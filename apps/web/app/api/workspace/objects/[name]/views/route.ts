@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getPostgresObjectViews, savePostgresObjectViews } from "@/lib/crm-postgres/views";
 import { getObjectViews, saveObjectViews } from "@/lib/workspace";
 import type { SavedView, ViewTypeSettings } from "@/lib/object-filters";
 
@@ -14,6 +15,11 @@ export async function GET(_req: Request, ctx: Params) {
 	const objectName = decodeURIComponent(name);
 
 	try {
+		if (process.env.CRM_DB_BACKEND === "postgres") {
+			const { views, activeView, viewSettings } = await getPostgresObjectViews(objectName);
+			return NextResponse.json({ views, activeView, viewSettings });
+		}
+
 		const { views, activeView, viewSettings } = getObjectViews(objectName);
 		return NextResponse.json({ views, activeView, viewSettings });
 	} catch (err) {
@@ -45,7 +51,9 @@ export async function PUT(req: Request, ctx: Params) {
 		const activeView = body.activeView;
 		const viewSettings = body.viewSettings;
 
-		const ok = saveObjectViews(objectName, views, activeView, viewSettings);
+		const ok = process.env.CRM_DB_BACKEND === "postgres"
+			? await savePostgresObjectViews(objectName, views, activeView, viewSettings)
+			: saveObjectViews(objectName, views, activeView, viewSettings);
 		if (!ok) {
 			return NextResponse.json(
 				{ error: "Object directory not found" },

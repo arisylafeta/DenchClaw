@@ -5,6 +5,7 @@ import {
 	discoverDuckDBPaths,
 	parseRelationValue,
 } from "@/lib/workspace";
+import { getPostgresEntryData } from "@/lib/crm-postgres/entry-read";
 import { buildGoogleFaviconUrl } from "@/lib/workspace-cell-format";
 
 export const dynamic = "force-dynamic";
@@ -101,6 +102,16 @@ export async function GET(
 			{ error: "Invalid entry ID" },
 			{ status: 400 },
 		);
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const data = await getPostgresEntryData(name, id);
+			return Response.json(data);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Entry not found";
+			return Response.json({ error: message }, { status: 404 });
+		}
 	}
 
 	const dbFile = findDuckDBForObject(name);

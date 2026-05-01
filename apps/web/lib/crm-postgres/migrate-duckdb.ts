@@ -120,6 +120,13 @@ const ENTITY_IMPORTS = [
   { objectName: "interaction", table: "crm_interactions", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.interaction) },
 ] as const;
 
+type EntityImportSpec = (typeof ENTITY_IMPORTS)[number];
+
+function requiredFallbackFor(spec: EntityImportSpec, column: string): unknown {
+  if (!("requiredFallbacks" in spec)) { return null; }
+  return spec.requiredFallbacks[column as keyof typeof spec.requiredFallbacks] ?? null;
+}
+
 function canonicalColumn(objectName: string, fieldName: string): string | null {
   return getCanonicalField(objectName, fieldName)?.column ?? EXTRA_CANONICAL_FIELDS[objectName]?.[fieldName] ?? null;
 }
@@ -351,7 +358,7 @@ export async function applyMigration(): Promise<MigrationApplyResult> {
           if (["from_person_id", "organizer_person_id", "person_id"].includes(column) && value && !idSets.people?.has(String(value))) { value = null; }
           if (column === "email_message_id" && value && !idSets.email_message?.has(String(value))) { value = null; }
           if (column === "calendar_event_id" && value && !idSets.calendar_event?.has(String(value))) { value = null; }
-          return value ?? spec.requiredFallbacks?.[column as keyof typeof spec.requiredFallbacks] ?? null;
+          return value ?? requiredFallbackFor(spec, column);
         });
         return [cleanText(row.entry_id), ...values, cleanDate(row.created_at), cleanDate(row.updated_at)];
       }).filter((row) => row[0]);

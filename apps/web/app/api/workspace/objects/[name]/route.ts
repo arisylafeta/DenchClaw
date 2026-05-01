@@ -11,6 +11,7 @@ import {
   readObjectYamlIcon,
 } from "@/lib/workspace";
 import { deserializeFilters, buildWhereClause, buildOrderByClause, type FieldMeta } from "@/lib/object-filters";
+import { getPostgresObjectData } from "@/lib/crm-postgres/object-read";
 import { buildGoogleFaviconUrl } from "@/lib/workspace-cell-format";
 
 export const dynamic = "force-dynamic";
@@ -387,6 +388,12 @@ export async function GET(
   { params }: { params: Promise<{ name: string }> },
 ) {
   const { name } = await params;
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const url = new URL(_req.url);
+    const data = await getPostgresObjectData(name, url);
+    return Response.json(data);
+  }
 
   if (!resolveDuckdbBin()) {
     return Response.json(
