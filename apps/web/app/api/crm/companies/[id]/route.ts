@@ -12,6 +12,7 @@ import {
 } from "@/lib/crm-queries";
 import { deriveDisplayDomain, deriveWebsite } from "@/lib/website-from-domain";
 import { getConnectionStrengthBucket } from "@/lib/connection-strength-label";
+import { getPostgresCompanyProfile } from "@/lib/crm-postgres/company-profile";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,6 +25,14 @@ export async function GET(
   const companyId = id?.trim();
   if (!companyId) {
     return Response.json({ error: "Missing company id." }, { status: 400 });
+  }
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const profile = await getPostgresCompanyProfile(companyId);
+    if (!profile) {
+      return Response.json({ error: "Company not found." }, { status: 404 });
+    }
+    return Response.json(profile);
   }
 
   const fieldMaps = await loadCrmFieldMaps();

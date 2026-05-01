@@ -7,6 +7,10 @@ const { loadCrmFieldMapsMock, safeQueryMock } = vi.hoisted(() => ({
   safeQueryMock: vi.fn(),
 }));
 
+const { getPostgresCompanyProfileMock } = vi.hoisted(() => ({
+  getPostgresCompanyProfileMock: vi.fn(),
+}));
+
 vi.mock("@/lib/crm-queries", () => ({
   buildEntryProjection: vi.fn((params: {
     objectId: string;
@@ -27,6 +31,10 @@ vi.mock("@/lib/crm-queries", () => ({
   loadCrmFieldMaps: loadCrmFieldMapsMock,
   safeQuery: safeQueryMock,
   sqlString: (value: string) => `'${value.replace(/'/g, "''")}'`,
+}));
+
+vi.mock("@/lib/crm-postgres/company-profile", () => ({
+  getPostgresCompanyProfile: getPostgresCompanyProfileMock,
 }));
 
 const baseFieldMaps = {
@@ -59,7 +67,52 @@ const baseFieldMaps = {
 describe("CRM company profile API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.CRM_DB_BACKEND;
     loadCrmFieldMapsMock.mockResolvedValue(baseFieldMaps);
+  });
+
+  it("uses the Postgres company profile reader when CRM_DB_BACKEND is postgres", async () => {
+    process.env.CRM_DB_BACKEND = "postgres";
+    getPostgresCompanyProfileMock.mockResolvedValue({
+      company: {
+        id: "comp_pg",
+        name: "Postgres Co",
+        domain: "postgres.example",
+        website: "https://postgres.example",
+        industry: null,
+        type: null,
+        source: null,
+        strength_score: 0,
+        strength_label: "New",
+        strength_color: "gray",
+        last_interaction_at: null,
+        notes: null,
+        created_at: null,
+        updated_at: null,
+      },
+      people: [],
+      threads: [],
+      events: [],
+      summary: {
+        people_count: 0,
+        thread_count: 0,
+        event_count: 0,
+        strongest_contact: null,
+      },
+    });
+
+    const res = await GET(
+      new Request("http://localhost/api/crm/companies/comp_pg"),
+      { params: Promise.resolve({ id: "comp_pg" }) },
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      company: { id: "comp_pg", name: "Postgres Co" },
+    });
+    expect(getPostgresCompanyProfileMock).toHaveBeenCalledWith("comp_pg");
+    expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
+    expect(safeQueryMock).not.toHaveBeenCalled();
   });
 
   it("populates Team from the People.Company relation even when email domain does not match", async () => {

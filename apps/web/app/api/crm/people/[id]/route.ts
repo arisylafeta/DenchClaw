@@ -13,6 +13,7 @@ import {
 import { extractEmailHost } from "@/lib/email-domain";
 import { deriveWebsite } from "@/lib/website-from-domain";
 import { getConnectionStrengthBucket } from "@/lib/connection-strength-label";
+import { getPostgresPersonProfile } from "@/lib/crm-postgres/person-profile";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -94,6 +95,14 @@ export async function GET(
   const personId = id?.trim();
   if (!personId) {
     return Response.json({ error: "Missing person id." }, { status: 400 });
+  }
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const profile = await getPostgresPersonProfile(personId);
+    if (!profile) {
+      return Response.json({ error: "Person not found." }, { status: 404 });
+    }
+    return Response.json(profile);
   }
 
   const fieldMaps = await loadCrmFieldMaps();
