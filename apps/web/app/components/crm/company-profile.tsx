@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
 import { Button } from "../ui/button";
 import { CompanyFavicon } from "./company-favicon";
 import { PersonAvatar } from "./person-avatar";
 import { ConnectionStrengthChip } from "./connection-strength-chip";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
-import { EnrichButton } from "./enrich-button";
 import { ProfileThreadList } from "./inbox/profile-thread-list";
 import { EventListItem } from "./event-list-item";
 import { EditableTitleHeading } from "./editable-title-heading";
@@ -70,19 +70,27 @@ type CompanyResponse = {
     event_count: number;
     strongest_contact: string | null;
   };
+  commercial: {
+    roles: Array<"buyer" | "supplier" | "recycler">;
+    profiles: CommercialProfile[];
+    opportunities: CommercialOpportunity[];
+    summary: CommercialSummary;
+  };
 };
 
-export type CompanyProfileTab = "overview" | "team" | "emails" | "meetings";
+export type CompanyProfileTab = "overview" | "team" | "profiles" | "opportunities" | "emails" | "meetings";
 
 const TABS: ReadonlyArray<{ id: CompanyProfileTab; label: string; count: (d: CompanyResponse) => number | null }> = [
   { id: "overview", label: "Overview", count: () => null },
   { id: "team", label: "Team", count: (d) => d.summary.people_count },
+  { id: "profiles", label: "Profiles", count: (d) => d.commercial.profiles.length },
+  { id: "opportunities", label: "Opportunities", count: (d) => d.commercial.opportunities.length },
   { id: "emails", label: "Emails", count: (d) => d.summary.thread_count },
   { id: "meetings", label: "Meetings", count: (d) => d.summary.event_count },
 ];
 
 function isCompanyProfileTab(value: string | undefined): value is CompanyProfileTab {
-  return value === "overview" || value === "team" || value === "emails" || value === "meetings";
+  return value === "overview" || value === "team" || value === "profiles" || value === "opportunities" || value === "emails" || value === "meetings";
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +229,8 @@ export function CompanyProfile({
         <div className="mx-auto w-full max-w-4xl px-6 py-6">
           {tab === "overview" && <OverviewTab data={data} />}
           {tab === "team" && <TeamTab data={data} onOpenPerson={onOpenPerson} />}
+          {tab === "profiles" && <ProfilesTab data={data} />}
+          {tab === "opportunities" && <OpportunitiesTab data={data} />}
           {tab === "emails" && <EmailsTab data={data} onOpenPerson={onOpenPerson} />}
           {tab === "meetings" && (
             <MeetingsTab
@@ -329,7 +339,8 @@ function CompanyHeader({
 // ---------------------------------------------------------------------------
 
 function OverviewTab({ data }: { data: CompanyResponse }) {
-  const { company, summary } = data;
+  const { company, summary, commercial } = data;
+  const urgentCount = commercial.summary.urgent_supply_count + commercial.summary.urgent_demand_count;
   return (
     <div className="space-y-6">
       <section>
@@ -342,6 +353,30 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
           <Stat label="Meetings" value={summary.event_count.toLocaleString()} />
           <Stat label="Strength" value={company.strength_label} />
         </div>
+      </section>
+      <section>
+        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
+          Commercial
+        </h3>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Profiles" value={commercial.summary.active_profile_count.toLocaleString()} />
+          <Stat label="Supply" value={commercial.summary.open_supply_count.toLocaleString()} />
+          <Stat label="Demand" value={commercial.summary.open_demand_count.toLocaleString()} />
+          <Stat label="Urgent" value={urgentCount.toLocaleString()} />
+        </div>
+        {commercial.roles.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {commercial.roles.map((role) => (
+              <span
+                key={role}
+                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
+                style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
+              >
+                {role}
+              </span>
+            ))}
+          </div>
+        )}
       </section>
       <section>
         <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
@@ -372,6 +407,106 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
           Strongest contact: <strong style={{ color: "var(--color-text)" }}>{summary.strongest_contact}</strong>
         </p>
       )}
+    </div>
+  );
+}
+
+function profileTypeLabel(profileType: CommercialProfile["profile_type"]): string {
+  if (profileType === "buyer_demand") { return "Buyer demand profile"; }
+  if (profileType === "seller_supply") { return "Seller supply profile"; }
+  return "Recycler intake profile";
+}
+
+function joinOrDash(items: string[]): string {
+  return items.length > 0 ? items.join(", ") : "—";
+}
+
+function ProfilesTab({ data }: { data: CompanyResponse }) {
+  if (data.commercial.profiles.length === 0) {
+    return <CrmEmptyState title="No commercial profiles yet" />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.commercial.profiles.map((profile) => (
+        <section key={profile.id} className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h3 className="text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>
+              {profileTypeLabel(profile.profile_type)}
+            </h3>
+            <span className="rounded-full px-2 py-0.5 text-[11px] capitalize" style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}>
+              {profile.status}
+            </span>
+          </div>
+          <div className="space-y-2">
+            <Field label="Contact" value={profile.contact_person_name ?? null} />
+            <Field label="Chemistry" value={joinOrDash(profile.chemistries)} />
+            <Field label="Formats" value={joinOrDash(profile.formats)} />
+            <Field label="Applications" value={joinOrDash(profile.previous_applications)} />
+            <Field label="Conditions" value={joinOrDash(profile.conditions)} />
+            <Field label="Specifics" value={joinOrDash(profile.specific_types)} />
+            <Field label="Geography" value={joinOrDash(profile.geographies)} />
+            <Field label="SoH floor" value={profile.soh_floor == null ? null : `${profile.soh_floor}%`} />
+            <Field
+              label="Volume range"
+              value={profile.volume_min == null && profile.volume_max == null ? null : `${profile.volume_min ?? "—"} - ${profile.volume_max ?? "—"}`}
+            />
+            <Field label="Notes" value={profile.notes} />
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function batteryDisplay(opportunity: CommercialOpportunity): string {
+  const parts = [
+    opportunity.chemistry,
+    opportunity.format,
+    [opportunity.manufacturer, opportunity.model].filter(Boolean).join(" ") || null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+function OpportunitiesTab({ data }: { data: CompanyResponse }) {
+  if (data.commercial.opportunities.length === 0) {
+    return <CrmEmptyState title="No opportunities yet" />;
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: "var(--color-border)" }}>
+      <table className="min-w-full text-left text-[13px]">
+        <thead style={{ background: "var(--color-surface)" }}>
+          <tr>
+            {[
+              "Type",
+              "Title",
+              "Battery",
+              "Qty",
+              "Location",
+              "Urgency",
+              "Deadline",
+            ].map((head) => (
+              <th key={head} className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--color-text-muted)" }}>
+                {head}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.commercial.opportunities.map((opportunity) => (
+            <tr key={opportunity.id} style={{ borderTop: "1px solid var(--color-border)" }}>
+              <td className="px-3 py-2 capitalize">{opportunity.opportunity_type}</td>
+              <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{opportunity.title}</td>
+              <td className="px-3 py-2" style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</td>
+              <td className="px-3 py-2">{opportunity.quantity ?? "—"}</td>
+              <td className="px-3 py-2">{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</td>
+              <td className="px-3 py-2 capitalize">{opportunity.urgency}</td>
+              <td className="px-3 py-2">{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -99,6 +99,27 @@ describe("CRM company profile API", () => {
         event_count: 0,
         strongest_contact: null,
       },
+      commercial: {
+        roles: [],
+        profiles: [],
+        opportunities: [],
+        summary: {
+          active_profile_count: 0,
+          buyer_profile_count: 0,
+          supplier_profile_count: 0,
+          recycler_profile_count: 0,
+          open_supply_count: 0,
+          open_demand_count: 0,
+          urgent_supply_count: 0,
+          urgent_demand_count: 0,
+          latest_profile_verified_at: null,
+          latest_supply_at: null,
+          latest_demand_at: null,
+          next_deadline_at: null,
+          commercial_status: "inactive",
+          commercial_priority_score: 0,
+        },
+      },
     });
 
     const res = await GET(
@@ -109,6 +130,9 @@ describe("CRM company profile API", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
       company: { id: "comp_pg", name: "Postgres Co" },
+      commercial: {
+        roles: [],
+      },
     });
     expect(getPostgresCompanyProfileMock).toHaveBeenCalledWith("comp_pg");
     expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
