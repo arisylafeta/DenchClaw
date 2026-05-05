@@ -7,6 +7,7 @@ import {
 	readObjectYaml,
 	writeObjectYaml,
 } from "@/lib/workspace";
+import { createPostgresField as createPgField } from "@/lib/crm-postgres/object-metadata";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,11 +36,6 @@ export async function POST(
 		return Response.json({ error: "Invalid object name" }, { status: 400 });
 	}
 
-	const dbFile = findDuckDBForObject(name);
-	if (!dbFile) {
-		return Response.json({ error: "DuckDB not found" }, { status: 404 });
-	}
-
 	const body = await req.json();
 	const fieldName: string = body.name?.trim();
 	const fieldType: string = body.type?.trim();
@@ -57,6 +53,28 @@ export async function POST(
 	}
 	if (fieldType === "enum" && (!enumValues || !Array.isArray(enumValues) || enumValues.length === 0)) {
 		return Response.json({ error: "enum_values required for enum fields" }, { status: 400 });
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const created = await createPgField(name, body);
+			return Response.json(created, { status: 201 });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to create field";
+			const status = /not found/i.test(message)
+				? 404
+				: /already exists|duplicate/i.test(message)
+					? 409
+					: /invalid|required|must/i.test(message)
+						? 400
+						: 500;
+			return Response.json({ error: message }, { status });
+		}
+	}
+
+	const dbFile = findDuckDBForObject(name);
+	if (!dbFile) {
+		return Response.json({ error: "DuckDB not found" }, { status: 404 });
 	}
 
 	const objects = duckdbQueryOnFile<{ id: string }>(

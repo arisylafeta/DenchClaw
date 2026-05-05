@@ -1,4 +1,5 @@
 import { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
+import { reorderPostgresFields } from "@/lib/crm-postgres/object-metadata";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,14 +26,6 @@ export async function PATCH(
 		);
 	}
 
-	const dbFile = findDuckDBForObject(name);
-	if (!dbFile) {
-		return Response.json(
-			{ error: "DuckDB not found" },
-			{ status: 404 },
-		);
-	}
-
 	const body = await req.json();
 	const fieldOrder: string[] = body.fieldOrder;
 
@@ -40,6 +33,25 @@ export async function PATCH(
 		return Response.json(
 			{ error: "fieldOrder must be a non-empty array" },
 			{ status: 400 },
+		);
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const result = await reorderPostgresFields(name, fieldOrder);
+			return Response.json(result);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to reorder fields";
+			const status = /not found/i.test(message) ? 404 : /invalid|required|must/i.test(message) ? 400 : 500;
+			return Response.json({ error: message }, { status });
+		}
+	}
+
+	const dbFile = findDuckDBForObject(name);
+	if (!dbFile) {
+		return Response.json(
+			{ error: "DuckDB not found" },
+			{ status: 404 },
 		);
 	}
 

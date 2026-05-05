@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PATCH } from "./route";
 
+const { updatePostgresField, deletePostgresField } = vi.hoisted(() => ({
+	updatePostgresField: vi.fn(async () => ({ ok: true })),
+	deletePostgresField: vi.fn(async () => ({ ok: true })),
+}));
+
 const {
 	duckdbExecOnFileMock,
 	duckdbQueryOnFileMock,
@@ -25,6 +30,11 @@ vi.mock("@/lib/workspace", () => ({
 	pivotViewIdentifier: (objectName: string) => `"v_${objectName}"`,
 	readObjectYaml: readObjectYamlMock,
 	writeObjectYaml: writeObjectYamlMock,
+}));
+
+vi.mock("@/lib/crm-postgres/object-metadata", () => ({
+	updatePostgresField,
+	deletePostgresField,
 }));
 
 describe("workspace field metadata API", () => {
@@ -133,5 +143,55 @@ describe("workspace field metadata API", () => {
 		await expect(res.json()).resolves.toMatchObject({
 			error: "enum_values must be an array of unique strings",
 		});
+	});
+
+	it("uses postgres helper for PATCH and bypasses duckdb", async () => {
+		process.env.CRM_DB_BACKEND = "postgres";
+		const res = await PATCH(
+			new Request("http://localhost/api/workspace/objects/leads/fields/status", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name: "Lifecycle" }),
+			}),
+			{ params: Promise.resolve({ name: "leads", fieldId: "status" }) },
+		);
+
+		expect(res.status).toBe(200);
+		expect(updatePostgresField).toHaveBeenCalledWith("leads", "status", { name: "Lifecycle" });
+		expect(findDuckDBForObjectMock).not.toHaveBeenCalled();
+		expect(duckdbQueryOnFileMock).not.toHaveBeenCalled();
+		expect(duckdbExecOnFileMock).not.toHaveBeenCalled();
+		delete process.env.CRM_DB_BACKEND;
+	});
+
+	it("returns 400 for invalid postgres PATCH body before helper", async () => {
+		process.env.CRM_DB_BACKEND = "postgres";
+		const res = await PATCH(
+			new Request("http://localhost/api/workspace/objects/leads/fields/status", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: "{",
+			}),
+			{ params: Promise.resolve({ name: "leads", fieldId: "status" }) },
+		);
+
+		expect(res.status).toBe(400);
+		expect(updatePostgresField).not.toHaveBeenCalled();
+		expect(findDuckDBForObjectMock).not.toHaveBeenCalled();
+		delete process.env.CRM_DB_BACKEND;
+	});
+
+	it("uses postgres helper for DELETE and bypasses duckdb", async () => {
+		process.env.CRM_DB_BACKEND = "postgres";
+		const { DELETE } = await import("./route");
+		const res = await DELETE(
+			new Request("http://localhost/api/workspace/objects/leads/fields/status", { method: "DELETE" }),
+			{ params: Promise.resolve({ name: "leads", fieldId: "status" }) },
+		);
+
+		expect(res.status).toBe(200);
+		expect(deletePostgresField).toHaveBeenCalledWith("leads", "status");
+		expect(findDuckDBForObjectMock).not.toHaveBeenCalled();
+		delete process.env.CRM_DB_BACKEND;
 	});
 });

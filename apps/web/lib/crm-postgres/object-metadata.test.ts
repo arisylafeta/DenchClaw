@@ -122,4 +122,56 @@ describe("crm-postgres object metadata", () => {
     expect(withPgTransaction).toHaveBeenCalledTimes(1);
     expect(txQuery.mock.calls[0]?.[0]).toContain("insert into crm_objects");
   });
+
+  it("creates a field for a postgres object", async () => {
+    queryPg
+      .mockResolvedValueOnce([{ id: "obj1", name: "people" }])
+      .mockResolvedValueOnce([{ cnt: 0 }])
+      .mockResolvedValueOnce([{ max_order: 2 }])
+      .mockResolvedValueOnce([{ id: "field1", name: "Stage", type: "enum" }]);
+
+    const { createPostgresField } = await import("./object-metadata");
+    await expect(createPostgresField("people", { name: "Stage", type: "enum", enum_values: ["Lead"] }))
+      .resolves.toEqual({ ok: true, fieldId: "field1", name: "Stage", type: "enum" });
+    expect(queryPg).toHaveBeenLastCalledWith(expect.stringContaining("insert into crm_fields"), expect.any(Array));
+  });
+
+  it("updates a postgres field", async () => {
+    queryPg
+      .mockResolvedValueOnce([{ id: "obj1", name: "people" }])
+      .mockResolvedValueOnce([{ id: "field1", object_id: "obj1", type: "enum" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "field1", name: "Status" }]);
+
+    const { updatePostgresField } = await import("./object-metadata");
+    await expect(updatePostgresField("people", "field1", { name: "Status" })).resolves.toEqual({ ok: true });
+    expect(queryPg).toHaveBeenNthCalledWith(4, expect.stringContaining("update crm_fields"), ["Status", "field1", "obj1"]);
+  });
+
+  it("deletes a postgres field and its custom values", async () => {
+    queryPg
+      .mockResolvedValueOnce([{ id: "obj1", name: "people" }])
+      .mockResolvedValueOnce([{ id: "field1", object_id: "obj1" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const { deletePostgresField } = await import("./object-metadata");
+    await expect(deletePostgresField("people", "field1")).resolves.toEqual({ ok: true });
+    expect(queryPg).toHaveBeenNthCalledWith(3, expect.stringContaining("delete from crm_custom_field_values"), ["field1"]);
+    expect(queryPg).toHaveBeenNthCalledWith(4, expect.stringContaining("delete from crm_fields"), ["field1", "obj1"]);
+  });
+
+  it("renames enum values and updates existing values", async () => {
+    queryPg
+      .mockResolvedValueOnce([{ id: "obj1", name: "people" }])
+      .mockResolvedValueOnce([{ id: "field1", object_id: "obj1", enum_values: ["Lead", "Customer"] }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const { renamePostgresEnumValue } = await import("./object-metadata");
+    await expect(renamePostgresEnumValue("people", "field1", "Lead", "Prospect"))
+      .resolves.toEqual({ ok: true, updated: true });
+    expect(queryPg).toHaveBeenNthCalledWith(3, expect.stringContaining("update crm_fields"), [JSON.stringify(["Prospect", "Customer"]), "field1", "obj1"]);
+    expect(queryPg).toHaveBeenNthCalledWith(4, expect.stringContaining("update crm_custom_field_values"), ["Prospect", "field1", "Lead"]);
+  });
 });

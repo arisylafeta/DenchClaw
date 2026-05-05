@@ -1,4 +1,5 @@
 import { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
+import { renamePostgresEnumValue } from "@/lib/crm-postgres/object-metadata";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,14 +28,6 @@ export async function PATCH(
 		);
 	}
 
-	const dbFile = findDuckDBForObject(name);
-	if (!dbFile) {
-		return Response.json(
-			{ error: "DuckDB not found" },
-			{ status: 404 },
-		);
-	}
-
 	const body = await req.json();
 	const oldValue: string = body.oldValue;
 	const newValue: string = body.newValue;
@@ -47,6 +40,31 @@ export async function PATCH(
 	}
 	if (oldValue.trim() === newValue.trim()) {
 		return Response.json({ ok: true, changed: 0 });
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const result = await renamePostgresEnumValue(name, fieldId, oldValue, newValue);
+			return Response.json(result);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to rename enum value";
+			const status = /not found/i.test(message)
+				? 404
+				: /already exists|duplicate/i.test(message)
+					? 409
+					: /invalid|required|must/i.test(message)
+						? 400
+						: 500;
+			return Response.json({ error: message }, { status });
+		}
+	}
+
+	const dbFile = findDuckDBForObject(name);
+	if (!dbFile) {
+		return Response.json(
+			{ error: "DuckDB not found" },
+			{ status: 404 },
+		);
 	}
 
 	// Validate object exists

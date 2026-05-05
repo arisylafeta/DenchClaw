@@ -7,6 +7,7 @@ import {
 	readObjectYaml,
 	writeObjectYaml,
 } from "@/lib/workspace";
+import { deletePostgresField, updatePostgresField } from "@/lib/crm-postgres/object-metadata";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,15 +36,15 @@ export async function PATCH(
 		);
 	}
 
-	const dbFile = findDuckDBForObject(name);
-	if (!dbFile) {
-		return Response.json(
-			{ error: "DuckDB not found" },
-			{ status: 404 },
-		);
+	let body: Record<string, unknown>;
+	try {
+		body = await req.json();
+	} catch {
+		if (process.env.CRM_DB_BACKEND === "postgres") {
+			return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+		}
+		throw new Error("Invalid JSON body.");
 	}
-
-	const body = await req.json();
 	const newName = typeof body.name === "string" ? body.name.trim() : null;
 	const hasDefaultValue = Object.prototype.hasOwnProperty.call(body, "default_value");
 	const defaultValue: unknown = body.default_value;
@@ -70,6 +71,31 @@ export async function PATCH(
 		return Response.json(
 			{ error: "enum_values must be an array of unique strings" },
 			{ status: 400 },
+		);
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const result = await updatePostgresField(name, fieldId, body);
+			return Response.json(result);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to rename field";
+			const status = /not found/i.test(message)
+				? 404
+				: /already exists|duplicate/i.test(message)
+					? 409
+					: /invalid|required|must/i.test(message)
+						? 400
+						: 500;
+			return Response.json({ error: message }, { status });
+		}
+	}
+
+	const dbFile = findDuckDBForObject(name);
+	if (!dbFile) {
+		return Response.json(
+			{ error: "DuckDB not found" },
+			{ status: 404 },
 		);
 	}
 
@@ -179,6 +205,17 @@ export async function DELETE(
 			{ error: "Invalid object name" },
 			{ status: 400 },
 		);
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const result = await deletePostgresField(name, fieldId);
+			return Response.json(result);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to delete field";
+			const status = /not found/i.test(message) ? 404 : 500;
+			return Response.json({ error: message }, { status });
+		}
 	}
 
 	const dbFile = findDuckDBForObject(name);

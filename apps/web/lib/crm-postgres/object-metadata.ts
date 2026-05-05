@@ -196,3 +196,185 @@ export async function reorderPostgresFields(objectName: string, fieldOrder: stri
 
   return { ok: true };
 }
+
+export async function createPostgresField(
+  objectName: string,
+  body: { name?: string; type?: string; enum_values?: string[]; required?: boolean; default_value?: string | null },
+): Promise<{ ok: true; fieldId: string; name: string; type: string }> {
+  const object = await getPostgresObjectByName(objectName);
+  if (!object) throw new Error(`Object '${objectName}' not found`);
+
+  const fieldName = body.name?.trim();
+  const fieldType = body.type?.trim();
+  if (!fieldName) throw new Error("Field name is required");
+  if (!fieldType) throw new Error("Field type is required");
+  if (fieldType === "enum" && (!Array.isArray(body.enum_values) || body.enum_values.length === 0)) {
+    throw new Error("enum_values required for enum fields");
+  }
+
+  const duplicate = await queryPg<{ cnt: number }>(
+    `select count(*)::int as cnt
+     from crm_fields
+     where object_id = $1 and name = $2`,
+    [object.id, fieldName],
+  );
+  if ((duplicate[0]?.cnt ?? 0) > 0) throw new Error("A field with that name already exists");
+
+  const maxOrder = await queryPg<{ max_order: number | null }>(
+    `select coalesce(max(sort_order), -1)::int as max_order
+     from crm_fields
+     where object_id = $1`,
+    [object.id],
+  );
+  const sortOrder = (maxOrder[0]?.max_order ?? -1) + 1;
+  const fieldId = randomUUID();
+
+  const inserted = await queryPg<{ id: string; name: string; type: string }>(
+    `insert into crm_fields (id, object_id, name, type, required, sort_order, enum_values, default_value)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+     returning id, name, type`,
+    [
+      fieldId,
+      object.id,
+      fieldName,
+      fieldType,
+      body.required === true,
+      sortOrder,
+      fieldType === "enum" ? JSON.stringify(body.enum_values ?? []) : null,
+      typeof body.default_value === "string" || body.default_value === null ? body.default_value ?? null : null,
+    ],
+  );
+
+  return { ok: true, fieldId: inserted[0]?.id ?? fieldId, name: inserted[0]?.name ?? fieldName, type: inserted[0]?.type ?? fieldType };
+}
+
+export async function updatePostgresField(
+  objectName: string,
+  fieldId: string,
+  body: { name?: string; enum_values?: string[]; default_value?: string | null },
+): Promise<{ ok: true }> {
+  const object = await getPostgresObjectByName(objectName);
+  if (!object) throw new Error(`Object '${objectName}' not found`);
+
+  const fields = await queryPg<{ id: string; object_id: string; type: string }>(
+    `select id, object_id, type
+     from crm_fields
+     where id = $1 and object_id = $2
+     limit 1`,
+    [fieldId, object.id],
+  );
+  const field = fields[0];
+  if (!field) throw new Error("Field not found");
+
+  const updates: string[] = [];
+  const params: unknown[] = [];
+
+  if (typeof body.name === "string" && body.name.trim().length > 0) {
+    const newName = body.name.trim();
+    const duplicate = await queryPg<{ cnt: number }>(
+      `select count(*)::int as cnt from crm_fields where object_id = $1 and name = $2 and id != $3`,
+      [object.id, newName, fieldId],
+    );
+    if ((duplicate[0]?.cnt ?? 0) > 0) throw new Error("A field with that name already exists");
+    params.push(newName);
+    updates.push(`name = $${params.length}`);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "default_value")) {
+    if (body.default_value !== null && typeof body.default_value !== "string") {
+      throw new Error("default_value must be a string or null");
+    }
+    params.push(body.default_value ?? null);
+    updates.push(`default_value = $${params.length}`);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "enum_values")) {
+    if (field.type !== "enum") throw new Error("enum_values can only be updated for select fields");
+    const enumValues = body.enum_values;
+    if (!Array.isArray(enumValues)) throw new Error("enum_values must be an array of unique strings");
+    params.push(JSON.stringify(enumValues));
+    updates.push(`enum_values = $${params.length}::jsonb`);
+  }
+
+  if (updates.length === 0) throw new Error("Name, default_value, or enum_values is required");
+
+  params.push(fieldId, object.id);
+  await queryPg(
+    `update crm_fields
+     set ${updates.join(", ")}, updated_at = now()
+     where id = $${params.length - 1} and object_id = $${params.length}`,
+    params,
+  );
+
+  return { ok: true };
+}
+
+export async function deletePostgresField(objectName: string, fieldId: string): Promise<{ ok: true }> {
+  const object = await getPostgresObjectByName(objectName);
+  if (!object) throw new Error(`Object '${objectName}' not found`);
+
+  const field = await queryPg<{ id: string }>(
+    `select id from crm_fields where id = $1 and object_id = $2 limit 1`,
+    [fieldId, object.id],
+  );
+  if (!field[0]) throw new Error("Field not found");
+
+  await queryPg("delete from crm_custom_field_values where field_id = $1", [fieldId]);
+  await queryPg("delete from crm_fields where id = $1 and object_id = $2", [fieldId, object.id]);
+  return { ok: true };
+}
+
+export async function renamePostgresEnumValue(
+  objectName: string,
+  fieldId: string,
+  oldValue: string,
+  newValue: string,
+): Promise<{ ok: true; updated: boolean }> {
+  const object = await getPostgresObjectByName(objectName);
+  if (!object) throw new Error(`Object '${objectName}' not found`);
+
+  const fields = await queryPg<{ id: string; object_id: string; enum_values: unknown }>(
+    `select id, object_id, enum_values
+     from crm_fields
+     where id = $1 and object_id = $2
+     limit 1`,
+    [fieldId, object.id],
+  );
+  const field = fields[0];
+  if (!field) throw new Error("Field not found");
+
+  const oldTrim = oldValue.trim();
+  const newTrim = newValue.trim();
+  if (!oldTrim || !newTrim) throw new Error("oldValue and newValue are required");
+  if (oldTrim === newTrim) return { ok: true, updated: false };
+
+  const enumValuesRaw = field.enum_values;
+  const enumValues = Array.isArray(enumValuesRaw)
+    ? enumValuesRaw.filter((value): value is string => typeof value === "string")
+    : typeof enumValuesRaw === "string"
+      ? (() => {
+        try {
+          const parsed = JSON.parse(enumValuesRaw);
+          return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+        } catch {
+          return [];
+        }
+      })()
+      : [];
+
+  const idx = enumValues.indexOf(oldTrim);
+  if (idx < 0) throw new Error(`Enum value '${oldValue}' not found`);
+  if (enumValues.includes(newTrim)) throw new Error(`Enum value '${newValue}' already exists`);
+
+  enumValues[idx] = newTrim;
+  await queryPg(
+    `update crm_fields set enum_values = $1::jsonb, updated_at = now() where id = $2 and object_id = $3`,
+    [JSON.stringify(enumValues), fieldId, object.id],
+  );
+  await queryPg(
+    `update crm_custom_field_values set text_value = $1 where field_id = $2 and text_value = $3`,
+    [newTrim, fieldId, oldTrim],
+  );
+
+  return { ok: true, updated: true };
+}
