@@ -38,6 +38,7 @@ describe("entry detail route", () => {
 
   it("uses postgres detail reader when CRM_DB_BACKEND is postgres", async () => {
     process.env.CRM_DB_BACKEND = "postgres";
+    const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
     const { GET } = await import("./route");
 
     const response = await GET(new Request("http://localhost/api/workspace/objects/people/entries/p1"), {
@@ -47,10 +48,14 @@ describe("entry detail route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ entry: { entry_id: "p1" } });
     expect(getPostgresEntryData).toHaveBeenCalledWith("people", "p1");
+    expect(findDuckDBForObject).not.toHaveBeenCalled();
+    expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+    expect(duckdbExecOnFile).not.toHaveBeenCalled();
   });
 
   it("uses postgres updater for PATCH when backend is postgres", async () => {
     process.env.CRM_DB_BACKEND = "postgres";
+    const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
     const { PATCH } = await import("./route");
 
     const response = await PATCH(new Request("http://localhost/api/workspace/objects/people/entries/p1", {
@@ -64,10 +69,14 @@ describe("entry detail route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true, updatedCount: 1 });
     expect(updatePostgresEntry).toHaveBeenCalledWith("people", "p1", { first_name: "Ari" });
+    expect(findDuckDBForObject).not.toHaveBeenCalled();
+    expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+    expect(duckdbExecOnFile).not.toHaveBeenCalled();
   });
 
   it("uses postgres deleter for DELETE when backend is postgres", async () => {
     process.env.CRM_DB_BACKEND = "postgres";
+    const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
     const { DELETE } = await import("./route");
 
     const response = await DELETE(new Request("http://localhost/api/workspace/objects/people/entries/p1", {
@@ -79,5 +88,8 @@ describe("entry detail route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true });
     expect(deletePostgresEntry).toHaveBeenCalledWith("people", "p1");
+    expect(findDuckDBForObject).not.toHaveBeenCalled();
+    expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+    expect(duckdbExecOnFile).not.toHaveBeenCalled();
   });
 });

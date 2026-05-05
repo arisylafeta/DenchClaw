@@ -26,14 +26,6 @@ export async function POST(
 		);
 	}
 
-	const dbFile = findDuckDBForObject(name);
-	if (!dbFile) {
-		return Response.json(
-			{ error: "DuckDB not found" },
-			{ status: 404 },
-		);
-	}
-
 	const body = await req.json();
 	const entryIds: string[] = body.entryIds;
 
@@ -57,6 +49,14 @@ export async function POST(
 					: 500;
 			return Response.json({ error: message }, { status });
 		}
+	}
+
+	const dbFile = findDuckDBForObject(name);
+	if (!dbFile) {
+		return Response.json(
+			{ error: "DuckDB not found" },
+			{ status: 404 },
+		);
 	}
 
 	// Validate object exists

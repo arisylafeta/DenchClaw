@@ -385,7 +385,9 @@ describe("Workspace Objects API", () => {
     });
 
     it("uses postgres object creator when backend is postgres", async () => {
+      vi.clearAllMocks();
       process.env.CRM_DB_BACKEND = "postgres";
+      const { duckdbPathAsync, duckdbQueryOnFileAsync } = await import("@/lib/workspace");
       createPostgresObject.mockResolvedValue({
         id: "obj_pg_1",
         name: "leads",
@@ -403,6 +405,8 @@ describe("Workspace Objects API", () => {
       expect(res.status).toBe(201);
       await expect(res.json()).resolves.toMatchObject({ ok: true, id: "obj_pg_1", name: "leads", path: "leads" });
       expect(createPostgresObject).toHaveBeenCalledWith(expect.objectContaining({ name: "leads" }));
+      expect(duckdbPathAsync).not.toHaveBeenCalled();
+      expect(duckdbQueryOnFileAsync).not.toHaveBeenCalled();
     });
   });
 
@@ -476,7 +480,9 @@ describe("Workspace Objects API", () => {
     });
 
     it("uses postgres entry creator when backend is postgres", async () => {
+      vi.clearAllMocks();
       process.env.CRM_DB_BACKEND = "postgres";
+      const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
       createPostgresEntry.mockResolvedValue({ entryId: "pg-entry-1" });
 
       const { POST } = await import("./objects/[name]/entries/route.js");
@@ -491,6 +497,9 @@ describe("Workspace Objects API", () => {
       expect(res.status).toBe(201);
       await expect(res.json()).resolves.toMatchObject({ ok: true, entryId: "pg-entry-1" });
       expect(createPostgresEntry).toHaveBeenCalledWith("leads", { name: "Acme" });
+      expect(findDuckDBForObject).not.toHaveBeenCalled();
+      expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+      expect(duckdbExecOnFile).not.toHaveBeenCalled();
     });
   });
 
@@ -682,7 +691,9 @@ describe("Workspace Objects API", () => {
     });
 
     it("uses postgres bulk delete when backend is postgres", async () => {
+      vi.clearAllMocks();
       process.env.CRM_DB_BACKEND = "postgres";
+      const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
       bulkDeletePostgresEntries.mockResolvedValue({ deletedCount: 2 });
 
       const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
@@ -696,6 +707,9 @@ describe("Workspace Objects API", () => {
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toMatchObject({ ok: true, deletedCount: 2 });
       expect(bulkDeletePostgresEntries).toHaveBeenCalledWith("leads", ["e1", "e2"]);
+      expect(findDuckDBForObject).not.toHaveBeenCalled();
+      expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+      expect(duckdbExecOnFile).not.toHaveBeenCalled();
     });
   });
 });
