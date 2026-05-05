@@ -20,6 +20,16 @@ const getPostgresEntryData = vi.fn(async () => ({
 
 vi.mock("@/lib/crm-postgres/entry-read", () => ({ getPostgresEntryData }));
 
+const updatePostgresEntry = vi.fn(async () => ({ updatedCount: 1 }));
+const deletePostgresEntry = vi.fn(async () => ({ ok: true }));
+
+vi.mock("@/lib/crm-postgres/entry-mutations", () => ({
+  createPostgresEntry: vi.fn(),
+  updatePostgresEntry,
+  deletePostgresEntry,
+  bulkDeletePostgresEntries: vi.fn(),
+}));
+
 describe("entry detail route", () => {
   afterEach(() => {
     delete process.env.CRM_DB_BACKEND;
@@ -37,5 +47,37 @@ describe("entry detail route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ entry: { entry_id: "p1" } });
     expect(getPostgresEntryData).toHaveBeenCalledWith("people", "p1");
+  });
+
+  it("uses postgres updater for PATCH when backend is postgres", async () => {
+    process.env.CRM_DB_BACKEND = "postgres";
+    const { PATCH } = await import("./route");
+
+    const response = await PATCH(new Request("http://localhost/api/workspace/objects/people/entries/p1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: { first_name: "Ari" } }),
+    }), {
+      params: Promise.resolve({ name: "people", id: "p1" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, updatedCount: 1 });
+    expect(updatePostgresEntry).toHaveBeenCalledWith("people", "p1", { first_name: "Ari" });
+  });
+
+  it("uses postgres deleter for DELETE when backend is postgres", async () => {
+    process.env.CRM_DB_BACKEND = "postgres";
+    const { DELETE } = await import("./route");
+
+    const response = await DELETE(new Request("http://localhost/api/workspace/objects/people/entries/p1", {
+      method: "DELETE",
+    }), {
+      params: Promise.resolve({ name: "people", id: "p1" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true });
+    expect(deletePostgresEntry).toHaveBeenCalledWith("people", "p1");
   });
 });

@@ -43,6 +43,21 @@ vi.mock("@/lib/workspace", () => ({
   readObjectYamlIcon: vi.fn(() => undefined),
 }));
 
+const createPostgresObject = vi.fn();
+const createPostgresEntry = vi.fn();
+const bulkDeletePostgresEntries = vi.fn();
+
+vi.mock("@/lib/crm-postgres/object-metadata", () => ({
+  createPostgresObject,
+}));
+
+vi.mock("@/lib/crm-postgres/entry-mutations", () => ({
+  createPostgresEntry,
+  updatePostgresEntry: vi.fn(),
+  deletePostgresEntry: vi.fn(),
+  bulkDeletePostgresEntries,
+}));
+
 describe("Workspace Objects API", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -87,6 +102,7 @@ describe("Workspace Objects API", () => {
   });
 
   afterEach(() => {
+    delete process.env.CRM_DB_BACKEND;
     vi.restoreAllMocks();
   });
 
@@ -367,6 +383,27 @@ describe("Workspace Objects API", () => {
 
       expect(res.status).toBe(409);
     });
+
+    it("uses postgres object creator when backend is postgres", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      createPostgresObject.mockResolvedValue({
+        id: "obj_pg_1",
+        name: "leads",
+        path: "leads",
+      });
+
+      const { POST } = await import("./objects/route.js");
+      const req = new Request("http://localhost/api/workspace/objects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "leads" }),
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      await expect(res.json()).resolves.toMatchObject({ ok: true, id: "obj_pg_1", name: "leads", path: "leads" });
+      expect(createPostgresObject).toHaveBeenCalledWith(expect.objectContaining({ name: "leads" }));
+    });
   });
 
   // ─── POST /api/workspace/objects/[name]/entries ─────────────────
@@ -436,6 +473,24 @@ describe("Workspace Objects API", () => {
       });
       const res = await POST(req, { params: Promise.resolve({ name: "missing" }) });
       expect(res.status).toBe(404);
+    });
+
+    it("uses postgres entry creator when backend is postgres", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      createPostgresEntry.mockResolvedValue({ entryId: "pg-entry-1" });
+
+      const { POST } = await import("./objects/[name]/entries/route.js");
+      const req = new Request("http://localhost/api/workspace/objects/leads/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: { name: "Acme" } }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(201);
+      await expect(res.json()).resolves.toMatchObject({ ok: true, entryId: "pg-entry-1" });
+      expect(createPostgresEntry).toHaveBeenCalledWith("leads", { name: "Acme" });
     });
   });
 
@@ -624,6 +679,23 @@ describe("Workspace Objects API", () => {
       });
       const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
       expect(res.status).toBe(200);
+    });
+
+    it("uses postgres bulk delete when backend is postgres", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      bulkDeletePostgresEntries.mockResolvedValue({ deletedCount: 2 });
+
+      const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: ["e1", "e2"] }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ ok: true, deletedCount: 2 });
+      expect(bulkDeletePostgresEntries).toHaveBeenCalledWith("leads", ["e1", "e2"]);
     });
   });
 });

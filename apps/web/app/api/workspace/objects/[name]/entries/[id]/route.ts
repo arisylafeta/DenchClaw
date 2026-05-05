@@ -6,6 +6,7 @@ import {
 	parseRelationValue,
 } from "@/lib/workspace";
 import { getPostgresEntryData } from "@/lib/crm-postgres/entry-read";
+import { deletePostgresEntry, updatePostgresEntry } from "@/lib/crm-postgres/entry-mutations";
 import { buildGoogleFaviconUrl } from "@/lib/workspace-cell-format";
 
 export const dynamic = "force-dynamic";
@@ -328,6 +329,24 @@ export async function PATCH(
 		);
 	}
 
+	const body = await req.json();
+	const fieldUpdates: Record<string, string> = body.fields ?? {};
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const updated = await updatePostgresEntry(name, id, fieldUpdates);
+			return Response.json(Object.assign({ ok: true }, updated));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to update entry";
+			const status = /not found/i.test(message)
+				? 404
+				: /invalid|must|required/i.test(message)
+					? 400
+					: 500;
+			return Response.json({ error: message }, { status });
+		}
+	}
+
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {
 		return Response.json(
@@ -358,9 +377,6 @@ export async function PATCH(
 			{ status: 404 },
 		);
 	}
-
-	const body = await req.json();
-	const fieldUpdates: Record<string, string> = body.fields ?? {};
 
 	// Get field IDs by name
 	const dbFields = q<{ id: string; name: string }>(dbFile,
@@ -417,6 +433,21 @@ export async function DELETE(
 			{ error: "Invalid object name" },
 			{ status: 400 },
 		);
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const deleted = await deletePostgresEntry(name, id);
+			return Response.json(Object.assign({ ok: true }, deleted));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to delete entry";
+			const status = /not found/i.test(message)
+				? 404
+				: /invalid|must|required/i.test(message)
+					? 400
+					: 500;
+			return Response.json({ error: message }, { status });
+		}
 	}
 
 	const dbFile = findDuckDBForObject(name);

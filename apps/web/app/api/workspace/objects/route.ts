@@ -8,6 +8,7 @@ import {
 	resolveWorkspaceRoot,
 	writeObjectYaml,
 } from "@/lib/workspace";
+import { createPostgresObject } from "@/lib/crm-postgres/object-metadata";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -78,6 +79,27 @@ export async function POST(request: Request) {
 			: undefined;
 	if (defaultView === undefined) {
 		return Response.json({ error: "Field 'default_view' must be 'table' or 'kanban'." }, { status: 400 });
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const created = await createPostgresObject({
+				name,
+				parentPath: parentPath || undefined,
+				description,
+				icon,
+				defaultView,
+			});
+			return Response.json(Object.assign({ ok: true }, created), { status: 201 });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to create object.";
+			const status = /not found/i.test(message)
+				? 404
+				: /invalid|must|required|already exists|duplicate/i.test(message)
+					? 400
+					: 500;
+			return Response.json({ error: message }, { status });
+		}
 	}
 
 	const workspaceRoot = resolveWorkspaceRoot();

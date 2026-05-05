@@ -1,4 +1,5 @@
 import { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
+import { bulkDeletePostgresEntries } from "@/lib/crm-postgres/entry-mutations";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,6 +42,21 @@ export async function POST(
 			{ error: "entryIds must be a non-empty array" },
 			{ status: 400 },
 		);
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const deleted = await bulkDeletePostgresEntries(name, entryIds);
+			return Response.json(Object.assign({ ok: true }, deleted));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to delete entries";
+			const status = /not found/i.test(message)
+				? 404
+				: /invalid|must|required/i.test(message)
+					? 400
+					: 500;
+			return Response.json({ error: message }, { status });
+		}
 	}
 
 	// Validate object exists

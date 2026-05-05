@@ -1,5 +1,6 @@
 import { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
 import { trackServer } from "@/lib/telemetry";
+import { createPostgresEntry } from "@/lib/crm-postgres/entry-mutations";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,6 +25,29 @@ export async function POST(
 			{ error: "Invalid object name" },
 			{ status: 400 },
 		);
+	}
+
+	let body: { fields?: Record<string, string> } = {};
+	try {
+		body = await req.json();
+	} catch {
+		// no body is fine
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		try {
+			const created = await createPostgresEntry(name, body.fields ?? {});
+			trackServer("object_entry_created");
+			return Response.json(Object.assign({ ok: true }, created), { status: 201 });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Failed to create entry";
+			const status = /not found/i.test(message)
+				? 404
+				: /invalid|must|required|already exists|duplicate/i.test(message)
+					? 400
+					: 500;
+			return Response.json({ error: message }, { status });
+		}
 	}
 
 	const dbFile = findDuckDBForObject(name);
@@ -71,13 +95,6 @@ export async function POST(
 	}
 
 	// Insert field values if provided
-	let body: { fields?: Record<string, string> } = {};
-	try {
-		body = await req.json();
-	} catch {
-		// no body is fine
-	}
-
 	if (body.fields && typeof body.fields === "object") {
 		// Get field IDs by name
 		const dbFields = duckdbQueryOnFile<{ id: string; name: string }>(dbFile,
