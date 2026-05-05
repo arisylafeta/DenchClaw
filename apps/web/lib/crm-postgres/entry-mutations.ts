@@ -43,6 +43,11 @@ function resolveEntityTable(object: Pick<ObjectRow, "name" | "entity_table">): s
   return canonicalTableByObjectName[object.name.trim().toLowerCase()] ?? null;
 }
 
+function normalizeRelationIds(ids: string[], relationshipType?: string | null): string[] {
+  if (relationshipType === "many_to_many") return ids;
+  return ids.length > 0 ? [ids[0]] : [];
+}
+
 async function loadObjectAndFields(tx: PgTransaction, objectName: string): Promise<{ object: ObjectRow; fields: FieldRow[] }> {
   const objectRows = rowsFrom(await tx.query(
     `select id, name, entity_table
@@ -161,7 +166,9 @@ export async function createPostgresEntry(
       const field = fieldByName.get(fieldName);
       if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
-      const relationIds = field.type === "relation" ? parseRelationIds(value) : null;
+      const relationIds = field.type === "relation"
+        ? normalizeRelationIds(parseRelationIds(value), field.relationship_type)
+        : null;
 
       if (relationIds) {
         await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
@@ -207,7 +214,9 @@ export async function updatePostgresEntry(
       const field = fieldByName.get(fieldName);
       if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
-      const relationIds = field.type === "relation" ? parseRelationIds(value) : null;
+      const relationIds = field.type === "relation"
+        ? normalizeRelationIds(parseRelationIds(value), field.relationship_type)
+        : null;
 
       if (relationIds) {
         await replaceRelationLinks(tx, object.id, entryId, field, relationIds);

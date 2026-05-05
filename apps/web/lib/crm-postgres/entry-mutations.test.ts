@@ -142,6 +142,29 @@ describe("crm-postgres entry mutations", () => {
     expect(inserts[1]?.[1]).toEqual(["obj_people", "f_company", "entry_1", "c2", 1]);
   });
 
+  it("many_to_many relation keeps all links and stores array value", async () => {
+    fieldRows = [{ id: "f_company", name: "Company", type: "relation", canonical_column: null, relationship_type: "many_to_many" }];
+    const { updatePostgresEntry } = await import("./entry-mutations");
+
+    const result = await updatePostgresEntry("people", "entry_1", { Company: ["c1", "c2"] });
+    expect(result).toEqual({ ok: true, updatedCount: 1 });
+
+    const relationInserts = txQuery.mock.calls.filter(([sql]) => String(sql).includes("insert into crm_relation_links"));
+    expect(relationInserts).toHaveLength(2);
+
+    const customUpsert = txQuery.mock.calls.find(([sql]) => String(sql).includes("insert into crm_custom_field_values"));
+    expect(customUpsert?.[1]).toEqual([
+      "obj_people",
+      "entry_1",
+      "f_company",
+      null,
+      null,
+      null,
+      null,
+      ["c1", "c2"],
+    ]);
+  });
+
   it("deletes one entry with full cleanup and canonical row removal", async () => {
     const { deletePostgresEntry } = await import("./entry-mutations");
     const result = await deletePostgresEntry("people", "entry_1");
@@ -211,6 +234,7 @@ describe("crm-postgres entry mutations", () => {
     expect(canonicalUpdate?.[1]).toEqual(["c9", "entry_1"]);
     expect(calls.some(([sql]) => String(sql).includes("delete from crm_relation_links") && String(sql).includes("field_id = $1"))).toBe(true);
     const relationInserts = calls.filter(([sql]) => String(sql).includes("insert into crm_relation_links"));
-    expect(relationInserts).toHaveLength(2);
+    expect(relationInserts).toHaveLength(1);
+    expect(relationInserts[0]?.[1]).toEqual(["obj_people", "f_company", "entry_1", "c9", 0]);
   });
 });
