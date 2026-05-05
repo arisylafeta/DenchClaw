@@ -6,6 +6,11 @@ import {
 	duckdbPath,
 } from "@/lib/workspace";
 import { runActionScript, runBulkAction, type ActionConfig, type ActionContext, type ActionEvent } from "@/lib/action-runner";
+import {
+	getPostgresActionConfig,
+	getPostgresActionContexts,
+	persistPostgresActionRun,
+} from "@/lib/crm-postgres/actions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,11 +56,37 @@ export async function POST(
 		return Response.json({ error: "actionId, fieldId, and entryIds[] required" }, { status: 400 });
 	}
 
-	const dbFile = findDuckDBForObject(name);
+	const postgresMode = process.env.CRM_DB_BACKEND === "postgres";
+	const dbFile = postgresMode ? "" : findDuckDBForObject(name);
 	if (!dbFile) {
+		if (postgresMode) {
+			// no-op (handled below)
+		} else {
 		return Response.json({ error: "DuckDB not found" }, { status: 404 });
+		}
 	}
-	const actionDbFile = dbFile;
+	const actionDbFile = dbFile || "";
+
+	if (postgresMode) {
+		const cfg = await getPostgresActionConfig(name, fieldId, actionId);
+		if (!cfg) {
+			return Response.json({ error: `Action '${actionId}' not found on field` }, { status: 404 });
+		}
+		const contexts = await getPostgresActionContexts(name, entryIds);
+		const normalizedContexts = contexts.map((ctx) => ({
+			...ctx,
+			actionId,
+			fieldId,
+			objectName: name,
+			objectId: cfg.objectId,
+		}));
+		return streamActionExecution(cfg.action, normalizedContexts, {
+			actionId,
+			fieldId,
+			objectId: cfg.objectId,
+			persist: (run) => persistPostgresActionRun(run),
+		});
+	}
 
 	const field = duckdbQueryOnFile<FieldRow>(
 		actionDbFile,
@@ -120,6 +151,35 @@ export async function POST(
 		});
 	}
 
+	return streamActionExecution(action, contexts, {
+		actionId,
+		fieldId,
+		objectId,
+		persist: (run) => {
+			persistActionRun(actionDbFile, run);
+		},
+	});
+}
+
+function streamActionExecution(
+	action: ActionConfig,
+	contexts: ActionContext[],
+	meta: {
+		actionId: string;
+		fieldId: string;
+		objectId: string;
+		persist: (run: {
+			actionId: string;
+			fieldId: string;
+			entryId: string;
+			objectId: string;
+			status: string;
+			result: string | null;
+			error: string | null;
+			exitCode: number | null;
+		}) => void | Promise<void>;
+	},
+) {
 	const runIdPrefix = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 	const encoder = new TextEncoder();
@@ -130,11 +190,11 @@ export async function POST(
 				controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${data}\n\n`));
 
 				if (event.type === "completed") {
-					persistActionRun(actionDbFile, {
-						actionId,
-						fieldId,
+					void meta.persist({
+						actionId: meta.actionId,
+						fieldId: meta.fieldId,
 						entryId: event.entryId,
-						objectId,
+						objectId: meta.objectId,
 						status: event.status,
 						result: event.result ? JSON.stringify(event.result) : null,
 						error: event.error ?? null,

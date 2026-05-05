@@ -3,6 +3,8 @@ import {
 	duckdbExecOnFile,
 	findDuckDBForObject,
 } from "@/lib/workspace";
+import { queryPg } from "@/lib/postgres";
+import { toCustomValueColumns } from "@/lib/crm-postgres/value-codec";
 import {
 	getIntegrationsState,
 	resolveDenchGatewayCredentials,
@@ -46,6 +48,15 @@ type EnrichRequestBody = {
 
 const MAX_ENTRY_IDS = 5000;
 const ENTRY_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const POSTGRES_OBJECT_TABLES: Record<string, string> = {
+	people: "crm_people",
+	company: "crm_companies",
+	companies: "crm_companies",
+	email_thread: "crm_email_threads",
+	email_message: "crm_email_messages",
+	calendar_event: "crm_calendar_events",
+	interaction: "crm_interactions",
+};
 
 /**
  * POST /api/workspace/objects/[name]/enrich
@@ -144,6 +155,20 @@ export async function POST(
 		)
 	) {
 		return Response.json({ error: "Invalid scope." }, { status: 400 });
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		return enrichWithPostgres({
+			name,
+			fieldId,
+			inputFieldName,
+			scope,
+			narrowedEntryIds,
+			gatewayUrl,
+			apiKey,
+			category,
+			matchedColumn,
+		});
 	}
 
 	const dbFile = findDuckDBForObject(name);
@@ -328,6 +353,211 @@ export async function POST(
 			Connection: "keep-alive",
 		},
 	});
+}
+
+async function enrichWithPostgres(args: {
+	name: string;
+	fieldId: string;
+	inputFieldName: string;
+	scope: "all" | "empty" | number;
+	narrowedEntryIds?: string[];
+	gatewayUrl: string;
+	apiKey: string;
+	category: "people" | "company";
+	matchedColumn: EnrichmentColumnDef;
+}) {
+	const { name, fieldId, inputFieldName, scope, narrowedEntryIds, gatewayUrl, apiKey, category, matchedColumn } = args;
+	const objectRows = await queryPg<{ id: string }>("select id from crm_objects where name = $1 limit 1", [name]);
+	if (!objectRows[0]) return Response.json({ error: `Object '${name}' not found.` }, { status: 404 });
+	const objectId = objectRows[0].id;
+
+	const inputFields = await queryPg<{ id: string; name: string; type: string; canonical_column: string | null }>(
+		`select id, name, type, canonical_column from crm_fields where object_id = $1 and name = $2 limit 1`,
+		[objectId, inputFieldName],
+	);
+	if (!inputFields[0]) {
+		return Response.json({ error: `Input field '${inputFieldName}' not found.` }, { status: 404 });
+	}
+	if (!isEligibleInputField(category, inputFields[0])) {
+		return Response.json({ error: `Input field '${inputFieldName}' is not supported for ${category} enrichment.` }, { status: 400 });
+	}
+
+	const enrichFieldRows = await queryPg<{ id: string; canonical_column: string | null; type: string }>(
+		"select id, canonical_column, type from crm_fields where object_id = $1 and id = $2 limit 1",
+		[objectId, fieldId],
+	);
+	if (!enrichFieldRows[0]) return Response.json({ error: "Enrichment field not found." }, { status: 404 });
+
+	const tableName = POSTGRES_OBJECT_TABLES[name];
+	const inputField = inputFields[0];
+	const enrichField = enrichFieldRows[0];
+
+	const entries = await loadPostgresEntriesForEnrichment({
+		objectId,
+		tableName,
+		inputField,
+		enrichField,
+		scope,
+		narrowedEntryIds,
+	});
+	const total = entries.length;
+
+	const encoder = new TextEncoder();
+	let cancelled = false;
+	const stream = new ReadableStream({
+		async start(controller) {
+			function send(data: Record<string, unknown>) {
+				controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+			}
+
+			let enriched = 0;
+			let failed = 0;
+			for (let i = 0; i < entries.length; i++) {
+				if (cancelled) break;
+				const entry = entries[i];
+				const inputValue = entry.input_value?.trim();
+				if (!inputValue) {
+					failed++;
+					send({ type: "error", entryId: entry.entry_id, error: "No input value", current: i + 1, total });
+					continue;
+				}
+				try {
+					const result = await callApolloGateway(gatewayUrl, apiKey, category, inputValue, matchedColumn.requiredFields);
+					if (!result.ok) {
+						failed++;
+						send({ type: "error", entryId: entry.entry_id, error: result.error, current: i + 1, total });
+						continue;
+					}
+					const value = extractEnrichmentValue(result.payload as Record<string, unknown>, matchedColumn);
+					if (value == null) {
+						failed++;
+						send({ type: "error", entryId: entry.entry_id, error: "Field not found in response", current: i + 1, total });
+						continue;
+					}
+					await patchPostgresEntryField(objectId, entry.entry_id, fieldId, enrichField, value);
+					enriched++;
+					send({ type: "progress", entryId: entry.entry_id, value, current: i + 1, total });
+				} catch (err) {
+					failed++;
+					send({ type: "error", entryId: entry.entry_id, error: err instanceof Error ? err.message : "Unknown error", current: i + 1, total });
+				}
+			}
+			if (!cancelled) {
+				send({ type: "done", enriched, failed, total });
+				controller.close();
+			}
+		},
+		cancel() {
+			cancelled = true;
+		},
+	});
+
+	return new Response(stream, {
+		headers: {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+		},
+	});
+}
+
+async function loadPostgresEntriesForEnrichment(args: {
+	objectId: string;
+	tableName?: string;
+	inputField: { id: string; canonical_column: string | null };
+	enrichField: { id: string; canonical_column: string | null };
+	scope: "all" | "empty" | number;
+	narrowedEntryIds?: string[];
+}): Promise<Array<{ entry_id: string; input_value: string | null }>> {
+	const { objectId, tableName, inputField, enrichField, scope, narrowedEntryIds } = args;
+	if (tableName && inputField.canonical_column) {
+		const params: unknown[] = [];
+		const where: string[] = [];
+		if (narrowedEntryIds?.length) {
+			params.push(narrowedEntryIds);
+			where.push(`e.id = any($${params.length}::text[])`);
+		}
+		if (scope === "empty") {
+			if (enrichField.canonical_column) {
+				where.push(`coalesce(e."${enrichField.canonical_column.replace(/"/g, '""')}"::text, '') = ''`);
+			} else {
+				params.push(objectId);
+				params.push(enrichField.id);
+				where.push(`not exists (select 1 from crm_custom_field_values ev where ev.object_id = $${params.length - 1} and ev.entry_id = e.id and ev.field_id = $${params.length} and coalesce(ev.text_value, ev.number_value::text, ev.boolean_value::text, ev.date_value::text, ev.json_value::text, '') <> '')`);
+			}
+		}
+		let limitSql = "";
+		if (typeof scope === "number" && scope > 0) {
+			params.push(scope);
+			limitSql = ` limit $${params.length}`;
+		}
+		const whereSql = where.length ? `where ${where.join(" and ")}` : "";
+		return queryPg<{ entry_id: string; input_value: string | null }>(
+			`select e.id as entry_id, e."${inputField.canonical_column.replace(/"/g, '""')}"::text as input_value
+			 from ${tableName} e
+			 ${whereSql}
+			${limitSql}`,
+			params,
+		);
+	}
+
+	const params: unknown[] = [objectId, inputField.id];
+	const where: string[] = [];
+	if (narrowedEntryIds?.length) {
+		params.push(narrowedEntryIds);
+		where.push(`e.entry_id = any($${params.length}::text[])`);
+	}
+	if (scope === "empty") {
+		params.push(enrichField.id);
+		where.push(`not exists (select 1 from crm_custom_field_values ev where ev.object_id = $1 and ev.entry_id = e.entry_id and ev.field_id = $${params.length} and coalesce(ev.text_value, ev.number_value::text, ev.boolean_value::text, ev.date_value::text, ev.json_value::text, '') <> '')`);
+	}
+	let limitSql = "";
+	if (typeof scope === "number" && scope > 0) {
+		params.push(scope);
+		limitSql = ` limit $${params.length}`;
+	}
+	const whereSql = where.length ? `and ${where.join(" and ")}` : "";
+	const inputParam = `$2`;
+	return queryPg<{ entry_id: string; input_value: string | null }>(
+		`select e.entry_id, iv.text_value as input_value
+		 from (select distinct entry_id from crm_custom_field_values where object_id = $1) e
+		 left join crm_custom_field_values iv
+		   on iv.object_id = $1 and iv.entry_id = e.entry_id and iv.field_id = ${inputParam}
+		 where true ${whereSql}
+		${limitSql}`,
+		params,
+	);
+}
+
+async function patchPostgresEntryField(
+	objectId: string,
+	entryId: string,
+	fieldId: string,
+	field: { canonical_column: string | null; type: string },
+	value: string,
+) {
+	if (field.canonical_column) {
+		const objects = await queryPg<{ name: string }>("select name from crm_objects where id = $1 limit 1", [objectId]);
+		const tableName = POSTGRES_OBJECT_TABLES[objects[0]?.name ?? ""];
+		if (tableName) {
+			await queryPg(
+				`update ${tableName} set "${field.canonical_column.replace(/"/g, '""')}" = $1, updated_at = now() where id = $2`,
+				[value, entryId],
+			);
+			return;
+		}
+	}
+	const cols = toCustomValueColumns(field.type, value);
+	await queryPg(
+		`insert into crm_custom_field_values (object_id, entry_id, field_id, text_value, number_value, boolean_value, date_value, json_value, updated_at)
+		 values ($1,$2,$3,$4,$5,$6,$7,$8,now())
+		 on conflict (entry_id, field_id)
+		 do update set text_value = excluded.text_value, number_value = excluded.number_value, boolean_value = excluded.boolean_value, date_value = excluded.date_value, json_value = excluded.json_value, updated_at = now()`,
+		[objectId, entryId, fieldId, cols.text_value, cols.number_value, cols.boolean_value, cols.date_value, cols.json_value],
+	);
+	const objects = await queryPg<{ name: string }>("select name from crm_objects where id = $1 limit 1", [objectId]);
+	const tableName = POSTGRES_OBJECT_TABLES[objects[0]?.name ?? ""];
+	if (tableName) await queryPg(`update ${tableName} set updated_at = now() where id = $1`, [entryId]);
 }
 
 type GatewayCallResult =

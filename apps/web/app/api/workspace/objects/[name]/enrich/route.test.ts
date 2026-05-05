@@ -6,6 +6,10 @@ vi.mock("@/lib/workspace", () => ({
   findDuckDBForObject: vi.fn(() => "/tmp/workspace.duckdb"),
 }));
 
+vi.mock("@/lib/postgres", () => ({
+  queryPg: vi.fn(),
+}));
+
 vi.mock("@/lib/integrations", () => ({
   getIntegrationsState: vi.fn(() => ({
     denchCloud: {
@@ -29,10 +33,15 @@ vi.mock("@/lib/integrations", () => ({
 
 describe("workspace enrichment route", () => {
   beforeEach(async () => {
+    delete process.env.CRM_DB_BACKEND;
     vi.restoreAllMocks();
-    const { duckdbExecOnFile, duckdbQueryOnFile } = await import("@/lib/workspace");
+    const { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } = await import("@/lib/workspace");
+    const { queryPg } = await import("@/lib/postgres");
     vi.mocked(duckdbExecOnFile).mockReset();
     vi.mocked(duckdbQueryOnFile).mockReset();
+    vi.mocked(findDuckDBForObject).mockReset();
+    vi.mocked(findDuckDBForObject).mockReturnValue("/tmp/workspace.duckdb");
+    vi.mocked(queryPg).mockReset();
   });
 
   it("forwards requiredFields for people enrichment derived from the apollo path", async () => {
@@ -90,6 +99,62 @@ describe("workspace enrichment route", () => {
     expect(response.status).toBe(200);
     await response.text();
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses Postgres reads/writes in postgres mode and avoids DuckDB helpers", async () => {
+    process.env.CRM_DB_BACKEND = "postgres";
+    const { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } = await import("@/lib/workspace");
+    const { queryPg } = await import("@/lib/postgres");
+
+    vi.mocked(queryPg).mockImplementation(async (sql: string, params?: readonly unknown[]) => {
+      if (sql.includes("select id from crm_objects where name")) return [{ id: "obj_1" }] as never;
+      if (sql.includes("from crm_fields") && sql.includes("name = $2")) {
+        return [{ id: "input_1", name: "email", type: "email" }] as never;
+      }
+      if (sql.includes("from crm_fields") && sql.includes("id = $2")) {
+        return [{ id: "field_1", canonical_column: null, type: "text" }] as never;
+      }
+      if (sql.includes("from crm_people e") && sql.includes("left join crm_custom_field_values input_values")) {
+        return [{ entry_id: "entry_1", input_value: "jane@acme.com" }] as never;
+      }
+      if (sql.includes("insert into crm_custom_field_values")) return [] as never;
+      if (sql.includes("update crm_people set updated_at = now() where id = $1")) {
+        expect(params).toEqual(["entry_1"]);
+        return [] as never;
+      }
+      return [] as never;
+    });
+
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ person: { name: "Jane Doe" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    const { POST } = await import("./route.js");
+    const response = await POST(
+      new Request("http://localhost/api/workspace/objects/leads/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fieldId: "field_1",
+          apolloPath: "person.name",
+          category: "people",
+          inputFieldName: "email",
+          scope: 1,
+        }),
+      }),
+      { params: Promise.resolve({ name: "leads" }) },
+    );
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(queryPg).toHaveBeenCalled();
+    expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+    expect(duckdbExecOnFile).not.toHaveBeenCalled();
+    expect(findDuckDBForObject).not.toHaveBeenCalled();
+    delete process.env.CRM_DB_BACKEND;
   });
 
   it("forwards LinkedIn people enrichment with gateway-compatible snake_case keys", async () => {

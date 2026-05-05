@@ -1,4 +1,5 @@
 import { duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
+import { getPostgresActionRuns } from "@/lib/crm-postgres/actions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,6 +23,16 @@ export async function GET(
 	const entryId = url.searchParams.get("entryId");
 	const actionId = url.searchParams.get("actionId");
 	const limit = Math.min(Number(url.searchParams.get("limit") || "20"), 100);
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		const runs = await getPostgresActionRuns(name, {
+			fieldId,
+			entryId,
+			actionId,
+			limit,
+		});
+		return Response.json({ runs });
+	}
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {
