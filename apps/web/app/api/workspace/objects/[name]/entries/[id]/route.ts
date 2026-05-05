@@ -329,10 +329,18 @@ export async function PATCH(
 		);
 	}
 
-	const body = await req.json();
-	const fieldUpdates: Record<string, string> = body.fields ?? {};
-
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+		let body: { fields?: Record<string, string> };
+		try {
+			body = await req.json();
+		} catch {
+			return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+		}
+		if (body.fields != null && (typeof body.fields !== "object" || Array.isArray(body.fields))) {
+			return Response.json({ error: "Field 'fields' must be an object." }, { status: 400 });
+		}
+		const fieldUpdates: Record<string, string> = body.fields ?? {};
+
 		try {
 			const updated = await updatePostgresEntry(name, id, fieldUpdates);
 			return Response.json(Object.assign({ ok: true }, updated));
@@ -346,6 +354,9 @@ export async function PATCH(
 			return Response.json({ error: message }, { status });
 		}
 	}
+
+	const body = await req.json();
+	const fieldUpdates: Record<string, string> = body.fields ?? {};
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {

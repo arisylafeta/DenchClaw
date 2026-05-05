@@ -74,6 +74,48 @@ describe("entry detail route", () => {
     expect(duckdbExecOnFile).not.toHaveBeenCalled();
   });
 
+  it("returns 400 for invalid json in postgres PATCH before helper", async () => {
+    vi.clearAllMocks();
+    process.env.CRM_DB_BACKEND = "postgres";
+    const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
+    const { PATCH } = await import("./route");
+
+    const response = await PATCH(new Request("http://localhost/api/workspace/objects/people/entries/p1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    }), {
+      params: Promise.resolve({ name: "people", id: "p1" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(updatePostgresEntry).not.toHaveBeenCalled();
+    expect(findDuckDBForObject).not.toHaveBeenCalled();
+    expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+    expect(duckdbExecOnFile).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for non-object fields in postgres PATCH before helper", async () => {
+    vi.clearAllMocks();
+    process.env.CRM_DB_BACKEND = "postgres";
+    const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");
+    const { PATCH } = await import("./route");
+
+    const response = await PATCH(new Request("http://localhost/api/workspace/objects/people/entries/p1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: "bad" }),
+    }), {
+      params: Promise.resolve({ name: "people", id: "p1" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(updatePostgresEntry).not.toHaveBeenCalled();
+    expect(findDuckDBForObject).not.toHaveBeenCalled();
+    expect(duckdbQueryOnFile).not.toHaveBeenCalled();
+    expect(duckdbExecOnFile).not.toHaveBeenCalled();
+  });
+
   it("uses postgres deleter for DELETE when backend is postgres", async () => {
     process.env.CRM_DB_BACKEND = "postgres";
     const { findDuckDBForObject, duckdbQueryOnFile, duckdbExecOnFile } = await import("@/lib/workspace");

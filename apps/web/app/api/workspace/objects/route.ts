@@ -95,8 +95,10 @@ export async function POST(request: Request) {
 			const message = error instanceof Error ? error.message : "Failed to create object.";
 			const status = /not found/i.test(message)
 				? 404
-				: /invalid|must|required|already exists|duplicate/i.test(message)
-					? 400
+				: /already exists|duplicate/i.test(message)
+					? 409
+					: /invalid|must|required/i.test(message)
+						? 400
 					: 500;
 			return Response.json({ error: message }, { status });
 		}

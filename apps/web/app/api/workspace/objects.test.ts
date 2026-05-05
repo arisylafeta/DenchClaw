@@ -408,6 +408,27 @@ describe("Workspace Objects API", () => {
       expect(duckdbPathAsync).not.toHaveBeenCalled();
       expect(duckdbQueryOnFileAsync).not.toHaveBeenCalled();
     });
+
+    it("returns 409 for postgres duplicate object errors", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { duckdbPathAsync, duckdbQueryOnFileAsync } = await import("@/lib/workspace");
+      createPostgresObject.mockRejectedValue(new Error("Object already exists"));
+
+      const { POST } = await import("./objects/route.js");
+      const req = new Request("http://localhost/api/workspace/objects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "leads" }),
+      });
+
+      const res = await POST(req);
+
+      expect(res.status).toBe(409);
+      expect(createPostgresObject).toHaveBeenCalled();
+      expect(duckdbPathAsync).not.toHaveBeenCalled();
+      expect(duckdbQueryOnFileAsync).not.toHaveBeenCalled();
+    });
   });
 
   // ─── POST /api/workspace/objects/[name]/entries ─────────────────
@@ -500,6 +521,38 @@ describe("Workspace Objects API", () => {
       expect(findDuckDBForObject).not.toHaveBeenCalled();
       expect(duckdbQueryOnFile).not.toHaveBeenCalled();
       expect(duckdbExecOnFile).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid json in postgres mode before helper", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { POST } = await import("./objects/[name]/entries/route.js");
+      const req = new Request("http://localhost/api/workspace/objects/leads/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(400);
+      expect(createPostgresEntry).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for non-object fields in postgres mode before helper", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { POST } = await import("./objects/[name]/entries/route.js");
+      const req = new Request("http://localhost/api/workspace/objects/leads/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: "bad" }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(400);
+      expect(createPostgresEntry).not.toHaveBeenCalled();
     });
   });
 
@@ -710,6 +763,70 @@ describe("Workspace Objects API", () => {
       expect(findDuckDBForObject).not.toHaveBeenCalled();
       expect(duckdbQueryOnFile).not.toHaveBeenCalled();
       expect(duckdbExecOnFile).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for invalid json in postgres bulk delete before helper", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(400);
+      expect(bulkDeletePostgresEntries).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for non-array entryIds in postgres bulk delete before helper", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: "bad" }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(400);
+      expect(bulkDeletePostgresEntries).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for empty entryIds in postgres bulk delete before helper", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: [] }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(400);
+      expect(bulkDeletePostgresEntries).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for non-string entryIds in postgres bulk delete before helper", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: ["e1", 2] }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
+
+      expect(res.status).toBe(400);
+      expect(bulkDeletePostgresEntries).not.toHaveBeenCalled();
     });
   });
 });

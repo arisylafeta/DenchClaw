@@ -26,12 +26,23 @@ export async function POST(
 		);
 	}
 
-	const body = await req.json();
-	const entryIds: string[] = body.entryIds;
+	let body: { entryIds?: unknown };
+	try {
+		body = await req.json();
+	} catch {
+		return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+	}
+	const entryIds = body.entryIds;
 
 	if (!Array.isArray(entryIds) || entryIds.length === 0) {
 		return Response.json(
 			{ error: "entryIds must be a non-empty array" },
+			{ status: 400 },
+		);
+	}
+	if (entryIds.some((id) => typeof id !== "string" || id.trim() === "")) {
+		return Response.json(
+			{ error: "entryIds must contain only non-empty strings" },
 			{ status: 400 },
 		);
 	}

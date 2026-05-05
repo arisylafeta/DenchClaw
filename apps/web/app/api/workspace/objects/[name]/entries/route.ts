@@ -27,14 +27,17 @@ export async function POST(
 		);
 	}
 
-	let body: { fields?: Record<string, string> } = {};
-	try {
-		body = await req.json();
-	} catch {
-		// no body is fine
-	}
-
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+		let body: { fields?: Record<string, string> } = {};
+		try {
+			body = await req.json();
+		} catch {
+			return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+		}
+		if (body.fields != null && (typeof body.fields !== "object" || Array.isArray(body.fields))) {
+			return Response.json({ error: "Field 'fields' must be an object." }, { status: 400 });
+		}
+
 		try {
 			const created = await createPostgresEntry(name, body.fields ?? {});
 			trackServer("object_entry_created");
@@ -48,6 +51,13 @@ export async function POST(
 					: 500;
 			return Response.json({ error: message }, { status });
 		}
+	}
+
+	let body: { fields?: Record<string, string> } = {};
+	try {
+		body = await req.json();
+	} catch {
+		// no body is fine
 	}
 
 	const dbFile = findDuckDBForObject(name);
