@@ -24,6 +24,10 @@ import {
 	ComposioToolNoConnectionError,
 } from "./composio-execute";
 import {
+	getPostgresPhotoSyncPeople,
+	updatePostgresAvatarUrls,
+} from "./crm-postgres/photos";
+import {
 	duckdbExecAsync,
 	duckdbQueryAllAsync,
 } from "./workspace";
@@ -102,20 +106,32 @@ const PAGE_SIZE = 500;
  */
 export async function syncGooglePhotos(opts: PhotoSyncOptions): Promise<PhotoSyncSummary> {
 	const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
+	const isPostgres = process.env.CRM_DB_BACKEND === "postgres";
+	let emailToEntryId = new Map<string, string>();
+	let avatarFieldId: string | null = null;
 
-	// Serialize the DB reads — concurrent duckdb CLI invocations race on
-	// the file lock and silently return empty result sets. Same bug the
-	// Gmail sync hit (see comment in gmail-sync.ts::loadFieldIdMaps).
-	const peopleFieldMap = await loadPeopleFieldMap();
-	const avatarFieldId = peopleFieldMap["Avatar URL"];
-	if (!avatarFieldId) {
-		return { photosWritten: 0, contactsSeen: 0, reachedEnd: true };
+	if (isPostgres) {
+		const people = await getPostgresPhotoSyncPeople();
+		for (const row of people) {
+			const email = row.email?.toLowerCase().trim();
+			if (!email) {continue;}
+			emailToEntryId.set(email, row.id);
+		}
+	} else {
+		// Serialize the DB reads — concurrent duckdb CLI invocations race on
+		// the file lock and silently return empty result sets. Same bug the
+		// Gmail sync hit (see comment in gmail-sync.ts::loadFieldIdMaps).
+		const peopleFieldMap = await loadPeopleFieldMap();
+		avatarFieldId = peopleFieldMap["Avatar URL"];
+		if (!avatarFieldId) {
+			return { photosWritten: 0, contactsSeen: 0, reachedEnd: true };
+		}
+		const emailFieldId = peopleFieldMap["Email Address"];
+		if (!emailFieldId) {
+			return { photosWritten: 0, contactsSeen: 0, reachedEnd: true };
+		}
+		emailToEntryId = await loadEmailToEntryIdMap(emailFieldId);
 	}
-	const emailFieldId = peopleFieldMap["Email Address"];
-	if (!emailFieldId) {
-		return { photosWritten: 0, contactsSeen: 0, reachedEnd: true };
-	}
-	const emailToEntryId = await loadEmailToEntryIdMap(emailFieldId);
 
 	const slug = await resolveToolSlug({
 		toolkitSlug: "gmail",
@@ -178,10 +194,17 @@ export async function syncGooglePhotos(opts: PhotoSyncOptions): Promise<PhotoSyn
 		}
 
 		if (updates.length > 0) {
-			photosWritten += await writeAvatarUrls({
-				avatarFieldId,
-				updates,
-			});
+			if (isPostgres) {
+				photosWritten += await updatePostgresAvatarUrls(updates.map((u) => ({
+					id: u.entryId,
+					avatarUrl: u.avatarUrl,
+				})));
+			} else if (avatarFieldId) {
+				photosWritten += await writeAvatarUrls({
+					avatarFieldId,
+					updates,
+				});
+			}
 		}
 
 		opts.onProgress?.({ page: page + 1, photosWritten });
