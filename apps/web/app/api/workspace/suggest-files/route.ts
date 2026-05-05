@@ -9,6 +9,7 @@ import {
 	pivotViewIdentifier,
 	readObjectYamlIcon,
 } from "@/lib/workspace";
+import { searchPostgresEntries, searchPostgresObjects } from "@/lib/crm-postgres/suggest-files";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -364,13 +365,17 @@ export async function GET(req: Request) {
 
 	// Search mode: find files, objects, and entries by name
 	if (searchQuery) {
+		const usePostgres = process.env.CRM_DB_BACKEND === "postgres";
 		// File search: workspace only (skip expensive home dir traversal)
 		const fileResults: SuggestItem[] = [];
 		searchFiles(workspaceRoot, searchQuery, fileResults, 15);
 
-		// DuckDB search: objects and entries (sequential to avoid lock contention)
-		const objectResults = await searchObjects(searchQuery, 10);
-		const entryResults = await searchEntries(searchQuery, 15);
+		const objectResults = usePostgres
+			? await searchPostgresObjects(searchQuery, 10)
+			: await searchObjects(searchQuery, 10);
+		const entryResults = usePostgres
+			? await searchPostgresEntries(searchQuery, 15)
+			: await searchEntries(searchQuery, 15);
 
 		// Deduplicate: if an object matches, remove the duplicate folder
 		const objectNames = new Set(objectResults.map((o) => o.name));
@@ -397,7 +402,9 @@ export async function GET(req: Request) {
 
 	// Default: list workspace root + all objects
 	const fileItems = listDir(workspaceRoot);
-	const objectItems = await searchObjects("", 20);
+	const objectItems = process.env.CRM_DB_BACKEND === "postgres"
+		? await searchPostgresObjects("", 20)
+		: await searchObjects("", 20);
 	// Deduplicate: if an object also appears as a folder, keep the object version
 	const objectNames = new Set(objectItems.map((o) => o.name));
 	const dedupedFiles = fileItems.filter(

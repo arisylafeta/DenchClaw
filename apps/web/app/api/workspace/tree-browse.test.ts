@@ -33,10 +33,26 @@ vi.mock("@/lib/workspace", () => ({
   parseSimpleYaml: vi.fn(() => ({})),
   duckdbQueryAll: vi.fn(() => []),
   duckdbQueryAllAsync: vi.fn(async () => []),
+  duckdbQueryOnFileAsync: vi.fn(async () => []),
   isDatabaseFile: vi.fn(() => false),
   discoverDuckDBPaths: vi.fn(() => []),
+  pivotViewIdentifier: vi.fn((name: string) => `"v_${name}"`),
+  readObjectYamlIcon: vi.fn(() => undefined),
   resolveDuckdbBin: vi.fn(() => null),
   safeResolvePath: vi.fn(() => null),
+}));
+
+vi.mock("@/lib/postgres", () => ({
+  queryPg: vi.fn(async () => []),
+}));
+
+vi.mock("@/lib/crm-postgres/tree", () => ({
+  loadPostgresTreeObjects: vi.fn(async () => new Map()),
+}));
+
+vi.mock("@/lib/crm-postgres/suggest-files", () => ({
+  searchPostgresObjects: vi.fn(async () => []),
+  searchPostgresEntries: vi.fn(async () => []),
 }));
 
 function makeDirent(name: string, isDir: boolean): Dirent {
@@ -83,11 +99,25 @@ describe("Workspace Tree & Browse API", () => {
       parseSimpleYaml: vi.fn(() => ({})),
       duckdbQueryAll: vi.fn(() => []),
       duckdbQueryAllAsync: vi.fn(async () => []),
+      duckdbQueryOnFileAsync: vi.fn(async () => []),
       isDatabaseFile: vi.fn(() => false),
       discoverDuckDBPaths: vi.fn(() => []),
+      pivotViewIdentifier: vi.fn((name: string) => `"v_${name}"`),
+      readObjectYamlIcon: vi.fn(() => undefined),
       resolveDuckdbBin: vi.fn(() => null),
       safeResolvePath: vi.fn(() => null),
     }));
+    vi.mock("@/lib/postgres", () => ({
+      queryPg: vi.fn(async () => []),
+    }));
+    vi.mock("@/lib/crm-postgres/tree", () => ({
+      loadPostgresTreeObjects: vi.fn(async () => new Map()),
+    }));
+    vi.mock("@/lib/crm-postgres/suggest-files", () => ({
+      searchPostgresObjects: vi.fn(async () => []),
+      searchPostgresEntries: vi.fn(async () => []),
+    }));
+    delete process.env.CRM_DB_BACKEND;
   });
 
   afterEach(() => {
@@ -195,6 +225,41 @@ describe("Workspace Tree & Browse API", () => {
       const rootPaths = (json.tree as Array<{ path: string }>).map((node) => node.path);
       expect(rootPaths).toContain("skills");
       expect(rootPaths).not.toContain("~skills");
+    });
+
+    it("uses Postgres tree helper and avoids DuckDB in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const workspace = await import("@/lib/workspace");
+      vi.mocked(workspace.resolveWorkspaceRoot).mockReturnValue("/ws");
+      const { readdir: mockReaddir } = await import("node:fs/promises");
+      vi.mocked(mockReaddir).mockImplementation((dir) => {
+        if (String(dir) === "/ws") {
+          return Promise.resolve([makeDirent("people", true)] as unknown as never[]);
+        }
+        return Promise.resolve([] as unknown as never[]);
+      });
+
+      const pgTree = await import("@/lib/crm-postgres/tree");
+      vi.mocked(pgTree.loadPostgresTreeObjects).mockResolvedValue(new Map([
+        ["people", { id: "obj-people", name: "people", default_view: "table", description: "People" }],
+      ]));
+      vi.mocked(workspace.duckdbQueryAllAsync).mockClear();
+      vi.mocked(workspace.discoverDuckDBPaths).mockClear();
+      vi.mocked(workspace.duckdbQueryOnFileAsync).mockClear();
+      vi.mocked(pgTree.loadPostgresTreeObjects).mockClear();
+
+      const { GET } = await import("./tree/route.js");
+      const req = new Request("http://localhost/api/workspace/tree");
+      const res = await GET(req);
+      const json = await res.json();
+
+      expect(pgTree.loadPostgresTreeObjects).toHaveBeenCalled();
+      expect(workspace.duckdbQueryAllAsync).not.toHaveBeenCalled();
+      expect(workspace.discoverDuckDBPaths).not.toHaveBeenCalled();
+      expect(workspace.duckdbQueryOnFileAsync).not.toHaveBeenCalled();
+      expect(json.tree).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: "people", type: "object" }),
+      ]));
     });
 
     it("hides noisy CRM sync object folders by default without hiding ordinary object folders", async () => {
@@ -435,6 +500,52 @@ describe("Workspace Tree & Browse API", () => {
       expect(names).toContain("doc.md");
       expect(names).toContain("IDENTITY.md");
     });
+
+    it("uses Postgres suggest helpers and avoids DuckDB in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const workspace = await import("@/lib/workspace");
+      vi.mocked(workspace.resolveWorkspaceRoot).mockReturnValue("/ws");
+      const pgSuggest = await import("@/lib/crm-postgres/suggest-files");
+      vi.mocked(pgSuggest.searchPostgresObjects).mockResolvedValue([
+        {
+          name: "people",
+          path: "workspace:object:people",
+          type: "object",
+          icon: "👤",
+          defaultView: "table",
+        },
+      ] as never);
+      vi.mocked(pgSuggest.searchPostgresEntries).mockResolvedValue([
+        {
+          name: "Ada Lovelace",
+          path: "workspace:entry:people:person-1",
+          type: "entry",
+          icon: "👤",
+          objectName: "people",
+          entryId: "person-1",
+        },
+      ] as never);
+      vi.mocked(workspace.duckdbQueryAllAsync).mockClear();
+      vi.mocked(workspace.discoverDuckDBPaths).mockClear();
+      vi.mocked(workspace.duckdbQueryOnFileAsync).mockClear();
+      vi.mocked(pgSuggest.searchPostgresObjects).mockClear();
+      vi.mocked(pgSuggest.searchPostgresEntries).mockClear();
+
+      const { GET } = await import("./suggest-files/route.js");
+      const req = new Request("http://localhost/api/workspace/suggest-files?q=ada");
+      const res = await GET(req);
+      const json = await res.json();
+
+      expect(workspace.duckdbQueryAllAsync).not.toHaveBeenCalled();
+      expect(workspace.discoverDuckDBPaths).not.toHaveBeenCalled();
+      expect(workspace.duckdbQueryOnFileAsync).not.toHaveBeenCalled();
+      expect(pgSuggest.searchPostgresObjects).toHaveBeenCalledWith("ada", 10);
+      expect(pgSuggest.searchPostgresEntries).toHaveBeenCalledWith("ada", 15);
+      expect(json.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: "workspace:object:people" }),
+        expect.objectContaining({ path: "workspace:entry:people:person-1" }),
+      ]));
+    });
   });
 
   // ─── GET /api/workspace/context ──────────────────────────────────
@@ -506,6 +617,49 @@ describe("Workspace Tree & Browse API", () => {
       const res = await GET();
       const json = await res.json();
       expect(json.items.length).toBeGreaterThanOrEqual(0);
+    });
+
+    it("uses Postgres instead of DuckDB when CRM_DB_BACKEND is postgres", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const workspace = await import("@/lib/workspace");
+      vi.mocked(workspace.resolveWorkspaceRoot).mockReturnValue("/ws");
+      const { queryPg } = await import("@/lib/postgres");
+      vi.mocked(queryPg).mockImplementation(async (sql: string) => {
+        if (sql.includes("from crm_objects")) {
+          return [{
+            id: "obj-people",
+            name: "people",
+            default_view: "table",
+            display_field: "Full Name",
+          }] as never[];
+        }
+        if (sql.includes("from crm_fields")) {
+          return [
+            { id: "field-name", object_id: "obj-people", name: "Full Name", type: "text", canonical_column: "full_name", sort_order: 0 },
+            { id: "field-email", object_id: "obj-people", name: "Email", type: "email", canonical_column: "email", sort_order: 1 },
+          ] as never[];
+        }
+        if (sql.includes("from crm_people")) {
+          return [{ entry_id: "person-1", "Full Name": "Ada Lovelace", Email: "ada@example.test" }] as never[];
+        }
+        return [] as never[];
+      });
+      vi.clearAllMocks();
+
+      const { GET } = await import("./search-index/route.js");
+      const res = await GET();
+      const json = await res.json();
+
+      expect(workspace.duckdbQueryAllAsync).not.toHaveBeenCalled();
+      expect(workspace.discoverDuckDBPaths).not.toHaveBeenCalled();
+      expect(workspace.duckdbQueryOnFileAsync).not.toHaveBeenCalled();
+      expect(json.items).toContainEqual(expect.objectContaining({
+        id: "entry:people:person-1",
+        label: "Ada Lovelace",
+        objectName: "people",
+        entryId: "person-1",
+        fields: { "Full Name": "Ada Lovelace", Email: "ada@example.test" },
+      }));
     });
   });
 });

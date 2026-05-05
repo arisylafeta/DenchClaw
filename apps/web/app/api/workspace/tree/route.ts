@@ -9,6 +9,7 @@ import {
   duckdbQueryAllAsync,
   isDatabaseFile,
 } from "@/lib/workspace";
+import { loadPostgresTreeObjects } from "@/lib/crm-postgres/tree";
 import {
   projectMissingObjectsToFilesystem,
   type ProjectionTarget,
@@ -278,7 +279,9 @@ export async function GET(req: Request) {
     return Response.json({ tree, exists: false, workspaceRoot: null, openclawDir, workspace });
   }
 
-  const dbObjects = await loadDbObjects();
+  const dbObjects = process.env.CRM_DB_BACKEND === "postgres"
+    ? await loadPostgresTreeObjects()
+    : await loadDbObjects();
 
   // ── Self-heal: project DB-only objects to the filesystem ─────────────
   // The tree builder is filesystem-centric: a DuckDB row only becomes a
