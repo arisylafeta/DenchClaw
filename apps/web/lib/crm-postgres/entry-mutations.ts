@@ -103,9 +103,8 @@ async function replaceRelationLinks(
   objectId: string,
   entryId: string,
   field: FieldRow,
-  rawValue: unknown,
+  relationIds: string[],
 ) {
-  const relationIds = parseRelationIds(rawValue);
   await tx.query("delete from crm_relation_links where field_id = $1 and source_entry_id = $2", [field.id, entryId]);
   for (const [position, targetEntryId] of relationIds.entries()) {
     await tx.query(
@@ -162,13 +161,15 @@ export async function createPostgresEntry(
       const field = fieldByName.get(fieldName);
       if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
-      if (field.type === "relation") {
-        await replaceRelationLinks(tx, object.id, entryId, field, value);
+      const relationIds = field.type === "relation" ? parseRelationIds(value) : null;
+
+      if (relationIds) {
+        await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
       }
 
       if (field.canonical_column) {
         canonicalColumns.push(field.canonical_column);
-        canonicalValues.push(value);
+        canonicalValues.push(relationIds ? relationStorageValue(relationIds, field.relationship_type) : value);
       } else if (field.type !== "relation") {
         await upsertCustomValue(tx, object.id, entryId, field, value);
       }
@@ -206,13 +207,15 @@ export async function updatePostgresEntry(
       const field = fieldByName.get(fieldName);
       if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
-      if (field.type === "relation") {
-        await replaceRelationLinks(tx, object.id, entryId, field, value);
+      const relationIds = field.type === "relation" ? parseRelationIds(value) : null;
+
+      if (relationIds) {
+        await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
       }
 
       if (field.canonical_column) {
         canonicalAssignments.push(`${quoteIdentifier(field.canonical_column)} = $${canonicalValues.length + 1}`);
-        canonicalValues.push(value);
+        canonicalValues.push(relationIds ? relationStorageValue(relationIds, field.relationship_type) : value);
       } else if (field.type !== "relation") {
         await upsertCustomValue(tx, object.id, entryId, field, value);
       }

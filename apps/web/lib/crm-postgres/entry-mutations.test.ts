@@ -199,7 +199,7 @@ describe("crm-postgres entry mutations", () => {
   });
 
   it("updates canonical relation field in canonical table and relation links", async () => {
-    fieldRows = [{ id: "f_company", name: "Company", type: "relation", canonical_column: "company_id", relationship_type: "many_to_many" }];
+    fieldRows = [{ id: "f_company", name: "Company", type: "relation", canonical_column: "company_id", relationship_type: "many_to_one" }];
     const { updatePostgresEntry } = await import("./entry-mutations");
 
     const result = await updatePostgresEntry("people", "entry_1", { Company: ["c9", "c10"] });
@@ -208,6 +208,7 @@ describe("crm-postgres entry mutations", () => {
     const calls = txQuery.mock.calls;
     const canonicalUpdate = calls.find(([sql]) => String(sql).includes("update") && String(sql).includes("crm_people"));
     expect(canonicalUpdate?.[0]).toContain("company_id");
+    expect(canonicalUpdate?.[1]).toEqual(["c9", "entry_1"]);
     expect(calls.some(([sql]) => String(sql).includes("delete from crm_relation_links") && String(sql).includes("field_id = $1"))).toBe(true);
     const relationInserts = calls.filter(([sql]) => String(sql).includes("insert into crm_relation_links"));
     expect(relationInserts).toHaveLength(2);
