@@ -170,6 +170,19 @@ export async function reorderPostgresFields(objectName: string, fieldOrder: stri
     const object = objects[0];
     if (!object) throw new Error(`Object not found: ${objectName}`);
 
+    const existingFields = await txQuery<{ id: string }>(
+      tx,
+      `select id
+       from crm_fields
+       where object_id = $1 and id = any($2::text[])`,
+      [object.id, fieldOrder],
+    );
+    const existingIds = new Set(existingFields.map((field) => field.id));
+    const missingIds = fieldOrder.filter((fieldId) => !existingIds.has(fieldId));
+    if (missingIds.length > 0) {
+      throw new Error(`Fields not found on ${objectName}: ${missingIds.join(", ")}`);
+    }
+
     for (const [index, fieldId] of fieldOrder.entries()) {
       await txQuery(
         tx,

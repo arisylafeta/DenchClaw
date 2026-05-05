@@ -78,6 +78,7 @@ describe("crm-postgres object metadata", () => {
     const txQuery = vi
       .fn()
       .mockResolvedValueOnce({ rows: [{ id: "obj1", name: "people" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "f2" }, { id: "f1" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
     withPgTransaction.mockImplementationOnce(async (fn) => fn({ query: txQuery }));
@@ -86,8 +87,25 @@ describe("crm-postgres object metadata", () => {
     await expect(reorderPostgresFields("people", ["f2", "f1"])).resolves.toEqual({ ok: true });
     expect(withPgTransaction).toHaveBeenCalledTimes(1);
     expect(txQuery.mock.calls[0]?.[0]).toContain("from crm_objects");
-    expect(txQuery.mock.calls[1]?.[0]).toContain("update crm_fields");
-    expect(txQuery.mock.calls[2]?.[1]).toEqual([1, "obj1", "f1"]);
+    expect(txQuery.mock.calls[1]?.[0]).toContain("from crm_fields");
+    expect(txQuery.mock.calls[2]?.[0]).toContain("update crm_fields");
+    expect(txQuery.mock.calls[3]?.[1]).toEqual([1, "obj1", "f1"]);
+  });
+
+  it("rejects reorder when any field id is missing for object and issues no updates", async () => {
+    const txQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ id: "obj1", name: "people" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "f1" }] });
+    withPgTransaction.mockImplementationOnce(async (fn) => fn({ query: txQuery }));
+
+    const { reorderPostgresFields } = await import("./object-metadata");
+    await expect(reorderPostgresFields("people", ["f1", "foreign_f2"]))
+      .rejects.toThrow("Fields not found on people: foreign_f2");
+
+    expect(withPgTransaction).toHaveBeenCalledTimes(1);
+    expect(txQuery.mock.calls[1]?.[0]).toContain("from crm_fields");
+    expect(txQuery.mock.calls.some(([sql]) => String(sql).includes("update crm_fields"))).toBe(false);
   });
 
   it("creates objects inside a postgres transaction", async () => {
