@@ -7,6 +7,7 @@ import {
   safeQuery,
   sqlString,
 } from "@/lib/crm-queries";
+import { getPostgresPersonActivity } from "@/lib/crm-postgres/activity";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,6 +42,22 @@ export async function GET(
   const url = new URL(req.url);
   const limit = clampInt(url.searchParams.get("limit"), DEFAULT_LIMIT, MAX_LIMIT);
   const offset = Math.max(0, parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    try {
+      const activity = await getPostgresPersonActivity({ personId, limit, offset });
+      return Response.json(activity);
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === "INVALID_INPUT") {
+        return Response.json({ error: "Missing person id." }, { status: 400 });
+      }
+      if (code === "NOT_FOUND") {
+        return Response.json({ error: "Person not found." }, { status: 404 });
+      }
+      return Response.json({ error: "Failed to load activity." }, { status: 500 });
+    }
+  }
 
   const fieldMaps = await loadCrmFieldMaps();
 

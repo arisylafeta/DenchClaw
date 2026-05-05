@@ -7,6 +7,7 @@ import {
   safeQuery,
   sqlString,
 } from "@/lib/crm-queries";
+import { getPostgresEnrichmentTarget } from "@/lib/crm-postgres/enrich-target";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,33 +48,39 @@ export async function POST(
     );
   }
 
-  const fieldMaps = await loadCrmFieldMaps();
   let lookupValue: string | null = null;
 
-  if (trimmedType === "people") {
-    const sql = buildEntryProjection({
-      objectId: ONBOARDING_OBJECT_IDS.people,
-      fieldMap: fieldMaps.people,
-      aliasedFields: [
-        { name: "Email Address", alias: "email" },
-        { name: "Full Name", alias: "name" },
-      ],
-      whereSql: `e.id = ${sqlString(trimmedId)}`,
-    });
-    const rows = await safeQuery<{ email: string | null; name: string | null }>(sql);
-    lookupValue = rows[0]?.email ?? null;
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const target = await getPostgresEnrichmentTarget(trimmedType, trimmedId);
+    lookupValue = target.lookupValue;
   } else {
-    const sql = buildEntryProjection({
-      objectId: ONBOARDING_OBJECT_IDS.company,
-      fieldMap: fieldMaps.company,
-      aliasedFields: [
-        { name: "Domain", alias: "domain" },
-        { name: "Company Name", alias: "name" },
-      ],
-      whereSql: `e.id = ${sqlString(trimmedId)}`,
-    });
-    const rows = await safeQuery<{ domain: string | null; name: string | null }>(sql);
-    lookupValue = rows[0]?.domain ?? null;
+    const fieldMaps = await loadCrmFieldMaps();
+
+    if (trimmedType === "people") {
+      const sql = buildEntryProjection({
+        objectId: ONBOARDING_OBJECT_IDS.people,
+        fieldMap: fieldMaps.people,
+        aliasedFields: [
+          { name: "Email Address", alias: "email" },
+          { name: "Full Name", alias: "name" },
+        ],
+        whereSql: `e.id = ${sqlString(trimmedId)}`,
+      });
+      const rows = await safeQuery<{ email: string | null; name: string | null }>(sql);
+      lookupValue = rows[0]?.email ?? null;
+    } else {
+      const sql = buildEntryProjection({
+        objectId: ONBOARDING_OBJECT_IDS.company,
+        fieldMap: fieldMaps.company,
+        aliasedFields: [
+          { name: "Domain", alias: "domain" },
+          { name: "Company Name", alias: "name" },
+        ],
+        whereSql: `e.id = ${sqlString(trimmedId)}`,
+      });
+      const rows = await safeQuery<{ domain: string | null; name: string | null }>(sql);
+      lookupValue = rows[0]?.domain ?? null;
+    }
   }
 
   if (!lookupValue) {
