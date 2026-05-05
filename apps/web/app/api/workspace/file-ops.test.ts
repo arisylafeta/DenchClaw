@@ -292,6 +292,52 @@ describe("Workspace File Operations API", () => {
       expect(fs.rmSync).toHaveBeenCalledWith("/ws/marketing/YC Founders/yc_company", { recursive: true });
     });
 
+    it("skips duckdb cleanup helpers in postgres mode when deleting an object folder", async () => {
+      const previousBackend = process.env.CRM_DB_BACKEND;
+      process.env.CRM_DB_BACKEND = "postgres";
+
+      const {
+        resolveFilesystemPath,
+        findDuckDBForObjectAsync,
+        duckdbPathAsync,
+        duckdbExecOnFileAsync,
+      } = await import("@/lib/workspace");
+      vi.mocked(resolveFilesystemPath).mockReturnValue({
+        absolutePath: "/ws/marketing/YC Founders/yc_company",
+        kind: "workspaceRelative",
+        withinWorkspace: true,
+        workspaceRelativePath: "marketing/YC Founders/yc_company",
+      });
+      vi.mocked(findDuckDBForObjectAsync).mockClear();
+      vi.mocked(duckdbPathAsync).mockClear();
+      vi.mocked(duckdbExecOnFileAsync).mockClear();
+
+      const fs = await import("node:fs");
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as never);
+      vi.mocked(fs.existsSync).mockImplementation((path) => String(path).endsWith(".object.yaml"));
+      vi.mocked(fs.readFileSync).mockReturnValue("name: yc_company\n" as never);
+
+      const { DELETE } = await import("./file/route.js");
+      const req = new Request("http://localhost/api/workspace/file", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "marketing/YC Founders/yc_company" }),
+      });
+      const res = await DELETE(req);
+
+      expect(res.status).toBe(200);
+      expect(findDuckDBForObjectAsync).not.toHaveBeenCalled();
+      expect(duckdbPathAsync).not.toHaveBeenCalled();
+      expect(duckdbExecOnFileAsync).not.toHaveBeenCalled();
+      expect(fs.rmSync).toHaveBeenCalledWith("/ws/marketing/YC Founders/yc_company", { recursive: true });
+
+      if (previousBackend === undefined) {
+        delete process.env.CRM_DB_BACKEND;
+      } else {
+        process.env.CRM_DB_BACKEND = previousBackend;
+      }
+    });
+
     it("returns 403 for system file", async () => {
       const { resolveFilesystemPath, isProtectedSystemPath } = await import("@/lib/workspace");
       vi.mocked(resolveFilesystemPath).mockReturnValue({

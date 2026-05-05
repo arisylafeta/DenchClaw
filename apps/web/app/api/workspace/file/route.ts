@@ -87,6 +87,10 @@ export async function POST(req: Request) {
 }
 
 async function dropObjectPivotViewForDeletedFolder(absPath: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    return { ok: true };
+  }
+
   const yamlPath = join(absPath, ".object.yaml");
   if (!existsSync(yamlPath)) {
     return { ok: true };
