@@ -14,6 +14,16 @@ type FieldRow = {
 
 type QueryLikeResult<T> = { rows?: T[]; rowCount?: number | null } | T[];
 
+const canonicalTableByObjectName: Record<string, string> = {
+  people: "crm_people",
+  company: "crm_companies",
+  companies: "crm_companies",
+  email_thread: "crm_email_threads",
+  email_message: "crm_email_messages",
+  calendar_event: "crm_calendar_events",
+  interaction: "crm_interactions",
+};
+
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
@@ -26,6 +36,11 @@ function rowCountFrom<T>(result: QueryLikeResult<T>): number {
   if (Array.isArray(result)) return result.length;
   if (typeof result.rowCount === "number") return result.rowCount;
   return result.rows?.length ?? 0;
+}
+
+function resolveEntityTable(object: Pick<ObjectRow, "name" | "entity_table">): string | null {
+  if (object.entity_table) return object.entity_table;
+  return canonicalTableByObjectName[object.name.trim().toLowerCase()] ?? null;
 }
 
 async function loadObjectAndFields(tx: PgTransaction, objectName: string): Promise<{ object: ObjectRow; fields: FieldRow[] }> {
@@ -105,6 +120,32 @@ async function replaceRelationLinks(
   await upsertCustomValue(tx, objectId, entryId, field, relationStorageValue(relationIds, field.relationship_type));
 }
 
+async function entryExists(tx: PgTransaction, object: ObjectRow, entryId: string): Promise<boolean> {
+  const entityTable = resolveEntityTable(object);
+  if (entityTable) {
+    const rows = rowsFrom(await tx.query(`select id from ${quoteIdentifier(entityTable)} where id = $1 limit 1`, [entryId]));
+    return rows.length > 0;
+  }
+
+  const customRows = rowsFrom(await tx.query(
+    `select entry_id
+     from crm_custom_field_values
+     where object_id = $1 and entry_id = $2
+     limit 1`,
+    [object.id, entryId],
+  ));
+  if (customRows.length > 0) return true;
+
+  const relationRows = rowsFrom(await tx.query(
+    `select source_entry_id
+     from crm_relation_links
+     where object_id = $1 and source_entry_id = $2
+     limit 1`,
+    [object.id, entryId],
+  ));
+  return relationRows.length > 0;
+}
+
 export async function createPostgresEntry(
   objectName: string,
   fields: Record<string, unknown>,
@@ -121,20 +162,23 @@ export async function createPostgresEntry(
       const field = fieldByName.get(fieldName);
       if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
+      if (field.type === "relation") {
+        await replaceRelationLinks(tx, object.id, entryId, field, value);
+      }
+
       if (field.canonical_column) {
         canonicalColumns.push(field.canonical_column);
         canonicalValues.push(value);
-      } else if (field.type === "relation") {
-        await replaceRelationLinks(tx, object.id, entryId, field, value);
-      } else {
+      } else if (field.type !== "relation") {
         await upsertCustomValue(tx, object.id, entryId, field, value);
       }
     }
 
-    if (object.entity_table) {
+    const entityTable = resolveEntityTable(object);
+    if (entityTable) {
       const cols = canonicalColumns.map(quoteIdentifier).join(", ");
       const placeholders = canonicalValues.map((_, index) => `$${index + 1}`).join(", ");
-      await tx.query(`insert into ${quoteIdentifier(object.entity_table)} (${cols}) values (${placeholders})`, canonicalValues);
+      await tx.query(`insert into ${quoteIdentifier(entityTable)} (${cols}) values (${placeholders})`, canonicalValues);
     }
   });
 
@@ -149,6 +193,11 @@ export async function updatePostgresEntry(
   const updatedCount = await withPgTransaction(async (tx) => {
     const { object, fields: objectFields } = await loadObjectAndFields(tx, objectName);
     const fieldByName = new Map(objectFields.map((field) => [field.name, field]));
+    const entityTable = resolveEntityTable(object);
+
+    if (!(await entryExists(tx, object, entryId))) {
+      throw new Error(`Entry not found: ${entryId}`);
+    }
 
     const canonicalAssignments: string[] = [];
     const canonicalValues: unknown[] = [];
@@ -157,20 +206,22 @@ export async function updatePostgresEntry(
       const field = fieldByName.get(fieldName);
       if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
+      if (field.type === "relation") {
+        await replaceRelationLinks(tx, object.id, entryId, field, value);
+      }
+
       if (field.canonical_column) {
         canonicalAssignments.push(`${quoteIdentifier(field.canonical_column)} = $${canonicalValues.length + 1}`);
         canonicalValues.push(value);
-      } else if (field.type === "relation") {
-        await replaceRelationLinks(tx, object.id, entryId, field, value);
-      } else {
+      } else if (field.type !== "relation") {
         await upsertCustomValue(tx, object.id, entryId, field, value);
       }
     }
 
     let canonicalUpdated = 1;
-    if (object.entity_table && canonicalAssignments.length > 0) {
+    if (entityTable && canonicalAssignments.length > 0) {
       const result = await tx.query(
-        `update ${quoteIdentifier(object.entity_table)}
+        `update ${quoteIdentifier(entityTable)}
          set ${canonicalAssignments.join(", ")}, updated_at = now()
          where id = $${canonicalValues.length + 1}`,
         [...canonicalValues, entryId],
@@ -188,6 +239,7 @@ export async function updatePostgresEntry(
 export async function deletePostgresEntry(objectName: string, entryId: string): Promise<{ ok: true }> {
   await withPgTransaction(async (tx) => {
     const { object } = await loadObjectAndFields(tx, objectName);
+    const entityTable = resolveEntityTable(object);
 
     await tx.query("delete from crm_custom_field_values where object_id = $1 and entry_id = $2", [object.id, entryId]);
     await tx.query("delete from crm_relation_links where source_entry_id = $1", [entryId]);
@@ -195,8 +247,8 @@ export async function deletePostgresEntry(objectName: string, entryId: string): 
     await tx.query("delete from crm_documents where entry_id = $1", [entryId]);
     await tx.query("delete from crm_action_runs where entry_id = $1", [entryId]);
 
-    if (object.entity_table) {
-      await tx.query(`delete from ${quoteIdentifier(object.entity_table)} where id = $1`, [entryId]);
+    if (entityTable) {
+      await tx.query(`delete from ${quoteIdentifier(entityTable)} where id = $1`, [entryId]);
     }
   });
 
@@ -211,6 +263,7 @@ export async function bulkDeletePostgresEntries(
 
   const deletedCount = await withPgTransaction(async (tx) => {
     const { object } = await loadObjectAndFields(tx, objectName);
+    const entityTable = resolveEntityTable(object);
 
     await tx.query("delete from crm_custom_field_values where object_id = $1 and entry_id = any($2::text[])", [object.id, entryIds]);
     await tx.query("delete from crm_relation_links where source_entry_id = any($1::text[])", [entryIds]);
@@ -218,8 +271,8 @@ export async function bulkDeletePostgresEntries(
     await tx.query("delete from crm_documents where entry_id = any($1::text[])", [entryIds]);
     await tx.query("delete from crm_action_runs where entry_id = any($1::text[])", [entryIds]);
 
-    if (object.entity_table) {
-      const result = await tx.query(`delete from ${quoteIdentifier(object.entity_table)} where id = any($1::text[]) returning id`, [entryIds]);
+    if (entityTable) {
+      const result = await tx.query(`delete from ${quoteIdentifier(entityTable)} where id = any($1::text[]) returning id`, [entryIds]);
       return rowCountFrom(result);
     }
 

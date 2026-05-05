@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const withPgTransaction = vi.hoisted(() => vi.fn());
 let txQuery: ReturnType<typeof vi.fn>;
+let sqlLog: string[];
+let objectRow: { id: string; name: string; entity_table: string | null };
+let fieldRows: Array<{ id: string; name: string; type: string; canonical_column: string | null; relationship_type?: string | null }>;
+let canonicalEntryExists = true;
+let customEntryExists = true;
 
 vi.mock("../postgres", () => ({
   withPgTransaction,
@@ -15,18 +20,25 @@ vi.mock("../workspace", () => ({
 
 function makeClient() {
   txQuery = vi.fn(async (sql: string, params?: unknown[]) => {
+    sqlLog.push(String(sql));
     if (sql.includes("from crm_objects") && sql.includes("where name = $1")) {
-      return { rows: [{ id: "obj_people", name: "people", entity_table: "crm_people" }] };
+      return { rows: [objectRow] };
     }
 
     if (sql.includes("from crm_fields") && sql.includes("where object_id = $1")) {
-      return {
-        rows: [
-          { id: "f_name", name: "Full Name", type: "text", canonical_column: "full_name" },
-          { id: "f_notes", name: "Notes", type: "text", canonical_column: null },
-          { id: "f_company", name: "Company", type: "relation", canonical_column: null, relationship_type: "many_to_many" },
-        ],
-      };
+      return { rows: fieldRows };
+    }
+
+    if (sql.includes("select id from") && sql.includes("where id = $1") && sql.includes("limit 1")) {
+      return { rows: canonicalEntryExists ? [{ id: params?.[0] }] : [] };
+    }
+
+    if (sql.includes("from crm_custom_field_values") && sql.includes("entry_id = $2") && sql.includes("limit 1")) {
+      return { rows: customEntryExists ? [{ entry_id: params?.[1] }] : [] };
+    }
+
+    if (sql.includes("from crm_relation_links") && sql.includes("source_entry_id = $2") && sql.includes("limit 1")) {
+      return { rows: customEntryExists ? [{ source_entry_id: params?.[1] }] : [] };
     }
 
     if (sql.includes("delete from crm_relation_links") && sql.includes("where field_id = $1 and source_entry_id = $2")) {
@@ -58,6 +70,10 @@ function makeClient() {
       return { rows: [] };
     }
 
+    if (sql.includes("update") && sql.includes("crm_people") && sql.includes("where id =")) {
+      return { rows: [], rowCount: 1 };
+    }
+
     if (sql.includes("insert into crm_custom_field_values") || sql.includes("update crm_custom_field_values")) {
       return { rows: [] };
     }
@@ -75,6 +91,15 @@ function makeClient() {
 describe("crm-postgres entry mutations", () => {
   beforeEach(() => {
     vi.resetModules();
+    objectRow = { id: "obj_people", name: "people", entity_table: "crm_people" };
+    fieldRows = [
+      { id: "f_name", name: "Full Name", type: "text", canonical_column: "full_name" },
+      { id: "f_notes", name: "Notes", type: "text", canonical_column: null },
+      { id: "f_company", name: "Company", type: "relation", canonical_column: null, relationship_type: "many_to_many" },
+    ];
+    canonicalEntryExists = true;
+    customEntryExists = true;
+    sqlLog = [];
     withPgTransaction.mockReset();
     withPgTransaction.mockImplementation(async (fn) => fn(makeClient()));
   });
@@ -145,5 +170,46 @@ describe("crm-postgres entry mutations", () => {
     expect(queryCalls.some((sql) => sql.includes("delete from crm_documents") && sql.includes("entry_id = any($1::text[])"))).toBe(true);
     expect(queryCalls.some((sql) => sql.includes("delete from crm_action_runs") && sql.includes("entry_id = any($1::text[])"))).toBe(true);
     expect(queryCalls.some((sql) => sql.includes("delete from") && sql.includes("crm_people") && sql.includes("id = any($1::text[])"))).toBe(true);
+  });
+
+  it("uses inferred canonical table when entity_table is null for people", async () => {
+    objectRow = { id: "obj_people", name: "people", entity_table: null };
+    const { createPostgresEntry, updatePostgresEntry, deletePostgresEntry } = await import("./entry-mutations");
+
+    await createPostgresEntry("people", { "Full Name": "Ada" });
+    await updatePostgresEntry("people", "entry_1", { "Full Name": "Ada Lovelace" });
+    await deletePostgresEntry("people", "entry_1");
+
+    const sqlCalls = sqlLog;
+    expect(sqlCalls.some((sql) => sql.includes("insert into") && sql.includes("crm_people"))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes("update") && sql.includes("crm_people") && sql.includes("where id ="))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes("delete from") && sql.includes("crm_people") && sql.includes("where id = $1"))).toBe(true);
+  });
+
+  it("rejects custom-only update when entry does not exist and writes no custom values", async () => {
+    objectRow = { id: "obj_task", name: "task", entity_table: null };
+    fieldRows = [{ id: "f_notes", name: "Notes", type: "text", canonical_column: null }];
+    customEntryExists = false;
+    const { updatePostgresEntry } = await import("./entry-mutations");
+
+    await expect(updatePostgresEntry("task", "missing_1", { Notes: "nope" })).rejects.toThrow("Entry not found: missing_1");
+
+    const sqlCalls = txQuery.mock.calls.map(([sql]) => String(sql));
+    expect(sqlCalls.some((sql) => sql.includes("insert into crm_custom_field_values"))).toBe(false);
+  });
+
+  it("updates canonical relation field in canonical table and relation links", async () => {
+    fieldRows = [{ id: "f_company", name: "Company", type: "relation", canonical_column: "company_id", relationship_type: "many_to_many" }];
+    const { updatePostgresEntry } = await import("./entry-mutations");
+
+    const result = await updatePostgresEntry("people", "entry_1", { Company: ["c9", "c10"] });
+    expect(result).toEqual({ ok: true, updatedCount: 1 });
+
+    const calls = txQuery.mock.calls;
+    const canonicalUpdate = calls.find(([sql]) => String(sql).includes("update") && String(sql).includes("crm_people"));
+    expect(canonicalUpdate?.[0]).toContain("company_id");
+    expect(calls.some(([sql]) => String(sql).includes("delete from crm_relation_links") && String(sql).includes("field_id = $1"))).toBe(true);
+    const relationInserts = calls.filter(([sql]) => String(sql).includes("insert into crm_relation_links"));
+    expect(relationInserts).toHaveLength(2);
   });
 });
