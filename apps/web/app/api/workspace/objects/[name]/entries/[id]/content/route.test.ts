@@ -22,6 +22,14 @@ vi.mock("@/lib/workspace", () => ({
 	resolveWorkspaceRoot: vi.fn(() => WORKSPACE_ROOT),
 }));
 
+vi.mock("@/lib/crm-postgres/documents", () => ({
+	resolvePostgresObjectContext: vi.fn(async () => null),
+	verifyPostgresEntryExists: vi.fn(async () => true),
+	lookupPostgresRegisteredDocument: vi.fn(async () => null),
+	registerPostgresEntryDocument: vi.fn(async () => {}),
+	lookupPostgresEntryIdByPath: vi.fn(async () => null),
+}));
+
 async function callGet() {
 	const { GET } = await import("./route.js");
 	return GET(new Request("http://localhost/api/workspace/objects/influencer/entries/entry-1/content"), {
@@ -240,5 +248,91 @@ describe("entry content route", () => {
 				&& sql.includes("yt-mikemurphy-002.md"),
 			),
 		).toBe(true);
+	});
+
+	describe("postgres backend", () => {
+		beforeEach(async () => {
+			vi.clearAllMocks();
+			process.env.CRM_DB_BACKEND = "postgres";
+			const pgDocs = await import("@/lib/crm-postgres/documents");
+			vi.mocked(pgDocs.resolvePostgresObjectContext).mockResolvedValue({
+				objectName: OBJECT_NAME,
+				objectId: OBJECT_ID,
+				objectDir: OBJECT_DIR,
+				workspaceRoot: WORKSPACE_ROOT,
+			});
+			vi.mocked(pgDocs.verifyPostgresEntryExists).mockResolvedValue(true);
+		});
+
+		it("GET uses postgres helpers and returns content shape without duckdb lookups", async () => {
+			const fs = await import("fs");
+			const workspace = await import("@/lib/workspace");
+			const pgDocs = await import("@/lib/crm-postgres/documents");
+
+			vi.mocked(pgDocs.lookupPostgresRegisteredDocument).mockResolvedValue({
+				file_path: "marketing/influencer/yt-mikemurphy-001.md",
+				title: "Mike Murphy",
+			});
+			vi.mocked(fs.existsSync).mockImplementation((path) => String(path) === `${OBJECT_DIR}/yt-mikemurphy-001.md`);
+			vi.mocked(fs.readFileSync).mockReturnValue("# Draft outreach");
+
+			const response = await callGet();
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({
+				content: "# Draft outreach",
+				exists: true,
+				path: "marketing/influencer/yt-mikemurphy-001.md",
+			});
+			expect(pgDocs.resolvePostgresObjectContext).toHaveBeenCalledWith(OBJECT_NAME);
+			expect(pgDocs.lookupPostgresRegisteredDocument).toHaveBeenCalledWith(OBJECT_ID, ENTRY_ID);
+			expect(workspace.duckdbQueryOnFile).not.toHaveBeenCalled();
+			expect(workspace.duckdbExecOnFile).not.toHaveBeenCalled();
+		});
+
+		it("PUT returns 404 when postgres entry is missing", async () => {
+			const fs = await import("fs");
+			const workspace = await import("@/lib/workspace");
+			const pgDocs = await import("@/lib/crm-postgres/documents");
+
+			vi.mocked(pgDocs.verifyPostgresEntryExists).mockResolvedValue(false);
+
+			const response = await callPut("# missing");
+			expect(response.status).toBe(404);
+			expect(await response.json()).toEqual({ error: "Entry not found" });
+			expect(fs.writeFileSync).not.toHaveBeenCalled();
+			expect(workspace.duckdbQueryOnFile).not.toHaveBeenCalled();
+			expect(workspace.duckdbExecOnFile).not.toHaveBeenCalled();
+		});
+
+		it("PUT success writes file, registers postgres document, and returns response shape", async () => {
+			const fs = await import("fs");
+			const workspace = await import("@/lib/workspace");
+			const pgDocs = await import("@/lib/crm-postgres/documents");
+
+			vi.mocked(pgDocs.lookupPostgresRegisteredDocument).mockResolvedValue(null);
+			vi.mocked(pgDocs.lookupPostgresEntryIdByPath).mockResolvedValue(null);
+			vi.mocked(fs.existsSync).mockReturnValue(false);
+
+			const response = await callPut("# Draft outreach");
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({
+				ok: true,
+				created: true,
+				path: "marketing/influencer/influencer-entry-1-001.md",
+			});
+			expect(fs.writeFileSync).toHaveBeenCalledWith(
+				`${OBJECT_DIR}/influencer-entry-1-001.md`,
+				"# Draft outreach",
+				"utf-8",
+			);
+			expect(pgDocs.registerPostgresEntryDocument).toHaveBeenCalledWith(
+				OBJECT_ID,
+				ENTRY_ID,
+				"influencer entry-1",
+				"marketing/influencer/influencer-entry-1-001.md",
+			);
+			expect(workspace.duckdbQueryOnFile).not.toHaveBeenCalled();
+			expect(workspace.duckdbExecOnFile).not.toHaveBeenCalled();
+		});
 	});
 });

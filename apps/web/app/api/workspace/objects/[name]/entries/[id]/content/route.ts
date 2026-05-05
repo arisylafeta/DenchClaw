@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join, relative } from "path";
 import {
+	lookupPostgresEntryIdByPath,
+	lookupPostgresRegisteredDocument,
+	registerPostgresEntryDocument,
+	resolvePostgresObjectContext,
+	verifyPostgresEntryExists,
+} from "@/lib/crm-postgres/documents";
+import {
 	duckdbExecOnFile,
 	duckdbQueryOnFile,
 	findDuckDBForObject,
@@ -34,6 +41,51 @@ type EntryFieldRow = {
 	field_name: string;
 	value: string | null;
 };
+
+function slugFragment(value: string): string {
+	return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "entry";
+}
+
+async function resolvePostgresEntryMdPath(
+	objectName: string,
+	entryId: string,
+): Promise<{ absolute: string; workspaceRelative: string; title: string } | null> {
+	const ctx = await resolvePostgresObjectContext(objectName);
+	if (!ctx) return null;
+
+	const registered = await lookupPostgresRegisteredDocument(ctx.objectId, entryId);
+	if (registered) {
+		const absolute = ctx.workspaceRoot && !registered.file_path.startsWith("/")
+			? join(ctx.workspaceRoot, registered.file_path)
+			: registered.file_path.startsWith("/")
+				? registered.file_path
+				: join(ctx.objectDir, registered.file_path.split("/").pop() ?? registered.file_path);
+		return {
+			absolute,
+			workspaceRelative: registered.file_path,
+			title: registered.title?.trim() || `${objectName} ${entryId}`,
+		};
+	}
+
+	const title = `${objectName} ${entryId}`;
+	const stem = `${slugFragment(objectName)}-${slugFragment(entryId)}`;
+	for (let i = 1; i <= 999; i++) {
+		const filename = `${stem}-${String(i).padStart(3, "0")}.md`;
+		const absolute = join(ctx.objectDir, filename);
+		const workspaceRelative = ctx.workspaceRoot
+			? relative(ctx.workspaceRoot, absolute)
+			: `${objectName}/${filename}`;
+		const ownerEntryId = await lookupPostgresEntryIdByPath(workspaceRelative);
+		if (ownerEntryId === entryId) return { absolute, workspaceRelative, title };
+		if (ownerEntryId) continue;
+		if (!existsSync(absolute)) return { absolute, workspaceRelative, title };
+	}
+
+	const fallback = `${stem}-999.md`;
+	const absolute = join(ctx.objectDir, fallback);
+	const workspaceRelative = ctx.workspaceRoot ? relative(ctx.workspaceRoot, absolute) : `${objectName}/${fallback}`;
+	return { absolute, workspaceRelative, title };
+}
 
 function resolveObjectContext(objectName: string): ObjectContext | null {
 	const dbFile = findDuckDBForObject(objectName);
@@ -340,6 +392,20 @@ export async function GET(
 		return Response.json({ error: "Invalid entry ID" }, { status: 400 });
 	}
 
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		const resolved = await resolvePostgresEntryMdPath(name, id);
+		if (!resolved) {
+			return Response.json({ content: "", exists: false, path: `${name}/${id}.md` });
+		}
+
+		if (existsSync(resolved.absolute)) {
+			const content = readFileSync(resolved.absolute, "utf-8");
+			return Response.json({ content, exists: true, path: resolved.workspaceRelative });
+		}
+
+		return Response.json({ content: "", exists: false, path: resolved.workspaceRelative });
+	}
+
 	const ctx = resolveObjectContext(name);
 	if (!ctx) {
 		return Response.json({ content: "", exists: false, path: `${name}/${id}.md` });
@@ -374,6 +440,36 @@ export async function PUT(
 	}
 	if (!id || id.length > 64) {
 		return Response.json({ error: "Invalid entry ID" }, { status: 400 });
+	}
+
+	if (process.env.CRM_DB_BACKEND === "postgres") {
+		const ctx = await resolvePostgresObjectContext(name);
+		if (!ctx) {
+			return Response.json({ error: "Object directory not found" }, { status: 404 });
+		}
+
+		if (!(await verifyPostgresEntryExists(name, id))) {
+			return Response.json({ error: "Entry not found" }, { status: 404 });
+		}
+
+		const resolved = await resolvePostgresEntryMdPath(name, id);
+		if (!resolved) {
+			return Response.json({ error: "Object directory not found" }, { status: 404 });
+		}
+
+		const body = await req.json();
+		const content = typeof body.content === "string" ? body.content : "";
+
+		if (!content.trim() && !existsSync(resolved.absolute)) {
+			return Response.json({ ok: true, created: false, path: resolved.workspaceRelative });
+		}
+
+		const alreadyExists = existsSync(resolved.absolute);
+		mkdirSync(dirname(resolved.absolute), { recursive: true });
+		writeFileSync(resolved.absolute, content, "utf-8");
+		await registerPostgresEntryDocument(ctx.objectId, id, resolved.title, resolved.workspaceRelative);
+
+		return Response.json({ ok: true, created: !alreadyExists, path: resolved.workspaceRelative });
 	}
 
 	const ctx = resolveObjectContext(name);
