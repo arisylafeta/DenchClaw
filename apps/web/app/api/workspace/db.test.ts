@@ -22,6 +22,11 @@ vi.mock("@/lib/report-filters", () => ({
   checkSqlSafety: vi.fn(() => null),
 }));
 
+vi.mock("@/lib/crm-postgres/sql-execution", () => ({
+  postgresReadOnlyQuery: vi.fn(async () => []),
+  introspectPostgresCrm: vi.fn(async () => []),
+}));
+
 describe("Workspace DB & Reports API", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -43,6 +48,11 @@ describe("Workspace DB & Reports API", () => {
       injectFilters: vi.fn((sql: string) => sql),
       checkSqlSafety: vi.fn(() => null),
     }));
+    vi.mock("@/lib/crm-postgres/sql-execution", () => ({
+      postgresReadOnlyQuery: vi.fn(async () => []),
+      introspectPostgresCrm: vi.fn(async () => []),
+    }));
+    delete process.env.CRM_DB_BACKEND;
   });
 
   afterEach(() => {
@@ -120,6 +130,25 @@ describe("Workspace DB & Reports API", () => {
       const json = await res.json();
       expect(json.rows).toEqual([]);
     });
+
+    it("uses postgres helper for app db path in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { postgresReadOnlyQuery } = await import("@/lib/crm-postgres/sql-execution");
+      vi.mocked(postgresReadOnlyQuery).mockResolvedValue([{ id: "pg-1" }]);
+
+      const { POST } = await import("./db/query/route.js");
+      const req = new Request("http://localhost/api/workspace/db/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "app://crm", sql: "SELECT 1 as id" }),
+      });
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(postgresReadOnlyQuery).toHaveBeenCalledWith("SELECT 1 as id");
+      expect(json.rows).toEqual([{ id: "pg-1" }]);
+    });
   });
 
   // ─── GET /api/workspace/db/introspect ───────────────────────────
@@ -156,6 +185,28 @@ describe("Workspace DB & Reports API", () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.tables).toBeDefined();
+    });
+
+    it("uses postgres introspection helper for app db path in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { introspectPostgresCrm } = await import("@/lib/crm-postgres/sql-execution");
+      vi.mocked(introspectPostgresCrm).mockResolvedValue([
+        {
+          table_name: "crm_people",
+          column_count: 1,
+          estimated_row_count: 0,
+          columns: [{ name: "id", type: "text", is_nullable: false }],
+        },
+      ]);
+
+      const { GET } = await import("./db/introspect/route.js");
+      const req = new Request("http://localhost/api/workspace/db/introspect?path=app://crm");
+      const res = await GET(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(introspectPostgresCrm).toHaveBeenCalled();
+      expect(json.tables[0]?.table_name).toBe("crm_people");
     });
   });
 
@@ -227,6 +278,49 @@ describe("Workspace DB & Reports API", () => {
       expect(buildFilterClauses).toHaveBeenCalled();
       expect(injectFilters).toHaveBeenCalled();
     });
+
+    it("uses postgres helper in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { checkSqlSafety, injectFilters } = await import("@/lib/report-filters");
+      vi.mocked(checkSqlSafety).mockReturnValue(null);
+      vi.mocked(injectFilters).mockImplementation((sql: string) => sql);
+      const { postgresReadOnlyQuery } = await import("@/lib/crm-postgres/sql-execution");
+      vi.mocked(postgresReadOnlyQuery).mockResolvedValue([{ count: 7 }]);
+
+      const { POST } = await import("./reports/execute/route.js");
+      const req = new Request("http://localhost/api/workspace/reports/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: "SELECT COUNT(*) as count FROM crm_people" }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+      expect(res.status).toBe(200);
+      expect(postgresReadOnlyQuery).toHaveBeenLastCalledWith("SELECT COUNT(*) as count FROM crm_people");
+      expect(json.rows).toEqual([{ count: 7 }]);
+    });
+  });
+
+  describe("POST /api/workspace/execute", () => {
+    it("uses postgres helper in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { postgresReadOnlyQuery } = await import("@/lib/crm-postgres/sql-execution");
+      vi.mocked(postgresReadOnlyQuery).mockResolvedValue([{ ok: true }]);
+
+      const { POST } = await import("./execute/route.js");
+      const req = new Request("http://localhost/api/workspace/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: "SELECT true as ok" }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+      expect(res.status).toBe(200);
+      expect(postgresReadOnlyQuery).toHaveBeenCalledWith("SELECT true as ok");
+      expect(json).toEqual({ rows: [{ ok: true }], ok: true });
+    });
   });
 
   // ─── POST /api/workspace/query ─────────────────────────────────
@@ -268,6 +362,25 @@ describe("Workspace DB & Reports API", () => {
       });
       const res = await POST(req);
       expect(res.status).toBe(403);
+    });
+
+    it("uses postgres helper in postgres mode", async () => {
+      process.env.CRM_DB_BACKEND = "postgres";
+      const { postgresReadOnlyQuery } = await import("@/lib/crm-postgres/sql-execution");
+      vi.mocked(postgresReadOnlyQuery).mockResolvedValue([{ id: 2 }]);
+
+      const { POST } = await import("./query/route.js");
+      const req = new Request("http://localhost/api/workspace/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: "SELECT 2 as id" }),
+      });
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(postgresReadOnlyQuery).toHaveBeenCalledWith("SELECT 2 as id");
+      expect(json.rows).toEqual([{ id: 2 }]);
     });
   });
 });

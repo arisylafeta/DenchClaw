@@ -1,4 +1,5 @@
 import { duckdbQueryAsync } from "@/lib/workspace";
+import { postgresReadOnlyQuery } from "@/lib/crm-postgres/sql-execution";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,6 +39,8 @@ export async function POST(req: Request) {
     );
   }
 
-	const rows = await duckdbQueryAsync(sql);
+  const rows = process.env.CRM_DB_BACKEND === "postgres"
+    ? await postgresReadOnlyQuery(sql)
+    : await duckdbQueryAsync(sql);
   return Response.json({ rows });
 }

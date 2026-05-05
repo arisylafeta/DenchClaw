@@ -1,4 +1,7 @@
 import { safeResolvePath, duckdbQueryOnFileAsync } from "@/lib/workspace";
+import { postgresReadOnlyQuery } from "@/lib/crm-postgres/sql-execution";
+
+const APP_DB_PATH = "app://crm";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,6 +44,11 @@ export async function POST(request: Request) {
       { error: "Only read-only queries (SELECT, DESCRIBE, SHOW, EXPLAIN, WITH) are allowed" },
       { status: 403 },
     );
+  }
+
+  if (process.env.CRM_DB_BACKEND === "postgres" && relPath === APP_DB_PATH) {
+    const rows = await postgresReadOnlyQuery(sql);
+    return Response.json({ rows, sql });
   }
 
   const absPath = safeResolvePath(relPath);

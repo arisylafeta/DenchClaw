@@ -2,6 +2,7 @@ import { duckdbQueryAsync } from "@/lib/workspace";
 import { buildFilterClauses, injectFilters, checkSqlSafety } from "@/lib/report-filters";
 import type { FilterEntry } from "@/lib/report-filters";
 import { trackServer } from "@/lib/telemetry";
+import { postgresReadOnlyQuery } from "@/lib/crm-postgres/sql-execution";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,7 +45,9 @@ export async function POST(req: Request) {
   const finalSql = injectFilters(sql, filterClauses);
 
   try {
-		const rows = await duckdbQueryAsync(finalSql);
+    const rows = process.env.CRM_DB_BACKEND === "postgres"
+      ? await postgresReadOnlyQuery(finalSql)
+      : await duckdbQueryAsync(finalSql);
     trackServer("report_executed");
     return Response.json({ rows, sql: finalSql });
   } catch (err) {

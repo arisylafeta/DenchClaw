@@ -1,4 +1,5 @@
 import { safeResolvePath, duckdbQueryOnFile, resolveDuckdbBin } from "@/lib/workspace";
+import { introspectPostgresCrm } from "@/lib/crm-postgres/sql-execution";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,6 +14,8 @@ type TableInfo = {
     is_nullable: boolean;
   }>;
 };
+
+const APP_DB_PATH = "app://crm";
 
 /**
  * GET /api/workspace/db/introspect?path=<relative-path>
@@ -29,6 +32,11 @@ export async function GET(request: Request) {
       { error: "Missing required `path` query parameter" },
       { status: 400 },
     );
+  }
+
+  if (process.env.CRM_DB_BACKEND === "postgres" && relPath === APP_DB_PATH) {
+    const tables = await introspectPostgresCrm();
+    return Response.json({ tables, path: relPath });
   }
 
   const absPath = safeResolvePath(relPath);
