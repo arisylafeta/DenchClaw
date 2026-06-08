@@ -151,9 +151,9 @@ export async function DELETE() {
     );
   }
 
-  // Skip = bypass Gmail/Calendar entirely and drop the user into the
-  // workspace as-is. They can come back later via Settings.
-  const next = advanceOnboardingStep("dench-cloud", "complete", {
+  // Skip = bypass Gmail/Calendar sync, but still ask the user to choose a
+  // starter skill so the workspace does not open empty.
+  const next = advanceOnboardingStep("dench-cloud", "skill-template", {
     denchCloud: {
       source: "web",
       skipped: true,

@@ -3,7 +3,9 @@ import {
   advanceOnboardingStep,
   readOnboardingState,
   type OnboardingStep,
+  type OnboardingState,
 } from "@/lib/denchclaw-state";
+import { isSkillTemplateId } from "@/lib/skill-templates";
 import { trackServer } from "@/lib/telemetry";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +22,12 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  let body: { from?: unknown; to?: unknown; skipping?: unknown };
+  let body: {
+    from?: unknown;
+    to?: unknown;
+    skipping?: unknown;
+    skillTemplate?: unknown;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -46,7 +53,34 @@ export async function PUT(req: Request) {
     );
   }
 
-  const next = advanceOnboardingStep(from, to, {});
+  const patch: Partial<OnboardingState> = {};
+  if (body.skillTemplate !== undefined) {
+    if (from !== "skill-template") {
+      return Response.json(
+        { error: "Skill template choices can only be saved from the skill-template step." },
+        { status: 400 },
+      );
+    }
+    if (!body.skillTemplate || typeof body.skillTemplate !== "object") {
+      return Response.json(
+        { error: "`skillTemplate` must be an object." },
+        { status: 400 },
+      );
+    }
+    const rawSkillTemplate = body.skillTemplate as Record<string, unknown>;
+    if (!isSkillTemplateId(rawSkillTemplate.templateId)) {
+      return Response.json(
+        { error: "Unknown skill template." },
+        { status: 400 },
+      );
+    }
+    patch.skillTemplate = {
+      templateId: rawSkillTemplate.templateId,
+      selectedAt: new Date().toISOString(),
+    };
+  }
+
+  const next = advanceOnboardingStep(from, to, patch);
   trackServer("onboarding_step_advanced", {
     from,
     to,

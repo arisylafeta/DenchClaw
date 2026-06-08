@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import type { OnboardingState } from "@/lib/denchclaw-state";
+import {
+  assertOnboardingResponseOk,
+  readOnboardingResponse,
+} from "./response";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -56,10 +60,7 @@ export function IdentityStep({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ from: "welcome", to: "identity" }),
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
-        }
+        await assertOnboardingResponseOk(res);
       }
 
       const res = await fetch("/api/onboarding/identity", {
@@ -67,11 +68,7 @@ export function IdentityStep({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmedName, email: trimmedEmail }),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const next = (await res.json()) as OnboardingState;
+      const next = await readOnboardingResponse<OnboardingState>(res);
       onAdvance(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save identity.");

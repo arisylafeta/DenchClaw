@@ -31,13 +31,15 @@ vi.mock("@/lib/telemetry", () => ({
   trackServer: vi.fn(),
 }));
 
-const { POST } = await import("./route");
+const { DELETE, POST } = await import("./route");
 const { saveApiKey, selectModel } = await import("@/lib/dench-cloud-settings");
 const { writeDenchAuthProfileKey } = await import("@/lib/dench-auth");
+const { advanceOnboardingStep } = await import("@/lib/denchclaw-state");
 
 const mockedSaveApiKey = vi.mocked(saveApiKey);
 const mockedSelectModel = vi.mocked(selectModel);
 const mockedWriteAuthProfile = vi.mocked(writeDenchAuthProfileKey);
+const mockedAdvanceOnboardingStep = vi.mocked(advanceOnboardingStep);
 
 const refreshOk = { attempted: true, restarted: true, error: null, profile: "dench" };
 
@@ -128,5 +130,21 @@ describe("Dench Cloud onboarding API", () => {
 
     expect(res.status).toBe(400);
     expect(mockedWriteAuthProfile).not.toHaveBeenCalled();
+  });
+
+  it("routes users who skip Dench Cloud to starter skill selection", async () => {
+    const res = await DELETE();
+
+    expect(res.status).toBe(200);
+    expect(mockedAdvanceOnboardingStep).toHaveBeenCalledWith(
+      "dench-cloud",
+      "skill-template",
+      expect.objectContaining({
+        denchCloud: expect.objectContaining({
+          source: "web",
+          skipped: true,
+        }),
+      }),
+    );
   });
 });

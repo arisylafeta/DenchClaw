@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OnboardingState } from "@/lib/denchclaw-state";
 import { ConnectionCard, type ConnectionStatus } from "./connection-card";
+import { readOnboardingResponse } from "./response";
 
 type DenchCloudStatus = {
   configured: boolean;
@@ -71,6 +72,7 @@ const ONBOARDING_STEP_ORDER = [
   "connect-gmail",
   "connect-calendar",
   "backfill",
+  "skill-template",
   "complete",
 ] as const;
 
@@ -332,11 +334,7 @@ export function SetupStep({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ acceptCli: true }),
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
-        }
-        const next = (await res.json()) as OnboardingState;
+        const next = await readOnboardingResponse<OnboardingState>(res);
         onAdvance(next);
       } catch (err) {
         setDenchCloudError(
@@ -381,11 +379,7 @@ export function SetupStep({
             ...(shouldAdvance ? { fromStep, toStep } : {}),
           }),
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
-        }
-        const next = (await res.json()) as OnboardingState;
+        const next = await readOnboardingResponse<OnboardingState>(res);
         onAdvance(next);
         return next;
       } catch (err) {
@@ -609,11 +603,7 @@ export function SetupStep({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: trimmed }),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const next = (await res.json()) as OnboardingState;
+      const next = await readOnboardingResponse<OnboardingState>(res);
       onAdvance(next);
       setShowKeyForm(false);
       setDenchCloudKeyInput("");
@@ -631,11 +621,7 @@ export function SetupStep({
     setDenchCloudError(null);
     try {
       const res = await fetch("/api/onboarding/dench-cloud", { method: "DELETE" });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const next = (await res.json()) as OnboardingState;
+      const next = await readOnboardingResponse<OnboardingState>(res);
       onAdvance(next);
       setShowKeyForm(false);
     } catch (err) {
@@ -647,11 +633,9 @@ export function SetupStep({
     }
   }
 
-  // Gmail is optional: when the user explicitly skips, jump the state
-  // machine straight to `complete` and drop them into the workspace. They
-  // can come back later via Settings to wire Gmail (and Calendar) up. This
-  // intentionally bypasses Calendar and the backfill step, because without
-  // Gmail neither has anything to chew on.
+  // Gmail is optional: when the user explicitly skips, bypass Calendar and
+  // backfill but still route through starter-skill selection so the workspace
+  // has a concrete first action.
   async function handleSkipGmail() {
     setToolkitError(null);
     setSkippingGmail(true);
@@ -661,21 +645,13 @@ export function SetupStep({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           from: state.currentStep,
-          to: "complete",
+          to: "skill-template",
           skipping: "gmail",
         }),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const next = (await res.json()) as OnboardingState;
+      const next = await readOnboardingResponse<OnboardingState>(res);
       onAdvance(next);
       setSkipGmailDialogOpen(false);
-      // Full navigation (not router.push) so the server-rendered `/`
-      // re-evaluates `isOnboardingComplete()` and the user lands directly
-      // in the workspace shell, skipping Setup → Sync → Complete.
-      window.location.assign("/");
     } catch (err) {
       // Close the dialog on failure so the inline error banner under the
       // setup cards becomes visible — otherwise the dialog occludes it.
@@ -702,11 +678,7 @@ export function SetupStep({
           skipping: "calendar",
         }),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const next = (await res.json()) as OnboardingState;
+      const next = await readOnboardingResponse<OnboardingState>(res);
       onAdvance(next);
     } catch (err) {
       setToolkitError(
@@ -783,11 +755,7 @@ export function SetupStep({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ from: "connect-calendar", to: "backfill" }),
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
-        }
-        const next = (await res.json()) as OnboardingState;
+        const next = await readOnboardingResponse<OnboardingState>(res);
         onAdvance(next);
       } catch (err) {
         setToolkitError(
@@ -1073,8 +1041,8 @@ function formatAccountLabel(value: string | null | undefined): string {
 
 /**
  * Confirmation dialog for skipping Gmail. Skipping Gmail also bypasses
- * Calendar + the backfill step and drops the user straight into the
- * workspace, so we ask explicitly rather than silently committing.
+ * Calendar + the backfill step, so we ask explicitly rather than silently
+ * committing.
  *
  * Style mirrors `keyboard-shortcuts-help.tsx` for visual consistency:
  * fixed overlay + centered surface, themed via the project's CSS
@@ -1133,15 +1101,15 @@ function SkipGmailDialog({
             className="font-instrument text-[24px] leading-tight tracking-tight"
             style={{ color: "var(--color-text)" }}
           >
-            Skip Gmail and head to the workspace?
+            Skip Gmail sync?
           </h2>
           <p
             id="skip-gmail-desc"
             className="mt-3 text-[13.5px] leading-relaxed"
             style={{ color: "var(--color-text-muted)" }}
           >
-            Your workspace will open empty — People, Companies, and the calendar
-            sync stay off until you connect Gmail later from Settings.
+            People, Companies, and calendar sync stay off until you connect
+            Gmail later from Settings. You&apos;ll still choose a starter skill next.
           </p>
         </div>
         <div
@@ -1176,7 +1144,7 @@ function SkipGmailDialog({
               (e.currentTarget as HTMLElement).style.opacity = "1";
             }}
           >
-            {submitting ? "Skipping…" : "Yes, skip Gmail"}
+            {submitting ? "Skipping…" : "Yes, choose a starter skill"}
           </button>
         </div>
       </div>

@@ -214,15 +214,14 @@ export function ComposioAppsSection({
     if (params?.limit) query.set("limit", String(params.limit));
     const suffix = query.toString();
     const response = await fetch(`/api/composio/toolkits${suffix ? `?${suffix}` : ""}`);
+    const payload = (await response.json().catch(() => ({}))) as
+      ComposioToolkitsResponse & { error?: string };
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
       throw new Error(
-        (err as { error?: string }).error ?? `Failed to load apps (${response.status})`,
+        payload.error ?? `Failed to load apps (${response.status})`,
       );
     }
-    return extractComposioToolkits(
-      (await response.json()) as ComposioToolkitsResponse,
-    );
+    return extractComposioToolkits(payload);
   }, []);
 
   const fetchMcpStatus = useCallback(async (

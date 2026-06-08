@@ -75,6 +75,7 @@ import { displayObjectName, displayObjectNameSingular } from "@/lib/object-displ
 import { isSeedPeopleObjectId, isSeedCompanyObjectId } from "@/lib/seed-object-ids";
 import { CronDashboard } from "../components/cron/cron-dashboard";
 import { SkillStorePanel } from "../components/skill-store/skill-store-panel";
+import { SkillTemplateGalleryPanel } from "../components/templates/skill-template-gallery-panel";
 import { IntegrationsPanel } from "../components/integrations/integrations-panel";
 import { ChatComposioModalHost } from "../components/integrations/chat-composio-modal-host";
 import { CloudSettingsPanel } from "../components/settings/cloud-settings-panel";
@@ -131,6 +132,8 @@ import {
 } from "@/lib/workspace-paths";
 import dynamic from "next/dynamic";
 import type { ComposioChatAction } from "@/lib/composio-chat-actions";
+import { startSkillTemplateChatFromDashboard } from "@/lib/skill-template-chat-start";
+import type { SkillTemplateId } from "@/lib/skill-templates";
 
 const TerminalDrawer = dynamic(
   () => import("../components/terminal/terminal-drawer"),
@@ -157,6 +160,11 @@ type WebSession = {
   updatedAt: number;
   messageCount: number;
   filePath?: string;
+};
+
+type SkillTemplateConsumeResponse = {
+  prompt: string | null;
+  templateId?: string;
 };
 
 // Left sidebar has two visual modes driven by width:
@@ -495,6 +503,8 @@ function WorkspacePageInner() {
   const chatRef = useRef<ChatPanelHandle>(null);
   // Mounted main chat panels keyed by tab id so inactive tabs can keep streaming.
   const chatPanelRefs = useRef<Record<string, ChatPanelHandle | null>>({});
+  const skillTemplateHandoffCheckedRef = useRef(false);
+  const skillTemplatePromptSentRef = useRef(false);
   // Root layout ref for resize handle position (handle follows cursor)
   const layoutRef = useRef<HTMLDivElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
@@ -572,6 +582,7 @@ function WorkspacePageInner() {
 
   // Terminal drawer state
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
   const [pendingComposioAction, setPendingComposioAction] = useState<ComposioChatAction | null>(null);
   const [tableSelectionContext, setTableSelectionContext] = useState<TableSelectionContext | null>(null);
 
@@ -801,6 +812,18 @@ function WorkspacePageInner() {
       });
     });
   }, []);
+
+  const handleStartDashboardTemplate = useCallback(
+    (templateId: SkillTemplateId) => {
+      setTemplatesPanelOpen(false);
+      startSkillTemplateChatFromDashboard({
+        templateId,
+        openChatTab: openPermanentBlankChatTab,
+        sendMessageInChatTab,
+      });
+    },
+    [openPermanentBlankChatTab, sendMessageInChatTab],
+  );
 
   // Navigate to a subagent panel when its card is clicked in the chat.
   // The identifier may be a childSessionKey (preferred) or a task label (legacy fallback).
@@ -1909,6 +1932,43 @@ function WorkspacePageInner() {
     sendMessageInChatTab(tab.id, sendParam);
   }, [openBlankChatTab, searchParams, router, sendMessageInChatTab]);
 
+  // After onboarding, consume a selected starter template once and use the
+  // same blank-chat path as other in-app auto-send entry points.
+  useEffect(() => {
+    if (searchParams.get("send")) {return;}
+    if (
+      skillTemplateHandoffCheckedRef.current ||
+      skillTemplatePromptSentRef.current
+    ) {
+      return;
+    }
+    skillTemplateHandoffCheckedRef.current = true;
+
+    async function consumeSkillTemplatePrompt() {
+      try {
+        const res = await fetch("/api/onboarding/skill-template/consume", {
+          method: "POST",
+        });
+        if (!res.ok) {return;}
+        const data = (await res.json()) as SkillTemplateConsumeResponse;
+        if (
+          typeof data.prompt !== "string" ||
+          !data.prompt.trim() ||
+          skillTemplatePromptSentRef.current
+        ) {
+          return;
+        }
+        skillTemplatePromptSentRef.current = true;
+        const tab = openBlankChatTab();
+        sendMessageInChatTab(tab.id, data.prompt);
+      } catch {
+        // This is a best-effort first-run handoff; the workspace should still load.
+      }
+    }
+
+    void consumeSkillTemplatePrompt();
+  }, [openBlankChatTab, searchParams, sendMessageInChatTab]);
+
   const formatBreadcrumbSegment = useCallback(
     (segment: string, partialPath: string) => {
       if (isAbsolutePath(partialPath)) return segment;
@@ -2314,6 +2374,7 @@ function WorkspacePageInner() {
     onNewChatSession: () => {
       openPermanentBlankChatTab();
     },
+    onOpenTemplates: () => setTemplatesPanelOpen(true),
     onSelectHistorySubagent: handleSelectSubagent,
     onSelectHistoryGatewaySession: (sessionKey: string, sessionId: string) => {
       const gs = gatewaySessions.find((s) => s.sessionKey === sessionKey);
@@ -2613,6 +2674,12 @@ function WorkspacePageInner() {
           request={pendingComposioAction}
           onRequestHandled={handleComposioActionHandled}
           onFallbackToIntegrations={handleComposioFallbackToIntegrations}
+        />
+
+        <SkillTemplateGalleryPanel
+          open={templatesPanelOpen}
+          onOpenChange={setTemplatesPanelOpen}
+          onStartTemplate={handleStartDashboardTemplate}
         />
 
         {terminalOpen && (

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OnboardingState } from "@/lib/denchclaw-state";
@@ -215,5 +216,55 @@ describe("SetupStep", () => {
       }),
     ]);
     expect(onAdvance).toHaveBeenLastCalledWith(calendarState);
+  });
+
+  it("routes Gmail skip users to starter skill selection", async () => {
+    const user = userEvent.setup();
+    const onAdvance = vi.fn();
+    const nextState: OnboardingState = {
+      ...baseState,
+      currentStep: "skill-template",
+      completedSteps: ["welcome", "identity", "dench-cloud", "connect-gmail"],
+    };
+    const bodies: unknown[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url === "/api/onboarding/dench-cloud") {
+        return new Response(JSON.stringify({
+          configured: true,
+          source: "cli",
+          primaryModel: "dench-cloud/gpt-5.5",
+        }));
+      }
+      if (url === "/api/composio/connections?include_toolkits=1&fresh=1") {
+        return new Response(JSON.stringify({ connections: [] }));
+      }
+      if (url === "/api/onboarding/state") {
+        if (typeof init?.body !== "string") {
+          throw new Error("Expected string JSON body.");
+        }
+        bodies.push(JSON.parse(init.body));
+        return new Response(JSON.stringify(nextState));
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    render(<Harness onAdvance={onAdvance} />);
+
+    await user.click(await screen.findByRole("button", { name: "Skip" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Yes, choose a starter skill" }),
+    );
+
+    await waitFor(() => {
+      expect(onAdvance).toHaveBeenCalledWith(nextState);
+    });
+    expect(bodies).toEqual([
+      {
+        from: "connect-gmail",
+        to: "skill-template",
+        skipping: "gmail",
+      },
+    ]);
   });
 });

@@ -10,9 +10,11 @@ import type { Components } from "react-markdown";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChainOfThought, type ChainPart } from "./chain-of-thought";
+import { ChatQuestionCard } from "./chat-question-card";
 import { isStatusReasoningText } from "./chat-stream-status";
 import { splitReportBlocks, hasReportBlocks } from "@/lib/report-blocks";
 import { splitDiffBlocks, hasDiffBlocks } from "@/lib/diff-blocks";
+import { splitQuestionBlocks, type QuestionBlock } from "@/lib/question-blocks";
 import type { ReportConfig } from "./charts/types";
 import { DiffCard } from "./diff-viewer";
 import { MessageVoiceButton } from "./message-voice-button";
@@ -60,6 +62,7 @@ type MessageSegment =
 	| { type: "chain"; parts: ChainPart[] }
 	| { type: "report-artifact"; config: ReportConfig }
 	| { type: "diff-artifact"; diff: string }
+	| { type: "question"; question: QuestionBlock }
 	| { type: "subagent-card"; task: string; label?: string; sessionKey?: string; status: "running" | "done" | "error" };
 
 /** Map AI SDK tool state string to a simplified status */
@@ -105,20 +108,24 @@ function groupParts(parts: UIMessage["parts"]): MessageSegment[] {
 			const text = (part as { type: "text"; text: string }).text;
 			if (isLeakedSilentToken(text)) { continue; }
 			flush(true);
-			if (hasReportBlocks(text)) {
-				segments.push(
-					...(splitReportBlocks(text) as MessageSegment[]),
-				);
-			} else if (hasDiffBlocks(text)) {
-				for (const seg of splitDiffBlocks(text)) {
-					if (seg.type === "diff-artifact") {
-						segments.push({ type: "diff-artifact", diff: seg.diff });
-					} else {
-						segments.push({ type: "text", text: seg.text });
+			for (const questionSegment of splitQuestionBlocks(text)) {
+				if (questionSegment.type === "question") {
+					segments.push({ type: "question", question: questionSegment.question });
+				} else if (hasReportBlocks(questionSegment.text)) {
+					segments.push(
+						...(splitReportBlocks(questionSegment.text) as MessageSegment[]),
+					);
+				} else if (hasDiffBlocks(questionSegment.text)) {
+					for (const seg of splitDiffBlocks(questionSegment.text)) {
+						if (seg.type === "diff-artifact") {
+							segments.push({ type: "diff-artifact", diff: seg.diff });
+						} else {
+							segments.push({ type: "text", text: seg.text });
+						}
 					}
+				} else if (questionSegment.text) {
+					segments.push({ type: "text", text: questionSegment.text });
 				}
-			} else {
-				segments.push({ type: "text", text });
 			}
 		} else if (part.type === "reasoning") {
 			const rp = part as {
@@ -323,6 +330,8 @@ function getCopyableMessageText(
 					return segment.diff.trim();
 				case "subagent-card":
 					return (segment.label || segment.task).trim();
+				case "question":
+					return segment.question.prompt.trim();
 				default:
 					return "";
 			}
@@ -1102,13 +1111,14 @@ type ChatMessageProps = {
 	onSubagentClick?: (task: string) => void;
 	onFilePathClick?: FilePathClickHandler;
 	onComposioAction?: (action: ComposioChatAction) => void;
+	onQuestionAnswer?: (answerText: string) => void;
 	sessionId?: string | null;
 	voicePlaybackEnabled?: boolean;
 	userHtmlMap?: Map<string, string>;
 	copyable?: boolean;
 };
 
-export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onSubagentClick, onFilePathClick, onComposioAction, sessionId, voicePlaybackEnabled = false, userHtmlMap, copyable = false }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onSubagentClick, onFilePathClick, onComposioAction, onQuestionAnswer, sessionId, voicePlaybackEnabled = false, userHtmlMap, copyable = false }: ChatMessageProps) {
 	const isUser = message.role === "user";
 	const segments = useMemo(() => groupParts(message.parts), [message.parts]);
 	const speechText = useMemo(() => extractSpeechText(segments), [segments]);
@@ -1278,6 +1288,21 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 					</motion.div>
 				);
 			}
+		if (segment.type === "question") {
+			return (
+				<motion.div
+					key={`question-${index}`}
+					initial={{ opacity: 0, y: 4 }}
+					animate={{ opacity: 1, y: 0 }}
+					transition={{ duration: 0.2, ease: "easeOut" }}
+				>
+					<ChatQuestionCard
+						question={segment.question}
+						onAnswer={onQuestionAnswer}
+					/>
+				</motion.div>
+			);
+		}
 		if (segment.type === "diff-artifact") {
 			return (
 				<motion.div

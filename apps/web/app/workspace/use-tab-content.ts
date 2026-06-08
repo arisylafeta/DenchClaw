@@ -380,13 +380,13 @@ async function fetchObjectContent(
     | { status: "fatal" }
   > => {
     const res = await fetch(`/api/workspace/objects/${encodeURIComponent(objectName)}`, { signal });
+    const data = await res.json().catch(() => ({} as Partial<ObjectData> & { code?: string }));
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({} as { code?: string }));
-      if (errData.code === "DUCKDB_NOT_INSTALLED") return { status: "duckdb-missing" };
+      if (data.code === "DUCKDB_NOT_INSTALLED") return { status: "duckdb-missing" };
       if (res.status === 404 || res.status >= 500) return { status: "retryable" };
       return { status: "fatal" };
     }
-    return { status: "ok", data: await res.json() };
+    return { status: "ok", data: data as ObjectData };
   };
 
   let result = await fetchOnce();

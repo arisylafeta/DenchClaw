@@ -8,6 +8,7 @@ import {
 } from "@/lib/denchclaw-state";
 import { IdentityStep } from "./identity-step";
 import { SetupStep } from "./setup-step";
+import { SkillTemplateStep } from "./skill-template-step";
 import { SyncStep } from "./sync-step";
 import { CompleteStep } from "./complete-step";
 import { PreviewPane, type PreviewVariant } from "./preview-pane";
@@ -21,19 +22,20 @@ import {
 import { ProfileSwitcher } from "../workspace/profile-switcher";
 import { CreateWorkspaceDialog } from "../workspace/create-workspace-dialog";
 
-type ClientStep = "identity" | "setup" | "sync";
+type ClientStep = "identity" | "setup" | "sync" | "skill-template";
 
 const CLIENT_STEPS: Array<{ id: ClientStep; label: string }> = [
   { id: "identity", label: "Identity" },
   { id: "setup", label: "Setup" },
   { id: "sync", label: "Sync" },
+  { id: "skill-template", label: "Template" },
 ];
 
 /**
  * Maps the server's fine-grained onboarding state (6 steps) onto the client's
- * compressed 3-step view. `welcome` and `identity` collapse to Step 1. The
+ * compressed step view. `welcome` and `identity` collapse to Step 1. The
  * three connection steps + dench-cloud fold into a single "Setup" screen.
- * `backfill` is Step 3. `complete` is its own full-screen landing.
+ * `backfill` is Sync. `skill-template` is the final choice before the full-screen landing.
  */
 function clientStepFor(server: OnboardingStep): ClientStep | "complete" {
   switch (server) {
@@ -46,6 +48,8 @@ function clientStepFor(server: OnboardingStep): ClientStep | "complete" {
       return "setup";
     case "backfill":
       return "sync";
+    case "skill-template":
+      return "skill-template";
     case "complete":
       return "complete";
   }
@@ -224,6 +228,14 @@ export function OnboardingWizard({
       return {
         previewVariant: variant,
         previewKey: "sync:people-table",
+        previewNode: <PreviewPeopleTable liveStats={liveStats} />,
+      };
+    }
+    if (activeClientStep === "skill-template") {
+      const variant: PreviewVariant = "workspace-live";
+      return {
+        previewVariant: variant,
+        previewKey: "skill-template:people-table",
         previewNode: <PreviewPeopleTable liveStats={liveStats} />,
       };
     }
@@ -507,6 +519,8 @@ function StepContent({
           onLiveStats={onLiveStats}
         />
       );
+    case "skill-template":
+      return <SkillTemplateStep state={state} onAdvance={onAdvance} />;
     case "complete":
       return <CompleteStep state={state} />;
   }

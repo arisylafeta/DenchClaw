@@ -42,6 +42,7 @@ export type OnboardingStep =
   | "connect-gmail"
   | "connect-calendar"
   | "backfill"
+  | "skill-template"
   | "complete";
 
 export const ONBOARDING_STEPS: OnboardingStep[] = [
@@ -51,6 +52,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   "connect-gmail",
   "connect-calendar",
   "backfill",
+  "skill-template",
   "complete",
 ];
 
@@ -88,6 +90,12 @@ export type BackfillProgress = {
   lastError?: string;
 };
 
+export type OnboardingSkillTemplate = {
+  templateId?: string;
+  selectedAt?: string;
+  promptConsumedAt?: string;
+};
+
 export type OnboardingState = {
   version: 1;
   currentStep: OnboardingStep;
@@ -102,6 +110,7 @@ export type OnboardingState = {
     gmail?: BackfillProgress;
     calendar?: BackfillProgress;
   };
+  skillTemplate?: OnboardingSkillTemplate;
   startedAt: string;
   updatedAt: string;
 };
@@ -237,6 +246,24 @@ function isValidStep(step: unknown): step is OnboardingStep {
   return typeof step === "string" && (ONBOARDING_STEPS as string[]).includes(step);
 }
 
+function sanitizeSkillTemplate(input: unknown): OnboardingSkillTemplate | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+  const raw = input as Record<string, unknown>;
+  const skillTemplate: OnboardingSkillTemplate = {};
+  if (typeof raw.templateId === "string") {
+    skillTemplate.templateId = raw.templateId;
+  }
+  if (typeof raw.selectedAt === "string") {
+    skillTemplate.selectedAt = raw.selectedAt;
+  }
+  if (typeof raw.promptConsumedAt === "string") {
+    skillTemplate.promptConsumedAt = raw.promptConsumedAt;
+  }
+  return Object.keys(skillTemplate).length > 0 ? skillTemplate : undefined;
+}
+
 function sanitizeOnboardingState(input: unknown): OnboardingState {
   if (!input || typeof input !== "object") {
     return defaultOnboardingState();
@@ -266,6 +293,7 @@ function sanitizeOnboardingState(input: unknown): OnboardingState {
       raw.backfill && typeof raw.backfill === "object"
         ? (raw.backfill as OnboardingState["backfill"])
         : undefined,
+    skillTemplate: sanitizeSkillTemplate(raw.skillTemplate),
     startedAt: typeof raw.startedAt === "string" ? raw.startedAt : fallback.startedAt,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : fallback.updatedAt,
   };

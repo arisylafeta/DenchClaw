@@ -43,6 +43,7 @@ describe("ONBOARDING_STEPS", () => {
       "connect-gmail",
       "connect-calendar",
       "backfill",
+      "skill-template",
       "complete",
     ]);
   });
@@ -64,6 +65,10 @@ describe("readOnboardingState", () => {
       currentStep: "identity",
       completedSteps: ["welcome"],
       identity: { name: "Sarah", email: "sarah@acme.com", capturedAt: new Date().toISOString() },
+      skillTemplate: {
+        templateId: "icp-outreach-builder",
+        selectedAt: "2026-04-15T00:00:00Z",
+      },
     };
     writeOnboardingState(next);
 
@@ -71,6 +76,7 @@ describe("readOnboardingState", () => {
     expect(loaded.currentStep).toBe("identity");
     expect(loaded.completedSteps).toEqual(["welcome"]);
     expect(loaded.identity?.email).toBe("sarah@acme.com");
+    expect(loaded.skillTemplate?.templateId).toBe("icp-outreach-builder");
   });
 });
 

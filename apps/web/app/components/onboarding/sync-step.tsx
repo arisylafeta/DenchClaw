@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OnboardingState } from "@/lib/denchclaw-state";
 import type { LiveStats } from "./preview-workspace-mock";
+import {
+  assertOnboardingResponseOk,
+  readOnboardingResponse,
+} from "./response";
 
 type ProgressEvent = {
   phase:
@@ -71,10 +75,7 @@ export function SyncStep({
     setError(null);
     try {
       const res = await fetch("/api/onboarding/sync/start", { method: "POST" });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
+      await assertOnboardingResponseOk(res);
       setStarted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start sync.");
@@ -131,13 +132,9 @@ export function SyncStep({
       const res = await fetch("/api/onboarding/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: "backfill", to: "complete" }),
+        body: JSON.stringify({ from: "backfill", to: "skill-template" }),
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const next = (await res.json()) as OnboardingState;
+      const next = await readOnboardingResponse<OnboardingState>(res);
       onAdvance(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not finish onboarding.");
@@ -201,7 +198,7 @@ export function SyncStep({
             (e.currentTarget as HTMLElement).style.opacity = "1";
           }}
         >
-          {completing ? "Opening workspace…" : "Let's go"}
+          {completing ? "Loading templates…" : "Choose starter skill"}
         </button>
       </div>
     </div>

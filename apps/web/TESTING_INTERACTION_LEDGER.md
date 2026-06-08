@@ -27,6 +27,7 @@ details (how it is coded).
 | Chat runtime | Silent token filtering | `NO_REPLY` full and partial token leaks never appear in final text | `lib/active-runs.test.ts` (existing, add cases) |
 | Chat message rendering | Tool and report block grouping | Mixed tool/report/diff parts render in stable groups without dropping order | `app/components/chat-message.test.tsx` (new) |
 | Chat message rendering | Tool status badges | Tool states reflect terminal result (`success` vs `error`) consistently | `app/components/chat-message.test.tsx` (new) |
+| Chat question cards | `dench-question` block rendering and answer submit | Structured MCQ blocks render as accessible choices, hide raw JSON, and submit selected answers as normal user turns | `lib/question-blocks.test.ts` (new) + `app/components/chat-message.test.tsx` (new) |
 | Subagent lifecycle | Registration + independent stream | Subagents continue streaming independently of parent run closure | `lib/subagent-runs.test.ts` (existing) + `lib/active-runs.test.ts` (existing) |
 | Subagent lifecycle | Follow-up messaging | User follow-up persists before spawn and stream resumes from same subagent session key | `lib/subagent-runs.test.ts` (existing, add cases) |
 | Subagent lifecycle | Abort from panel | Abort transitions run to non-running immediately and unblocks next action | `lib/subagent-runs.test.ts` (existing, add cases) |

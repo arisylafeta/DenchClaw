@@ -507,15 +507,14 @@ export function EntryDetailModal({
         const res = await fetch(
           `/api/workspace/objects/${encodeURIComponent(objectName)}/entries/${encodeURIComponent(entryId)}`,
         );
+        const json = await res.json().catch(() => ({ error: "Failed to load" }));
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: "Failed to load" }));
           if (!cancelled) {
-            setError(err.error ?? "Failed to load entry");
+            setError(json.error ?? "Failed to load entry");
             setLoading(false);
           }
           return;
         }
-        const json = await res.json();
         if (!cancelled) {
           setData(json);
           setLoading(false);

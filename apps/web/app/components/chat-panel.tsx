@@ -812,6 +812,33 @@ export type SubagentSpawnInfo = {
 	status?: "running" | "completed" | "error";
 };
 
+export function ChatPanelTemplatesButton({
+	onOpenTemplates,
+}: {
+	onOpenTemplates: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onOpenTemplates}
+			className="p-1.5 rounded-lg cursor-pointer transition-colors"
+			style={{ color: "var(--color-text-muted)" }}
+			title="Templates"
+			aria-label="Templates"
+			onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
+			onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+		>
+			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+				<rect x="3" y="3" width="7" height="7" rx="1.5" />
+				<rect x="14" y="3" width="7" height="7" rx="1.5" />
+				<rect x="3" y="14" width="7" height="7" rx="1.5" />
+				<path d="M14 17.5h7" />
+				<path d="M17.5 14v7" />
+			</svg>
+		</button>
+	);
+}
+
 type ChatPanelProps = {
 	/** When set, scopes sessions to this file and prepends content as context. */
 	fileContext?: FileContext;
@@ -889,6 +916,8 @@ type ChatPanelProps = {
 	onSelectHistorySession?: (sessionId: string) => void;
 	/** Start a brand new (blank) chat tab. */
 	onNewChatSession?: () => void;
+	/** Open the skill template gallery for a template-backed chat start. */
+	onOpenTemplates?: () => void;
 	/** Open a subagent (child) session by its session key. */
 	onSelectHistorySubagent?: (sessionKey: string) => void;
 	/** Open a gateway/channel session by its key + id. */
@@ -934,6 +963,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			visible,
 			searchFn,
 			onNewChatSession,
+			onOpenTemplates,
 		},
 		ref,
 	) {
@@ -2031,6 +2061,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// change, notably `isStreaming`).
 		useEffect(() => { handleEditorSubmitRef.current = handleEditorSubmit; }, [handleEditorSubmit]);
 
+		const handleQuestionAnswer = useCallback(
+			(answerText: string) => {
+				void handleEditorSubmit(answerText, [], "", []);
+			},
+			[handleEditorSubmit],
+		);
+
 		// ── Queue flush: send the next queued message once the stream finishes ──
 		const prevFlushStatusRef = useRef(status);
 		useEffect(() => {
@@ -2619,6 +2656,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					</div>
 					{!hideHeaderActions && (
 					<div className="flex items-center gap-1 shrink-0">
+						{onOpenTemplates && (
+							<ChatPanelTemplatesButton onOpenTemplates={onOpenTemplates} />
+						)}
 						{onNewChatSession && (
 							<button
 								type="button"
@@ -2814,6 +2854,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									onSubagentClick={onSubagentClick}
 									onFilePathClick={onFilePathClick}
 									onComposioAction={onComposioAction}
+									onQuestionAnswer={handleQuestionAnswer}
 									sessionId={currentSessionId}
 									voicePlaybackEnabled={voicePlaybackEnabled}
 									userHtmlMap={userHtmlMapRef.current}
