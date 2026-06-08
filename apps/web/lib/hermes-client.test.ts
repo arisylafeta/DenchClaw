@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HermesConfig } from "./agent-backend";
+import { createHermesChatStream } from "./hermes-client";
 
 const config: HermesConfig = {
   baseUrl: "https://hermes.example.com",
@@ -36,14 +37,17 @@ afterEach(() => {
 
 describe("createHermesChatStream", () => {
   it("posts to Hermes runs API with bearer auth and session key", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({ run_id: "run_123", status: "started" }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/runs")) {
+        return new Response(
+          JSON.stringify({ run_id: "run_123", status: "started" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("", { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
 
-    const { createHermesChatStream } = await import("./hermes-client");
     const stream = createHermesChatStream({
       sessionKey: "sess_abc",
       message: "Hello Hermes",
@@ -71,14 +75,25 @@ describe("createHermesChatStream", () => {
   });
 
   it("returns an SSE stream that emits a start event when run starts", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({ run_id: "run_456", status: "started" }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
+    vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/runs")) {
+        return new Response(
+          JSON.stringify({ run_id: "run_456", status: "started" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("", { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    });
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/runs")) {
+        return new Response(
+          JSON.stringify({ run_id: "run_456", status: "started" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("", { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    }) as typeof fetch;
 
-    const { createHermesChatStream } = await import("./hermes-client");
     const stream = createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
@@ -99,7 +114,6 @@ describe("createHermesChatStream", () => {
       ),
     );
 
-    const { createHermesChatStream } = await import("./hermes-client");
     const stream = createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
@@ -113,9 +127,9 @@ describe("createHermesChatStream", () => {
   });
 
   it("returns an SSE stream with an error event when no apiKey is provided", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as typeof fetch;
 
-    const { createHermesChatStream } = await import("./hermes-client");
     const stream = createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
@@ -133,7 +147,6 @@ describe("createHermesChatStream", () => {
       new Error("Network error"),
     );
 
-    const { createHermesChatStream } = await import("./hermes-client");
     const stream = createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
@@ -144,4 +157,52 @@ describe("createHermesChatStream", () => {
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe("hermes-error");
   });
+
+  it("proxies Hermes run events after creating a run", async () => {
+    const eventsBody = [
+      "event: message",
+      'data: {"type":"response.output_text.delta","delta":"Hi"}',
+      "",
+      "event: message",
+      'data: {"type":"response.completed"}',
+      "",
+    ].join("\n");
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/runs")) {
+        return new Response(JSON.stringify({ run_id: "run_1", status: "started" }), { status: 202 });
+      }
+      return new Response(eventsBody, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const stream = await createHermesChatStream({
+      sessionKey: "agent:main:web:abc",
+      message: "hello",
+      config: { baseUrl: "http://127.0.0.1:8642", apiKey: "secret", model: "hermes-agent" },
+    });
+    const text = await readStreamText(stream);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8642/v1/runs/run_1/events",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(text).toContain('"type":"text-delta"');
+    expect(text).toContain('"textDelta":"Hi"');
+    expect(text).toContain('"type":"finish"');
+  });
 });
+
+async function readStreamText(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let result = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    result += decoder.decode(value, { stream: true });
+  }
+  return result;
+}
