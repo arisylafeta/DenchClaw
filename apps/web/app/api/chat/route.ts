@@ -33,6 +33,8 @@ import {
 	buildChatImageHydrationErrorMessage,
 	hydrateMessageImageAttachments,
 } from "@/lib/chat-image-attachments";
+import { resolveAgentBackend, resolveHermesConfig } from "@/lib/agent-backend";
+import { createHermesChatStream } from "@/lib/hermes-client";
 import {
 	buildAgentMessage,
 	type WorkspaceContext,
@@ -131,6 +133,7 @@ export async function POST(req: Request) {
 	);
 
 	const isSubagentSession = typeof sessionKey === "string" && sessionKey.includes(":subagent:");
+	const backend = resolveAgentBackend();
 	const normalizedModelOverride =
 		typeof modelOverride === "string" && modelOverride.trim()
 			? modelOverride.trim()
@@ -170,10 +173,10 @@ export async function POST(req: Request) {
 		}
 	}
 
-	if (!isSubagentSession && sessionId && hasActiveRun(sessionId)) {
+	if (backend !== "hermes" && !isSubagentSession && sessionId && hasActiveRun(sessionId)) {
 		return new Response("Active run in progress", { status: 409 });
 	}
-	if (isSubagentSession && sessionKey) {
+	if (backend !== "hermes" && isSubagentSession && sessionKey) {
 		const existingRun = getActiveRun(sessionKey);
 		if (existingRun?.status === "running") {
 			return new Response("Active subagent run in progress", { status: 409 });
@@ -201,6 +204,43 @@ export async function POST(req: Request) {
 	const imageAttachments = imageHydration.attachments.length > 0
 		? imageHydration.attachments
 		: undefined;
+
+	if (backend === "hermes") {
+		if (isSubagentSession) {
+			return new Response("Subagent sessions are unavailable with Hermes backend", {
+				status: 409,
+			});
+		}
+
+		if (sessionId && lastUserMessage) {
+			await persistUserMessage(sessionId, {
+				id: lastUserMessage.id,
+				content: userText,
+				parts: lastUserMessage.parts as unknown[],
+				html: userHtml,
+			});
+		}
+
+		const hermesSessionKey = sessionId ?? sessionKey;
+		if (!hermesSessionKey) {
+			return new Response("sessionId is required for Hermes chat", { status: 400 });
+		}
+
+		const stream = await createHermesChatStream({
+			sessionKey: hermesSessionKey,
+			message: agentMessage,
+			config: resolveHermesConfig(),
+		});
+
+		return new Response(stream, {
+			headers: {
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache, no-transform",
+				Connection: "keep-alive",
+				"X-Agent-Backend": "hermes",
+			},
+		});
+	}
 
 	const runKey = isSubagentSession && sessionKey ? sessionKey : (sessionId as string);
 

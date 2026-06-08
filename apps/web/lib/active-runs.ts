@@ -23,6 +23,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { resolveWebChatDir, resolveOpenClawStateDir, resolveActiveAgentId } from "./workspace";
+import { resolveAgentBackend } from "./agent-backend";
 import {
 	type AgentProcessHandle,
 	type AgentEvent,
@@ -428,6 +429,10 @@ export function reactivateSubscribeRun(
 	message?: string,
 	imageAttachments?: ImageAttachment[],
 ): boolean {
+	if (resolveAgentBackend() === "hermes") {
+		return false;
+	}
+
 	const run = activeRuns.get(sessionKey);
 	if (!run?.isSubscribeOnly) {return false;}
 	if (run.status === "running") {return true;}
@@ -708,8 +713,12 @@ export function startSubscribeRun(params: {
 	parentSessionId: string;
 	task: string;
 	label?: string;
-}): ActiveRun {
+}): ActiveRun | null {
 	const { sessionKey, parentSessionId, task, label } = params;
+
+	if (resolveAgentBackend() === "hermes") {
+		return null;
+	}
 
 	if (activeRuns.has(sessionKey)) {
 		return activeRuns.get(sessionKey)!;

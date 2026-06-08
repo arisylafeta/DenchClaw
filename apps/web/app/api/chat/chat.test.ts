@@ -22,6 +22,30 @@ vi.mock("node:fs", () => ({
   ),
 }));
 
+// Mock agent-backend module
+vi.mock("@/lib/agent-backend", () => ({
+  resolveAgentBackend: vi.fn(() => "openclaw"),
+  resolveHermesConfig: vi.fn(() => ({
+    baseUrl: "http://127.0.0.1:8642",
+    apiKey: null,
+    model: "hermes-agent",
+  })),
+}));
+
+vi.mock("@/lib/hermes-client", () => ({
+  createHermesChatStream: vi.fn(async () => {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"type":"text-delta","textDelta":"hello"}\n\n'),
+        );
+        controller.close();
+      },
+    });
+  }),
+}));
+
 // Mock workspace module
 vi.mock("@/lib/workspace", () => ({
   ensureManagedWorkspaceRouting: vi.fn(),
@@ -101,6 +125,13 @@ describe("Chat API routes", () => {
     }));
   });
 
+  beforeEach(async () => {
+    const { resolveAgentBackend } = await import("@/lib/agent-backend");
+    const { createHermesChatStream } = await import("@/lib/hermes-client");
+    vi.mocked(resolveAgentBackend).mockReturnValue("openclaw");
+    vi.mocked(createHermesChatStream).mockClear();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -164,6 +195,43 @@ describe("Chat API routes", () => {
         expect.any(Function),
         { replay: true },
       );
+    });
+
+    it("uses Hermes stream instead of startRun when backend is hermes", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      const { startRun, subscribeToRun, persistUserMessage } = await import("@/lib/active-runs");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+      vi.mocked(startRun).mockClear();
+      vi.mocked(subscribeToRun).mockClear();
+      vi.mocked(persistUserMessage).mockClear();
+
+      const { POST } = await import("./route.js");
+      const req = new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
+          ],
+          sessionId: "s1",
+        }),
+      });
+
+      const res = await POST(req);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("text/event-stream");
+      expect(res.headers.get("X-Agent-Backend")).toBe("hermes");
+      expect(createHermesChatStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: "s1",
+          message: "hello",
+        }),
+      );
+      expect(startRun).not.toHaveBeenCalled();
+      expect(subscribeToRun).not.toHaveBeenCalled();
+      expect(persistUserMessage).toHaveBeenCalled();
     });
 
     it("forwards a chat model override to the run starter", async () => {
@@ -736,6 +804,35 @@ describe("Chat API routes", () => {
       const req = new Request("http://localhost/api/chat/stream?sessionId=s1");
       const res = await GET(req);
       expect(res.headers.get("X-Run-Active")).toBe("false");
+    });
+
+    it("returns 404 for subagent session when startSubscribeRun returns null", async () => {
+      const { getActiveRun, startSubscribeRun } = await import("@/lib/active-runs");
+      vi.mocked(getActiveRun).mockReturnValue(undefined);
+      vi.mocked(startSubscribeRun).mockReturnValue(null as never);
+
+      const fs = await import("node:fs");
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          runs: {
+            r1: {
+              childSessionKey: "agent:main:subagent:test-123",
+              requesterSessionKey: "agent:main:web:parent-session",
+              task: "test task",
+            },
+          },
+        }),
+      );
+
+      const { GET } = await import("./stream/route.js");
+      const req = new Request(
+        "http://localhost/api/chat/stream?sessionKey=agent:main:subagent:test-123",
+      );
+      const res = await GET(req);
+
+      expect(res.status).toBe(404);
+      expect(startSubscribeRun).toHaveBeenCalled();
     });
   });
 });

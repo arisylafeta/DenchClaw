@@ -94,9 +94,6 @@ export async function createHermesChatStream(
         }
 
         const data = (await response.json()) as { run_id: string; status: string };
-        controller.enqueue(
-          encodeSse({ type: "hermes-run-started", runId: data.run_id, status: data.status }),
-        );
 
         if (!data.run_id) {
           controller.enqueue(encodeSse({ type: "error", errorText: "No run ID returned" }));
@@ -107,7 +104,11 @@ export async function createHermesChatStream(
         try {
           const runResult = await pollRunCompletion(config, data.run_id, sessionKey);
           if (runResult.output) {
-            controller.enqueue(encodeSse({ type: "text-delta", textDelta: runResult.output }));
+            controller.enqueue(encodeSse({ type: "text-start", id: data.run_id }));
+            controller.enqueue(
+              encodeSse({ type: "text-delta", id: data.run_id, delta: runResult.output }),
+            );
+            controller.enqueue(encodeSse({ type: "text-end", id: data.run_id }));
           }
           controller.enqueue(encodeSse({ type: "finish" }));
         } catch (pollErr) {

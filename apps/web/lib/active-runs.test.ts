@@ -9,6 +9,10 @@ vi.mock("./workspace", () => ({
 	resolveActiveAgentId: vi.fn(() => "main"),
 }));
 
+vi.mock("./agent-backend", () => ({
+	resolveAgentBackend: vi.fn(() => "openclaw"),
+}));
+
 vi.mock("./chat-agent-registry", () => ({
 	markChatAgentIdle: vi.fn(),
 }));
@@ -1995,6 +1999,62 @@ describe("active-runs", () => {
 			child.stdout.end();
 			await new Promise((r) => setTimeout(r, 50));
 			child._emit("close", 0);
+		});
+	});
+
+	describe("Hermes backend guard", () => {
+		it("startSubscribeRun returns null when backend is hermes", async () => {
+			const { resolveAgentBackend } = await import("./agent-backend.js");
+			vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+
+			const { startSubscribeRun } = await setup();
+			const result = startSubscribeRun({
+				sessionKey: "agent:main:web:hermes-test",
+				parentSessionId: "hermes-test",
+				task: "test task",
+			});
+
+			expect(result).toBeNull();
+		});
+
+		it("startSubscribeRun does not spawn subscribe process when backend is hermes", async () => {
+			const { resolveAgentBackend } = await import("./agent-backend.js");
+			vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+
+			const { startSubscribeRun } = await setup();
+			const { spawnAgentSubscribeProcess } = await import("./agent-runner.js");
+			vi.mocked(spawnAgentSubscribeProcess).mockClear();
+
+			startSubscribeRun({
+				sessionKey: "agent:main:web:hermes-test",
+				parentSessionId: "hermes-test",
+				task: "test task",
+			});
+
+			expect(spawnAgentSubscribeProcess).not.toHaveBeenCalled();
+		});
+
+		it("reactivateSubscribeRun returns false when backend is hermes", async () => {
+			const { resolveAgentBackend } = await import("./agent-backend.js");
+			vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+
+			const { reactivateSubscribeRun } = await setup();
+			const result = reactivateSubscribeRun("agent:main:web:hermes-test", "hello");
+
+			expect(result).toBe(false);
+		});
+
+		it("reactivateSubscribeRun does not spawn when backend is hermes", async () => {
+			const { resolveAgentBackend } = await import("./agent-backend.js");
+			vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+
+			const { reactivateSubscribeRun } = await setup();
+			const { spawnAgentSubscribeProcess } = await import("./agent-runner.js");
+			vi.mocked(spawnAgentSubscribeProcess).mockClear();
+
+			reactivateSubscribeRun("agent:main:web:hermes-test", "hello");
+
+			expect(spawnAgentSubscribeProcess).not.toHaveBeenCalled();
 		});
 	});
 });

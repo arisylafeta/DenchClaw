@@ -79,7 +79,7 @@ describe("createHermesChatStream", () => {
     });
   });
 
-  it("returns an SSE stream that emits a start event when run starts", async () => {
+  it("returns UI stream text events when the Hermes run completes", async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/v1/runs") && init?.method === "POST") {
         return new Response(
@@ -104,8 +104,9 @@ describe("createHermesChatStream", () => {
 
     const events = await readSseEvents(stream);
     expect(events).toEqual([
-      { type: "hermes-run-started", runId: "run_456", status: "started" },
-      { type: "text-delta", textDelta: "Hi there" },
+      { type: "text-start", id: "run_456" },
+      { type: "text-delta", id: "run_456", delta: "Hi there" },
+      { type: "text-end", id: "run_456" },
       { type: "finish" },
     ]);
   });
@@ -162,7 +163,7 @@ describe("createHermesChatStream", () => {
     expect(events[0].type).toBe("error");
   });
 
-  it("polls run status and emits output as text-delta", async () => {
+  it("polls run status and emits UI stream text events", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/v1/runs") && init?.method === "POST") {
         return new Response(JSON.stringify({ run_id: "run_1", status: "started" }), { status: 202 });
@@ -188,8 +189,9 @@ describe("createHermesChatStream", () => {
       expect.objectContaining({ method: "GET" }),
     );
     expect(events).toEqual([
-      { type: "hermes-run-started", runId: "run_1", status: "started" },
-      { type: "text-delta", textDelta: "Hello world!" },
+      { type: "text-start", id: "run_1" },
+      { type: "text-delta", id: "run_1", delta: "Hello world!" },
+      { type: "text-end", id: "run_1" },
       { type: "finish" },
     ]);
   });
