@@ -1,0 +1,59 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GET } from "./route";
+
+const { loadCrmFieldMapsMock, safeQueryMock } = vi.hoisted(() => ({
+  loadCrmFieldMapsMock: vi.fn(),
+  safeQueryMock: vi.fn(),
+}));
+
+const { getPostgresInboxMock } = vi.hoisted(() => ({
+  getPostgresInboxMock: vi.fn(),
+}));
+
+vi.mock("@/lib/crm-queries", () => ({
+  buildEntryProjection: vi.fn(() => "projection"),
+  loadCrmFieldMaps: loadCrmFieldMapsMock,
+  safeQuery: safeQueryMock,
+}));
+
+vi.mock("@/lib/crm-postgres/inbox", () => ({
+  getPostgresInbox: getPostgresInboxMock,
+}));
+
+describe("CRM inbox API", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.CRM_DB_BACKEND;
+  });
+
+  it("uses the Postgres inbox reader when CRM_DB_BACKEND is postgres", async () => {
+    process.env.CRM_DB_BACKEND = "postgres";
+    getPostgresInboxMock.mockResolvedValue({
+      threads: [],
+      total: 0,
+      limit: 25,
+      offset: 5,
+      sender: "person",
+    });
+
+    const res = await GET(new Request("http://localhost/api/crm/inbox?sender=person&limit=25&offset=5&q=solar"));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      threads: [],
+      total: 0,
+      limit: 25,
+      offset: 5,
+      sender: "person",
+    });
+    expect(getPostgresInboxMock).toHaveBeenCalledWith({
+      search: "solar",
+      senderFilter: "person",
+      personId: null,
+      limit: 25,
+      offset: 5,
+    });
+    expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
+    expect(safeQueryMock).not.toHaveBeenCalled();
+  });
+});

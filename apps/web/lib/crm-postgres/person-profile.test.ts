@@ -1,0 +1,49 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getPostgresPersonProfile } from "./person-profile";
+
+const { queryPgMock } = vi.hoisted(() => ({
+  queryPgMock: vi.fn(),
+}));
+
+vi.mock("../postgres", () => ({
+  queryPg: queryPgMock,
+}));
+
+describe("getPostgresPersonProfile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads Notes from custom field values for CRM profile pages", async () => {
+    queryPgMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("from crm_people")) {
+        return [
+          {
+            id: "gog:person:ari.sylafeta@gmail.com",
+            name: "Ari Sylafeta",
+            email: null,
+            company_id: null,
+            phone: null,
+            status: null,
+            source: null,
+            strength_score: null,
+            last_interaction_at: null,
+            job_title: null,
+            linkedin_url: null,
+            avatar_url: null,
+            notes: sql.includes("crm_custom_field_values")
+              ? "Typeform submission - Buyer Sourcing Criteria"
+              : null,
+            created_at: null,
+            updated_at: null,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const profile = await getPostgresPersonProfile("gog:person:ari.sylafeta@gmail.com");
+
+    expect(profile?.person.notes).toBe("Typeform submission - Buyer Sourcing Criteria");
+  });
+});
