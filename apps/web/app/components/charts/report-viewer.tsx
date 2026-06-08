@@ -152,8 +152,8 @@ export function ReportViewer({ config: propConfig, reportPath }: ReportViewerPro
             }),
           });
 
-          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
             setPanelData((prev) => ({
               ...prev,
               [panel.id]: {
@@ -166,6 +166,7 @@ export function ReportViewer({ config: propConfig, reportPath }: ReportViewerPro
             return;
           }
 
+          const data = await res.json();
           setPanelData((prev) => ({
             ...prev,
             [panel.id]: {

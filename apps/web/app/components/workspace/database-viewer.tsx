@@ -232,10 +232,11 @@ export function DatabaseViewer({ dbPath, filename }: DatabaseViewerProps) {
         const res = await fetch(
           `/api/workspace/db/introspect?path=${encodeURIComponent(dbPath)}`,
         );
-        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
           throw new Error(data.error || `HTTP ${res.status}`);
         }
+        const data = await res.json();
         if (!cancelled) {
           if (data.duckdb_available === false) {
             setDuckdbAvailable(false);

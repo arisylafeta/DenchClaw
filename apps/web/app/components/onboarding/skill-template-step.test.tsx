@@ -41,8 +41,8 @@ describe("SkillTemplateStep", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: /CRM Contact Enricher/i }),
-    ).toHaveAttribute("aria-pressed", "true");
+      screen.getByRole("article", { name: /CRM Contact Enricher/i }),
+    ).toHaveAttribute("data-selected", "true");
   });
 
   it("saves the selected template through the existing onboarding state contract", async () => {
@@ -69,8 +69,9 @@ describe("SkillTemplateStep", () => {
 
     render(<SkillTemplateStep state={baseState} onAdvance={onAdvance} />);
 
-    await user.click(screen.getByRole("button", { name: /Company Deep Researcher/i }));
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(
+      screen.getByRole("button", { name: /Choose Company Deep Researcher/i }),
+    );
     await user.click(screen.getByRole("button", { name: "Start with this" }));
 
     await waitFor(() => {

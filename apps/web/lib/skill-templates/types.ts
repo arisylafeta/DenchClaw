@@ -11,6 +11,12 @@ export const SKILL_TEMPLATE_IDS = [
   "warm-lead-nurture",
   "proposal-chaser",
   "no-show-recovery",
+  "champion-job-change-tracker",
+  "deck-claim-verifier",
+  "pre-call-diff-brief",
+  "candidate-ghosting-recovery",
+  "month-end-metrics-assembler",
+  "plg-expansion-scout",
   "crm-contact-enricher",
   "duplicate-record-cleaner",
   "relationship-strength-scorer",
@@ -81,19 +87,44 @@ export type SkillTemplateApp = {
   name: string;
 };
 
+export type SkillTemplateQuestionOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type SkillTemplateInterviewQuestion = {
+  id: string;
+  prompt: string;
+  required: boolean;
+  allowMultiple?: boolean;
+  options?: readonly SkillTemplateQuestionOption[];
+  freeformHint?: string;
+};
+
 export type SkillTemplate = {
   id: SkillTemplateId;
   title: string;
   summary: string;
   category: SkillTemplateCategory;
   outcome: string;
+  userUseCase: string;
   personas: readonly SkillTemplatePersona[];
   requiredApps: readonly SkillTemplateApp[];
+  suggestedApps: readonly SkillTemplateApp[];
   triggerModes: readonly SkillTemplateTriggerMode[];
   autonomy: SkillTemplateAutonomy;
-  interviewTopics: readonly string[];
+  interviewQuestions: readonly SkillTemplateInterviewQuestion[];
   skillInstructions: readonly string[];
+  activityLogInstructions: readonly string[];
   buildPrompt: () => string;
+};
+
+export type SkillTemplateDefinitionInput = Omit<
+  SkillTemplate,
+  "buildPrompt" | "suggestedApps"
+> & {
+  suggestedApps?: readonly SkillTemplateApp[];
 };
 
 export type SkillTemplateDefinition = Omit<SkillTemplate, "buildPrompt">;

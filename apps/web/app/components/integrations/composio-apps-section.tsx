@@ -20,6 +20,7 @@ import {
   denchIntegrationsBrand,
   formatDenchIntegrationsStatusError,
 } from "@/lib/dench-integrations-brand";
+import { readJsonByStatus } from "@/lib/http-response";
 
 const FEATURED_SLUGS = [
   "gmail",
@@ -214,14 +215,16 @@ export function ComposioAppsSection({
     if (params?.limit) query.set("limit", String(params.limit));
     const suffix = query.toString();
     const response = await fetch(`/api/composio/toolkits${suffix ? `?${suffix}` : ""}`);
-    const payload = (await response.json().catch(() => ({}))) as
-      ComposioToolkitsResponse & { error?: string };
-    if (!response.ok) {
+    const result = await readJsonByStatus<ComposioToolkitsResponse, { error?: string }>(
+      response,
+      {},
+    );
+    if (!result.ok) {
       throw new Error(
-        payload.error ?? `Failed to load apps (${response.status})`,
+        result.data.error ?? `Failed to load apps (${response.status})`,
       );
     }
-    return extractComposioToolkits(payload);
+    return extractComposioToolkits(result.data);
   }, []);
 
   const fetchMcpStatus = useCallback(async (
@@ -612,14 +615,15 @@ export function ComposioAppsSection({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "repair_mcp" }),
       });
-      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
         setStatusError(
           (payload as { error?: string }).error
             ?? formatDenchIntegrationsStatusError("update"),
         );
         return;
       }
+      const payload = await response.json();
       setMcpStatus(payload as ComposioMcpStatus);
     } catch (err) {
       setStatusError(

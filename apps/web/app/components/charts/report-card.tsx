@@ -113,14 +113,15 @@ export function ReportCard({ config }: ReportCardProps) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sql: panel.sql }),
           });
-          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
             setPanelData((prev) => ({
               ...prev,
               [panel.id]: { rows: [], loading: false, error: data.error || `HTTP ${res.status}` },
             }));
             return;
           }
+          const data = await res.json();
           setPanelData((prev) => ({
             ...prev,
             [panel.id]: { rows: data.rows ?? [], loading: false },

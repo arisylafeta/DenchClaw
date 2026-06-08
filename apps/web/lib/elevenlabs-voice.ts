@@ -1,6 +1,7 @@
 import {
   buildDenchGatewayApiBaseUrl,
 } from "../../../src/cli/dench-cloud";
+import { readJsonByStatus } from "@/lib/http-response";
 
 const DEFAULT_TTS_MODEL_ID = "eleven_multilingual_v2";
 const DEFAULT_STT_MODEL_ID = "scribe_v2";
@@ -198,17 +199,20 @@ export async function transcribeElevenLabsAudio(params: {
     body,
   });
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
+  const result = await readJsonByStatus<unknown, unknown | null>(
+    response,
+    null,
+  );
+  if (!result.ok) {
     throw new Error(
-      readString(asRecord(payload)?.detail)
-      ?? readString(asRecord(payload)?.error)
-      ?? readString(asRecord(payload)?.message)
+      readString(asRecord(result.data)?.detail)
+      ?? readString(asRecord(result.data)?.error)
+      ?? readString(asRecord(result.data)?.message)
       ?? `Request failed (${response.status}).`,
     );
   }
 
-  const text = extractTranscriptText(payload);
+  const text = extractTranscriptText(result.data);
   if (!text) {
     throw new Error("Transcription completed without any text.");
   }

@@ -154,10 +154,11 @@ export function PersonProfile({
         setData(null);
         return;
       }
-      const next = (await res.json().catch(() => ({}))) as PersonResponse & { error?: string };
       if (!res.ok) {
+        const next = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(next.error ?? `HTTP ${res.status}`);
       }
+      const next = (await res.json()) as PersonResponse;
       setData(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load person.");

@@ -10,6 +10,12 @@ import { staleThreadFollowUpAgent } from "./skill-templates/stale-thread-follow-
 import { warmLeadNurture } from "./skill-templates/warm-lead-nurture";
 import { proposalChaser } from "./skill-templates/proposal-chaser";
 import { noShowRecovery } from "./skill-templates/no-show-recovery";
+import { championJobChangeTracker } from "./skill-templates/champion-job-change-tracker";
+import { deckClaimVerifier } from "./skill-templates/deck-claim-verifier";
+import { preCallDiffBrief } from "./skill-templates/pre-call-diff-brief";
+import { candidateGhostingRecovery } from "./skill-templates/candidate-ghosting-recovery";
+import { monthEndMetricsAssembler } from "./skill-templates/month-end-metrics-assembler";
+import { plgExpansionScout } from "./skill-templates/plg-expansion-scout";
 import { crmContactEnricher } from "./skill-templates/crm-contact-enricher";
 import { duplicateRecordCleaner } from "./skill-templates/duplicate-record-cleaner";
 import { relationshipStrengthScorer } from "./skill-templates/relationship-strength-scorer";
@@ -53,7 +59,9 @@ export {
   type SkillTemplateAutonomy,
   type SkillTemplateCategory,
   type SkillTemplateId,
+  type SkillTemplateInterviewQuestion,
   type SkillTemplatePersona,
+  type SkillTemplateQuestionOption,
   type SkillTemplateTriggerMode,
 } from "./skill-templates/types";
 
@@ -70,6 +78,12 @@ const TEMPLATE_DEFINITIONS: readonly SkillTemplateDefinition[] = [
   warmLeadNurture,
   proposalChaser,
   noShowRecovery,
+  championJobChangeTracker,
+  deckClaimVerifier,
+  preCallDiffBrief,
+  candidateGhostingRecovery,
+  monthEndMetricsAssembler,
+  plgExpansionScout,
   crmContactEnricher,
   duplicateRecordCleaner,
   relationshipStrengthScorer,

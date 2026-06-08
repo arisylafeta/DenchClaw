@@ -6,7 +6,7 @@ import type { SkillTemplate } from "@/lib/skill-templates";
 type SkillTemplateCardProps = {
   template: SkillTemplate;
   selected: boolean;
-  onSelect: () => void;
+  onUse: () => void;
   actionLabel?: string;
 };
 
@@ -38,15 +38,16 @@ function RollingArrow({ size = 14 }: { size?: number }) {
 export function SkillTemplateCard({
   template,
   selected,
-  onSelect,
+  onUse,
   actionLabel = "Use",
 }: SkillTemplateCardProps) {
+  const useLabel = selected ? "Chosen" : actionLabel;
+
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className="group/template-card relative flex h-full min-h-[208px] w-full flex-col rounded-2xl border p-5 text-left transition-[border-color,box-shadow,transform,background-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+    <article
+      aria-label={template.title}
+      data-selected={selected ? "true" : undefined}
+      className="group/template-card relative flex h-full min-h-[208px] w-full flex-col rounded-2xl border p-5 text-left transition-[border-color,box-shadow,transform,background-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-sm"
       style={{
         borderColor: selected ? "var(--color-accent)" : "var(--color-border)",
         background: selected
@@ -105,18 +106,26 @@ export function SkillTemplateCard({
           ))}
         </div>
 
-        <span
-          className="group/template-action flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold opacity-100 shadow-sm transition-[border-color,color,opacity] md:opacity-0 md:group-hover/template-card:opacity-100"
+        <button
+          type="button"
+          onClick={onUse}
+          disabled={selected}
+          aria-label={`${useLabel} ${template.title}`}
+          className={`group/template-action flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold shadow-sm transition-[border-color,color,opacity] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-default ${
+            selected
+              ? "opacity-100"
+              : "opacity-100 md:opacity-0 md:group-hover/template-card:opacity-100"
+          }`}
           style={{
             borderColor: "var(--color-border)",
             background: "var(--color-background)",
             color: selected ? "var(--color-accent)" : "var(--color-text-muted)",
           }}
         >
-          {selected ? "Chosen" : actionLabel}
+          {useLabel}
           <RollingArrow />
-        </span>
+        </button>
       </div>
-    </button>
+    </article>
   );
 }

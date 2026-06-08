@@ -236,7 +236,7 @@ export async function executeComposioTool<T = unknown>(
     }
 
     if (response.ok) {
-      const data = (await response.json().catch(() => null)) as T;
+      const data = (await response.json()) as T;
       return {
         data,
         retries: attempt,

@@ -11,12 +11,19 @@ function readError(data: unknown): string | undefined {
 }
 
 async function readResponseBody(res: Response): Promise<unknown> {
-  if (typeof res.text !== "function" && typeof res.json === "function") {
+  if (typeof res.json === "function") {
     try {
       return (await res.json()) as unknown;
     } catch {
-      return {};
+      if (!res.ok) {
+        return {};
+      }
+      throw new Error("Expected a JSON response.");
     }
+  }
+
+  if (typeof res.text !== "function") {
+    return {};
   }
 
   const text = await res.text();

@@ -11,6 +11,7 @@ import {
 	type EnrichmentCategory,
 	type EnrichmentColumnDef,
 } from "@/lib/enrichment-columns";
+import { readJsonByStatus } from "@/lib/http-response";
 import {
 	DropdownMenu,
 	DropdownMenuTrigger,
@@ -739,18 +740,21 @@ export function AddColumnPopover({
 				body: JSON.stringify(body),
 			});
 
-			const result = await res.json().catch(() => ({ error: "Failed" }));
-			if (!res.ok) {
-				setError(result.error ?? "Failed to create enrichment field");
+			const result = await readJsonByStatus<
+				{ fieldId?: string },
+				{ error?: string }
+			>(res, { error: "Failed" });
+			if (!result.ok) {
+				setError(result.data.error ?? "Failed to create enrichment field");
 				return;
 			}
 
 			handleClose();
 			onCreated();
 
-			if (onEnrichmentStartRef.current && result.fieldId) {
+			if (onEnrichmentStartRef.current && result.data.fieldId) {
 				onEnrichmentStartRef.current({
-					fieldId: result.fieldId,
+					fieldId: result.data.fieldId,
 					fieldName: selectedEnrichCol.label,
 					apolloPath: selectedEnrichCol.apolloPath,
 					category: selectedEnrichCol.category,
