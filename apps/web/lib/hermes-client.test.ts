@@ -8,6 +8,10 @@ const config: HermesConfig = {
   model: "hermes-agent",
 };
 
+function sseBody(...events: Array<Record<string, unknown>>): string {
+  return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+}
+
 async function readSseEvents(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -19,7 +23,10 @@ async function readSseEvents(stream: ReadableStream<Uint8Array>) {
     const text = decoder.decode(value, { stream: true });
     for (const line of text.split("\n")) {
       if (line.startsWith("data: ")) {
-        events.push(JSON.parse(line.slice(6)));
+        const json = line.slice(6).trim();
+        if (json && json !== "[DONE]") {
+          events.push(JSON.parse(json));
+        }
       }
     }
   }
@@ -44,10 +51,13 @@ describe("createHermesChatStream", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
-      if (url.endsWith("/v1/runs/run_123")) {
+      if (url.includes("/v1/runs/run_123/events")) {
         return new Response(
-          JSON.stringify({ run_id: "run_123", status: "completed", output: "done" }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          sseBody(
+            { event: "message.delta", delta: "done" },
+            { event: "run.completed", output: "done" },
+          ),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
         );
       }
       return new Response("", { status: 404 });
@@ -79,7 +89,7 @@ describe("createHermesChatStream", () => {
     });
   });
 
-  it("returns UI stream text events when the Hermes run completes", async () => {
+  it("streams text deltas from Hermes SSE events", async () => {
     globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/v1/runs") && init?.method === "POST") {
         return new Response(
@@ -87,10 +97,14 @@ describe("createHermesChatStream", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
-      if (url.endsWith("/v1/runs/run_456")) {
+      if (url.includes("/v1/runs/run_456/events")) {
         return new Response(
-          JSON.stringify({ run_id: "run_456", status: "completed", output: "Hi there" }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          sseBody(
+            { event: "message.delta", delta: "Hello" },
+            { event: "message.delta", delta: " world" },
+            { event: "run.completed", output: "Hello world" },
+          ),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
         );
       }
       return new Response("", { status: 404 });
@@ -104,9 +118,94 @@ describe("createHermesChatStream", () => {
 
     const events = await readSseEvents(stream);
     expect(events).toEqual([
-      { type: "text-start", id: "run_456" },
-      { type: "text-delta", id: "run_456", delta: "Hi there" },
-      { type: "text-end", id: "run_456" },
+      { type: "text-start", id: expect.any(String) },
+      { type: "text-delta", id: expect.any(String), delta: "Hello" },
+      { type: "text-delta", id: expect.any(String), delta: " world" },
+      { type: "text-end", id: expect.any(String) },
+      { type: "finish" },
+    ]);
+    // All text events share the same id
+    const textId = events[0].id;
+    expect(events[1].id).toBe(textId);
+    expect(events[2].id).toBe(textId);
+    expect(events[3].id).toBe(textId);
+  });
+
+  it("streams tool calls from Hermes SSE events", async () => {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/runs")) {
+        return new Response(
+          JSON.stringify({ run_id: "run_tools", status: "started" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/v1/runs/run_tools/events")) {
+        return new Response(
+          sseBody(
+            { event: "tool.started", tool: "exa_search", preview: "test query" },
+            { event: "tool.completed", tool: "exa_search", duration: 0.5, error: false },
+            { event: "message.delta", delta: "Found results" },
+            { event: "run.completed", output: "Found results" },
+          ),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+
+    const stream = await createHermesChatStream({
+      sessionKey: "sess_tools",
+      message: "search for test",
+      config,
+    });
+
+    const events = await readSseEvents(stream);
+    expect(events).toEqual([
+      { type: "tool-input-start", toolCallId: expect.any(String), toolName: "exa_search" },
+      { type: "tool-input-available", toolCallId: expect.any(String), toolName: "exa_search", input: "test query" },
+      { type: "tool-output-available", toolCallId: expect.any(String), output: "exa_search" },
+      { type: "text-start", id: expect.any(String) },
+      { type: "text-delta", id: expect.any(String), delta: "Found results" },
+      { type: "text-end", id: expect.any(String) },
+      { type: "finish" },
+    ]);
+  });
+
+  it("streams reasoning from Hermes SSE events", async () => {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/runs")) {
+        return new Response(
+          JSON.stringify({ run_id: "run_think", status: "started" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/v1/runs/run_think/events")) {
+        return new Response(
+          sseBody(
+            { event: "reasoning.available", text: "Let me think..." },
+            { event: "message.delta", delta: "Here is my answer" },
+            { event: "run.completed", output: "Here is my answer" },
+          ),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+
+    const stream = await createHermesChatStream({
+      sessionKey: "sess_think",
+      message: "think about this",
+      config,
+    });
+
+    const events = await readSseEvents(stream);
+    expect(events).toEqual([
+      { type: "reasoning-start", id: expect.any(String) },
+      { type: "reasoning-delta", id: expect.any(String), delta: "Let me think..." },
+      { type: "reasoning-end", id: expect.any(String) },
+      { type: "text-start", id: expect.any(String) },
+      { type: "text-delta", id: expect.any(String), delta: "Here is my answer" },
+      { type: "text-end", id: expect.any(String) },
       { type: "finish" },
     ]);
   });
@@ -163,15 +262,18 @@ describe("createHermesChatStream", () => {
     expect(events[0].type).toBe("error");
   });
 
-  it("polls run status and emits UI stream text events", async () => {
+  it("calls the events endpoint for streaming", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/v1/runs") && init?.method === "POST") {
         return new Response(JSON.stringify({ run_id: "run_1", status: "started" }), { status: 202 });
       }
-      if (url.endsWith("/v1/runs/run_1")) {
+      if (url.includes("/v1/runs/run_1/events")) {
         return new Response(
-          JSON.stringify({ run_id: "run_1", status: "completed", output: "Hello world!" }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          sseBody(
+            { event: "message.delta", delta: "Hello world!" },
+            { event: "run.completed", output: "Hello world!" },
+          ),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
         );
       }
       return new Response("", { status: 404 });
@@ -185,26 +287,14 @@ describe("createHermesChatStream", () => {
     });
     const events = await readSseEvents(stream);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8642/v1/runs/run_1",
+      "http://127.0.0.1:8642/v1/runs/run_1/events",
       expect.objectContaining({ method: "GET" }),
     );
     expect(events).toEqual([
-      { type: "text-start", id: "run_1" },
-      { type: "text-delta", id: "run_1", delta: "Hello world!" },
-      { type: "text-end", id: "run_1" },
+      { type: "text-start", id: expect.any(String) },
+      { type: "text-delta", id: expect.any(String), delta: "Hello world!" },
+      { type: "text-end", id: expect.any(String) },
       { type: "finish" },
     ]);
   });
 });
-
-async function readStreamText(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let result = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    result += decoder.decode(value, { stream: true });
-  }
-  return result;
-}

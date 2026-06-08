@@ -19,43 +19,22 @@ export function errorStream(message: string, status?: number): ReadableStream<Ui
   });
 }
 
-type HermesRunResult = {
-  run_id: string;
-  status: string;
+type HermesSseEvent = {
+  event: string;
+  run_id?: string;
+  timestamp?: number;
+  delta?: string;
+  text?: string;
+  tool?: string;
+  preview?: string;
+  duration?: number;
+  error?: boolean;
   output?: string;
+  usage?: Record<string, unknown>;
 };
 
-async function pollRunCompletion(
-  config: HermesConfig,
-  runId: string,
-  sessionKey: string,
-): Promise<HermesRunResult> {
-  const maxAttempts = 60;
-  const delayMs = 1000;
-
-  for (let i = 0; i < maxAttempts; i++) {
-    const res = await fetch(`${config.baseUrl}/v1/runs/${encodeURIComponent(runId)}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "X-Hermes-Session-Key": sessionKey,
-      },
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Hermes run status failed: ${res.status} ${body}`.trim());
-    }
-
-    const run = (await res.json()) as HermesRunResult;
-    if (run.status === "completed" || run.status === "failed") {
-      return run;
-    }
-
-    await new Promise((r) => setTimeout(r, delayMs));
-  }
-
-  throw new Error("Hermes run timed out");
+function nextId(prefix: string): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export async function createHermesChatStream(
@@ -69,8 +48,19 @@ export async function createHermesChatStream(
 
   const stream = new ReadableStream({
     async start(controller) {
+      const encoder = new TextEncoder();
+      let textId: string | null = null;
+      let reasoningId: string | null = null;
+      let toolCallId: string | null = null;
+      let finished = false;
+
+      function emit(data: Record<string, unknown>) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      }
+
       try {
-        const response = await fetch(`${config.baseUrl}/v1/runs`, {
+        // 1. Create the run
+        const runRes = await fetch(`${config.baseUrl}/v1/runs`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
@@ -84,42 +74,162 @@ export async function createHermesChatStream(
           }),
         });
 
-        if (!response.ok) {
-          const body = await response.text();
-          controller.enqueue(
-            encodeSse({ type: "error", errorText: body, status: response.status }),
-          );
+        if (!runRes.ok) {
+          const body = await runRes.text();
+          emit({ type: "error", errorText: body, status: runRes.status });
           controller.close();
           return;
         }
 
-        const data = (await response.json()) as { run_id: string; status: string };
+        const runData = (await runRes.json()) as { run_id: string; status: string };
+        const runId = runData.run_id;
 
-        if (!data.run_id) {
-          controller.enqueue(encodeSse({ type: "error", errorText: "No run ID returned" }));
+        if (!runId) {
+          emit({ type: "error", errorText: "No run ID returned" });
           controller.close();
           return;
         }
 
-        try {
-          const runResult = await pollRunCompletion(config, data.run_id, sessionKey);
-          if (runResult.output) {
-            controller.enqueue(encodeSse({ type: "text-start", id: data.run_id }));
-            controller.enqueue(
-              encodeSse({ type: "text-delta", id: data.run_id, delta: runResult.output }),
-            );
-            controller.enqueue(encodeSse({ type: "text-end", id: data.run_id }));
+        // 2. Stream events from /v1/runs/{id}/events
+        const eventsRes = await fetch(`${config.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "X-Hermes-Session-Key": sessionKey,
+          },
+        });
+
+        if (!eventsRes.ok) {
+          const body = await eventsRes.text();
+          emit({ type: "error", errorText: `Events stream failed: ${body}`, status: eventsRes.status });
+          controller.close();
+          return;
+        }
+
+        const reader = eventsRes.body?.getReader();
+        if (!reader) {
+          emit({ type: "error", errorText: "No response body" });
+          controller.close();
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete SSE lines
+          let newlineIdx: number;
+          while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, newlineIdx).trim();
+            buffer = buffer.slice(newlineIdx + 1);
+
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const event = JSON.parse(jsonStr) as HermesSseEvent;
+
+              switch (event.event) {
+                case "message.delta": {
+                  if (event.delta) {
+                    // Close reasoning block before starting text
+                    if (reasoningId) {
+                      emit({ type: "reasoning-end", id: reasoningId });
+                      reasoningId = null;
+                    }
+                    if (!textId) {
+                      textId = nextId("text");
+                      emit({ type: "text-start", id: textId });
+                    }
+                    emit({ type: "text-delta", id: textId, delta: event.delta });
+                  }
+                  break;
+                }
+
+                case "reasoning.available": {
+                  if (event.text) {
+                    if (!reasoningId) {
+                      reasoningId = nextId("reasoning");
+                      emit({ type: "reasoning-start", id: reasoningId });
+                    }
+                    emit({ type: "reasoning-delta", id: reasoningId, delta: event.text });
+                  }
+                  break;
+                }
+
+                case "tool.started": {
+                  // Close any open text block before tool call
+                  if (textId) {
+                    emit({ type: "text-end", id: textId });
+                    textId = null;
+                  }
+                  toolCallId = nextId("tool");
+                  emit({
+                    type: "tool-input-start",
+                    toolCallId,
+                    toolName: event.tool ?? "unknown",
+                  });
+                  if (event.preview) {
+                    emit({
+                      type: "tool-input-available",
+                      toolCallId,
+                      toolName: event.tool ?? "unknown",
+                      input: event.preview,
+                    });
+                  }
+                  break;
+                }
+
+                case "tool.completed": {
+                  if (toolCallId) {
+                    emit({
+                      type: event.error ? "tool-output-error" : "tool-output-available",
+                      toolCallId,
+                      output: event.output ?? event.tool ?? "completed",
+                    });
+                    toolCallId = null;
+                  }
+                  break;
+                }
+
+                case "run.completed": {
+                  // Close any open blocks
+                  if (textId) {
+                    emit({ type: "text-end", id: textId });
+                    textId = null;
+                  }
+                  if (reasoningId) {
+                    emit({ type: "reasoning-end", id: reasoningId });
+                    reasoningId = null;
+                  }
+                  if (!finished) {
+                    finished = true;
+                    emit({ type: "finish" });
+                  }
+                  break;
+                }
+              }
+            } catch {
+              // ignore non-JSON lines
+            }
           }
-          controller.enqueue(encodeSse({ type: "finish" }));
-        } catch (pollErr) {
-          const pollMsg = pollErr instanceof Error ? pollErr.message : "Failed to get run result";
-          controller.enqueue(encodeSse({ type: "error", errorText: pollMsg }));
         }
+
+        // Ensure stream is properly closed
+        if (textId) emit({ type: "text-end", id: textId });
+        if (reasoningId) emit({ type: "reasoning-end", id: reasoningId });
+        if (!finished) emit({ type: "finish" });
 
         controller.close();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
-        controller.enqueue(encodeSse({ type: "error", errorText: msg }));
+        emit({ type: "error", errorText: msg });
         controller.close();
       }
     },
