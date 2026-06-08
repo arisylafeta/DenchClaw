@@ -9,6 +9,8 @@ import {
 	buildChatImageHydrationErrorMessage,
 	hydrateMessageImageAttachments,
 } from "@/lib/chat-image-attachments";
+import { resolveAgentBackend, resolveHermesConfig } from "@/lib/agent-backend";
+import { createHermesChatStream } from "@/lib/hermes-client";
 
 export const runtime = "nodejs";
 
@@ -28,6 +30,24 @@ export async function POST(req: Request) {
 	const imageAttachments = imageHydration.attachments.length > 0
 		? imageHydration.attachments
 		: undefined;
+
+	const backend = resolveAgentBackend();
+	if (backend === "hermes") {
+		const stream = await createHermesChatStream({
+			sessionKey,
+			message,
+			config: resolveHermesConfig(),
+		});
+
+		return new Response(stream, {
+			headers: {
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache, no-transform",
+				Connection: "keep-alive",
+				"X-Agent-Backend": "hermes",
+			},
+		});
+	}
 
 	let run = getActiveRun(sessionKey);
 	if (run?.status === "running") {
