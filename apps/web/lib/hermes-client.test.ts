@@ -48,7 +48,7 @@ describe("createHermesChatStream", () => {
     });
     globalThis.fetch = fetchSpy as typeof fetch;
 
-    const stream = createHermesChatStream({
+    const stream = await createHermesChatStream({
       sessionKey: "sess_abc",
       message: "Hello Hermes",
       config,
@@ -75,15 +75,6 @@ describe("createHermesChatStream", () => {
   });
 
   it("returns an SSE stream that emits a start event when run starts", async () => {
-    vi.fn(async (url: string) => {
-      if (url.endsWith("/v1/runs")) {
-        return new Response(
-          JSON.stringify({ run_id: "run_456", status: "started" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      return new Response("", { status: 200, headers: { "Content-Type": "text/event-stream" } });
-    });
     globalThis.fetch = vi.fn(async (url: string) => {
       if (url.endsWith("/v1/runs")) {
         return new Response(
@@ -94,7 +85,7 @@ describe("createHermesChatStream", () => {
       return new Response("", { status: 200, headers: { "Content-Type": "text/event-stream" } });
     }) as typeof fetch;
 
-    const stream = createHermesChatStream({
+    const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
       config,
@@ -114,7 +105,7 @@ describe("createHermesChatStream", () => {
       ),
     );
 
-    const stream = createHermesChatStream({
+    const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
       config,
@@ -122,7 +113,7 @@ describe("createHermesChatStream", () => {
 
     const events = await readSseEvents(stream);
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("hermes-error");
+    expect(events[0].type).toBe("error");
     expect(events[0].status).toBe(401);
   });
 
@@ -130,15 +121,15 @@ describe("createHermesChatStream", () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy as typeof fetch;
 
-    const stream = createHermesChatStream({
+    const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
-      config: { ...config, apiKey: "" },
+      config: { ...config, apiKey: null },
     });
 
     const events = await readSseEvents(stream);
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("hermes-error");
+    expect(events[0].type).toBe("error");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -147,7 +138,7 @@ describe("createHermesChatStream", () => {
       new Error("Network error"),
     );
 
-    const stream = createHermesChatStream({
+    const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
       config,
@@ -155,7 +146,7 @@ describe("createHermesChatStream", () => {
 
     const events = await readSseEvents(stream);
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("hermes-error");
+    expect(events[0].type).toBe("error");
   });
 
   it("proxies Hermes run events after creating a run", async () => {

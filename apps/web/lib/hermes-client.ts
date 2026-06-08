@@ -7,13 +7,13 @@ export type HermesChatStreamParams = {
 };
 
 export function encodeSse(data: Record<string, unknown>): Uint8Array {
-  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n`);
+  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 export function errorStream(message: string, status?: number): ReadableStream<Uint8Array> {
   return new ReadableStream({
     start(controller) {
-      controller.enqueue(encodeSse({ type: "hermes-error", message, status }));
+      controller.enqueue(encodeSse({ type: "error", errorText: message, status }));
       controller.close();
     },
   });
@@ -26,7 +26,7 @@ function mapHermesEvent(raw: Record<string, unknown>): Record<string, unknown> |
   if (raw.type === "response.completed" || raw.type === "run.completed") {
     return { type: "finish" };
   }
-  if (typeof raw.type === "string" && raw.type.includes("tool")) {
+  if (typeof raw.type === "string" && (raw.type.startsWith("tool.") || raw.type === "tool")) {
     return { type: "tool-progress", data: raw };
   }
   return null;
@@ -54,9 +54,9 @@ function parseSseDataChunks(text: string): Record<string, unknown>[] {
   return chunks;
 }
 
-export function createHermesChatStream(
+export async function createHermesChatStream(
   params: HermesChatStreamParams,
-): ReadableStream<Uint8Array> {
+): Promise<ReadableStream<Uint8Array>> {
   const { sessionKey, message, config } = params;
 
   if (!config.apiKey) {
@@ -83,7 +83,7 @@ export function createHermesChatStream(
         if (!response.ok) {
           const body = await response.text();
           controller.enqueue(
-            encodeSse({ type: "hermes-error", status: response.status, message: body }),
+            encodeSse({ type: "error", errorText: body, status: response.status }),
           );
           controller.close();
           return;
@@ -95,7 +95,7 @@ export function createHermesChatStream(
         );
 
         if (!data.run_id) {
-          controller.enqueue(encodeSse({ type: "hermes-error", message: "No run ID returned" }));
+          controller.enqueue(encodeSse({ type: "error", errorText: "No run ID returned" }));
           controller.close();
           return;
         }
@@ -112,7 +112,7 @@ export function createHermesChatStream(
           if (!eventsResponse.ok) {
             const body = await eventsResponse.text();
             controller.enqueue(
-              encodeSse({ type: "hermes-error", status: eventsResponse.status, message: body }),
+              encodeSse({ type: "error", errorText: body, status: eventsResponse.status }),
             );
             controller.close();
             return;
@@ -129,13 +129,13 @@ export function createHermesChatStream(
           }
         } catch (eventsErr) {
           const eventsMsg = eventsErr instanceof Error ? eventsErr.message : "Failed to fetch events";
-          controller.enqueue(encodeSse({ type: "hermes-error", message: eventsMsg }));
+          controller.enqueue(encodeSse({ type: "error", errorText: eventsMsg }));
         }
 
         controller.close();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
-        controller.enqueue(encodeSse({ type: "hermes-error", message: msg }));
+        controller.enqueue(encodeSse({ type: "error", errorText: msg }));
         controller.close();
       }
     },

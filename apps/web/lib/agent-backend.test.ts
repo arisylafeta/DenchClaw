@@ -58,7 +58,7 @@ describe("resolveHermesConfig", () => {
     const config = resolveHermesConfig();
     expect(config).toEqual({
       baseUrl: "http://127.0.0.1:8642",
-      apiKey: "",
+      apiKey: null,
       model: "hermes-agent",
     });
   });
@@ -87,9 +87,9 @@ describe("resolveHermesConfig", () => {
     expect(config.apiKey).toBe("sk-test-key-123");
   });
 
-  it("defaults apiKey to empty string when not set", () => {
+  it("defaults apiKey to null when not set", () => {
     const config = resolveHermesConfig();
-    expect(config.apiKey).toBe("");
+    expect(config.apiKey).toBeNull();
   });
 
   it("reads HERMES_MODEL from env", () => {

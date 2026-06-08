@@ -18,7 +18,7 @@ vi.mock("@/lib/agent-backend", () => ({
 }));
 
 vi.mock("@/lib/hermes-client", () => ({
-	createHermesChatStream: vi.fn(() => {
+	createHermesChatStream: vi.fn(async () => {
 		const encoder = new TextEncoder();
 		return new ReadableStream({
 			start(controller) {
@@ -65,7 +65,7 @@ describe("POST /api/gateway/chat", () => {
 
 		const { createHermesChatStream } = await import("@/lib/hermes-client");
 		vi.mocked(createHermesChatStream).mockReset();
-		vi.mocked(createHermesChatStream).mockImplementation(() => {
+		vi.mocked(createHermesChatStream).mockImplementation(async () => {
 			const encoder = new TextEncoder();
 			return new ReadableStream({
 				start(controller) {
