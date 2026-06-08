@@ -138,7 +138,6 @@ export async function createHermesChatStream(
               switch (event.event) {
                 case "message.delta": {
                   if (event.delta) {
-                    // Close reasoning block before starting text
                     if (reasoningId) {
                       emit({ type: "reasoning-end", id: reasoningId });
                       reasoningId = null;
