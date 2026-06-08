@@ -266,5 +266,9 @@ describe("SetupStep", () => {
         skipping: "gmail",
       },
     ]);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Skip" })).toBeEnabled();
+    });
   });
 });

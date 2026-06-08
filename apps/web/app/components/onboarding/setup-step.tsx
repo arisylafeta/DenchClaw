@@ -656,10 +656,11 @@ export function SetupStep({
       // Close the dialog on failure so the inline error banner under the
       // setup cards becomes visible — otherwise the dialog occludes it.
       setSkipGmailDialogOpen(false);
-      setSkippingGmail(false);
       setToolkitError(
         err instanceof Error ? err.message : "Could not skip Gmail.",
       );
+    } finally {
+      setSkippingGmail(false);
     }
   }
 
