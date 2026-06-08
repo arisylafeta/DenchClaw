@@ -58,9 +58,9 @@ function DefaultHeader({ mode }: { mode: SkillTemplateGalleryMode }) {
             "Pick a proven workflow and DenchClaw will open a chat to shape it into your own reusable skill.",
         }
       : {
-          title: "Use your first skill.",
+          title: "What do you want me to do?",
           description:
-            "Pick one concrete workflow. DenchClaw will interview you, then turn your answers into a reusable skill.",
+            "Pick one task. I'll interview you, then turn your answers into a reusable workflow.",
         };
 
   return (
