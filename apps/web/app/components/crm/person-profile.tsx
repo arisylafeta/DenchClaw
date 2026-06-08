@@ -154,11 +154,13 @@ export function PersonProfile({
         setData(null);
         return;
       }
+      const next = (await res.json().catch(() => null)) as (PersonResponse & { error?: string }) | null;
       if (!res.ok) {
-        const next = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(next.error ?? `HTTP ${res.status}`);
+        throw new Error(next?.error ?? `HTTP ${res.status}`);
       }
-      const next = (await res.json()) as PersonResponse;
+      if (!next) {
+        throw new Error("Failed to parse person response.");
+      }
       setData(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load person.");
