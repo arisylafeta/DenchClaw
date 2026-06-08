@@ -58,7 +58,7 @@ function DefaultHeader({ mode }: { mode: SkillTemplateGalleryMode }) {
             "Pick a proven workflow and DenchClaw will open a chat to shape it into your own reusable skill.",
         }
       : {
-          title: "Choose your first skill.",
+          title: "Use your first skill.",
           description:
             "Pick one concrete workflow. DenchClaw will interview you, then turn your answers into a reusable skill.",
         };
@@ -140,7 +140,7 @@ export function SkillTemplateGallery({
         <DefaultHeader mode={mode} />
       )}
 
-      <div className="flex min-h-10 items-center gap-2 overflow-x-auto py-1">
+      <div className="flex min-h-10 items-center gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="group relative shrink-0">
           <FiSearch
             aria-hidden="true"
@@ -174,7 +174,9 @@ export function SkillTemplateGallery({
           className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors"
           style={{
             borderColor:
-              selectedCategory === null ? "var(--color-border)" : "transparent",
+              selectedCategory === null
+                ? "var(--color-border)"
+                : "transparent",
             background:
               selectedCategory === null
                 ? "var(--color-surface-hover)"

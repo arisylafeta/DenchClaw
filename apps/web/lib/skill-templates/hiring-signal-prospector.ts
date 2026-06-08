@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const hiringSignalProspector = defineSkillTemplate({
   id: "hiring-signal-prospector",
@@ -7,7 +7,7 @@ export const hiringSignalProspector = defineSkillTemplate({
   category: "Find Leads",
   outcome: "Tracks hiring patterns, scores companies by pain intensity, enriches decision makers, and logs evidence-backed opportunities.",
   personas: ["Founder", "Sales"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail, externalApps.linkedin],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Can automate",
   userUseCase: "Use this when hiring activity is a buying-intent signal: companies adding sales reps, RevOps, security, support, finance, or other roles that reveal a new operational pain. The skill should find companies hiring for the right jobs, interpret what that implies, identify likely buyers, and turn the signal into CRM-ready prospecting action.",
@@ -71,11 +71,11 @@ export const hiringSignalProspector = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Search public job postings, company career pages, enrichment data, and CRM context for hiring signals that match the requested roles.",
+    "Search public job postings, company career pages, LinkedIn context, Dench-native enrichment, HubSpot/Dench CRM context, uploaded lists, and Gmail history for hiring signals that match the requested roles.",
     "Group related openings by company to detect team-level growth rather than isolated one-off roles.",
     "Interpret job descriptions for buying intent, tool mentions, department priorities, urgency, and timing cues.",
     "Prioritize companies where hiring activity maps directly to the user's product thesis and target buyer.",
-    "Exclude companies already owned by active CRM opportunities unless the user explicitly wants them reviewed.",
+    "Exclude companies already owned by active HubSpot/Dench CRM opportunities or recent Gmail outreach unless the user explicitly wants them reviewed.",
     "Return each prospect with relevant job links, signal interpretation, likely buyer, recommended contact path, and CRM-safe source notes.",
     "For scheduled runs, dedupe against prior findings and only surface new or materially changed hiring signals since the last run.",
   ],

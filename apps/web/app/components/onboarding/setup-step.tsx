@@ -1110,7 +1110,7 @@ function SkipGmailDialog({
             style={{ color: "var(--color-text-muted)" }}
           >
             People, Companies, and calendar sync stay off until you connect
-            Gmail later from Settings. You&apos;ll still choose a starter skill next.
+            Gmail later from Settings. You&apos;ll still use a starter skill next.
           </p>
         </div>
         <div
@@ -1145,7 +1145,7 @@ function SkipGmailDialog({
               (e.currentTarget as HTMLElement).style.opacity = "1";
             }}
           >
-            {submitting ? "Skipping…" : "Yes, choose a starter skill"}
+            {submitting ? "Skipping…" : "Yes, use a starter skill"}
           </button>
         </div>
       </div>

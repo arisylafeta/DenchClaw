@@ -198,7 +198,7 @@ export function SyncStep({
             (e.currentTarget as HTMLElement).style.opacity = "1";
           }}
         >
-          {completing ? "Loading templates…" : "Choose starter skill"}
+          {completing ? "Loading templates…" : "Use starter skill"}
         </button>
       </div>
     </div>

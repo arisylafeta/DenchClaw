@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const companyDeepResearcher = defineSkillTemplate({
   id: "company-deep-researcher",
@@ -8,7 +8,7 @@ export const companyDeepResearcher = defineSkillTemplate({
   outcome: "Builds a sourced company brief with business model, team, market, recent news, risks, and recommended actions.",
   userUseCase: "Use this when a user needs a cited company brief that can support a sales account plan, investor diligence, recruiting context, partnership evaluation, or strategic research. The skill should combine Dench-native CRM, enrichment, web search, and files first, then use connected Gmail, Calendar, Notion, Slack, or LinkedIn context only when relevant and authorized.",
   personas: ["Founder", "Sales", "Investor/BD", "Knowledge Worker"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail, externalApps.linkedin],
   triggerModes: ["manual"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -72,7 +72,7 @@ export const companyDeepResearcher = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use Dench CRM records, native enrichment, web search, and user-provided files as the baseline source set; use connected apps only when they add relevant authorized context.",
+    "Use HubSpot/Dench CRM records, native enrichment, web search, LinkedIn context, Gmail history, and user-provided files as the baseline source set; use other connected apps only when they add relevant authorized context.",
     "Cite every material factual claim, including company size, funding, leadership, customers, pricing, news, market position, and risks.",
     "Prefer primary and high-quality sources such as company websites, filings, official blogs, reputable news, customer evidence, and supplied files.",
     "Do not invent facts; if sources conflict, cite both sides, explain the conflict, and mark the field unresolved.",

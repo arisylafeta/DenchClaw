@@ -8,7 +8,7 @@ export const newsSignalDigest = defineSkillTemplate({
   outcome: "Watches topics, companies, people, and markets, then posts relevant developments with context and next actions.",
   userUseCase: "Use this when a founder, seller, investor, recruiter, or operator needs a manual or scheduled news digest that turns noisy public updates into cited account, market, customer, investor, or hiring signals.",
   personas: ["Founder", "Sales", "Investor/BD", "Knowledge Worker"],
-  requiredApps: [externalApps.slack],
+  requiredApps: [externalApps.hubspot, externalApps.slack],
   triggerModes: ["scheduled", "manual"],
   autonomy: "Can automate",
   interviewQuestions: [
@@ -73,7 +73,7 @@ export const newsSignalDigest = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use web search, Dench CRM records, enrichment, and files to identify relevant news; use connected Slack, Gmail, Notion, Calendar, or LinkedIn only when helpful.",
+    "Use web search, HubSpot/Dench CRM records, enrichment, and files to identify relevant news; use connected Slack, Gmail, Notion, Calendar, or LinkedIn only when helpful.",
     "Cite every news item with source name, title, URL or file reference, publication date, and retrieval date when available.",
     "Rank items by relevance to the chosen scope, recency, credibility, and potential business impact.",
     "Filter duplicate syndications, stale articles, SEO spam, and unsupported rumors unless rumor monitoring is explicitly requested.",

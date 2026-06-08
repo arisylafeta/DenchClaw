@@ -20,6 +20,13 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { resolveDenchClawDir } from "./workspace";
+import { SKILL_TEMPLATE_IDS, type SkillTemplateId } from "./skill-templates/types";
+
+function isValidSkillTemplateId(value: unknown): value is SkillTemplateId {
+  return (
+    typeof value === "string" && (SKILL_TEMPLATE_IDS as readonly string[]).includes(value)
+  );
+}
 
 // ---------------------------------------------------------------------------
 // File names
@@ -91,7 +98,7 @@ export type BackfillProgress = {
 };
 
 export type OnboardingSkillTemplate = {
-  templateId?: string;
+  templateId?: SkillTemplateId;
   selectedAt?: string;
   promptConsumedAt?: string;
 };
@@ -252,7 +259,7 @@ function sanitizeSkillTemplate(input: unknown): OnboardingSkillTemplate | undefi
   }
   const raw = input as Record<string, unknown>;
   const skillTemplate: OnboardingSkillTemplate = {};
-  if (typeof raw.templateId === "string") {
+  if (isValidSkillTemplateId(raw.templateId)) {
     skillTemplate.templateId = raw.templateId;
   }
   if (typeof raw.selectedAt === "string") {

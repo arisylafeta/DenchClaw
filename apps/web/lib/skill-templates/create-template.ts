@@ -16,6 +16,7 @@ export const externalApps = {
 } satisfies Record<string, SkillTemplateApp>;
 
 const customerValidatedInstructions = [
+  "Treat Dench CRM, connected Gmail, connected HubSpot, uploaded files/manual exports, web research, and Dench-native enrichment as available source primitives; only mark a capability unavailable when the specific user data or permission is missing.",
   "Start from the user's current pressure and produce a ranked action queue before any long narrative; if the run produces a brief, cap the first section to the smallest useful skim.",
   "Default external communication and data writes to draft or review unless the skill instructions and the user's answers clearly authorize a narrow automated action.",
   "Attach evidence, confidence, missing-data caveats, and recommended next owner action to every scored lead, risk, cleanup suggestion, follow-up, or brief section.",

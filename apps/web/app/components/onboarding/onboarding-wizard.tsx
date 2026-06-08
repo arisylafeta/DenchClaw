@@ -156,6 +156,7 @@ export function OnboardingWizard({
   // Step 1 is a classic single-column sign-up style screen; steps 2+ use
   // the split-screen with a live preview on the right.
   const isSingleColumn = activeClientStep === "identity";
+  const isTemplateStep = activeClientStep === "skill-template";
 
   // Nielsen's "user control & freedom" — always give the user an escape hatch
   // from a step they no longer want to be on. We only step back client-side
@@ -386,6 +387,8 @@ export function OnboardingWizard({
         className={
           isSingleColumn
             ? "relative min-h-[calc(100vh-4rem)]"
+            : isTemplateStep
+              ? "relative min-h-[calc(100vh-4rem)]"
             : "grid min-h-[calc(100vh-4rem)] grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
         }
       >
@@ -394,6 +397,8 @@ export function OnboardingWizard({
           className={
             isSingleColumn
               ? "relative flex min-h-[calc(100vh-4rem)] items-center justify-center px-6 pb-16 pt-6 sm:px-10"
+              : isTemplateStep
+                ? "flex min-h-[calc(100vh-4rem)] items-start justify-center px-6 pb-16 pt-6 sm:px-10 lg:px-16"
               : "flex items-start justify-center px-6 pb-16 pt-6 sm:px-10 lg:items-center lg:pt-0"
           }
         >
@@ -401,6 +406,8 @@ export function OnboardingWizard({
             className={
               isSingleColumn
                 ? "w-full max-w-[400px]"
+                : isTemplateStep
+                  ? "w-full max-w-[1120px]"
                 : "w-full max-w-[520px]"
             }
           >
@@ -457,7 +464,7 @@ export function OnboardingWizard({
           </div>
         </main>
 
-        {!isSingleColumn && (
+        {!isSingleColumn && !isTemplateStep && (
           <aside
             className="hidden lg:flex"
             style={{ borderLeft: "1px solid var(--color-border)" }}
@@ -558,7 +565,7 @@ function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   // Avoid hydration mismatch: theme is only known after mount.
-  if (!mounted) return <div className="h-9 w-9" />;
+  if (!mounted) {return <div className="h-9 w-9" />;}
   const isDark = resolvedTheme === "dark";
   return (
     <button

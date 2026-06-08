@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const championJobChangeTracker = defineSkillTemplate({
   id: "champion-job-change-tracker",
@@ -9,7 +9,7 @@ export const championJobChangeTracker = defineSkillTemplate({
   userUseCase:
     "Use when a sales, founder, or customer-success owner depends on champions and needs a repeatable way to catch job changes before renewals, expansions, or referrals go cold. The skill should protect the existing account relationship, identify the champion's new company fit, and draft personal follow-up for review.",
   personas: ["Customer Success", "Sales", "Founder"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -65,9 +65,9 @@ export const championJobChangeTracker = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Identify likely champion role changes only when evidence is current and source-backed; separate confirmed changes from weak hints.",
+    "Identify likely champion role changes from HubSpot/Dench CRM contact changes, Gmail bounces or OOO replies, Dench-native enrichment, public profile/web evidence, and uploaded review lists; separate confirmed changes from weak hints.",
     "For the old account, summarize why the champion mattered, open renewal or expansion exposure, likely replacement contacts, and the recommended owner action.",
-    "For the champion's new company, assess fit, timing, account ownership, and relationship context before suggesting outreach.",
+    "For the champion's new company, use enrichment, CRM ownership, prior Gmail relationship history, and public account evidence to assess fit, timing, account ownership, and relationship context before suggesting outreach.",
     "Draft personal follow-up that reads like a relationship note, not a marketing reactivation email, and never auto-send by default.",
     "Avoid implying private knowledge, sensitive employment details, or pressure around the role change.",
     "For scheduled runs, suppress unchanged champion changes and resurface only when risk, fit, or owner action materially changes.",

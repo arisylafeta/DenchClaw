@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const candidateGhostingRecovery = defineSkillTemplate({
   id: "candidate-ghosting-recovery",
@@ -9,7 +9,7 @@ export const candidateGhostingRecovery = defineSkillTemplate({
   userUseCase:
     "Use when a recruiter or founder loses candidates between phone screens, onsite scheduling, offers, or follow-up steps and needs a respectful recovery motion. The skill should detect silence by stage, preserve candidate experience, and keep hiring managers informed without auto-sending sensitive messages.",
   personas: ["Recruiter", "Founder"],
-  requiredApps: [],
+  requiredApps: [externalApps.gmail, externalApps.googleCalendar, externalApps.notion],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -60,7 +60,7 @@ export const candidateGhostingRecovery = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Detect ghosting from stage-specific silence, not one universal timer; include the last candidate touch and expected next step.",
+    "Detect ghosting from stage-specific silence across Dench CRM, Gmail threads, Calendar events, Notion scorecards, and uploaded ATS exports, not one universal timer; include the last candidate touch and expected next step.",
     "Before drafting, summarize candidate context, role stage, recent interaction, likely reason for silence if evidence exists, and recommended owner action.",
     "Keep all candidate-facing messages draft-only by default and never create rejection language unless explicitly requested.",
     "Reference only role-relevant, candidate-provided, or authorized context; avoid pressure, guilt, or assumptions about personal circumstances.",

@@ -253,7 +253,7 @@ describe("SetupStep", () => {
 
     await user.click(await screen.findByRole("button", { name: "Skip" }));
     await user.click(
-      await screen.findByRole("button", { name: "Yes, choose a starter skill" }),
+      await screen.findByRole("button", { name: "Yes, use a starter skill" }),
     );
 
     await waitFor(() => {

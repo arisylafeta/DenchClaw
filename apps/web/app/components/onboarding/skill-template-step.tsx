@@ -3,17 +3,8 @@
 import { useCallback, useState } from "react";
 import { SkillTemplateGallery } from "@/app/components/templates/skill-template-gallery";
 import type { OnboardingState } from "@/lib/denchclaw-state";
-import {
-  SKILL_TEMPLATES,
-  isSkillTemplateId,
-  type SkillTemplateId,
-} from "@/lib/skill-templates";
+import type { SkillTemplateId } from "@/lib/skill-templates";
 import { readOnboardingResponse } from "./response";
-
-function initialTemplateId(state: OnboardingState): SkillTemplateId {
-  const persisted = state.skillTemplate?.templateId;
-  return isSkillTemplateId(persisted) ? persisted : SKILL_TEMPLATES[0].id;
-}
 
 export function SkillTemplateStep({
   state,
@@ -22,13 +13,13 @@ export function SkillTemplateStep({
   state: OnboardingState;
   onAdvance: (next: OnboardingState) => void;
 }) {
-  const [selectedId, setSelectedId] = useState<SkillTemplateId>(() =>
-    initialTemplateId(state),
-  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleContinue = useCallback(async () => {
+  const handleUseTemplate = useCallback(async (templateId: SkillTemplateId) => {
+    if (submitting) {
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -38,7 +29,7 @@ export function SkillTemplateStep({
         body: JSON.stringify({
           from: "skill-template",
           to: "complete",
-          skillTemplate: { templateId: selectedId },
+          skillTemplate: { templateId },
         }),
       });
       const next = await readOnboardingResponse<OnboardingState>(res);
@@ -48,15 +39,15 @@ export function SkillTemplateStep({
     } finally {
       setSubmitting(false);
     }
-  }, [onAdvance, selectedId]);
+  }, [onAdvance, submitting]);
 
   return (
     <div className="space-y-7">
       <SkillTemplateGallery
         mode="onboarding"
-        selectedTemplateId={selectedId}
-        onSelectTemplate={setSelectedId}
-        actionLabel="Choose"
+        selectedTemplateId={state.skillTemplate?.templateId}
+        onSelectTemplate={(templateId) => void handleUseTemplate(templateId)}
+        actionLabel="Use"
       />
 
       {error && (
@@ -65,28 +56,11 @@ export function SkillTemplateStep({
         </p>
       )}
 
-      <div className="flex justify-end pt-2">
-        <button
-          type="button"
-          onClick={() => void handleContinue()}
-          disabled={submitting}
-          className="flex h-10 items-center justify-center rounded-lg px-5 text-[13.5px] font-medium transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50"
-          style={{
-            background: "var(--color-accent)",
-            color: "#fff",
-          }}
-          onMouseEnter={(e) => {
-            if (!submitting) {
-              (e.currentTarget as HTMLElement).style.opacity = "0.92";
-            }
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.opacity = "1";
-          }}
-        >
-          {submitting ? "Saving…" : "Start with this"}
-        </button>
-      </div>
+      {submitting && (
+        <p className="text-right text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>
+          Saving template…
+        </p>
+      )}
     </div>
   );
 }

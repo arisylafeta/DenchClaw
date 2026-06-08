@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const monthEndMetricsAssembler = defineSkillTemplate({
   id: "month-end-metrics-assembler",
@@ -9,7 +9,7 @@ export const monthEndMetricsAssembler = defineSkillTemplate({
   userUseCase:
     "Use when a founder spends hours pulling revenue, runway, customer, hiring, and forecast numbers into investor updates or board prep. The skill should assemble the numbers, show what changed, cite where each metric came from, and create the draft snapshot without assuming a large ops team.",
   personas: ["Founder", "Operator"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail, externalApps.notion],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -66,11 +66,11 @@ export const monthEndMetricsAssembler = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Build a source map for every requested metric and clearly separate verified values, user-provided values, stale values, and missing values.",
-    "Calculate month-over-month and forecast deltas only when source values are available; otherwise flag the gap instead of inventing a number.",
+    "Build a source map for every requested metric using HubSpot/Dench CRM, Gmail context, Notion/docs, uploaded spreadsheets, pasted numbers, and linked files; clearly separate verified values, user-provided values, stale values, and missing values.",
+    "Calculate month-over-month and forecast deltas from source values or explicitly user-provided values only; otherwise flag the gap instead of inventing a number.",
     "Lead with the metrics that changed meaningfully and explain why each change matters for runway, fundraising, customer traction, or hiring.",
     "Create audience-specific versions only when requested; default to one private founder snapshot plus a concise update-ready summary.",
-    "Cite or label the source of every metric so the founder can answer investor or board follow-up questions.",
+    "Cite or label the source of every metric, including HubSpot report/view, CRM field, Gmail thread, Notion page, uploaded file, or manual founder input, so the founder can answer investor or board follow-up questions.",
     "For scheduled runs, update the same period snapshot and track unresolved metric gaps until the founder fills or dismisses them.",
   ],
   activityLogInstructions: [

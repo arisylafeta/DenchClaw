@@ -65,14 +65,14 @@ describe("skill template consume API", () => {
   });
 
   it("ignores invalid persisted template ids", async () => {
-    const state: OnboardingState = {
+    const state = {
       ...readOnboardingState(),
       currentStep: "complete",
       skillTemplate: {
         templateId: "unknown-template",
         selectedAt: "2026-04-15T00:00:00.000Z",
       },
-    };
+    } as OnboardingState;
     writeOnboardingState(state);
 
     const res = await POST();

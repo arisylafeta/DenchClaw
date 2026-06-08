@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const plgExpansionScout = defineSkillTemplate({
   id: "plg-expansion-scout",
@@ -9,7 +9,7 @@ export const plgExpansionScout = defineSkillTemplate({
   userUseCase:
     "Use when a PLG or hybrid sales team has product usage inside existing customer organizations and needs to spot expansion without sounding like vendor spam. The skill should group usage into account context, identify real expansion moments, and give CSMs a talk track rather than auto-emailing customers.",
   personas: ["Customer Success", "Sales", "Founder"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -62,9 +62,9 @@ export const plgExpansionScout = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Group usage or signal data to the correct customer account before recommending expansion; flag uncertain account mapping as missing data.",
+    "Accept product usage from uploaded exports, pasted tables, saved reports, HubSpot properties, CRM notes, or workspace lists, then group each signal to the correct customer account before recommending expansion; flag uncertain account mapping as missing data.",
     "Rank expansion signals by evidence strength, account value, relationship context, and urgency instead of surfacing every usage increase.",
-    "Explain the exact behavior that changed and why it creates a plausible expansion conversation.",
+    "Use HubSpot/Dench CRM ownership, Gmail relationship history, enrichment, and account notes to explain the exact behavior that changed and why it creates a plausible expansion conversation.",
     "Produce CSM-led talk tracks and owner-reviewed drafts; never auto-send customer-facing expansion outreach by default.",
     "Separate expansion opportunity from renewal risk so owners can decide whether to sell, nurture, or protect the relationship.",
     "For scheduled runs, suppress unchanged signals and resurface only when the signal crosses a new threshold or owner action becomes due.",

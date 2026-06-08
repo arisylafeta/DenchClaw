@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const deckClaimVerifier = defineSkillTemplate({
   id: "deck-claim-verifier",
@@ -9,7 +9,7 @@ export const deckClaimVerifier = defineSkillTemplate({
   userUseCase:
     "Use when an investor, founder, or strategy operator receives a deck or memo with quantitative, customer, funding, market, or competitive claims that need fast trust checks. The skill should extract each material claim, try to verify it from preferred sources, and clearly mark what could not be proven.",
   personas: ["Investor/BD", "Founder", "Knowledge Worker"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.notion],
   triggerModes: ["manual"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -70,6 +70,7 @@ export const deckClaimVerifier = defineSkillTemplate({
   ],
   skillInstructions: [
     "Extract every material factual claim before researching; keep the original wording and slide or section reference.",
+    "Verify claims against uploaded decks/docs, HubSpot/Dench CRM evidence, Notion/files, native enrichment, and public primary or trusted sources depending on the selected source standard.",
     "Classify each claim as Verified, Partial, Unable to verify, Contradicted, or Out of scope with a short rationale.",
     "For Verified and Partial claims, include the exact supporting quote or data point and source URL or file reference.",
     "Do not fill gaps with plausible facts; if a claim cannot be supported, mark it Unable to verify and list the sources checked.",

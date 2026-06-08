@@ -8,7 +8,7 @@ export const linkedinStyleOutreach = defineSkillTemplate({
   outcome: "Researches prospects, writes short LinkedIn-style messages, manages follow-up sequencing, and logs outreach state.",
   userUseCase: "Use this when a founder, seller, recruiter, or BD owner has people or accounts to contact and wants concise LinkedIn-style outreach that feels researched without being creepy. The skill should turn CRM lists, uploaded files, saved searches, or manual names into short messages, follow-up plans, and logged outreach state.",
   personas: ["Founder", "Sales", "Recruiter"],
-  requiredApps: [externalApps.linkedin],
+  requiredApps: [externalApps.linkedin, externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Can automate",
   interviewQuestions: [
@@ -68,11 +68,11 @@ export const linkedinStyleOutreach = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Accept prospects from Dench CRM records, enrichment results, uploaded files, pasted names, or manual search criteria; use LinkedIn only when connected and useful for profile context.",
+    "Accept prospects from HubSpot/Dench CRM records, enrichment results, uploaded files, pasted names, Gmail relationship history, or manual search criteria; use LinkedIn when connected and useful for profile context.",
     "For each prospect, research lightweight public and CRM context that supports a specific opening line: role, company, recent change, mutual context, hiring/funding/news signal, or stated interest.",
     "Write concise LinkedIn-style messages with one clear CTA, no fabricated familiarity, no over-personalized claims, and no sensitive personal data unless the user explicitly provided it.",
     "Respect the selected send policy: draft by default; send only when the prospect matches explicit allowlists, daily caps, duplicate checks, quiet hours, and channel constraints.",
-    "For scheduled runs, use idempotency checks against CRM notes, prior Dench runs, and connected app history so the same prospect is not messaged twice for the same campaign.",
+    "For scheduled runs, use idempotency checks against HubSpot/Dench CRM notes, Gmail history, prior Dench runs, and connected app history so the same prospect is not messaged twice for the same campaign.",
     "Stop outreach when a reply, accepted connection plus response, meeting booked, disqualifying CRM stage, do-not-contact flag, blocked signal, or owner override is detected.",
   ],
   activityLogInstructions: [

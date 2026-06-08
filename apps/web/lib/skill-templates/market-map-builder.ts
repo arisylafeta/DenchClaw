@@ -8,7 +8,7 @@ export const marketMapBuilder = defineSkillTemplate({
   outcome: "Builds and updates a market map with categories, companies, trends, funding, customer segments, and strategic takeaways.",
   userUseCase: "Use this when a founder, investor, BD lead, or strategy operator needs a cited map of a market, category, or problem space. The skill should discover companies, segment them cleanly, capture evidence, and expose whitespace without forcing uncertain companies into tidy boxes.",
   personas: ["Founder", "Investor/BD", "Knowledge Worker"],
-  requiredApps: [externalApps.notion],
+  requiredApps: [externalApps.hubspot, externalApps.notion, externalApps.linkedin],
   triggerModes: ["manual"],
   autonomy: "Updates CRM",
   interviewQuestions: [
@@ -73,7 +73,7 @@ export const marketMapBuilder = defineSkillTemplate({
   ],
   skillInstructions: [
     "Define the market boundaries before collecting companies, including what is intentionally out of scope.",
-    "Build the map from Dench CRM, native enrichment, web search, and supplied files; use connected Notion, Slack, Gmail, Calendar, or LinkedIn only when they add relevant context.",
+    "Build the map from HubSpot/Dench CRM, native enrichment, web search, LinkedIn, and supplied files; use connected Notion, Slack, Gmail, or Calendar when they add relevant context.",
     "Cite each included company and material attribute with primary or reputable sources.",
     "Assign companies to clear categories and explain ambiguous classifications instead of forcing weak fits.",
     "Include confidence levels for company fit, market category, and important inferred attributes.",

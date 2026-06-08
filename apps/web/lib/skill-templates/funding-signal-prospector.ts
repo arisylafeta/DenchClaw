@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const fundingSignalProspector = defineSkillTemplate({
   id: "funding-signal-prospector",
@@ -8,7 +8,7 @@ export const fundingSignalProspector = defineSkillTemplate({
   outcome: "Monitors funding signals, filters against ICP rules, enriches contacts, and creates time-sensitive CRM opportunities.",
   userUseCase: "Use this when a founder or seller wants a repeatable prospecting workflow around recent funding events. The skill should find companies that match a target market, verify funding from credible sources, infer why the event creates urgency, and turn the signal into CRM-ready account research and outreach angles.",
   personas: ["Founder", "Sales"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Can automate",
   interviewQuestions: [
@@ -71,9 +71,9 @@ export const fundingSignalProspector = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Search public web sources and Dench-native enrichment for funding events that match the selected stage and freshness window.",
+    "Search public web sources, Dench-native enrichment, HubSpot account context, CRM history, and uploaded/source lists for funding events that match the selected stage and freshness window.",
     "Verify funding amount, date, stage, investors, and company identity from credible sources before including a company.",
-    "Filter funded companies through the requested ICP, exclusions, and CRM duplicate checks before ranking them.",
+    "Filter funded companies through the requested ICP, exclusions, HubSpot/Dench CRM ownership, Gmail history, and duplicate checks before ranking them.",
     "Explain the likely post-funding spend trigger for each account and tie it to observable evidence.",
     "Enrich each qualified account with domain, size, headquarters, relevant leaders, and source URLs.",
     "Write only additive CRM notes, scores, tasks, or drafts with source attribution and confidence; do not overwrite user-authored fields.",

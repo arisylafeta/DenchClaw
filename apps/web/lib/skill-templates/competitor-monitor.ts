@@ -9,7 +9,7 @@ export const competitorMonitor = defineSkillTemplate({
   userUseCase:
     "Use this when a founder, GTM team, CS lead, or operator needs a repeatable monitor for named competitors, adjacent categories, or strategic threats. The skill should watch for product, pricing, customer, hiring, funding, and messaging changes, then separate verified facts from implications so the team can decide whether to respond.",
   personas: ["Founder", "Sales", "Customer Success"],
-  requiredApps: [externalApps.slack],
+  requiredApps: [externalApps.hubspot, externalApps.slack],
   triggerModes: ["scheduled", "manual"],
   autonomy: "Can automate",
   interviewQuestions: [
@@ -71,7 +71,7 @@ export const competitorMonitor = defineSkillTemplate({
   ],
   skillInstructions: [
     "Monitor only the requested competitors, categories, and signal types unless the user explicitly expands scope.",
-    "Use primary sources, company sites, reputable news, CRM context, and supplied files before lower-quality commentary.",
+    "Use primary sources, company sites, reputable news, HubSpot/Dench CRM context, enrichment, and supplied files before lower-quality commentary.",
     "Cite each signal with source title, URL or file reference, publisher, and observed date.",
     "Deduplicate repeated coverage of the same event and suppress unchanged signals in scheduled digests.",
     "Separate verified changes from interpretation, and label confidence for each implication or recommended response.",

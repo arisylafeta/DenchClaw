@@ -9,7 +9,7 @@ export const talentPipelineHygiene = defineSkillTemplate({
   userUseCase:
     "Use this when recruiting or operations needs a clean view of candidate pipelines: stale stages, missing feedback, duplicate profiles, scheduling gaps, and process risks. The skill should use candidate CRM data, files, Calendar/Gmail context, and optional Slack/Notion notes while avoiding protected-class or privacy-sensitive analysis.",
   personas: ["Recruiter", "Operator"],
-  requiredApps: [externalApps.notion, externalApps.slack],
+  requiredApps: [externalApps.gmail, externalApps.googleCalendar, externalApps.notion, externalApps.slack],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Updates CRM",
   interviewQuestions: [
@@ -72,7 +72,7 @@ export const talentPipelineHygiene = defineSkillTemplate({
   skillInstructions: [
     "Audit only authorized candidate and hiring records available through Dench CRM and connected systems.",
     "Do not surface, infer, or act on protected-class or sensitive attributes; hygiene findings must be process-based and role-related.",
-    "Flag missing or stale operational fields such as owner, stage, next step, last contact, feedback, scheduled interview, or duplicate record.",
+    "Use Gmail threads, Calendar interviews, Notion scorecards, Slack handoff context, uploaded ATS exports, and Dench CRM records to flag missing or stale operational fields such as owner, stage, next step, last contact, feedback, scheduled interview, or duplicate record.",
     "Cite each issue with the relevant record, timestamp, Calendar event, Gmail thread, file, Slack thread, or Notion page when available.",
     "Prioritize issues by candidate impact, hiring urgency, process risk, and age of inactivity.",
     "For cron audits, report changes since the previous run and avoid repeatedly flagging acknowledged issues unless they become more urgent.",

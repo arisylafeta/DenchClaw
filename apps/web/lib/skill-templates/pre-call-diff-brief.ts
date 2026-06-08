@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const preCallDiffBrief = defineSkillTemplate({
   id: "pre-call-diff-brief",
@@ -9,7 +9,7 @@ export const preCallDiffBrief = defineSkillTemplate({
   userUseCase:
     "Use when a founder, seller, investor, recruiter, or CS owner has back-to-back meetings and needs a just-in-time brief that is shorter than a dossier. The skill should highlight only the facts that changed the meeting plan since the last interaction.",
   personas: ["Founder", "Sales", "Customer Success", "Recruiter", "Investor/BD"],
-  requiredApps: [],
+  requiredApps: [externalApps.googleCalendar, externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Creates drafts",
   interviewQuestions: [
@@ -75,7 +75,7 @@ export const preCallDiffBrief = defineSkillTemplate({
   ],
   skillInstructions: [
     "Anchor on the calendar event or selected meeting, then find the last meaningful interaction with the attendee, company, or opportunity.",
-    "Lead with what changed since that last touch; skip static biography or company background unless it alters the recommended meeting plan.",
+    "Use Gmail, HubSpot/Dench CRM, Calendar, enrichment, notes/files, and relevant public changes to lead with what changed since that last touch; skip static biography or company background unless it alters the recommended meeting plan.",
     "Keep the brief to the configured maximum length and put the recommended ask or CTA in the first screen.",
     "Separate commitments made by the user from commitments owed by the other party.",
     "Label sensitive internal context and low-confidence claims according to the configured visibility policy.",

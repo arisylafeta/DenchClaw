@@ -1,4 +1,4 @@
-import { defineSkillTemplate } from "./create-template";
+import { defineSkillTemplate, externalApps } from "./create-template";
 
 export const targetAccountListBuilder = defineSkillTemplate({
   id: "target-account-list-builder",
@@ -8,7 +8,7 @@ export const targetAccountListBuilder = defineSkillTemplate({
   outcome: "Discovers target companies, enriches contacts, scores fit, and writes a prioritized list into Dench CRM.",
   userUseCase: "Use this when a founder or seller knows the market they want to attack but needs DenchClaw to turn that ICP into a clean, ranked account list with evidence, exclusions, owners, and CRM-ready next actions.",
   personas: ["Founder", "Sales"],
-  requiredApps: [],
+  requiredApps: [externalApps.hubspot, externalApps.gmail, externalApps.linkedin],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Updates CRM",
   interviewQuestions: [
@@ -66,8 +66,8 @@ export const targetAccountListBuilder = defineSkillTemplate({
   ],
   skillInstructions: [
     "Translate the user's ICP into concrete account search filters before gathering companies.",
-    "Use Dench CRM, native enrichment, web search, uploaded files, and workspace context to assemble candidate accounts.",
-    "Deduplicate against existing CRM accounts, customers, active opportunities, previous Dench runs, and user-provided exclusions.",
+    "Use HubSpot/Dench CRM, native enrichment, web search, uploaded files, LinkedIn context, Gmail history, and workspace context to assemble candidate accounts.",
+    "Deduplicate against existing HubSpot/Dench CRM accounts, customers, active opportunities, Gmail history, previous Dench runs, and user-provided exclusions.",
     "Enrich each account with domain, industry, size, location, signals, source URLs, and confidence notes.",
     "Score accounts with the selected priority model and explain the top ranking factors in plain language.",
     "Write or propose CRM records additively with source attribution, not silent overwrites of user-authored fields.",

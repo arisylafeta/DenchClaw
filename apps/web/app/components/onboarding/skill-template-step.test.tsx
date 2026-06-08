@@ -70,9 +70,8 @@ describe("SkillTemplateStep", () => {
     render(<SkillTemplateStep state={baseState} onAdvance={onAdvance} />);
 
     await user.click(
-      screen.getByRole("button", { name: /Choose Company Deep Researcher/i }),
+      screen.getByRole("button", { name: /Use Company Deep Researcher/i }),
     );
-    await user.click(screen.getByRole("button", { name: "Start with this" }));
 
     await waitFor(() => {
       expect(onAdvance).toHaveBeenCalledWith(nextState);

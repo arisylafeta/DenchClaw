@@ -8,7 +8,7 @@ export const customerVoiceMiner = defineSkillTemplate({
   outcome: "Extracts recurring pains, objections, feature requests, quotes, and messaging insights from customer-facing context.",
   userUseCase: "Use this when product, founder, CS, or GTM teams need customer truth from CRM notes, transcripts, support notes, reviews, Slack threads, Notion docs, Gmail, or uploaded research. The skill should turn messy qualitative material into cited themes, quotes, objections, product gaps, and messaging recommendations without exposing unnecessary private details.",
   personas: ["Founder", "Customer Success", "Sales"],
-  requiredApps: [externalApps.slack, externalApps.notion],
+  requiredApps: [externalApps.gmail, externalApps.hubspot, externalApps.slack, externalApps.notion],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Can automate",
   interviewQuestions: [
@@ -70,7 +70,7 @@ export const customerVoiceMiner = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use only customer data available to the requesting user through Dench CRM, local files, and connected apps.",
+    "Use only customer data available to the requesting user through HubSpot/Dench CRM, Gmail, Slack, Notion, local files, uploads, and connected apps.",
     "Cite each theme with source references, dates, account or segment context, and representative quotes where permitted.",
     "Redact sensitive personal data unless necessary for the requested business purpose and avoid exposing private email or Slack content beyond relevant excerpts.",
     "Group similar feedback into themes, quantify frequency when possible, and avoid overstating conclusions from small samples.",

@@ -8,7 +8,7 @@ export const websiteVisitorFollowUp = defineSkillTemplate({
   outcome: "Accepts visitor or intent exports, matches accounts, prioritizes warm leads, drafts follow-ups, and logs next actions.",
   userUseCase: "Turn a manual or scheduled website-visitor export into enriched account follow-up. The skill helps founders and sellers prioritize visitors by intent, match them to CRM records, research likely buyers, and create respectful follow-up actions without pretending DenchClaw has realtime site tracking.",
   personas: ["Founder", "Sales"],
-  requiredApps: [externalApps.gmail],
+  requiredApps: [externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
   autonomy: "Can automate",
   interviewQuestions: [
@@ -70,8 +70,8 @@ export const websiteVisitorFollowUp = defineSkillTemplate({
   ],
   skillInstructions: [
     "Use only manual uploads, pasted lists, or scheduled export files; do not assume website webhooks, event listeners, or realtime visitor callbacks exist.",
-    "Normalize visitor records by company, domain, visit date, source, page path, and identity fields before matching to Dench CRM.",
-    "Score intent using configured page behavior, recency, repeat visits, CRM status, relationship history, and account fit.",
+    "Normalize visitor records by company, domain, visit date, source, page path, campaign metadata, and identity fields before matching to Dench CRM or HubSpot.",
+    "Score intent using configured page behavior, recency, repeat visits, CRM/HubSpot status, Gmail relationship history, enrichment, and account fit.",
     "Enrich matched companies and likely buyers with Dench-native enrichment, CRM history, web search, and Gmail context when connected.",
     "Draft follow-up that references observed account-level interest carefully without implying a specific private person visited unless the export proves it.",
     "Respect send guardrails, quiet hours, duplicate checks, owner approval, and do-not-contact exclusions before creating or sending any message.",
