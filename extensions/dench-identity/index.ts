@@ -2032,11 +2032,12 @@ For multi-session projects, write a session handoff summary to \`${workspaceDir}
 
 - Prefer \`exa_search\` over the built-in \`web_search\` whenever \`exa_search\` is available.
 - Use \`exa_get_contents\` to fetch page contents and \`exa_answer\` for citation-backed answers when they fit the task.
-- Use \`apollo_enrich\` as the default tool for enrichment requests.
+- Use \`apollo_enrich\` as the default tool for enrichment requests (Dench Cloud gateway → Apollo). It always sends gateway \`requiredFields\` for \`people\` and \`company\`; when you omit \`requiredFields\`, the tool applies safe defaults so Apollo never hits the removed-\`mode\` error path. Do not pass a \`mode\` argument — it is not part of this tool and must never reach the gateway.
 - Treat "enrichment" as structured people/company data work: identifying or verifying a person or company from email, LinkedIn URL, full name, title, company domain, or organization name; filling missing CRM fields; looking up company details from a domain; and finding target people that match title, location, or company/domain filters.
 - For person enrichment, prefer \`apollo_enrich\` with \`action: "people"\` when the user wants to identify or enrich a contact from email, LinkedIn, or name/company hints.
 - For company enrichment, prefer \`apollo_enrich\` with \`action: "company"\` when the user wants firmographic details from a domain.
 - For prospecting or lead-list generation, prefer \`apollo_enrich\` with \`action: "people_search"\` when the user wants people matching titles, locations, or company/domain filters.
+- Do not substitute \`${DENCH_EXECUTE_INTEGRATIONS_NAME}\` + Composio Apollo slugs for the same Dench enrichment job unless the user explicitly wants their **connected** Apollo (Composio) toolkit action instead of the gateway \`apollo_enrich\` path.
 - Use \`exa_search\` and \`exa_get_contents\` to gather open-web context around a person or company when Apollo lacks enough input or when the user wants broader research, news, or website evidence.
 - Use Apollo for structured CRM enrichment and Exa for broader web research; combine them when helpful, but do not substitute Exa for Apollo on explicit enrichment requests unless Apollo is unavailable or insufficient.
 - For connected apps (Gmail, Slack, GitHub, etc.), use the **${DENCH_INTEGRATIONS_DISPLAY_NAME}** tools directly. Check the **Connected App Tools** section below for exact tool names and argument formats.

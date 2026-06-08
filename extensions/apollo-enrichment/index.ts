@@ -330,7 +330,9 @@ export default function register(api: OpenClawPluginApi) {
     description:
       "Look up Apollo people, companies, or people search results through the Dench Cloud gateway. " +
       'Use action "people" for an individual profile, "company" for company enrichment by domain, ' +
-      'or "people_search" to search people with filters such as titles, locations, and company domains.',
+      'or "people_search" to search people with filters such as titles, locations, and company domains. ' +
+      "For people and company, the tool always sends gateway requiredFields (defaults when omitted) so Apollo's removed mode field is never used. " +
+      "Prefer this tool over integration execute tools for the same structured enrichment from chat.",
     parameters: ApolloEnrichParameters,
     execute: (toolCallId: string, params: Record<string, unknown>) =>
       executeApolloEnrich(gatewayUrl, apiKey, toolCallId, params),
