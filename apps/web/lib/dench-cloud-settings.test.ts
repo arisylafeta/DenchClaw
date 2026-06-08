@@ -96,6 +96,16 @@ const mocks = vi.hoisted(() => {
           "dench_search_integrations",
           "dench_execute_integrations",
         ],
+        byProvider: {
+          "dench-cloud": {
+            allow: [
+              "read",
+              "exec",
+              "dench_search_integrations",
+              "dench_execute_integrations",
+            ],
+          },
+        },
       },
     })),
     readConfiguredDenchCloudSettings: vi.fn(() => ({
@@ -271,6 +281,14 @@ describe("dench cloud settings", () => {
       "dench_execute_integrations",
       "dench_search_integrations",
     ]);
+    expect(written.tools.byProvider["dench-cloud"].allow).toEqual([
+      "dench_execute_integrations",
+      "dench_search_integrations",
+      "exec",
+      "read",
+    ]);
+    expect(written.tools.byProvider["dench-cloud"].profile).toBeUndefined();
+    expect(written.tools.byProvider["dench-cloud"].alsoAllow).toBeUndefined();
   });
 
   it("preserves unrelated auth profiles when saving the Dench Cloud API key", async () => {
@@ -348,6 +366,14 @@ describe("dench cloud settings", () => {
       "dench_execute_integrations",
       "dench_search_integrations",
     ]);
+    expect(written.tools.byProvider["dench-cloud"].allow).toEqual([
+      "dench_execute_integrations",
+      "dench_search_integrations",
+      "exec",
+      "read",
+    ]);
+    expect(written.tools.byProvider["dench-cloud"].profile).toBeUndefined();
+    expect(written.tools.byProvider["dench-cloud"].alsoAllow).toBeUndefined();
   });
 
   it("preserves a stored voiceId without re-enabling ElevenLabs during model changes", async () => {

@@ -121,6 +121,58 @@ function syncAllowedTools(config: UnknownRecord, toolNames: string[]): void {
   tools.alsoAllow = Array.from(preserved).sort((left, right) => left.localeCompare(right));
 }
 
+function syncToolProviderPolicies(config: UnknownRecord, patchTools: UnknownRecord | undefined): void {
+  const patchByProvider = asRecord(patchTools?.byProvider);
+  if (!patchByProvider) {
+    return;
+  }
+
+  const tools = ensureRecord(config, "tools");
+  const byProvider = ensureRecord(tools, "byProvider");
+  for (const [providerId, rawProviderPatch] of Object.entries(patchByProvider)) {
+    const providerPatch = asRecord(rawProviderPatch);
+    if (!providerPatch) {
+      continue;
+    }
+
+    const providerPolicy = ensureRecord(byProvider, providerId);
+    const allow = readStringList(providerPatch.allow);
+    if (allow.length > 0) {
+      const preserved = new Set(
+        [...readStringList(providerPolicy.allow), ...readStringList(providerPolicy.alsoAllow)].filter(
+          (name) => !allow.includes(name),
+        ),
+      );
+      delete providerPolicy.alsoAllow;
+      for (const toolName of allow) {
+        preserved.add(toolName);
+      }
+      providerPolicy.allow = Array.from(preserved).sort((left, right) => left.localeCompare(right));
+    }
+
+    const alsoAllow = readStringList(providerPatch.alsoAllow);
+    if (alsoAllow.length > 0) {
+      const preserved = new Set(
+        [...readStringList(providerPolicy.alsoAllow), ...readStringList(providerPolicy.allow)].filter(
+          (name) => !alsoAllow.includes(name),
+        ),
+      );
+      delete providerPolicy.allow;
+      for (const toolName of alsoAllow) {
+        preserved.add(toolName);
+      }
+      providerPolicy.alsoAllow = Array.from(preserved).sort((left, right) => left.localeCompare(right));
+    }
+
+    const profile = readString(providerPatch.profile);
+    if (profile) {
+      providerPolicy.profile = profile;
+    } else if (allow.length > 0) {
+      delete providerPolicy.profile;
+    }
+  }
+}
+
 function readElevenLabsProvider(config: UnknownRecord): UnknownRecord | undefined {
   const tts = asRecord(asRecord(config.messages)?.tts);
   return asRecord(tts?.elevenlabs) ?? asRecord(asRecord(tts?.providers)?.elevenlabs);
@@ -430,6 +482,7 @@ export async function saveApiKey(
 
   const patchTools = asRecord((patch as UnknownRecord).tools);
   syncAllowedTools(config, readStringList(patchTools?.alsoAllow));
+  syncToolProviderPolicies(config, patchTools);
 
   writeConfig(config);
   if (options.syncAuthProfile !== false) {
@@ -497,6 +550,7 @@ export async function selectModel(stableId: string): Promise<CloudSettingsUpdate
 
   const patchTools = asRecord((patch as UnknownRecord).tools);
   syncAllowedTools(config, readStringList(patchTools?.alsoAllow));
+  syncToolProviderPolicies(config, patchTools);
 
   writeConfig(config);
 
@@ -595,6 +649,10 @@ export async function saveActiveCloudSettings(
         Object.assign(servers, patchServers);
       }
     }
+
+    const patchTools = asRecord((patch as UnknownRecord).tools);
+    syncAllowedTools(config, readStringList(patchTools?.alsoAllow));
+    syncToolProviderPolicies(config, patchTools);
 
     changed = true;
     requiresRefresh = true;

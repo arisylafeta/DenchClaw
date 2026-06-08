@@ -521,6 +521,48 @@ function mergeAllowedTools(existingTools: unknown, patchTools: unknown): string[
   return [...merged].sort((left, right) => left.localeCompare(right));
 }
 
+function mergeProviderToolPolicies(existingTools: unknown, patchTools: unknown): Record<string, unknown> {
+  const existingByProvider = asRecord(asRecord(existingTools)?.byProvider) ?? {};
+  const patchByProvider = asRecord(asRecord(patchTools)?.byProvider) ?? {};
+  const mergedByProvider: Record<string, unknown> = { ...existingByProvider };
+
+  for (const [providerId, rawPatchPolicy] of Object.entries(patchByProvider)) {
+    const patchPolicy = asRecord(rawPatchPolicy);
+    if (!patchPolicy) {
+      continue;
+    }
+
+    const existingPolicy = asRecord(mergedByProvider[providerId]) ?? {};
+    const nextPolicy: Record<string, unknown> = { ...existingPolicy };
+    const allow = uniqueStrings([
+      ...toStringArray(existingPolicy.allow),
+      ...toStringArray(existingPolicy.alsoAllow),
+      ...toStringArray(patchPolicy.allow),
+    ]).sort((left, right) => left.localeCompare(right));
+    const alsoAllow = uniqueStrings([
+      ...toStringArray(existingPolicy.alsoAllow),
+      ...toStringArray(existingPolicy.allow),
+      ...toStringArray(patchPolicy.alsoAllow),
+    ]).sort((left, right) => left.localeCompare(right));
+
+    if (allow.length > 0) {
+      delete nextPolicy.alsoAllow;
+      nextPolicy.allow = allow;
+    } else if (alsoAllow.length > 0) {
+      delete nextPolicy.allow;
+      nextPolicy.alsoAllow = alsoAllow;
+    }
+    if (typeof patchPolicy.profile === "string" && patchPolicy.profile.trim()) {
+      nextPolicy.profile = patchPolicy.profile.trim();
+    } else if (allow.length > 0) {
+      delete nextPolicy.profile;
+    }
+    mergedByProvider[providerId] = nextPolicy;
+  }
+
+  return mergedByProvider;
+}
+
 function toFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -2814,6 +2856,10 @@ function preStageDenchCloudConfig(params: {
       nextConfig.tools,
       (configPatch as Record<string, unknown>).tools,
     );
+    tools.byProvider = mergeProviderToolPolicies(
+      nextConfig.tools,
+      (configPatch as Record<string, unknown>).tools,
+    );
     delete tools.allow;
     nextConfig.tools = tools;
 
@@ -3041,6 +3087,18 @@ async function applyDenchCloudBootstrapConfig(params: {
       errorMessage: "Failed to enable Dench Integrations wrapper tools.",
     });
   }
+
+  const nextByProvider = mergeProviderToolPolicies(
+    (raw as Record<string, unknown> | undefined)?.tools,
+    (configPatch as Record<string, unknown>).tools,
+  );
+  await setOpenClawConfigJson({
+    openclawCommand: params.openclawCommand,
+    profile: params.profile,
+    key: "tools.byProvider",
+    value: nextByProvider,
+    errorMessage: "Failed to scope Dench Cloud tool policy.",
+  });
 
   writeAuthProfileKey(params.stateDir, params.apiKey);
   return appliedTtsShape;

@@ -155,6 +155,10 @@ describe("dench-cloud helpers", () => {
       "dench_search_integrations",
       "dench_execute_integrations",
     ]);
+    expect(patch.tools.byProvider["dench-cloud"].allow).toContain("read");
+    expect(patch.tools.byProvider["dench-cloud"].allow).toContain("exec");
+    expect(patch.tools.byProvider["dench-cloud"].allow).toContain("dench_search_integrations");
+    expect(patch.tools.byProvider["dench-cloud"].allow).not.toContain("bundle-mcp");
   });
 
   it("keeps the runtime plugin patch in parity with the CLI/web helper", () => {

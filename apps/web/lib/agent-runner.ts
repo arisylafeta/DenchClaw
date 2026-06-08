@@ -550,7 +550,7 @@ const MISSING_SCOPE_RE = /missing scope:\s*(\S+)/i;
  * missing or invalid.
  */
 export function enhanceScopeError(raw: string): string | null {
-	const match = MISSING_SCOPE_RE.exec(raw);
+	const match = raw.match(MISSING_SCOPE_RE);
 	if (!match) {
 		return null;
 	}
