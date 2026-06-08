@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { CompanyFavicon } from "./company-favicon";
 import { PersonAvatar } from "./person-avatar";
 import { ConnectionStrengthChip } from "./connection-strength-chip";
@@ -228,7 +229,7 @@ export function CompanyProfile({
         onSaveName={handleSaveName}
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-6 py-6">
+        <div className={`mx-auto w-full px-6 py-6 ${tab === "opportunities" ? "max-w-none" : "max-w-4xl"}`}>
           {tab === "overview" && <OverviewTab data={data} />}
           {tab === "team" && <TeamTab data={data} onOpenPerson={onOpenPerson} />}
           {tab === "profiles" && <ProfilesTab data={data} />}
@@ -470,45 +471,223 @@ function batteryDisplay(opportunity: CommercialOpportunity): string {
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
 
+type OpportunityFilterKey = "opportunity_type" | "status" | "urgency" | "source_system";
+type OpportunityFilters = Partial<Record<OpportunityFilterKey, string[]>>;
+
+const OPPORTUNITY_FILTERS: ReadonlyArray<{ key: OpportunityFilterKey; label: string; values: string[] }> = [
+  { key: "opportunity_type", label: "Type", values: ["supply", "demand"] },
+  { key: "status", label: "Status", values: ["open", "matched", "closed", "draft"] },
+  { key: "urgency", label: "Urgency", values: ["critical", "high", "medium", "low"] },
+  { key: "source_system", label: "Source", values: ["crm", "csv", "supabase", "email"] },
+];
+
+function filterLabel(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function opportunitySearchText(opportunity: CommercialOpportunity): string {
+  return [
+    opportunity.title,
+    opportunity.contact_person_name,
+    opportunity.opportunity_type,
+    opportunity.status,
+    opportunity.source_system,
+    opportunity.battery_type,
+    opportunity.previous_application,
+    opportunity.chemistry,
+    opportunity.condition,
+    opportunity.format,
+    opportunity.manufacturer,
+    opportunity.model,
+    opportunity.specific_type,
+    opportunity.location_region,
+    opportunity.location_country,
+    opportunity.urgency,
+    opportunity.notes,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function opportunityMatchesFilters(opportunity: CommercialOpportunity, search: string, filters: OpportunityFilters): boolean {
+  const query = search.trim().toLowerCase();
+  if (query && !opportunitySearchText(opportunity).includes(query)) {
+    return false;
+  }
+
+  return OPPORTUNITY_FILTERS.every(({ key }) => {
+    const values = filters[key];
+    return !values || values.length === 0 || values.includes(opportunity[key]);
+  });
+}
+
+function titleCase(value: string): string {
+  return filterLabel(value).replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function OpportunityFilterDropdown({
+  group,
+  selectedValues,
+  onToggle,
+}: {
+  group: { key: OpportunityFilterKey; label: string; values: string[] };
+  selectedValues: string[];
+  onToggle: (key: OpportunityFilterKey, value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const summary = selectedValues.length === 0
+    ? "All"
+    : selectedValues.length === 1
+      ? filterLabel(selectedValues[0])
+      : `${selectedValues.length} selected`;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-9 min-w-28 items-center justify-between gap-2 rounded-md border px-3 text-[12px] font-medium capitalize transition-colors"
+        style={{
+          borderColor: selectedValues.length > 0 ? "var(--color-text)" : "var(--color-border)",
+          background: "var(--color-background)",
+          color: "var(--color-text)",
+        }}
+      >
+        <span>{group.label}: {summary}</span>
+        <span aria-hidden="true" className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>▾</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 z-20 mt-1 min-w-40 rounded-md border p-1 shadow-lg"
+          style={{ borderColor: "var(--color-border)", background: "var(--color-background)" }}
+        >
+          {group.values.map((value) => {
+            const active = selectedValues.includes(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={active}
+                onClick={() => onToggle(group.key, value)}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] capitalize hover:bg-[var(--color-surface-hover)]"
+                style={{ color: "var(--color-text)" }}
+              >
+                <span aria-hidden="true" className="inline-flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px]" style={{ borderColor: active ? "var(--color-text)" : "var(--color-border)" }}>
+                  {active ? "✓" : ""}
+                </span>
+                {titleCase(value)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OpportunitiesTab({ data }: { data: CompanyResponse }) {
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<OpportunityFilters>({});
+
+  const filteredOpportunities = useMemo(
+    () => data.commercial.opportunities.filter((opportunity) => opportunityMatchesFilters(opportunity, search, filters)),
+    [data.commercial.opportunities, search, filters],
+  );
+
+  const hasActiveFilters = search.trim().length > 0 || Object.values(filters).some((values) => values && values.length > 0);
+
+  function toggleFilter(key: OpportunityFilterKey, value: string) {
+    setFilters((current) => {
+      const selected = current[key] ?? [];
+      const next = selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value];
+      return { ...current, [key]: next.length > 0 ? next : undefined };
+    });
+  }
+
+  function clearFilters() {
+    setSearch("");
+    setFilters({});
+  }
+
   if (data.commercial.opportunities.length === 0) {
     return <CrmEmptyState title="No opportunities yet" />;
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: "var(--color-border)" }}>
-      <table className="min-w-full text-left text-[13px]">
-        <thead style={{ background: "var(--color-surface)" }}>
-          <tr>
-            {[
-              "Type",
-              "Title",
-              "Battery",
-              "Qty",
-              "Location",
-              "Urgency",
-              "Deadline",
-            ].map((head) => (
-              <th key={head} className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--color-text-muted)" }}>
-                {head}
-              </th>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 border-b pb-3" style={{ borderColor: "var(--color-border)" }}>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+          <Input
+            aria-label="Search opportunities"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search opportunities"
+            className="max-w-sm"
+          />
+            {OPPORTUNITY_FILTERS.map((group) => (
+              <OpportunityFilterDropdown
+                key={group.key}
+                group={group}
+                selectedValues={filters[group.key] ?? []}
+                onToggle={toggleFilter}
+              />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.commercial.opportunities.map((opportunity) => (
-            <tr key={opportunity.id} style={{ borderTop: "1px solid var(--color-border)" }}>
-              <td className="px-3 py-2 capitalize">{opportunity.opportunity_type}</td>
-              <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{opportunity.title}</td>
-              <td className="px-3 py-2" style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</td>
-              <td className="px-3 py-2">{opportunity.quantity ?? "—"}</td>
-              <td className="px-3 py-2">{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</td>
-              <td className="px-3 py-2 capitalize">{opportunity.urgency}</td>
-              <td className="px-3 py-2">{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </div>
+          <div className="flex items-center gap-3 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+            <span>{filteredOpportunities.length} of {data.commercial.opportunities.length} opportunities</span>
+            {hasActiveFilters && (
+              <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {filteredOpportunities.length === 0 ? (
+        <CrmEmptyState title="No opportunities match these filters" />
+      ) : (
+        <div data-testid="opportunities-table-shell" className="w-full overflow-x-auto">
+          <table className="min-w-full text-left text-[13px]">
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                {[
+                  "Type",
+                  "Title",
+                  "Battery",
+                  "Qty",
+                  "Location",
+                  "Urgency",
+                  "Deadline",
+                ].map((head) => (
+                  <th key={head} className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--color-text-muted)" }}>
+                    {head}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredOpportunities.map((opportunity) => (
+                <tr key={opportunity.id} className="hover:bg-[var(--color-surface-hover)]" style={{ borderBottom: "1px solid var(--color-border)" }}>
+                  <td className="px-3 py-2 capitalize">{opportunity.opportunity_type}</td>
+                  <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{opportunity.title}</td>
+                  <td className="px-3 py-2" style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</td>
+                  <td className="px-3 py-2">{opportunity.quantity ?? "—"}</td>
+                  <td className="px-3 py-2">{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</td>
+                  <td className="px-3 py-2 capitalize">{opportunity.urgency}</td>
+                  <td className="px-3 py-2">{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

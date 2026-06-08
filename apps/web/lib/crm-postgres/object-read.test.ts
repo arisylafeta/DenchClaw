@@ -11,6 +11,7 @@ describe("postgres object read adapter", () => {
     queryPg.mockReset();
     queryPg.mockImplementation(async (sql: string) => {
       if (sql.includes("from crm_objects") && sql.includes("where name = $1")) {
+        if (queryPg.mock.calls.at(-1)?.[1]?.[0] === "task") return [{ id: "obj_task", name: "task", default_view: "kanban" }];
         if (sql.includes("company")) return [{ id: "obj_company", name: "company", display_field: "Name" }];
         return [{ id: "seed_obj_people_00000000000000", name: "people", default_view: "table" }];
       }
@@ -33,9 +34,15 @@ describe("postgres object read adapter", () => {
         ];
       }
       if (sql.includes("from crm_saved_views")) return [{ id: "v1", name: "All CRM Contacts", view_type: "table", columns: ["Full Name"] }];
+      if (sql.includes("select count(distinct cfv.entry_id)")) return [{ count: "1" }];
+      if (sql.includes("select distinct cfv.entry_id") && sql.includes("from crm_custom_field_values cfv")) return [{ entry_id: "t1", created_at: null, updated_at: null }];
       if (sql.includes("count(*)")) return [{ count: "1" }];
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
-      if (sql.includes("from crm_custom_field_values")) return [{ entry_id: "p1", field_name: "Notes", text_value: "VIP" }];
+      if (sql.includes("from crm_custom_field_values")) return [
+        { entry_id: "p1", field_name: "Notes", text_value: "VIP" },
+        { entry_id: "t1", field_name: "Title", text_value: "Prepare investor deck" },
+        { entry_id: "t1", field_name: "Status", text_value: "In Queue" },
+      ];
       if (sql.includes("from crm_companies")) return [{ id: "c1", name: "Acme", domain: "acme.test", website: null }];
       return [];
     });
@@ -113,5 +120,18 @@ describe("postgres object read adapter", () => {
     expect(data.fields.find((field) => field.name === "Company")?.related_object_name).toBe("company");
     expect(data.relationLabels.Company.c1).toBe("Acme");
     expect(data.relationFaviconUrls.Company.c1).toContain("google.com/s2/favicons");
+  });
+
+  it("loads entries for custom-value-only objects such as task", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData("task", new URL("http://localhost?pageSize=10"));
+
+    expect(data.object.name).toBe("task");
+    expect(data.totalCount).toBe(1);
+    expect(data.entries[0]).toMatchObject({
+      entry_id: "t1",
+      Title: "Prepare investor deck",
+      Status: "In Queue",
+    });
   });
 });

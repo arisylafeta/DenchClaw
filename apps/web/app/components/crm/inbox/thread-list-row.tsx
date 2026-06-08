@@ -233,17 +233,36 @@ export function ThreadListRow({
   );
 }
 
-function pickSenderDisplay(thread: Thread): {
+function isRebatteryAddress(email: string | null | undefined): boolean {
+  return typeof email === "string" && email.toLowerCase().endsWith("@rebattery.io");
+}
+
+export function pickSenderDisplay(thread: Thread): {
   name: string | null;
   email: string | null;
   avatar_url: string | null;
 } {
+  const primaryParticipant = thread.primary_sender_id
+    ? thread.participants.find((x) => x.id === thread.primary_sender_id)
+    : undefined;
+  if (isRebatteryAddress(thread.primary_sender_email) || isRebatteryAddress(primaryParticipant?.email)) {
+    const recipient = thread.participants.find(
+      (x) => x.id !== thread.primary_sender_id && !isRebatteryAddress(x.email),
+    );
+    if (recipient) {
+      return {
+        name: recipient.name ?? recipient.email ?? null,
+        email: recipient.email ?? null,
+        avatar_url: recipient.avatar_url ?? null,
+      };
+    }
+  }
+
   if (thread.primary_sender_name || thread.primary_sender_email) {
-    const p = thread.participants.find((x) => x.id === thread.primary_sender_id);
     return {
       name: thread.primary_sender_name ?? thread.primary_sender_email ?? null,
       email: thread.primary_sender_email,
-      avatar_url: p?.avatar_url ?? null,
+      avatar_url: primaryParticipant?.avatar_url ?? null,
     };
   }
   const first = thread.participants[0];

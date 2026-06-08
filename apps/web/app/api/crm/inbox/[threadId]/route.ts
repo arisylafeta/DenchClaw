@@ -16,6 +16,7 @@ import {
   markEmailBodyHydrationAttempted,
   readEmailBodyHydrationAttempted,
 } from "@/lib/denchclaw-state";
+import { getPostgresInboxThread } from "@/lib/crm-postgres/inbox-thread";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -42,6 +43,11 @@ export async function GET(
   const id = threadId?.trim();
   if (!id) {
     return Response.json({ error: "Missing thread id." }, { status: 400 });
+  }
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const data = await getPostgresInboxThread(id);
+    return Response.json(data);
   }
 
   const fieldMaps = await loadCrmFieldMaps();

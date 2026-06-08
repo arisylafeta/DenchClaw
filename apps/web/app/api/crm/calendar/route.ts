@@ -6,6 +6,7 @@ import {
   loadCrmFieldMaps,
   safeQuery,
 } from "@/lib/crm-queries";
+import { getPostgresCalendarEvents } from "@/lib/crm-postgres/calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,6 +32,11 @@ export async function GET(req: Request) {
   const toIso = url.searchParams.get("to")?.trim() || null;
   const limit = clampInt(url.searchParams.get("limit"), DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
   const offset = Math.max(0, parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const data = await getPostgresCalendarEvents({ search, fromIso, toIso, limit, offset });
+    return Response.json(data);
+  }
 
   const fieldMaps = await loadCrmFieldMaps();
 

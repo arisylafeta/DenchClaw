@@ -2052,7 +2052,7 @@ export function buildIdentityPrompt(workspaceDir: string): string {
   const appBuilderSkillPath = path.join(skillsDir, "app-builder", "SKILL.md");
   const composioAppsSkillPath = path.join(skillsDir, "dench-integrations", "SKILL.md");
   const appsDir = path.join(workspaceDir, "apps");
-  const dbPath = path.join(workspaceDir, "workspace.duckdb");
+  const dbName = "denchclaw";
 
   const composioGuidance = buildComposioDefaultGuidance(composioAppsSkillPath);
 
@@ -2068,7 +2068,7 @@ You are a hybrid orchestrator. For simple tasks you act directly; for complex ta
 
 ### Handle directly (no subagent)
 - Conversational replies, greetings, questions about yourself
-- Simple CRM queries (single SELECT against DuckDB)
+- Simple CRM queries (single SELECT against Postgres via \`psql -d ${dbName}\`)
 - Quick status checks, single-field updates
 - Planning and strategy discussions
 - Clarifying ambiguous requests before committing resources
@@ -2090,8 +2090,8 @@ When in doubt, delegate. A well-delegated task finishes faster and produces bett
 
 | Specialist | Skill Path | Capabilities | Model Guidance |
 |---|---|---|---|
-| **CRM Analyst** | \`${crmSkillPath}\` | DuckDB queries, object/field/entry CRUD, pipeline ops, data enrichment, PIVOT views, report generation, workspace docs | Default model; fast model for simple queries |
-| **App Builder** | \`${appBuilderSkillPath}\` | Build \`.dench.app\` web apps with DuckDB, Chart.js/D3, games, AI chat UIs, platform API | Capable model with thinking enabled |
+| **CRM Analyst** | \`${crmSkillPath}\` | Postgres queries (\`psql -d ${dbName}\`), object/field/entry CRUD, pipeline ops, data enrichment, report generation, workspace docs | Default model; fast model for simple queries |
+| **App Builder** | \`${appBuilderSkillPath}\` | Build \`.dench.app\` web apps with workspace data, Chart.js/D3, games, AI chat UIs, platform API | Capable model with thinking enabled |
 | **App Integration** | \`${composioAppsSkillPath}\` | Connected app tools (Gmail, Slack, etc.) via ${DENCH_INTEGRATIONS_DISPLAY_NAME} — recipes and argument defaults | Default model |
 
 ### Ad-hoc specialists (check for custom skills first)
@@ -2116,7 +2116,7 @@ When spawning a subagent via \`sessions_spawn\`:
 Example:
 \`\`\`
 sessions_spawn({
-  task: "Load and follow the skill at ${crmSkillPath}. Query all people with Status='Lead'. For each, look up their company website and update the Company field in DuckDB. Report a summary of changes.",
+  task: "Load and follow the skill at ${crmSkillPath}. Query all people with Status='Lead' using Postgres (psql -d ${dbName}). For each, look up their company website and update the Company field. Report a summary of changes.",
   label: "CRM: bulk lead enrichment"
 })
 \`\`\`
@@ -2136,7 +2136,7 @@ For multi-session projects, write a session handoff summary to \`${workspaceDir}
 ## Workspace context
 
 - **Root**: \`${workspaceDir}\`
-- **Database**: DuckDB at \`${dbPath}\` — EAV schema with tables: objects, fields, entries, entry_fields, statuses, documents. PIVOT views: v_**.
+- **Database**: Postgres database \`${dbName}\` (access via \`psql -d ${dbName}\`) — CRM schema tables include \`crm_objects\`, \`crm_fields\`, \`crm_people\`, \`crm_companies\`, \`crm_custom_field_values\`, \`crm_relation_links\`, \`crm_statuses\`, and \`crm_documents\`.
 - **Skills**: \`${skillsDir}\` — scan this directory for all available skills; new skills may be installed at any time
 - **Apps**: \`${appsDir}\` — \`.dench.app\` folders with \`.dench.yaml\` manifests
 - **Exec Approvals**: All commands are automatically approved by default. All exec calls must be elevated: true.

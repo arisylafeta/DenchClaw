@@ -251,9 +251,9 @@ function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, Fi
   return parts.join(", ");
 }
 
-async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: number, offset: number, whereClause: string, params: unknown[], orderBy: string): Promise<Record<string, unknown>[]> {
+async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: number, offset: number, whereClause: string, params: unknown[], orderBy: string, search: string | null): Promise<Record<string, unknown>[]> {
   const tableName = supportedTables[object.name];
-  if (!tableName) return [];
+  if (!tableName) return loadCustomOnlyEntries(object, pageSize, offset, search);
 
   const selectList = buildEntrySelect(fields);
   const listParams = [...params, pageSize, offset];
@@ -279,6 +279,73 @@ async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: numb
   }
 
   return entries;
+}
+
+async function loadCustomOnlyEntries(object: ObjectRow, pageSize: number, offset: number, search: string | null): Promise<Record<string, unknown>[]> {
+  const params: unknown[] = [object.id];
+  let searchClause = "";
+  if (search?.trim()) {
+    params.push(`%${search.trim()}%`);
+    searchClause = `and exists (
+      select 1 from crm_custom_field_values search_values
+      where search_values.object_id = cfv.object_id
+        and search_values.entry_id = cfv.entry_id
+        and lower(coalesce(search_values.text_value, search_values.json_value::text, '')) like lower($${params.length})
+    )`;
+  }
+  params.push(pageSize, offset);
+  const ids = await queryPg<{ entry_id: string; created_at?: string | Date | null; updated_at?: string | Date | null }>(`
+    select distinct cfv.entry_id,
+           min(cfv.created_at) as created_at,
+           max(cfv.updated_at) as updated_at
+      from crm_custom_field_values cfv
+     where cfv.object_id = $1
+       ${searchClause}
+     group by cfv.entry_id
+     order by max(cfv.updated_at) desc nulls last, cfv.entry_id desc
+     limit $${params.length - 1} offset $${params.length}
+  `, params);
+  if (ids.length === 0) return [];
+
+  const entries: Record<string, unknown>[] = ids.map((row) => ({
+    entry_id: row.entry_id,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
+  }));
+  const customRows = await queryPg<CustomValueRow>(
+    `select cfv.entry_id, f.name as field_name, cfv.text_value, cfv.number_value, cfv.boolean_value, cfv.date_value, cfv.json_value
+       from crm_custom_field_values cfv
+       join crm_fields f on f.id = cfv.field_id
+      where cfv.object_id = $1 and cfv.entry_id = any($2::text[])`,
+    [object.id, entries.map((entry) => entry.entry_id)],
+  );
+  const entriesById = new Map(entries.map((entry) => [String(entry.entry_id), entry]));
+  for (const row of customRows) {
+    const entry = entriesById.get(row.entry_id);
+    if (entry) entry[row.field_name] = customValue(row);
+  }
+  return entries;
+}
+
+async function countCustomOnlyEntries(object: ObjectRow, search: string | null): Promise<number> {
+  const params: unknown[] = [object.id];
+  let searchClause = "";
+  if (search?.trim()) {
+    params.push(`%${search.trim()}%`);
+    searchClause = `and exists (
+      select 1 from crm_custom_field_values search_values
+      where search_values.object_id = cfv.object_id
+        and search_values.entry_id = cfv.entry_id
+        and lower(coalesce(search_values.text_value, search_values.json_value::text, '')) like lower($${params.length})
+    )`;
+  }
+  const rows = await queryPg<{ count: string | number }>(`
+    select count(distinct cfv.entry_id)
+      from crm_custom_field_values cfv
+     where cfv.object_id = $1
+       ${searchClause}
+  `, params);
+  return Number(rows[0]?.count ?? 0);
 }
 
 function parseRelationValue(value: unknown): string[] {
@@ -349,8 +416,9 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
   const tableName = supportedTables[object.name];
   const fieldsByName = new Map(fields.map((field) => [field.name, field]));
   const params: unknown[] = [object.id];
+  const search = url.searchParams.get("search");
   const conditions = [
-    buildSearchCondition(url.searchParams.get("search"), fields, "e", params),
+    buildSearchCondition(search, fields, "e", params),
     buildFilterCondition(parseFilters(url.searchParams.get("filters")), fieldsByName, "e", params),
   ].filter((condition): condition is string => !!condition);
   const whereClause = `where $1::text is not null${conditions.length ? ` and ${conditions.join(" and ")}` : ""}`;
@@ -359,8 +427,8 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
     ? await queryPg<{ count: string | number }>(`select count(*) from ${tableName} e ${whereClause}`, params)
     : [];
   const orderBy = buildOrderBy(sort, fieldsByName, "e", params);
-  const totalCount = Number(totalCountRows[0]?.count ?? 0);
-  const entries = await loadEntries(object, fields, pageSize, offset, whereClause, params, orderBy);
+  const totalCount = tableName ? Number(totalCountRows[0]?.count ?? 0) : await countCustomOnlyEntries(object, search);
+  const entries = await loadEntries(object, fields, pageSize, offset, whereClause, params, orderBy, search);
   const resolvedRelations = await resolveRelationLabels(fields, entries);
 
   const savedViews = savedViewRows.map(toSavedView);

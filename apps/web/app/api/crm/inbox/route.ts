@@ -6,6 +6,7 @@ import {
   loadCrmFieldMaps,
   safeQuery,
 } from "@/lib/crm-queries";
+import { getPostgresInbox } from "@/lib/crm-postgres/inbox";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,6 +48,11 @@ export async function GET(req: Request) {
   const personId = url.searchParams.get("personId")?.trim() || null;
   const limit = clampInt(url.searchParams.get("limit"), DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
   const offset = Math.max(0, parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const data = await getPostgresInbox({ search, senderFilter, personId, limit, offset });
+    return Response.json(data);
+  }
 
   const fieldMaps = await loadCrmFieldMaps();
 

@@ -88,6 +88,28 @@ function deferred<T>() {
 }
 
 describe("useTabContent stale-while-revalidate", () => {
+  it("includes URL object-view params when initially fetching an object tab", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?path=people&view=All+CRM+Contacts&search=ari.sylafeta&cols=Full+Name%2CNotes&terminal=1",
+    );
+    const urls: string[] = [];
+    fetchHandler = async (url) => {
+      urls.push(url);
+      return new Response(JSON.stringify(makeObjectData()), { status: 200 });
+    };
+
+    renderHook(() => useTabContent(makeObjectTab("people"), makeDeps()));
+
+    await waitFor(() => {
+      expect(urls.length).toBeGreaterThan(0);
+    });
+    expect(urls[0]).toBe(
+      "/api/workspace/objects/people?view=All+CRM+Contacts&search=ari.sylafeta&cols=Full+Name%2CNotes",
+    );
+  });
+
   it("emits loading on initial load, then resolves to fetched object content", async () => {
     fetchHandler = async () =>
       new Response(JSON.stringify(makeObjectData()), { status: 200 });

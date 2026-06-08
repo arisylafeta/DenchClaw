@@ -147,23 +147,30 @@ async function loadCompany(companyId: string | null, email: string | null): Prom
 
 export async function getPostgresPersonProfile(personId: string): Promise<PostgresPersonProfile | null> {
   const rows = await queryPg<PersonRow>(`
-    select id,
-           full_name as name,
-           email,
-           company_id,
-           phone,
-           lead_status as status,
-           source,
-           strength_score,
-           last_interaction_at,
-           job_title,
-           linkedin_url,
-           avatar_url,
-           raw_json->>'Notes' as notes,
-           created_at,
-           updated_at
-      from crm_people
-     where id = $1
+    select p.id,
+           p.full_name as name,
+           p.email,
+           p.company_id,
+           p.phone,
+           p.lead_status as status,
+           p.source,
+           p.strength_score,
+           p.last_interaction_at,
+           p.job_title,
+           p.linkedin_url,
+           p.avatar_url,
+           coalesce(notes_value.text_value, p.raw_json->>'Notes') as notes,
+           p.created_at,
+           p.updated_at
+      from crm_people p
+      left join crm_objects people_obj on people_obj.name = 'people'
+      left join crm_fields notes_field
+        on notes_field.object_id = people_obj.id
+       and notes_field.name = 'Notes'
+      left join crm_custom_field_values notes_value
+        on notes_value.entry_id = p.id
+       and notes_value.field_id = notes_field.id
+     where p.id = $1
      limit 1
   `, [personId]);
   const raw = rows[0];

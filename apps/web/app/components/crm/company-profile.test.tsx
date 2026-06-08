@@ -91,6 +91,38 @@ function buildCompanyResponse(id: string, name: string) {
           last_synced_at: null,
           notes: null,
         },
+        {
+          id: "opp_2",
+          company_id: id,
+          contact_person_id: null,
+          contact_person_name: "Jordan Lee",
+          opportunity_type: "supply",
+          status: "open",
+          source_system: "csv",
+          source_id: "silverlake:tesla",
+          title: "Tesla Model 3 long range pack",
+          battery_type: "EV battery",
+          previous_application: "Battery electric sedan",
+          chemistry: "NCA",
+          condition: "Used",
+          format: "Pack",
+          manufacturer: "Tesla",
+          model: "Model 3",
+          specific_type: null,
+          location_country: "United Kingdom",
+          location_region: "Hampshire",
+          quantity: 1,
+          soh: null,
+          pack_kwh: 82,
+          price_amount: null,
+          currency: "GBP",
+          urgency: "medium",
+          priority_score: null,
+          available_from: null,
+          deadline_at: null,
+          last_synced_at: null,
+          notes: "Clean imported supply row.",
+        },
       ],
       summary: {
         active_profile_count: 1,
@@ -209,5 +241,39 @@ describe("CompanyProfile tab reset on entry change", () => {
     await user.click(screen.getByRole("button", { name: /Opportunities/ }));
     expect(screen.getByText("Nissan Leaf battery pack")).toBeInTheDocument();
     expect(screen.getByText("NMC · Pack · Nissan Leaf")).toBeInTheDocument();
+  });
+
+  it("filters opportunities with inline multi-select dropdowns and clear controls", async () => {
+    const user = userEvent.setup();
+    render(<CompanyProfile companyId="acme" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Company acme")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Opportunities/ }));
+    expect(screen.getByText("2 of 2 opportunities")).toBeInTheDocument();
+    expect(screen.getByTestId("opportunities-table-shell")).toHaveClass("w-full");
+    expect(screen.getByText("Nissan Leaf battery pack")).toBeInTheDocument();
+    expect(screen.getByText("Tesla Model 3 long range pack")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox", { name: "Search opportunities" }), "tesla");
+    expect(screen.getByText("1 of 2 opportunities")).toBeInTheDocument();
+    expect(screen.queryByText("Nissan Leaf battery pack")).not.toBeInTheDocument();
+    expect(screen.getByText("Tesla Model 3 long range pack")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Urgency: All" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "High" }));
+    expect(screen.getByText("No opportunities match these filters")).toBeInTheDocument();
+    expect(screen.getByText("0 of 2 opportunities")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Medium" }));
+    expect(screen.getByText("1 of 2 opportunities")).toBeInTheDocument();
+    expect(screen.getByText("Tesla Model 3 long range pack")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("2 of 2 opportunities")).toBeInTheDocument();
+    expect(screen.getByText("Nissan Leaf battery pack")).toBeInTheDocument();
+    expect(screen.getByText("Tesla Model 3 long range pack")).toBeInTheDocument();
   });
 });

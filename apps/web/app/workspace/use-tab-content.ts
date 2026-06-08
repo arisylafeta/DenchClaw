@@ -40,6 +40,7 @@ import type {
 import type { ContentTab } from "@/lib/workspace-tabs";
 
 const MAX_CACHE_ENTRIES = 20;
+const OBJECT_VIEW_PARAM_KEYS = ["view", "viewType", "filters", "sort", "search", "page", "pageSize", "cols"];
 
 type CacheEntry = {
   /** Cached resolved content. Undefined while loading, never reached for sync kinds. */
@@ -380,7 +381,16 @@ async function fetchObjectContent(
     | { status: "duckdb-missing" }
     | { status: "fatal" }
   > => {
-    const res = await fetch(`/api/workspace/objects/${encodeURIComponent(objectName)}`, { signal });
+    const params = new URLSearchParams();
+    if (typeof window !== "undefined") {
+      const current = new URLSearchParams(window.location.search);
+      for (const key of OBJECT_VIEW_PARAM_KEYS) {
+        const value = current.get(key);
+        if (value != null && value !== "") params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    const res = await fetch(`/api/workspace/objects/${encodeURIComponent(objectName)}${query ? `?${query}` : ""}`, { signal });
     const result = await readJsonByStatus<
       ObjectData,
       Partial<ObjectData> & { code?: string }

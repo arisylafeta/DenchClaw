@@ -8,6 +8,7 @@ import {
   safeQuery,
   sqlString,
 } from "@/lib/crm-queries";
+import { getPostgresCalendarEvent } from "@/lib/crm-postgres/calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,6 +32,14 @@ export async function GET(
   const eventId = id?.trim();
   if (!eventId) {
     return Response.json({ error: "Missing event id." }, { status: 400 });
+  }
+
+  if (process.env.CRM_DB_BACKEND === "postgres") {
+    const data = await getPostgresCalendarEvent(eventId);
+    if (!data) {
+      return Response.json({ error: "Event not found." }, { status: 404 });
+    }
+    return Response.json(data);
   }
 
   const fieldMaps = await loadCrmFieldMaps();

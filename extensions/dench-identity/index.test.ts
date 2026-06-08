@@ -44,7 +44,7 @@ describe("buildIdentityPrompt", () => {
   it("includes all workspace context paths (prevents agent losing orientation)", () => {
     const prompt = buildIdentityPrompt(workspaceDir);
     expect(prompt).toContain(`**Root**: \`${workspaceDir}\``);
-    expect(prompt).toContain(path.join(workspaceDir, "workspace.duckdb"));
+    expect(prompt).toContain("`denchclaw`");
     expect(prompt).toContain(path.join(workspaceDir, "skills"));
     expect(prompt).toContain(path.join(workspaceDir, "apps"));
   });

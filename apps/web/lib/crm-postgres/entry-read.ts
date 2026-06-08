@@ -240,15 +240,12 @@ export async function getPostgresEntryData(objectName: string, entryId: string):
   );
 
   const tableName = supportedTables[object.name];
-  if (!tableName) {
-    throw new Error(`Postgres detail read is not implemented for object: ${object.name}`);
-  }
-
-  const entryRows = await queryPg<Record<string, unknown>>(
-    `select ${buildEntrySelect(fields)} from ${tableName} where id = $1 limit 1`,
-    [entryId],
-  );
-  const entry = entryRows[0];
+  const entry = tableName
+    ? (await queryPg<Record<string, unknown>>(
+        `select ${buildEntrySelect(fields)} from ${tableName} where id = $1 limit 1`,
+        [entryId],
+      ))[0]
+    : await loadCustomOnlyEntry(object.id, entryId);
   if (!entry) {
     throw new Error("Entry not found");
   }
@@ -275,5 +272,25 @@ export async function getPostgresEntryData(objectName: string, entryId: string):
     relationFaviconUrls: resolvedRelations.faviconUrls,
     reverseRelations: await getReverseRelationsForEntry(object.name, entryId),
     effectiveDisplayField: resolveDisplayField(object, fields),
+  };
+}
+
+async function loadCustomOnlyEntry(objectId: string, entryId: string): Promise<Record<string, unknown> | null> {
+  const existsRows = await queryPg<{ entry_id: string; created_at?: string | Date | null; updated_at?: string | Date | null }>(`
+    select cfv.entry_id,
+           min(cfv.created_at) as created_at,
+           max(cfv.updated_at) as updated_at
+      from crm_custom_field_values cfv
+     where cfv.object_id = $1
+       and cfv.entry_id = $2
+     group by cfv.entry_id
+     limit 1
+  `, [objectId, entryId]);
+  const row = existsRows[0];
+  if (!row) return null;
+  return {
+    entry_id: row.entry_id,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   };
 }

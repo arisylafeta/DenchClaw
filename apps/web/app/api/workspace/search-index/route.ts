@@ -10,6 +10,7 @@ import {
   pivotViewIdentifier,
   readObjectYamlIcon,
 } from "@/lib/workspace";
+import { queryPg } from "@/lib/postgres";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -72,10 +73,28 @@ type EavRow = {
   value: string | null;
 };
 
+const POSTGRES_TABLE_BY_OBJECT: Record<string, string> = {
+  people: "crm_people",
+  company: "crm_companies",
+  companies: "crm_companies",
+  email_thread: "crm_email_threads",
+  email_message: "crm_email_messages",
+  calendar_event: "crm_calendar_events",
+  interaction: "crm_interactions",
+};
+
 // --- Helpers ---
 
 function sqlEscape(s: string): string {
   return s.replace(/'/g, "''");
+}
+
+function isPostgresBackend(): boolean {
+  return process.env.CRM_DB_BACKEND === "postgres";
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
 }
 
 /** Determine the display field (same heuristic as the objects route). */
@@ -91,6 +110,115 @@ function resolveDisplayField(obj: ObjectRow, fields: FieldRow[]): string {
   if (textField) {return textField.name;}
 
   return fields[0]?.name ?? "id";
+}
+
+function buildPostgresEntrySelect(fields: FieldRow[]): string {
+  const canonicalSelects = fields
+    .filter((field) => typeof (field as FieldRow & { canonical_column?: string | null }).canonical_column === "string")
+    .map((field) => {
+      const canonical = (field as FieldRow & { canonical_column: string }).canonical_column;
+      return `${quoteIdentifier(canonical)} as ${quoteIdentifier(field.name)}`;
+    });
+
+  return ["id as entry_id", "created_at", "updated_at", ...canonicalSelects].join(", ");
+}
+
+async function readPostgresObjects(): Promise<ObjectRow[]> {
+  return queryPg<ObjectRow>(
+    `select id, name, description, default_view, display_field
+       from crm_objects
+      order by name`,
+  );
+}
+
+async function readPostgresFields(objectId: string): Promise<FieldRow[]> {
+  return queryPg<FieldRow & { canonical_column?: string | null }>(
+    `select id, name, type, canonical_column, sort_order
+       from crm_fields
+      where object_id = $1
+      order by sort_order`,
+    [objectId],
+  );
+}
+
+async function readPostgresCustomEntries(objectId: string): Promise<Record<string, unknown>[]> {
+  const rows = await queryPg<{
+    entry_id: string;
+    field_name: string;
+    value: string | null;
+  }>(
+    `select cfv.entry_id,
+            f.name as field_name,
+            coalesce(cfv.text_value, cfv.number_value::text, cfv.boolean_value::text, cfv.date_value::text, cfv.json_value::text) as value
+       from crm_custom_field_values cfv
+       join crm_fields f on f.id = cfv.field_id
+      where cfv.object_id = $1
+      order by cfv.updated_at desc
+      limit 2500`,
+    [objectId],
+  );
+
+  const grouped = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    let entry = grouped.get(row.entry_id);
+    if (!entry) {
+      entry = { entry_id: row.entry_id };
+      grouped.set(row.entry_id, entry);
+    }
+    if (row.field_name) {
+      entry[row.field_name] = row.value;
+    }
+  }
+  return Array.from(grouped.values()).slice(0, 500);
+}
+
+async function buildPostgresEntryItems(objects: ObjectRow[]): Promise<SearchIndexItem[]> {
+  const items: SearchIndexItem[] = [];
+
+  for (const obj of objects) {
+    const fields = await readPostgresFields(obj.id);
+    const displayField = resolveDisplayField(obj, fields);
+    const previewFields = fields
+      .filter((f) => !["relation", "richtext"].includes(f.type))
+      .slice(0, 4);
+    const tableName = POSTGRES_TABLE_BY_OBJECT[obj.name];
+    const entries = tableName
+      ? await queryPg<Record<string, unknown>>(
+        `select ${buildPostgresEntrySelect(fields)}
+           from ${tableName}
+          order by created_at desc
+          limit 500`,
+      )
+      : await readPostgresCustomEntries(obj.id);
+    const objIcon = readObjectYamlIcon(obj.name);
+
+    for (const entry of entries) {
+      const entryId = dbStr(entry.entry_id);
+      if (!entryId) {continue;}
+
+      const displayValue = dbStr(entry[displayField]);
+      const fieldPreview: Record<string, string> = {};
+      for (const f of previewFields) {
+        const val = entry[f.name];
+        if (val != null && val !== "") {
+          fieldPreview[f.name] = dbStr(val);
+        }
+      }
+
+      items.push({
+        id: `entry:${obj.name}:${entryId}`,
+        label: displayValue || `(${obj.name} entry)`,
+        sublabel: obj.name,
+        kind: "entry",
+        icon: objIcon,
+        objectName: obj.name,
+        entryId,
+        fields: Object.keys(fieldPreview).length > 0 ? fieldPreview : undefined,
+      });
+    }
+  }
+
+  return items;
 }
 
 /** Flatten a tree recursively to produce file/object search items. */
@@ -284,6 +412,8 @@ const CRM_NAV_ITEMS: SearchIndexItem[] = [
 
 export async function GET() {
   const items: SearchIndexItem[] = [];
+  const postgresMode = isPostgresBackend();
+  const postgresObjects = postgresMode ? await readPostgresObjects() : [];
 
   // 1. Files + objects from tree
   const root = resolveWorkspaceRoot();
@@ -294,10 +424,12 @@ export async function GET() {
     // interaction) still need to be reachable via global search even
     // though their parent objects are absent from the file tree.
     const dbObjects = new Map<string, ObjectRow>();
-    const objs = await duckdbQueryAllAsync<ObjectRow & { name: string }>(
-      "SELECT * FROM objects",
-      "name",
-    );
+    const objs = postgresMode
+      ? postgresObjects
+      : await duckdbQueryAllAsync<ObjectRow & { name: string }>(
+        "SELECT * FROM objects",
+        "name",
+      );
     for (const o of objs) {dbObjects.set(o.name, o);}
 
     // Scan workspace root (the workspace folder IS the knowledge base)
@@ -307,9 +439,13 @@ export async function GET() {
   // 2. Entries from all objects across all discovered DBs.
   // `buildEntryItems` deliberately doesn't filter on `hidden_in_sidebar`
   // either — see the same rationale above.
-  const dbPaths = discoverDuckDBPaths();
-  if (dbPaths.length > 0) {
-    items.push(...await buildEntryItems());
+  if (postgresMode) {
+    items.push(...await buildPostgresEntryItems(postgresObjects));
+  } else {
+    const dbPaths = discoverDuckDBPaths();
+    if (dbPaths.length > 0) {
+      items.push(...await buildEntryItems());
+    }
   }
 
   // 3. CRM nav shortcuts (People / Companies / Inbox / Calendar). Always

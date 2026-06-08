@@ -8,6 +8,16 @@ export type PostgresObjectContext = {
 	workspaceRoot: string | null;
 };
 
+const canonicalTableByObjectName: Record<string, string> = {
+	people: "crm_people",
+	company: "crm_companies",
+	companies: "crm_companies",
+	email_thread: "crm_email_threads",
+	email_message: "crm_email_messages",
+	calendar_event: "crm_calendar_events",
+	interaction: "crm_interactions",
+};
+
 export async function resolvePostgresObjectContext(objectName: string): Promise<PostgresObjectContext | null> {
 	const objectDir = findObjectDir(objectName);
 	if (!objectDir) return null;
@@ -27,12 +37,18 @@ export async function resolvePostgresObjectContext(objectName: string): Promise<
 }
 
 export async function verifyPostgresEntryExists(objectName: string, entryId: string): Promise<boolean> {
+	const objectRows = await queryPg<{ entity_table: string | null }>(
+		`select entity_table from crm_objects where name = $1 limit 1`,
+		[objectName],
+	);
+	const entityTable = objectRows[0]?.entity_table ?? canonicalTableByObjectName[objectName.trim().toLowerCase()];
+	if (!entityTable || !/^crm_[a-z0-9_]+$/.test(entityTable)) return false;
+
 	const rows = await queryPg<{ cnt: number }>(
 		`select count(*)::int as cnt
-		 from crm_entries e
-		 join crm_objects o on o.id = e.object_id
-		 where o.name = $1 and e.id = $2`,
-		[objectName, entryId],
+		 from ${entityTable}
+		 where id = $1`,
+		[entryId],
 	);
 	return (rows[0]?.cnt ?? 0) > 0;
 }
