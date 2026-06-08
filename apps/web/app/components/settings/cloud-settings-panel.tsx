@@ -61,6 +61,20 @@ type ActionNotice = {
   message: string;
 };
 
+function isNetworkValidationError(message: string): boolean {
+  return message.startsWith("Could not reach Dench Cloud gateway");
+}
+
+function apiKeySubtitle(validationError?: string): string {
+  if (!validationError) {
+    return "Connect to Dench Cloud for AI model access.";
+  }
+  if (isNetworkValidationError(validationError)) {
+    return "Could not reach Dench Cloud. Check your connection and try again.";
+  }
+  return "Your API key is invalid. Enter a new one below.";
+}
+
 type IntegrationDraftState = Record<DenchIntegrationId, boolean>;
 
 const ENRICHMENT_WATERFALL_PROVIDERS = [
@@ -266,6 +280,8 @@ function ApiKeyEntry({
   validationError?: string;
 }) {
   const [keyInput, setKeyInput] = useState("");
+  const showValidationBanner =
+    Boolean(validationError) && (!notice || notice.message !== validationError);
 
   return (
     <div className="space-y-4">
@@ -284,9 +300,7 @@ function ApiKeyEntry({
             Dench Cloud
           </div>
           <div className="text-[11px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
-            {validationError
-              ? "Your API key is invalid. Enter a new one below."
-              : "Connect to Dench Cloud for AI model access."}
+            {apiKeySubtitle(validationError)}
           </div>
         </div>
         <a
@@ -300,7 +314,7 @@ function ApiKeyEntry({
         </a>
       </div>
 
-      {validationError && (
+      {showValidationBanner && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
           {validationError}
         </div>
@@ -679,6 +693,9 @@ export function CloudSettingsPanel() {
       });
       const payload = await res.json();
       if (!res.ok) {
+        if (payload.state) {
+          setData(payload.state);
+        }
         setNotice({
           tone: "error",
           message: payload.error ?? "Failed to save API key.",

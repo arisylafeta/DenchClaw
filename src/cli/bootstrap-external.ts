@@ -817,6 +817,15 @@ function applyDenchManagedIntegrationDefaults(params: {
   );
 }
 
+/** OpenClaw prefers index.ts over index.mjs when both exist; strip TS after sync when compiled output is present. */
+function stripTypeScriptPluginEntry(pluginDest: string): void {
+  const compiledEntry = path.join(pluginDest, "index.mjs");
+  const typeScriptEntry = path.join(pluginDest, "index.ts");
+  if (existsSync(compiledEntry) && existsSync(typeScriptEntry)) {
+    rmSync(typeScriptEntry, { force: true });
+  }
+}
+
 async function syncBundledPlugins(params: {
   openclawCommand: string;
   profile: string;
@@ -867,6 +876,7 @@ async function syncBundledPlugins(params: {
       const pluginDest = path.join(params.stateDir, "extensions", plugin.sourceDirName);
       mkdirSync(path.dirname(pluginDest), { recursive: true });
       cpSync(pluginSrc, pluginDest, { recursive: true, force: true });
+      stripTypeScriptPluginEntry(pluginDest);
       const normalizedPluginSrc = normalizeFilesystemPath(pluginSrc);
       const normalizedPluginDest = normalizeFilesystemPath(pluginDest);
       nextAllow.push(plugin.pluginId);

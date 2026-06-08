@@ -1213,6 +1213,80 @@ function chooseFallbackTool(app: string, queryText: string) {
   return best;
 }
 
+function buildStaticFallbackInputSchema(
+  recipe: (typeof STATIC_COMPOSIO_FALLBACK)[string][number],
+) {
+  const properties: Record<string, unknown> = {};
+  for (const arg of recipe.required_args ?? []) {
+    properties[arg] = { type: "string" };
+  }
+  for (const [key, hint] of Object.entries(recipe.arg_hints ?? {})) {
+    properties[key] = {
+      type: typeof hint === "number" ? "number" : Array.isArray(hint) ? "array" : "string",
+      description: Array.isArray(hint) ? JSON.stringify(hint) : String(hint),
+    };
+  }
+  return {
+    type: "object",
+    properties,
+    required: recipe.required_args ?? [],
+  };
+}
+
+function buildStaticFallbackSearchResults(toolkitSlug: string, queryText: string) {
+  const recipe = chooseFallbackTool(toolkitSlug, queryText);
+  if (!recipe) {
+    return [];
+  }
+
+  return [
+    {
+      tool_slug: recipe.tool,
+      name: recipe.intent,
+      description: `Known ${humanizeResolverApp(toolkitSlug)} recipe (local fallback because gateway search returned no matches).`,
+      toolkit: {
+        slug: toolkitSlug,
+        name: humanizeResolverApp(toolkitSlug),
+      },
+      input_schema: buildStaticFallbackInputSchema(recipe),
+      suggested_arguments: recipe.default_args ?? {},
+      is_connected: true,
+      account_count: null,
+      accounts: [],
+      match_source: "static_recipe_fallback",
+    },
+  ];
+}
+
+function buildEmptyConnectedSearchInstruction(params: {
+  normalizedToolkit: string;
+  query: string;
+  fallbackResults: Array<Record<string, unknown>>;
+}): string {
+  if (params.fallbackResults.length > 0) {
+    const top = params.fallbackResults[0] ?? {};
+    const slug = readString(top.tool_slug) ?? "the top fallback tool_slug";
+    const suggested = top.suggested_arguments;
+    const suggestedText =
+      suggested && typeof suggested === "object" && Object.keys(suggested as object).length > 0
+        ? ` and suggested_arguments ${JSON.stringify(suggested)}`
+        : "";
+    return [
+      `Gateway search returned no matches, but ${humanizeResolverApp(params.normalizedToolkit)} is connected.`,
+      "Do NOT stop the task, do NOT mention gog, and do NOT switch to shell CLIs.",
+      `Call ${DENCH_EXECUTE_INTEGRATIONS_NAME} immediately with tool_slug "${slug}"${suggestedText}.`,
+      `If execution fails, retry ${DENCH_SEARCH_INTEGRATIONS_NAME} with toolkit only (omit query) or a shorter query.`,
+    ].join(" ");
+  }
+
+  return [
+    `No ${humanizeResolverApp(params.normalizedToolkit)} integration tools matched gateway search.`,
+    "Do NOT stop — retry search with toolkit only (omit query), a shorter query, or a different keyword.",
+    `Then execute the best match with ${DENCH_EXECUTE_INTEGRATIONS_NAME}.`,
+    "Never fall back to gog while this app is connected.",
+  ].join(" ");
+}
+
 type ComposioSearchPresentationResult = {
   app: ComposioToolIndexFile["connected_apps"][number];
   search: ComposioToolSearchResult;
@@ -1832,10 +1906,35 @@ function createDenchSearchIntegrationsTool(api: OpenClawPluginApi): AnyAgentTool
         });
       }
 
-      const items = asRecordArray(gatewayResult.items) ?? [];
-      const connectedToolkits = Array.isArray(gatewayResult.connected_toolkits)
+      let items = asRecordArray(gatewayResult.items) ?? [];
+      let connectedToolkits = Array.isArray(gatewayResult.connected_toolkits)
         ? (gatewayResult.connected_toolkits as string[])
         : [];
+
+      if (
+        items.length === 0 &&
+        normalizedToolkit &&
+        query &&
+        connectedToolkits.includes(normalizedToolkit)
+      ) {
+        const retryResult = await postComposioGatewayJson({
+          api,
+          path: "/v1/composio/tools/search",
+          body: {
+            toolkit_slug: normalizedToolkit,
+            limit,
+          },
+        });
+        if (retryResult) {
+          const retryItems = asRecordArray(retryResult.items) ?? [];
+          if (retryItems.length > 0) {
+            items = retryItems;
+          }
+          if (Array.isArray(retryResult.connected_toolkits)) {
+            connectedToolkits = retryResult.connected_toolkits as string[];
+          }
+        }
+      }
 
       if (
         items.length === 0 &&
@@ -1858,15 +1957,29 @@ function createDenchSearchIntegrationsTool(api: OpenClawPluginApi): AnyAgentTool
       }
 
       if (items.length === 0) {
+        const fallbackResults =
+          normalizedToolkit && connectedToolkits.includes(normalizedToolkit)
+            ? buildStaticFallbackSearchResults(normalizedToolkit, query)
+            : [];
+
         return jsonResult({
           query,
           toolkit_filter: normalizedToolkit,
-          result_count: 0,
-          results: [],
+          result_count: fallbackResults.length,
+          results: fallbackResults,
           connected_toolkits: connectedToolkits,
-          instruction: normalizedToolkit
-            ? `No ${humanizeResolverApp(normalizedToolkit)} integration tools matched. Refine the query or try a broader search.`
-            : "No integration tools matched. Refine the query or specify a toolkit.",
+          search_source:
+            fallbackResults.length > 0 ? "static_recipe_fallback" : "gateway_tool_router",
+          instruction:
+            normalizedToolkit && connectedToolkits.includes(normalizedToolkit)
+              ? buildEmptyConnectedSearchInstruction({
+                  normalizedToolkit,
+                  query,
+                  fallbackResults,
+                })
+              : normalizedToolkit
+                ? `No ${humanizeResolverApp(normalizedToolkit)} integration tools matched. Refine the query or try a broader search.`
+                : "No integration tools matched. Refine the query or specify a toolkit.",
         });
       }
 
@@ -1927,6 +2040,7 @@ function buildComposioDefaultGuidance(composioAppsSkillPath: string): string {
     "- Missing first-time connection example: `[Connect Slack](dench://composio/connect?toolkit=slack&name=Slack)`.",
     '- If the search returns `availability: "connect_required"`, briefly explain the app is not connected and end with the connect link.',
     "- If an integration tool call fails because of argument shape, fix the arguments and retry once before considering any fallback.",
+    "- When search returns zero gateway matches but the app is connected, the tool may include `static_recipe_fallback` results with `suggested_arguments`. Execute the top match immediately — do NOT stop the turn or switch to gog.",
     "- When the user implicitly asks for the full dataset, keep paginating until the tool response no longer advertises more pages.",
     "",
   ].join("\n");
@@ -2081,7 +2195,13 @@ export default function register(api: any) {
     typeof api.registerTool === "function" &&
     shouldRegisterIntegrationTools(workspaceDir)
   ) {
-    api.registerTool(createDenchSearchIntegrationsTool(api));
+    api.registerTool(createDenchSearchIntegrationsTool(api), {
+      name: DENCH_SEARCH_INTEGRATIONS_NAME,
+      optional: true,
+    });
+    api.logger?.info?.(
+      `[dench-identity] registered ${DENCH_SEARCH_INTEGRATIONS_NAME} integration tool`,
+    );
   }
 
   api.on(

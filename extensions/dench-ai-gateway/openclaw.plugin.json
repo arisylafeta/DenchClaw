@@ -3,6 +3,16 @@
   "name": "Dench AI Gateway",
   "version": "1.0.0",
   "description": "Registers Dench Cloud as an OpenClaw model provider with live gateway-backed model discovery, and arms the gateway-side Gmail/Calendar sync poll trigger.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "dench_execute_integrations",
+      "denchclaw_refresh_sync",
+      "denchclaw_resync_full"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

@@ -242,7 +242,7 @@ export function createResyncFullTool(api: any): AnyAgentTool {
 export function registerSyncRefreshTools(api: any): string[] {
   const refresh = createRefreshSyncTool(api);
   const resync = createResyncFullTool(api);
-  api.registerTool(refresh);
-  api.registerTool(resync);
+  api.registerTool(refresh, { name: REFRESH_TOOL_NAME, optional: true });
+  api.registerTool(resync, { name: RESYNC_TOOL_NAME, optional: true });
   return [refresh.name, resync.name];
 }

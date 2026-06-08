@@ -117,6 +117,8 @@ When only one account is connected, the gateway auto-selects it — no `connecte
 - Pass **JSON-shaped** arguments as the tool schema requires: arrays are arrays, not comma-separated strings.
 - Read the returned `input_schema` before filling arguments. Use exact field names and types.
 - Treat the live schema from `dench_search_integrations` as authoritative over any recipe table below.
+- If search returns **zero gateway matches** but the app is connected, results may include `match_source: "static_recipe_fallback"` with `suggested_arguments`. **Execute that tool immediately** — do not stop the turn or switch to `gog`.
+- If gateway search still fails, retry with **toolkit only** (omit query) or a shorter query before giving up.
 - If a call fails on argument shape, fix the types and retry once before escalating.
 - If the search returns `availability: "connect_required"`, show the connect link to the user.
 - If the response includes pagination fields (`has_more`, `next_cursor`, `starting_after`, etc.), keep paginating when the user asked for the full dataset.

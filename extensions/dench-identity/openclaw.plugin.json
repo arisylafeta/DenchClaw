@@ -3,6 +3,14 @@
   "name": "DenchClaw Identity",
   "version": "1.0.0",
   "description": "Injects the DenchClaw identity and behavioral contracts into the agent system prompt.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "dench_search_integrations"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

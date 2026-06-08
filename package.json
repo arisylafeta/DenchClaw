@@ -1,6 +1,6 @@
 {
   "name": "denchclaw",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "description": "Fully Managed OpenClaw Framework for managing your CRM, Sales Automation and Outreach agents. The only local productivity tool you need.",
   "keywords": [],
   "homepage": "https://github.com/DenchHQ/DenchClaw#readme",
@@ -37,6 +37,7 @@
   },
   "scripts": {
     "build": "tsdown",
+    "build:dench-plugins": "node scripts/build-dench-plugins.mjs",
     "build:plugin-env": "node scripts/build-plugin-env.mjs",
     "build:seed-duckdb": "node scripts/build-seed-duckdb.mjs",
     "check": "pnpm format:check && pnpm lint",
@@ -51,7 +52,7 @@
     "format:check": "oxfmt --check",
     "github:sync-secrets": "bash scripts/with-root-env.sh bash scripts/sync-github-secrets.sh",
     "lint": "oxlint --type-aware",
-    "prepack": "pnpm build:seed-duckdb && pnpm build:plugin-env && pnpm build && pnpm web:build && pnpm web:prepack",
+    "prepack": "pnpm build:seed-duckdb && pnpm build:plugin-env && pnpm build:dench-plugins && pnpm build && pnpm web:build && pnpm web:prepack",
     "start": "node denchclaw.mjs",
     "test": "pnpm test:cli && pnpm --dir apps/web test",
     "test:cli": "vitest run --config vitest.unit.config.ts src/cli/run-main.test.ts src/cli/bootstrap-external.test.ts src/cli/bootstrap-external.bootstrap-command.test.ts src/cli/dench-cloud.test.ts src/cli/workspace-seed.test.ts src/cli/web-runtime.test.ts src/cli/web-runtime-command.test.ts src/cli/flatten-standalone-deps.test.ts src/cli/sync-poll.test.ts && vitest run --config extensions/vitest.config.ts extensions/dench-identity/index.test.ts extensions/dench-identity/composio-cheat-sheet.test.ts extensions/dench-ai-gateway/index.test.ts",
@@ -73,6 +74,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
+    "esbuild": "0.27.3",
     "oxfmt": "0.34.0",
     "oxlint": "^1.49.0",
     "oxlint-tsgolint": "^0.14.2",

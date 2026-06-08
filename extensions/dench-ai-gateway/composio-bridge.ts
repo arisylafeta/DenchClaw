@@ -198,7 +198,10 @@ export function registerDenchIntegrationsBridge(api: any, fallbackGatewayUrl: st
     authorization: `Bearer ${apiKey}`,
   });
 
-  api.registerTool(tool);
+  api.registerTool(tool, {
+    name: DENCH_EXECUTE_INTEGRATIONS_NAME,
+    optional: true,
+  });
   api.logger?.info?.(
     `[dench-ai-gateway] registered ${DENCH_EXECUTE_INTEGRATIONS_NAME} bridge tool`,
   );

@@ -311,6 +311,7 @@ describe("register", () => {
 
     expect(api.registerTool).toHaveBeenCalledWith(
       expect.objectContaining({ name: "dench_search_integrations" }),
+      { name: "dench_search_integrations", optional: true },
     );
     expect(getRegisteredTool(api as any, "dench_execute_integrations")).toBeUndefined();
 
@@ -694,7 +695,7 @@ describe("register", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("returns no-match guidance when a toolkit search has no matching tools", async () => {
+  it("returns static fallback recipes when a connected toolkit search has no gateway matches", async () => {
     const tmp = path.join(
       os.tmpdir(),
       `dench-identity-no-match-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -720,9 +721,16 @@ describe("register", () => {
     });
     const payload = JSON.parse(result.content[0].text);
 
-    expect(payload.result_count).toBe(0);
+    expect(payload.result_count).toBe(1);
+    expect(payload.results[0].tool_slug).toBe("GMAIL_FETCH_EMAILS");
+    expect(payload.results[0].suggested_arguments).toEqual({
+      label_ids: ["INBOX"],
+      max_results: 10,
+    });
+    expect(payload.search_source).toBe("static_recipe_fallback");
     expect(payload.connected_toolkits).toEqual(["gmail"]);
-    expect(payload.instruction).toContain("No Gmail integration tools matched");
+    expect(payload.instruction).toContain("dench_execute_integrations");
+    expect(payload.instruction).toContain("Do NOT stop");
 
     rmSync(tmp, { recursive: true, force: true });
   });

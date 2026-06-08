@@ -96,6 +96,19 @@ describe("dench-cloud helpers", () => {
     ).rejects.toThrow("Check your key at dench.com/settings");
   });
 
+  it("surfaces network failures during API key validation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }) as unknown as typeof fetch,
+    );
+
+    await expect(
+      validateDenchCloudApiKey("https://gateway.merseoriginals.com", "dench_test_key"),
+    ).rejects.toThrow("Could not reach Dench Cloud gateway");
+  });
+
   it("builds the Dench Cloud config patch with provider models, agent aliases, and Dench Integrations tools", () => {
     const patch = buildDenchCloudConfigPatch({
       gatewayUrl: "https://gateway.merseoriginals.com",

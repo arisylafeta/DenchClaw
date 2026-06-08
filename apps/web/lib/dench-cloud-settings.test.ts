@@ -340,8 +340,22 @@ describe("dench cloud settings", () => {
     const result = await saveApiKey("bad-key");
 
     expect(result.error).toBe("Invalid Dench Cloud API key.");
+    expect(mocks.validateDenchCloudApiKey).toHaveBeenCalledTimes(1);
     expect(mocks.state.authText).toBe(existingAuthProfile);
     expect(mocks.refreshIntegrationsRuntime).not.toHaveBeenCalled();
+  });
+
+  it("returns invalid-key state without re-validating when API key validation fails", async () => {
+    mocks.validateDenchCloudApiKey.mockRejectedValueOnce(
+      new Error("Could not reach Dench Cloud gateway at https://gateway.example.com/v1 (fetch failed)."),
+    );
+
+    const result = await saveApiKey("bad-key");
+
+    expect(mocks.validateDenchCloudApiKey).toHaveBeenCalledTimes(1);
+    expect(result.state.status).toBe("invalid_key");
+    expect(result.state.validationError).toContain("Could not reach Dench Cloud gateway");
+    expect(result.error).toContain("Could not reach Dench Cloud gateway");
   });
 
   it("refreshes integrations when switching the primary model to Dench Cloud", async () => {

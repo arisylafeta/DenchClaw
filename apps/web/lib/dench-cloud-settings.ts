@@ -96,6 +96,35 @@ function resolvePrimaryModel(config: UnknownRecord): string | null {
   return typeof primary === "string" && primary.trim() ? primary.trim() : null;
 }
 
+function resolveApiKeySource(config: UnknownRecord): "config" | "env" | "missing" {
+  const models = asRecord(config.models);
+  const provider = asRecord(asRecord(models?.providers)?.["dench-cloud"]);
+  if (typeof provider?.apiKey === "string" && provider.apiKey.trim()) return "config";
+  if (process.env.DENCH_CLOUD_API_KEY?.trim() || process.env.DENCH_API_KEY?.trim()) return "env";
+  return "missing";
+}
+
+function buildInvalidKeySettingsState(
+  config: UnknownRecord,
+  validationError: string,
+): CloudSettingsState {
+  const primaryModel = resolvePrimaryModel(config);
+  const isDenchPrimary = Boolean(primaryModel?.startsWith("dench-cloud/"));
+  return {
+    status: "invalid_key",
+    apiKeySource: resolveApiKeySource(config),
+    gatewayUrl: resolveGatewayUrl(config),
+    primaryModel,
+    isDenchPrimary,
+    selectedDenchModel: null,
+    selectedVoiceId: readSelectedVoiceId(config),
+    elevenLabsEnabled: isElevenLabsEnabled(config),
+    models: [],
+    recommendedModelId: RECOMMENDED_DENCH_CLOUD_MODEL_ID,
+    validationError,
+  };
+}
+
 function ensureRecord(parent: UnknownRecord, key: string): UnknownRecord {
   const existing = asRecord(parent[key]);
   if (existing) return existing;
@@ -327,13 +356,7 @@ export async function getCloudVoiceState(): Promise<CloudVoiceState> {
   const selectedVoiceId = readSelectedVoiceId(config);
   const elevenLabsEnabled = isElevenLabsEnabled(config);
 
-  const apiKeySource: "config" | "env" | "missing" = (() => {
-    const models = asRecord(config.models);
-    const provider = asRecord(asRecord(models?.providers)?.["dench-cloud"]);
-    if (typeof provider?.apiKey === "string" && provider.apiKey.trim()) return "config";
-    if (process.env.DENCH_CLOUD_API_KEY?.trim() || process.env.DENCH_API_KEY?.trim()) return "env";
-    return "missing";
-  })();
+  const apiKeySource = resolveApiKeySource(config);
 
   if (!apiKey) {
     return {
@@ -434,11 +457,12 @@ export async function saveApiKey(
   try {
     await validateDenchCloudApiKey(gatewayUrl, apiKey);
   } catch (err) {
+    const validationError = err instanceof Error ? err.message : "API key validation failed.";
     return {
-      state: await getCloudSettingsState(),
+      state: buildInvalidKeySettingsState(config, validationError),
       changed: false,
       refresh: { attempted: false, restarted: false, error: null, profile: "default" },
-      error: err instanceof Error ? err.message : "API key validation failed.",
+      error: validationError,
     };
   }
 

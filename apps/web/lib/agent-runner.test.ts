@@ -194,14 +194,14 @@ describe("agent-runner", () => {
 			expect(params.auth).toBeUndefined();
 		});
 
-		it("requests protocol version 3 (current Gateway protocol)", async () => {
+		it("requests protocol version 4 (current Gateway protocol)", async () => {
 			const { buildConnectParams } = await import("./agent-runner.js");
 			const params = buildConnectParams({ url: "ws://127.0.0.1:19001" }) as {
 				minProtocol: number;
 				maxProtocol: number;
 			};
-			expect(params.minProtocol).toBe(3);
-			expect(params.maxProtocol).toBe(3);
+			expect(params.minProtocol).toBe(4);
+			expect(params.maxProtocol).toBe(4);
 		});
 
 		it("requests all 5 operator scopes for full gateway access (prevents missing-scope 403s)", async () => {
