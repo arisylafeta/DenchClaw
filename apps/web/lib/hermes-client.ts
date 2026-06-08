@@ -19,39 +19,43 @@ export function errorStream(message: string, status?: number): ReadableStream<Ui
   });
 }
 
-function mapHermesEvent(raw: Record<string, unknown>): Record<string, unknown> | null {
-  if (raw.type === "response.output_text.delta" && typeof raw.delta === "string") {
-    return { type: "text-delta", textDelta: raw.delta };
-  }
-  if (raw.type === "response.completed" || raw.type === "run.completed") {
-    return { type: "finish" };
-  }
-  if (typeof raw.type === "string" && (raw.type.startsWith("tool.") || raw.type === "tool")) {
-    return { type: "tool-progress", data: raw };
-  }
-  return null;
-}
+type HermesRunResult = {
+  run_id: string;
+  status: string;
+  output?: string;
+};
 
-function parseSseDataChunks(text: string): Record<string, unknown>[] {
-  const chunks: Record<string, unknown>[] = [];
-  for (const block of text.split("\n\n")) {
-    const dataLines = block
-      .split("\n")
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim());
-    if (dataLines.length === 0) continue;
-    const data = dataLines.join("\n");
-    if (!data || data === "[DONE]") continue;
-    try {
-      const parsed = JSON.parse(data);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        chunks.push(parsed as Record<string, unknown>);
-      }
-    } catch {
-      chunks.push({ type: "hermes.raw", text: data });
+async function pollRunCompletion(
+  config: HermesConfig,
+  runId: string,
+  sessionKey: string,
+): Promise<HermesRunResult> {
+  const maxAttempts = 60;
+  const delayMs = 1000;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await fetch(`${config.baseUrl}/v1/runs/${encodeURIComponent(runId)}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "X-Hermes-Session-Key": sessionKey,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Hermes run status failed: ${res.status} ${body}`.trim());
     }
+
+    const run = (await res.json()) as HermesRunResult;
+    if (run.status === "completed" || run.status === "failed") {
+      return run;
+    }
+
+    await new Promise((r) => setTimeout(r, delayMs));
   }
-  return chunks;
+
+  throw new Error("Hermes run timed out");
 }
 
 export async function createHermesChatStream(
@@ -101,35 +105,14 @@ export async function createHermesChatStream(
         }
 
         try {
-          const eventsResponse = await fetch(`${config.baseUrl}/v1/runs/${data.run_id}/events`, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${config.apiKey}`,
-              "X-Hermes-Session-Key": sessionKey,
-            },
-          });
-
-          if (!eventsResponse.ok) {
-            const body = await eventsResponse.text();
-            controller.enqueue(
-              encodeSse({ type: "error", errorText: body, status: eventsResponse.status }),
-            );
-            controller.close();
-            return;
+          const runResult = await pollRunCompletion(config, data.run_id, sessionKey);
+          if (runResult.output) {
+            controller.enqueue(encodeSse({ type: "text-delta", textDelta: runResult.output }));
           }
-
-          const eventsText = await eventsResponse.text();
-          const chunks = parseSseDataChunks(eventsText);
-          
-          for (const chunk of chunks) {
-            const mapped = mapHermesEvent(chunk);
-            if (mapped) {
-              controller.enqueue(encodeSse(mapped));
-            }
-          }
-        } catch (eventsErr) {
-          const eventsMsg = eventsErr instanceof Error ? eventsErr.message : "Failed to fetch events";
-          controller.enqueue(encodeSse({ type: "error", errorText: eventsMsg }));
+          controller.enqueue(encodeSse({ type: "finish" }));
+        } catch (pollErr) {
+          const pollMsg = pollErr instanceof Error ? pollErr.message : "Failed to get run result";
+          controller.enqueue(encodeSse({ type: "error", errorText: pollMsg }));
         }
 
         controller.close();
