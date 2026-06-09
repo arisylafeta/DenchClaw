@@ -1526,6 +1526,49 @@ export async function persistUserMessage(
 	}
 }
 
+/**
+ * Persist a completed assistant message to the session JSONL.
+ * Used by backends (e.g. Hermes) that do not run through ActiveRunManager.
+ */
+export async function persistAssistantMessage(
+	sessionId: string,
+	msg: { id: string; content: string; parts?: unknown[] },
+): Promise<void> {
+	await ensureDir();
+	const filePath = safeSessionFilePath(sessionId);
+
+	const line = JSON.stringify({
+		id: msg.id,
+		role: "assistant",
+		content: msg.content,
+		...(msg.parts ? { parts: msg.parts } : {}),
+		timestamp: new Date().toISOString(),
+	});
+
+	let alreadySaved = false;
+	await queueFileMutation(filePath, async () => {
+		if (!await pathExistsAsync(filePath)) {await writeFile(filePath, "");}
+
+		const existing = await readFile(filePath, "utf-8");
+		const lines = existing.split("\n").filter((l) => l.trim());
+		alreadySaved = lines.some((l) => {
+			try {
+				return JSON.parse(l).id === msg.id;
+			} catch {
+				return false;
+			}
+		});
+
+		if (!alreadySaved) {
+			await writeFile(filePath, [...lines, line].join("\n") + "\n");
+		}
+	});
+
+	if (!alreadySaved) {
+		await updateIndex(sessionId, { incrementCount: 1 });
+	}
+}
+
 // ── Internals ──
 
 async function ensureDir() {

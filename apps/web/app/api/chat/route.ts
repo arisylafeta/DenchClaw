@@ -11,6 +11,7 @@ import {
 	getActiveRun,
 	subscribeToRun,
 	persistUserMessage,
+	persistAssistantMessage,
 	persistSubscribeUserMessage,
 	reactivateSubscribeRun,
 	type SseEvent,
@@ -226,13 +227,48 @@ export async function POST(req: Request) {
 			return new Response("sessionId is required for Hermes chat", { status: 400 });
 		}
 
-		const stream = await createHermesChatStream({
+		const hermesStream = await createHermesChatStream({
 			sessionKey: hermesSessionKey,
 			message: agentMessage,
 			config: resolveHermesConfig(),
 		});
 
-		return new Response(stream, {
+		// Accumulate assistant text for persistence.  The raw stream
+		// emits AI-SDK UI chunks (text-delta, reasoning-delta, etc.)
+		// so we tap into it without altering what the client receives.
+		let assistantText = "";
+		let assistantId = `assistant_${Date.now()}`;
+		const persistStream = hermesStream.pipeThrough(
+			new TransformStream<Uint8Array, Uint8Array>({
+				transform(chunk, controller) {
+					controller.enqueue(chunk);
+					// Parse SSE lines to accumulate text deltas.
+					const decoded = new TextDecoder().decode(chunk);
+					for (const line of decoded.split("\n")) {
+						if (!line.startsWith("data: ")) continue;
+						try {
+							const evt = JSON.parse(line.slice(6));
+							if (evt.type === "text-delta" && typeof evt.delta === "string") {
+								assistantText += evt.delta;
+							}
+						} catch { /* ignore non-JSON */ }
+					}
+				},
+				async flush() {
+					if (assistantText.trim() && sessionId) {
+						await persistAssistantMessage(sessionId, {
+							id: assistantId,
+							content: assistantText,
+							parts: [{ type: "text", text: assistantText }],
+						}).catch((err) =>
+							console.error("[hermes] Failed to persist assistant message:", err),
+						);
+					}
+				},
+			}),
+		);
+
+		return new Response(persistStream, {
 			headers: {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache, no-transform",
