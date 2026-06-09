@@ -244,6 +244,41 @@ export async function POST(req: Request) {
 		let currentReasoning = "";
 		let hasReasoningPart = false;
 		const toolParts = new Map<string, Record<string, unknown>>();
+		// Track pending composio search queries for output fetching
+		const pendingComposioOutputs = new Map<string, Promise<Record<string, unknown> | null>>();
+
+		const composioApiKey = (process.env.COMPOSIO_API_KEY || "").trim();
+		const composioUserId = (process.env.COMPOSIO_USER_ID || "").trim();
+
+		async function fetchComposioSearchOutput(query: string, toolkit?: string): Promise<Record<string, unknown> | null> {
+			if (!composioApiKey) return null;
+			try {
+				const params = new URLSearchParams();
+				if (query) params.set("search", query);
+				if (toolkit) params.set("toolkit_slug", toolkit);
+				params.set("limit", "20");
+				const res = await fetch(`https://backend.composio.dev/api/v3/tools?${params}`, {
+					headers: { accept: "application/json", "x-api-key": composioApiKey },
+					signal: AbortSignal.timeout(10000),
+				});
+				if (!res.ok) return null;
+				return await res.json();
+			} catch { return null; }
+		}
+
+		async function fetchComposioExecuteOutput(toolSlug: string, args: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+			if (!composioApiKey || !composioUserId) return null;
+			try {
+				const res = await fetch(`https://backend.composio.dev/api/v3/tools/execute/${encodeURIComponent(toolSlug)}`, {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json", "x-api-key": composioApiKey },
+					body: JSON.stringify({ user_id: composioUserId, arguments: args }),
+					signal: AbortSignal.timeout(15000),
+				});
+				if (!res.ok) return null;
+				return await res.json();
+			} catch { return null; }
+		}
 
 		function flushTextPart() {
 			if (currentText) {
@@ -271,7 +306,7 @@ export async function POST(req: Request) {
 
 		const persistStream = hermesStream.pipeThrough(
 			new TransformStream<Uint8Array, Uint8Array>({
-				transform(chunk, controller) {
+				async transform(chunk, controller) {
 					controller.enqueue(chunk);
 					const decoded = new TextDecoder().decode(chunk);
 					for (const line of decoded.split("\n")) {
@@ -311,18 +346,34 @@ export async function POST(req: Request) {
 									if (evt.toolCallId && toolParts.has(evt.toolCallId)) {
 										const tp = toolParts.get(evt.toolCallId)!;
 										const input = evt.input;
-										// Hermes sends preview as a string; wrap it in an object
-										// so the UI can read args.query, args.preview, etc.
 										(tp as Record<string, unknown>).args = typeof input === "string"
 											? { query: input, preview: input }
 											: (input ?? {});
 										(tp as Record<string, unknown>).state = "call";
+
+										// Fire Composio fetch in background for search tools
+										const toolName = (tp as Record<string, unknown>).toolName as string;
+										if (toolName?.includes("dench_search_integrations") && typeof input === "string") {
+											pendingComposioOutputs.set(evt.toolCallId, fetchComposioSearchOutput(input));
+										}
 									}
 									break;
 								case "tool-output-available":
 									if (evt.toolCallId && toolParts.has(evt.toolCallId)) {
 										const tp = toolParts.get(evt.toolCallId)!;
-										(tp as Record<string, unknown>).result = evt.output ?? "";
+										// Check if we have a pending Composio fetch for this tool
+										const pending = pendingComposioOutputs.get(evt.toolCallId);
+										if (pending) {
+											const composioResult = await pending;
+											if (composioResult) {
+												(tp as Record<string, unknown>).result = composioResult;
+											} else {
+												(tp as Record<string, unknown>).result = evt.output ?? "";
+											}
+											pendingComposioOutputs.delete(evt.toolCallId);
+										} else {
+											(tp as Record<string, unknown>).result = evt.output ?? "";
+										}
 										(tp as Record<string, unknown>).state = "result";
 									}
 									break;
@@ -341,6 +392,17 @@ export async function POST(req: Request) {
 					// Flush any remaining text/reasoning
 					flushTextPart();
 					flushReasoningPart();
+
+					// Resolve any pending Composio outputs
+					for (const [toolCallId, promise] of pendingComposioOutputs) {
+						const tp = toolParts.get(toolCallId);
+						if (tp) {
+							const result = await promise.catch(() => null);
+							if (result) {
+								(tp as Record<string, unknown>).result = result;
+							}
+						}
+					}
 
 					// Add tool parts in insertion order
 					for (const tp of toolParts.values()) {
