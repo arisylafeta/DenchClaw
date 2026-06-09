@@ -52,6 +52,7 @@ export async function createHermesChatStream(
       let textId: string | null = null;
       let reasoningId: string | null = null;
       let toolCallId: string | null = null;
+      let toolPreview: string | null = null;
       let finished = false;
 
       function emit(data: Record<string, unknown>) {
@@ -169,6 +170,7 @@ export async function createHermesChatStream(
                     textId = null;
                   }
                   toolCallId = nextId("tool");
+                  toolPreview = event.preview ?? null;
                   emit({
                     type: "tool-input-start",
                     toolCallId,
@@ -187,12 +189,16 @@ export async function createHermesChatStream(
 
                 case "tool.completed": {
                   if (toolCallId) {
+                    const outputLabel = toolPreview
+                      ? `Done: ${toolPreview}`
+                      : (event.tool ?? "completed");
                     emit({
                       type: event.error ? "tool-output-error" : "tool-output-available",
                       toolCallId,
-                      output: event.output ?? event.tool ?? "completed",
+                      output: event.error ? (event.output ?? "Tool execution failed") : outputLabel,
                     });
                     toolCallId = null;
+                    toolPreview = null;
                   }
                   break;
                 }

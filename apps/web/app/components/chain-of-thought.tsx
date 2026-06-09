@@ -404,7 +404,7 @@ function classifyTool(
 	args?: Record<string, unknown>,
 	output?: Record<string, unknown>,
 ): StepKind {
-	if (name === "dench_search_integrations" || name === "dench_execute_integrations" || name === "composio_search_tools" || name === "composio_call_tool") {
+	if (name === "dench_search_integrations" || name === "dench_execute_integrations" || name === "composio_search_tools" || name === "composio_call_tool" || name.includes("dench_search_integrations") || name.includes("dench_execute_integrations")) {
 		return "composio";
 	}
 	const n = name.toLowerCase().replace(/[_-]/g, "");
@@ -508,9 +508,9 @@ function buildStepLabel(
 
 	switch (kind) {
 		case "composio":
-			return toolName === "dench_search_integrations" || toolName === "composio_search_tools"
+			return name.includes("search_integrations") || name === "composio_search_tools"
 				? denchIntegrationsBrand.searchLabel
-				: toolName === "dench_execute_integrations" || toolName === "composio_call_tool"
+				: name.includes("execute_integrations") || name === "composio_call_tool"
 					? denchIntegrationsBrand.callLabel
 					: denchIntegrationsBrand.genericToolLabel;
 		case "search": {
