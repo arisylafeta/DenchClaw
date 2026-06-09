@@ -233,33 +233,120 @@ export async function POST(req: Request) {
 			config: resolveHermesConfig(),
 		});
 
-		// Accumulate assistant text for persistence.  The raw stream
+		// Accumulate assistant text + parts for persistence.  The raw stream
 		// emits AI-SDK UI chunks (text-delta, reasoning-delta, etc.)
 		// so we tap into it without altering what the client receives.
 		let assistantText = "";
 		let assistantId = `assistant_${Date.now()}`;
+		const parts: Array<Record<string, unknown>> = [];
+		let currentText = "";
+		let hasTextPart = false;
+		let currentReasoning = "";
+		let hasReasoningPart = false;
+		const toolParts = new Map<string, Record<string, unknown>>();
+
+		function flushTextPart() {
+			if (currentText) {
+				if (!hasTextPart) {
+					parts.push({ type: "text", text: currentText });
+					hasTextPart = true;
+				} else {
+					// Append to existing text part
+					const last = parts[parts.length - 1];
+					if (last?.type === "text") {
+						(last as { text: string }).text += currentText;
+					}
+				}
+				currentText = "";
+			}
+		}
+
+		function flushReasoningPart() {
+			if (currentReasoning) {
+				parts.push({ type: "reasoning", text: currentReasoning });
+				currentReasoning = "";
+				hasReasoningPart = true;
+			}
+		}
+
 		const persistStream = hermesStream.pipeThrough(
 			new TransformStream<Uint8Array, Uint8Array>({
 				transform(chunk, controller) {
 					controller.enqueue(chunk);
-					// Parse SSE lines to accumulate text deltas.
 					const decoded = new TextDecoder().decode(chunk);
 					for (const line of decoded.split("\n")) {
 						if (!line.startsWith("data: ")) continue;
 						try {
 							const evt = JSON.parse(line.slice(6));
-							if (evt.type === "text-delta" && typeof evt.delta === "string") {
-								assistantText += evt.delta;
+							switch (evt.type) {
+								case "text-delta":
+									if (typeof evt.delta === "string") {
+										assistantText += evt.delta;
+										currentText += evt.delta;
+									}
+									break;
+								case "text-end":
+									flushTextPart();
+									break;
+								case "reasoning-delta":
+									if (typeof evt.delta === "string") {
+										currentReasoning += evt.delta;
+									}
+									break;
+								case "reasoning-end":
+									flushReasoningPart();
+									break;
+								case "tool-input-start":
+									if (evt.toolCallId) {
+										toolParts.set(evt.toolCallId, {
+											type: "tool-invocation",
+											toolCallId: evt.toolCallId,
+											toolName: evt.toolName ?? "unknown",
+											state: "call",
+											args: {},
+										});
+									}
+									break;
+								case "tool-input-available":
+									if (evt.toolCallId && toolParts.has(evt.toolCallId)) {
+										const tp = toolParts.get(evt.toolCallId)!;
+										(tp as Record<string, unknown>).args = evt.input ?? {};
+										(tp as Record<string, unknown>).state = "call";
+									}
+									break;
+								case "tool-output-available":
+									if (evt.toolCallId && toolParts.has(evt.toolCallId)) {
+										const tp = toolParts.get(evt.toolCallId)!;
+										(tp as Record<string, unknown>).result = evt.output ?? "";
+										(tp as Record<string, unknown>).state = "result";
+									}
+									break;
+								case "tool-output-error":
+									if (evt.toolCallId && toolParts.has(evt.toolCallId)) {
+										const tp = toolParts.get(evt.toolCallId)!;
+										(tp as Record<string, unknown>).errorText = evt.output ?? "Error";
+										(tp as Record<string, unknown>).state = "result";
+									}
+									break;
 							}
 						} catch { /* ignore non-JSON */ }
 					}
 				},
 				async flush() {
+					// Flush any remaining text/reasoning
+					flushTextPart();
+					flushReasoningPart();
+
+					// Add tool parts in insertion order
+					for (const tp of toolParts.values()) {
+						parts.push(tp);
+					}
+
 					if (assistantText.trim() && sessionId) {
 						await persistAssistantMessage(sessionId, {
 							id: assistantId,
 							content: assistantText,
-							parts: [{ type: "text", text: assistantText }],
+							parts,
 						}).catch((err) =>
 							console.error("[hermes] Failed to persist assistant message:", err),
 						);
