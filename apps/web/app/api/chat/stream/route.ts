@@ -62,7 +62,7 @@ export async function GET(req: Request) {
 				sessionKey,
 				parentSessionId: info.parentSessionId,
 				task: info.task,
-			});
+			}) ?? undefined;
 		}
 	}
 

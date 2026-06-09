@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 			parentSessionId: sessionKey,
 			task: `Channel session: ${sessionLabel}`,
 			label: sessionLabel,
-		});
+		}) ?? undefined;
 	}
 
 	if (!run) {

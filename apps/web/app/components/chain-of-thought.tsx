@@ -508,9 +508,9 @@ function buildStepLabel(
 
 	switch (kind) {
 		case "composio":
-			return name.includes("search_integrations") || name === "composio_search_tools"
+			return toolName.includes("search_integrations") || toolName === "composio_search_tools"
 				? denchIntegrationsBrand.searchLabel
-				: name.includes("execute_integrations") || name === "composio_call_tool"
+				: toolName.includes("execute_integrations") || toolName === "composio_call_tool"
 					? denchIntegrationsBrand.callLabel
 					: denchIntegrationsBrand.genericToolLabel;
 		case "search": {

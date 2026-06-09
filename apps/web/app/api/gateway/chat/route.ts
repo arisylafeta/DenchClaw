@@ -63,7 +63,7 @@ export async function POST(req: Request) {
 			parentSessionId: sessionKey,
 			task: message.slice(0, 200),
 			label: sessionLabel,
-		});
+		}) ?? undefined;
 		reactivateSubscribeRun(sessionKey, message, imageAttachments);
 	}
 
