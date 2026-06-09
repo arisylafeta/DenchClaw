@@ -310,7 +310,12 @@ export async function POST(req: Request) {
 								case "tool-input-available":
 									if (evt.toolCallId && toolParts.has(evt.toolCallId)) {
 										const tp = toolParts.get(evt.toolCallId)!;
-										(tp as Record<string, unknown>).args = evt.input ?? {};
+										const input = evt.input;
+										// Hermes sends preview as a string; wrap it in an object
+										// so the UI can read args.query, args.preview, etc.
+										(tp as Record<string, unknown>).args = typeof input === "string"
+											? { query: input, preview: input }
+											: (input ?? {});
 										(tp as Record<string, unknown>).state = "call";
 									}
 									break;

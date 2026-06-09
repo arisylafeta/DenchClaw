@@ -1387,8 +1387,8 @@ function ToolStep({
 	errorText?: string;
 }) {
 	const kind = classifyTool(toolName, args, output);
-	const isComposioSearch = toolName === "dench_search_integrations" || toolName === "composio_search_tools";
-	const isComposioCall = toolName === "dench_execute_integrations" || toolName === "composio_call_tool";
+	const isComposioSearch = toolName === "dench_search_integrations" || toolName === "composio_search_tools" || toolName.includes("dench_search_integrations");
+	const isComposioCall = toolName === "dench_execute_integrations" || toolName === "composio_call_tool" || toolName.includes("dench_execute_integrations");
 	const isComposioTool = isComposioSearch || isComposioCall;
 	// Show output by default for exec/command tools — these are the most
 	// useful to see inline.  Other tools default to collapsed.
@@ -1774,6 +1774,43 @@ function ToolStep({
 						)}
 					</div>
 				)}
+
+				{/* Composio fallback — when structured output isn't available, show input info */}
+				{isComposioSearch && !composioSearchCard && status === "done" && (() => {
+					const query = typeof args?.query === "string" ? args.query : typeof args?.search === "string" ? args.search : null;
+					const toolkit = typeof args?.toolkit === "string" ? args.toolkit : null;
+					const preview = typeof args?.preview === "string" ? args.preview : null;
+					const displayQuery = query ?? preview;
+					return displayQuery || toolkit ? (
+						<div
+							className="mt-1.5 rounded-lg px-2.5 py-2"
+							style={{
+								background: "var(--color-bg)",
+								border: "1px solid var(--color-border)",
+							}}
+						>
+							{displayQuery && <SummaryRow label="Query" value={displayQuery} />}
+							{toolkit && <SummaryRow label="Toolkit" value={toolkit} />}
+						</div>
+					) : null;
+				})()}
+
+				{isComposioCall && !composioCallCard && status === "done" && (() => {
+					const toolSlug = typeof args?.tool_slug === "string" ? args.tool_slug : typeof args?.tool_name === "string" ? args.tool_name : null;
+					const preview = typeof args?.preview === "string" ? args.preview : null;
+					const displayTool = toolSlug ?? preview;
+					return displayTool ? (
+						<div
+							className="mt-1.5 rounded-lg px-2.5 py-2"
+							style={{
+								background: "var(--color-bg)",
+								border: "1px solid var(--color-border)",
+							}}
+						>
+							<SummaryRow label="Tool" value={displayTool} />
+						</div>
+					) : null;
+				})()}
 
 				{/* Args summary — show for tools with no output/diff so they're never opaque */}
 				{!outputText &&
