@@ -192,11 +192,19 @@ export async function createHermesChatStream(
                     const outputLabel = toolPreview
                       ? `Done: ${toolPreview}`
                       : (event.tool ?? "completed");
-                    emit({
-                      type: event.error ? "tool-output-error" : "tool-output-available",
-                      toolCallId,
-                      output: event.error ? (event.output ?? "Tool execution failed") : outputLabel,
-                    });
+                    if (event.error) {
+                      emit({
+                        type: "tool-output-error",
+                        toolCallId,
+                        errorText: event.output ?? "Tool execution failed",
+                      });
+                    } else {
+                      emit({
+                        type: "tool-output-available",
+                        toolCallId,
+                        output: outputLabel,
+                      });
+                    }
                     toolCallId = null;
                     toolPreview = null;
                   }
