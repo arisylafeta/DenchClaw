@@ -1129,50 +1129,28 @@ function WorkspacePageInner() {
   }, [fetchGatewaySessions]);
 
   const handleWorkspaceChanged = useCallback(() => {
-    // The newly-active workspace may not be onboarded yet (e.g. a fresh
-    // workspace someone just created, or one they hadn't finished setting
-    // up). The home page server component only checks onboarding on its
-    // initial render, so a soft in-place reset would strand the user on `/`
-    // looking at a half-empty UI. Probe `/api/onboarding/state` first and
-    // hard-navigate to `/onboarding` when the new workspace still needs it;
-    // otherwise fall through to the smooth in-memory reset.
-    void (async () => {
-      try {
-        const res = await fetch("/api/onboarding/state", { cache: "no-store" });
-        if (res.ok) {
-          const data = (await res.json()) as { currentStep?: string };
-          if (data.currentStep && data.currentStep !== "complete") {
-            window.location.assign("/onboarding");
-            return;
-          }
-        }
-      } catch {
-        // Network/parse failure: fall through to soft reset rather than
-        // trapping the user — the next refresh will surface onboarding.
-      }
-      resetWorkspaceStateOnSwitch({
-        setBrowseDir,
-        clearActiveContent: () => dispatch({ type: "activateContent", id: null }),
-        setActiveSessionId,
-        setActiveSubagentKey,
-        resetMainChat: () => {
-          chatPanelRefs.current = {};
-          setChatRuntimeSnapshots({});
-          setChatRunsSnapshot(createChatRunsSnapshot({ parentRuns: [], subagents: [] }));
-          setStreamingSessionIds(new Set());
-          setSubagents([]);
-          dispatch({ type: "replace", state: ensureChatPresent(EMPTY_TABS_STATE) });
-        },
-        replaceUrlToRoot: () => {
-          // URL sync effect will write the correct URL after state is cleared
-        },
-        reconnectWorkspaceWatcher,
-        refreshSessions,
-        refreshContext: () => {
-          void refreshContext();
-        },
-      });
-    })();
+    resetWorkspaceStateOnSwitch({
+      setBrowseDir,
+      clearActiveContent: () => dispatch({ type: "activateContent", id: null }),
+      setActiveSessionId,
+      setActiveSubagentKey,
+      resetMainChat: () => {
+        chatPanelRefs.current = {};
+        setChatRuntimeSnapshots({});
+        setChatRunsSnapshot(createChatRunsSnapshot({ parentRuns: [], subagents: [] }));
+        setStreamingSessionIds(new Set());
+        setSubagents([]);
+        dispatch({ type: "replace", state: ensureChatPresent(EMPTY_TABS_STATE) });
+      },
+      replaceUrlToRoot: () => {
+        // URL sync effect will write the correct URL after state is cleared.
+      },
+      reconnectWorkspaceWatcher,
+      refreshSessions,
+      refreshContext: () => {
+        void refreshContext();
+      },
+    });
   }, [reconnectWorkspaceWatcher, refreshContext, refreshSessions, router, setBrowseDir]);
 
   const handleDeleteSession = useCallback(

@@ -1,36 +1,46 @@
 import {
-  addMcpServer,
-  getMcpServerConfig,
-  listMcpServers,
-  McpServerError,
-  recordServerState,
-  removeMcpServer,
-} from "@/lib/mcp-servers";
-import { probeMcpServer } from "@/lib/mcp-probe";
-import { trackServer } from "@/lib/telemetry";
+  type HermesMcpAuthority,
+  readHermesMcpAuthority,
+} from "@/lib/hermes-mcp-authority";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type PostBody = {
+type McpSettingsBody = {
   key?: unknown;
   url?: unknown;
   transport?: unknown;
-};
-
-type DeleteBody = {
-  key?: unknown;
 };
 
 function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
 
+function legacyState(authority: HermesMcpAuthority) {
+  return {
+    servers: [],
+    readOnly: true,
+    managedByHermes: true,
+    metadata: {
+      mcpAuthority: authority,
+    },
+    summary: {
+      owner: "hermes",
+      message:
+        "Hermes MCP config is the active MCP authority. Dench MCP settings are legacy and exposed here as a read-only client surface.",
+    },
+    legacyDenchMcp: {
+      disabled: true,
+      archived: true,
+      wouldMutate: ["Dench MCP server registry"],
+      servers: [],
+    },
+  };
+}
+
 export async function GET(): Promise<Response> {
   try {
-    return Response.json({
-      servers: listMcpServers(),
-    });
+    return Response.json(legacyState(await readHermesMcpAuthority()));
   } catch (err) {
     return jsonError(
       err instanceof Error ? err.message : "Failed to load MCP servers.",
@@ -40,9 +50,9 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  let body: PostBody;
+  let body: McpSettingsBody;
   try {
-    body = (await req.json()) as PostBody;
+    body = (await req.json()) as McpSettingsBody;
   } catch {
     return jsonError("Invalid JSON body.", 400);
   }
@@ -57,64 +67,31 @@ export async function POST(req: Request): Promise<Response> {
     return jsonError("Field 'transport' must be a string.", 400);
   }
 
-  let server;
-  try {
-    server = addMcpServer({
-      key: body.key,
-      url: body.url,
-      transport: body.transport,
-      // No authToken at creation time — Connect happens after the row appears,
-      // either via the OAuth flow (Phase 2) or a paste-a-token dialog (Phase 1
-      // fallback). This matches the Cursor UX where the Add dialog only takes
-      // a name + URL.
-    });
-    trackServer("mcp_server_added", {
-      key: server.key,
-      transport: server.transport,
-      has_auth: server.hasAuth,
-    });
-  } catch (err) {
-    if (err instanceof McpServerError) {
-      return jsonError(err.message, err.status);
-    }
-    return jsonError(
-      err instanceof Error ? err.message : "Failed to add MCP server.",
-      500,
-    );
-  }
-
-  // Run an immediate probe so the new row lands with the right state. We
-  // intentionally don't fail the POST when the probe fails — the row exists,
-  // the user can click Connect to fix it. The probe just decides whether the
-  // initial label says "Connect", "Needs authentication", or shows a tool
-  // count.
-  const serverConfig = getMcpServerConfig(server.key);
-  if (serverConfig) {
-    const probe = await probeMcpServer({
-      url: serverConfig.url,
-      headers: serverConfig.headers,
-    });
-    try {
-      const updated = recordServerState(server.key, {
-        state: probe.status,
-        toolCount: probe.toolCount,
-        detail: probe.detail,
-        checkedAt: probe.checkedAt,
-      });
-      return Response.json({ server: updated }, { status: 201 });
-    } catch {
-      // If state recording fails for some reason, fall through to returning
-      // the untested entry. The UI can re-probe.
-    }
-  }
-
-  return Response.json({ server }, { status: 201 });
+  return Response.json(
+    {
+      error: "legacy_mcp_settings",
+      message:
+        "Hermes MCP config is the integration authority; Dench MCP settings are legacy and read-only until ownership is proven.",
+      changed: false,
+      readOnly: true,
+      managedByHermes: true,
+      metadata: {
+        mcpAuthority: await readHermesMcpAuthority(),
+      },
+      legacyDenchMcp: {
+        disabled: true,
+        archived: true,
+        wouldMutate: ["Dench MCP server registry"],
+      },
+    },
+    { status: 409 },
+  );
 }
 
 export async function DELETE(req: Request): Promise<Response> {
-  let body: DeleteBody;
+  let body: Pick<McpSettingsBody, "key">;
   try {
-    body = (await req.json()) as DeleteBody;
+    body = (await req.json()) as Pick<McpSettingsBody, "key">;
   } catch {
     return jsonError("Invalid JSON body.", 400);
   }
@@ -123,17 +100,23 @@ export async function DELETE(req: Request): Promise<Response> {
     return jsonError("Field 'key' must be a string.", 400);
   }
 
-  try {
-    removeMcpServer(body.key);
-    trackServer("mcp_server_removed", { key: body.key });
-    return Response.json({ key: body.key });
-  } catch (err) {
-    if (err instanceof McpServerError) {
-      return jsonError(err.message, err.status);
-    }
-    return jsonError(
-      err instanceof Error ? err.message : "Failed to remove MCP server.",
-      500,
-    );
-  }
+  return Response.json(
+    {
+      error: "legacy_mcp_settings",
+      message:
+        "Hermes MCP config is the integration authority; Dench MCP settings are legacy and read-only until ownership is proven.",
+      changed: false,
+      readOnly: true,
+      managedByHermes: true,
+      metadata: {
+        mcpAuthority: await readHermesMcpAuthority(),
+      },
+      legacyDenchMcp: {
+        disabled: true,
+        archived: true,
+        wouldMutate: ["Dench MCP server registry"],
+      },
+    },
+    { status: 409 },
+  );
 }

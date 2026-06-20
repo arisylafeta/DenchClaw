@@ -14,6 +14,13 @@ export type PostgresPeopleListItem = {
 export async function getPostgresPeople(
   params: { limit: number },
 ): Promise<{ people: PostgresPeopleListItem[] }> {
+  const columns = await loadPeopleColumns();
+  const strengthScore = columns.has("strength_score") ? "p.strength_score" : "null::numeric";
+  const lastInteractionAt = columns.has("last_interaction_at") ? "p.last_interaction_at" : "null::timestamptz";
+  const jobTitle = columns.has("job_title") ? "p.job_title" : "null::text";
+  const sortByStrength = columns.has("strength_score") ? "p.strength_score desc nulls last," : "";
+  const sortByLastInteraction = columns.has("last_interaction_at") ? "p.last_interaction_at desc nulls last," : "";
+
   const rows = await queryPg<{
     id: string;
     name: string | null;
@@ -28,14 +35,14 @@ export async function getPostgresPeople(
             p.full_name as name,
             p.email,
             c.name as company_name,
-            p.strength_score,
-            p.last_interaction_at,
+            ${strengthScore} as strength_score,
+            ${lastInteractionAt} as last_interaction_at,
             p.avatar_url,
-            p.job_title
+            ${jobTitle} as job_title
        from crm_people p
        left join crm_companies c on c.id = p.company_id
-      order by p.strength_score desc nulls last,
-               p.last_interaction_at desc nulls last,
+      order by ${sortByStrength}
+               ${sortByLastInteraction}
                p.updated_at desc nulls last
       limit $1`,
     [params.limit],
@@ -56,4 +63,14 @@ export async function getPostgresPeople(
       };
     }),
   };
+}
+
+async function loadPeopleColumns(): Promise<Set<string>> {
+  const rows = await queryPg<{ column_name: string }>(
+    `select column_name
+       from information_schema.columns
+      where table_schema = current_schema()
+        and table_name = 'crm_people'`,
+  );
+  return new Set(rows.map((row) => row.column_name));
 }

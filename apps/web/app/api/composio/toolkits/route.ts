@@ -5,6 +5,10 @@ import {
   resolveComposioEligibility,
   resolveComposioGatewayUrl,
 } from "@/lib/composio";
+import {
+  isHermesDenchClawMcpAuthority,
+  readHermesMcpAuthority,
+} from "@/lib/hermes-mcp-authority";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -63,6 +67,26 @@ async function fetchToolkitsCached(
 }
 
 export async function GET(request: Request) {
+  const authority = await readHermesMcpAuthority();
+  if (isHermesDenchClawMcpAuthority(authority)) {
+    return Response.json({
+      toolkits: [],
+      items: [],
+      categories: [],
+      cursor: null,
+      total: 0,
+      managedByHermes: true,
+      readOnly: true,
+      metadata: {
+        mcpAuthority: authority,
+      },
+      legacyToolkits: {
+        disabled: true,
+        wouldUse: "Legacy Dench Cloud Composio toolkit list",
+      },
+    });
+  }
+
   const apiKey = resolveComposioApiKey();
   if (!apiKey) {
     return Response.json(

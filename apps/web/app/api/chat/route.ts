@@ -445,7 +445,7 @@ export async function POST(req: Request) {
 				sessionKey,
 				parentSessionId: info.parentSessionId,
 				task: info.task,
-			});
+			}) ?? undefined;
 		}
 		await persistSubscribeUserMessage(sessionKey, {
 			id: lastUserMessage.id,
