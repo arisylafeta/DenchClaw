@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { ThemeProvider } from "next-themes";
 import { getOrCreateAnonymousId, readPersonInfo, readPrivacyMode } from "@/lib/telemetry";
-import { DeprecationBanner } from "./components/deprecation-banner";
 import { PostHogProvider } from "./components/posthog-provider";
 import "./globals.css";
 
@@ -67,7 +66,6 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <DeprecationBanner />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <Suspense fallback={null}>
             <PostHogProvider anonymousId={anonymousId} personInfo={personInfo ?? undefined} privacyMode={privacyMode}>
