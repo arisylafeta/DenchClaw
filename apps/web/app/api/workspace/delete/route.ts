@@ -1,9 +1,12 @@
 import { rmSync } from "node:fs";
+import { execSync } from "node:child_process";
 import {
   discoverWorkspaces,
   getActiveWorkspaceName,
   resolveWorkspaceRoot,
   setUIActiveWorkspace,
+  readActiveProfileName,
+  writeActiveProfileName,
 } from "@/lib/workspace";
 import { trackServer } from "@/lib/telemetry";
 
@@ -50,6 +53,45 @@ export async function POST(req: Request) {
     );
   }
 
+  // When running Hermes backend, remove the Hermes profile via CLI.
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    try {
+      execSync(`hermes profile remove ${workspaceName}`, {
+        stdio: "pipe",
+        timeout: 15_000,
+      });
+    } catch (error) {
+      return Response.json(
+        { error: `Hermes profile delete failed: ${(error as Error).message}` },
+        { status: 500 },
+      );
+    }
+
+    // If the deleted profile was the active one, reset to "default".
+    if (readActiveProfileName() === workspaceName) {
+      writeActiveProfileName("default");
+    }
+
+    trackServer("workspace_deleted");
+
+    const remaining = discoverWorkspaces();
+    const previousActive = getActiveWorkspaceName();
+    if (previousActive === workspaceName) {
+      setUIActiveWorkspace(remaining[0]?.name ?? null);
+    }
+    const activeWorkspace = getActiveWorkspaceName();
+
+    return Response.json({
+      deleted: true,
+      workspace: workspaceName,
+      activeWorkspace,
+      workspaceRoot: resolveWorkspaceRoot(),
+      profile: workspaceName,
+      activeProfile: activeWorkspace,
+    });
+  }
+
+  // Default (non-Hermes) deletion.
   try {
     rmSync(availableWorkspace.workspaceDir, { recursive: true, force: false });
   } catch (error) {

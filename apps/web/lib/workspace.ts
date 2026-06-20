@@ -26,6 +26,7 @@ async function pathExistsAsync(path: string): Promise<boolean> {
 const UI_STATE_FILENAME = ".dench-ui-state.json";
 const FIXED_STATE_DIRNAME = ".openclaw-dench";
 const DEFAULT_PROFILE = "default";
+const ACTIVE_PROFILE_FILE = join(homedir(), ".hermes", ".dench-active-profile.json");
 const WORKSPACE_PREFIX = "workspace-";
 const ROOT_WORKSPACE_DIRNAME = "workspace";
 const WORKSPACE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
@@ -61,6 +62,24 @@ function expandUserPath(input: string): string {
   return trimmed;
 }
 
+export function readActiveProfileName(): string | null {
+  try {
+    const raw = readFileSync(ACTIVE_PROFILE_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    return data.activeProfile?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeActiveProfileName(name: string): void {
+  try {
+    writeFileSync(ACTIVE_PROFILE_FILE, JSON.stringify({ activeProfile: name }, null, 2), "utf-8");
+  } catch {
+    // best-effort
+  }
+}
+
 function normalizeWorkspaceName(name: string | null | undefined): string | null {
   const normalized = name?.trim() || null;
   if (!normalized) {
@@ -92,6 +111,15 @@ function isInternalWorkspaceNameForDiscovery(name: string): boolean {
 }
 
 function stateDirPath(): string {
+  // When running Hermes backend, check for an active profile override first.
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    const activeProfile = readActiveProfileName();
+    if (activeProfile) {
+      const denchHome = process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes");
+      const profileDir = join(denchHome, "profiles", activeProfile);
+      if (existsSync(profileDir)) return profileDir;
+    }
+  }
   const explicitStateDir = process.env.OPENCLAW_STATE_DIR?.trim();
   if (explicitStateDir) return explicitStateDir;
   const denchHome = process.env.DENCH_HOME?.trim();
@@ -155,6 +183,23 @@ function workspaceNameFromPath(inputPath: string | null | undefined): string | n
 }
 
 function scanWorkspaceNames(stateDir: string): string[] {
+  // When running Hermes backend, discover profiles from ~/.hermes/profiles/
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    const profilesRoot = join(process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes"), "profiles");
+    try {
+      const entries = readdirSync(profilesRoot, { withFileTypes: true });
+      const names = entries
+        .filter((e) => e.isDirectory() && existsSync(join(profilesRoot, e.name, "config.yaml")))
+        .map((e) => e.name)
+        .sort();
+      if (!names.includes("default") && existsSync(join(profilesRoot, "default"))) {
+        names.unshift("default");
+      }
+      return names;
+    } catch {
+      return ["default"];
+    }
+  }
   try {
     const names = readdirSync(stateDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
@@ -226,15 +271,32 @@ export function discoverWorkspaces(): DiscoveredWorkspace[] {
   const activeWorkspace = getActiveWorkspaceName();
   const discovered: DiscoveredWorkspace[] = [];
 
-  for (const workspaceName of scanWorkspaceNames(stateDir)) {
-    const workspaceDir = resolveWorkspaceDir(workspaceName);
-    discovered.push({
-      name: workspaceName,
-      stateDir,
-      workspaceDir: existsSync(workspaceDir) ? workspaceDir : null,
-      isActive: activeWorkspace === workspaceName,
-      hasConfig: existsSync(join(stateDir, "openclaw.json")),
-    });
+  // When running Hermes backend, each profile has its own state dir and workspace dir.
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    const hermesRoot = process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes");
+    const profilesRoot = join(hermesRoot, "profiles");
+    for (const workspaceName of scanWorkspaceNames(stateDir)) {
+      const profileDir = join(profilesRoot, workspaceName);
+      const profileWorkspaceDir = join(profileDir, "workspace");
+      discovered.push({
+        name: workspaceName,
+        stateDir: profileDir,
+        workspaceDir: existsSync(profileWorkspaceDir) ? profileWorkspaceDir : null,
+        isActive: activeWorkspace === workspaceName,
+        hasConfig: existsSync(join(profileDir, "openclaw.json")) || existsSync(join(profileDir, "config.yaml")),
+      });
+    }
+  } else {
+    for (const workspaceName of scanWorkspaceNames(stateDir)) {
+      const workspaceDir = resolveWorkspaceDir(workspaceName);
+      discovered.push({
+        name: workspaceName,
+        stateDir,
+        workspaceDir: existsSync(workspaceDir) ? workspaceDir : null,
+        isActive: activeWorkspace === workspaceName,
+        hasConfig: existsSync(join(stateDir, "openclaw.json")),
+      });
+    }
   }
 
   discovered.sort((a, b) => a.name.localeCompare(b.name));

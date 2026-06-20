@@ -24,6 +24,13 @@ const canonicalTableByObjectName: Record<string, string> = {
   interaction: "crm_interactions",
 };
 
+const JUNCTION_TABLE_MAP: Record<string, { table: string; sourceCol: string; targetCol: string; extraCols?: Record<string, string> }> = {
+  "seed_fld_emthread_people_00000": { table: "crm_email_thread_participants", sourceCol: "thread_id", targetCol: "person_id" },
+  "seed_fld_emmsg_to_0000000000000": { table: "crm_email_message_recipients", sourceCol: "message_id", targetCol: "person_id", extraCols: { recipient_type: "to" } },
+  "seed_fld_emmsg_cc_0000000000000": { table: "crm_email_message_recipients", sourceCol: "message_id", targetCol: "person_id", extraCols: { recipient_type: "cc" } },
+  "seed_fld_calev_attend_000000000": { table: "crm_calendar_event_attendees", sourceCol: "event_id", targetCol: "person_id" },
+};
+
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
@@ -110,18 +117,34 @@ async function replaceRelationLinks(
   field: FieldRow,
   relationIds: string[],
 ) {
-  await tx.query("delete from crm_relation_links where field_id = $1 and source_entry_id = $2", [field.id, entryId]);
-  for (const [position, targetEntryId] of relationIds.entries()) {
-    await tx.query(
-      `insert into crm_relation_links
-        (object_id, field_id, source_entry_id, target_entry_id, position)
-       values
-        ($1, $2, $3, $4, $5)`,
-      [objectId, field.id, entryId, targetEntryId, position],
-    );
+  const junction = JUNCTION_TABLE_MAP[field.id];
+  if (junction) {
+    // Delete existing rows scoped by extraCols (e.g. recipient_type) to avoid
+    // wiping sibling relations that share the same junction table (To vs Cc).
+    if (junction.extraCols && junction.extraCols.recipient_type) {
+      await tx.query(
+        `delete from ${junction.table} where ${junction.sourceCol} = $1 and recipient_type = $2`,
+        [entryId, junction.extraCols.recipient_type],
+      );
+    } else {
+      await tx.query(`delete from ${junction.table} where ${junction.sourceCol} = $1`, [entryId]);
+    }
+    for (const [position, targetEntryId] of relationIds.entries()) {
+      if (junction.extraCols && junction.extraCols.recipient_type) {
+        await tx.query(
+          `insert into ${junction.table} (${junction.sourceCol}, ${junction.targetCol}, recipient_type, position) values ($1, $2, $3, $4) on conflict do nothing`,
+          [entryId, targetEntryId, junction.extraCols.recipient_type, position],
+        );
+      } else {
+        await tx.query(
+          `insert into ${junction.table} (${junction.sourceCol}, ${junction.targetCol}, position) values ($1, $2, $3) on conflict do nothing`,
+          [entryId, targetEntryId, position],
+        );
+      }
+    }
   }
-
-  await upsertCustomValue(tx, objectId, entryId, field, relationStorageValue(relationIds, field.relationship_type));
+  // For non-junction relations (many_to_one with canonical_column),
+  // the canonical column write handles it — no relation_links needed.
 }
 
 async function entryExists(tx: PgTransaction, object: ObjectRow, entryId: string): Promise<boolean> {
@@ -130,24 +153,7 @@ async function entryExists(tx: PgTransaction, object: ObjectRow, entryId: string
     const rows = rowsFrom(await tx.query(`select id from ${quoteIdentifier(entityTable)} where id = $1 limit 1`, [entryId]));
     return rows.length > 0;
   }
-
-  const customRows = rowsFrom(await tx.query(
-    `select entry_id
-     from crm_custom_field_values
-     where object_id = $1 and entry_id = $2
-     limit 1`,
-    [object.id, entryId],
-  ));
-  if (customRows.length > 0) return true;
-
-  const relationRows = rowsFrom(await tx.query(
-    `select source_entry_id
-     from crm_relation_links
-     where object_id = $1 and source_entry_id = $2
-     limit 1`,
-    [object.id, entryId],
-  ));
-  return relationRows.length > 0;
+  return false;
 }
 
 export async function createPostgresEntry(
@@ -170,7 +176,7 @@ export async function createPostgresEntry(
         ? normalizeRelationIds(parseRelationIds(value), field.relationship_type)
         : null;
 
-      if (relationIds) {
+      if (relationIds && !field.canonical_column) {
         await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
       }
 
@@ -178,7 +184,7 @@ export async function createPostgresEntry(
         canonicalColumns.push(field.canonical_column);
         canonicalValues.push(relationIds ? relationStorageValue(relationIds, field.relationship_type) : value);
       } else if (field.type !== "relation") {
-        await upsertCustomValue(tx, object.id, entryId, field, value);
+        throw new Error(`Non-canonical field "${fieldName}" on "${objectName}" has no column mapping. Add a real column and canonical_column to crm_fields.`);
       }
     }
 
@@ -218,7 +224,7 @@ export async function updatePostgresEntry(
         ? normalizeRelationIds(parseRelationIds(value), field.relationship_type)
         : null;
 
-      if (relationIds) {
+      if (relationIds && !field.canonical_column) {
         await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
       }
 
@@ -226,7 +232,7 @@ export async function updatePostgresEntry(
         canonicalAssignments.push(`${quoteIdentifier(field.canonical_column)} = $${canonicalValues.length + 1}`);
         canonicalValues.push(relationIds ? relationStorageValue(relationIds, field.relationship_type) : value);
       } else if (field.type !== "relation") {
-        await upsertCustomValue(tx, object.id, entryId, field, value);
+        throw new Error(`Non-canonical field "${fieldName}" on "${objectName}" has no column mapping. Add a real column and canonical_column to crm_fields.`);
       }
     }
 
@@ -254,10 +260,11 @@ export async function deletePostgresEntry(objectName: string, entryId: string): 
     const entityTable = resolveEntityTable(object);
 
     await tx.query("delete from crm_custom_field_values where object_id = $1 and entry_id = $2", [object.id, entryId]);
-    await tx.query("delete from crm_relation_links where source_entry_id = $1", [entryId]);
-    await tx.query("delete from crm_relation_links where target_entry_id = $1", [entryId]);
+    // Clean up junction table entries
+    await tx.query("delete from crm_email_thread_participants where thread_id = $1 or person_id = $1", [entryId]);
+    await tx.query("delete from crm_email_message_recipients where message_id = $1 or person_id = $1", [entryId]);
+    await tx.query("delete from crm_calendar_event_attendees where event_id = $1 or person_id = $1", [entryId]);
     await tx.query("delete from crm_documents where entry_id = $1", [entryId]);
-    await tx.query("delete from crm_action_runs where entry_id = $1", [entryId]);
 
     if (entityTable) {
       await tx.query(`delete from ${quoteIdentifier(entityTable)} where id = $1`, [entryId]);
@@ -278,10 +285,11 @@ export async function bulkDeletePostgresEntries(
     const entityTable = resolveEntityTable(object);
 
     await tx.query("delete from crm_custom_field_values where object_id = $1 and entry_id = any($2::text[])", [object.id, entryIds]);
-    await tx.query("delete from crm_relation_links where source_entry_id = any($1::text[])", [entryIds]);
-    await tx.query("delete from crm_relation_links where target_entry_id = any($1::text[])", [entryIds]);
+    // Clean up junction table entries
+    await tx.query("delete from crm_email_thread_participants where thread_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
+    await tx.query("delete from crm_email_message_recipients where message_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
+    await tx.query("delete from crm_calendar_event_attendees where event_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
     await tx.query("delete from crm_documents where entry_id = any($1::text[])", [entryIds]);
-    await tx.query("delete from crm_action_runs where entry_id = any($1::text[])", [entryIds]);
 
     if (entityTable) {
       const result = await tx.query(`delete from ${quoteIdentifier(entityTable)} where id = any($1::text[]) returning id`, [entryIds]);

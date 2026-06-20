@@ -1,4 +1,5 @@
 import type { HermesConfig } from "./agent-backend";
+import { readActiveProfileName } from "./workspace";
 
 export type HermesChatStreamParams = {
   sessionKey: string;
@@ -72,6 +73,7 @@ export async function createHermesChatStream(
             input: message,
             session_id: sessionKey,
             model: config.model,
+            ...(readActiveProfileName() ? { profile: readActiveProfileName() } : {}),
           }),
         });
 

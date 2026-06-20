@@ -5,6 +5,8 @@ import {
   readFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
+import { homedir } from "node:os";
 import {
   discoverWorkspaces,
   setUIActiveWorkspace,
@@ -14,6 +16,7 @@ import {
   isValidWorkspaceName,
   resolveWorkspaceRoot,
   ensureAgentInConfig,
+  writeActiveProfileName,
 } from "@/lib/workspace";
 import {
   BOOTSTRAP_TEMPLATE_CONTENT,
@@ -125,13 +128,138 @@ export async function POST(req: Request) {
     );
   }
 
-  const stateDir = resolveOpenClawStateDir();
-  const workspaceDir = resolveWorkspaceDirForName(workspaceName);
   const seedBootstrap = body.seedBootstrap !== false;
   const seeded: string[] = [];
   const copiedFiles: string[] = [];
-
   const projectRoot = resolveDenchPackageRoot();
+
+  // ---------------------------------------------------------------------------
+  // Hermes backend: create a Hermes profile instead of a workspace-<name> dir.
+  // ---------------------------------------------------------------------------
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    const profilesRoot = join(process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes"), "profiles");
+    const profileDir = join(profilesRoot, workspaceName);
+    const profileWorkspaceDir = join(profileDir, "workspace");
+
+    try {
+      // 1. Create the Hermes profile by cloning the current one.
+      execSync(`hermes profile create ${workspaceName} --clone`, {
+        stdio: "pipe",
+        timeout: 30_000,
+      });
+    } catch (err) {
+      return Response.json(
+        { error: `Failed to create Hermes profile: ${(err as Error).message}` },
+        { status: 500 },
+      );
+    }
+
+    // 2. Write an openclaw.json in the new profile dir if it doesn't exist.
+    const openclawConfigPath = join(profileDir, "openclaw.json");
+    if (!existsSync(openclawConfigPath)) {
+      try {
+        writeFileSync(
+          openclawConfigPath,
+          JSON.stringify(
+            {
+              plugins: { entries: {} },
+              tools: { deny: [], web: { search: { enabled: true } } },
+              agents: { list: [] },
+            },
+            null,
+            2,
+          ) + "\n",
+          "utf-8",
+        );
+        copiedFiles.push("openclaw.json");
+      } catch {
+        // best-effort
+      }
+    }
+
+    // 3. Seed bootstrap files into the profile's workspace/ subdirectory.
+    if (seedBootstrap) {
+      mkdirSync(profileWorkspaceDir, { recursive: true });
+      for (const filename of getBootstrapFilenames()) {
+        const filePath = join(profileWorkspaceDir, filename);
+        if (!existsSync(filePath)) {
+          const content = loadTemplateContent(filename, projectRoot);
+          try {
+            writeFileSync(filePath, content, { encoding: "utf-8", flag: "wx" });
+            seeded.push(filename);
+          } catch {
+            // race / already exists
+          }
+        }
+      }
+    }
+
+    // 4. Seed managed skills, DuckDB, and CRM object projections.
+    if (projectRoot) {
+      const seedResult = seedWorkspaceFromAssets({ workspaceDir: profileWorkspaceDir, packageRoot: projectRoot });
+      seeded.push(...seedResult.projectionFiles);
+      if (seedResult.seeded) {
+        seeded.push("workspace.duckdb");
+      }
+    }
+
+    if (seedBootstrap) {
+      const wsStateDir = join(profileWorkspaceDir, ".openclaw");
+      const statePath = join(wsStateDir, "workspace-state.json");
+      if (!existsSync(statePath)) {
+        try {
+          mkdirSync(wsStateDir, { recursive: true });
+          const state = {
+            version: 1,
+            bootstrapSeededAt: new Date().toISOString(),
+            duckdbSeededAt: existsSync(join(profileWorkspaceDir, "workspace.duckdb"))
+              ? new Date().toISOString()
+              : undefined,
+          };
+          writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+        } catch {
+          // Best-effort state tracking
+        }
+      }
+    }
+
+    // 5. Register agent in openclaw.json and make it the default.
+    ensureAgentInConfig(workspaceName, profileDir);
+
+    // 6. Set the active profile.
+    writeActiveProfileName(workspaceName);
+    setUIActiveWorkspace(workspaceName);
+    const activeWorkspace = getActiveWorkspaceName();
+
+    // Apply onboarding-related schema additions (idempotent).
+    try {
+      await ensureLatestSchema();
+    } catch {
+      // Non-fatal.
+    }
+
+    trackServer("workspace_created", { has_seed: seedBootstrap, hermes: true });
+
+    return Response.json({
+      workspace: workspaceName,
+      activeWorkspace,
+      workspaceDir: profileDir,
+      stateDir: profileDir,
+      copiedFiles,
+      seededFiles: seeded,
+      crmSynced: !!projectRoot,
+      workspaceRoot: profileDir,
+      // Backward-compat response fields while callers migrate.
+      profile: workspaceName,
+      activeProfile: activeWorkspace,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Default (non-Hermes) workspace creation.
+  // ---------------------------------------------------------------------------
+  const stateDir = resolveOpenClawStateDir();
+  const workspaceDir = resolveWorkspaceDirForName(workspaceName);
 
   try {
     mkdirSync(stateDir, { recursive: true });

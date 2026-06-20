@@ -5,6 +5,7 @@ import {
   resolveWorkspaceRoot,
   setUIActiveWorkspace,
   setDefaultAgentInConfig,
+  writeActiveProfileName,
 } from "@/lib/workspace";
 import { trackServer } from "@/lib/telemetry";
 
@@ -48,6 +49,13 @@ export async function POST(req: Request) {
 
   setUIActiveWorkspace(requestedWorkspace);
   setDefaultAgentInConfig(requestedWorkspace);
+
+  // When running Hermes backend, persist the active profile so the state dir
+  // resolution picks up the new profile on subsequent requests.
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    writeActiveProfileName(requestedWorkspace);
+  }
+
   trackServer("workspace_switched");
   const activeWorkspace = getActiveWorkspaceName();
   const selected = discoverWorkspaces().find((workspace) => workspace.name === activeWorkspace) ?? null;
