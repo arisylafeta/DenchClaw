@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { PostHog } from "posthog-node";
+import { resolveOpenClawStateDir } from "./workspace";
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY || "";
 const POSTHOG_HOST = "https://us.i.posthog.com";
@@ -42,7 +42,7 @@ export function getOrCreateAnonymousId(): string {
   if (_cachedAnonymousId) return _cachedAnonymousId;
 
   try {
-    const stateDir = join(process.env.HOME || homedir(), ".openclaw-dench");
+    const stateDir = resolveOpenClawStateDir();
     const configPath = join(stateDir, "telemetry.json");
 
     let raw: Record<string, unknown> = {};
@@ -74,7 +74,7 @@ export function getOrCreateAnonymousId(): string {
  */
 export function writePersonInfo(person: Partial<PersonInfo>): PersonInfo | null {
   try {
-    const stateDir = join(process.env.HOME || homedir(), ".openclaw-dench");
+    const stateDir = resolveOpenClawStateDir();
     const configPath = join(stateDir, "telemetry.json");
 
     let raw: Record<string, unknown> = {};
@@ -120,7 +120,7 @@ export function readPersonInfo(): PersonInfo | null {
   if (_cachedPersonInfo !== undefined) return _cachedPersonInfo;
 
   try {
-    const stateDir = join(process.env.HOME || homedir(), ".openclaw-dench");
+    const stateDir = resolveOpenClawStateDir();
     const configPath = join(stateDir, "telemetry.json");
 
     if (!existsSync(configPath)) {
@@ -150,7 +150,7 @@ export function readPrivacyMode(): boolean {
   if (_cachedPrivacyMode !== undefined) return _cachedPrivacyMode;
 
   try {
-    const stateDir = join(process.env.HOME || homedir(), ".openclaw-dench");
+    const stateDir = resolveOpenClawStateDir();
     const configPath = join(stateDir, "telemetry.json");
 
     if (!existsSync(configPath)) {

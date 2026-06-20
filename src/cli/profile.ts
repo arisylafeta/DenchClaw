@@ -88,6 +88,10 @@ function resolveProfileStateDir(
   env: Record<string, string | undefined>,
   homedir: () => string,
 ): string {
+  const explicitStateDir = env.OPENCLAW_STATE_DIR?.trim();
+  if (explicitStateDir) return path.resolve(explicitStateDir);
+  const denchHome = env.DENCH_HOME?.trim();
+  if (denchHome) return path.join(path.resolve(denchHome), "profiles", "default");
   return path.join(
     resolveRequiredHomeDir(env as NodeJS.ProcessEnv, homedir),
     DENCHCLAW_STATE_DIRNAME,

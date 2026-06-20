@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 var SECRETS_PATTERN = /(?:sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|xoxb-[a-zA-Z0-9-]+|AKIA[A-Z0-9]{16}|eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})/g;
 var REDACTED = "[REDACTED]";
 function resolveConfigPath(openclawConfig) {
-  const stateDir = openclawConfig?.stateDir ?? join(process.env.HOME || homedir(), ".openclaw-dench");
+  const stateDir = openclawConfig?.stateDir ?? process.env.OPENCLAW_STATE_DIR?.trim() ?? (process.env.DENCH_HOME?.trim() ? join(process.env.DENCH_HOME.trim(), "profiles", "default") : join(process.env.OPENCLAW_HOME?.trim() || process.env.HOME || homedir(), ".openclaw-dench"));
   return join(stateDir, "telemetry.json");
 }
 function readPrivacyMode(openclawConfig) {

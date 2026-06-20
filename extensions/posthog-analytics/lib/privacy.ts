@@ -10,7 +10,7 @@ const REDACTED = "[REDACTED]";
 
 function resolveConfigPath(openclawConfig?: any): string {
   const stateDir =
-    openclawConfig?.stateDir ?? join(process.env.HOME || homedir(), ".openclaw-dench");
+    openclawConfig?.stateDir ?? process.env.OPENCLAW_STATE_DIR?.trim() ?? (process.env.DENCH_HOME?.trim() ? join(process.env.DENCH_HOME.trim(), "profiles", "default") : join(process.env.OPENCLAW_HOME?.trim() || process.env.HOME || homedir(), ".openclaw-dench"));
   return join(stateDir, "telemetry.json");
 }
 

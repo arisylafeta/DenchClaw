@@ -32,9 +32,10 @@ const composioUserId = (process.env.COMPOSIO_USER_ID || "").trim();
 function readComposioJson() {
   const candidates = [
     join(process.cwd(), "composio.json"),
-    "/root/.openclaw-dench/composio.json",
-    join(process.env.OPENCLAW_STATE_DIR || "", "composio.json"),
-  ];
+    process.env.OPENCLAW_STATE_DIR ? join(process.env.OPENCLAW_STATE_DIR, "composio.json") : null,
+    process.env.DENCH_HOME ? join(process.env.DENCH_HOME, "composio.json") : null,
+    process.env.DENCH_HOME ? join(process.env.DENCH_HOME, "profiles", "default", "composio.json") : null,
+  ].filter(Boolean);
   for (const p of candidates) {
     try {
       if (existsSync(p)) return JSON.parse(readFileSync(p, "utf-8"));

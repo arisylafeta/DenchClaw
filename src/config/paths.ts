@@ -72,6 +72,10 @@ export function resolveStateDir(
   env: NodeJS.ProcessEnv = process.env,
   homedir: () => string = envHomedir(env),
 ): string {
+  const explicitStateDir = env.OPENCLAW_STATE_DIR?.trim();
+  if (explicitStateDir) return path.resolve(explicitStateDir);
+  const denchHome = env.DENCH_HOME?.trim();
+  if (denchHome) return path.join(path.resolve(denchHome), "profiles", "default");
   const effectiveHomedir = () => resolveRequiredHomeDir(env, homedir);
   return newStateDir(effectiveHomedir);
 }

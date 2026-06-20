@@ -25,6 +25,7 @@ async function pathExistsAsync(path: string): Promise<boolean> {
 
 const UI_STATE_FILENAME = ".dench-ui-state.json";
 const FIXED_STATE_DIRNAME = ".openclaw-dench";
+const DEFAULT_PROFILE = "default";
 const WORKSPACE_PREFIX = "workspace-";
 const ROOT_WORKSPACE_DIRNAME = "workspace";
 const WORKSPACE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
@@ -91,6 +92,10 @@ function isInternalWorkspaceNameForDiscovery(name: string): boolean {
 }
 
 function stateDirPath(): string {
+  const explicitStateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (explicitStateDir) return explicitStateDir;
+  const denchHome = process.env.DENCH_HOME?.trim();
+  if (denchHome) return join(denchHome, "profiles", DEFAULT_PROFILE);
   return join(resolveOpenClawHomeDir(), FIXED_STATE_DIRNAME);
 }
 
