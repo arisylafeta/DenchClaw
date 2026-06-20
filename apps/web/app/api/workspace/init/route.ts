@@ -43,6 +43,18 @@ const BOOTSTRAP_FILENAMES = [
   "BOOTSTRAP.md",
 ] as const;
 
+// OpenClaw-specific scaffold files that are not relevant under the Hermes backend.
+// HEARTBEAT.md references OpenClaw heartbeat API calls; BOOTSTRAP.md is an OpenClaw
+// onboarding concept. Skip both when running Hermes-managed.
+const OPENCLAW_ONLY_FILES = new Set(["HEARTBEAT.md", "BOOTSTRAP.md"]);
+
+function getBootstrapFilenames(): readonly string[] {
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    return BOOTSTRAP_FILENAMES.filter((f) => !OPENCLAW_ONLY_FILES.has(f));
+  }
+  return BOOTSTRAP_FILENAMES;
+}
+
 const TEMPLATE_DIR = join("assets", "seed", "templates");
 
 const WORKSPACE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
@@ -132,7 +144,7 @@ export async function POST(req: Request) {
   }
 
   if (seedBootstrap) {
-    for (const filename of BOOTSTRAP_FILENAMES) {
+    for (const filename of getBootstrapFilenames()) {
       const filePath = join(workspaceDir, filename);
       if (!existsSync(filePath)) {
         const content = loadTemplateContent(filename, projectRoot);
