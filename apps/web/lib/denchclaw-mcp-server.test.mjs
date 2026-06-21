@@ -291,14 +291,14 @@ describe("executeTool: crm_search_companies", () => {
     expect(call.params[0]).toBe("%acme%");
   });
 
-  it("builds parameterized conditions for platform_role", async () => {
+  it("builds parameterized conditions for country", async () => {
     const { pool, calls } = makePoolWithQuerySpy(() => ({ rows: [] }));
     __setPgPoolForTests(pool);
 
-    await executeTool("crm_search_companies", { platform_role: "BUYER" });
+    await executeTool("crm_search_companies", { country: "Germany" });
     const call = calls.find((c) => /from crm_companies/.test(c.sql));
-    expect(call.sql).toMatch(/platform_role = \$/);
-    expect(call.params).toContain("BUYER");
+    expect(call.sql).toMatch(/country/);
+    expect(call.params).toContain("%germany%");
   });
 });
 
