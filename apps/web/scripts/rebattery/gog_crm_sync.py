@@ -1,0 +1,721 @@
+#!/usr/bin/env python3
+"""
+Gog CRM Email Sync
+
+Syncs emails from both Gmail accounts (ari + alex) into Postgres CRM.
+Only imports emails where:
+  1. The email has 'CRM' label in Gmail, OR
+  2. At least one counterparty (from/to/cc, excluding account owner) is in CRM people
+
+Writes directly to Postgres crm_* tables. No DuckDB, no Composio.
+
+Usage:
+    python3 gog_crm_sync.py [--dry-run] [--account ari@rebattery.io]
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from email.utils import parseaddr, parsedate_to_datetime
+from pathlib import Path
+
+import psycopg2
+
+# --- Config ---
+GOG_BIN = "/usr/local/bin/gog"
+KEYRING_PASSWORD_PATH = "/root/.hermes/profiles/default/workspace/.secrets/gog-keyring-password"
+ACCOUNTS = ["ari@rebattery.io", "alex@rebattery.io"]
+DB_NAME = "denchclaw"
+SEARCH_BATCH_SIZE = 8  # emails per Gmail search query (from + to = 16 clauses)
+MAX_RESULTS_PER_SEARCH = 100
+RATE_LIMIT_DELAY = 0.1  # seconds between gog calls
+COMMIT_EVERY = 25  # commit after this many messages
+
+
+# ---------------------------------------------------------------------------
+# gog CLI wrapper
+# ---------------------------------------------------------------------------
+
+def gog(account, *args, timeout=120):
+    """Run gog command, return parsed JSON output."""
+    password = Path(KEYRING_PASSWORD_PATH).read_text().strip()
+    env = os.environ.copy()
+    env["GOG_KEYRING_PASSWORD"] = password
+    env["HOME"] = "/root"
+    cmd = [GOG_BIN, "--account", account] + list(args) + ["--json", "--no-input"]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"gog failed ({result.returncode}): {result.stderr[:500]}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"raw": result.stdout}
+
+
+# ---------------------------------------------------------------------------
+# Email parsing helpers
+# ---------------------------------------------------------------------------
+
+def normalize_email(email):
+    """Normalize: lowercase, strip plus tags."""
+    if not email:
+        return None
+    email = email.strip().lower()
+    if "@" not in email:
+        return None
+    local, domain = email.rsplit("@", 1)
+    if "+" in local:
+        local = local[: local.index("+")]
+    if not local or not domain:
+        return None
+    return f"{local}@{domain}"
+
+
+def parse_email_addresses(header_value):
+    """Parse a From/To/Cc header into list of (name, email) tuples."""
+    if not header_value:
+        return []
+    results = []
+    # Split by comma, handle quoted names with commas
+    parts = re.split(r',\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', header_value)
+    for part in parts:
+        name, email = parseaddr(part.strip())
+        if email:
+            results.append((name.strip() if name else "", email.strip().lower()))
+    return results
+
+
+def parse_date(date_str):
+    """Parse email date header to ISO format."""
+    if not date_str:
+        return None
+    try:
+        dt = parsedate_to_datetime(date_str)
+        return dt.isoformat() if dt else None
+    except Exception:
+        return None
+
+
+def make_body_preview(body):
+    """Create a plain-text preview from body text."""
+    if not body:
+        return ""
+    # Strip HTML tags if present
+    text = re.sub(r"<[^>]+>", " ", body)
+    # Collapse whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:500]
+
+
+# ---------------------------------------------------------------------------
+# CRM data loading
+# ---------------------------------------------------------------------------
+
+def get_crm_people(conn):
+    """Load CRM people emails into a dict {normalized_email: person_id}."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, lower(email) as email
+            FROM crm_people
+            WHERE email IS NOT NULL AND email != ''
+            """
+        )
+        return {row[1]: row[0] for row in cur.fetchall() if row[1]}
+
+
+def get_person_company_map(conn):
+    """Load {person_id: company_id} for all people with companies."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, company_id FROM crm_people WHERE company_id IS NOT NULL"
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def get_existing_message_ids(conn):
+    """Load already-imported Gmail message IDs."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT gmail_message_id FROM crm_email_messages WHERE gmail_message_id IS NOT NULL"
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
+def get_owner_emails():
+    """Account owner emails to exclude from counterparty matching."""
+    return {normalize_email(e) for e in ACCOUNTS}
+
+
+# ---------------------------------------------------------------------------
+# Gmail search
+# ---------------------------------------------------------------------------
+
+def search_label_crm(account):
+    """Search for messages with CRM label."""
+    print(f"  [{account}] Searching label:CRM...")
+    try:
+        result = gog(
+            account, "gmail", "messages", "search", "label:CRM", "--max", "500"
+        )
+        messages = (
+            result if isinstance(result, list) else result.get("messages", [])
+        )
+        print(f"    Found {len(messages)} messages with CRM label")
+        return messages
+    except Exception as e:
+        print(f"    Warning: CRM label search failed: {e}", file=sys.stderr)
+        return []
+
+
+def search_by_crm_people(account, crm_emails, owner_emails):
+    """Search for messages where CRM people are from/to, in batches."""
+    search_emails = sorted(crm_emails - owner_emails)
+    if not search_emails:
+        print(f"  [{account}] No CRM emails to search for (excluding owners)")
+        return []
+
+    total_batches = (len(search_emails) - 1) // SEARCH_BATCH_SIZE + 1
+    print(
+        f"  [{account}] Searching {len(search_emails)} CRM emails "
+        f"in {total_batches} batches..."
+    )
+
+    all_messages = []
+    seen_ids = set()
+
+    for i in range(0, len(search_emails), SEARCH_BATCH_SIZE):
+        batch = search_emails[i : i + SEARCH_BATCH_SIZE]
+        clauses = []
+        for email in batch:
+            clauses.append(f"from:{email}")
+            clauses.append(f"to:{email}")
+        query = " OR ".join(clauses)
+
+        batch_num = i // SEARCH_BATCH_SIZE + 1
+        try:
+            result = gog(
+                account,
+                "gmail",
+                "messages",
+                "search",
+                query,
+                "--max",
+                str(MAX_RESULTS_PER_SEARCH),
+            )
+            messages = (
+                result if isinstance(result, list) else result.get("messages", [])
+            )
+            new_count = 0
+            for msg in messages:
+                msg_id = msg.get("id")
+                if msg_id and msg_id not in seen_ids:
+                    seen_ids.add(msg_id)
+                    all_messages.append(msg)
+                    new_count += 1
+            print(
+                f"    Batch {batch_num}/{total_batches}: "
+                f"{len(messages)} results, {new_count} new "
+                f"(total unique: {len(all_messages)})"
+            )
+        except Exception as e:
+            print(
+                f"    Warning: batch {batch_num} failed: {e}", file=sys.stderr
+            )
+
+        time.sleep(RATE_LIMIT_DELAY)
+
+    print(f"    Total unique messages from CRM people: {len(all_messages)}")
+    return all_messages
+
+
+def fetch_message(account, message_id):
+    """Fetch full message details via gog gmail get."""
+    try:
+        result = gog(account, "gmail", "get", message_id, timeout=60)
+        time.sleep(RATE_LIMIT_DELAY)
+        return result
+    except Exception as e:
+        print(
+            f"    Warning: failed to fetch message {message_id}: {e}",
+            file=sys.stderr,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Import decision
+# ---------------------------------------------------------------------------
+
+def check_should_import(headers, crm_emails, owner_emails, has_crm_label):
+    """
+    Check if message should be imported.
+    Returns (should_import, reason, matched_party_ids).
+    """
+    if has_crm_label:
+        return True, "crm-label", set()
+
+    from_header = headers.get("from", "")
+    to_header = headers.get("to", "")
+    cc_header = headers.get("cc", "")
+
+    all_parties = []
+    all_parties.extend(parse_email_addresses(from_header))
+    all_parties.extend(parse_email_addresses(to_header))
+    all_parties.extend(parse_email_addresses(cc_header))
+
+    matched = set()
+    for _name, email in all_parties:
+        normalized = normalize_email(email)
+        if normalized and normalized not in owner_emails and normalized in crm_emails:
+            matched.add(crm_emails[normalized])
+
+    if matched:
+        return True, "crm-party", matched
+
+    return False, "no-match", set()
+
+
+# ---------------------------------------------------------------------------
+# Postgres upserts
+# ---------------------------------------------------------------------------
+
+def upsert_thread(cur, gmail_thread_id, subject, sent_at):
+    """Upsert email thread. Returns thread PK."""
+    thread_pk = f"gmail_thread_{gmail_thread_id}"
+    cur.execute(
+        """
+        INSERT INTO crm_email_threads (id, subject, gmail_thread_id, last_message_at, message_count)
+        VALUES (%s, %s, %s, %s, 1)
+        ON CONFLICT (gmail_thread_id) DO UPDATE
+        SET subject = EXCLUDED.subject,
+            last_message_at = GREATEST(crm_email_threads.last_message_at, EXCLUDED.last_message_at),
+            updated_at = now()
+        RETURNING id
+        """,
+        (thread_pk, subject, gmail_thread_id, sent_at),
+    )
+    return cur.fetchone()[0]
+
+
+def upsert_message(
+    cur, gmail_msg_id, thread_pk, subject, sent_at,
+    from_person_id, from_email, body_preview, body, has_attachments,
+):
+    """Upsert email message. Returns message PK."""
+    msg_pk = f"gmail_msg_{gmail_msg_id}"
+    cur.execute(
+        """
+        INSERT INTO crm_email_messages
+            (id, thread_id, subject, sent_at, from_person_id, from_email,
+             body_preview, body, has_attachments, gmail_message_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (gmail_message_id) DO UPDATE
+        SET subject = EXCLUDED.subject,
+            sent_at = EXCLUDED.sent_at,
+            from_person_id = COALESCE(EXCLUDED.from_person_id, crm_email_messages.from_person_id),
+            from_email = COALESCE(EXCLUDED.from_email, crm_email_messages.from_email),
+            body_preview = EXCLUDED.body_preview,
+            body = EXCLUDED.body,
+            has_attachments = EXCLUDED.has_attachments,
+            updated_at = now()
+        RETURNING id
+        """,
+        (
+            msg_pk, thread_pk, subject, sent_at, from_person_id, from_email,
+            body_preview, body[:50000] if body else None,
+            has_attachments, gmail_msg_id,
+        ),
+    )
+    return cur.fetchone()[0]
+
+
+def upsert_recipient(cur, message_pk, person_id, recipient_type, position):
+    """Upsert email message recipient."""
+    cur.execute(
+        """
+        INSERT INTO crm_email_message_recipients (message_id, person_id, recipient_type, position)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (message_id, person_id, recipient_type) DO NOTHING
+        """,
+        (message_pk, person_id, recipient_type, position),
+    )
+
+
+def upsert_thread_participant(cur, thread_pk, person_id, position):
+    """Upsert thread participant."""
+    cur.execute(
+        """
+        INSERT INTO crm_email_thread_participants (thread_id, person_id, position)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (thread_id, person_id) DO NOTHING
+        """,
+        (thread_pk, person_id, position),
+    )
+
+
+def upsert_interaction(
+    cur, person_id, company_id, msg_pk, occurred_at, direction, score
+):
+    """Upsert interaction for a CRM person on a message."""
+    # Deterministic ID: hash of message PK + person ID
+    raw = f"{msg_pk}_{person_id}"
+    int_id = "int_" + hashlib.md5(raw.encode()).hexdigest()[:16]
+    cur.execute(
+        """
+        INSERT INTO crm_interactions
+            (id, type, occurred_at, person_id, company_id,
+             email_message_id, direction, score_contribution)
+        VALUES (%s, 'Email', %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (id) DO UPDATE
+        SET occurred_at = EXCLUDED.occurred_at,
+            direction = EXCLUDED.direction,
+            score_contribution = EXCLUDED.score_contribution,
+            updated_at = now()
+        """,
+        (int_id, occurred_at, person_id, company_id, msg_pk, direction, score),
+    )
+
+
+def update_person_last_interaction(cur, person_id, occurred_at):
+    """Update person's last_interaction_at if this is more recent."""
+    cur.execute(
+        """
+        UPDATE crm_people
+        SET last_interaction_at = GREATEST(
+            COALESCE(last_interaction_at, '1970-01-01'::timestamptz),
+            %s::timestamptz
+        )
+        WHERE id = %s AND (%s::timestamptz > COALESCE(last_interaction_at, '1970-01-01'::timestamptz))
+        """,
+        (occurred_at, person_id, occurred_at),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main sync
+# ---------------------------------------------------------------------------
+
+def sync_account(
+    conn,
+    account,
+    crm_people,
+    owner_emails,
+    person_company_map,
+    existing_message_ids,
+    dry_run=False,
+):
+    """Sync one Gmail account. Returns stats dict."""
+    stats = {
+        "found": 0,
+        "fetched": 0,
+        "imported": 0,
+        "skipped": 0,
+        "errors": 0,
+        "threads": 0,
+        "recipients": 0,
+        "participants": 0,
+        "interactions": 0,
+    }
+
+    # Search for messages
+    crm_label_msgs = search_label_crm(account)
+    counterparty_msgs = search_by_crm_people(
+        account, set(crm_people.keys()), owner_emails
+    )
+
+    # Deduplicate by message ID
+    crm_label_ids = {msg.get("id") for msg in crm_label_msgs}
+    all_msgs = {}
+    for msg in crm_label_msgs + counterparty_msgs:
+        msg_id = msg.get("id")
+        if msg_id and msg_id not in all_msgs:
+            all_msgs[msg_id] = msg
+
+    print(f"\n  [{account}] Total unique messages to process: {len(all_msgs)}")
+    stats["found"] = len(all_msgs)
+
+    already_imported = [msg_id for msg_id in all_msgs if msg_id in existing_message_ids]
+    if already_imported:
+        print(
+            f"  [{account}] Already imported, skipping fetch for {len(already_imported)} messages"
+        )
+
+    if dry_run:
+        print("  [DRY RUN] Skipping fetch and import.")
+        return stats
+
+    # Process each message
+    for i, (msg_id, _msg_info) in enumerate(all_msgs.items()):
+        if (i + 1) % COMMIT_EVERY == 0:
+            conn.commit()
+            print(
+                f"  [{account}] Processed {i+1}/{len(all_msgs)} "
+                f"(imported: {stats['imported']}, skipped: {stats['skipped']})"
+            )
+
+        if msg_id in existing_message_ids:
+            stats["skipped"] += 1
+            continue
+
+        # Fetch full message
+        full_msg = fetch_message(account, msg_id)
+        if not full_msg:
+            stats["errors"] += 1
+            continue
+
+        stats["fetched"] += 1
+
+        # Extract data from gog response
+        headers = full_msg.get("headers", {})
+        raw_msg = full_msg.get("message", {})
+        body = full_msg.get("body", "")
+        attachments = full_msg.get("attachments", [])
+
+        from_header = headers.get("from", "")
+        to_header = headers.get("to", "")
+        cc_header = headers.get("cc", "")
+        subject = headers.get("subject", "")
+        date_header = headers.get("date", "")
+
+        thread_id = raw_msg.get("threadId", "")
+        internal_date = raw_msg.get("internalDate")
+        label_ids = raw_msg.get("labelIds", [])
+
+        if not thread_id:
+            print(f"    Warning: no threadId for message {msg_id}, skipping")
+            stats["errors"] += 1
+            continue
+
+        # Parse date
+        sent_at = parse_date(date_header)
+        if not sent_at and internal_date:
+            try:
+                sent_at = datetime.fromtimestamp(
+                    int(internal_date) / 1000, tz=timezone.utc
+                ).isoformat()
+            except Exception:
+                pass
+
+        # Check if should import
+        has_crm_label = msg_id in crm_label_ids or "CRM" in label_ids
+        should, reason, matched_parties = check_should_import(
+            headers, crm_people, owner_emails, has_crm_label
+        )
+
+        if not should:
+            stats["skipped"] += 1
+            continue
+
+        stats["imported"] += 1
+
+        # Parse all parties
+        from_parties = parse_email_addresses(from_header)
+        to_parties = parse_email_addresses(to_header)
+        cc_parties = parse_email_addresses(cc_header)
+
+        # Resolve from_person_id
+        from_person_id = None
+        if from_parties:
+            from_email = normalize_email(from_parties[0][1])
+            if from_email and from_email in crm_people:
+                from_person_id = crm_people[from_email]
+
+        # Determine direction
+        from_is_owner = False
+        if from_parties:
+            from_email = normalize_email(from_parties[0][1])
+            from_is_owner = from_email in owner_emails
+
+        to_has_owner = any(
+            normalize_email(email) in owner_emails
+            for _name, email in to_parties + cc_parties
+        )
+
+        if from_is_owner:
+            direction = "Sent"
+        elif to_has_owner:
+            direction = "Received"
+        else:
+            direction = "Internal"
+
+        # Body preview
+        body_preview = make_body_preview(body)
+
+        # Upsert thread
+        with conn.cursor() as cur:
+            thread_pk = upsert_thread(cur, thread_id, subject, sent_at)
+            stats["threads"] += 1
+
+            # Upsert message
+            sender_email = normalize_email(from_parties[0][1]) if from_parties else None
+            msg_pk = upsert_message(
+                cur, msg_id, thread_pk, subject, sent_at,
+                from_person_id, sender_email, body_preview, body, bool(attachments),
+            )
+            existing_message_ids.add(msg_id)
+
+            # Upsert recipients (to and cc) - only CRM people
+            pos = 0
+            for _name, email in to_parties:
+                normalized = normalize_email(email)
+                if normalized and normalized in crm_people:
+                    person_id = crm_people[normalized]
+                    upsert_recipient(cur, msg_pk, person_id, "to", pos)
+                    upsert_thread_participant(cur, thread_pk, person_id, pos)
+                    stats["recipients"] += 1
+                    stats["participants"] += 1
+                    pos += 1
+
+            pos = 0
+            for _name, email in cc_parties:
+                normalized = normalize_email(email)
+                if normalized and normalized in crm_people:
+                    person_id = crm_people[normalized]
+                    upsert_recipient(cur, msg_pk, person_id, "cc", pos)
+                    upsert_thread_participant(cur, thread_pk, person_id, pos)
+                    stats["recipients"] += 1
+                    stats["participants"] += 1
+                    pos += 1
+
+            # Add from person as thread participant if in CRM
+            if from_person_id:
+                upsert_thread_participant(cur, thread_pk, from_person_id, 0)
+                stats["participants"] += 1
+
+            # Create interactions for all CRM parties in this message
+            # From person
+            if from_person_id:
+                company_id = person_company_map.get(from_person_id)
+                upsert_interaction(
+                    cur, from_person_id, company_id, msg_pk,
+                    sent_at, direction, 1.0,
+                )
+                update_person_last_interaction(cur, from_person_id, sent_at)
+                stats["interactions"] += 1
+
+            # To persons
+            for _name, email in to_parties:
+                normalized = normalize_email(email)
+                if normalized and normalized in crm_people:
+                    person_id = crm_people[normalized]
+                    if person_id == from_person_id:
+                        continue
+                    company_id = person_company_map.get(person_id)
+                    upsert_interaction(
+                        cur, person_id, company_id, msg_pk,
+                        sent_at, direction, 1.0,
+                    )
+                    update_person_last_interaction(cur, person_id, sent_at)
+                    stats["interactions"] += 1
+
+            # CC persons
+            for _name, email in cc_parties:
+                normalized = normalize_email(email)
+                if normalized and normalized in crm_people:
+                    person_id = crm_people[normalized]
+                    if person_id == from_person_id:
+                        continue
+                    company_id = person_company_map.get(person_id)
+                    upsert_interaction(
+                        cur, person_id, company_id, msg_pk,
+                        sent_at, direction, 0.3,
+                    )
+                    update_person_last_interaction(cur, person_id, sent_at)
+                    stats["interactions"] += 1
+
+    conn.commit()
+    return stats
+
+
+def update_thread_aggregates(conn):
+    """Recalculate thread message_count and last_message_at from actual messages."""
+    print("\nUpdating thread aggregates...")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE crm_email_threads t
+            SET message_count = sub.cnt,
+                last_message_at = sub.latest
+            FROM (
+                SELECT thread_id, count(*) as cnt, max(sent_at) as latest
+                FROM crm_email_messages
+                GROUP BY thread_id
+            ) sub
+            WHERE t.id = sub.thread_id
+            """
+        )
+    conn.commit()
+    print(f"  Updated {cur.rowcount} threads")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Gog CRM Email Sync")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Search only, no imports"
+    )
+    parser.add_argument(
+        "--account", type=str, default=None, help="Sync only this account"
+    )
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("  Gog CRM Email Sync")
+    print("=" * 60)
+
+    accounts = [args.account] if args.account else ACCOUNTS
+
+    # Connect to Postgres
+    conn = psycopg2.connect(dbname=DB_NAME)
+    conn.autocommit = False
+
+    # Load CRM data
+    print("\nLoading CRM data...")
+    crm_people = get_crm_people(conn)
+    owner_emails = get_owner_emails()
+    person_company_map = get_person_company_map(conn)
+    existing_message_ids = get_existing_message_ids(conn)
+    print(f"  {len(crm_people)} CRM people with emails")
+    print(f"  {len(person_company_map)} people with company links")
+    print(f"  {len(existing_message_ids)} Gmail messages already imported")
+    print(f"  Owner emails excluded: {owner_emails}")
+
+    # Sync each account
+    all_stats = []
+    for account in accounts:
+        print(f"\n{'─' * 50}")
+        print(f"  Account: {account}")
+        print(f"{'─' * 50}")
+
+        stats = sync_account(
+            conn, account, crm_people, owner_emails,
+            person_company_map, existing_message_ids, dry_run=args.dry_run,
+        )
+        all_stats.append((account, stats))
+
+    if not args.dry_run:
+        update_thread_aggregates(conn)
+
+    # Print summary
+    print("\n" + "=" * 60)
+    print("  SYNC SUMMARY")
+    print("=" * 60)
+    for account, stats in all_stats:
+        print(f"\n  {account}:")
+        for key, val in stats.items():
+            print(f"    {key:>15}: {val}")
+
+    conn.close()
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
