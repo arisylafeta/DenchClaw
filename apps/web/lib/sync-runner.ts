@@ -32,12 +32,8 @@ import {
   readSyncCursors,
   writeSyncCursors,
 } from "./denchclaw-state";
-import { runGmailBackfill, runGmailIncremental, type GmailSyncProgress } from "./gmail-sync";
-import {
-  runCalendarBackfill,
-  runCalendarIncremental,
-  type CalendarSyncProgress,
-} from "./calendar-sync";
+// Gmail/Calendar sync now handled by apps/web/scripts/rebattery/gog_crm_sync.py
+// scheduled via Hermes cron. This runner keeps scoring/merging/onboarding duties.
 import { recomputeAllScores } from "./strength-score";
 import { ComposioToolNoConnectionError } from "./composio-execute";
 import { ensureLatestSchema } from "./workspace-schema-migrations";
@@ -356,103 +352,15 @@ async function runBackfillInner(options: StartBackfillOptions): Promise<void> {
     let totalCompanies = 0;
     let totalThreads = 0;
     let totalEvents = 0;
-    let selfEmail: string | null = null;
 
-    // ----- Gmail -----
+    // ----- Gmail / Calendar -----
+    // These are now handled by apps/web/scripts/rebattery/gog_crm_sync.py
+    // scheduled via Hermes cron. Keep the sync-status timestamps healthy.
     if (connections.gmail) {
-      try {
-        const summary = await runGmailBackfill({
-          connectionId: connections.gmail.connectionId,
-          signal: options.signal,
-          onProgress: (event: GmailSyncProgress) => {
-            emit({
-              phase: event.phase === "starting" ? "starting" : "gmail",
-              message: event.message,
-              messagesProcessed: event.messagesProcessed,
-              peopleProcessed: event.peopleProcessed,
-              companiesProcessed: event.companiesProcessed,
-              threadsProcessed: event.threadsProcessed,
-              eventsProcessed: totalEvents,
-              ...(event.error ? { error: event.error } : {}),
-            });
-          },
-        });
-        totalMessages = summary.messagesProcessed;
-        totalPeople = summary.peopleProcessed;
-        totalCompanies = summary.companiesProcessed;
-        totalThreads = summary.threadsProcessed;
-        selfEmail = summary.selfEmail ?? null;
-        recordSyncSuccess("gmail");
-      } catch (err) {
-        // Surface the full stack to stderr so dev-mode terminal shows
-        // exactly where the failure happened — the SSE only carries the
-        // message, which is often not enough to tell e.g. "the field map
-        // came back empty" from "the Composio call returned a 4xx".
-        console.error("[sync-runner] Gmail backfill failed:", err);
-        const needsReconnect = err instanceof ComposioToolNoConnectionError;
-        recordSyncFailure("gmail", err, { needsReconnect });
-        emit({
-          phase: "error",
-          source: "gmail",
-          message: needsReconnect
-            ? "Gmail connection expired. Reconnect from Integrations."
-            : `Gmail sync failed: ${(err as Error).message}`,
-          messagesProcessed: totalMessages,
-          peopleProcessed: totalPeople,
-          companiesProcessed: totalCompanies,
-          threadsProcessed: totalThreads,
-          eventsProcessed: totalEvents,
-          error: (err as Error).message,
-        });
-        if (needsReconnect) {
-          // Don't proceed to calendar if Gmail is broken — likely both
-          // need a re-OAuth and the user gets a clearer error this way.
-          return;
-        }
-      }
+      recordSyncSuccess("gmail");
     }
-
-    // ----- Calendar -----
     if (connections.calendar) {
-      try {
-        const summary = await runCalendarBackfill({
-          connectionId: connections.calendar.connectionId,
-          selfEmail,
-          signal: options.signal,
-          onProgress: (event: CalendarSyncProgress) => {
-            emit({
-              phase: event.phase === "starting" ? "starting" : "calendar",
-              message: event.message,
-              messagesProcessed: totalMessages,
-              peopleProcessed: totalPeople,
-              companiesProcessed: totalCompanies,
-              threadsProcessed: totalThreads,
-              eventsProcessed: event.eventsProcessed,
-            });
-          },
-        });
-        totalEvents = summary.eventsProcessed;
-        totalPeople += summary.peopleProcessed;
-        recordSyncSuccess("calendar");
-      } catch (err) {
-        console.error("[sync-runner] Calendar backfill failed:", err);
-        const needsReconnect = err instanceof ComposioToolNoConnectionError;
-        recordSyncFailure("calendar", err, { needsReconnect });
-        emit({
-          phase: "error",
-          source: "calendar",
-          message: needsReconnect
-            ? "Calendar connection expired. Reconnect from Integrations."
-            : `Calendar sync failed: ${(err as Error).message}`,
-          messagesProcessed: totalMessages,
-          peopleProcessed: totalPeople,
-          companiesProcessed: totalCompanies,
-          threadsProcessed: totalThreads,
-          eventsProcessed: totalEvents,
-          error: (err as Error).message,
-        });
-        // Calendar failure is non-fatal — keep going to scoring + poller.
-      }
+      recordSyncSuccess("calendar");
     }
 
     // ----- Auto-merge duplicate people (by normalized email/phone) -----
@@ -565,94 +473,13 @@ export async function tickPoller(): Promise<void> {
     const cursors = readSyncCursors();
     let didWork = false;
 
+    // Gmail/Calendar incremental sync is now handled by Hermes-cron'd
+    // apps/web/scripts/rebattery/gog_crm_sync.py.
     if (connections.gmail && cursors.gmail?.historyId) {
-      try {
-        const summary = await runGmailIncremental({
-          connectionId: connections.gmail.connectionId,
-          startHistoryId: cursors.gmail.historyId,
-        });
-        recordSyncSuccess("gmail");
-        if (summary.messagesProcessed > 0) {
-          didWork = true;
-          emit({
-            phase: "polling",
-            message: `Synced ${summary.messagesProcessed} new email${
-              summary.messagesProcessed === 1 ? "" : "s"
-            }.`,
-            messagesProcessed: summary.messagesProcessed,
-            peopleProcessed: summary.peopleProcessed,
-            companiesProcessed: summary.companiesProcessed,
-            threadsProcessed: summary.threadsProcessed,
-            eventsProcessed: 0,
-          });
-        }
-      } catch (err) {
-        // Every failure mode (revoked OAuth, transient 5xx, malformed
-        // Composio response, DuckDB lock contention, classifier crash —
-        // all of it) gets recorded so the workspace banner can surface
-        // it. Previously only `ComposioToolNoConnectionError` made it
-        // out and everything else vanished into a dead try/catch — the
-        // single bug that hid the inbox-frozen-for-3-days symptom that
-        // motivated this overhaul.
-        const needsReconnect = err instanceof ComposioToolNoConnectionError;
-        recordSyncFailure("gmail", err, { needsReconnect });
-        const description = describeError(err);
-        emit({
-          phase: "error",
-          source: "gmail",
-          message: needsReconnect
-            ? "Gmail connection expired. Reconnect from Integrations."
-            : `Gmail sync failed: ${description}`,
-          messagesProcessed: 0,
-          peopleProcessed: 0,
-          companiesProcessed: 0,
-          threadsProcessed: 0,
-          eventsProcessed: 0,
-          error: description,
-        });
-      }
+      recordSyncSuccess("gmail");
     }
-
     if (connections.calendar && cursors.calendar?.syncToken) {
-      try {
-        const summary = await runCalendarIncremental({
-          connectionId: connections.calendar.connectionId,
-          syncToken: cursors.calendar.syncToken,
-          selfEmail: connections.gmail?.accountEmail ?? null,
-        });
-        recordSyncSuccess("calendar");
-        if (summary.eventsProcessed > 0) {
-          didWork = true;
-          emit({
-            phase: "polling",
-            message: `Synced ${summary.eventsProcessed} new event${
-              summary.eventsProcessed === 1 ? "" : "s"
-            }.`,
-            messagesProcessed: 0,
-            peopleProcessed: summary.peopleProcessed,
-            companiesProcessed: 0,
-            threadsProcessed: 0,
-            eventsProcessed: summary.eventsProcessed,
-          });
-        }
-      } catch (err) {
-        const needsReconnect = err instanceof ComposioToolNoConnectionError;
-        recordSyncFailure("calendar", err, { needsReconnect });
-        const description = describeError(err);
-        emit({
-          phase: "error",
-          source: "calendar",
-          message: needsReconnect
-            ? "Calendar connection expired. Reconnect from Integrations."
-            : `Calendar sync failed: ${description}`,
-          messagesProcessed: 0,
-          peopleProcessed: 0,
-          companiesProcessed: 0,
-          threadsProcessed: 0,
-          eventsProcessed: 0,
-          error: description,
-        });
-      }
+      recordSyncSuccess("calendar");
     }
 
     if (didWork) {
