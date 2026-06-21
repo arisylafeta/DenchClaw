@@ -13,7 +13,6 @@ type SuggestItemLike = {
 type ObjectRow = {
   id: string;
   name: string;
-  icon?: string | null;
   default_view?: string | null;
 };
 
@@ -38,9 +37,9 @@ const FALLBACK_COLUMNS: Record<string, string[]> = {
   company: ["name", "domain", "website"],
   companies: ["name", "domain", "website"],
   email_thread: ["subject"],
-  email_message: ["subject", "from_email", "to_email"],
-  calendar_event: ["title", "location"],
-  interaction: ["type", "notes"],
+  email_message: ["subject", "body_preview", "body"],
+  calendar_event: ["title"],
+  interaction: ["type", "direction"],
 };
 
 function quoteIdentifier(identifier: string): string {
@@ -50,7 +49,7 @@ function quoteIdentifier(identifier: string): string {
 export async function searchPostgresObjects(query: string, max: number): Promise<SuggestItemLike[]> {
   const trimmed = query.trim();
   const rows = await queryPg<ObjectRow>(
-    `select name, icon, default_view
+    `select name, default_view
        from crm_objects
       where hidden_in_sidebar = false
         and ($1 = '' or lower(name) like lower($2))
@@ -62,7 +61,6 @@ export async function searchPostgresObjects(query: string, max: number): Promise
     name: row.name,
     path: `workspace:object:${row.name}`,
     type: "object",
-    icon: row.icon ?? undefined,
     defaultView: row.default_view === "kanban" ? "kanban" : "table",
   }));
 }
@@ -72,7 +70,7 @@ export async function searchPostgresEntries(query: string, max: number): Promise
   if (!trimmed) return [];
 
   const objects = await queryPg<ObjectRow>(
-    `select id, name, icon
+    `select id, name
        from crm_objects
       where hidden_in_sidebar = false
       order by sort_order, name`,
@@ -128,40 +126,12 @@ export async function searchPostgresEntries(query: string, max: number): Promise
             name: row.label || row.entry_id,
             path: `workspace:entry:${object.name}:${row.entry_id}`,
             type: "entry",
-            icon: object.icon ?? undefined,
             objectName: object.name,
             entryId: row.entry_id,
           });
           if (items.length >= max) break;
         }
       }
-    }
-
-    if (items.length >= max) break;
-    const customRows = await queryPg<{ entry_id: string; label: string }>(
-      `select cfv.entry_id,
-              min(coalesce(cfv.text_value, cfv.json_value::text, cfv.number_value::text, cfv.date_value::text, cfv.boolean_value::text, cfv.entry_id)) as label
-         from crm_custom_field_values cfv
-         join crm_fields f on f.id = cfv.field_id
-        where cfv.object_id = $1
-          and lower(coalesce(cfv.text_value, cfv.json_value::text, '')) like lower($2)
-        group by cfv.entry_id
-        order by max(cfv.updated_at) desc nulls last, cfv.entry_id desc
-        limit $3`,
-      [object.id, `%${trimmed}%`, max - items.length],
-    );
-    for (const row of customRows) {
-      if (!row.entry_id || seenEntryIds.has(row.entry_id)) continue;
-      seenEntryIds.add(row.entry_id);
-      items.push({
-        name: row.label || row.entry_id,
-        path: `workspace:entry:${object.name}:${row.entry_id}`,
-        type: "entry",
-        icon: object.icon ?? undefined,
-        objectName: object.name,
-        entryId: row.entry_id,
-      });
-      if (items.length >= max) break;
     }
   }
 

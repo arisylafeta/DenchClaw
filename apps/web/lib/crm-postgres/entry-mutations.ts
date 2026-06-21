@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { parseRelationIds, relationStorageValue, toCustomValueColumns } from "./value-codec";
+import { parseRelationIds, relationStorageValue } from "./value-codec";
 import { withPgTransaction, type PgTransaction } from "../postgres";
 
 type ObjectRow = { id: string; name: string; entity_table?: string | null };
@@ -74,40 +74,6 @@ async function loadObjectAndFields(tx: PgTransaction, objectName: string): Promi
   ));
 
   return { object, fields };
-}
-
-async function upsertCustomValue(
-  tx: PgTransaction,
-  objectId: string,
-  entryId: string,
-  field: FieldRow,
-  value: unknown,
-) {
-  const encoded = toCustomValueColumns(field.type, value);
-  await tx.query(
-    `insert into crm_custom_field_values
-      (object_id, entry_id, field_id, text_value, number_value, boolean_value, date_value, json_value)
-     values
-      ($1, $2, $3, $4, $5, $6, $7, $8)
-     on conflict (entry_id, field_id)
-     do update set
-      text_value = excluded.text_value,
-      number_value = excluded.number_value,
-      boolean_value = excluded.boolean_value,
-      date_value = excluded.date_value,
-      json_value = excluded.json_value,
-      updated_at = now()`,
-    [
-      objectId,
-      entryId,
-      field.id,
-      encoded.text_value,
-      encoded.number_value,
-      encoded.boolean_value,
-      encoded.date_value,
-      encoded.json_value,
-    ],
-  );
 }
 
 async function replaceRelationLinks(
@@ -259,7 +225,6 @@ export async function deletePostgresEntry(objectName: string, entryId: string): 
     const { object } = await loadObjectAndFields(tx, objectName);
     const entityTable = resolveEntityTable(object);
 
-    await tx.query("delete from crm_custom_field_values where object_id = $1 and entry_id = $2", [object.id, entryId]);
     // Clean up junction table entries
     await tx.query("delete from crm_email_thread_participants where thread_id = $1 or person_id = $1", [entryId]);
     await tx.query("delete from crm_email_message_recipients where message_id = $1 or person_id = $1", [entryId]);
@@ -284,7 +249,6 @@ export async function bulkDeletePostgresEntries(
     const { object } = await loadObjectAndFields(tx, objectName);
     const entityTable = resolveEntityTable(object);
 
-    await tx.query("delete from crm_custom_field_values where object_id = $1 and entry_id = any($2::text[])", [object.id, entryIds]);
     // Clean up junction table entries
     await tx.query("delete from crm_email_thread_participants where thread_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
     await tx.query("delete from crm_email_message_recipients where message_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);

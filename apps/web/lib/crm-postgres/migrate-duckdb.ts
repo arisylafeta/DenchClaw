@@ -1,4 +1,4 @@
-import { duckdbPathAsync, duckdbQueryOnFileAsync, getObjectViews, pivotViewIdentifier } from "../workspace";
+import { duckdbPathAsync, duckdbQueryOnFileAsync, pivotViewIdentifier } from "../workspace";
 import { withPgTransaction, type PgTransaction } from "../postgres";
 import { getCanonicalField } from "./field-registry";
 
@@ -14,15 +14,12 @@ export type MigrationApplyResult = {
 
 type Row = Record<string, unknown>;
 
-const OBJECT_NAMES = ["company", "people", "email_thread", "email_message", "calendar_event", "interaction"];
-
 const EXTRA_CANONICAL_FIELDS: Record<string, Record<string, string>> = {
   email_thread: {
     Subject: "subject",
     "Last Message At": "last_message_at",
     "Message Count": "message_count",
     "Gmail Thread ID": "gmail_thread_id",
-    "Raw JSON": "raw_json",
   },
   email_message: {
     Thread: "thread_id",
@@ -33,7 +30,6 @@ const EXTRA_CANONICAL_FIELDS: Record<string, Record<string, string>> = {
     Body: "body",
     "Has Attachments": "has_attachments",
     "Gmail Message ID": "gmail_message_id",
-    "Raw JSON": "raw_json",
   },
   calendar_event: {
     Title: "title",
@@ -42,7 +38,6 @@ const EXTRA_CANONICAL_FIELDS: Record<string, Record<string, string>> = {
     Organizer: "organizer_person_id",
     "Meeting Type": "meeting_type",
     "Google Event ID": "google_event_id",
-    "Raw JSON": "raw_json",
   },
   interaction: {
     Type: "type",
@@ -53,7 +48,6 @@ const EXTRA_CANONICAL_FIELDS: Record<string, Record<string, string>> = {
     Event: "calendar_event_id",
     Direction: "direction",
     "Score Contribution": "score_contribution",
-    "Raw JSON": "raw_json",
   },
 };
 
@@ -79,12 +73,8 @@ const ENTITY_IMPORTS = [
       country: "Country",
       city: "City",
       employee_count: "Employee Count",
-      annual_revenue_micros: "Annual Revenue Micros",
-      lifecycle_stage: "Lifecycle Stage",
-      lead_status: "Lead Status",
       strength_score: "Strength Score",
       last_interaction_at: "Last Interaction At",
-      raw_json: "Raw JSON",
     },
     requiredFallbacks: { name: "Untitled company" },
   },
@@ -104,14 +94,9 @@ const ENTITY_IMPORTS = [
       linkedin_url: "LinkedIn URL",
       avatar_url: "Avatar URL",
       contact_type: "Contact Type",
-      buying_role: "Buying Role",
-      market_role: "Market Role",
-      lifecycle_stage: "Lifecycle Stage",
-      lead_status: "Lead Status",
       source: "Source",
       strength_score: "Strength Score",
       last_interaction_at: "Last Interaction At",
-      raw_json: "Raw JSON",
     },
   },
   { objectName: "email_thread", table: "crm_email_threads", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.email_thread) },
@@ -200,31 +185,11 @@ function cleanJson(value: unknown): string | null {
 
 function valueForColumn(column: string, value: unknown): unknown {
   if (column.endsWith("_at")) { return cleanDate(value); }
-  if (["strength_score", "employee_count", "annual_revenue_micros", "message_count", "score_contribution"].includes(column)) {
+  if (["strength_score", "employee_count", "message_count", "score_contribution"].includes(column)) {
     return cleanNumber(value);
   }
   if (column === "has_attachments") { return cleanBoolean(value); }
-  if (column === "raw_json") { return cleanJson(value); }
   return cleanText(value);
-}
-
-function customTypedValues(fieldType: string, value: unknown): [unknown, unknown, unknown, unknown, unknown] | null {
-  const text = cleanText(value);
-  if (text === null) { return null; }
-  if (fieldType === "number") {
-    const n = cleanNumber(value);
-    return n === null ? null : [null, n, null, null, null];
-  }
-  if (fieldType === "boolean") {
-    const b = cleanBoolean(value);
-    return b === null ? null : [null, null, b, null, null];
-  }
-  if (fieldType === "date") {
-    const d = cleanDate(value);
-    return d === null ? null : [null, null, null, d, null];
-  }
-  if (fieldType === "json" || fieldType === "richtext" || text.length > 2000) { return [null, null, null, null, cleanJson(value)]; }
-  return [text, null, null, null, null];
 }
 
 async function insertRows(
@@ -264,18 +229,6 @@ async function duckRows(dbPath: string, sql: string): Promise<Row[]> {
   }
 }
 
-function duckSqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-function chunks<T>(values: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    result.push(values.slice(index, index + size));
-  }
-  return result;
-}
-
 export async function buildMigrationPlan(): Promise<MigrationPlan> {
   const dbPath = await duckdbPathAsync();
   if (!dbPath) { throw new Error("DuckDB database not found"); }
@@ -295,23 +248,14 @@ export async function applyMigration(): Promise<MigrationApplyResult> {
 
   const objects = await duckRows(dbPath, "select * from objects");
   const fields = await duckRows(dbPath, "select * from fields");
-  const statuses = await duckRows(dbPath, "select * from statuses");
   const documents = await duckRows(dbPath, "select * from documents");
-  const actionRuns = await duckRows(dbPath, "select * from action_runs");
   const objectById = new Map(objects.map((obj) => [String(obj.id), obj]));
   const objectNameById = new Map(objects.map((obj) => [String(obj.id), String(obj.name)]));
-  const fieldsById = new Map(fields.map((field) => [String(field.id), field]));
 
   return withPgTransaction(async (client) => {
     const inserted: Record<string, number> = {};
     await client.query(`truncate
-      crm_relation_links,
-      crm_custom_field_values,
-      crm_saved_views,
-      crm_object_view_settings,
-      crm_action_runs,
       crm_documents,
-      crm_statuses,
       crm_interactions,
       crm_calendar_events,
       crm_email_messages,
@@ -323,9 +267,9 @@ export async function applyMigration(): Promise<MigrationApplyResult> {
       cascade`);
 
     inserted.objects = await insertRows(client, "crm_objects", [
-      "id", "name", "entity_table", "description", "icon", "default_view", "display_field", "immutable", "hidden_in_sidebar", "sort_order", "created_at", "updated_at",
+      "id", "name", "entity_table", "description", "default_view", "display_field", "immutable", "hidden_in_sidebar", "sort_order", "created_at", "updated_at",
     ], objects.map((obj) => [
-      cleanText(obj.id), cleanText(obj.name), null, cleanText(obj.description), cleanText(obj.icon), cleanText(obj.default_view) ?? "table", cleanText(obj.display_field), cleanBoolean(obj.immutable) ?? false, cleanBoolean(obj.hidden_in_sidebar) ?? false, cleanNumber(obj.sort_order) ?? 0, cleanDate(obj.created_at), cleanDate(obj.updated_at),
+      cleanText(obj.id), cleanText(obj.name), null, cleanText(obj.description), cleanText(obj.default_view) ?? "table", cleanText(obj.display_field), cleanBoolean(obj.immutable) ?? false, cleanBoolean(obj.hidden_in_sidebar) ?? false, cleanNumber(obj.sort_order) ?? 0, cleanDate(obj.created_at), cleanDate(obj.updated_at),
     ]));
 
     inserted.fields = await insertRows(client, "crm_fields", [
@@ -337,12 +281,8 @@ export async function applyMigration(): Promise<MigrationApplyResult> {
       ];
     }));
 
-    inserted.statuses = await insertRows(client, "crm_statuses", ["id", "object_id", "name", "color", "sort_order", "is_default", "created_at", "updated_at"], statuses.map((row) => [
-      cleanText(row.id), cleanText(row.object_id), cleanText(row.name), cleanText(row.color) ?? "#94a3b8", cleanNumber(row.sort_order) ?? 0, cleanBoolean(row.is_default) ?? false, cleanDate(row.created_at), cleanDate(row.updated_at),
-    ]));
-
-    inserted.documents = await insertRows(client, "crm_documents", ["id", "title", "icon", "cover_image", "file_path", "parent_id", "parent_object_id", "entry_id", "sort_order", "is_published", "created_at", "updated_at"], documents.map((row) => [
-      cleanText(row.id), cleanText(row.title) ?? "Untitled", cleanText(row.icon), cleanText(row.cover_image), cleanText(row.file_path), cleanText(row.parent_id), cleanText(row.parent_object_id), cleanText(row.entry_id), cleanNumber(row.sort_order) ?? 0, cleanBoolean(row.is_published) ?? false, cleanDate(row.created_at), cleanDate(row.updated_at),
+    inserted.documents = await insertRows(client, "crm_documents", ["id", "title", "icon", "file_path", "parent_object_id", "entry_id", "sort_order", "is_published", "created_at", "updated_at"], documents.map((row) => [
+      cleanText(row.id), cleanText(row.title) ?? "Untitled", cleanText(row.icon), cleanText(row.file_path), cleanText(row.parent_object_id), cleanText(row.entry_id), cleanNumber(row.sort_order) ?? 0, cleanBoolean(row.is_published) ?? false, cleanDate(row.created_at), cleanDate(row.updated_at),
     ]));
 
     const idSets: Record<string, Set<string>> = {};
@@ -363,79 +303,6 @@ export async function applyMigration(): Promise<MigrationApplyResult> {
         return [cleanText(row.entry_id), ...values, cleanDate(row.created_at), cleanDate(row.updated_at)];
       }).filter((row) => row[0]);
       inserted[spec.table] = await insertRows(client, spec.table, columns, pgRows);
-    }
-
-    const customRows: unknown[][] = [];
-    const relationRows: unknown[][] = [];
-    const relationFieldIds: string[] = [];
-    const customFieldIds: string[] = [];
-    for (const field of fields) {
-      const fieldType = cleanText(field.type) ?? "text";
-      const objectId = cleanText(field.object_id);
-      const fieldId = cleanText(field.id);
-      if (!objectId || !fieldId) { continue; }
-      const objectName = objectNameById.get(objectId) ?? "";
-      if (fieldType === "relation") { relationFieldIds.push(fieldId); }
-      else if (isCustomField(objectName, String(field.name)) && !canonicalColumn(objectName, String(field.name))) { customFieldIds.push(fieldId); }
-    }
-
-    for (const ids of chunks([...relationFieldIds, ...customFieldIds], 50)) {
-      const inList = ids.map(duckSqlString).join(", ");
-      const values = await duckdbQueryOnFileAsync<Row>(
-        dbPath,
-        `select e.object_id, ef.entry_id, ef.field_id, ef.value
-          from entry_fields ef
-          join entries e on e.id = ef.entry_id
-          where ef.field_id in (${inList})
-            and ef.value is not null
-            and ef.value <> ''`,
-      );
-      for (const row of values) {
-        const field = fieldsById.get(String(row.field_id));
-        if (!field) { continue; }
-        const fieldType = cleanText(field.type) ?? "text";
-      if (fieldType === "relation") {
-        relationIdsFromValue(row.value).forEach((targetId, position) => {
-          relationRows.push([cleanText(row.object_id), cleanText(row.field_id), cleanText(row.entry_id), targetId, position]);
-        });
-        continue;
-      }
-      const typedValues = customTypedValues(fieldType, row.value);
-      if (!typedValues) { continue; }
-      customRows.push([cleanText(row.object_id), cleanText(row.entry_id), cleanText(row.field_id), ...typedValues]);
-      }
-    }
-    inserted.custom_values = await insertRows(client, "crm_custom_field_values", ["object_id", "entry_id", "field_id", "text_value", "number_value", "boolean_value", "date_value", "json_value"], customRows, { onConflict: "on conflict (entry_id, field_id) do nothing" });
-    inserted.relation_links = await insertRows(client, "crm_relation_links", ["object_id", "field_id", "source_entry_id", "target_entry_id", "position"], relationRows, { onConflict: "on conflict (field_id, source_entry_id, target_entry_id) do nothing" });
-
-    inserted.action_runs = await insertRows(client, "crm_action_runs", ["id", "action_id", "field_id", "entry_id", "object_id", "status", "started_at", "completed_at", "result", "error", "stdout", "exit_code"], actionRuns.map((row) => [
-      cleanText(row.id), cleanText(row.action_id), cleanText(row.field_id), cleanText(row.entry_id), cleanText(row.object_id), cleanText(row.status) ?? "pending", cleanDate(row.started_at), cleanDate(row.completed_at), cleanText(row.result), cleanText(row.error), cleanText(row.stdout), cleanNumber(row.exit_code),
-    ]));
-
-    inserted.saved_views = 0;
-    inserted.object_view_settings = 0;
-    for (const objectName of OBJECT_NAMES) {
-      const objectId = cleanText(objects.find((obj) => obj.name === objectName)?.id);
-      if (!objectId) { continue; }
-      const { views, activeView, viewSettings } = getObjectViews(objectName);
-      const viewIdsByName = new Map<string, string>();
-      for (let index = 0; index < views.length; index += 1) {
-        const view = views[index];
-        const result = await client.query<{ id: string }>(
-          `insert into crm_saved_views (id, object_id, name, view_type, filters, sort, columns, column_widths, settings, sort_order)
-           values (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
-          [objectId, view.name, view.view_type ?? "table", cleanJson(view.filters), cleanJson(view.sort), cleanJson(view.columns), cleanJson(view.column_widths), cleanJson(view.settings), index],
-        );
-        const id = result.rows[0]?.id;
-        if (id) { viewIdsByName.set(view.name, id); }
-        inserted.saved_views += result.rowCount ?? 0;
-      }
-      const activeViewId = activeView ? viewIdsByName.get(activeView) ?? null : null;
-      const settingsResult = await client.query(
-        "insert into crm_object_view_settings (object_id, active_view_id, settings) values ($1, $2, $3)",
-        [objectId, activeViewId, cleanJson(viewSettings) ?? "{}"],
-      );
-      inserted.object_view_settings += settingsResult.rowCount ?? 0;
     }
 
     return { duckdbPath: dbPath, inserted };

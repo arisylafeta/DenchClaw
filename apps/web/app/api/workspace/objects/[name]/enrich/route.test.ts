@@ -114,10 +114,6 @@ describe("workspace enrichment route", () => {
       if (sql.includes("from crm_fields") && sql.includes("id = $2")) {
         return [{ id: "field_1", canonical_column: null, type: "text" }] as never;
       }
-      if (sql.includes("from crm_people e") && sql.includes("left join crm_custom_field_values input_values")) {
-        return [{ entry_id: "entry_1", input_value: "jane@acme.com" }] as never;
-      }
-      if (sql.includes("insert into crm_custom_field_values")) return [] as never;
       if (sql.includes("update crm_people set updated_at = now() where id = $1")) {
         expect(params).toEqual(["entry_1"]);
         return [] as never;

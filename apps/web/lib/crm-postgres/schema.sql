@@ -1,3 +1,11 @@
+-- Denchclaw CRM schema — matches production database as of 2026-06-21
+--
+-- This file mirrors the live `denchclaw` database schema exactly.
+-- Tables that were dropped (crm_custom_field_values, crm_saved_views,
+-- crm_object_view_settings, crm_statuses, crm_action_runs,
+-- crm_commercial_profiles) and the crm_company_commercial_summary_v view
+-- are intentionally absent. crm_relation_links is a VIEW, defined at the bottom.
+
 create table if not exists crm_companies (
   id text primary key,
   name text not null,
@@ -13,14 +21,16 @@ create table if not exists crm_companies (
   country text,
   city text,
   employee_count double precision,
-  annual_revenue_micros double precision,
-  lifecycle_stage text,
-  lead_status text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   strength_score double precision,
   last_interaction_at timestamptz,
-  raw_json jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  countries_with_facilities text,
+  buyer_workstream_status text,
+  buyer_category text,
+  buyer_evidence text,
+  buyer_last_reviewed_at timestamptz,
+  notes text
 );
 
 create table if not exists crm_people (
@@ -29,24 +39,24 @@ create table if not exists crm_people (
   first_name text,
   last_name text,
   email text,
-  phone text,
   company_id text references crm_companies(id) on delete set null,
   source_company_name text,
   company_domain text,
-  job_title text,
-  linkedin_url text,
   avatar_url text,
   contact_type text,
-  buying_role text,
-  market_role text,
   lifecycle_stage text,
-  lead_status text,
   source text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  phone text,
+  job_title text,
+  linkedin_url text,
   strength_score double precision,
   last_interaction_at timestamptz,
-  raw_json jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  tags text,
+  notes text,
+  email_opted_out boolean default false,
+  buyer_sourced_at timestamptz
 );
 
 create table if not exists crm_email_threads (
@@ -55,7 +65,6 @@ create table if not exists crm_email_threads (
   last_message_at timestamptz,
   message_count integer,
   gmail_thread_id text,
-  raw_json jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -70,9 +79,25 @@ create table if not exists crm_email_messages (
   body text,
   has_attachments boolean,
   gmail_message_id text,
-  raw_json jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists crm_email_thread_participants (
+  thread_id text not null references crm_email_threads(id) on delete cascade,
+  person_id text not null references crm_people(id) on delete cascade,
+  position integer not null default 0,
+  created_at timestamptz not null default now(),
+  primary key (thread_id, person_id)
+);
+
+create table if not exists crm_email_message_recipients (
+  message_id text not null references crm_email_messages(id) on delete cascade,
+  person_id text not null references crm_people(id) on delete cascade,
+  recipient_type text not null check (recipient_type in ('to', 'cc')),
+  position integer not null default 0,
+  created_at timestamptz not null default now(),
+  primary key (message_id, person_id, recipient_type)
 );
 
 create table if not exists crm_calendar_events (
@@ -83,9 +108,15 @@ create table if not exists crm_calendar_events (
   organizer_person_id text references crm_people(id) on delete set null,
   meeting_type text,
   google_event_id text,
-  raw_json jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists crm_calendar_event_attendees (
+  event_id text not null references crm_calendar_events(id) on delete cascade,
+  person_id text not null references crm_people(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (event_id, person_id)
 );
 
 create table if not exists crm_interactions (
@@ -98,7 +129,6 @@ create table if not exists crm_interactions (
   calendar_event_id text references crm_calendar_events(id) on delete set null,
   direction text,
   score_contribution double precision,
-  raw_json jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -108,7 +138,6 @@ create table if not exists crm_objects (
   name text not null unique,
   entity_table text,
   description text,
-  icon text,
   default_view text not null default 'table',
   display_field text,
   immutable boolean not null default false,
@@ -137,124 +166,17 @@ create table if not exists crm_fields (
   unique (object_id, name)
 );
 
-create table if not exists crm_custom_field_values (
-  object_id text not null references crm_objects(id) on delete cascade,
-  entry_id text not null,
-  field_id text not null references crm_fields(id) on delete cascade,
-  text_value text,
-  number_value double precision,
-  boolean_value boolean,
-  date_value timestamptz,
-  json_value jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  primary key (entry_id, field_id)
-);
-
-create table if not exists crm_relation_links (
-  object_id text not null references crm_objects(id) on delete cascade,
-  field_id text not null references crm_fields(id) on delete cascade,
-  source_entry_id text not null,
-  target_entry_id text not null,
-  position integer not null default 0,
-  created_at timestamptz not null default now(),
-  primary key (field_id, source_entry_id, target_entry_id)
-);
-
-create table if not exists crm_saved_views (
-  id text primary key,
-  object_id text not null references crm_objects(id) on delete cascade,
-  name text not null,
-  view_type text not null default 'table',
-  filters jsonb,
-  sort jsonb,
-  columns jsonb,
-  column_widths jsonb,
-  settings jsonb,
-  sort_order integer not null default 0,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (object_id, name)
-);
-
-create table if not exists crm_object_view_settings (
-  object_id text primary key references crm_objects(id) on delete cascade,
-  active_view_id text references crm_saved_views(id) on delete set null,
-  settings jsonb not null default '{}'::jsonb,
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists crm_statuses (
-  id text primary key default (gen_random_uuid()::text),
-  object_id text not null references crm_objects(id) on delete cascade,
-  name text not null,
-  color text default '#94a3b8',
-  sort_order integer default 0,
-  is_default boolean default false,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now(),
-  unique (object_id, name)
-);
-
 create table if not exists crm_documents (
   id text primary key default (gen_random_uuid()::text),
   title text default 'Untitled',
   icon text,
-  cover_image text,
   file_path text not null unique,
-  parent_id text references crm_documents(id),
   parent_object_id text references crm_objects(id),
   entry_id text,
   sort_order integer default 0,
   is_published boolean default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
-);
-
-create table if not exists crm_action_runs (
-  id text primary key default (gen_random_uuid()::text),
-  action_id text not null,
-  field_id text not null,
-  entry_id text not null,
-  object_id text not null references crm_objects(id) on delete cascade,
-  status text not null default 'pending',
-  started_at timestamptz default now(),
-  completed_at timestamptz,
-  result text,
-  error text,
-  stdout text,
-  exit_code integer
-);
-
-create table if not exists crm_commercial_profiles (
-  id text primary key,
-  company_id text not null references crm_companies(id) on delete cascade,
-  contact_person_id text references crm_people(id) on delete set null,
-  profile_type text not null check (profile_type in ('buyer_demand', 'seller_supply', 'recycler_intake')),
-  status text not null default 'unverified' check (status in ('active', 'paused', 'unverified', 'archived')),
-  battery_types text[] not null default '{}',
-  previous_applications text[] not null default '{}',
-  chemistries text[] not null default '{}',
-  conditions text[] not null default '{}',
-  formats text[] not null default '{}',
-  specific_types text[] not null default '{}',
-  soh_floor numeric(5,2),
-  volume_min numeric(12,2),
-  volume_max numeric(12,2),
-  geographies text[] not null default '{}',
-  preferred_outcome text,
-  notes text,
-  source text,
-  last_verified_at timestamptz,
-  raw_json jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint crm_commercial_profiles_soh_floor_check check (soh_floor is null or (soh_floor >= 0 and soh_floor <= 100)),
-  constraint crm_commercial_profiles_volume_check check (
-    (volume_min is null or volume_min >= 0)
-    and (volume_max is null or volume_max >= 0)
-    and (volume_min is null or volume_max is null or volume_min <= volume_max)
-  )
 );
 
 create table if not exists crm_commercial_opportunities (
@@ -274,29 +196,27 @@ create table if not exists crm_commercial_opportunities (
   manufacturer text,
   model text,
   specific_type text,
-  quantity numeric(12,2),
-  soh numeric(5,2),
-  pack_kwh numeric(12,3),
+  quantity numeric(12,2) check (quantity is null or quantity >= 0),
+  soh numeric(5,2) check (soh is null or (soh >= 0 and soh <= 100)),
+  pack_kwh numeric(12,3) check (pack_kwh is null or pack_kwh >= 0),
   location_country text,
   location_region text,
   available_from timestamptz,
   deadline_at timestamptz,
-  price_amount numeric(12,2),
+  price_amount numeric(12,2) check (price_amount is null or price_amount >= 0),
   currency text,
   urgency text not null default 'medium' check (urgency in ('low', 'medium', 'high', 'critical')),
-  priority_score numeric(8,2),
+  priority_score numeric(8,2) check (priority_score is null or priority_score >= 0),
   notes text,
   raw_json jsonb not null default '{}'::jsonb,
   last_synced_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint crm_commercial_opportunities_quantity_check check (quantity is null or quantity >= 0),
-  constraint crm_commercial_opportunities_soh_check check (soh is null or (soh >= 0 and soh <= 100)),
-  constraint crm_commercial_opportunities_pack_kwh_check check (pack_kwh is null or pack_kwh >= 0),
-  constraint crm_commercial_opportunities_price_amount_check check (price_amount is null or price_amount >= 0),
-  constraint crm_commercial_opportunities_priority_score_check check (priority_score is null or priority_score >= 0)
+  buyer_company_id text references crm_companies(id) on delete set null,
+  seller_company_id text references crm_companies(id) on delete set null
 );
 
+-- updated_at maintenance trigger function
 create or replace function set_updated_at()
 returns trigger
 language plpgsql
@@ -307,96 +227,193 @@ begin
 end;
 $$;
 
-drop trigger if exists trg_crm_commercial_profiles_set_updated_at on crm_commercial_profiles;
-create trigger trg_crm_commercial_profiles_set_updated_at
-before update on crm_commercial_profiles
-for each row
-execute function set_updated_at();
-
 drop trigger if exists trg_crm_commercial_opportunities_set_updated_at on crm_commercial_opportunities;
 create trigger trg_crm_commercial_opportunities_set_updated_at
 before update on crm_commercial_opportunities
 for each row
 execute function set_updated_at();
 
-create or replace view crm_company_commercial_summary_v as
-with profile_stats as (
-  select
-    cp.company_id,
-    count(*) filter (where cp.status = 'active') as active_profile_count,
-    count(*) filter (where cp.status = 'active' and cp.profile_type = 'buyer_demand') as buyer_profile_count,
-    count(*) filter (where cp.status = 'active' and cp.profile_type = 'seller_supply') as supplier_profile_count,
-    count(*) filter (where cp.status = 'active' and cp.profile_type = 'recycler_intake') as recycler_profile_count,
-    max(cp.last_verified_at) as latest_profile_verified_at
-  from crm_commercial_profiles cp
-  group by cp.company_id
-),
-opportunity_stats as (
-  select
-    co.company_id,
-    count(*) filter (where co.status = 'open' and co.opportunity_type = 'supply') as open_supply_count,
-    count(*) filter (where co.status = 'open' and co.opportunity_type = 'demand') as open_demand_count,
-    count(*) filter (
-      where co.status = 'open'
-        and co.opportunity_type = 'supply'
-        and (co.urgency in ('high', 'critical') or (co.deadline_at is not null and co.deadline_at <= now() + interval '14 days'))
-    ) as urgent_supply_count,
-    count(*) filter (
-      where co.status = 'open'
-        and co.opportunity_type = 'demand'
-        and (co.urgency in ('high', 'critical') or (co.deadline_at is not null and co.deadline_at <= now() + interval '14 days'))
-    ) as urgent_demand_count,
-    max(co.available_from) filter (where co.opportunity_type = 'supply') as latest_supply_at,
-    max(co.available_from) filter (where co.opportunity_type = 'demand') as latest_demand_at,
-    min(co.deadline_at) filter (where co.status = 'open' and co.deadline_at is not null) as next_deadline_at,
-    max(co.priority_score) filter (where co.status = 'open') as max_open_priority_score
-  from crm_commercial_opportunities co
-  group by co.company_id
-)
+-- crm_relation_links is a VIEW (not a table) that unions together all of the
+-- relationship edges derived from the junction tables and FK columns above.
+create or replace view crm_relation_links as
 select
-  c.id as company_id,
-  coalesce(ps.active_profile_count, 0) as active_profile_count,
-  coalesce(ps.buyer_profile_count, 0) as buyer_profile_count,
-  coalesce(ps.supplier_profile_count, 0) as supplier_profile_count,
-  coalesce(ps.recycler_profile_count, 0) as recycler_profile_count,
-  coalesce(os.open_supply_count, 0) as open_supply_count,
-  coalesce(os.open_demand_count, 0) as open_demand_count,
-  coalesce(os.urgent_supply_count, 0) as urgent_supply_count,
-  coalesce(os.urgent_demand_count, 0) as urgent_demand_count,
-  ps.latest_profile_verified_at,
-  os.latest_supply_at,
-  os.latest_demand_at,
-  os.next_deadline_at,
-  case
-    when coalesce(os.open_supply_count, 0) > 0 and coalesce(os.open_demand_count, 0) > 0 then 'supply_and_demand'
-    when coalesce(os.open_supply_count, 0) > 0 then 'active_supply'
-    when coalesce(os.open_demand_count, 0) > 0 then 'active_demand'
-    when coalesce(ps.active_profile_count, 0) > 0 then 'profile_only'
-    else 'inactive'
-  end as commercial_status,
-  (
-    coalesce(os.max_open_priority_score, 0)
-    + ((coalesce(os.urgent_supply_count, 0) + coalesce(os.urgent_demand_count, 0)) * 10)
-    + coalesce(os.open_supply_count, 0)
-    + coalesce(os.open_demand_count, 0)
-  )::numeric(10,2) as commercial_priority_score
-from crm_companies c
-left join profile_stats ps on ps.company_id = c.id
-left join opportunity_stats os on os.company_id = c.id;
+  'seed_obj_email_thread_000000000'::text as object_id,
+  'seed_fld_emthread_people_00000'::text as field_id,
+  crm_email_thread_participants.thread_id as source_entry_id,
+  crm_email_thread_participants.person_id as target_entry_id,
+  crm_email_thread_participants.position,
+  crm_email_thread_participants.created_at
+from crm_email_thread_participants
+union all
+select
+  'seed_obj_email_message_00000000'::text as object_id,
+  'seed_fld_emmsg_to_0000000000000'::text as field_id,
+  crm_email_message_recipients.message_id as source_entry_id,
+  crm_email_message_recipients.person_id as target_entry_id,
+  crm_email_message_recipients.position,
+  crm_email_message_recipients.created_at
+from crm_email_message_recipients
+where crm_email_message_recipients.recipient_type = 'to'
+union all
+select
+  'seed_obj_email_message_00000000'::text as object_id,
+  'seed_fld_emmsg_cc_0000000000000'::text as field_id,
+  crm_email_message_recipients.message_id as source_entry_id,
+  crm_email_message_recipients.person_id as target_entry_id,
+  crm_email_message_recipients.position,
+  crm_email_message_recipients.created_at
+from crm_email_message_recipients
+where crm_email_message_recipients.recipient_type = 'cc'
+union all
+select
+  'seed_obj_calendar_event_0000000'::text as object_id,
+  'seed_fld_calev_attend_000000000'::text as field_id,
+  crm_calendar_event_attendees.event_id as source_entry_id,
+  crm_calendar_event_attendees.person_id as target_entry_id,
+  0 as position,
+  crm_calendar_event_attendees.created_at
+from crm_calendar_event_attendees
+union all
+select
+  'seed_obj_people_00000000000000'::text as object_id,
+  'seed_fld_people_company_0000000'::text as field_id,
+  crm_people.id as source_entry_id,
+  crm_people.company_id as target_entry_id,
+  0 as position,
+  crm_people.created_at
+from crm_people
+where crm_people.company_id is not null
+union all
+select
+  'seed_obj_email_message_00000000'::text as object_id,
+  'seed_fld_emmsg_from_00000000000'::text as field_id,
+  crm_email_messages.id as source_entry_id,
+  crm_email_messages.from_person_id as target_entry_id,
+  0 as position,
+  crm_email_messages.created_at
+from crm_email_messages
+where crm_email_messages.from_person_id is not null
+union all
+select
+  'seed_obj_email_message_00000000'::text as object_id,
+  'seed_fld_emmsg_thread_000000000'::text as field_id,
+  crm_email_messages.id as source_entry_id,
+  crm_email_messages.thread_id as target_entry_id,
+  0 as position,
+  crm_email_messages.created_at
+from crm_email_messages
+where crm_email_messages.thread_id is not null
+union all
+select
+  'seed_obj_interaction_00000000000'::text as object_id,
+  'seed_fld_inter_person_000000000'::text as field_id,
+  crm_interactions.id as source_entry_id,
+  crm_interactions.person_id as target_entry_id,
+  0 as position,
+  crm_interactions.created_at
+from crm_interactions
+where crm_interactions.person_id is not null
+union all
+select
+  'seed_obj_interaction_00000000000'::text as object_id,
+  'seed_fld_inter_company_00000000'::text as field_id,
+  crm_interactions.id as source_entry_id,
+  crm_interactions.company_id as target_entry_id,
+  0 as position,
+  crm_interactions.created_at
+from crm_interactions
+where crm_interactions.company_id is not null
+union all
+select
+  'seed_obj_interaction_00000000000'::text as object_id,
+  'seed_fld_inter_email_0000000000'::text as field_id,
+  crm_interactions.id as source_entry_id,
+  crm_interactions.email_message_id as target_entry_id,
+  0 as position,
+  crm_interactions.created_at
+from crm_interactions
+where crm_interactions.email_message_id is not null
+union all
+select
+  'seed_obj_interaction_00000000000'::text as object_id,
+  'seed_fld_inter_event_0000000000'::text as field_id,
+  crm_interactions.id as source_entry_id,
+  crm_interactions.calendar_event_id as target_entry_id,
+  0 as position,
+  crm_interactions.created_at
+from crm_interactions
+where crm_interactions.calendar_event_id is not null
+union all
+select
+  'seed_obj_calendar_event_0000000'::text as object_id,
+  'seed_fld_calev_organ_0000000000'::text as field_id,
+  crm_calendar_events.id as source_entry_id,
+  crm_calendar_events.organizer_person_id as target_entry_id,
+  0 as position,
+  crm_calendar_events.created_at
+from crm_calendar_events
+where crm_calendar_events.organizer_person_id is not null
+union all
+select
+  'f43167a6-6805-44ab-b26a-e187752365f1'::text as object_id,
+  '36cf33c6-dcbb-47f8-9c82-c287b40d24ed'::text as field_id,
+  crm_commercial_opportunities.id as source_entry_id,
+  crm_commercial_opportunities.company_id as target_entry_id,
+  0 as position,
+  crm_commercial_opportunities.created_at
+from crm_commercial_opportunities
+where crm_commercial_opportunities.company_id is not null
+union all
+select
+  'f43167a6-6805-44ab-b26a-e187752365f1'::text as object_id,
+  '164c1603-4faa-46d8-98dc-03f7e6f91152'::text as field_id,
+  crm_commercial_opportunities.id as source_entry_id,
+  crm_commercial_opportunities.contact_person_id as target_entry_id,
+  0 as position,
+  crm_commercial_opportunities.created_at
+from crm_commercial_opportunities
+where crm_commercial_opportunities.contact_person_id is not null
+union all
+select
+  'f43167a6-6805-44ab-b26a-e187752365f1'::text as object_id,
+  '1eac4175-7d53-4712-8f2f-79d23c254e06'::text as field_id,
+  crm_commercial_opportunities.id as source_entry_id,
+  crm_commercial_opportunities.buyer_company_id as target_entry_id,
+  0 as position,
+  crm_commercial_opportunities.created_at
+from crm_commercial_opportunities
+where crm_commercial_opportunities.buyer_company_id is not null
+union all
+select
+  'f43167a6-6805-44ab-b26a-e187752365f1'::text as object_id,
+  '30204a59-a42f-4baa-a3a8-3ad92fe441b3'::text as field_id,
+  crm_commercial_opportunities.id as source_entry_id,
+  crm_commercial_opportunities.seller_company_id as target_entry_id,
+  0 as position,
+  crm_commercial_opportunities.created_at
+from crm_commercial_opportunities
+where crm_commercial_opportunities.seller_company_id is not null;
+
+-- Indexes (non-constraint indexes only; primary keys & unique constraints
+-- are declared inline above).
+
+create index if not exists crm_companies_domain_idx on crm_companies (lower(domain));
+create index if not exists crm_companies_name_idx on crm_companies (lower(name));
+create index if not exists crm_companies_buyer_workstream_idx on crm_companies (buyer_workstream_status) where buyer_workstream_status is not null;
 
 create index if not exists crm_people_email_idx on crm_people (lower(email));
 create index if not exists crm_people_company_idx on crm_people (company_id);
-create index if not exists crm_people_last_interaction_idx on crm_people (last_interaction_at desc nulls last);
-create index if not exists crm_companies_domain_idx on crm_companies (lower(domain));
-create index if not exists crm_companies_name_idx on crm_companies (lower(name));
+create index if not exists crm_people_job_title_idx on crm_people (job_title) where job_title is not null;
+
 create index if not exists crm_email_messages_thread_sent_idx on crm_email_messages (thread_id, sent_at desc);
-create index if not exists crm_custom_values_field_text_idx on crm_custom_field_values (field_id, text_value);
-create index if not exists crm_custom_values_field_number_idx on crm_custom_field_values (field_id, number_value);
-create index if not exists crm_custom_values_field_date_idx on crm_custom_field_values (field_id, date_value);
-create index if not exists crm_relation_links_source_idx on crm_relation_links (field_id, source_entry_id);
-create index if not exists crm_relation_links_target_idx on crm_relation_links (field_id, target_entry_id);
-create index if not exists idx_crm_commercial_profiles_company_id on crm_commercial_profiles (company_id);
-create index if not exists idx_crm_commercial_profiles_type_status on crm_commercial_profiles (profile_type, status);
+
+create index if not exists idx_thread_participants_person on crm_email_thread_participants (person_id);
+
+create index if not exists idx_msg_recipients_person on crm_email_message_recipients (person_id);
+create index if not exists idx_msg_recipients_type on crm_email_message_recipients (recipient_type);
+
+create index if not exists idx_event_attendees_person on crm_calendar_event_attendees (person_id);
+
 create index if not exists idx_crm_commercial_opportunities_company_id on crm_commercial_opportunities (company_id);
 create index if not exists idx_crm_commercial_opportunities_type_status on crm_commercial_opportunities (opportunity_type, status);
 create index if not exists idx_crm_commercial_opportunities_source on crm_commercial_opportunities (source_system, source_id) where source_id is not null;

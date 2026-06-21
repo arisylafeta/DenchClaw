@@ -1,5 +1,4 @@
 import { extractEmailHost } from "../email-domain";
-import { getConnectionStrengthBucket } from "../connection-strength-label";
 import { queryPg } from "../postgres";
 import { deriveWebsite } from "../website-from-domain";
 
@@ -9,10 +8,7 @@ type PersonRow = {
   email: string | null;
   company_id: string | null;
   phone: string | null;
-  status: string | null;
   source: string | null;
-  strength_score: number | string | null;
-  last_interaction_at: string | Date | null;
   job_title: string | null;
   linkedin_url: string | null;
   avatar_url: string | null;
@@ -29,7 +25,6 @@ type CompanyRow = {
   industry: string | null;
   type: string | null;
   source: string | null;
-  strength_score: number | string | null;
 };
 
 type ThreadRow = {
@@ -51,7 +46,6 @@ type EventRow = {
   title: string | null;
   start_at: string | Date | null;
   end_at: string | Date | null;
-  meeting_type: string | null;
   google_event_id: string | null;
 };
 
@@ -71,12 +65,7 @@ export type PostgresPersonProfile = {
     company_name: string | null;
     company_id: string | null;
     phone: string | null;
-    status: string | null;
     source: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
-    last_interaction_at: string | null;
     job_title: string | null;
     linkedin_url: string | null;
     avatar_url: string | null;
@@ -115,10 +104,9 @@ async function loadCompany(companyId: string | null, email: string | null): Prom
              name,
              domain,
              website,
-             coalesce(sector, raw_json->>'Industry') as industry,
-             coalesce(company_type, raw_json->>'Type') as type,
-             raw_json->>'Source' as source,
-             strength_score
+             sector as industry,
+             company_type as type,
+             role_source as source
         from crm_companies
        where id = $1
        limit 1
@@ -133,10 +121,9 @@ async function loadCompany(companyId: string | null, email: string | null): Prom
            name,
            domain,
            website,
-           coalesce(sector, raw_json->>'Industry') as industry,
-           coalesce(company_type, raw_json->>'Type') as type,
-           raw_json->>'Source' as source,
-           strength_score
+           sector as industry,
+           company_type as type,
+           role_source as source
       from crm_companies
      where lower(domain) = $1
         or $1 like '%.' || lower(domain)
@@ -152,24 +139,14 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
            p.email,
            p.company_id,
            p.phone,
-           p.lead_status as status,
            p.source,
-           p.strength_score,
-           p.last_interaction_at,
            p.job_title,
            p.linkedin_url,
            p.avatar_url,
-           coalesce(notes_value.text_value, p.raw_json->>'Notes') as notes,
+           p.notes,
            p.created_at,
            p.updated_at
       from crm_people p
-      left join crm_objects people_obj on people_obj.name = 'people'
-      left join crm_fields notes_field
-        on notes_field.object_id = people_obj.id
-       and notes_field.name = 'Notes'
-      left join crm_custom_field_values notes_value
-        on notes_value.entry_id = p.id
-       and notes_value.field_id = notes_field.id
      where p.id = $1
      limit 1
   `, [personId]);
@@ -177,8 +154,6 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
   if (!raw) return null;
 
   const company = await loadCompany(raw.company_id, raw.email);
-  const strengthScore = numberOrNull(raw.strength_score) ?? 0;
-  const bucket = getConnectionStrengthBucket(strengthScore);
   const person = {
     id: raw.id,
     name: raw.name,
@@ -186,12 +161,7 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
     company_id: raw.company_id,
     company_name: company?.name ?? null,
     phone: raw.phone,
-    status: raw.status,
     source: raw.source,
-    strength_score: Number.isFinite(strengthScore) ? strengthScore : null,
-    strength_label: bucket.label,
-    strength_color: bucket.color,
-    last_interaction_at: iso(raw.last_interaction_at),
     job_title: raw.job_title,
     linkedin_url: raw.linkedin_url,
     avatar_url: raw.avatar_url,
@@ -236,7 +206,6 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
            e.title,
            e.start_at,
            e.end_at,
-           e.meeting_type,
            e.google_event_id
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
@@ -266,7 +235,6 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
       ? {
           ...company,
           website: company.website ?? deriveWebsite(company.domain ?? null),
-          strength_score: numberOrNull(company.strength_score),
         }
       : null,
     derived_website: deriveWebsite(person.email),

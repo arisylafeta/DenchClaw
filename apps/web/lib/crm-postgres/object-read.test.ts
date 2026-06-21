@@ -33,16 +33,8 @@ describe("postgres object read adapter", () => {
           { id: "f5", name: "Notes", type: "text", sort_order: 5 },
         ];
       }
-      if (sql.includes("from crm_saved_views")) return [{ id: "v1", name: "All CRM Contacts", view_type: "table", columns: ["Full Name"] }];
-      if (sql.includes("select count(distinct cfv.entry_id)")) return [{ count: "1" }];
-      if (sql.includes("select distinct cfv.entry_id") && sql.includes("from crm_custom_field_values cfv")) return [{ entry_id: "t1", created_at: null, updated_at: null }];
       if (sql.includes("count(*)")) return [{ count: "1" }];
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
-      if (sql.includes("from crm_custom_field_values")) return [
-        { entry_id: "p1", field_name: "Notes", text_value: "VIP" },
-        { entry_id: "t1", field_name: "Title", text_value: "Prepare investor deck" },
-        { entry_id: "t1", field_name: "Status", text_value: "In Queue" },
-      ];
       if (sql.includes("from crm_companies")) return [{ id: "c1", name: "Acme", domain: "acme.test", website: null }];
       return [];
     });
@@ -55,7 +47,9 @@ describe("postgres object read adapter", () => {
     expect(data.object.name).toBe("people");
     expect(data.fields[0].name).toBe("Full Name");
     expect(data.entries[0].entry_id).toBe("p1");
-    expect(data.savedViews?.[0].name).toBe("All CRM Contacts");
+    expect(data.savedViews).toEqual([]);
+    expect(data.activeView).toBeUndefined();
+    expect(data.statuses).toEqual([]);
   });
 
   it("applies search, filters, and canonical sort to list and count queries", async () => {
@@ -75,42 +69,9 @@ describe("postgres object read adapter", () => {
     const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)"));
     const listCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_people"));
     expect(countCall?.[0]).toContain("lower");
-    expect(countCall?.[0]).toContain("from crm_custom_field_values");
     expect(countCall?.[1]).toContain("%ada%");
-    expect(countCall?.[1]).toContain("%VIP%");
     expect(listCall?.[0]).toContain('order by e."full_name" asc');
     expect(data.totalCount).toBe(1);
-  });
-
-  it("sorts list queries by custom field values with parameterized field ids", async () => {
-    const sort = encodeURIComponent(JSON.stringify([{ field: "Notes", direction: "asc" }]));
-
-    const { getPostgresObjectData } = await import("./object-read");
-    await getPostgresObjectData("people", new URL(`http://localhost?sort=${sort}`));
-
-    const listCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_people"));
-    const sql = String(listCall?.[0]);
-
-    expect(sql).toContain("order by (select coalesce(cfv.text_value, cfv.number_value::text, cfv.boolean_value::text, cfv.date_value::text, cfv.json_value::text)");
-    expect(sql).toContain("from crm_custom_field_values cfv");
-    expect(sql).toContain("cfv.object_id = $1 and cfv.field_id = $2 and cfv.entry_id = e.id");
-    expect(sql).toContain("limit 1) asc nulls last, e.created_at desc, e.id desc");
-    expect(listCall?.[1]).toEqual(["seed_obj_people_00000000000000", "f5", 100, 0]);
-  });
-
-  it("searches custom text fields with a single field-id array exists condition", async () => {
-    const { getPostgresObjectData } = await import("./object-read");
-    await getPostgresObjectData("people", new URL("http://localhost?search=silverlake"));
-
-    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)"));
-    const sql = String(countCall?.[0]);
-
-    expect(sql).toContain("exists (select 1 from crm_custom_field_values cfv");
-    expect(sql).toContain("cfv.entry_id = e.id");
-    expect(sql).toContain("cfv.field_id = any($3::text[])");
-    expect(sql).toContain("lower(coalesce(cfv.text_value, cfv.json_value::text, '')) like lower($2)");
-    expect(sql).not.toContain("limit 1)::text) like lower($2)");
-    expect(countCall?.[1]).toEqual(["seed_obj_people_00000000000000", "%silverlake%", ["f5"]]);
   });
 
   it("adds relation metadata, labels, and favicons for company relations", async () => {
@@ -120,18 +81,5 @@ describe("postgres object read adapter", () => {
     expect(data.fields.find((field) => field.name === "Company")?.related_object_name).toBe("company");
     expect(data.relationLabels.Company.c1).toBe("Acme");
     expect(data.relationFaviconUrls.Company.c1).toContain("google.com/s2/favicons");
-  });
-
-  it("loads entries for custom-value-only objects such as task", async () => {
-    const { getPostgresObjectData } = await import("./object-read");
-    const data = await getPostgresObjectData("task", new URL("http://localhost?pageSize=10"));
-
-    expect(data.object.name).toBe("task");
-    expect(data.totalCount).toBe(1);
-    expect(data.entries[0]).toMatchObject({
-      entry_id: "t1",
-      Title: "Prepare investor deck",
-      Status: "In Queue",
-    });
   });
 });

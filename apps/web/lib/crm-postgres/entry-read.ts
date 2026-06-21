@@ -5,7 +5,6 @@ type ObjectRow = {
   id: string;
   name: string;
   description?: string | null;
-  icon?: string | null;
   default_view?: string | null;
   display_field?: string | null;
 };
@@ -24,16 +23,6 @@ type FieldRow = {
   relationship_type?: string | null;
   sort_order?: number | null;
   related_object_name?: string | null;
-};
-
-type CustomValueRow = {
-  entry_id: string;
-  field_name: string;
-  text_value?: string | null;
-  number_value?: number | string | null;
-  boolean_value?: boolean | null;
-  date_value?: string | Date | null;
-  json_value?: unknown;
 };
 
 type ReverseRelationRow = {
@@ -89,15 +78,6 @@ function resolveDisplayField(object: ObjectRow, fields: FieldRow[]): string {
   return fields[0]?.name ?? "id";
 }
 
-function customValue(row: CustomValueRow): unknown {
-  if (row.json_value !== undefined && row.json_value !== null) return row.json_value;
-  if (row.text_value !== undefined && row.text_value !== null) return row.text_value;
-  if (row.number_value !== undefined && row.number_value !== null) return Number(row.number_value);
-  if (row.boolean_value !== undefined && row.boolean_value !== null) return row.boolean_value;
-  if (row.date_value !== undefined && row.date_value !== null) return row.date_value;
-  return null;
-}
-
 function buildEntrySelect(fields: FieldRow[]): string {
   const canonicalSelects = fields
     .filter((field) => field.canonical_column)
@@ -131,7 +111,6 @@ export async function getReverseRelationsForEntry(
              nullif(trim(concat_ws(' ', interactions.type, interactions.occurred_at::text)), ''),
              nullif(people.full_name, ''),
              nullif(companies.name, ''),
-             nullif(label_values.text_value, ''),
              l.source_entry_id
            ) as label
       from crm_relation_links l
@@ -149,9 +128,6 @@ export async function getReverseRelationsForEntry(
            when o.name in ('company', 'companies') then 'Company Name'
            else null
          end)
-      left join crm_custom_field_values label_values
-        on label_values.entry_id = l.source_entry_id
-       and label_values.field_id = display_field.id
       left join crm_email_messages email_messages on o.name = 'email_message' and email_messages.id = l.source_entry_id
       left join crm_email_threads email_threads on o.name = 'email_thread' and email_threads.id = l.source_entry_id
       left join crm_calendar_events calendar_events on o.name = 'calendar_event' and calendar_events.id = l.source_entry_id
@@ -250,18 +226,6 @@ export async function getPostgresEntryData(objectName: string, entryId: string):
     throw new Error("Entry not found");
   }
 
-  const customRows = await queryPg<CustomValueRow>(
-    `select cfv.entry_id, f.name as field_name, cfv.text_value, cfv.number_value, cfv.boolean_value, cfv.date_value, cfv.json_value
-       from crm_custom_field_values cfv
-       join crm_fields f on f.id = cfv.field_id
-      where cfv.object_id = $1 and cfv.entry_id = $2`,
-    [object.id, entryId],
-  );
-
-  for (const row of customRows) {
-    entry[row.field_name] = customValue(row);
-  }
-
   const resolvedRelations = await resolveRelationLabels(fields, entry);
 
   return {
@@ -275,22 +239,6 @@ export async function getPostgresEntryData(objectName: string, entryId: string):
   };
 }
 
-async function loadCustomOnlyEntry(objectId: string, entryId: string): Promise<Record<string, unknown> | null> {
-  const existsRows = await queryPg<{ entry_id: string; created_at?: string | Date | null; updated_at?: string | Date | null }>(`
-    select cfv.entry_id,
-           min(cfv.created_at) as created_at,
-           max(cfv.updated_at) as updated_at
-      from crm_custom_field_values cfv
-     where cfv.object_id = $1
-       and cfv.entry_id = $2
-     group by cfv.entry_id
-     limit 1
-  `, [objectId, entryId]);
-  const row = existsRows[0];
-  if (!row) return null;
-  return {
-    entry_id: row.entry_id,
-    created_at: row.created_at ?? null,
-    updated_at: row.updated_at ?? null,
-  };
+async function loadCustomOnlyEntry(_objectId: string, _entryId: string): Promise<Record<string, unknown> | null> {
+  return null;
 }

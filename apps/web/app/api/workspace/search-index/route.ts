@@ -65,14 +65,6 @@ type FieldRow = {
   sort_order?: number;
 };
 
-type EavRow = {
-  entry_id: string;
-  created_at: string;
-  updated_at: string;
-  field_name: string;
-  value: string | null;
-};
-
 const POSTGRES_TABLE_BY_OBJECT: Record<string, string> = {
   people: "crm_people",
   company: "crm_companies",
@@ -141,37 +133,6 @@ async function readPostgresFields(objectId: string): Promise<FieldRow[]> {
   );
 }
 
-async function readPostgresCustomEntries(objectId: string): Promise<Record<string, unknown>[]> {
-  const rows = await queryPg<{
-    entry_id: string;
-    field_name: string;
-    value: string | null;
-  }>(
-    `select cfv.entry_id,
-            f.name as field_name,
-            coalesce(cfv.text_value, cfv.number_value::text, cfv.boolean_value::text, cfv.date_value::text, cfv.json_value::text) as value
-       from crm_custom_field_values cfv
-       join crm_fields f on f.id = cfv.field_id
-      where cfv.object_id = $1
-      order by cfv.updated_at desc
-      limit 2500`,
-    [objectId],
-  );
-
-  const grouped = new Map<string, Record<string, unknown>>();
-  for (const row of rows) {
-    let entry = grouped.get(row.entry_id);
-    if (!entry) {
-      entry = { entry_id: row.entry_id };
-      grouped.set(row.entry_id, entry);
-    }
-    if (row.field_name) {
-      entry[row.field_name] = row.value;
-    }
-  }
-  return Array.from(grouped.values()).slice(0, 500);
-}
-
 async function buildPostgresEntryItems(objects: ObjectRow[]): Promise<SearchIndexItem[]> {
   const items: SearchIndexItem[] = [];
 
@@ -182,14 +143,13 @@ async function buildPostgresEntryItems(objects: ObjectRow[]): Promise<SearchInde
       .filter((f) => !["relation", "richtext"].includes(f.type))
       .slice(0, 4);
     const tableName = POSTGRES_TABLE_BY_OBJECT[obj.name];
-    const entries = tableName
-      ? await queryPg<Record<string, unknown>>(
-        `select ${buildPostgresEntrySelect(fields)}
-           from ${tableName}
-          order by created_at desc
-          limit 500`,
-      )
-      : await readPostgresCustomEntries(obj.id);
+    if (!tableName) {continue;}
+    const entries = await queryPg<Record<string, unknown>>(
+      `select ${buildPostgresEntrySelect(fields)}
+         from ${tableName}
+        order by created_at desc
+        limit 500`,
+    );
     const objIcon = readObjectYamlIcon(obj.name);
 
     for (const entry of entries) {
@@ -343,7 +303,13 @@ async function buildEntryItems(): Promise<SearchIndexItem[]> {
     );
 
     if (entries.length === 0) {
-      const rawRows = await duckdbQueryOnFileAsync<EavRow>(dbPath,
+      const rawRows = await duckdbQueryOnFileAsync<{
+        entry_id: string;
+        created_at: string;
+        updated_at: string;
+        field_name: string;
+        value: string | null;
+      }>(dbPath,
         `SELECT e.id as entry_id, e.created_at, e.updated_at,
                 f.name as field_name, ef.value
          FROM entries e

@@ -1,4 +1,3 @@
-import { getConnectionStrengthBucket } from "../connection-strength-label";
 import { queryPg } from "../postgres";
 import { deriveDisplayDomain, deriveWebsite } from "../website-from-domain";
 
@@ -91,10 +90,7 @@ export type PostgresCompanyProfile = {
     industry: string | null;
     type: string | null;
     source: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
-    last_interaction_at: string | null;
+    platform_role: string | null;
     notes: string | null;
     created_at: string | null;
     updated_at: string | null;
@@ -104,10 +100,6 @@ export type PostgresCompanyProfile = {
     name: string | null;
     email: string | null;
     job_title: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
-    last_interaction_at: string | null;
     avatar_url: string | null;
   }>;
   threads: Array<{
@@ -128,7 +120,6 @@ export type PostgresCompanyProfile = {
     title: string | null;
     start_at: string | null;
     end_at: string | null;
-    meeting_type: string | null;
   }>;
   summary: {
     people_count: number;
@@ -147,8 +138,7 @@ type CompanyRow = {
   industry: string | null;
   type: string | null;
   source: string | null;
-  strength_score: number | string | null;
-  last_interaction_at: string | Date | null;
+  platform_role: string | null;
   notes: string | null;
   created_at: string | Date | null;
   updated_at: string | Date | null;
@@ -159,8 +149,6 @@ type PersonRow = {
   name: string | null;
   email: string | null;
   job_title: string | null;
-  strength_score: number | string | null;
-  last_interaction_at: string | Date | null;
   avatar_url: string | null;
 };
 
@@ -183,7 +171,6 @@ type EventRow = {
   title: string | null;
   start_at: string | Date | null;
   end_at: string | Date | null;
-  meeting_type: string | null;
 };
 
 type CommercialProfileRow = {
@@ -276,12 +263,11 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            name,
            domain,
            website,
-           coalesce(sector, raw_json->>'Industry') as industry,
-           coalesce(company_type, raw_json->>'Type') as type,
-           raw_json->>'Source' as source,
-           strength_score,
-           last_interaction_at,
-           raw_json->>'Notes' as notes,
+           sector as industry,
+           company_type as type,
+           role_source as source,
+           platform_role,
+           notes,
            created_at,
            updated_at
       from crm_companies
@@ -291,8 +277,6 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
   const raw = companyRows[0];
   if (!raw) { return null; }
 
-  const strengthScore = numberOrNull(raw.strength_score) ?? 0;
-  const bucket = getConnectionStrengthBucket(strengthScore);
   const company = {
     id: raw.id,
     name: raw.name,
@@ -301,10 +285,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     industry: raw.industry,
     type: raw.type,
     source: raw.source,
-    strength_score: Number.isFinite(strengthScore) ? strengthScore : null,
-    strength_label: bucket.label,
-    strength_color: bucket.color,
-    last_interaction_at: iso(raw.last_interaction_at),
+    platform_role: raw.platform_role,
     notes: raw.notes,
     created_at: iso(raw.created_at),
     updated_at: iso(raw.updated_at),
@@ -317,36 +298,26 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            full_name as name,
            email,
            job_title,
-           strength_score,
-           last_interaction_at,
            avatar_url
       from crm_people
      where company_id = $1
         or ($2::text is not null and lower(split_part(email, '@', 2)) = $2)
         or ($2::text is not null and lower(split_part(email, '@', 2)) like '%.' || $2)
      order by coalesce(lower(trim(email)), id),
-              strength_score desc nulls last,
-              last_interaction_at desc nulls last
+              updated_at desc nulls last
      limit 100
   `, [company.id, domain]);
   const people = peopleRows
     .map((row) => {
-      const score = numberOrNull(row.strength_score) ?? 0;
-      const personBucket = getConnectionStrengthBucket(score);
       return {
         id: row.id,
         name: row.name,
         email: row.email,
         job_title: row.job_title,
-        strength_score: Number.isFinite(score) ? score : null,
-        strength_label: personBucket.label,
-        strength_color: personBucket.color,
-        last_interaction_at: iso(row.last_interaction_at),
         avatar_url: row.avatar_url,
       };
     })
-    .toSorted((a, b) => (b.strength_score ?? 0) - (a.strength_score ?? 0)
-      || String(b.last_interaction_at ?? "").localeCompare(String(a.last_interaction_at ?? "")));
+    .toSorted((a, b) => String(b.name ?? "").localeCompare(String(a.name ?? "")));
 
   const threads = await queryPg<ThreadRow>(`
     select t.id,
@@ -383,8 +354,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     select e.id,
            e.title,
            e.start_at,
-           e.end_at,
-           e.meeting_type
+           e.end_at
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id
@@ -396,35 +366,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
      limit 50
   `, [company.id]);
 
-  const profileRows = await queryPg<CommercialProfileRow>(`
-    select cp.id,
-           cp.company_id,
-           cp.contact_person_id,
-           p.full_name as contact_person_name,
-           cp.profile_type,
-           cp.status,
-           cp.battery_types,
-           cp.previous_applications,
-           cp.chemistries,
-           cp.conditions,
-           cp.formats,
-           cp.specific_types,
-           cp.geographies,
-           cp.soh_floor,
-           cp.volume_min,
-           cp.volume_max,
-           cp.preferred_outcome,
-           cp.notes,
-           cp.source,
-           cp.last_verified_at
-      from crm_commercial_profiles cp
-      left join crm_people p on p.id = cp.contact_person_id
-     where cp.company_id = $1
-     order by case when cp.status = 'active' then 0 else 1 end,
-              cp.profile_type asc,
-              cp.last_verified_at desc nulls last,
-              cp.created_at desc
-  `, [company.id]);
+  const profileRows: CommercialProfileRow[] = [];
 
   const opportunityRows = await queryPg<CommercialOpportunityRow>(`
     select co.id,
@@ -473,25 +415,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
      limit 200
   `, [company.id]);
 
-  const summaryRows = await queryPg<CommercialSummaryRow>(`
-    select active_profile_count,
-           buyer_profile_count,
-           supplier_profile_count,
-           recycler_profile_count,
-           open_supply_count,
-           open_demand_count,
-           urgent_supply_count,
-           urgent_demand_count,
-           latest_profile_verified_at,
-           latest_supply_at,
-           latest_demand_at,
-           next_deadline_at,
-           commercial_status,
-           commercial_priority_score
-      from crm_company_commercial_summary_v
-     where company_id = $1
-     limit 1
-  `, [company.id]);
+  const summaryRows: CommercialSummaryRow[] = [];
 
   const fallbackSummary: CommercialSummary = {
     active_profile_count: 0,
@@ -530,9 +454,9 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     : fallbackSummary;
 
   const roles: CompanyCommercial["roles"] = [];
-  if (commercialSummary.buyer_profile_count > 0 || commercialSummary.open_demand_count > 0) { roles.push("buyer"); }
-  if (commercialSummary.supplier_profile_count > 0 || commercialSummary.open_supply_count > 0) { roles.push("supplier"); }
-  if (commercialSummary.recycler_profile_count > 0) { roles.push("recycler"); }
+  if (raw.platform_role === 'BUYER') roles.push("buyer");
+  if (raw.platform_role === 'SUPPLIER') roles.push("supplier");
+  if (raw.platform_role === 'RECYCLER') roles.push("recycler");
 
   const commercial: CompanyCommercial = {
     roles,

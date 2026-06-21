@@ -29,7 +29,6 @@ export type PostgresActivityResult = {
       title: string | null;
       start_at: string | null;
       end_at: string | null;
-      meeting_type: string | null;
     } | null;
   }>;
   total: number;
@@ -50,7 +49,6 @@ type InteractionRow = {
   title: string | null;
   start_at: string | Date | null;
   end_at: string | Date | null;
-  meeting_type: string | null;
 };
 
 function iso(value: string | Date | null): string | null {
@@ -85,7 +83,7 @@ export async function getPostgresPersonActivity(
   const rows = await queryPg<InteractionRow>(
     `select i.id, i.type, i.direction, i.occurred_at, i.email_message_id, i.calendar_event_id,
             m.thread_id, m.subject, m.body_preview, m.from_person_id,
-            e.title, e.start_at, e.end_at, e.meeting_type
+            e.title, e.start_at, e.end_at
        from crm_interactions i
        left join crm_email_messages m on m.id = i.email_message_id
        left join crm_calendar_events e on e.id = i.calendar_event_id
@@ -134,7 +132,6 @@ export async function getPostgresPersonActivity(
           title: row.title,
           start_at: iso(row.start_at),
           end_at: iso(row.end_at),
-          meeting_type: row.meeting_type,
         }
         : null,
     };

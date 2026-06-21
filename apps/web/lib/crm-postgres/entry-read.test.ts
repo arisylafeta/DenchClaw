@@ -28,12 +28,6 @@ describe("postgres entry read", () => {
           { field_name: "Participants", source_object_name: "calendar_event", source_object_id: "event_obj", source_entry_id: "e1", display_field: "Title", label: "Planning" },
         ];
       }
-      if (sql.includes("from crm_custom_field_values")) {
-        return [
-          { entry_id: "t1", field_name: "Title", text_value: "Prepare investor deck" },
-          { entry_id: "t1", field_name: "Status", text_value: "In Queue" },
-        ];
-      }
       return [];
     });
   });
@@ -52,17 +46,5 @@ describe("postgres entry read", () => {
     expect(links[0]).toMatchObject({ fieldName: "From", sourceObjectName: "email_message", displayField: "Subject" });
     expect(links[0].links).toEqual([{ id: "m1", label: "Hello" }]);
     expect(links[1]).toMatchObject({ fieldName: "Participants", sourceObjectName: "calendar_event", displayField: "Title" });
-  });
-
-  it("loads detail data for custom-value-only objects such as task", async () => {
-    const { getPostgresEntryData } = await import("./entry-read");
-    const data = await getPostgresEntryData("task", "t1");
-
-    expect(data.object.name).toBe("task");
-    expect(data.entry).toMatchObject({
-      entry_id: "t1",
-      Title: "Prepare investor deck",
-      Status: "In Queue",
-    });
   });
 });

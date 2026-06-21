@@ -37,11 +37,7 @@ export async function resolvePostgresObjectContext(objectName: string): Promise<
 }
 
 export async function verifyPostgresEntryExists(objectName: string, entryId: string): Promise<boolean> {
-	const objectRows = await queryPg<{ entity_table: string | null }>(
-		`select entity_table from crm_objects where name = $1 limit 1`,
-		[objectName],
-	);
-	const entityTable = objectRows[0]?.entity_table ?? canonicalTableByObjectName[objectName.trim().toLowerCase()];
+	const entityTable = canonicalTableByObjectName[objectName.trim().toLowerCase()];
 	if (!entityTable || !/^crm_[a-z0-9_]+$/.test(entityTable)) return false;
 
 	const rows = await queryPg<{ cnt: number }>(

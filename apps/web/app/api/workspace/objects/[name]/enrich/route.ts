@@ -4,7 +4,6 @@ import {
 	findDuckDBForObject,
 } from "@/lib/workspace";
 import { queryPg } from "@/lib/postgres";
-import { toCustomValueColumns } from "@/lib/crm-postgres/value-codec";
 import {
 	getIntegrationsState,
 	resolveDenchGatewayCredentials,
@@ -469,7 +468,7 @@ async function loadPostgresEntriesForEnrichment(args: {
 	scope: "all" | "empty" | number;
 	narrowedEntryIds?: string[];
 }): Promise<Array<{ entry_id: string; input_value: string | null }>> {
-	const { objectId, tableName, inputField, enrichField, scope, narrowedEntryIds } = args;
+	const { tableName, inputField, enrichField, scope, narrowedEntryIds } = args;
 	if (tableName && inputField.canonical_column) {
 		const params: unknown[] = [];
 		const where: string[] = [];
@@ -480,10 +479,6 @@ async function loadPostgresEntriesForEnrichment(args: {
 		if (scope === "empty") {
 			if (enrichField.canonical_column) {
 				where.push(`coalesce(e."${enrichField.canonical_column.replace(/"/g, '""')}"::text, '') = ''`);
-			} else {
-				params.push(objectId);
-				params.push(enrichField.id);
-				where.push(`not exists (select 1 from crm_custom_field_values ev where ev.object_id = $${params.length - 1} and ev.entry_id = e.id and ev.field_id = $${params.length} and coalesce(ev.text_value, ev.number_value::text, ev.boolean_value::text, ev.date_value::text, ev.json_value::text, '') <> '')`);
 			}
 		}
 		let limitSql = "";
@@ -501,32 +496,7 @@ async function loadPostgresEntriesForEnrichment(args: {
 		);
 	}
 
-	const params: unknown[] = [objectId, inputField.id];
-	const where: string[] = [];
-	if (narrowedEntryIds?.length) {
-		params.push(narrowedEntryIds);
-		where.push(`e.entry_id = any($${params.length}::text[])`);
-	}
-	if (scope === "empty") {
-		params.push(enrichField.id);
-		where.push(`not exists (select 1 from crm_custom_field_values ev where ev.object_id = $1 and ev.entry_id = e.entry_id and ev.field_id = $${params.length} and coalesce(ev.text_value, ev.number_value::text, ev.boolean_value::text, ev.date_value::text, ev.json_value::text, '') <> '')`);
-	}
-	let limitSql = "";
-	if (typeof scope === "number" && scope > 0) {
-		params.push(scope);
-		limitSql = ` limit $${params.length}`;
-	}
-	const whereSql = where.length ? `and ${where.join(" and ")}` : "";
-	const inputParam = `$2`;
-	return queryPg<{ entry_id: string; input_value: string | null }>(
-		`select e.entry_id, iv.text_value as input_value
-		 from (select distinct entry_id from crm_custom_field_values where object_id = $1) e
-		 left join crm_custom_field_values iv
-		   on iv.object_id = $1 and iv.entry_id = e.entry_id and iv.field_id = ${inputParam}
-		 where true ${whereSql}
-		${limitSql}`,
-		params,
-	);
+	return [];
 }
 
 async function patchPostgresEntryField(
@@ -536,28 +506,18 @@ async function patchPostgresEntryField(
 	field: { canonical_column: string | null; type: string },
 	value: string,
 ) {
-	if (field.canonical_column) {
-		const objects = await queryPg<{ name: string }>("select name from crm_objects where id = $1 limit 1", [objectId]);
-		const tableName = POSTGRES_OBJECT_TABLES[objects[0]?.name ?? ""];
-		if (tableName) {
-			await queryPg(
-				`update ${tableName} set "${field.canonical_column.replace(/"/g, '""')}" = $1, updated_at = now() where id = $2`,
-				[value, entryId],
-			);
-			return;
-		}
+	if (!field.canonical_column) {
+		throw new Error(`Cannot enrich field without canonical_column (fieldId=${fieldId})`);
 	}
-	const cols = toCustomValueColumns(field.type, value);
-	await queryPg(
-		`insert into crm_custom_field_values (object_id, entry_id, field_id, text_value, number_value, boolean_value, date_value, json_value, updated_at)
-		 values ($1,$2,$3,$4,$5,$6,$7,$8,now())
-		 on conflict (entry_id, field_id)
-		 do update set text_value = excluded.text_value, number_value = excluded.number_value, boolean_value = excluded.boolean_value, date_value = excluded.date_value, json_value = excluded.json_value, updated_at = now()`,
-		[objectId, entryId, fieldId, cols.text_value, cols.number_value, cols.boolean_value, cols.date_value, cols.json_value],
-	);
 	const objects = await queryPg<{ name: string }>("select name from crm_objects where id = $1 limit 1", [objectId]);
 	const tableName = POSTGRES_OBJECT_TABLES[objects[0]?.name ?? ""];
-	if (tableName) await queryPg(`update ${tableName} set updated_at = now() where id = $1`, [entryId]);
+	if (!tableName) {
+		throw new Error(`No entity table for object (objectId=${objectId})`);
+	}
+	await queryPg(
+		`update ${tableName} set "${field.canonical_column.replace(/"/g, '""')}" = $1, updated_at = now() where id = $2`,
+		[value, entryId],
+	);
 }
 
 type GatewayCallResult =

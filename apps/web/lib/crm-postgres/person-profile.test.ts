@@ -31,9 +31,7 @@ describe("getPostgresPersonProfile", () => {
             job_title: null,
             linkedin_url: null,
             avatar_url: null,
-            notes: sql.includes("crm_custom_field_values")
-              ? "Typeform submission - Buyer Sourcing Criteria"
-              : null,
+            notes: "Typeform submission - Buyer Sourcing Criteria",
             created_at: null,
             updated_at: null,
           },

@@ -7,7 +7,6 @@ type ObjectRow = {
   id: string;
   name: string;
   description?: string | null;
-  icon?: string | null;
   default_view?: string | null;
   display_field?: string | null;
   immutable?: boolean | null;
@@ -55,16 +54,6 @@ type SavedViewRow = {
 type ObjectViewSettingsRow = {
   active_view_id?: string | null;
   settings?: ViewTypeSettings | null;
-};
-
-type CustomValueRow = {
-  entry_id: string;
-  field_name: string;
-  text_value?: string | null;
-  number_value?: number | string | null;
-  boolean_value?: boolean | null;
-  date_value?: string | Date | null;
-  json_value?: unknown;
 };
 
 export type PostgresObjectData = {
@@ -125,15 +114,6 @@ function toSavedView(row: SavedViewRow): SavedView & { id?: string } {
   };
 }
 
-function customValue(row: CustomValueRow): unknown {
-  if (row.json_value !== undefined && row.json_value !== null) return row.json_value;
-  if (row.text_value !== undefined && row.text_value !== null) return row.text_value;
-  if (row.number_value !== undefined && row.number_value !== null) return Number(row.number_value);
-  if (row.boolean_value !== undefined && row.boolean_value !== null) return row.boolean_value;
-  if (row.date_value !== undefined && row.date_value !== null) return row.date_value;
-  return null;
-}
-
 function buildEntrySelect(fields: FieldRow[]): string {
   const canonicalSelects = fields
     .filter((field) => field.canonical_column)
@@ -161,23 +141,16 @@ function isFilterGroup(value: FilterRule | FilterGroup): value is FilterGroup {
   return "rules" in value;
 }
 
-function appendCustomValueExpression(field: FieldRow, tableAlias: string, params: unknown[]): string {
-  params.push(field.id);
-  return `(select coalesce(cfv.text_value, cfv.number_value::text, cfv.boolean_value::text, cfv.date_value::text, cfv.json_value::text)
-            from crm_custom_field_values cfv
-            where cfv.object_id = $1 and cfv.field_id = $${params.length} and cfv.entry_id = ${tableAlias}.id
-            limit 1)`;
-}
-
-function appendFieldExpression(field: FieldRow, tableAlias: string, params: unknown[]): string {
+function appendFieldExpression(field: FieldRow, tableAlias: string, _params: unknown[]): string | null {
   if (field.canonical_column) return `${tableAlias}.${quoteIdentifier(field.canonical_column)}`;
-  return appendCustomValueExpression(field, tableAlias, params);
+  return null;
 }
 
 function buildRuleCondition(rule: FilterRule, fieldsByName: Map<string, FieldRow>, tableAlias: string, params: unknown[]): string | null {
   const field = fieldsByName.get(rule.field);
   if (!field) return null;
   const expr = appendFieldExpression(field, tableAlias, params);
+  if (!expr) return null;
   switch (rule.operator) {
     case "is_empty":
       return `(${expr} is null or ${expr}::text = '')`;
@@ -220,19 +193,10 @@ function buildSearchCondition(search: string | null, fields: FieldRow[], tableAl
   const parts = textFields
     .filter((field) => field.canonical_column)
     .map((field) => `lower(${tableAlias}.${quoteIdentifier(field.canonical_column!)}::text) like lower(${placeholder})`);
-  const customFieldIds = textFields
-    .filter((field) => !field.canonical_column)
-    .map((field) => field.id);
-  if (customFieldIds.length) {
-    params.push(customFieldIds);
-    parts.push(
-      `exists (select 1 from crm_custom_field_values cfv where cfv.object_id = $1 and cfv.entry_id = ${tableAlias}.id and cfv.field_id = any($${params.length}::text[]) and lower(coalesce(cfv.text_value, cfv.json_value::text, '')) like lower(${placeholder}))`,
-    );
-  }
   return parts.length ? `(${parts.join(" or ")})` : null;
 }
 
-function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, FieldRow>, tableAlias: string, params: unknown[]): string {
+function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, FieldRow>, tableAlias: string, _params: unknown[]): string {
   const parts: string[] = [];
   for (const rule of sort ?? []) {
     const direction = rule.direction === "asc" ? "asc" : "desc";
@@ -243,17 +207,15 @@ function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, Fi
     const field = fieldsByName.get(rule.field);
     if (field?.canonical_column) {
       parts.push(`${tableAlias}.${quoteIdentifier(field.canonical_column)} ${direction}`);
-    } else if (field) {
-      parts.push(`${appendCustomValueExpression(field, tableAlias, params)} ${direction} nulls last`);
     }
   }
   parts.push(`${tableAlias}.created_at desc`, `${tableAlias}.id desc`);
   return parts.join(", ");
 }
 
-async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: number, offset: number, whereClause: string, params: unknown[], orderBy: string, search: string | null): Promise<Record<string, unknown>[]> {
+async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: number, offset: number, whereClause: string, params: unknown[], orderBy: string, _search: string | null): Promise<Record<string, unknown>[]> {
   const tableName = supportedTables[object.name];
-  if (!tableName) return loadCustomOnlyEntries(object, pageSize, offset, search);
+  if (!tableName) return loadCustomOnlyEntries(object, pageSize, offset, _search);
 
   const selectList = buildEntrySelect(fields);
   const listParams = [...params, pageSize, offset];
@@ -262,90 +224,15 @@ async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: numb
     listParams,
   );
 
-  if (entries.length === 0) return entries;
-
-  const customRows = await queryPg<CustomValueRow>(
-    `select cfv.entry_id, f.name as field_name, cfv.text_value, cfv.number_value, cfv.boolean_value, cfv.date_value, cfv.json_value
-     from crm_custom_field_values cfv
-     join crm_fields f on f.id = cfv.field_id
-     where cfv.object_id = $1 and cfv.entry_id = any($2::text[])`,
-    [object.id, entries.map((entry) => entry.entry_id)],
-  );
-
-  const entriesById = new Map(entries.map((entry) => [String(entry.entry_id), entry]));
-  for (const row of customRows) {
-    const entry = entriesById.get(row.entry_id);
-    if (entry) entry[row.field_name] = customValue(row);
-  }
-
   return entries;
 }
 
-async function loadCustomOnlyEntries(object: ObjectRow, pageSize: number, offset: number, search: string | null): Promise<Record<string, unknown>[]> {
-  const params: unknown[] = [object.id];
-  let searchClause = "";
-  if (search?.trim()) {
-    params.push(`%${search.trim()}%`);
-    searchClause = `and exists (
-      select 1 from crm_custom_field_values search_values
-      where search_values.object_id = cfv.object_id
-        and search_values.entry_id = cfv.entry_id
-        and lower(coalesce(search_values.text_value, search_values.json_value::text, '')) like lower($${params.length})
-    )`;
-  }
-  params.push(pageSize, offset);
-  const ids = await queryPg<{ entry_id: string; created_at?: string | Date | null; updated_at?: string | Date | null }>(`
-    select distinct cfv.entry_id,
-           min(cfv.created_at) as created_at,
-           max(cfv.updated_at) as updated_at
-      from crm_custom_field_values cfv
-     where cfv.object_id = $1
-       ${searchClause}
-     group by cfv.entry_id
-     order by max(cfv.updated_at) desc nulls last, cfv.entry_id desc
-     limit $${params.length - 1} offset $${params.length}
-  `, params);
-  if (ids.length === 0) return [];
-
-  const entries: Record<string, unknown>[] = ids.map((row) => ({
-    entry_id: row.entry_id,
-    created_at: row.created_at ?? null,
-    updated_at: row.updated_at ?? null,
-  }));
-  const customRows = await queryPg<CustomValueRow>(
-    `select cfv.entry_id, f.name as field_name, cfv.text_value, cfv.number_value, cfv.boolean_value, cfv.date_value, cfv.json_value
-       from crm_custom_field_values cfv
-       join crm_fields f on f.id = cfv.field_id
-      where cfv.object_id = $1 and cfv.entry_id = any($2::text[])`,
-    [object.id, entries.map((entry) => entry.entry_id)],
-  );
-  const entriesById = new Map(entries.map((entry) => [String(entry.entry_id), entry]));
-  for (const row of customRows) {
-    const entry = entriesById.get(row.entry_id);
-    if (entry) entry[row.field_name] = customValue(row);
-  }
-  return entries;
+async function loadCustomOnlyEntries(_object: ObjectRow, _pageSize: number, _offset: number, _search: string | null): Promise<Record<string, unknown>[]> {
+  return [];
 }
 
-async function countCustomOnlyEntries(object: ObjectRow, search: string | null): Promise<number> {
-  const params: unknown[] = [object.id];
-  let searchClause = "";
-  if (search?.trim()) {
-    params.push(`%${search.trim()}%`);
-    searchClause = `and exists (
-      select 1 from crm_custom_field_values search_values
-      where search_values.object_id = cfv.object_id
-        and search_values.entry_id = cfv.entry_id
-        and lower(coalesce(search_values.text_value, search_values.json_value::text, '')) like lower($${params.length})
-    )`;
-  }
-  const rows = await queryPg<{ count: string | number }>(`
-    select count(distinct cfv.entry_id)
-      from crm_custom_field_values cfv
-     where cfv.object_id = $1
-       ${searchClause}
-  `, params);
-  return Number(rows[0]?.count ?? 0);
+async function countCustomOnlyEntries(_object: ObjectRow, _search: string | null): Promise<number> {
+  return 0;
 }
 
 function parseRelationValue(value: unknown): string[] {
@@ -404,9 +291,10 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
       order by f.sort_order`,
     [object.id],
   );
-  const statuses = await queryPg<StatusRow>("select * from crm_statuses where object_id = $1 order by sort_order", [object.id]);
-  const savedViewRows = await queryPg<SavedViewRow>("select * from crm_saved_views where object_id = $1 order by sort_order", [object.id]);
-  const settingsRows = await queryPg<ObjectViewSettingsRow>("select * from crm_object_view_settings where object_id = $1 limit 1", [object.id]);
+  // crm_statuses, crm_saved_views, and crm_object_view_settings tables were dropped.
+  const statuses: StatusRow[] = [];
+  const savedViewRows: SavedViewRow[] = [];
+  const settingsRows: ObjectViewSettingsRow[] = [];
 
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const pageSizeParam = url.searchParams.get("pageSize") ?? url.searchParams.get("pagesize");

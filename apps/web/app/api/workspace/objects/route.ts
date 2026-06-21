@@ -83,13 +83,12 @@ export async function POST(request: Request) {
 
 	if (process.env.CRM_DB_BACKEND === "postgres") {
 		try {
-			const created = await createPostgresObject({
-				name,
-				parentPath: parentPath || undefined,
-				description,
-				icon,
-				defaultView,
-			});
+		const created = await createPostgresObject({
+			name,
+			parentPath: parentPath || undefined,
+			description,
+			defaultView,
+		});
 			return Response.json(Object.assign({ ok: true }, created), { status: 201 });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Failed to create object.";

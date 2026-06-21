@@ -8,7 +8,6 @@ type MessageRow = {
   body: string | null;
   has_attachments: boolean | null;
   gmail_message_id: string | null;
-  sender_type: string | null;
   from_person_id: string | null;
   to_person_ids: string[] | null;
   cc_person_ids: string[] | null;
@@ -35,18 +34,10 @@ export async function getPostgresInboxThread(threadId: string) {
            m.body,
            m.has_attachments,
            m.gmail_message_id,
-           sender_type.text_value as sender_type,
            m.from_person_id,
            coalesce(to_people.person_ids, array[]::text[]) as to_person_ids,
            coalesce(cc_people.person_ids, array[]::text[]) as cc_person_ids
       from crm_email_messages m
-      left join crm_objects message_object on message_object.name = 'email_message'
-      left join crm_fields sender_type_field
-        on sender_type_field.object_id = message_object.id
-       and sender_type_field.name = 'Sender Type'
-      left join crm_custom_field_values sender_type
-        on sender_type.entry_id = m.id
-       and sender_type.field_id = sender_type_field.id
       left join lateral (
         select array_agg(l.target_entry_id order by l.position, l.target_entry_id) as person_ids
           from crm_relation_links l
@@ -97,7 +88,6 @@ export async function getPostgresInboxThread(threadId: string) {
       body: message.body,
       has_attachments: Boolean(message.has_attachments),
       gmail_message_id: message.gmail_message_id,
-      sender_type: message.sender_type,
       from_person_id: message.from_person_id,
       to_person_ids: message.to_person_ids ?? [],
       cc_person_ids: message.cc_person_ids ?? [],

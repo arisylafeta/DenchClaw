@@ -24,7 +24,6 @@ type InboxThreadRow = {
     avatar_url: string | null;
   }> | null;
   snippet: string | null;
-  primary_sender_type: string | null;
   primary_sender_id: string | null;
   primary_sender_name: string | null;
   primary_sender_email: string | null;
@@ -43,16 +42,8 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
       select distinct on (m.thread_id)
              m.thread_id,
              m.body_preview as snippet,
-             m.from_person_id,
-             sender_type.text_value as sender_type
+              m.from_person_id
         from crm_email_messages m
-        left join crm_objects message_object on message_object.name = 'email_message'
-        left join crm_fields sender_type_field
-          on sender_type_field.object_id = message_object.id
-         and sender_type_field.name = 'Sender Type'
-        left join crm_custom_field_values sender_type
-          on sender_type.entry_id = m.id
-         and sender_type.field_id = sender_type_field.id
        where m.thread_id is not null
        order by m.thread_id, m.sent_at desc nulls last, m.id desc
     ),
@@ -62,9 +53,8 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
              t.last_message_at,
              t.message_count,
              t.gmail_thread_id,
-             latest_msg.snippet,
-             latest_msg.sender_type as primary_sender_type,
-             latest_msg.from_person_id as primary_sender_id,
+              latest_msg.snippet,
+              latest_msg.from_person_id as primary_sender_id,
              sender.full_name as primary_sender_name,
              sender.email as primary_sender_email,
              count(*) over () as total_count
@@ -80,16 +70,14 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
             where participant_object.name = 'email_thread'
               and participant_field.name = 'Participants'
               and participant_link.source_entry_id = t.id
-              and participant_link.target_entry_id = $2::text
-         ))
-         and ($3::text <> 'person' or latest_msg.sender_type is null or latest_msg.sender_type = 'Person')
-         and ($3::text <> 'automated' or (latest_msg.sender_type is not null and latest_msg.sender_type <> 'Person'))
-    ),
+          and participant_link.target_entry_id = $2::text
+     ))
+     ),
     page as (
       select *
         from filtered
        order by last_message_at desc nulls last, id
-       limit $4 offset $5
+       limit $3 offset $4
     )
     select page.*,
            coalesce(participants.participant_ids, array[]::text[]) as participant_ids,
@@ -112,7 +100,7 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
            and participant_link.source_entry_id = page.id
       ) participants on true
      order by page.last_message_at desc nulls last, page.id
-  `, [params.search.toLowerCase(), params.personId, senderFilter, params.limit, params.offset]);
+  `, [params.search.toLowerCase(), params.personId, params.limit, params.offset]);
 
   const threads = rows.map((row) => ({
     id: row.id,
@@ -123,7 +111,6 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
     participant_ids: row.participant_ids ?? [],
     participants: row.participants ?? [],
     snippet: row.snippet,
-    primary_sender_type: row.primary_sender_type,
     primary_sender_id: row.primary_sender_id,
     primary_sender_name: row.primary_sender_name,
     primary_sender_email: row.primary_sender_email,

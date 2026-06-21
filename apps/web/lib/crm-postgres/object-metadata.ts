@@ -5,7 +5,6 @@ export type PostgresObjectRow = {
   id: string;
   name: string;
   description?: string | null;
-  icon?: string | null;
   default_view?: string | null;
   display_field?: string | null;
   immutable?: boolean | null;
@@ -47,7 +46,6 @@ type CreatePostgresObjectInput = {
   id?: string;
   name: string;
   description?: string | null;
-  icon?: string | null;
   defaultView?: string;
   displayField?: string | null;
   immutable?: boolean;
@@ -66,9 +64,13 @@ async function txQuery<T extends Record<string, unknown>>(
   return Array.isArray(result) ? (result as T[]) : (result.rows as T[]);
 }
 
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
 export async function getPostgresObjectByName(name: string): Promise<PostgresObjectRow | null> {
   const rows = await queryPg<PostgresObjectRow>(
-    `select id, name, description, icon, default_view, display_field, immutable, hidden_in_sidebar, sort_order, created_at, updated_at, entity_table
+    `select id, name, description, default_view, display_field, immutable, hidden_in_sidebar, sort_order, created_at, updated_at, entity_table
      from crm_objects
      where name = $1
      limit 1`,
@@ -87,14 +89,9 @@ export async function getPostgresFields(objectId: string): Promise<PostgresField
   );
 }
 
-export async function getPostgresStatuses(objectId: string): Promise<PostgresStatusRow[]> {
-  return queryPg<PostgresStatusRow>(
-    `select id, object_id, name, color, sort_order, is_default, created_at, updated_at
-     from crm_statuses
-     where object_id = $1
-     order by sort_order`,
-    [objectId],
-  );
+export async function getPostgresStatuses(_objectId: string): Promise<PostgresStatusRow[]> {
+  // crm_statuses table was dropped; statuses are no longer persisted.
+  return [];
 }
 
 export function resolvePostgresDisplayField(
@@ -114,15 +111,14 @@ export async function createPostgresObject(input: CreatePostgresObjectInput): Pr
   const rows = await withPgTransaction(async (tx) => txQuery<{ id: string; name: string }>(
     tx,
     `insert into crm_objects
-      (id, name, description, icon, default_view, display_field, immutable, hidden_in_sidebar, sort_order, entity_table)
+      (id, name, description, default_view, display_field, immutable, hidden_in_sidebar, sort_order, entity_table)
      values
-      ($1, $2, $3, $4, coalesce($5, 'table'), $6, coalesce($7, false), coalesce($8, false), coalesce($9, 0), $10)
+      ($1, $2, $3, coalesce($4, 'table'), $5, coalesce($6, false), coalesce($7, false), coalesce($8, 0), $9)
      returning id, name`,
     [
       id,
       input.name,
       input.description ?? null,
-      input.icon ?? null,
       input.defaultView ?? null,
       input.displayField ?? null,
       input.immutable ?? false,
@@ -199,7 +195,7 @@ export async function reorderPostgresFields(objectName: string, fieldOrder: stri
 
 export async function createPostgresField(
   objectName: string,
-  body: { name?: string; type?: string; enum_values?: string[]; required?: boolean; default_value?: string | null },
+  body: { name?: string; type?: string; enum_values?: string[]; required?: boolean },
 ): Promise<{ ok: true; fieldId: string; name: string; type: string }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
@@ -230,8 +226,8 @@ export async function createPostgresField(
   const fieldId = randomUUID();
 
   const inserted = await queryPg<{ id: string; name: string; type: string }>(
-    `insert into crm_fields (id, object_id, name, type, required, sort_order, enum_values, default_value)
-     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+    `insert into crm_fields (id, object_id, name, type, required, sort_order, enum_values)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb)
      returning id, name, type`,
     [
       fieldId,
@@ -241,7 +237,6 @@ export async function createPostgresField(
       body.required === true,
       sortOrder,
       fieldType === "enum" ? JSON.stringify(body.enum_values ?? []) : null,
-      typeof body.default_value === "string" || body.default_value === null ? body.default_value ?? null : null,
     ],
   );
 
@@ -251,7 +246,7 @@ export async function createPostgresField(
 export async function updatePostgresField(
   objectName: string,
   fieldId: string,
-  body: { name?: string; enum_values?: string[]; default_value?: string | null },
+  body: { name?: string; enum_values?: string[] },
 ): Promise<{ ok: true }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
@@ -280,14 +275,6 @@ export async function updatePostgresField(
     updates.push(`name = $${params.length}`);
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, "default_value")) {
-    if (body.default_value !== null && typeof body.default_value !== "string") {
-      throw new Error("default_value must be a string or null");
-    }
-    params.push(body.default_value ?? null);
-    updates.push(`default_value = $${params.length}`);
-  }
-
   if (Object.prototype.hasOwnProperty.call(body, "enum_values")) {
     if (field.type !== "enum") throw new Error("enum_values can only be updated for select fields");
     const enumValues = body.enum_values;
@@ -296,7 +283,7 @@ export async function updatePostgresField(
     updates.push(`enum_values = $${params.length}::jsonb`);
   }
 
-  if (updates.length === 0) throw new Error("Name, default_value, or enum_values is required");
+  if (updates.length === 0) throw new Error("Name or enum_values is required");
 
   params.push(fieldId, object.id);
   await queryPg(
@@ -319,7 +306,6 @@ export async function deletePostgresField(objectName: string, fieldId: string): 
   );
   if (!field[0]) throw new Error("Field not found");
 
-  await queryPg("delete from crm_custom_field_values where field_id = $1", [fieldId]);
   await queryPg("delete from crm_fields where id = $1 and object_id = $2", [fieldId, object.id]);
   return { ok: true };
 }
@@ -333,8 +319,8 @@ export async function renamePostgresEnumValue(
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
 
-  const fields = await queryPg<{ id: string; object_id: string; enum_values: unknown }>(
-    `select id, object_id, enum_values
+  const fields = await queryPg<{ id: string; object_id: string; enum_values: unknown; canonical_column?: string | null }>(
+    `select id, object_id, enum_values, canonical_column
      from crm_fields
      where id = $1 and object_id = $2
      limit 1`,
@@ -371,10 +357,13 @@ export async function renamePostgresEnumValue(
     `update crm_fields set enum_values = $1::jsonb, updated_at = now() where id = $2 and object_id = $3`,
     [JSON.stringify(enumValues), fieldId, object.id],
   );
-  await queryPg(
-    `update crm_custom_field_values set text_value = $1 where field_id = $2 and text_value = $3`,
-    [newTrim, fieldId, oldTrim],
-  );
+
+  if (field.canonical_column && object.entity_table) {
+    await queryPg(
+      `update ${quoteIdentifier(object.entity_table)} set ${quoteIdentifier(field.canonical_column)} = $1 where ${quoteIdentifier(field.canonical_column)} = $2`,
+      [newTrim, oldTrim],
+    );
+  }
 
   return { ok: true, updated: true };
 }
