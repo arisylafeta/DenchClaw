@@ -17,6 +17,7 @@ export default defineConfig({
     include: [
       "lib/**/*.test.ts",
       "lib/**/*.test.tsx",
+      "lib/**/*.test.mjs",
       "app/**/*.test.ts",
       "app/**/*.test.tsx",
     ],

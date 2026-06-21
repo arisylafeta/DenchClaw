@@ -42,7 +42,8 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
       select distinct on (m.thread_id)
              m.thread_id,
              m.body_preview as snippet,
-              m.from_person_id
+             m.from_person_id,
+             m.from_email
         from crm_email_messages m
        where m.thread_id is not null
        order by m.thread_id, m.sent_at desc nulls last, m.id desc
@@ -53,10 +54,17 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
              t.last_message_at,
              t.message_count,
              t.gmail_thread_id,
-              latest_msg.snippet,
-              latest_msg.from_person_id as primary_sender_id,
-             sender.full_name as primary_sender_name,
-             sender.email as primary_sender_email,
+             latest_msg.snippet,
+             latest_msg.from_person_id as primary_sender_id,
+             coalesce(
+               sender.full_name,
+               case
+                 when latest_msg.from_email in ('alex@rebattery.io', 'agjpolglase@gmail.com', 'alexgpolglase@gmail.com', 'apolglaser@gmail.com') then 'Alex Polglase'
+                 when latest_msg.from_email in ('ari@rebattery.io', 'ari.sylafeta@gmail.com') then 'Ari Sylafeta'
+                 else null
+               end
+             ) as primary_sender_name,
+             coalesce(sender.email, latest_msg.from_email) as primary_sender_email,
              count(*) over () as total_count
         from crm_email_threads t
         left join latest_msg on latest_msg.thread_id = t.id
@@ -64,15 +72,11 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
        where ($1::text = '' or lower(coalesce(t.subject, '')) like '%' || $1::text || '%')
          and ($2::text is null or exists (
            select 1
-             from crm_relation_links participant_link
-             join crm_fields participant_field on participant_field.id = participant_link.field_id
-             join crm_objects participant_object on participant_object.id = participant_field.object_id
-            where participant_object.name = 'email_thread'
-              and participant_field.name = 'Participants'
-              and participant_link.source_entry_id = t.id
-          and participant_link.target_entry_id = $2::text
-     ))
-     ),
+             from crm_email_thread_participants p
+            where p.thread_id = t.id
+              and p.person_id = $2::text
+         ))
+    ),
     page as (
       select *
         from filtered
@@ -89,15 +93,11 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
                  'id', person.id,
                  'name', person.full_name,
                  'email', person.email,
-                 'avatar_url', person.avatar_url
+                  'avatar_url', null
                ) order by participant_link.position, person.id) as participants
-          from crm_relation_links participant_link
-          join crm_fields participant_field on participant_field.id = participant_link.field_id
-          join crm_objects participant_object on participant_object.id = participant_field.object_id
-          join crm_people person on person.id = participant_link.target_entry_id
-         where participant_object.name = 'email_thread'
-           and participant_field.name = 'Participants'
-           and participant_link.source_entry_id = page.id
+          from crm_email_thread_participants participant_link
+          join crm_people person on person.id = participant_link.person_id
+         where participant_link.thread_id = page.id
       ) participants on true
      order by page.last_message_at desc nulls last, page.id
   `, [params.search.toLowerCase(), params.personId, params.limit, params.offset]);

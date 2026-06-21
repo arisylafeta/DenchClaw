@@ -87,10 +87,6 @@ export type PostgresCompanyProfile = {
     name: string | null;
     domain: string | null;
     website: string | null;
-    industry: string | null;
-    type: string | null;
-    source: string | null;
-    platform_role: string | null;
     notes: string | null;
     created_at: string | null;
     updated_at: string | null;
@@ -100,7 +96,6 @@ export type PostgresCompanyProfile = {
     name: string | null;
     email: string | null;
     job_title: string | null;
-    avatar_url: string | null;
   }>;
   threads: Array<{
     id: string;
@@ -113,7 +108,6 @@ export type PostgresCompanyProfile = {
     primary_sender_id: string | null;
     primary_sender_name: string | null;
     primary_sender_email: string | null;
-    primary_sender_avatar_url: string | null;
   }>;
   events: Array<{
     id: string;
@@ -135,10 +129,6 @@ type CompanyRow = {
   name: string | null;
   domain: string | null;
   website: string | null;
-  industry: string | null;
-  type: string | null;
-  source: string | null;
-  platform_role: string | null;
   notes: string | null;
   created_at: string | Date | null;
   updated_at: string | Date | null;
@@ -149,7 +139,6 @@ type PersonRow = {
   name: string | null;
   email: string | null;
   job_title: string | null;
-  avatar_url: string | null;
 };
 
 type ThreadRow = {
@@ -163,7 +152,6 @@ type ThreadRow = {
   primary_sender_id: string | null;
   primary_sender_name: string | null;
   primary_sender_email: string | null;
-  primary_sender_avatar_url: string | null;
 };
 
 type EventRow = {
@@ -263,10 +251,6 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            name,
            domain,
            website,
-           sector as industry,
-           company_type as type,
-           role_source as source,
-           platform_role,
            notes,
            created_at,
            updated_at
@@ -282,10 +266,6 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     name: raw.name,
     domain: raw.domain,
     website: raw.website ?? deriveWebsite(raw.domain),
-    industry: raw.industry,
-    type: raw.type,
-    source: raw.source,
-    platform_role: raw.platform_role,
     notes: raw.notes,
     created_at: iso(raw.created_at),
     updated_at: iso(raw.updated_at),
@@ -297,8 +277,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            id,
            full_name as name,
            email,
-           job_title,
-           avatar_url
+           job_title
       from crm_people
      where company_id = $1
         or ($2::text is not null and lower(split_part(email, '@', 2)) = $2)
@@ -314,7 +293,6 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
         name: row.name,
         email: row.email,
         job_title: row.job_title,
-        avatar_url: row.avatar_url,
       };
     })
     .toSorted((a, b) => String(b.name ?? "").localeCompare(String(a.name ?? "")));
@@ -327,10 +305,9 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            t.gmail_thread_id,
            msg.body_preview as snippet,
            case when msg.from_person_id is not null then 'Person' else null end as primary_sender_type,
-           msg.from_person_id as primary_sender_id,
-           p.full_name as primary_sender_name,
-           p.email as primary_sender_email,
-           p.avatar_url as primary_sender_avatar_url
+            msg.from_person_id as primary_sender_id,
+            p.full_name as primary_sender_name,
+            p.email as primary_sender_email
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id
@@ -454,9 +431,6 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     : fallbackSummary;
 
   const roles: CompanyCommercial["roles"] = [];
-  if (raw.platform_role === 'BUYER') roles.push("buyer");
-  if (raw.platform_role === 'SUPPLIER') roles.push("supplier");
-  if (raw.platform_role === 'RECYCLER') roles.push("recycler");
 
   const commercial: CompanyCommercial = {
     roles,

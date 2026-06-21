@@ -8,10 +8,8 @@ type PersonRow = {
   email: string | null;
   company_id: string | null;
   phone: string | null;
-  source: string | null;
   job_title: string | null;
   linkedin_url: string | null;
-  avatar_url: string | null;
   notes: string | null;
   created_at: string | Date | null;
   updated_at: string | Date | null;
@@ -22,9 +20,6 @@ type CompanyRow = {
   name: string | null;
   domain: string | null;
   website: string | null;
-  industry: string | null;
-  type: string | null;
-  source: string | null;
 };
 
 type ThreadRow = {
@@ -38,7 +33,6 @@ type ThreadRow = {
   primary_sender_id: string | null;
   primary_sender_name: string | null;
   primary_sender_email: string | null;
-  primary_sender_avatar_url: string | null;
 };
 
 type EventRow = {
@@ -65,10 +59,8 @@ export type PostgresPersonProfile = {
     company_name: string | null;
     company_id: string | null;
     phone: string | null;
-    source: string | null;
     job_title: string | null;
     linkedin_url: string | null;
-    avatar_url: string | null;
     notes: string | null;
     created_at: string | null;
     updated_at: string | null;
@@ -103,10 +95,7 @@ async function loadCompany(companyId: string | null, email: string | null): Prom
       select id,
              name,
              domain,
-             website,
-             sector as industry,
-             company_type as type,
-             role_source as source
+             website
         from crm_companies
        where id = $1
        limit 1
@@ -120,14 +109,11 @@ async function loadCompany(companyId: string | null, email: string | null): Prom
     select id,
            name,
            domain,
-           website,
-           sector as industry,
-           company_type as type,
-           role_source as source
+           website
       from crm_companies
      where lower(domain) = $1
         or $1 like '%.' || lower(domain)
-     limit 1
+      limit 1
   `, [host]);
   return rows[0] ?? null;
 }
@@ -139,10 +125,8 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
            p.email,
            p.company_id,
            p.phone,
-           p.source,
            p.job_title,
            p.linkedin_url,
-           p.avatar_url,
            p.notes,
            p.created_at,
            p.updated_at
@@ -161,10 +145,8 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
     company_id: raw.company_id,
     company_name: company?.name ?? null,
     phone: raw.phone,
-    source: raw.source,
     job_title: raw.job_title,
     linkedin_url: raw.linkedin_url,
-    avatar_url: raw.avatar_url,
     notes: raw.notes,
     created_at: iso(raw.created_at),
     updated_at: iso(raw.updated_at),
@@ -179,9 +161,8 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
            msg.body_preview as snippet,
            case when msg.from_person_id is not null then 'Person' else null end as primary_sender_type,
            msg.from_person_id as primary_sender_id,
-           sender.full_name as primary_sender_name,
-           sender.email as primary_sender_email,
-           sender.avatar_url as primary_sender_avatar_url
+            sender.full_name as primary_sender_name,
+            sender.email as primary_sender_email
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id

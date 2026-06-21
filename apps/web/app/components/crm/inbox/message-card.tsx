@@ -38,8 +38,8 @@ export function MessageCard({
   }, [defaultExpanded]);
 
   const sender = message.from_person_id ? people.get(message.from_person_id) : null;
-  const senderName = sender?.name ?? sender?.email ?? "Unknown sender";
-  const senderEmail = sender?.email ?? null;
+  const senderName = sender?.name ?? message.from_name ?? message.from_email ?? "Unknown sender";
+  const senderEmail = sender?.email ?? message.from_email ?? null;
   const tos = message.to_person_ids
     .map((id) => people.get(id))
     .filter((p): p is Participant => Boolean(p));

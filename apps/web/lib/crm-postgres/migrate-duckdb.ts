@@ -65,16 +65,8 @@ const ENTITY_IMPORTS = [
       website: "Website",
       phone: "Phone Number",
       linkedin_url: "LinkedIn URL",
-      company_type: "Company Type",
-      platform_role: "Platform Role",
-      sector: "Company Sector",
-      role_confidence: "Role Confidence",
-      role_source: "Role Source",
       country: "Country",
       city: "City",
-      employee_count: "Employee Count",
-      strength_score: "Strength Score",
-      last_interaction_at: "Last Interaction At",
     },
     requiredFallbacks: { name: "Untitled company" },
   },
@@ -88,15 +80,8 @@ const ENTITY_IMPORTS = [
       email: "Email Address",
       phone: "Phone Number",
       company_id: "Company",
-      source_company_name: "Source Company Name",
-      company_domain: "Company Domain",
       job_title: "Job Title",
       linkedin_url: "LinkedIn URL",
-      avatar_url: "Avatar URL",
-      contact_type: "Contact Type",
-      source: "Source",
-      strength_score: "Strength Score",
-      last_interaction_at: "Last Interaction At",
     },
   },
   { objectName: "email_thread", table: "crm_email_threads", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.email_thread) },
@@ -185,7 +170,7 @@ function cleanJson(value: unknown): string | null {
 
 function valueForColumn(column: string, value: unknown): unknown {
   if (column.endsWith("_at")) { return cleanDate(value); }
-  if (["strength_score", "employee_count", "message_count", "score_contribution"].includes(column)) {
+  if (["message_count", "score_contribution"].includes(column)) {
     return cleanNumber(value);
   }
   if (column === "has_attachments") { return cleanBoolean(value); }

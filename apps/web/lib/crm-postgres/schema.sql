@@ -13,24 +13,12 @@ create table if not exists crm_companies (
   website text,
   phone text,
   linkedin_url text,
-  company_type text,
-  platform_role text,
-  sector text,
-  role_confidence text,
-  role_source text,
   country text,
   city text,
-  employee_count double precision,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  strength_score double precision,
-  last_interaction_at timestamptz,
-  countries_with_facilities text,
-  buyer_workstream_status text,
-  buyer_category text,
-  buyer_evidence text,
-  buyer_last_reviewed_at timestamptz,
-  notes text
+  notes text,
+  tags text[]
 );
 
 create table if not exists crm_people (
@@ -40,23 +28,14 @@ create table if not exists crm_people (
   last_name text,
   email text,
   company_id text references crm_companies(id) on delete set null,
-  source_company_name text,
-  company_domain text,
-  avatar_url text,
-  contact_type text,
-  lifecycle_stage text,
-  source text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   phone text,
   job_title text,
   linkedin_url text,
-  strength_score double precision,
-  last_interaction_at timestamptz,
-  tags text,
+  tags text[],
   notes text,
-  email_opted_out boolean default false,
-  buyer_sourced_at timestamptz
+  email_opted_out boolean default false
 );
 
 create table if not exists crm_email_threads (
@@ -399,7 +378,6 @@ where crm_commercial_opportunities.seller_company_id is not null;
 
 create index if not exists crm_companies_domain_idx on crm_companies (lower(domain));
 create index if not exists crm_companies_name_idx on crm_companies (lower(name));
-create index if not exists crm_companies_buyer_workstream_idx on crm_companies (buyer_workstream_status) where buyer_workstream_status is not null;
 
 create index if not exists crm_people_email_idx on crm_people (lower(email));
 create index if not exists crm_people_company_idx on crm_people (company_id);

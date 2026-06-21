@@ -96,7 +96,7 @@ export async function getPostgresPersonActivity(
   const fromIds = Array.from(new Set(rows.map((row) => row.from_person_id).filter(Boolean))) as string[];
   const fromPeopleRows = fromIds.length
     ? await queryPg<{ id: string; full_name: string | null; email: string | null; avatar_url: string | null }>(
-      "select id, full_name, email, avatar_url from crm_people where id = any($1::text[])",
+      "select id, full_name, email, null as avatar_url from crm_people where id = any($1::text[])",
       [fromIds],
     )
     : [];

@@ -44,7 +44,7 @@ async function loadPeopleForEvent(eventId: string, fieldName: "Attendees" | "Org
     select p.id,
            p.full_name as name,
            p.email,
-           p.avatar_url
+           null as avatar_url
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id
@@ -100,7 +100,7 @@ export async function getPostgresCalendarEvents(params: PostgresCalendarParams) 
           'id', p.id,
           'name', p.full_name,
           'email', p.email,
-          'avatar_url', p.avatar_url
+          'avatar_url', null
         ) order by l.position, p.full_name nulls last, p.email nulls last) as attendees
           from crm_relation_links l
           join crm_fields f on f.id = l.field_id
@@ -147,7 +147,7 @@ export async function getPostgresCalendarEvent(eventId: string) {
   if (!row) return null;
 
   const [organizers, attendees, companies] = await Promise.all([
-    row.organizer_id ? queryPg<Person>("select id, full_name as name, email, avatar_url from crm_people where id = $1 limit 1", [row.organizer_id]) : loadPeopleForEvent(eventId, "Organizer"),
+    row.organizer_id ? queryPg<Person>("select id, full_name as name, email, null as avatar_url from crm_people where id = $1 limit 1", [row.organizer_id]) : loadPeopleForEvent(eventId, "Organizer"),
     loadPeopleForEvent(eventId, "Attendees"),
     loadCompaniesForEvent(eventId),
   ]);

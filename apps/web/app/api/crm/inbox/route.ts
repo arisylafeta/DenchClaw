@@ -49,7 +49,7 @@ export async function GET(req: Request) {
   const limit = clampInt(url.searchParams.get("limit"), DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
   const offset = Math.max(0, parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
 
-  if (process.env.CRM_DB_BACKEND === "postgres") {
+  if (process.env.CRM_DB_BACKEND !== "duckdb") {
     const data = await getPostgresInbox({ search, senderFilter, personId, limit, offset });
     return Response.json(data);
   }

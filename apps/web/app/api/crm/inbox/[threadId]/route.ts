@@ -45,7 +45,7 @@ export async function GET(
     return Response.json({ error: "Missing thread id." }, { status: 400 });
   }
 
-  if (process.env.CRM_DB_BACKEND === "postgres") {
+  if (process.env.CRM_DB_BACKEND !== "duckdb") {
     const data = await getPostgresInboxThread(id);
     return Response.json(data);
   }

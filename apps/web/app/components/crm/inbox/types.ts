@@ -30,6 +30,8 @@ export type Message = {
   gmail_message_id: string | null;
   sender_type: string | null;
   from_person_id: string | null;
+  from_name?: string | null;
+  from_email?: string | null;
   to_person_ids: string[];
   cc_person_ids: string[];
 };
