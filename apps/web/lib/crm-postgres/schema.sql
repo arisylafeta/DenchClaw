@@ -43,7 +43,7 @@ create table if not exists crm_email_threads (
   subject text,
   last_message_at timestamptz,
   message_count integer,
-  gmail_thread_id text,
+  gmail_thread_id text unique,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -54,10 +54,11 @@ create table if not exists crm_email_messages (
   subject text,
   sent_at timestamptz,
   from_person_id text references crm_people(id) on delete set null,
+  from_email text,
   body_preview text,
   body text,
   has_attachments boolean,
-  gmail_message_id text,
+  gmail_message_id text unique,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -86,7 +87,7 @@ create table if not exists crm_calendar_events (
   end_at timestamptz,
   organizer_person_id text references crm_people(id) on delete set null,
   meeting_type text,
-  google_event_id text,
+  google_event_id text unique,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
