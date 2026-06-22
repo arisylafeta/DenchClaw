@@ -265,7 +265,7 @@ async function cmdJobPostings(positional, flags) {
 }
 
 async function cmdUsage(flags) {
-  const data = await apolloRequest("/usage");
+  const data = await apolloRequest("/auth/health");
   output(data, flags.raw);
 }
 

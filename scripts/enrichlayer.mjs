@@ -476,10 +476,18 @@ async function main() {
       break;
     }
 
-    // Meta API
+    // Meta API — try /credits, fall back to /account/credits
     case "credits": {
       expectArgs(args, 0);
-      data = await apiGet("/credits", {}, options);
+      try {
+        data = await apiGet("/credits", {}, options);
+      } catch (e) {
+        if (e.message?.includes("404")) {
+          data = await apiGet("/account/credits", {}, options);
+        } else {
+          throw e;
+        }
+      }
       break;
     }
 
