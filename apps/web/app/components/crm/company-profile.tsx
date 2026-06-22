@@ -6,7 +6,6 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CompanyFavicon } from "./company-favicon";
 import { PersonAvatar } from "./person-avatar";
-import { ConnectionStrengthChip } from "./connection-strength-chip";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
 import { ProfileThreadList } from "./inbox/profile-thread-list";
@@ -32,9 +31,6 @@ type CompanyResponse = {
     industry: string | null;
     type: string | null;
     source: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
     last_interaction_at: string | null;
     notes: string | null;
     created_at: string | null;
@@ -45,9 +41,6 @@ type CompanyResponse = {
     name: string | null;
     email: string | null;
     job_title: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
     last_interaction_at: string | null;
     avatar_url: string | null;
   }>;
@@ -292,7 +285,6 @@ function CompanyHeader({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <EditableTitleHeading name={company.name} saveName={onSaveName} />
-            <ConnectionStrengthChip score={company.strength_score} />
           </div>
           <div
             className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]"
@@ -360,7 +352,7 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
           <Stat label="People" value={summary.people_count.toLocaleString()} />
           <Stat label="Threads" value={summary.thread_count.toLocaleString()} />
           <Stat label="Meetings" value={summary.event_count.toLocaleString()} />
-          <Stat label="Strength" value={company.strength_label} />
+          <Stat label="Last contact" value={company.last_interaction_at ? formatRelativeDate(company.last_interaction_at) : "—"} />
         </div>
       </section>
       <section>
@@ -775,7 +767,6 @@ function TeamTab({
                   {[person.job_title, person.email].filter(Boolean).join(" · ")}
                 </p>
               </div>
-              <ConnectionStrengthChip score={person.strength_score} size="sm" showLabel={false} />
               <span
                 className="text-right text-[11px] shrink-0 w-16"
                 style={{ color: "var(--color-text-muted)" }}

@@ -6,6 +6,7 @@ export type PostgresPeopleListItem = {
   email: string | null;
   company_name: string | null;
   job_title: string | null;
+  last_interaction_at: string | null;
 };
 
 export async function getPostgresPeople(
@@ -17,15 +18,18 @@ export async function getPostgresPeople(
     email: string | null;
     company_name: string | null;
     job_title: string | null;
+    last_interaction_at: string | null;
   }>(
     `select p.id,
             p.full_name as name,
             p.email,
             c.name as company_name,
-            p.job_title
+            p.job_title,
+            p.last_interaction_at
        from crm_people p
        left join crm_companies c on c.id = p.company_id
-      order by p.updated_at desc nulls last
+      order by p.last_interaction_at desc nulls last,
+               p.updated_at desc nulls last
       limit $1`,
     [params.limit],
   );
@@ -37,7 +41,7 @@ export async function getPostgresPeople(
       email: row.email,
       company_name: row.company_name,
       job_title: row.job_title,
+      last_interaction_at: row.last_interaction_at,
     })),
   };
 }
-

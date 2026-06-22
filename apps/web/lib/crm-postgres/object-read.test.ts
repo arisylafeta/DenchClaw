@@ -16,6 +16,12 @@ const mockFieldRows = [
   { id: "f7", name: "Last Interaction", type: "date", canonical_column: "last_interaction_at", sort_order: 7 },
 ];
 
+const mockOpportunityFieldRows = [
+  { id: "of1", name: "Name", type: "text", canonical_column: "title", sort_order: 1 },
+  { id: "of2", name: "Status", type: "text", canonical_column: "status", sort_order: 2 },
+  { id: "of3", name: "Amount", type: "number", canonical_column: "price_amount", sort_order: 3 },
+];
+
 describe("postgres object read adapter", () => {
   beforeEach(() => {
     queryPg.mockReset();
@@ -24,6 +30,7 @@ describe("postgres object read adapter", () => {
         const objectName = String(params?.[0] ?? "");
         if (objectName === "task") return [{ id: "obj_task", name: "task", default_view: "kanban" }];
         if (objectName === "company") return [{ id: "obj_company", name: "company", display_field: "Name" }];
+        if (objectName === "opportunity") return [{ id: "obj_opportunity", name: "opportunity", default_view: "table" }];
         return [{ id: "seed_obj_people_00000000000000", name: "people", default_view: "table" }];
       }
       if (sql.includes("from information_schema.columns")) {
@@ -36,6 +43,16 @@ describe("postgres object read adapter", () => {
             { column_name: "name" },
             { column_name: "domain" },
             { column_name: "website" },
+          ];
+        }
+        if (table === "crm_commercial_opportunities") {
+          return [
+            { column_name: "id" },
+            { column_name: "created_at" },
+            { column_name: "updated_at" },
+            { column_name: "title" },
+            { column_name: "status" },
+            { column_name: "price_amount" },
           ];
         }
         return [
@@ -64,13 +81,20 @@ describe("postgres object read adapter", () => {
         }];
       }
       if (sql.includes("from crm_fields") && sql.includes("left join crm_objects")) {
+        if (params?.[0] === "obj_opportunity") {
+          return mockOpportunityFieldRows;
+        }
         return mockFieldRows;
       }
       if (sql.includes("from crm_fields") && sql.includes("where object_id = $1")) {
+        if (params?.[0] === "obj_opportunity") {
+          return mockOpportunityFieldRows;
+        }
         return mockFieldRows;
       }
       if (sql.includes("count(*)")) return [{ count: "1" }];
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
+      if (sql.includes("from crm_commercial_opportunities")) return [{ entry_id: "o1", created_at: "2026-01-01", updated_at: "2026-01-01", Name: "Retired EV packs", Status: "open", Amount: 125000 }];
       if (sql.includes("from crm_companies")) return [{ id: "c1", name: "Acme", domain: "acme.test", website: null }];
       return [];
     });
@@ -219,5 +243,18 @@ describe("postgres object read adapter", () => {
     const listSql = String(listCall?.[0]);
     expect(listSql).toContain('"full_name" as "Full Name"');
     expect(listSql).toContain('"email" as "Email"');
+  });
+
+  it("loads opportunity entries from crm_commercial_opportunities", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData("opportunity", new URL("http://localhost?pageSize=10"));
+
+    expect(data.object.name).toBe("opportunity");
+    expect(data.entries).toHaveLength(1);
+
+    const listCall = queryPg.mock.calls.find(([sql]) =>
+      String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_commercial_opportunities"),
+    );
+    expect(String(listCall?.[0])).toContain('"title"');
   });
 });

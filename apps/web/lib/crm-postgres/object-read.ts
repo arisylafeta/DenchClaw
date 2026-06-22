@@ -78,6 +78,8 @@ const supportedTables: Record<string, string> = {
   people: "crm_people",
   company: "crm_companies",
   companies: "crm_companies",
+  opportunity: "crm_commercial_opportunities",
+  opportunities: "crm_commercial_opportunities",
   email_thread: "crm_email_threads",
   email_message: "crm_email_messages",
   calendar_event: "crm_calendar_events",

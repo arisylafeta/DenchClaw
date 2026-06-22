@@ -10,6 +10,7 @@ type PersonRow = {
   phone: string | null;
   job_title: string | null;
   linkedin_url: string | null;
+  last_interaction_at: string | Date | null;
   notes: string | null;
   created_at: string | Date | null;
   updated_at: string | Date | null;
@@ -62,6 +63,7 @@ export type PostgresPersonProfile = {
     job_title: string | null;
     linkedin_url: string | null;
     notes: string | null;
+    last_interaction_at: string | null;
     created_at: string | null;
     updated_at: string | null;
   };
@@ -124,12 +126,13 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
            p.full_name as name,
            p.email,
            p.company_id,
-           p.phone,
-           p.job_title,
-           p.linkedin_url,
-           p.notes,
-           p.created_at,
-           p.updated_at
+            p.phone,
+            p.job_title,
+            p.linkedin_url,
+            p.last_interaction_at,
+            p.notes,
+            p.created_at,
+            p.updated_at
       from crm_people p
      where p.id = $1
      limit 1
@@ -148,6 +151,7 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
     job_title: raw.job_title,
     linkedin_url: raw.linkedin_url,
     notes: raw.notes,
+    last_interaction_at: iso(raw.last_interaction_at),
     created_at: iso(raw.created_at),
     updated_at: iso(raw.updated_at),
   };

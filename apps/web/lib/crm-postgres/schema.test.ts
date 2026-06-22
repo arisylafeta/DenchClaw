@@ -7,8 +7,10 @@ describe("crm postgres schema", () => {
     const sql = readFileSync(join(process.cwd(), "lib/crm-postgres/schema.sql"), "utf-8");
 
     expect(sql).toContain("create table if not exists crm_people");
+    expect(sql).toContain("last_interaction_at timestamptz");
     expect(sql).toContain("create table if not exists crm_companies");
     expect(sql).toContain("create or replace view crm_relation_links");
     expect(sql).toContain("create index if not exists crm_people_company_idx");
+    expect(sql).not.toContain("strength_score");
   });
 });

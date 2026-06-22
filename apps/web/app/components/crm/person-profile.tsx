@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { PersonAvatar } from "./person-avatar";
 import { CompanyFavicon } from "./company-favicon";
-import { ConnectionStrengthChip } from "./connection-strength-chip";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
 import { EnrichButton } from "./enrich-button";
@@ -26,9 +25,6 @@ type PersonResponse = {
     phone: string | null;
     status: string | null;
     source: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
     last_interaction_at: string | null;
     job_title: string | null;
     linkedin_url: string | null;
@@ -45,7 +41,6 @@ type PersonResponse = {
     industry: string | null;
     type: string | null;
     source: string | null;
-    strength_score: number | null;
   } | null;
   derived_website: string | null;
   threads: Array<{
@@ -354,7 +349,6 @@ function PersonHeader({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <EditableTitleHeading name={person.name} saveName={onSaveName} />
-            <ConnectionStrengthChip score={person.strength_score} />
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
             {person.email && (
@@ -504,7 +498,7 @@ function OverviewTab({
           At a glance
         </h3>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Strength" value={person.strength_label} />
+          <Stat label="Company" value={person.company_name ?? "—"} />
           <Stat
             label="Last contact"
             value={
@@ -566,7 +560,6 @@ function OverviewTab({
                 </p>
               )}
             </div>
-            <ConnectionStrengthChip score={company.strength_score} />
           </button>
         </section>
       )}

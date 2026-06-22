@@ -38,6 +38,9 @@ create table if not exists crm_people (
   email_opted_out boolean default false
 );
 
+alter table crm_people
+  add column if not exists last_interaction_at timestamptz;
+
 create table if not exists crm_email_threads (
   id text primary key,
   subject text,

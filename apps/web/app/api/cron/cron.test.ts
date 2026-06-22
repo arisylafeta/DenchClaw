@@ -74,6 +74,40 @@ describe("Cron API routes", () => {
       expect(json.jobs).toEqual([]);
     });
 
+    it("reads Hermes global jobs when running with Hermes backend", async () => {
+      process.env.DENCH_AGENT_BACKEND = "hermes";
+      process.env.DENCH_HOME = "/root/.hermes";
+
+      const { existsSync: mockExists, readFileSync: mockReadFile } = await import("node:fs");
+      vi.mocked(mockExists).mockImplementation((p) => {
+        const s = String(p);
+        return s === "/root/.hermes/cron/jobs.json";
+      });
+      vi.mocked(mockReadFile).mockImplementation((p) => {
+        if (String(p) === "/root/.hermes/cron/jobs.json") {
+          return JSON.stringify({
+            jobs: [
+              {
+                id: "j-hermes",
+                name: "Hermes job",
+                enabled: true,
+                next_run_at: "2026-06-23T08:00:00+00:00",
+              },
+            ],
+          }) as never;
+        }
+        return "" as never;
+      });
+
+      const { GET } = await import("./jobs/route.js");
+      const res = await GET();
+      const json = await res.json();
+
+      expect(json.jobs).toHaveLength(1);
+      expect(json.jobs[0].id).toBe("j-hermes");
+      expect(json.cronStatus.enabled).toBe(true);
+    });
+
     it("returns the heartbeat interval from agents.defaults.heartbeat.every", async () => {
       const { existsSync: mockExists, readFileSync: mockReadFile } = await import("node:fs");
       vi.mocked(mockExists).mockImplementation((p) => String(p).endsWith("openclaw.json"));

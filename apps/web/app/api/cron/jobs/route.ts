@@ -6,7 +6,16 @@ import { readHeartbeatSetting } from "@/lib/cron-heartbeat";
 export const dynamic = "force-dynamic";
 
 const CRON_DIR = join(resolveOpenClawStateDir(), "cron");
-const JOBS_FILE = join(CRON_DIR, "jobs.json");
+
+function resolveJobsFile(): string {
+  if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    const hermesHome = process.env.DENCH_HOME?.trim()
+      || process.env.HERMES_HOME?.trim()
+      || join(process.env.HOME || "/root", ".hermes");
+    return join(hermesHome, "cron", "jobs.json");
+  }
+  return join(CRON_DIR, "jobs.json");
+}
 
 type CronStoreFile = {
   version: 1;
@@ -15,9 +24,10 @@ type CronStoreFile = {
 
 /** Read cron jobs.json, returning empty array if missing or invalid. */
 function readJobsFile(): Array<Record<string, unknown>> {
-  if (!existsSync(JOBS_FILE)) {return [];}
+  const jobsFile = resolveJobsFile();
+  if (!existsSync(jobsFile)) {return [];}
   try {
-    const raw = readFileSync(JOBS_FILE, "utf-8");
+    const raw = readFileSync(jobsFile, "utf-8");
     const parsed = JSON.parse(raw) as CronStoreFile;
     if (parsed && Array.isArray(parsed.jobs)) {return parsed.jobs;}
     return [];
@@ -31,6 +41,13 @@ function computeNextWakeAtMs(jobs: Array<Record<string, unknown>>): number | nul
   let min: number | null = null;
   for (const job of jobs) {
     if (job.enabled !== true) {continue;}
+
+    const nextRunIso = typeof job.next_run_at === "string" ? Date.parse(job.next_run_at) : Number.NaN;
+    if (Number.isFinite(nextRunIso)) {
+      if (min === null || nextRunIso < min) {min = nextRunIso;}
+      continue;
+    }
+
     const state = job.state as Record<string, unknown> | undefined;
     if (!state) {continue;}
     const next = state.nextRunAtMs;
