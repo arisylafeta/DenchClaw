@@ -35,6 +35,7 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { queryPgEnrichment } from "../postgres-enrichment.js";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -541,6 +542,18 @@ export const TOOLS = [
       properties: {
         table: { type: "string", description: "Optional: get details for a single table only (e.g. 'crm_companies')." },
       },
+    },
+  },
+  {
+    name: "crm_enrichment_query",
+    description:
+      "Query the enrichment copy database for a company by domain. Returns the enriched company row or { found: false } if not enriched yet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Company domain to look up (e.g. example.com)." },
+      },
+      required: ["domain"],
     },
   },
 ];
@@ -1077,6 +1090,24 @@ export async function executeTool(name, args) {
         result = { tables };
       } finally {
         client.release();
+      }
+      break;
+    }
+
+    case "crm_enrichment_query": {
+      const domain = typeof args.domain === "string" ? args.domain.trim() : "";
+      if (!domain) {
+        result = { error: "domain is required." };
+        break;
+      }
+      const rows = await queryPgEnrichment(
+        "select * from public.crm_company_enrichments where lower(domain) = lower($1) limit 1",
+        [domain],
+      );
+      if (rows.length === 0) {
+        result = { found: false };
+      } else {
+        result = rows[0];
       }
       break;
     }
