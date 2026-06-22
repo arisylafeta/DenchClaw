@@ -35,7 +35,6 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { queryPgEnrichment } from "../postgres-enrichment.js";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +82,24 @@ export function __setPgPoolForTests(pool) {
 export function __resetPgPoolForTests() {
   _injectedPool = null;
   _pgPool = null;
+}
+
+// ─── Enrichment PostgreSQL ───────────────────────────────────────────────────
+
+let _pgEnrichmentPool = null;
+function pgEnrichmentPool() {
+  if (!_pgEnrichmentPool) {
+    const config = process.env.ENRICHMENT_DATABASE_URL
+      ? { connectionString: process.env.ENRICHMENT_DATABASE_URL }
+      : { host: "/var/run/postgresql", database: "denchclaw_enrichment_copy" };
+    _pgEnrichmentPool = new pg.Pool({ ...config, max: 5, idleTimeoutMillis: 30_000 });
+  }
+  return _pgEnrichmentPool;
+}
+
+async function queryPgEnrichment(sql, params) {
+  const result = await pgEnrichmentPool().query(sql, params ?? []);
+  return result.rows;
 }
 function resolvePgPool() {
   return _injectedPool || pgPool();

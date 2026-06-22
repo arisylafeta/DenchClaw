@@ -1,7 +1,7 @@
 import { queryPg } from "@/lib/postgres";
 import {
+  getEnrichedCompanyById,
   getEnrichedCompanyByDomain,
-  type CrmCompanyEnrichment,
 } from "@/lib/crm-postgres/enrichment";
 
 export const dynamic = "force-dynamic";
@@ -22,12 +22,17 @@ export async function GET(
       "select domain from crm_companies where id = $1 limit 1",
       [trimmedId],
     );
-    const domain = companyRows[0]?.domain ?? null;
-    if (!domain) {
+    const company = companyRows[0] ?? null;
+    if (!company) {
       return Response.json({ error: "Company not found." }, { status: 404 });
     }
 
-    const enrichment = await getEnrichedCompanyByDomain(domain);
+    // Try company_id first, then fall back to domain
+    let enrichment = await getEnrichedCompanyById(trimmedId);
+    if (!enrichment && company.domain) {
+      enrichment = await getEnrichedCompanyByDomain(company.domain);
+    }
+
     return Response.json({ enrichment });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
