@@ -12,9 +12,12 @@ function buildCompanyResponse(id: string, name: string) {
       name,
       domain: null,
       website: null,
+      platform_role: null,
       industry: null,
       type: null,
       source: null,
+      sectors: null,
+      roles: null,
       strength_score: null,
       strength_label: "—",
       strength_color: "#999999",
@@ -241,6 +244,36 @@ describe("CompanyProfile tab reset on entry change", () => {
     await user.click(screen.getByRole("button", { name: /Opportunities/ }));
     expect(screen.getByText("Nissan Leaf battery pack")).toBeInTheDocument();
     expect(screen.getByText("NMC · Pack · Nissan Leaf")).toBeInTheDocument();
+  });
+
+  it("renders Sectors and Platform Role as field-like values in the Details section", async () => {
+    fetchSpy.mockRestore();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const match = url.match(/\/api\/crm\/companies\/([^/?]+)/);
+      const id = match ? decodeURIComponent(match[1]) : "unknown";
+      const response = buildCompanyResponse(id, `Company ${id}`);
+      response.company.sectors = ["automotive", "energy_storage"];
+      response.company.platform_role = "BUYER";
+      response.company.roles = ["buyer", "supplier"];
+      return Promise.resolve(
+        new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    render(<CompanyProfile companyId="acme" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Company acme")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText("Sectors").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("automotive, energy_storage")).toBeInTheDocument();
+    expect(screen.getByText("Platform Role")).toBeInTheDocument();
+    expect(screen.getByText("BUYER")).toBeInTheDocument();
   });
 
   it("filters opportunities with inline multi-select dropdowns and clear controls", async () => {

@@ -23,6 +23,7 @@ type CompanyResponse = {
     name: string | null;
     domain: string | null;
     website: string | null;
+    platform_role: string | null;
     country: string | null;
     city: string | null;
     about: string | null;
@@ -447,6 +448,8 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
           <Field label="City" value={company.city} />
           <Field label="Industry" value={company.industry} />
           <Field label="Type" value={company.type} />
+          <Field label="Sectors" value={joinOrDash(company.sectors ?? [])} />
+          <Field label="Platform Role" value={company.platform_role} />
           <Field label="Source" value={company.source} />
           <Field
             label="Last contact"

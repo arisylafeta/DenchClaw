@@ -87,6 +87,7 @@ export type PostgresCompanyProfile = {
     name: string | null;
     domain: string | null;
     website: string | null;
+    platform_role: string | null;
     country: string | null;
     city: string | null;
     about: string | null;
@@ -134,6 +135,7 @@ type CompanyRow = {
   name: string | null;
   domain: string | null;
   website: string | null;
+  platform_role: string | null;
   country: string | null;
   city: string | null;
   about: string | null;
@@ -261,6 +263,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            name,
            domain,
            website,
+           platform_role,
            country,
            city,
            about,
@@ -281,6 +284,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     name: raw.name,
     domain: raw.domain,
     website: raw.website ?? deriveWebsite(raw.domain),
+    platform_role: raw.platform_role,
     country: raw.country,
     city: raw.city,
     about: raw.about,
