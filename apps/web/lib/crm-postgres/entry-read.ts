@@ -1,5 +1,6 @@
 import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
+import { getTableColumns } from "./table-columns";
 
 type ObjectRow = {
   id: string;
@@ -67,7 +68,7 @@ function quoteIdentifier(identifier: string): string {
 }
 
 function resolveDisplayField(object: ObjectRow, fields: FieldRow[]): string {
-  if (object.display_field) return object.display_field;
+  if (object.display_field && fields.some((field) => field.name === object.display_field)) return object.display_field;
 
   const nameField = fields.find((field) => /\bname\b/i.test(field.name) || /\btitle\b/i.test(field.name));
   if (nameField) return nameField.name;
@@ -78,9 +79,9 @@ function resolveDisplayField(object: ObjectRow, fields: FieldRow[]): string {
   return fields[0]?.name ?? "id";
 }
 
-function buildEntrySelect(fields: FieldRow[]): string {
+function buildEntrySelect(fields: FieldRow[], existingColumns: Set<string>): string {
   const canonicalSelects = fields
-    .filter((field) => field.canonical_column)
+    .filter((field) => field.canonical_column && existingColumns.has(field.canonical_column))
     .map((field) => `${quoteIdentifier(field.canonical_column!)} as ${quoteIdentifier(field.name)}`);
 
   return ["id as entry_id", "created_at", "updated_at", ...canonicalSelects].join(", ");
@@ -206,7 +207,7 @@ export async function getPostgresEntryData(objectName: string, entryId: string):
     throw new Error(`CRM object not found: ${objectName}`);
   }
 
-  const fields = await queryPg<FieldRow>(
+  let fields = await queryPg<FieldRow>(
     `select f.*, related.name as related_object_name
        from crm_fields f
        left join crm_objects related on related.id = f.related_object_id
@@ -216,9 +217,13 @@ export async function getPostgresEntryData(objectName: string, entryId: string):
   );
 
   const tableName = supportedTables[object.name];
+  const existingColumns = tableName ? await getTableColumns(tableName) : new Set<string>();
+  if (tableName) {
+    fields = fields.filter((field) => !field.canonical_column || existingColumns.has(field.canonical_column));
+  }
   const entry = tableName
     ? (await queryPg<Record<string, unknown>>(
-        `select ${buildEntrySelect(fields)} from ${tableName} where id = $1 limit 1`,
+        `select ${buildEntrySelect(fields, existingColumns)} from ${tableName} where id = $1 limit 1`,
         [entryId],
       ))[0]
     : await loadCustomOnlyEntry(object.id, entryId);

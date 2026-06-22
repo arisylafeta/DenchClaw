@@ -6,32 +6,68 @@ vi.mock("../postgres", () => ({
   queryPg,
 }));
 
+const mockFieldRows = [
+  { id: "f1", name: "Full Name", type: "text", canonical_column: "full_name", sort_order: 1 },
+  { id: "f2", name: "Email", type: "email", canonical_column: "email", sort_order: 2 },
+  { id: "f3", name: "Subscribed", type: "boolean", canonical_column: "subscribed", sort_order: 3 },
+  { id: "f4", name: "Company", type: "relation", canonical_column: "company_id", related_object_id: "obj_company", related_object_name: "company", sort_order: 4 },
+  { id: "f5", name: "Notes", type: "text", sort_order: 5 },
+  { id: "f6", name: "Strength Score", type: "number", canonical_column: "strength_score", sort_order: 6 },
+  { id: "f7", name: "Last Interaction", type: "date", canonical_column: "last_interaction_at", sort_order: 7 },
+];
+
 describe("postgres object read adapter", () => {
   beforeEach(() => {
     queryPg.mockReset();
-    queryPg.mockImplementation(async (sql: string) => {
+    queryPg.mockImplementation(async (sql: string, params?: unknown[]) => {
       if (sql.includes("from crm_objects") && sql.includes("where name = $1")) {
-        if (queryPg.mock.calls.at(-1)?.[1]?.[0] === "task") return [{ id: "obj_task", name: "task", default_view: "kanban" }];
-        if (sql.includes("company")) return [{ id: "obj_company", name: "company", display_field: "Name" }];
+        const objectName = String(params?.[0] ?? "");
+        if (objectName === "task") return [{ id: "obj_task", name: "task", default_view: "kanban" }];
+        if (objectName === "company") return [{ id: "obj_company", name: "company", display_field: "Name" }];
         return [{ id: "seed_obj_people_00000000000000", name: "people", default_view: "table" }];
       }
-      if (sql.includes("from crm_fields") && sql.includes("left join crm_objects")) {
+      if (sql.includes("from information_schema.columns")) {
+        const table = params?.[0];
+        if (table === "crm_companies") {
+          return [
+            { column_name: "id" },
+            { column_name: "created_at" },
+            { column_name: "updated_at" },
+            { column_name: "name" },
+            { column_name: "domain" },
+            { column_name: "website" },
+          ];
+        }
         return [
-          { id: "f1", name: "Full Name", type: "text", canonical_column: "full_name", sort_order: 1 },
-          { id: "f2", name: "Email", type: "email", canonical_column: "email", sort_order: 2 },
-          { id: "f3", name: "Subscribed", type: "boolean", canonical_column: "subscribed", sort_order: 3 },
-          { id: "f4", name: "Company", type: "relation", canonical_column: "company_id", related_object_id: "obj_company", related_object_name: "company", sort_order: 4 },
-          { id: "f5", name: "Notes", type: "text", sort_order: 5 },
+          { column_name: "id" },
+          { column_name: "created_at" },
+          { column_name: "updated_at" },
+          { column_name: "full_name" },
+          { column_name: "email" },
+          { column_name: "subscribed" },
+          { column_name: "company_id" },
         ];
       }
+      if (sql.includes("count(*)::float") && sql.includes("_fill_rate")) {
+        return [{
+          _total: 10,
+          id_fill_rate: 1,
+          created_at_fill_rate: 1,
+          updated_at_fill_rate: 1,
+          full_name_fill_rate: 0.8,
+          email_fill_rate: 0.9,
+          subscribed_fill_rate: 0.3,
+          company_id_fill_rate: 0.5,
+          name_fill_rate: 0.7,
+          domain_fill_rate: 0.4,
+          website_fill_rate: 0.2,
+        }];
+      }
+      if (sql.includes("from crm_fields") && sql.includes("left join crm_objects")) {
+        return mockFieldRows;
+      }
       if (sql.includes("from crm_fields") && sql.includes("where object_id = $1")) {
-        return [
-          { id: "f1", name: "Full Name", type: "text", canonical_column: "full_name", sort_order: 1 },
-          { id: "f2", name: "Email", type: "email", canonical_column: "email", sort_order: 2 },
-          { id: "f3", name: "Subscribed", type: "boolean", canonical_column: "subscribed", sort_order: 3 },
-          { id: "f4", name: "Company", type: "relation", canonical_column: "company_id", related_object_id: "obj_company", sort_order: 4 },
-          { id: "f5", name: "Notes", type: "text", sort_order: 5 },
-        ];
+        return mockFieldRows;
       }
       if (sql.includes("count(*)")) return [{ count: "1" }];
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
@@ -45,11 +81,51 @@ describe("postgres object read adapter", () => {
     const data = await getPostgresObjectData("people", new URL("http://localhost?pagesize=10"));
 
     expect(data.object.name).toBe("people");
-    expect(data.fields[0].name).toBe("Full Name");
+    expect(data.fields[0].name).toBe("Email");
     expect(data.entries[0].entry_id).toBe("p1");
     expect(data.savedViews).toEqual([]);
     expect(data.activeView).toBeUndefined();
     expect(data.statuses).toEqual([]);
+  });
+
+  it("removes stale fields whose canonical_column does not exist on the backing table", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData("people", new URL("http://localhost"));
+
+    const names = data.fields.map((field) => field.name);
+    expect(names).not.toContain("Strength Score");
+    expect(names).not.toContain("Last Interaction");
+    expect(names).toContain("Full Name");
+    expect(names).toContain("Email");
+    expect(names).toContain("Notes");
+  });
+
+  it("orders people/company fields by backing table fill rate", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData("people", new URL("http://localhost"));
+
+    expect(data.fields.map((field) => field.name)).toEqual([
+      "Email",      // 0.9 fill rate
+      "Full Name",  // 0.8
+      "Company",    // 0.5
+      "Subscribed", // 0.3
+      "Notes",      // no canonical column; stable sort_order fallback
+    ]);
+  });
+
+  it("does not reorder objects outside the people/company scope", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData("task", new URL("http://localhost"));
+
+    expect(data.fields.map((field) => field.name)).toEqual([
+      "Full Name",
+      "Email",
+      "Subscribed",
+      "Company",
+      "Notes",
+      "Strength Score",
+      "Last Interaction",
+    ]);
   });
 
   it("applies search, filters, and canonical sort to list and count queries", async () => {
@@ -66,7 +142,7 @@ describe("postgres object read adapter", () => {
     const { getPostgresObjectData } = await import("./object-read");
     const data = await getPostgresObjectData("people", new URL(`http://localhost?search=ada&filters=${filters}&sort=${sort}`));
 
-    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)"));
+    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select count(*) from crm_people"));
     const listCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_people"));
     expect(countCall?.[0]).toContain("lower");
     expect(countCall?.[1]).toContain("%ada%");
@@ -81,5 +157,67 @@ describe("postgres object read adapter", () => {
     expect(data.fields.find((field) => field.name === "Company")?.related_object_name).toBe("company");
     expect(data.relationLabels.Company.c1).toBe("Acme");
     expect(data.relationFaviconUrls.Company.c1).toContain("google.com/s2/favicons");
+  });
+
+  it("does not 500 when canonical_column is absent from the backing table", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+
+    // This is the exact failing scenario: `crm_fields` maps display fields to
+    // `strength_score` / `last_interaction_at`, but the actual `crm_companies`
+    // table does not have those columns.
+    const data = await getPostgresObjectData("company", new URL("http://localhost?pageSize=5"));
+
+    expect(data.object.name).toBe("company");
+    expect(data.entries).toHaveLength(1);
+  });
+
+  it("omits missing canonical columns from the select list and order by", async () => {
+    const sort = encodeURIComponent(JSON.stringify([
+      { field: "Full Name", direction: "asc" },
+      { field: "Last Interaction", direction: "desc" },
+    ]));
+
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("people", new URL(`http://localhost?sort=${sort}`));
+
+    const listCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_people"));
+    const listSql = String(listCall?.[0]);
+    expect(listSql).not.toContain('"strength_score"');
+    expect(listSql).not.toContain('"last_interaction_at"');
+    expect(listSql).toContain('order by e."full_name" asc');
+    expect(listSql).toContain("e.created_at desc");
+    expect(listSql).toContain("e.id desc");
+  });
+
+  it("ignores filters that reference missing canonical columns", async () => {
+    const filters = Buffer.from(JSON.stringify({
+      id: "root",
+      conjunction: "and",
+      rules: [
+        { id: "r1", field: "Subscribed", operator: "is_true" },
+        { id: "r2", field: "Strength Score", operator: "is_not_empty" },
+      ],
+    })).toString("base64");
+
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("people", new URL(`http://localhost?filters=${filters}`));
+
+    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)"));
+    const countSql = String(countCall?.[0]);
+    expect(countSql).toContain("subscribed");
+    expect(countSql).not.toContain('"strength_score"');
+  });
+
+  it("introspects the actual table and preserves real canonical columns", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("people", new URL("http://localhost"));
+
+    const infoSchemaCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("from information_schema.columns"));
+    expect(infoSchemaCall?.[1]).toEqual(["crm_people"]);
+
+    const listCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_people"));
+    const listSql = String(listCall?.[0]);
+    expect(listSql).toContain('"full_name" as "Full Name"');
+    expect(listSql).toContain('"email" as "Email"');
   });
 });

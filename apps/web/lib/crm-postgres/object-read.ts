@@ -2,6 +2,7 @@ import type { FilterGroup, FilterRule, SavedView, SortRule, ViewType, ViewTypeSe
 import { deserializeFilters } from "../object-filters";
 import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
+import { getColumnFillRates, getTableColumns } from "./table-columns";
 
 type ObjectRow = {
   id: string;
@@ -83,6 +84,7 @@ const supportedTables: Record<string, string> = {
   interaction: "crm_interactions",
 };
 
+const FILL_RATE_OBJECTS = new Set(["people", "company", "companies"]);
 const textLikeTypes = new Set(["text", "richtext", "email", "url", "phone"]);
 
 function quoteIdentifier(identifier: string): string {
@@ -90,7 +92,7 @@ function quoteIdentifier(identifier: string): string {
 }
 
 function resolveDisplayField(object: ObjectRow, fields: FieldRow[]): string {
-  if (object.display_field) return object.display_field;
+  if (object.display_field && fields.some((field) => field.name === object.display_field)) return object.display_field;
 
   const nameField = fields.find((field) => /\bname\b/i.test(field.name) || /\btitle\b/i.test(field.name));
   if (nameField) return nameField.name;
@@ -99,6 +101,13 @@ function resolveDisplayField(object: ObjectRow, fields: FieldRow[]): string {
   if (textField) return textField.name;
 
   return fields[0]?.name ?? "id";
+}
+
+function rankFieldsByFillRate(a: FieldRow, b: FieldRow, fillRates: Map<string, number>): number {
+  const aRate = a.canonical_column && fillRates.has(a.canonical_column) ? fillRates.get(a.canonical_column)! : -1;
+  const bRate = b.canonical_column && fillRates.has(b.canonical_column) ? fillRates.get(b.canonical_column)! : -1;
+  if (aRate !== bRate) return bRate - aRate;
+  return (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER);
 }
 
 function toSavedView(row: SavedViewRow): SavedView & { id?: string } {
@@ -114,9 +123,9 @@ function toSavedView(row: SavedViewRow): SavedView & { id?: string } {
   };
 }
 
-function buildEntrySelect(fields: FieldRow[]): string {
+function buildEntrySelect(fields: FieldRow[], existingColumns: Set<string>): string {
   const canonicalSelects = fields
-    .filter((field) => field.canonical_column)
+    .filter((field) => field.canonical_column && existingColumns.has(field.canonical_column))
     .map((field) => `${quoteIdentifier(field.canonical_column!)} as ${quoteIdentifier(field.name)}`);
 
   return [
@@ -141,15 +150,15 @@ function isFilterGroup(value: FilterRule | FilterGroup): value is FilterGroup {
   return "rules" in value;
 }
 
-function appendFieldExpression(field: FieldRow, tableAlias: string, _params: unknown[]): string | null {
-  if (field.canonical_column) return `${tableAlias}.${quoteIdentifier(field.canonical_column)}`;
+function appendFieldExpression(field: FieldRow, tableAlias: string, existingColumns: Set<string>, _params: unknown[]): string | null {
+  if (field.canonical_column && existingColumns.has(field.canonical_column)) return `${tableAlias}.${quoteIdentifier(field.canonical_column)}`;
   return null;
 }
 
-function buildRuleCondition(rule: FilterRule, fieldsByName: Map<string, FieldRow>, tableAlias: string, params: unknown[]): string | null {
+function buildRuleCondition(rule: FilterRule, fieldsByName: Map<string, FieldRow>, tableAlias: string, existingColumns: Set<string>, params: unknown[]): string | null {
   const field = fieldsByName.get(rule.field);
   if (!field) return null;
-  const expr = appendFieldExpression(field, tableAlias, params);
+  const expr = appendFieldExpression(field, tableAlias, existingColumns, params);
   if (!expr) return null;
   switch (rule.operator) {
     case "is_empty":
@@ -175,28 +184,28 @@ function buildRuleCondition(rule: FilterRule, fieldsByName: Map<string, FieldRow
   }
 }
 
-function buildFilterCondition(group: FilterGroup | undefined, fieldsByName: Map<string, FieldRow>, tableAlias: string, params: unknown[]): string | null {
+function buildFilterCondition(group: FilterGroup | undefined, fieldsByName: Map<string, FieldRow>, tableAlias: string, existingColumns: Set<string>, params: unknown[]): string | null {
   if (!group?.rules.length) return null;
   const parts = group.rules
-    .map((rule) => isFilterGroup(rule) ? buildFilterCondition(rule, fieldsByName, tableAlias, params) : buildRuleCondition(rule, fieldsByName, tableAlias, params))
+    .map((rule) => isFilterGroup(rule) ? buildFilterCondition(rule, fieldsByName, tableAlias, existingColumns, params) : buildRuleCondition(rule, fieldsByName, tableAlias, existingColumns, params))
     .filter((part): part is string => !!part);
   if (parts.length === 0) return null;
   return `(${parts.join(group.conjunction === "or" ? " or " : " and ")})`;
 }
 
-function buildSearchCondition(search: string | null, fields: FieldRow[], tableAlias: string, params: unknown[]): string | null {
+function buildSearchCondition(search: string | null, fields: FieldRow[], tableAlias: string, existingColumns: Set<string>, params: unknown[]): string | null {
   const trimmed = search?.trim();
   if (!trimmed) return null;
   params.push(`%${trimmed}%`);
   const placeholder = `$${params.length}`;
   const textFields = fields.filter((field) => textLikeTypes.has(field.type));
   const parts = textFields
-    .filter((field) => field.canonical_column)
+    .filter((field) => field.canonical_column && existingColumns.has(field.canonical_column))
     .map((field) => `lower(${tableAlias}.${quoteIdentifier(field.canonical_column!)}::text) like lower(${placeholder})`);
   return parts.length ? `(${parts.join(" or ")})` : null;
 }
 
-function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, FieldRow>, tableAlias: string, _params: unknown[]): string {
+function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, FieldRow>, tableAlias: string, existingColumns: Set<string>, _params: unknown[]): string {
   const parts: string[] = [];
   for (const rule of sort ?? []) {
     const direction = rule.direction === "asc" ? "asc" : "desc";
@@ -205,7 +214,7 @@ function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, Fi
       continue;
     }
     const field = fieldsByName.get(rule.field);
-    if (field?.canonical_column) {
+    if (field?.canonical_column && existingColumns.has(field.canonical_column)) {
       parts.push(`${tableAlias}.${quoteIdentifier(field.canonical_column)} ${direction}`);
     }
   }
@@ -213,11 +222,11 @@ function buildOrderBy(sort: SortRule[] | undefined, fieldsByName: Map<string, Fi
   return parts.join(", ");
 }
 
-async function loadEntries(object: ObjectRow, fields: FieldRow[], pageSize: number, offset: number, whereClause: string, params: unknown[], orderBy: string, _search: string | null): Promise<Record<string, unknown>[]> {
+async function loadEntries(object: ObjectRow, fields: FieldRow[], existingColumns: Set<string>, pageSize: number, offset: number, whereClause: string, params: unknown[], orderBy: string, _search: string | null): Promise<Record<string, unknown>[]> {
   const tableName = supportedTables[object.name];
   if (!tableName) return loadCustomOnlyEntries(object, pageSize, offset, _search);
 
-  const selectList = buildEntrySelect(fields);
+  const selectList = buildEntrySelect(fields, existingColumns);
   const listParams = [...params, pageSize, offset];
   const entries = await queryPg<Record<string, unknown>>(
     `select ${selectList} from ${tableName} e ${whereClause} order by ${orderBy} limit $${listParams.length - 1} offset $${listParams.length}`,
@@ -283,7 +292,7 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
     throw new Error(`CRM object not found: ${objectName}`);
   }
 
-  const fields = await queryPg<FieldRow>(
+  let fields = await queryPg<FieldRow>(
     `select f.*, related.name as related_object_name
        from crm_fields f
        left join crm_objects related on related.id = f.related_object_id
@@ -302,21 +311,30 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
   const offset = (page - 1) * pageSize;
 
   const tableName = supportedTables[object.name];
+  const existingColumns = tableName ? await getTableColumns(tableName) : new Set<string>();
+  if (tableName) {
+    fields = fields.filter((field) => !field.canonical_column || existingColumns.has(field.canonical_column));
+  }
+  const effectiveDisplayField = resolveDisplayField(object, fields);
+  if (tableName && FILL_RATE_OBJECTS.has(object.name)) {
+    const fillRates = await getColumnFillRates(tableName, existingColumns);
+    fields = [...fields].sort((a, b) => rankFieldsByFillRate(a, b, fillRates));
+  }
   const fieldsByName = new Map(fields.map((field) => [field.name, field]));
   const params: unknown[] = [object.id];
   const search = url.searchParams.get("search");
   const conditions = [
-    buildSearchCondition(search, fields, "e", params),
-    buildFilterCondition(parseFilters(url.searchParams.get("filters")), fieldsByName, "e", params),
+    buildSearchCondition(search, fields, "e", existingColumns, params),
+    buildFilterCondition(parseFilters(url.searchParams.get("filters")), fieldsByName, "e", existingColumns, params),
   ].filter((condition): condition is string => !!condition);
   const whereClause = `where $1::text is not null${conditions.length ? ` and ${conditions.join(" and ")}` : ""}`;
   const sort = parseJsonParam<SortRule[]>(url.searchParams.get("sort"));
   const totalCountRows = tableName
     ? await queryPg<{ count: string | number }>(`select count(*) from ${tableName} e ${whereClause}`, params)
     : [];
-  const orderBy = buildOrderBy(sort, fieldsByName, "e", params);
+  const orderBy = buildOrderBy(sort, fieldsByName, "e", existingColumns, params);
   const totalCount = tableName ? Number(totalCountRows[0]?.count ?? 0) : await countCustomOnlyEntries(object, search);
-  const entries = await loadEntries(object, fields, pageSize, offset, whereClause, params, orderBy, search);
+  const entries = await loadEntries(object, fields, existingColumns, pageSize, offset, whereClause, params, orderBy, search);
   const resolvedRelations = await resolveRelationLabels(fields, entries);
 
   const savedViews = savedViewRows.map(toSavedView);
@@ -331,7 +349,7 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
     relationLabels: resolvedRelations.labels,
     relationFaviconUrls: resolvedRelations.faviconUrls,
     reverseRelations: [],
-    effectiveDisplayField: resolveDisplayField(object, fields),
+    effectiveDisplayField,
     savedViews,
     activeView,
     viewSettings: settingsRows[0]?.settings ?? undefined,

@@ -1,21 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
-const { loadCrmFieldMapsMock, safeQueryMock } = vi.hoisted(() => ({
-  loadCrmFieldMapsMock: vi.fn(),
-  safeQueryMock: vi.fn(),
-}));
-
 const { getPostgresCalendarEventMock } = vi.hoisted(() => ({
   getPostgresCalendarEventMock: vi.fn(),
-}));
-
-vi.mock("@/lib/crm-queries", () => ({
-  buildEntryProjection: vi.fn(() => "projection"),
-  hydratePeopleByIds: vi.fn(async () => new Map()),
-  loadCrmFieldMaps: loadCrmFieldMapsMock,
-  safeQuery: safeQueryMock,
-  sqlString: (value: string) => `'${value.replace(/'/g, "''")}'`,
 }));
 
 vi.mock("@/lib/crm-postgres/calendar", () => ({
@@ -25,11 +12,9 @@ vi.mock("@/lib/crm-postgres/calendar", () => ({
 describe("CRM calendar detail API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.CRM_DB_BACKEND;
   });
 
-  it("uses the Postgres calendar detail reader when CRM_DB_BACKEND is postgres", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
+  it("uses the Postgres calendar detail reader", async () => {
     getPostgresCalendarEventMock.mockResolvedValue({
       event: { id: "event_pg", title: "Postgres Event" },
       organizer: null,
@@ -45,7 +30,5 @@ describe("CRM calendar detail API", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ event: { id: "event_pg", title: "Postgres Event" } });
     expect(getPostgresCalendarEventMock).toHaveBeenCalledWith("event_pg");
-    expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
-    expect(safeQueryMock).not.toHaveBeenCalled();
   });
 });

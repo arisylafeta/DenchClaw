@@ -1,23 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
-const { loadCrmFieldMapsMock, safeQueryMock } = vi.hoisted(() => ({
-  loadCrmFieldMapsMock: vi.fn(),
-  safeQueryMock: vi.fn(),
-}));
-
 const { getPostgresPersonProfileMock } = vi.hoisted(() => ({
   getPostgresPersonProfileMock: vi.fn(),
-}));
-
-vi.mock("@/lib/crm-queries", () => ({
-  buildEntryProjection: vi.fn(() => "projection"),
-  buildLatestMessagePerThreadCte: vi.fn(() => null),
-  hydratePeopleByIds: vi.fn(async () => new Map()),
-  jsonArrayContains: vi.fn(() => "contains"),
-  loadCrmFieldMaps: loadCrmFieldMapsMock,
-  safeQuery: safeQueryMock,
-  sqlString: (value: string) => `'${value.replace(/'/g, "''")}'`,
 }));
 
 vi.mock("@/lib/crm-postgres/person-profile", () => ({
@@ -27,11 +12,9 @@ vi.mock("@/lib/crm-postgres/person-profile", () => ({
 describe("CRM person profile API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.CRM_DB_BACKEND;
   });
 
-  it("uses the Postgres person profile reader when CRM_DB_BACKEND is postgres", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
+  it("uses the Postgres person profile reader", async () => {
     getPostgresPersonProfileMock.mockResolvedValue({
       person: {
         id: "person_pg",
@@ -76,7 +59,5 @@ describe("CRM person profile API", () => {
       person: { id: "person_pg", name: "Postgres Person" },
     });
     expect(getPostgresPersonProfileMock).toHaveBeenCalledWith("person_pg");
-    expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
-    expect(safeQueryMock).not.toHaveBeenCalled();
   });
 });

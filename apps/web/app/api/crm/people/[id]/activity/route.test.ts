@@ -1,21 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
-const { loadCrmFieldMapsMock, safeQueryMock, hydratePeopleByIdsMock } = vi.hoisted(() => ({
-  loadCrmFieldMapsMock: vi.fn(),
-  safeQueryMock: vi.fn(),
-  hydratePeopleByIdsMock: vi.fn(),
-}));
-
 const { getPostgresPersonActivityMock } = vi.hoisted(() => ({
   getPostgresPersonActivityMock: vi.fn(),
-}));
-
-vi.mock("@/lib/crm-queries", () => ({
-  hydratePeopleByIds: hydratePeopleByIdsMock,
-  loadCrmFieldMaps: loadCrmFieldMapsMock,
-  safeQuery: safeQueryMock,
-  sqlString: (value: string) => `'${value.replace(/'/g, "''")}'`,
 }));
 
 vi.mock("@/lib/crm-postgres/activity", () => ({
@@ -25,11 +12,9 @@ vi.mock("@/lib/crm-postgres/activity", () => ({
 describe("CRM person activity API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.CRM_DB_BACKEND;
   });
 
   it("returns 400 when person id is missing", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
     const res = await GET(new Request("http://localhost/api/crm/people/%20/activity"), {
       params: Promise.resolve({ id: "  " }),
     });
@@ -39,8 +24,7 @@ describe("CRM person activity API", () => {
     expect(getPostgresPersonActivityMock).not.toHaveBeenCalled();
   });
 
-  it("uses Postgres helper when CRM_DB_BACKEND is postgres", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
+  it("uses the Postgres activity helper", async () => {
     getPostgresPersonActivityMock.mockResolvedValue({
       activities: [{ id: "int_1", type: "Email", direction: "Sent", occurred_at: "2026-05-01T00:00:00.000Z", email: null, event: null }],
       total: 1,
@@ -63,8 +47,5 @@ describe("CRM person activity API", () => {
       limit: 25,
       offset: 10,
     });
-    expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
-    expect(safeQueryMock).not.toHaveBeenCalled();
-    expect(hydratePeopleByIdsMock).not.toHaveBeenCalled();
   });
 });

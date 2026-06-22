@@ -3,14 +3,11 @@ import { join } from "node:path";
 import {
   resolveWorkspaceRoot,
   parseSimpleYaml,
-  duckdbQueryAllAsync,
-  discoverDuckDBPaths,
-  duckdbQueryOnFileAsync,
   isDatabaseFile,
-  pivotViewIdentifier,
   readObjectYamlIcon,
 } from "@/lib/workspace";
 import { queryPg } from "@/lib/postgres";
+import { getTableColumns } from "@/lib/crm-postgres/table-columns";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -77,14 +74,6 @@ const POSTGRES_TABLE_BY_OBJECT: Record<string, string> = {
 
 // --- Helpers ---
 
-function sqlEscape(s: string): string {
-  return s.replace(/'/g, "''");
-}
-
-function isPostgresBackend(): boolean {
-  return process.env.CRM_DB_BACKEND === "postgres";
-}
-
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
@@ -104,9 +93,12 @@ function resolveDisplayField(obj: ObjectRow, fields: FieldRow[]): string {
   return fields[0]?.name ?? "id";
 }
 
-function buildPostgresEntrySelect(fields: FieldRow[]): string {
+function buildPostgresEntrySelect(fields: FieldRow[], existingColumns: Set<string>): string {
   const canonicalSelects = fields
-    .filter((field) => typeof (field as FieldRow & { canonical_column?: string | null }).canonical_column === "string")
+    .filter((field) => {
+      const canonical = (field as FieldRow & { canonical_column?: string | null }).canonical_column;
+      return typeof canonical === "string" && existingColumns.has(canonical);
+    })
     .map((field) => {
       const canonical = (field as FieldRow & { canonical_column: string }).canonical_column;
       return `${quoteIdentifier(canonical)} as ${quoteIdentifier(field.name)}`;
@@ -144,8 +136,9 @@ async function buildPostgresEntryItems(objects: ObjectRow[]): Promise<SearchInde
       .slice(0, 4);
     const tableName = POSTGRES_TABLE_BY_OBJECT[obj.name];
     if (!tableName) {continue;}
+    const existingColumns = await getTableColumns(tableName);
     const entries = await queryPg<Record<string, unknown>>(
-      `select ${buildPostgresEntrySelect(fields)}
+      `select ${buildPostgresEntrySelect(fields, existingColumns)}
          from ${tableName}
         order by created_at desc
         limit 500`,
@@ -259,108 +252,6 @@ function flattenTree(
   }
 }
 
-/**
- * Fetch all entries from all objects across ALL discovered DuckDB files.
- * Deduplicates objects by name (shallower DBs win).
- */
-async function buildEntryItems(): Promise<SearchIndexItem[]> {
-  const items: SearchIndexItem[] = [];
-  const dbPaths = discoverDuckDBPaths();
-  if (dbPaths.length === 0) {return [];}
-
-  // Collect all objects across DBs, deduplicating by name (shallowest wins)
-  const seenNames = new Set<string>();
-  const objectsWithDb: Array<{ obj: ObjectRow; dbPath: string }> = [];
-
-  for (const dbPath of dbPaths) {
-    const objs = await duckdbQueryOnFileAsync<ObjectRow>(dbPath,
-      "SELECT * FROM objects ORDER BY name",
-    );
-    for (const obj of objs) {
-      if (seenNames.has(obj.name)) {continue;}
-      seenNames.add(obj.name);
-      objectsWithDb.push({ obj, dbPath });
-    }
-  }
-
-  for (const { obj, dbPath } of objectsWithDb) {
-    const fields = await duckdbQueryOnFileAsync<FieldRow>(dbPath,
-      `SELECT * FROM fields WHERE object_id = '${sqlEscape(obj.id)}' ORDER BY sort_order`,
-    );
-    const displayField = resolveDisplayField(obj, fields);
-    const previewFields = fields
-      .filter((f) => !["relation", "richtext"].includes(f.type))
-      .slice(0, 4);
-    // Icon comes from .object.yaml — DuckDB no longer stores it.
-    const objIcon = readObjectYamlIcon(obj.name);
-
-    // Try PIVOT view first, then raw EAV (on the same DB).
-    // Use pivotViewIdentifier so object names with hyphens (e.g. "ai-agent")
-    // resolve to the correct quoted identifier ("v_ai_agent") instead of
-    // producing invalid SQL.
-    let entries: Record<string, unknown>[] = await duckdbQueryOnFileAsync(dbPath,
-      `SELECT * FROM ${pivotViewIdentifier(obj.name)} ORDER BY created_at DESC LIMIT 500`,
-    );
-
-    if (entries.length === 0) {
-      const rawRows = await duckdbQueryOnFileAsync<{
-        entry_id: string;
-        created_at: string;
-        updated_at: string;
-        field_name: string;
-        value: string | null;
-      }>(dbPath,
-        `SELECT e.id as entry_id, e.created_at, e.updated_at,
-                f.name as field_name, ef.value
-         FROM entries e
-         JOIN entry_fields ef ON ef.entry_id = e.id
-         JOIN fields f ON f.id = ef.field_id
-         WHERE e.object_id = '${sqlEscape(obj.id)}'
-         ORDER BY e.created_at DESC
-         LIMIT 2500`,
-      );
-
-      const grouped = new Map<string, Record<string, unknown>>();
-      for (const row of rawRows) {
-        let entry = grouped.get(row.entry_id);
-        if (!entry) {
-          entry = { entry_id: row.entry_id };
-          grouped.set(row.entry_id, entry);
-        }
-        if (row.field_name) {entry[row.field_name] = row.value;}
-      }
-      entries = Array.from(grouped.values());
-    }
-
-    for (const entry of entries) {
-      const entryId = dbStr(entry.entry_id);
-      if (!entryId) {continue;}
-
-      const displayValue = dbStr(entry[displayField]);
-      const fieldPreview: Record<string, string> = {};
-      for (const f of previewFields) {
-        const val = entry[f.name];
-        if (val != null && val !== "") {
-          fieldPreview[f.name] = dbStr(val);
-        }
-      }
-
-      items.push({
-        id: `entry:${obj.name}:${entryId}`,
-        label: displayValue || `(${obj.name} entry)`,
-        sublabel: obj.name,
-        kind: "entry",
-        icon: objIcon,
-        objectName: obj.name,
-        entryId,
-        fields: Object.keys(fieldPreview).length > 0 ? fieldPreview : undefined,
-      });
-    }
-  }
-
-  return items;
-}
-
 // --- Route handler ---
 
 /**
@@ -378,41 +269,25 @@ const CRM_NAV_ITEMS: SearchIndexItem[] = [
 
 export async function GET() {
   const items: SearchIndexItem[] = [];
-  const postgresMode = isPostgresBackend();
-  const postgresObjects = postgresMode ? await readPostgresObjects() : [];
+  const postgresObjects = await readPostgresObjects();
 
   // 1. Files + objects from tree
   const root = resolveWorkspaceRoot();
   if (root) {
-    // Aggregate objects from ALL discovered DuckDB files (shallower wins).
-    // Important: we do NOT filter on `hidden_in_sidebar` here — entries
-    // from CRM-only objects (email_thread / email_message / calendar_event /
-    // interaction) still need to be reachable via global search even
-    // though their parent objects are absent from the file tree.
+    // Aggregate objects from Postgres. We do NOT filter on
+    // `hidden_in_sidebar` here — entries from CRM-only objects
+    // (email_thread / email_message / calendar_event / interaction)
+    // still need to be reachable via global search even though their
+    // parent objects are absent from the file tree.
     const dbObjects = new Map<string, ObjectRow>();
-    const objs = postgresMode
-      ? postgresObjects
-      : await duckdbQueryAllAsync<ObjectRow & { name: string }>(
-        "SELECT * FROM objects",
-        "name",
-      );
-    for (const o of objs) {dbObjects.set(o.name, o);}
+    for (const o of postgresObjects) {dbObjects.set(o.name, o);}
 
     // Scan workspace root (the workspace folder IS the knowledge base)
     flattenTree(root, "", dbObjects, items);
   }
 
-  // 2. Entries from all objects across all discovered DBs.
-  // `buildEntryItems` deliberately doesn't filter on `hidden_in_sidebar`
-  // either — see the same rationale above.
-  if (postgresMode) {
-    items.push(...await buildPostgresEntryItems(postgresObjects));
-  } else {
-    const dbPaths = discoverDuckDBPaths();
-    if (dbPaths.length > 0) {
-      items.push(...await buildEntryItems());
-    }
-  }
+  // 2. Entries from all objects in Postgres.
+  items.push(...await buildPostgresEntryItems(postgresObjects));
 
   // 3. CRM nav shortcuts (People / Companies / Inbox / Calendar). Always
   // present so they're reachable even when the workspace is empty.
