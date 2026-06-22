@@ -7,14 +7,12 @@ const requireFs = createRequire(import.meta.url);
 const realFs = requireFs("node:fs") as typeof import("node:fs");
 
 function resolveBundledExtensionSourcePath(pluginId: string): string {
-  const cwdCandidates = [
-    join(process.cwd(), "extensions", pluginId),
-    join(process.cwd(), "..", "..", "extensions", pluginId),
-  ];
-  return (
-    cwdCandidates.find((candidate) => realFs.existsSync(candidate)) ?? cwdCandidates[cwdCandidates.length - 1]!
-  );
+  return join("/fake/repo/root", "extensions", pluginId);
 }
+
+vi.mock("@/lib/runtime-roots", () => ({
+  resolveBundledExtensionsRoot: vi.fn(() => "/fake/repo/root"),
+}));
 
 vi.mock("@/lib/workspace", () => ({
   resolveOpenClawStateDir: vi.fn(() => "/home/testuser/.openclaw-dench"),

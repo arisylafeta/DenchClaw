@@ -239,22 +239,22 @@ describe("workspace utilities", () => {
       expect(resolveAgentWorkspacePrefix()).toBe(WS_DIR);
     });
 
-    it("returns relative path when workspace is inside repo", async () => {
+    it("returns absolute path when workspace is inside repo", async () => {
       const repoWs = join(STATE_DIR, "workspace-test");
       process.env.OPENCLAW_WORKSPACE = repoWs;
       const { resolveAgentWorkspacePrefix, mockExists } = await importWorkspace();
       mockExists.mockImplementation((p) => String(p) === repoWs);
       vi.spyOn(process, "cwd").mockReturnValue(STATE_DIR);
-      expect(resolveAgentWorkspacePrefix()).toBe("workspace-test");
+      expect(resolveAgentWorkspacePrefix()).toBe(repoWs);
     });
 
-    it("handles non apps/web cwd", async () => {
+    it("returns absolute path regardless of cwd", async () => {
       const repoWs = join(STATE_DIR, "workspace-test");
       process.env.OPENCLAW_WORKSPACE = repoWs;
       const { resolveAgentWorkspacePrefix, mockExists } = await importWorkspace();
       mockExists.mockImplementation((p) => String(p) === repoWs);
       vi.spyOn(process, "cwd").mockReturnValue(STATE_DIR);
-      expect(resolveAgentWorkspacePrefix()).toBe("workspace-test");
+      expect(resolveAgentWorkspacePrefix()).toBe(repoWs);
     });
   });
 
