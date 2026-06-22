@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CRM Company Enricher Worker Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["batch_id", "worker_kind", "companies"],
+  "properties": {
+    "batch_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worker_kind": {
+      "type": "string",
+      "enum": ["enricher", "verifier"]
+    },
+    "companies": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "company_id",
+          "domain",
+          "country",
+          "city",
+          "about",
+          "sectors",
+          "roles",
+          "evidence_url",
+          "evidence_snippet",
+          "confidence",
+          "confidence_reason",
+          "identity_ambiguity",
+          "identity_note"
+        ],
+        "properties": {
+          "company_id": { "type": "string", "minLength": 1 },
+          "domain": { "type": ["string", "null"] },
+          "country": { "type": ["string", "null"] },
+          "city": { "type": ["string", "null"] },
+          "about": { "type": ["string", "null"], "maxLength": 200 },
+          "sectors": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "battery_recycling",
+                "second_life_batteries",
+                "energy_storage",
+                "ev_batteries",
+                "battery_trading",
+                "electronics_recycling",
+                "fleet_or_depot",
+                "utilities",
+                "industrial_energy",
+                "automotive",
+                "other",
+                "unknown"
+              ]
+            },
+            "allOf": [
+              {
+                "if": {
+                  "contains": { "const": "unknown" }
+                },
+                "then": {
+                  "maxItems": 1
+                }
+              }
+            ]
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "buyer",
+                "seller",
+                "recycler",
+                "investor",
+                "service_provider",
+                "manufacturer",
+                "unknown"
+              ]
+            },
+            "allOf": [
+              {
+                "if": {
+                  "contains": { "const": "unknown" }
+                },
+                "then": {
+                  "maxItems": 1
+                }
+              }
+            ]
+          },
+          "evidence_url": {
+            "type": ["string", "null"],
+            "format": "uri"
+          },
+          "evidence_snippet": { "type": ["string", "null"], "maxLength": 300 },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "confidence_reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "identity_ambiguity": { "type": "boolean" },
+          "identity_note": { "type": ["string", "null"], "maxLength": 500 }
+        }
+      }
+    }
+  }
+}

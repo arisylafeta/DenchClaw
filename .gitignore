@@ -115,3 +115,11 @@ dist/protocol.schema.json
 extensions/posthog-analytics/lib/build-env.js
 .cursor/debug-*.log
 .gstack/
+.slim/deepwork/
+.opencode/ralph-loop.local.md
+company-scope.json
+enrichment-state.json
+accepted-results.jsonl
+batch-inputs/
+batch-outputs/
+verification-outputs/
