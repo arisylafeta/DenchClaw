@@ -53,7 +53,13 @@ export function resolveRequiredHomeDir(
   env: NodeJS.ProcessEnv = process.env,
   homedir: () => string = os.homedir,
 ): string {
-  return resolveEffectiveHomeDir(env, homedir) ?? path.resolve(process.cwd());
+  const home = resolveEffectiveHomeDir(env, homedir);
+  if (home) {
+    return home;
+  }
+  throw new Error(
+    "Unable to resolve home directory. Set HOME, USERPROFILE, or OPENCLAW_HOME environment variable.",
+  );
 }
 
 export function expandHomePrefix(

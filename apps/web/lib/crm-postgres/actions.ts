@@ -1,5 +1,6 @@
 import type { ActionConfig, ActionContext } from "@/lib/action-runner";
 import { queryPg } from "@/lib/postgres";
+import { resolveWorkspaceRoot } from "@/lib/workspace";
 
 type FieldRow = {
   id: string;
@@ -72,7 +73,7 @@ export async function getPostgresActionContexts(objectName: string, entryIds: st
     }
   }
 
-  const workspacePath = process.cwd();
+  const workspacePath = resolveWorkspaceRoot() ?? "";
   const port = process.env.PORT || "3000";
   const apiUrl = `http://localhost:${port}/api`;
 

@@ -245,13 +245,15 @@ async function terminatePidWithEscalation(pid: number): Promise<void> {
 
 export function resolveCliPackageRoot(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 10; i += 1) {
     if (existsSync(path.join(dir, "package.json"))) {
       return dir;
     }
     dir = path.dirname(dir);
   }
-  return process.cwd();
+  throw new Error(
+    "Unable to resolve CLI package root. Ensure package.json exists in the project hierarchy.",
+  );
 }
 
 export function resolveProfileStateDir(
@@ -664,16 +666,18 @@ function resolveSymlinkedPackage(linkPath: string, packageName: string, rootNm: 
 }
 
 /**
- * Copy assets/seed/ and skills/ into the runtime app dir so the web init
- * route can locate them via resolveProjectRoot() (which walks up from
- * process.cwd looking for package.json + assets/seed/workspace.duckdb).
- * Without these, creating a new workspace in the web UI silently skips
- * seeding objects (people, company, task), the DuckDB, and managed skills.
+ * Copy assets/seed/, skills/, and extensions/ into the runtime app dir so
+ * the web init route can locate them via resolveDenchPackageRoot() (which
+ * walks up from import.meta.url or process.cwd looking for
+ * assets/seed/workspace.duckdb). Without these, creating a new workspace in
+ * the web UI silently skips seeding objects, the DuckDB, and managed skills.
  */
 function ensureSeedAssets(runtimeAppDir: string, packageRoot: string): void {
   const pairs: Array<[src: string, dst: string]> = [
     [path.join(packageRoot, "assets", "seed"), path.join(runtimeAppDir, "assets", "seed")],
     [path.join(packageRoot, "skills"), path.join(runtimeAppDir, "skills")],
+    [path.join(packageRoot, "extensions"), path.join(runtimeAppDir, "extensions")],
+    [path.join(packageRoot, "package.json"), path.join(runtimeAppDir, "package.json")],
   ];
   for (const [src, dst] of pairs) {
     if (!existsSync(src)) continue;

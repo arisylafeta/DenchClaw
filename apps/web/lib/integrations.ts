@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { resolveOpenClawStateDir } from "@/lib/workspace";
+import { resolveBundledExtensionsRoot } from "@/lib/runtime-roots";
 
 /**
  * Returns a guaranteed-valid working directory for spawning child processes.
@@ -411,11 +412,13 @@ function resolveBundledPluginPaths(sourceDirName: string): {
   installPath: string;
   sourcePath: string;
 } {
-  const cwdCandidates = [
-    join(process.cwd(), "extensions", sourceDirName),
-    join(process.cwd(), "..", "..", "extensions", sourceDirName),
-  ];
-  const sourcePath = cwdCandidates.find((candidate) => existsSync(candidate)) ?? cwdCandidates[0];
+  const root = resolveBundledExtensionsRoot();
+  if (!root) {
+    throw new Error(
+      "Bundled extensions root not found. Set DENCH_EXTENSIONS_ROOT or ensure extensions/shared exists.",
+    );
+  }
+  const sourcePath = join(root, "extensions", sourceDirName);
   return {
     installPath: join(resolveOpenClawStateDir(), "extensions", sourceDirName),
     sourcePath,

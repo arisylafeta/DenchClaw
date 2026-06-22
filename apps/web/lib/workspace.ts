@@ -705,25 +705,10 @@ export const resolveDenchRoot = resolveWorkspaceRoot;
 /**
  * Return the workspace path prefix for the agent.
  * Returns the absolute workspace path (e.g. ~/.openclaw/workspace),
- * or a relative path from the repo root if the workspace is inside it.
+ * or null if no workspace is resolved.
  */
 export function resolveAgentWorkspacePrefix(): string | null {
-  const root = resolveWorkspaceRoot();
-  if (!root) {return null;}
-
-  // If the workspace is an absolute path outside the repo, return it as-is
-  if (root.startsWith("/")) {
-    const cwd = process.cwd();
-    const repoRoot = cwd.endsWith(join("apps", "web"))
-      ? resolve(cwd, "..", "..")
-      : cwd;
-    const rel = relative(repoRoot, root);
-    // If the relative path starts with "..", it's outside the repo — use absolute
-    if (rel.startsWith("..")) {return root;}
-    return rel || root;
-  }
-
-  return root;
+  return resolveWorkspaceRoot();
 }
 
 // ---------------------------------------------------------------------------

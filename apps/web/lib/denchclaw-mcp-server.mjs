@@ -29,6 +29,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve, isAbsolute } from "node:path";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
@@ -43,8 +44,8 @@ const composioUserId = (process.env.COMPOSIO_USER_ID || "").trim();
 
 function readComposioJson() {
   const candidates = [
-    join(process.cwd(), "composio.json"),
     process.env.OPENCLAW_STATE_DIR ? join(process.env.OPENCLAW_STATE_DIR, "composio.json") : null,
+    join(process.env.DENCH_HOME || homedir(), ".openclaw-dench", "composio.json"),
     process.env.DENCH_HOME ? join(process.env.DENCH_HOME, "composio.json") : null,
     process.env.DENCH_HOME ? join(process.env.DENCH_HOME, "profiles", "default", "composio.json") : null,
   ].filter(Boolean);

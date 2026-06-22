@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { queryPg } from "../lib/postgres";
 
 async function main() {
-  const sql = readFileSync(join(process.cwd(), "lib/crm-postgres/schema.sql"), "utf-8");
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const sql = readFileSync(join(moduleDir, "..", "lib", "crm-postgres", "schema.sql"), "utf-8");
   await queryPg(sql);
   console.log("Applied CRM Postgres schema");
 }
