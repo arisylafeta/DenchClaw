@@ -23,6 +23,11 @@ type CompanyResponse = {
     name: string | null;
     domain: string | null;
     website: string | null;
+    country: string | null;
+    city: string | null;
+    about: string | null;
+    sectors: string[] | null;
+    roles: string[] | null;
     industry: string | null;
     type: string | null;
     source: string | null;
@@ -383,6 +388,48 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
       </section>
       <section>
         <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
+          Enrichment
+        </h3>
+        {company.about && (
+          <p className="mb-3 text-[13px]" style={{ color: "var(--color-text)" }}>
+            {company.about}
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Country" value={company.country ?? "—"} />
+          <Stat label="City" value={company.city ?? "—"} />
+          <Stat label="Sectors" value={company.sectors?.length ?? 0} />
+          <Stat label="Roles" value={company.roles?.length ?? 0} />
+        </div>
+        {company.sectors && company.sectors.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {company.sectors.map((sector) => (
+              <span
+                key={sector}
+                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
+                style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
+              >
+                {sector.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
+        {company.roles && company.roles.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {company.roles.map((role) => (
+              <span
+                key={role}
+                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
+                style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
+              >
+                {role.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+      <section>
+        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
           Details
         </h3>
         <div
@@ -396,6 +443,8 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
             link={company.website ?? undefined}
             external
           />
+          <Field label="Country" value={company.country} />
+          <Field label="City" value={company.city} />
           <Field label="Industry" value={company.industry} />
           <Field label="Type" value={company.type} />
           <Field label="Source" value={company.source} />

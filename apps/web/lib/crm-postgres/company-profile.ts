@@ -87,6 +87,11 @@ export type PostgresCompanyProfile = {
     name: string | null;
     domain: string | null;
     website: string | null;
+    country: string | null;
+    city: string | null;
+    about: string | null;
+    sectors: string[] | null;
+    roles: string[] | null;
     notes: string | null;
     created_at: string | null;
     updated_at: string | null;
@@ -129,6 +134,11 @@ type CompanyRow = {
   name: string | null;
   domain: string | null;
   website: string | null;
+  country: string | null;
+  city: string | null;
+  about: string | null;
+  sectors: string[] | null;
+  roles: string[] | null;
   notes: string | null;
   created_at: string | Date | null;
   updated_at: string | Date | null;
@@ -251,6 +261,11 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            name,
            domain,
            website,
+           country,
+           city,
+           about,
+           sectors,
+           roles,
            notes,
            created_at,
            updated_at
@@ -266,6 +281,11 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     name: raw.name,
     domain: raw.domain,
     website: raw.website ?? deriveWebsite(raw.domain),
+    country: raw.country,
+    city: raw.city,
+    about: raw.about,
+    sectors: raw.sectors,
+    roles: raw.roles,
     notes: raw.notes,
     created_at: iso(raw.created_at),
     updated_at: iso(raw.updated_at),
