@@ -331,10 +331,28 @@ describe("URL roundtrip / popstate idempotency", () => {
     expect(selectActiveContentTab(state)?.kind).toBe("object");
   });
 
+  it("maps path=people to the people object view without a tree resolver", () => {
+    const state = applyUrlToState(EMPTY_TABS_STATE, parseUrlState("path=people"), {});
+    const active = selectActiveContentTab(state);
+    expect(active?.kind).toBe("object");
+    expect(active?.path).toBe("people");
+    expect(active?.preview).toBe(false);
+  });
+
+  it("maps path=company to the company object view without a tree resolver", () => {
+    const state = applyUrlToState(EMPTY_TABS_STATE, parseUrlState("path=company"), {});
+    const active = selectActiveContentTab(state);
+    expect(active?.kind).toBe("object");
+    expect(active?.path).toBe("company");
+    expect(active?.preview).toBe(false);
+  });
+
   it("maps legacy path=companies URLs to the canonical company object", () => {
     const state = applyUrlToState(EMPTY_TABS_STATE, parseUrlState("path=companies"), {});
-    expect(selectActiveContentTab(state)?.kind).toBe("object");
-    expect(selectActiveContentTab(state)?.path).toBe("company");
+    const active = selectActiveContentTab(state);
+    expect(active?.kind).toBe("object");
+    expect(active?.path).toBe("company");
+    expect(active?.preview).toBe(false);
   });
 
   it("opening the Companies sidebar nav after viewing People activates the company tab (regression: 'click Companies, nothing opens')", () => {

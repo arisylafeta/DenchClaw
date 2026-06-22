@@ -978,12 +978,22 @@ export function contentTabFromUrl(
   }
 
   const path = url.path;
-  if (path === "companies") {
+  // Direct CRM object URLs must hydrate as CRM object tabs even when the
+  // workspace tree / kind resolver is not yet available.
+  if (path === "people") {
+    return makeContentTab({
+      kind: "object",
+      path: "people",
+      title: "People",
+      preview: false,
+    });
+  }
+  if (path === "company" || path === "companies") {
     return makeContentTab({
       kind: "object",
       path: "company",
       title: "Companies",
-      preview: true,
+      preview: false,
     });
   }
   const kind = shell.resolveKind?.(path) ?? inferContentTabKindFromPath(path);
