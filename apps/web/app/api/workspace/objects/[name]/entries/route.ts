@@ -44,11 +44,13 @@ export async function POST(
 			return Response.json(Object.assign({ ok: true }, created), { status: 201 });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Failed to create entry";
-			const status = /not found/i.test(message)
-				? 404
-				: /invalid|must|required|already exists|duplicate/i.test(message)
-					? 400
-					: 500;
+			const status = /read.only/i.test(message)
+				? 403
+				: /not found/i.test(message)
+					? 404
+					: /invalid|must|required|already exists|duplicate/i.test(message)
+						? 400
+						: 500;
 			return Response.json({ error: message }, { status });
 		}
 	}

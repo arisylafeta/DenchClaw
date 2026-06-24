@@ -24,6 +24,17 @@ const canonicalTableByObjectName: Record<string, string> = {
   interaction: "crm_interactions",
 };
 
+// Objects exposed as read-only CRM tables (e.g. campaign metrics snapshots). Any
+// create/update/delete is rejected up front so the UI cannot silently no-op or
+// return a false-success response. Routes map the "read-only" message to HTTP 403.
+const READ_ONLY_OBJECTS = new Set(["campaign", "campaigns"]);
+
+function assertMutable(objectName: string): void {
+  if (READ_ONLY_OBJECTS.has(objectName.trim().toLowerCase())) {
+    throw new Error(`Object '${objectName}' is read-only.`);
+  }
+}
+
 const JUNCTION_TABLE_MAP: Record<string, { table: string; sourceCol: string; targetCol: string; extraCols?: Record<string, string> }> = {
   "seed_fld_emthread_people_00000": { table: "crm_email_thread_participants", sourceCol: "thread_id", targetCol: "person_id" },
   "seed_fld_emmsg_to_0000000000000": { table: "crm_email_message_recipients", sourceCol: "message_id", targetCol: "person_id", extraCols: { recipient_type: "to" } },
@@ -126,6 +137,7 @@ export async function createPostgresEntry(
   objectName: string,
   fields: Record<string, unknown>,
 ): Promise<{ entryId: string; ok: true }> {
+  assertMutable(objectName);
   const entryId = randomUUID();
   await withPgTransaction(async (tx) => {
     const { object, fields: objectFields } = await loadObjectAndFields(tx, objectName);
@@ -170,6 +182,7 @@ export async function updatePostgresEntry(
   entryId: string,
   fields: Record<string, unknown>,
 ): Promise<{ ok: true; updatedCount: number }> {
+  assertMutable(objectName);
   const updatedCount = await withPgTransaction(async (tx) => {
     const { object, fields: objectFields } = await loadObjectAndFields(tx, objectName);
     const fieldByName = new Map(objectFields.map((field) => [field.name, field]));
@@ -221,6 +234,7 @@ export async function updatePostgresEntry(
 }
 
 export async function deletePostgresEntry(objectName: string, entryId: string): Promise<{ ok: true }> {
+  assertMutable(objectName);
   await withPgTransaction(async (tx) => {
     const { object } = await loadObjectAndFields(tx, objectName);
     const entityTable = resolveEntityTable(object);
@@ -243,6 +257,7 @@ export async function bulkDeletePostgresEntries(
   objectName: string,
   entryIds: string[],
 ): Promise<{ ok: true; deletedCount: number }> {
+  assertMutable(objectName);
   if (entryIds.length === 0) return { ok: true, deletedCount: 0 };
 
   const deletedCount = await withPgTransaction(async (tx) => {
