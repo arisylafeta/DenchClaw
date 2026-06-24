@@ -84,6 +84,8 @@ const supportedTables: Record<string, string> = {
   email_message: "crm_email_messages",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
+  campaign: "campaigns",
+  campaigns: "campaigns",
 };
 
 const FILL_RATE_OBJECTS = new Set(["people", "company", "companies"]);
