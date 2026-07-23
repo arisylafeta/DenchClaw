@@ -643,20 +643,20 @@ describe("isMainEntry", () => {
   });
 
   it("returns true when argv1 is an absolute path matching the module URL", () => {
-    const modulePath = "/root/denchclaw/source/apps/web/lib/denchclaw-mcp-server.mjs";
+    const modulePath = "/root/.hermes/projects/denchclaw/apps/web/lib/denchclaw-mcp-server.mjs";
     const moduleUrl = `file://${modulePath}`;
     expect(isMainEntry(modulePath, moduleUrl)).toBe(true);
   });
 
   it("returns true when argv1 is a relative path resolving to the module URL", () => {
-    const modulePath = "/root/denchclaw/source/apps/web/lib/denchclaw-mcp-server.mjs";
+    const modulePath = "/root/.hermes/projects/denchclaw/apps/web/lib/denchclaw-mcp-server.mjs";
     const moduleUrl = `file://${modulePath}`;
-    // Simulate launching from /root/denchclaw/source with a relative path.
-    expect(isMainEntry("apps/web/lib/denchclaw-mcp-server.mjs", moduleUrl, "/root/denchclaw/source")).toBe(true);
+    // Simulate launching from the canonical project checkout with a relative path.
+    expect(isMainEntry("apps/web/lib/denchclaw-mcp-server.mjs", moduleUrl, "/root/.hermes/projects/denchclaw")).toBe(true);
   });
 
   it("returns false when argv1 resolves to a different path", () => {
-    const moduleUrl = "file:///root/denchclaw/source/apps/web/lib/denchclaw-mcp-server.mjs";
+    const moduleUrl = "file:///root/.hermes/projects/denchclaw/apps/web/lib/denchclaw-mcp-server.mjs";
     expect(isMainEntry("/some/other/file.mjs", moduleUrl)).toBe(false);
   });
 });

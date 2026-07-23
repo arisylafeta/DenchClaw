@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
@@ -29,7 +29,7 @@ import psycopg2
 
 # --- Config ---
 GOG_BIN = "/usr/local/bin/gog"
-KEYRING_PASSWORD_PATH = "/root/.hermes/profiles/default/workspace/.secrets/gog-keyring-password"
+KEYRING_PASSWORD_PATH = "/root/.hermes/workspace/.secrets/gog-keyring-password"
 ACCOUNTS = ["ari@rebattery.io", "alex@rebattery.io"]
 DB_NAME = "denchclaw"
 SEARCH_BATCH_SIZE = 8  # emails per Gmail search query (from + to = 16 clauses)
@@ -155,17 +155,196 @@ def get_owner_emails():
     return {normalize_email(e) for e in ACCOUNTS}
 
 
+COMMON_EMAIL_PROVIDERS = {
+    "gmail", "yahoo", "outlook", "hotmail", "icloud", "proton", "aol", "live", "msn"
+}
+
+
+def is_common_email_provider(domain):
+    """Return True if domain is a public/common email provider."""
+    if not domain:
+        return True
+    return domain.lower() in COMMON_EMAIL_PROVIDERS
+
+
+def upsert_company_by_domain(cur, domain):
+    """
+    Upsert a company by domain. Returns company id.
+    Uses SELECT-then-INSERT/UPDATE because the live DB does not have a
+    unique constraint on lower(domain) (some domains have duplicate rows).
+    """
+    domain = (domain or "").lower().strip()
+    if not domain:
+        return None
+
+    # Update an existing row for this domain if one exists.
+    cur.execute(
+        "SELECT id FROM crm_companies WHERE lower(domain) = %s LIMIT 1",
+        (domain,),
+    )
+    row = cur.fetchone()
+    display_name = domain[0].upper() + domain[1:] if domain else domain
+    if row:
+        existing_id = row[0]
+        cur.execute(
+            """
+            UPDATE crm_companies
+            SET name = %s,
+                domain = %s,
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (display_name, domain, existing_id),
+        )
+        return existing_id
+
+    company_id = "company_domain_" + hashlib.md5(str(domain).encode()).hexdigest()[:16]
+    cur.execute(
+        """
+        INSERT INTO crm_companies (id, name, domain, tags)
+        VALUES (%s, %s, %s, ARRAY['auto-created'])
+        """,
+        (company_id, display_name, domain),
+    )
+    return company_id
+
+
+def upsert_person_by_email(cur, name, email, company_id):
+    """
+    Upsert a person by email. Returns person id.
+    Uses SELECT-then-INSERT/UPDATE because the live DB does not have a
+    unique constraint on lower(email) (emails are currently unique in
+    practice, but the index is not marked unique).
+    """
+    email = normalize_email(email)
+    if not email:
+        raise ValueError("email is required for upsert_person_by_email")
+    person_id = "person_email_" + hashlib.md5(email.encode()).hexdigest()[:16]
+    name = (name or "").strip()
+    parts = name.split(None, 1) if name else []
+    full_name = name if name else None
+    first_name = parts[0] if parts else None
+    last_name = parts[1] if len(parts) > 1 else None
+
+    cur.execute(
+        "SELECT id FROM crm_people WHERE lower(email) = %s LIMIT 1",
+        (email,),
+    )
+    row = cur.fetchone()
+    if row:
+        existing_id = row[0]
+        cur.execute(
+            """
+            UPDATE crm_people
+            SET full_name = COALESCE(NULLIF(%s, ''), full_name),
+                first_name = COALESCE(%s, first_name),
+                last_name = COALESCE(%s, last_name),
+                company_id = COALESCE(%s, company_id),
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (full_name or "", first_name, last_name, company_id, existing_id),
+        )
+        return existing_id
+
+    cur.execute(
+        """
+        INSERT INTO crm_people
+            (id, full_name, first_name, last_name, email, company_id, tags)
+        VALUES (%s, %s, %s, %s, %s, %s, ARRAY['auto-created'])
+        """,
+        (person_id, full_name, first_name, last_name, email, company_id),
+    )
+    return person_id
+
+
+def ensure_person(cur, name, email, crm_people, owner_emails, person_company_map, stats):
+    """
+    Ensure a person exists in crm_people for the given email/name.
+    Auto-creates company and person if missing and not an owner email.
+    Returns (person_id, created).
+    """
+    normalized = normalize_email(email)
+    if not normalized:
+        return None, False
+    if normalized in owner_emails:
+        return None, False
+    if normalized in crm_people:
+        return crm_people[normalized], False
+
+    domain = normalized.split("@", 1)[1]
+    company_id = None
+    if not is_common_email_provider(domain):
+        company_id = upsert_company_by_domain(cur, domain)
+
+    person_id = upsert_person_by_email(cur, name, normalized, company_id)
+    crm_people[normalized] = person_id
+    person_company_map[person_id] = company_id
+    stats["auto_created"] += 1
+    return person_id, True
+
+
+# ---------------------------------------------------------------------------
+# Sync state
+# ---------------------------------------------------------------------------
+
+
+def init_sync_state(conn):
+    """Create the sync state table if it does not exist."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crm_sync_state (
+                account text primary key,
+                last_sync_at timestamptz,
+                last_sync_status text,
+                updated_at timestamptz not null default now()
+            )
+            """
+        )
+    conn.commit()
+
+
+def get_last_sync_at(conn, account):
+    """Load the last successful sync timestamp for an account."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT last_sync_at FROM crm_sync_state WHERE account = %s",
+            (account,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_sync_state(conn, account, status):
+    """Upsert sync state for an account."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO crm_sync_state (account, last_sync_at, last_sync_status, updated_at)
+            VALUES (%s, now(), %s, now())
+            ON CONFLICT (account) DO UPDATE
+            SET last_sync_at = EXCLUDED.last_sync_at,
+                last_sync_status = EXCLUDED.last_sync_status,
+                updated_at = now()
+            """,
+            (account, status),
+        )
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Gmail search
 # ---------------------------------------------------------------------------
 
-def search_label_crm(account):
-    """Search for messages with CRM label."""
-    print(f"  [{account}] Searching label:CRM...")
+def search_label_crm(account, after_date=None):
+    """Search for messages with CRM label, optionally after a date."""
+    query = "label:CRM"
+    if after_date:
+        query += f" after:{after_date}"
+    print(f"  [{account}] Searching {query}...")
     try:
-        result = gog(
-            account, "gmail", "messages", "search", "label:CRM", "--max", "500"
-        )
+        result = gog(account, "gmail", "messages", "search", query, "--max", "500")
         messages = (
             result if isinstance(result, list) else result.get("messages", [])
         )
@@ -176,7 +355,7 @@ def search_label_crm(account):
         return []
 
 
-def search_by_crm_people(account, crm_emails, owner_emails):
+def search_by_crm_people(account, crm_emails, owner_emails, after_date=None):
     """Search for messages where CRM people are from/to, in batches."""
     search_emails = sorted(crm_emails - owner_emails)
     if not search_emails:
@@ -199,6 +378,8 @@ def search_by_crm_people(account, crm_emails, owner_emails):
             clauses.append(f"from:{email}")
             clauses.append(f"to:{email}")
         query = " OR ".join(clauses)
+        if after_date:
+            query += f" after:{after_date}"
 
         batch_num = i // SEARCH_BATCH_SIZE + 1
         try:
@@ -412,6 +593,9 @@ def sync_account(
     person_company_map,
     existing_message_ids,
     dry_run=False,
+    last_sync_at=None,
+    full_sync=False,
+    max_fetch=None,
 ):
     """Sync one Gmail account. Returns stats dict."""
     stats = {
@@ -424,12 +608,19 @@ def sync_account(
         "recipients": 0,
         "participants": 0,
         "interactions": 0,
+        "auto_created": 0,
     }
 
+    # Build incremental date filter
+    after_date = None
+    if not full_sync and last_sync_at:
+        after_date = (last_sync_at - timedelta(days=1)).strftime("%Y/%m/%d")
+        print(f"  [{account}] Incremental sync after {after_date}")
+
     # Search for messages
-    crm_label_msgs = search_label_crm(account)
+    crm_label_msgs = search_label_crm(account, after_date)
     counterparty_msgs = search_by_crm_people(
-        account, set(crm_people.keys()), owner_emails
+        account, set(crm_people.keys()), owner_emails, after_date
     )
 
     # Deduplicate by message ID
@@ -453,12 +644,22 @@ def sync_account(
         print("  [DRY RUN] Skipping fetch and import.")
         return stats
 
+    # Apply max-fetch safety valve (newest first, relying on Gmail search order)
+    process_msg_ids = list(all_msgs.keys())
+    if max_fetch:
+        process_msg_ids = process_msg_ids[:max_fetch]
+        print(
+            f"  [{account}] Capping fetch at {max_fetch} messages "
+            f"(processing {len(process_msg_ids)})"
+        )
+
     # Process each message
-    for i, (msg_id, _msg_info) in enumerate(all_msgs.items()):
+    for i, msg_id in enumerate(process_msg_ids):
+        total_to_process = len(process_msg_ids)
         if (i + 1) % COMMIT_EVERY == 0:
             conn.commit()
             print(
-                f"  [{account}] Processed {i+1}/{len(all_msgs)} "
+                f"  [{account}] Processed {i+1}/{total_to_process} "
                 f"(imported: {stats['imported']}, skipped: {stats['skipped']})"
             )
 
@@ -522,14 +723,7 @@ def sync_account(
         to_parties = parse_email_addresses(to_header)
         cc_parties = parse_email_addresses(cc_header)
 
-        # Resolve from_person_id
-        from_person_id = None
-        if from_parties:
-            from_email = normalize_email(from_parties[0][1])
-            if from_email and from_email in crm_people:
-                from_person_id = crm_people[from_email]
-
-        # Determine direction
+        # Determine direction before parties are auto-created
         from_is_owner = False
         if from_parties:
             from_email = normalize_email(from_parties[0][1])
@@ -552,6 +746,20 @@ def sync_account(
 
         # Upsert thread
         with conn.cursor() as cur:
+            # Auto-create missing counterparties so the rest of the pipeline
+            # can link them naturally.
+            for name, email in from_parties + to_parties + cc_parties:
+                ensure_person(
+                    cur, name, email, crm_people, owner_emails, person_company_map, stats
+                )
+
+            # Resolve from_person_id (now guaranteed to exist if not owner)
+            from_person_id = None
+            if from_parties:
+                from_email = normalize_email(from_parties[0][1])
+                if from_email and from_email in crm_people:
+                    from_person_id = crm_people[from_email]
+
             thread_pk = upsert_thread(cur, thread_id, subject, sent_at)
             stats["threads"] += 1
 
@@ -633,6 +841,9 @@ def sync_account(
                     stats["interactions"] += 1
 
     conn.commit()
+    if not dry_run:
+        set_sync_state(conn, account, "success")
+        print(f"  [{account}] Sync state recorded")
     return stats
 
 
@@ -665,6 +876,12 @@ def main():
     parser.add_argument(
         "--account", type=str, default=None, help="Sync only this account"
     )
+    parser.add_argument(
+        "--full-sync", action="store_true", help="Ignore last sync state and sync everything"
+    )
+    parser.add_argument(
+        "--max-fetch", type=int, default=None, help="Max messages to fetch per account (newest first)"
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -677,6 +894,9 @@ def main():
     conn = psycopg2.connect(dbname=DB_NAME)
     conn.autocommit = False
 
+    # Ensure sync state table exists
+    init_sync_state(conn)
+
     # Load CRM data
     print("\nLoading CRM data...")
     crm_people = get_crm_people(conn)
@@ -688,6 +908,17 @@ def main():
     print(f"  {len(existing_message_ids)} Gmail messages already imported")
     print(f"  Owner emails excluded: {owner_emails}")
 
+    # Load last sync state unless full sync requested
+    last_sync_map = {}
+    if not args.full_sync:
+        for account in accounts:
+            last_sync_map[account] = get_last_sync_at(conn, account)
+            if last_sync_map[account]:
+                print(
+                    f"  Last successful sync for {account}: "
+                    f"{last_sync_map[account].isoformat()}"
+                )
+
     # Sync each account
     all_stats = []
     for account in accounts:
@@ -697,7 +928,11 @@ def main():
 
         stats = sync_account(
             conn, account, crm_people, owner_emails,
-            person_company_map, existing_message_ids, dry_run=args.dry_run,
+            person_company_map, existing_message_ids,
+            dry_run=args.dry_run,
+            last_sync_at=last_sync_map.get(account),
+            full_sync=args.full_sync,
+            max_fetch=args.max_fetch,
         )
         all_stats.append((account, stats))
 

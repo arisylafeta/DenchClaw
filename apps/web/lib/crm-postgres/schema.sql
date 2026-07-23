@@ -38,6 +38,9 @@ create table if not exists crm_people (
   email_opted_out boolean default false
 );
 
+alter table crm_people
+  add column if not exists last_interaction_at timestamptz;
+
 create table if not exists crm_email_threads (
   id text primary key,
   subject text,
@@ -397,3 +400,47 @@ create index if not exists idx_crm_commercial_opportunities_company_id on crm_co
 create index if not exists idx_crm_commercial_opportunities_type_status on crm_commercial_opportunities (opportunity_type, status);
 create index if not exists idx_crm_commercial_opportunities_source on crm_commercial_opportunities (source_system, source_id) where source_id is not null;
 create index if not exists idx_crm_commercial_opportunities_deadline on crm_commercial_opportunities (deadline_at) where status = 'open' and deadline_at is not null;
+
+-- Campaign metrics snapshot (one row per auction/campaign).
+-- Aggregate metrics filled from the rebattery-platform `auction.invites` /
+-- `auction.emails` / `auction.questions` tables after each campaign.
+-- Read-only CRM object: registered as crm_objects(name='campaign') + crm_fields
+-- in the live database (decorated here for versioning).
+create table if not exists campaigns (
+  id text primary key,
+  campaign_name text not null,
+  auction_slug text not null unique,
+  type text not null default 'auction_invite',
+  channel text not null default 'email-postmark',
+  audience text,
+  status text not null default 'live',
+  source_system text not null default 'rebattery-platform',
+  launched_at timestamptz,
+  last_invite_at timestamptz,
+  audience_size integer not null default 0,
+  invites_sent integer not null default 0,
+  emails_delivered integer not null default 0,
+  emails_opened integer not null default 0,
+  emails_clicked integer not null default 0,
+  emails_bounced integer not null default 0,
+  opted_out integer not null default 0,
+  invitees_viewed integer not null default 0,
+  total_views integer not null default 0,
+  questions_asked integer not null default 0,
+  quotes_submitted integer not null default 0,
+  total_quote_value numeric(14,2) not null default 0,
+  crm_person_coverage integer not null default 0,
+  metrics_refreshed_at timestamptz not null default now(),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_campaigns_set_updated_at on campaigns;
+create trigger trg_campaigns_set_updated_at
+  before update on campaigns
+  for each row
+  execute function set_updated_at();
+
+create index if not exists campaigns_status_idx on campaigns (status);
+create index if not exists campaigns_launched_at_idx on campaigns (launched_at desc nulls last);

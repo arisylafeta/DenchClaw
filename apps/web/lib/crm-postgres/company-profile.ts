@@ -87,6 +87,13 @@ export type PostgresCompanyProfile = {
     name: string | null;
     domain: string | null;
     website: string | null;
+    platform_role: string | null;
+    country: string | null;
+    city: string | null;
+    about: string | null;
+    sectors: string[] | null;
+    roles: string[] | null;
+    last_interaction_at: string | null;
     notes: string | null;
     created_at: string | null;
     updated_at: string | null;
@@ -96,6 +103,7 @@ export type PostgresCompanyProfile = {
     name: string | null;
     email: string | null;
     job_title: string | null;
+    last_interaction_at: string | null;
   }>;
   threads: Array<{
     id: string;
@@ -129,6 +137,13 @@ type CompanyRow = {
   name: string | null;
   domain: string | null;
   website: string | null;
+  platform_role: string | null;
+  country: string | null;
+  city: string | null;
+  about: string | null;
+  sectors: string[] | null;
+  roles: string[] | null;
+  last_interaction_at: string | Date | null;
   notes: string | null;
   created_at: string | Date | null;
   updated_at: string | Date | null;
@@ -139,6 +154,7 @@ type PersonRow = {
   name: string | null;
   email: string | null;
   job_title: string | null;
+  last_interaction_at: string | Date | null;
 };
 
 type ThreadRow = {
@@ -251,6 +267,13 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            name,
            domain,
            website,
+           platform_role,
+           country,
+           city,
+           about,
+           sectors,
+           roles,
+           null::timestamptz as last_interaction_at,
            notes,
            created_at,
            updated_at
@@ -266,6 +289,13 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
     name: raw.name,
     domain: raw.domain,
     website: raw.website ?? deriveWebsite(raw.domain),
+    platform_role: raw.platform_role,
+    country: raw.country,
+    city: raw.city,
+    about: raw.about,
+    sectors: raw.sectors,
+    roles: raw.roles,
+    last_interaction_at: iso(raw.last_interaction_at),
     notes: raw.notes,
     created_at: iso(raw.created_at),
     updated_at: iso(raw.updated_at),
@@ -277,7 +307,8 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
            id,
            full_name as name,
            email,
-           job_title
+           job_title,
+           last_interaction_at
       from crm_people
      where company_id = $1
         or ($2::text is not null and lower(split_part(email, '@', 2)) = $2)
@@ -293,9 +324,17 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
         name: row.name,
         email: row.email,
         job_title: row.job_title,
+        last_interaction_at: iso(row.last_interaction_at),
       };
     })
     .toSorted((a, b) => String(b.name ?? "").localeCompare(String(a.name ?? "")));
+
+  const interactionRows = await queryPg<{ last_interaction_at: string | Date | null }>(`
+    select max(occurred_at) as last_interaction_at
+      from crm_interactions
+     where company_id = $1
+  `, [company.id]);
+  company.last_interaction_at = iso(interactionRows[0]?.last_interaction_at ?? null);
 
   const threads = await queryPg<ThreadRow>(`
     select t.id,

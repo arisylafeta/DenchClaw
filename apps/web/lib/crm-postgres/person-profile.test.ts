@@ -27,6 +27,7 @@ describe("getPostgresPersonProfile", () => {
             status: null,
             job_title: null,
             linkedin_url: null,
+            last_interaction_at: "2026-06-22T11:59:24Z",
             notes: "Typeform submission - Buyer Sourcing Criteria",
             created_at: null,
             updated_at: null,
@@ -39,5 +40,6 @@ describe("getPostgresPersonProfile", () => {
     const profile = await getPostgresPersonProfile("gog:person:ari.sylafeta@gmail.com");
 
     expect(profile?.person.notes).toBe("Typeform submission - Buyer Sourcing Criteria");
+    expect(profile?.person.last_interaction_at).toBe("2026-06-22T11:59:24Z");
   });
 });

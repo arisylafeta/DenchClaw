@@ -6,7 +6,6 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CompanyFavicon } from "./company-favicon";
 import { PersonAvatar } from "./person-avatar";
-import { ConnectionStrengthChip } from "./connection-strength-chip";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
 import { ProfileThreadList } from "./inbox/profile-thread-list";
@@ -23,12 +22,15 @@ type CompanyResponse = {
     name: string | null;
     domain: string | null;
     website: string | null;
+    platform_role: string | null;
+    country: string | null;
+    city: string | null;
+    about: string | null;
+    sectors: string[] | null;
+    roles: string[] | null;
     industry: string | null;
     type: string | null;
     source: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
     last_interaction_at: string | null;
     notes: string | null;
     created_at: string | null;
@@ -39,9 +41,6 @@ type CompanyResponse = {
     name: string | null;
     email: string | null;
     job_title: string | null;
-    strength_score: number | null;
-    strength_label: string;
-    strength_color: string;
     last_interaction_at: string | null;
     avatar_url: string | null;
   }>;
@@ -286,7 +285,6 @@ function CompanyHeader({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <EditableTitleHeading name={company.name} saveName={onSaveName} />
-            <ConnectionStrengthChip score={company.strength_score} />
           </div>
           <div
             className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]"
@@ -354,7 +352,7 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
           <Stat label="People" value={summary.people_count.toLocaleString()} />
           <Stat label="Threads" value={summary.thread_count.toLocaleString()} />
           <Stat label="Meetings" value={summary.event_count.toLocaleString()} />
-          <Stat label="Strength" value={company.strength_label} />
+          <Stat label="Last contact" value={company.last_interaction_at ? formatRelativeDate(company.last_interaction_at) : "—"} />
         </div>
       </section>
       <section>
@@ -383,6 +381,48 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
       </section>
       <section>
         <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
+          Enrichment
+        </h3>
+        {company.about && (
+          <p className="mb-3 text-[13px]" style={{ color: "var(--color-text)" }}>
+            {company.about}
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Country" value={company.country ?? "—"} />
+          <Stat label="City" value={company.city ?? "—"} />
+          <Stat label="Sectors" value={company.sectors?.length ?? 0} />
+          <Stat label="Roles" value={company.roles?.length ?? 0} />
+        </div>
+        {company.sectors && company.sectors.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {company.sectors.map((sector) => (
+              <span
+                key={sector}
+                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
+                style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
+              >
+                {sector.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
+        {company.roles && company.roles.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {company.roles.map((role) => (
+              <span
+                key={role}
+                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
+                style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
+              >
+                {role.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+      <section>
+        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
           Details
         </h3>
         <div
@@ -396,8 +436,12 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
             link={company.website ?? undefined}
             external
           />
+          <Field label="Country" value={company.country} />
+          <Field label="City" value={company.city} />
           <Field label="Industry" value={company.industry} />
           <Field label="Type" value={company.type} />
+          <Field label="Sectors" value={joinOrDash(company.sectors ?? [])} />
+          <Field label="Platform Role" value={company.platform_role} />
           <Field label="Source" value={company.source} />
           <Field
             label="Last contact"
@@ -723,7 +767,6 @@ function TeamTab({
                   {[person.job_title, person.email].filter(Boolean).join(" · ")}
                 </p>
               </div>
-              <ConnectionStrengthChip score={person.strength_score} size="sm" showLabel={false} />
               <span
                 className="text-right text-[11px] shrink-0 w-16"
                 style={{ color: "var(--color-text-muted)" }}

@@ -61,6 +61,8 @@ const supportedTables: Record<string, string> = {
   email_message: "crm_email_messages",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
+  campaign: "campaigns",
+  campaigns: "campaigns",
 };
 
 function quoteIdentifier(identifier: string): string {

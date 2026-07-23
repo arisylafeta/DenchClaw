@@ -9,8 +9,8 @@ import type { LiveStats } from "./preview-workspace-mock";
  * so the user is literally looking at a preview of the workspace they're
  * about to open.
  *
- * Real data: polls `GET /api/crm/people?limit=12` (top N by strength
- * score). While sync is running, `liveStats.people` ticks upward, which we
+ * Real data: polls `GET /api/crm/people?limit=12` (top N by recent
+ * interaction). While sync is running, `liveStats.people` ticks upward, which we
  * use as a refresh trigger so the preview updates as contacts land. When
  * the API has fewer rows than we want to show, we pad with placeholder
  * "loading" rows so the table still reads as a populated surface.
@@ -24,9 +24,7 @@ type ApiPerson = {
   name: string | null;
   email: string | null;
   company_name: string | null;
-  strength_score: number | null;
   last_interaction_at: string | null;
-  avatar_url: string | null;
   job_title: string | null;
 };
 
@@ -184,7 +182,7 @@ function CrmListHeader({ count }: { count: number }) {
         </span>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
-        <ToolbarPill label="Sort: Strength" />
+        <ToolbarPill label="Sort: Recent" />
         <ToolbarPill label="Filter" />
       </div>
     </header>
@@ -207,7 +205,7 @@ function ToolbarPill({ label }: { label: string }) {
 }
 
 // Column layout used by both header and every row so they align perfectly.
-const GRID_COLS = "minmax(0,1fr) 120px 86px 72px";
+const GRID_COLS = "minmax(0,1fr) 120px 86px";
 
 function ColumnHeader() {
   return (
@@ -222,7 +220,6 @@ function ColumnHeader() {
       <span>Person</span>
       <span>Company</span>
       <span className="text-right">Last touch</span>
-      <span className="text-right">Strength</span>
     </div>
   );
 }
@@ -255,7 +252,6 @@ function PersonRow({
 function RealPerson({ person }: { person: ApiPerson }) {
   const displayName = person.name?.trim() || person.email || "Unknown";
   const company = person.company_name ?? deriveCompanyFromEmail(person.email);
-  const strength = clamp(person.strength_score ?? 0, 0, 100);
   const lastTouch = formatRelative(person.last_interaction_at);
   const subtitle = person.job_title?.trim() || person.email || "";
 
@@ -282,8 +278,6 @@ function RealPerson({ person }: { person: ApiPerson }) {
       >
         {lastTouch}
       </p>
-
-      <StrengthBar value={strength} />
     </>
   );
 }
@@ -313,30 +307,7 @@ function PlaceholderPerson() {
         className="block h-2 w-12 justify-self-end rounded"
         style={{ background: "var(--color-surface-hover)" }}
       />
-      <span
-        className="block h-2 w-10 justify-self-end rounded"
-        style={{ background: "var(--color-surface-hover)" }}
-      />
     </>
-  );
-}
-
-function StrengthBar({ value }: { value: number }) {
-  return (
-    <div className="flex items-center justify-end gap-1.5">
-      <div
-        className="relative h-1.5 w-10 overflow-hidden rounded-full"
-        style={{ background: "var(--color-surface-hover)" }}
-      >
-        <div
-          className="absolute inset-y-0 left-0 rounded-full"
-          style={{ width: `${value}%`, background: "var(--color-accent)" }}
-        />
-      </div>
-      <span className="w-5 text-right text-[10.5px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>
-        {Math.round(value)}
-      </span>
-    </div>
   );
 }
 
@@ -354,10 +325,6 @@ function deriveCompanyFromEmail(email: string | null): string | null {
   const label = host.split(".")[0] ?? host;
   if (!label) {return null;}
   return label.charAt(0).toUpperCase() + label.slice(1);
-}
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
 }
 
 function formatRelative(iso: string | null): string {
