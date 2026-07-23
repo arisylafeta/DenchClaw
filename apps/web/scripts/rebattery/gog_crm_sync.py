@@ -29,7 +29,7 @@ import psycopg2
 
 # --- Config ---
 GOG_BIN = "/usr/local/bin/gog"
-KEYRING_PASSWORD_PATH = "/root/.hermes/profiles/default/workspace/.secrets/gog-keyring-password"
+KEYRING_PASSWORD_PATH = "/root/.hermes/workspace/.secrets/gog-keyring-password"
 ACCOUNTS = ["ari@rebattery.io", "alex@rebattery.io"]
 DB_NAME = "denchclaw"
 SEARCH_BATCH_SIZE = 8  # emails per Gmail search query (from + to = 16 clauses)
