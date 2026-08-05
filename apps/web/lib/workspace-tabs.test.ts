@@ -49,7 +49,7 @@ function fileInput(id: string, title: string = id) {
 
 describe("openContent — preview replacement (the original bug)", () => {
   it("replaces an active preview with a new preview in the same slot", () => {
-    // Reproduces: ?path=tmp/companies.sql -> click skills/app-builder/SKILL.md
+    // Reproduces: ?path=tmp/companies.sql -> click skills/crm/SKILL.md
     let state: WorkspaceTabsState = EMPTY_TABS_STATE;
     state = openContent(state, {
       ...fileInput("tmp/companies.sql", "companies.sql"),
@@ -59,15 +59,15 @@ describe("openContent — preview replacement (the original bug)", () => {
     expect(state.contentTabs).toHaveLength(1);
 
     state = openContent(state, {
-      ...fileInput("skills/app-builder/SKILL.md", "SKILL.md"),
+      ...fileInput("skills/crm/SKILL.md", "SKILL.md"),
       preview: true,
     });
 
     // Old tab gone, new tab takes the slot, active id matches the new id.
     // No "stale id" window — both move atomically.
-    expect(state.contentTabs.map((t) => t.id)).toEqual(["skills/app-builder/SKILL.md"]);
-    expect(state.activeContentId).toBe("skills/app-builder/SKILL.md");
-    expect(selectActivePath(state)).toBe("skills/app-builder/SKILL.md");
+    expect(state.contentTabs.map((t) => t.id)).toEqual(["skills/crm/SKILL.md"]);
+    expect(state.activeContentId).toBe("skills/crm/SKILL.md");
+    expect(selectActivePath(state)).toBe("skills/crm/SKILL.md");
   });
 
   it("focuses an existing tab instead of duplicating it", () => {
@@ -512,10 +512,10 @@ describe("workspaceTabsReducer", () => {
     });
     state = workspaceTabsReducer(state, {
       type: "openContent",
-      tab: { ...fileInput("skills/app-builder/SKILL.md"), preview: true },
+      tab: { ...fileInput("skills/crm/SKILL.md"), preview: true },
     });
-    expect(state.contentTabs.map((t) => t.id)).toEqual(["skills/app-builder/SKILL.md"]);
-    expect(state.activeContentId).toBe("skills/app-builder/SKILL.md");
+    expect(state.contentTabs.map((t) => t.id)).toEqual(["skills/crm/SKILL.md"]);
+    expect(state.activeContentId).toBe("skills/crm/SKILL.md");
   });
 
   it("dispatches activateContent and ignores unknown ids", () => {

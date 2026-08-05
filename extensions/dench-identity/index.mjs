@@ -582,7 +582,6 @@ function buildComposioDefaultGuidance(composioAppsSkillPath) {
 function buildIdentityPrompt(workspaceDir) {
   const skillsDir = path2.join(workspaceDir, "skills");
   const crmSkillPath = path2.join(skillsDir, "crm", "SKILL.md");
-  const appBuilderSkillPath = path2.join(skillsDir, "app-builder", "SKILL.md");
   const composioAppsSkillPath = path2.join(skillsDir, "dench-integrations", "SKILL.md");
   const appsDir = path2.join(workspaceDir, "apps");
   const dbPath = path2.join(workspaceDir, "workspace.duckdb");
@@ -622,7 +621,6 @@ When in doubt, delegate. A well-delegated task finishes faster and produces bett
 | Specialist | Skill Path | Capabilities | Model Guidance |
 |---|---|---|---|
 | **CRM Analyst** | \`${crmSkillPath}\` | DuckDB queries, object/field/entry CRUD, pipeline ops, data enrichment, PIVOT views, report generation, workspace docs | Default model; fast model for simple queries |
-| **App Builder** | \`${appBuilderSkillPath}\` | Build \`.dench.app\` web apps with DuckDB, Chart.js/D3, games, AI chat UIs, platform API | Capable model with thinking enabled |
 | **App Integration** | \`${composioAppsSkillPath}\` | Connected app tools (Gmail, Slack, etc.) via ${DENCH_INTEGRATIONS_DISPLAY_NAME} \u2014 recipes and argument defaults | Default model |
 
 ### Ad-hoc specialists (check for custom skills first)
