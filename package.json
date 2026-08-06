@@ -60,7 +60,8 @@
     "web:build": "pnpm --dir apps/web build",
     "web:dev": "pnpm --dir apps/web dev",
     "web:install": "pnpm --dir apps/web install",
-    "web:prepack": "cp -r apps/web/public apps/web/.next/standalone/apps/web/public && cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static && cp apps/web/lib/denchclaw-mcp-server.mjs apps/web/.next/standalone/apps/web/denchclaw-mcp-server.mjs && cp apps/web/lib/dench-sync-poll-tick.mjs apps/web/.next/standalone/apps/web/dench-sync-poll-tick.mjs && node scripts/flatten-standalone-deps.mjs"
+    "web:prepack": "cp -r apps/web/public apps/web/.next/standalone/apps/web/public && cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static && cp apps/web/lib/denchclaw-mcp-server.mjs apps/web/.next/standalone/apps/web/denchclaw-mcp-server.mjs && cp apps/web/lib/dench-sync-poll-tick.mjs apps/web/.next/standalone/apps/web/dench-sync-poll-tick.mjs && node scripts/flatten-standalone-deps.mjs",
+    "projects:mvp": "node scripts/rebattery/run-projects-mvp-fixture.mjs"
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",

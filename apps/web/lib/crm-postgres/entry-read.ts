@@ -63,6 +63,8 @@ const supportedTables: Record<string, string> = {
   interaction: "crm_interactions",
   campaign: "campaigns",
   campaigns: "campaigns",
+  project: "projects",
+  work_task: "work_tasks",
 };
 
 function quoteIdentifier(identifier: string): string {
@@ -105,6 +107,8 @@ export async function getReverseRelationsForEntry(
              when o.name = 'interaction' then 'Type'
              when o.name = 'people' then 'Full Name'
              when o.name in ('company', 'companies') then 'Company Name'
+             when o.name = 'work_task' then 'Title'
+             when o.name = 'project' then 'Name'
              else coalesce(o.display_field, display_field.name, 'id')
            end as display_field,
            coalesce(
@@ -114,6 +118,8 @@ export async function getReverseRelationsForEntry(
              nullif(trim(concat_ws(' ', interactions.type, interactions.occurred_at::text)), ''),
              nullif(people.full_name, ''),
              nullif(companies.name, ''),
+             nullif(work_tasks.title, ''),
+             nullif(projects.name, ''),
              l.source_entry_id
            ) as label
       from crm_relation_links l
@@ -137,6 +143,8 @@ export async function getReverseRelationsForEntry(
       left join crm_interactions interactions on o.name = 'interaction' and interactions.id = l.source_entry_id
       left join crm_people people on o.name = 'people' and people.id = l.source_entry_id
       left join crm_companies companies on o.name in ('company', 'companies') and companies.id = l.source_entry_id
+      left join work_tasks on o.name = 'work_task' and work_tasks.id = l.source_entry_id
+      left join projects on o.name = 'project' and projects.id = l.source_entry_id
      where l.target_entry_id = $1
      order by f.sort_order, l.position, l.source_entry_id
   `, [entryId]);
@@ -185,6 +193,10 @@ async function resolveRelationLabels(fields: FieldRow[], entry: Record<string, u
     labels[field.name] = {};
     faviconUrls[field.name] = {};
     if (ids.length === 0) continue;
+    if (field.related_object_name === "project" || field.name === "Project") {
+      const rows = await queryPg<{ id: string; name: string }>("select id, name from projects where id = any($1::text[])", [Array.from(ids)]);
+      for (const row of rows) labels[field.name][row.id] = row.name || row.id;
+    }
     if (field.related_object_name === "company" || field.name === "Company") {
       const rows = await queryPg<{ id: string; name?: string | null; domain?: string | null; website?: string | null }>(
         "select id, name, domain, website from crm_companies where id = any($1::text[])",

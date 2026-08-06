@@ -216,6 +216,26 @@ before update on crm_commercial_opportunities
 for each row
 execute function set_updated_at();
 
+-- ReBattery Projects / Work Tasks prototype: canonical tables intentionally keep a small,
+-- explicit field set so the existing object table/detail/Kanban interfaces can render them.
+create table if not exists projects (
+  id text primary key, name text not null, portfolio text, investment_state text, outcome text,
+  principal_weakness text, reinvestment_direction text, last_reviewed date,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table if not exists work_tasks (
+  id text primary key, reb_key text not null unique, title text not null, status text not null,
+  project_id text references projects(id) on delete set null, capability text, task_type text, priority text,
+  owner text, repository text, source_path text, external_linear_id text, current_impact text,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create index if not exists work_tasks_project_idx on work_tasks(project_id);
+create index if not exists work_tasks_status_idx on work_tasks(status);
+drop trigger if exists trg_projects_set_updated_at on projects;
+create trigger trg_projects_set_updated_at before update on projects for each row execute function set_updated_at();
+drop trigger if exists trg_work_tasks_set_updated_at on work_tasks;
+create trigger trg_work_tasks_set_updated_at before update on work_tasks for each row execute function set_updated_at();
+
 -- crm_relation_links is a VIEW (not a table) that unions together all of the
 -- relationship edges derived from the junction tables and FK columns above.
 create or replace view crm_relation_links as
@@ -376,6 +396,10 @@ select
   crm_commercial_opportunities.created_at
 from crm_commercial_opportunities
 where crm_commercial_opportunities.seller_company_id is not null;
+union all
+select 'reb_project_object'::text, 'reb_work_task_project_field'::text,
+       work_tasks.id, work_tasks.project_id, 0, work_tasks.created_at
+from work_tasks where work_tasks.project_id is not null;
 
 -- Indexes (non-constraint indexes only; primary keys & unique constraints
 -- are declared inline above).

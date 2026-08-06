@@ -22,6 +22,8 @@ const canonicalTableByObjectName: Record<string, string> = {
   email_message: "crm_email_messages",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
+  project: "projects",
+  work_task: "work_tasks",
 };
 
 // Objects exposed as read-only CRM tables (e.g. campaign metrics snapshots). Any
