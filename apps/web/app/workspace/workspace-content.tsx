@@ -4024,6 +4024,7 @@ function ObjectView({
               statuses={data.statuses}
               members={members}
               relationLabels={data.relationLabels}
+              accordionGroupFieldName={data.object.name === "work_task" ? "Project" : undefined}
               onEntryClick={handleEntryClickProp}
               onRefresh={handleRefresh}
             />

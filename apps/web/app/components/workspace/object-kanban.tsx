@@ -45,6 +45,8 @@ type ObjectKanbanProps = {
   statuses: Status[];
   members?: Array<{ id: string; name: string }>;
   relationLabels?: Record<string, Record<string, string>>;
+  /** Optional outer grouping rendered as independently expandable Kanban accordions. */
+  accordionGroupFieldName?: string;
   onEntryClick?: (entryId: string) => void;
   onRefresh?: () => void;
 };
@@ -73,6 +75,57 @@ function parseRelationValue(value: string | null | undefined): string[] {
     }
   }
   return [trimmed];
+}
+
+
+function columnDropId(sectionKey: string, columnName: string): string {
+  return `column:${encodeURIComponent(sectionKey)}:${encodeURIComponent(columnName)}`;
+}
+
+function parseColumnDropId(id: string): { sectionKey: string; columnName: string } | null {
+  if (!id.startsWith("column:")) {return null;}
+  const separator = id.indexOf(":", "column:".length);
+  if (separator < 0) {return null;}
+  return {
+    sectionKey: decodeURIComponent(id.slice("column:".length, separator)),
+    columnName: decodeURIComponent(id.slice(separator + 1)),
+  };
+}
+
+export type KanbanAccordionSection = {
+  key: string;
+  label: string;
+  entries: Record<string, unknown>[];
+};
+
+export function buildKanbanAccordionSections(
+  entries: Record<string, unknown>[],
+  fieldName: string,
+  labels: Record<string, string> = {},
+): KanbanAccordionSection[] {
+  const entriesByKey = new Map<string, Record<string, unknown>[]>();
+  for (const entry of entries) {
+    const key = parseRelationValue(safeString(entry[fieldName]))[0] ?? "_ungrouped";
+    const groupedEntries = entriesByKey.get(key) ?? [];
+    groupedEntries.push(entry);
+    entriesByKey.set(key, groupedEntries);
+  }
+
+  const sections: KanbanAccordionSection[] = [];
+  for (const [key, label] of Object.entries(labels)) {
+    const groupedEntries = entriesByKey.get(key);
+    if (!groupedEntries) {continue;}
+    sections.push({ key, label, entries: groupedEntries });
+    entriesByKey.delete(key);
+  }
+  for (const [key, groupedEntries] of entriesByKey) {
+    sections.push({
+      key,
+      label: key === "_ungrouped" ? "No project" : labels[key] ?? key,
+      entries: groupedEntries,
+    });
+  }
+  return sections;
 }
 
 function getEntryTitle(entry: Record<string, unknown>, fields: Field[]): string {
@@ -361,6 +414,7 @@ function EnumBadgeMini({
 
 function DroppableColumn({
   columnName,
+  droppableId,
   color,
   items,
   cardFields,
@@ -374,6 +428,7 @@ function DroppableColumn({
   onToast,
 }: {
   columnName: string;
+  droppableId: string;
   color: string;
   items: Record<string, unknown>[];
   cardFields: Field[];
@@ -386,7 +441,7 @@ function DroppableColumn({
   onRefresh?: () => void;
   onToast?: (message: string, opts?: { type?: "success" | "error" | "info" }) => void;
 }) {
-  const { setNodeRef } = useDroppable({ id: `column:${columnName}` });
+  const { setNodeRef } = useDroppable({ id: droppableId });
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(columnName);
   const [renaming, setRenaming] = useState(false);
@@ -535,12 +590,14 @@ export function ObjectKanban({
   statuses,
   members,
   relationLabels,
+  accordionGroupFieldName,
   onEntryClick,
   onRefresh,
 }: ObjectKanbanProps) {
   const showToast = useToast();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
   // Optimistic local entries for instant drag feedback
   const [localEntries, setLocalEntries] = useState(entries);
 
@@ -566,6 +623,40 @@ export function ObjectKanban({
     return fields.find((f) => f.type === "enum") ?? null;
   }, [fields]);
 
+  const accordionField = useMemo(
+    () => accordionGroupFieldName
+      ? fields.find((field) => field.name === accordionGroupFieldName) ?? null
+      : null,
+    [accordionGroupFieldName, fields],
+  );
+
+  const accordionSections = useMemo(
+    () => accordionField
+      ? buildKanbanAccordionSections(
+          localEntries,
+          accordionField.name,
+          relationLabels?.[accordionField.name],
+        )
+      : [],
+    [accordionField, localEntries, relationLabels],
+  );
+  const accordionSectionKeys = accordionSections.map((section) => section.key).join(" ");
+
+  useEffect(() => {
+    if (!accordionField || accordionSections.length === 0) {return;}
+    setExpandedSections((current) => {
+      const visibleKeys = new Set(accordionSections.map((section) => section.key));
+      const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)));
+      if (next.size === 0) {next.add(accordionSections[0].key);}
+      if (next.size === current.size && Array.from(next).every((key) => current.has(key))) {
+        return current;
+      }
+      return next;
+    });
+  // The stable key list prevents task moves from resetting the user's expansion choices.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accordionField, accordionSectionKeys]);
+
   // Determine columns
   const columns = useMemo(() => {
     if (statuses.length > 0) {
@@ -588,13 +679,12 @@ export function ObjectKanban({
     return Array.from(unique).map((v) => ({ name: v, color: "#94a3b8" }));
   }, [statuses, groupField, localEntries]);
 
-  // Group entries by column
-  const grouped = useMemo(() => {
+  const groupEntriesByColumn = useCallback((sectionEntries: Record<string, unknown>[]) => {
     const groups: Record<string, Record<string, unknown>[]> = {};
     for (const col of columns) {groups[col.name] = [];}
     groups["_ungrouped"] = [];
 
-    for (const entry of localEntries) {
+    for (const entry of sectionEntries) {
       const val = groupField ? safeString(entry[groupField.name]) : "";
       if (groups[val]) {
         groups[val].push(entry);
@@ -603,9 +693,14 @@ export function ObjectKanban({
       }
     }
     return groups;
-  }, [columns, localEntries, groupField]);
+  }, [columns, groupField]);
 
-  const cardFields = fields.filter((f) => f !== groupField);
+  const grouped = useMemo(
+    () => groupEntriesByColumn(localEntries),
+    [groupEntriesByColumn, localEntries],
+  );
+
+  const cardFields = fields.filter((f) => f !== groupField && f !== accordionField);
 
   // Active drag entry for overlay
   const activeEntry = useMemo(() => {
@@ -622,7 +717,7 @@ export function ObjectKanban({
   const handleDragOver = useCallback((event: { over: { id: string | number } | null }) => {
     const overId = event.over?.id ? String(event.over.id) : null;
     if (overId?.startsWith("column:")) {
-      setOverColumnId(overId.replace("column:", ""));
+      setOverColumnId(overId);
     } else {
       setOverColumnId(null);
     }
@@ -637,60 +732,56 @@ export function ObjectKanban({
       const { active, over } = event;
       if (!over || !groupField) {return;}
 
-      const overId = String(over.id);
-      if (!overId.startsWith("column:")) {return;}
+      const target = parseColumnDropId(String(over.id));
+      if (!target) {return;}
 
-      const targetColumn = overId.replace("column:", "");
       const entryId = String(active.id);
       const entry = localEntries.find((e) => String(e.entry_id) === entryId);
       if (!entry) {return;}
 
       const currentValue = safeString(entry[groupField.name]);
-      if (currentValue === targetColumn) {return;}
+      const currentAccordionValue = accordionField
+        ? parseRelationValue(safeString(entry[accordionField.name]))[0] ?? "_ungrouped"
+        : "_all";
+      const targetAccordionValue = accordionField ? target.sectionKey : "_all";
+      if (currentValue === target.columnName && currentAccordionValue === targetAccordionValue) {return;}
 
-      // Optimistic update
-      setLocalEntries((prev) =>
-        prev.map((e) =>
-          String(e.entry_id) === entryId
-            ? { ...e, [groupField.name]: targetColumn }
-            : e,
-        ),
-      );
+      const changedFields: Record<string, unknown> = {
+        [groupField.name]: target.columnName,
+      };
+      if (accordionField && currentAccordionValue !== targetAccordionValue) {
+        changedFields[accordionField.name] = targetAccordionValue === "_ungrouped"
+          ? ""
+          : targetAccordionValue;
+      }
 
-      // Persist via API
+      const applyFields = (candidate: Record<string, unknown>, values: Record<string, unknown>) =>
+        String(candidate.entry_id) === entryId ? { ...candidate, ...values } : candidate;
+      setLocalEntries((prev) => prev.map((candidate) => applyFields(candidate, changedFields)));
+
       try {
         const res = await fetch(
           `/api/workspace/objects/${encodeURIComponent(objectName)}/entries/${encodeURIComponent(entryId)}`,
           {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fields: { [groupField.name]: targetColumn } }),
+            body: JSON.stringify({ fields: changedFields }),
           },
         );
         if (res.ok) {
           onRefresh?.();
         } else {
-          // Revert on failure
-          setLocalEntries((prev) =>
-            prev.map((e) =>
-              String(e.entry_id) === entryId
-                ? { ...e, [groupField.name]: currentValue }
-                : e,
-            ),
-          );
+          const previousFields: Record<string, unknown> = { [groupField.name]: currentValue };
+          if (accordionField) {previousFields[accordionField.name] = entry[accordionField.name] ?? "";}
+          setLocalEntries((prev) => prev.map((candidate) => applyFields(candidate, previousFields)));
         }
       } catch {
-        // Revert on error
-        setLocalEntries((prev) =>
-          prev.map((e) =>
-            String(e.entry_id) === entryId
-              ? { ...e, [groupField.name]: currentValue }
-              : e,
-          ),
-        );
+        const previousFields: Record<string, unknown> = { [groupField.name]: currentValue };
+        if (accordionField) {previousFields[accordionField.name] = entry[accordionField.name] ?? "";}
+        setLocalEntries((prev) => prev.map((candidate) => applyFields(candidate, previousFields)));
       }
     },
-    [groupField, localEntries, objectName, onRefresh],
+    [accordionField, groupField, localEntries, objectName, onRefresh],
   );
 
   if (!groupField) {
@@ -706,6 +797,75 @@ export function ObjectKanban({
     );
   }
 
+  const renderBoard = (
+    boardGroups: Record<string, Record<string, unknown>[]>,
+    sectionKey: string,
+  ) => (
+    <div className="flex gap-4 overflow-x-auto pb-4 px-1" style={{ minHeight: "320px" }}>
+      {columns.map((col) => {
+        const droppableId = columnDropId(sectionKey, col.name);
+        return (
+          <DroppableColumn
+            key={droppableId}
+            columnName={col.name}
+            droppableId={droppableId}
+            color={col.color}
+            items={boardGroups[col.name] ?? []}
+            cardFields={cardFields}
+            members={members}
+            relationLabels={relationLabels}
+            onEntryClick={onEntryClick}
+            isOver={overColumnId === droppableId}
+            groupFieldId={groupField.id}
+            objectName={objectName}
+            onRefresh={onRefresh}
+            onToast={showToast}
+          />
+        );
+      })}
+
+      {boardGroups["_ungrouped"]?.length > 0 && (
+        <div
+          className="flex-shrink-0 flex flex-col rounded-xl"
+          style={{
+            width: "280px",
+            background: "var(--color-bg)",
+            border: "1px dashed var(--color-border)",
+          }}
+        >
+          <div
+            className="flex items-center gap-2 px-3 py-2.5 border-b"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <span className="text-sm font-medium" style={{ color: "var(--color-text-muted)" }}>
+              Ungrouped
+            </span>
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full"
+              style={{ background: "var(--color-surface)", color: "var(--color-text-muted)" }}
+            >
+              {boardGroups["_ungrouped"].length}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {boardGroups["_ungrouped"].map((entry, idx) => (
+              <DraggableCard
+                key={safeString(entry.entry_id) || String(idx)}
+                entry={entry}
+                fields={cardFields}
+                members={members}
+                relationLabels={relationLabels}
+                onEntryClick={onEntryClick}
+                objectName={objectName}
+                onToast={showToast}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <DndContext
       sensors={sensors}
@@ -714,75 +874,62 @@ export function ObjectKanban({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div
-        className="flex gap-4 overflow-x-auto pb-4 px-1"
-        style={{ minHeight: "400px" }}
-      >
-        {columns.map((col) => (
-          <DroppableColumn
-            key={col.name}
-            columnName={col.name}
-            color={col.color}
-            items={grouped[col.name] ?? []}
-            cardFields={cardFields}
-            members={members}
-            relationLabels={relationLabels}
-            onEntryClick={onEntryClick}
-            isOver={overColumnId === col.name}
-            groupFieldId={groupField.id}
-            objectName={objectName}
-            onRefresh={onRefresh}
-            onToast={showToast}
-          />
-        ))}
-
-        {/* Ungrouped entries */}
-        {grouped["_ungrouped"]?.length > 0 && (
-          <div
-            className="flex-shrink-0 flex flex-col rounded-xl"
-            style={{
-              width: "280px",
-              background: "var(--color-bg)",
-              border: "1px dashed var(--color-border)",
-            }}
-          >
-            <div
-              className="flex items-center gap-2 px-3 py-2.5 border-b"
-              style={{ borderColor: "var(--color-border)" }}
-            >
-              <span
-                className="text-sm font-medium"
-                style={{ color: "var(--color-text-muted)" }}
+      {accordionField ? (
+        <div className="flex flex-col gap-3 px-1 pb-4">
+          {accordionSections.map((section) => {
+            const isExpanded = expandedSections.has(section.key);
+            return (
+              <section
+                key={section.key}
+                className="rounded-xl border overflow-hidden"
+                style={{ borderColor: "var(--color-border)", background: "var(--color-bg)" }}
               >
-                Ungrouped
-              </span>
-              <span
-                className="text-xs px-1.5 py-0.5 rounded-full"
-                style={{
-                  background: "var(--color-surface)",
-                  color: "var(--color-text-muted)",
-                }}
-              >
-                {grouped["_ungrouped"].length}
-              </span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              {grouped["_ungrouped"].map((entry, idx) => (
-                <DraggableCard
-                  key={safeString(entry.entry_id) || String(idx)}
-                  entry={entry}
-                  fields={cardFields}
-                  members={members}
-                  relationLabels={relationLabels}
-                  onEntryClick={onEntryClick}
-                  objectName={objectName}
-                  onToast={showToast}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+                <button
+                  type="button"
+                  aria-expanded={isExpanded}
+                  onClick={() => setExpandedSections((current) => {
+                    const next = new Set(current);
+                    if (next.has(section.key)) {next.delete(section.key);} else {next.add(section.key);}
+                    return next;
+                  })}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                    aria-hidden
+                  >
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                  <span className="font-medium flex-1" style={{ color: "var(--color-text)" }}>
+                    {section.label}
+                  </span>
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full"
+                    style={{ background: "var(--color-surface)", color: "var(--color-text-muted)" }}
+                  >
+                    {section.entries.length} {section.entries.length === 1 ? "task" : "tasks"}
+                  </span>
+                </button>
+                {isExpanded && (
+                  <div className="border-t px-3 pt-3" style={{ borderColor: "var(--color-border)" }}>
+                    {renderBoard(groupEntriesByColumn(section.entries), section.key)}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        renderBoard(grouped, "_all")
+      )}
 
       {/* Drag overlay - floating card that follows cursor */}
       <DragOverlay dropAnimation={null}>
