@@ -16,6 +16,8 @@ const canonicalTableByObjectName: Record<string, string> = {
 	email_message: "crm_email_messages",
 	calendar_event: "crm_calendar_events",
 	interaction: "crm_interactions",
+	project: "projects",
+	work_task: "work_tasks",
 };
 
 export async function resolvePostgresObjectContext(objectName: string): Promise<PostgresObjectContext | null> {
@@ -38,7 +40,7 @@ export async function resolvePostgresObjectContext(objectName: string): Promise<
 
 export async function verifyPostgresEntryExists(objectName: string, entryId: string): Promise<boolean> {
 	const entityTable = canonicalTableByObjectName[objectName.trim().toLowerCase()];
-	if (!entityTable || !/^crm_[a-z0-9_]+$/.test(entityTable)) return false;
+	if (!entityTable || !/^(?:crm_[a-z0-9_]+|projects|work_tasks)$/.test(entityTable)) return false;
 
 	const rows = await queryPg<{ cnt: number }>(
 		`select count(*)::int as cnt

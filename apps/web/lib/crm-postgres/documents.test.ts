@@ -41,6 +41,17 @@ describe("crm-postgres documents", () => {
 		);
 	});
 
+	it("verifies project and work-task entries against their canonical tables", async () => {
+		queryPg.mockResolvedValue([{ cnt: 1 }]);
+
+		const { verifyPostgresEntryExists } = await import("./documents");
+
+		await expect(verifyPostgresEntryExists("project", "project-1")).resolves.toBe(true);
+		await expect(verifyPostgresEntryExists("work_task", "task-1")).resolves.toBe(true);
+		expect(queryPg.mock.calls[0]?.[0]).toContain("from projects");
+		expect(queryPg.mock.calls[1]?.[0]).toContain("from work_tasks");
+	});
+
 	it("returns false when entry is not found", async () => {
 		queryPg.mockResolvedValueOnce([{ cnt: 0 }]);
 

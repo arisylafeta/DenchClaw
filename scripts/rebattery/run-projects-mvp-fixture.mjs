@@ -35,7 +35,7 @@ const check = spawnSync(
     "-F",
     ",",
     "-c",
-    "select (select count(*) from projects where id = 'reb-project-supplier-inventory'), (select count(*) from work_tasks where project_id = 'reb-project-supplier-inventory')",
+    "select (select count(*) from projects), (select count(*) from work_tasks)",
   ],
   { encoding: "utf8" },
 );

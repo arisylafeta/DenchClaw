@@ -397,7 +397,7 @@ select
 from crm_commercial_opportunities
 where crm_commercial_opportunities.seller_company_id is not null
 union all
-select 'reb_work_task_object'::text, 'reb_work_task_project_field'::text,
+select 'reb_work_task_object'::text, 'reb_work_task_3'::text,
        work_tasks.id, work_tasks.project_id, 0, work_tasks.created_at
 from work_tasks where work_tasks.project_id is not null;
 
