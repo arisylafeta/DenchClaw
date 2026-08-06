@@ -29,6 +29,7 @@ describe("postgres object read adapter", () => {
       if (sql.includes("from crm_objects") && sql.includes("where name = $1")) {
         const objectName = String(params?.[0] ?? "");
         if (objectName === "task") return [{ id: "obj_task", name: "task", default_view: "kanban" }];
+        if (objectName === "work_task") return [{ id: "obj_work_task", name: "work_task", default_view: "kanban", display_field: "Title" }];
         if (objectName === "company") return [{ id: "obj_company", name: "company", display_field: "Name" }];
         if (objectName === "opportunity") return [{ id: "obj_opportunity", name: "opportunity", default_view: "table" }];
         return [{ id: "seed_obj_people_00000000000000", name: "people", default_view: "table" }];
@@ -53,6 +54,16 @@ describe("postgres object read adapter", () => {
             { column_name: "title" },
             { column_name: "status" },
             { column_name: "price_amount" },
+          ];
+        }
+        if (table === "work_tasks") {
+          return [
+            { column_name: "id" },
+            { column_name: "created_at" },
+            { column_name: "updated_at" },
+            { column_name: "title" },
+            { column_name: "status" },
+            { column_name: "project_id" },
           ];
         }
         return [
@@ -84,6 +95,13 @@ describe("postgres object read adapter", () => {
         if (params?.[0] === "obj_opportunity") {
           return mockOpportunityFieldRows;
         }
+        if (params?.[0] === "obj_work_task") {
+          return [
+            { id: "wt_title", name: "Title", type: "text", canonical_column: "title", sort_order: 1 },
+            { id: "wt_status", name: "Status", type: "enum", canonical_column: "status", sort_order: 2 },
+            { id: "wt_project", name: "Project", type: "relation", canonical_column: "project_id", related_object_id: "reb_project_object", related_object_name: "project", relationship_type: "many_to_one", sort_order: 3 },
+          ];
+        }
         return mockFieldRows;
       }
       if (sql.includes("from crm_fields") && sql.includes("where object_id = $1")) {
@@ -95,6 +113,8 @@ describe("postgres object read adapter", () => {
       if (sql.includes("count(*)")) return [{ count: "1" }];
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
       if (sql.includes("from crm_commercial_opportunities")) return [{ entry_id: "o1", created_at: "2026-01-01", updated_at: "2026-01-01", Name: "Retired EV packs", Status: "open", Amount: 125000 }];
+      if (sql.includes("from work_tasks")) return [{ entry_id: "t1", created_at: "2026-01-01", updated_at: "2026-01-01", Title: "Finalize API", Status: "Done", Project: "p1" }];
+      if (sql.includes("from projects")) return [{ id: "p1", name: "Supplier inventory lifecycle" }];
       if (sql.includes("from crm_companies")) return [{ id: "c1", name: "Acme", domain: "acme.test", website: null }];
       return [];
     });
@@ -256,5 +276,15 @@ describe("postgres object read adapter", () => {
       String(sql).startsWith("select id as entry_id") && String(sql).includes("from crm_commercial_opportunities"),
     );
     expect(String(listCall?.[0])).toContain('"title"');
+  });
+
+  it("loads work tasks for Kanban and resolves the Project relation label", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData("work_task", new URL("http://localhost?pageSize=10"));
+
+    expect(data.object.default_view).toBe("kanban");
+    expect(data.fields.find((field) => field.name === "Status")?.type).toBe("enum");
+    expect(data.entries[0]).toMatchObject({ Title: "Finalize API", Status: "Done", Project: "p1" });
+    expect(data.relationLabels.Project.p1).toBe("Supplier inventory lifecycle");
   });
 });
