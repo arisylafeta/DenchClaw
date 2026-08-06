@@ -184,6 +184,7 @@ const RIGHT_PANEL_MAX = 2000;
 const STORAGE_LEFT = "dench-workspace-left-sidebar-width";
 const STORAGE_RIGHT_PANEL = "dench-workspace-right-panel-width";
 const STORAGE_RIGHT_PANEL_COLLAPSED = "dench-workspace-right-panel-collapsed";
+const STORAGE_CHAT_PANEL_COLLAPSED = "dench-workspace-chat-panel-collapsed";
 const STORAGE_FILE_TREE_COLLAPSED = "dench-workspace-file-tree-collapsed";
 const FILE_TREE_WIDTH = 240;
 
@@ -573,6 +574,7 @@ function WorkspacePageInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Sidebar collapse state (desktop only).
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [chatPanelCollapsed, setChatPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
   // File tree (right panel's left column) is now always available, independently
@@ -922,6 +924,10 @@ function WorkspacePageInner() {
     if (collapsed === "0") {
       setRightPanelCollapsed(false);
     }
+    const chatCollapsed = window.localStorage.getItem(STORAGE_CHAT_PANEL_COLLAPSED);
+    if (chatCollapsed === "1") {
+      setChatPanelCollapsed(true);
+    }
     const treeCollapsed = window.localStorage.getItem(STORAGE_FILE_TREE_COLLAPSED);
     if (treeCollapsed === "1") {
       setFileTreeCollapsed(true);
@@ -937,11 +943,11 @@ function WorkspacePageInner() {
       return rightPanelWidth;
     }
     return clamp(
-      totalWidth - reservedLeftSidebarWidth - CENTER_PANEL_MIN,
+      totalWidth - reservedLeftSidebarWidth - (chatPanelCollapsed ? 0 : CENTER_PANEL_MIN),
       RIGHT_PANEL_MIN,
       RIGHT_PANEL_MAX,
     );
-  }, [layoutWidth, reservedLeftSidebarWidth, rightPanelWidth]);
+  }, [chatPanelCollapsed, layoutWidth, reservedLeftSidebarWidth, rightPanelWidth]);
   // Right panel width contract — three values, three concerns:
   //   - rightPanelWidth          → user's saved preference (persisted to localStorage,
   //                                only mutated by the resize handle). Never used as a
@@ -955,7 +961,9 @@ function WorkspacePageInner() {
   //                                Used as the OUTER aside width so collapse animates
   //                                smoothly (outer wipes over inner; inner stays at
   //                                rendered width during the 200ms transition).
-  const renderedRightPanelWidth = Math.min(rightPanelWidth, availableRightPanelMaxWidth);
+  const renderedRightPanelWidth = chatPanelCollapsed
+    ? availableRightPanelMaxWidth
+    : Math.min(rightPanelWidth, availableRightPanelMaxWidth);
   const effectiveRightPanelWidth = rightPanelCollapsed ? 0 : renderedRightPanelWidth;
 
   // Snap-aware resize handler: dragging below the compact threshold snaps to icon mode;
@@ -985,6 +993,9 @@ function WorkspacePageInner() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_RIGHT_PANEL_COLLAPSED, rightPanelCollapsed ? "1" : "0");
   }, [rightPanelCollapsed]);
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_CHAT_PANEL_COLLAPSED, chatPanelCollapsed ? "1" : "0");
+  }, [chatPanelCollapsed]);
   useEffect(() => {
     window.localStorage.setItem(STORAGE_FILE_TREE_COLLAPSED, fileTreeCollapsed ? "1" : "0");
   }, [fileTreeCollapsed]);
@@ -1408,6 +1419,11 @@ function WorkspacePageInner() {
       if (node.type === "folder") {
         return;
       }
+      if (node.type === "object" && (node.name === "project" || node.name === "work_task")) {
+        setChatPanelCollapsed(true);
+        setFileTreeCollapsed(true);
+        setRightPanelCollapsed(false);
+      }
       openTabForNode(node);
       closeEntryModalIfOpen();
     },
@@ -1816,6 +1832,11 @@ function WorkspacePageInner() {
     if (tabLoadedForWorkspace.current !== (workspaceName || null)) return;
 
     const urlState = parseUrlState(searchParams);
+    if (urlState.path === "project" || urlState.path === "work_task") {
+      setChatPanelCollapsed(true);
+      setFileTreeCollapsed(true);
+      setRightPanelCollapsed(false);
+    }
     const shell = buildShellUrlState();
     dispatch({ type: "applyUrl", url: urlState, shell });
 
@@ -2441,7 +2462,7 @@ function WorkspacePageInner() {
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       ref={layoutRef}
-      className="flex h-screen"
+      className="relative flex h-screen"
       style={{ background: "var(--color-main-bg)" }}
       onClick={handleContainerClick}
     >
@@ -2505,8 +2526,37 @@ function WorkspacePageInner() {
       )}
 
 
+      {!isMobile && chatPanelCollapsed && (
+        <button
+          type="button"
+          onClick={() => setChatPanelCollapsed(false)}
+          className="absolute top-2 z-50 rounded-md border p-1.5 shadow-sm transition-colors"
+          style={{
+            left: reservedLeftSidebarWidth + 8,
+            color: "var(--color-text-muted)",
+            background: "var(--color-surface)",
+            borderColor: "var(--color-border)",
+          }}
+          title="Show chat"
+          aria-label="Show chat"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+          </svg>
+        </button>
+      )}
+
       {/* ── Center: chat panel ── */}
-      <main className="flex-1 flex flex-col min-w-[300px] overflow-hidden relative" style={{ background: "var(--color-main-bg)" }}>
+      <main
+        className={`${chatPanelCollapsed && !isMobile ? "flex-none" : "flex-1"} flex flex-col overflow-hidden relative`}
+        style={{
+          width: chatPanelCollapsed && !isMobile ? 0 : undefined,
+          minWidth: chatPanelCollapsed && !isMobile ? 0 : 300,
+          background: "var(--color-main-bg)",
+          transition: "width 200ms ease, min-width 200ms ease",
+        }}
+        aria-hidden={chatPanelCollapsed && !isMobile}
+      >
         {/* Mobile top bar */}
         {isMobile && (
           <div
@@ -2591,21 +2641,44 @@ function WorkspacePageInner() {
                 </svg>
               </button>
             ) : undefined;
-            const headerRightSlot = showRightToggle ? (
-              <button
-                type="button"
-                onClick={() => setRightPanelCollapsed(false)}
-                className="p-1.5 rounded-md transition-colors cursor-pointer"
-                style={{ color: "var(--color-text-muted)" }}
-                title="Show right panel (⌘⇧B)"
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect width="18" height="18" x="3" y="3" rx="2" />
-                  <path d="M15 3v18" />
-                </svg>
-              </button>
+            const headerRightSlot = !isMobile ? (
+              <div className="flex items-center gap-0.5">
+                {showRightToggle && (
+                  <button
+                    type="button"
+                    onClick={() => setRightPanelCollapsed(false)}
+                    className="p-1.5 rounded-md transition-colors cursor-pointer"
+                    style={{ color: "var(--color-text-muted)" }}
+                    title="Show right panel (⌘⇧B)"
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect width="18" height="18" x="3" y="3" rx="2" />
+                      <path d="M15 3v18" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChatPanelCollapsed(true);
+                    setFileTreeCollapsed(true);
+                    setRightPanelCollapsed(false);
+                  }}
+                  className="p-1.5 rounded-md transition-colors cursor-pointer"
+                  style={{ color: "var(--color-text-muted)" }}
+                  title="Hide chat"
+                  aria-label="Hide chat"
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
             ) : undefined;
             return (
               <div
