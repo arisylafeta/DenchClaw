@@ -512,7 +512,6 @@ function WorkspacePageInner() {
   const skillTemplatePromptSentRef = useRef(false);
   // Root layout ref for resize handle position (handle follows cursor)
   const layoutRef = useRef<HTMLDivElement>(null);
-  const chatRestoreButtonRef = useRef<HTMLButtonElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
 
   // Live-reactive tree via SSE watcher (with browse-mode support)
@@ -1012,7 +1011,7 @@ function WorkspacePageInner() {
   }, [fileTreeCollapsed, isMobile]);
   useEffect(() => {
     if (chatPanelCollapsed && isDesktopWorkspaceViewport()) {
-      chatRestoreButtonRef.current?.focus();
+      document.getElementById("workspace-show-chat")?.focus();
     }
   }, [chatPanelCollapsed, isMobile]);
 
@@ -2542,26 +2541,7 @@ function WorkspacePageInner() {
       )}
 
 
-      {!isMobile && chatPanelCollapsed && (
-        <button
-          ref={chatRestoreButtonRef}
-          type="button"
-          onClick={() => setChatPanelCollapsed(false)}
-          className="absolute top-2 z-50 rounded-md border p-1.5 shadow-sm transition-colors"
-          style={{
-            left: reservedLeftSidebarWidth + 8,
-            color: "var(--color-text-muted)",
-            background: "var(--color-surface)",
-            borderColor: "var(--color-border)",
-          }}
-          title="Show chat"
-          aria-label="Show chat"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
-          </svg>
-        </button>
-      )}
+
 
       {/* ── Center: chat panel ── */}
       <main
@@ -2780,6 +2760,7 @@ function WorkspacePageInner() {
               <RightPanelContent
                 tabsState={tabsState}
                 activeContentTab={activeContentTab}
+                chatPanelCollapsed={chatPanelCollapsed}
                 fileTreeCollapsed={fileTreeCollapsed}
                 enhancedTree={enhancedTree}
                 effectiveParentDir={effectiveParentDir}
@@ -2795,6 +2776,7 @@ function WorkspacePageInner() {
                 onTreeExternalDrop={handleSidebarExternalDrop}
                 onTreeFileSearchSelect={handleFileSearchSelect}
                 onTreeGoHome={handleGoHome}
+                onShowChat={() => setChatPanelCollapsed(false)}
                 onSetFileTreeCollapsed={setFileTreeCollapsed}
                 onSetRightPanelCollapsed={setRightPanelCollapsed}
                 onActivateContent={handleContentTabActivate}
@@ -2823,6 +2805,7 @@ function WorkspacePageInner() {
                 <RightPanelContent
                   tabsState={tabsState}
                   activeContentTab={activeContentTab}
+                  chatPanelCollapsed={false}
                   fileTreeCollapsed={fileTreeCollapsed}
                   enhancedTree={enhancedTree}
                   effectiveParentDir={effectiveParentDir}
@@ -2837,6 +2820,7 @@ function WorkspacePageInner() {
                   onTreeNavigateUp={handleNavigateUp}
                   onTreeFileSearchSelect={handleFileSearchSelect}
                   onTreeGoHome={handleGoHome}
+                  onShowChat={() => setChatPanelCollapsed(false)}
                   onSetFileTreeCollapsed={setFileTreeCollapsed}
                   onSetRightPanelCollapsed={() => setMobileRightPanelOpen(false)}
                   onActivateContent={handleContentTabActivate}

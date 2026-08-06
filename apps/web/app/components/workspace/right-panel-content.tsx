@@ -48,7 +48,8 @@ export type RightPanelContentProps = {
   /** Currently-active content tab (already selected by the parent). */
   activeContentTab: ContentTab | null;
 
-  // file tree column
+  // header controls and file tree column
+  chatPanelCollapsed: boolean;
   fileTreeCollapsed: boolean;
   enhancedTree: TreeNode[];
   effectiveParentDir: string | null;
@@ -70,6 +71,7 @@ export type RightPanelContentProps = {
   onTreeExternalDrop?: (node: TreeNode) => void;
   onTreeFileSearchSelect?: (item: SuggestItem) => void;
   onTreeGoHome?: () => void;
+  onShowChat: () => void;
   onSetFileTreeCollapsed: (collapsed: boolean) => void;
   onSetRightPanelCollapsed: (collapsed: boolean) => void;
 
@@ -114,6 +116,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
   const {
     tabsState,
     activeContentTab,
+    chatPanelCollapsed,
     fileTreeCollapsed,
     enhancedTree,
     effectiveParentDir,
@@ -129,6 +132,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
     onTreeExternalDrop,
     onTreeFileSearchSelect,
     onTreeGoHome,
+    onShowChat,
     onSetFileTreeCollapsed,
     onSetRightPanelCollapsed,
     onActivateContent,
@@ -179,7 +183,9 @@ export function RightPanelContent(props: RightPanelContentProps) {
         <ContentTabStrip
           tabs={tabsState.contentTabs}
           activeContentId={tabsState.activeContentId}
+          chatPanelCollapsed={chatPanelCollapsed}
           fileTreeCollapsed={fileTreeCollapsed}
+          onShowChat={onShowChat}
           onShowFileTree={() => onSetFileTreeCollapsed(false)}
           onCollapseRightPanel={() => onSetRightPanelCollapsed(true)}
           onActivate={onActivateContent}
@@ -361,7 +367,9 @@ function FileTreeColumn({
 type ContentTabStripProps = {
   tabs: ContentTab[];
   activeContentId: string | null;
+  chatPanelCollapsed: boolean;
   fileTreeCollapsed: boolean;
+  onShowChat: () => void;
   onShowFileTree: () => void;
   onCollapseRightPanel: () => void;
   onActivate: (id: string) => void;
@@ -374,7 +382,9 @@ type ContentTabStripProps = {
 function ContentTabStrip({
   tabs,
   activeContentId,
+  chatPanelCollapsed,
   fileTreeCollapsed,
+  onShowChat,
   onShowFileTree,
   onCollapseRightPanel,
   onActivate,
@@ -397,6 +407,37 @@ function ContentTabStrip({
       style={{ borderColor: "var(--color-border)" }}
     >
       <div className="no-scrollbar flex-1 flex items-center gap-1 px-2 min-w-0 h-full overflow-x-auto">
+        {chatPanelCollapsed && (
+          <button
+            id="workspace-show-chat"
+            type="button"
+            onClick={onShowChat}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer shrink-0 text-[12px] font-medium"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Show chat"
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "transparent";
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+            </svg>
+            Chat
+          </button>
+        )}
         {fileTreeCollapsed && (
           <button
             type="button"
