@@ -83,3 +83,40 @@ describe("ObjectFilterBar views interaction", () => {
     expect(onFiltersChange).toHaveBeenCalledWith(emptyFilterGroup());
   });
 });
+
+
+describe("ObjectFilterBar relation values", () => {
+  it("shows relation labels as selectable filter options", async () => {
+    const user = userEvent.setup();
+    const onFiltersChange = vi.fn();
+    const filters = {
+      id: "root",
+      conjunction: "and" as const,
+      rules: [{ id: "r-project", field: "Project", operator: "has_any" as const }],
+    };
+
+    render(
+      <ObjectFilterBar
+        fields={[{ id: "f-project", name: "Project", type: "relation", related_object_name: "project" }]}
+        filters={filters}
+        onFiltersChange={onFiltersChange}
+        savedViews={[]}
+        onSaveView={vi.fn()}
+        onLoadView={vi.fn()}
+        onDeleteView={vi.fn()}
+        onSetActiveView={vi.fn()}
+        relationOptions={{
+          Project: [{ id: "reb-project-supplier-inventory", name: "Supplier inventory lifecycle" }],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /filter/i }));
+    await user.click(screen.getByRole("button", { name: "Supplier inventory lifecycle" }));
+
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      ...filters,
+      rules: [{ ...filters.rules[0], value: ["reb-project-supplier-inventory"] }],
+    });
+  });
+});

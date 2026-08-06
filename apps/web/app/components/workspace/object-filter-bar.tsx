@@ -40,6 +40,8 @@ type ObjectFilterBarProps = {
 	onSetActiveView: (name: string | undefined) => void;
 	/** Members for user-type fields. */
 	members?: Array<{ id: string; name: string }>;
+	/** Selectable relation targets keyed by relation field name. */
+	relationOptions?: Record<string, Array<{ id: string; name: string }>>;
 };
 
 // ---------------------------------------------------------------------------
@@ -498,6 +500,7 @@ function FilterRuleRow({
 	field,
 	fields,
 	members,
+	relationOptions,
 	onUpdate,
 	onRemove,
 }: {
@@ -505,6 +508,7 @@ function FilterRuleRow({
 	field: Field | undefined;
 	fields: Field[];
 	members?: Array<{ id: string; name: string }>;
+	relationOptions?: Record<string, Array<{ id: string; name: string }>>;
 	onUpdate: (updates: Partial<FilterRule>) => void;
 	onRemove: () => void;
 }) {
@@ -613,7 +617,7 @@ function FilterRuleRow({
 						<RelationValueEditor
 							value={rule.value as string | string[] ?? ""}
 							relatedObjectName={field?.related_object_name}
-							members={fieldType === "user" ? members : undefined}
+							members={fieldType === "user" ? members : relationOptions?.[rule.field]}
 							multiple={isMultiOp}
 							onChange={(v) => onUpdate({ value: v })}
 						/>
@@ -650,6 +654,7 @@ export function ObjectFilterBar({
 	onDeleteView,
 	onSetActiveView,
 	members,
+	relationOptions,
 }: ObjectFilterBarProps) {
 	const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
 	const [viewsOpen, setViewsOpen] = useState(false);
@@ -750,6 +755,7 @@ export function ObjectFilterBar({
 				fields={fields}
 				groupedFields={groupedFields}
 				members={members}
+				relationOptions={relationOptions}
 				addRule={addRule}
 				updateRule={updateRule}
 				removeRule={removeRule}
@@ -900,6 +906,7 @@ function FilterPopover({
 	fields,
 	groupedFields,
 	members,
+	relationOptions,
 	addRule,
 	updateRule,
 	removeRule,
@@ -914,6 +921,7 @@ function FilterPopover({
 	fields: Field[];
 	groupedFields: Record<string, Field[]>;
 	members?: Array<{ id: string; name: string }>;
+	relationOptions?: Record<string, Array<{ id: string; name: string }>>;
 	addRule: (fieldName: string) => void;
 	updateRule: (id: string, updates: Partial<FilterRule>) => void;
 	removeRule: (id: string) => void;
@@ -1007,6 +1015,7 @@ function FilterPopover({
 											field={field}
 											fields={fields}
 											members={members}
+											relationOptions={relationOptions}
 											onUpdate={(updates) => updateRule(rule.id, updates)}
 											onRemove={() => removeRule(rule.id)}
 										/>

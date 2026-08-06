@@ -272,14 +272,16 @@ async function resolveRelationLabels(fields: FieldRow[], entries: Record<string,
     for (const entry of entries) for (const id of parseRelationValue(entry[field.name])) ids.add(id);
     labels[field.name] = {};
     faviconUrls[field.name] = {};
-    if (ids.size === 0) continue;
-
     if (field.related_object_name === "project" || field.name === "Project") {
+      // Project is the Work Task board's filter dimension. Return the complete
+      // taxonomy so options do not disappear with pagination or active filters.
       const rows = await queryPg<{ id: string; name: string }>(
-        "select id, name from projects where id = any($1::text[])", [Array.from(ids)],
+        "select id, name from projects order by name",
       );
       for (const row of rows) labels[field.name][row.id] = row.name || row.id;
     }
+    if (ids.size === 0) continue;
+
     if (field.related_object_name === "company" || field.name === "Company") {
       const rows = await queryPg<{ id: string; name?: string | null; domain?: string | null; website?: string | null }>(
         "select id, name, domain, website from crm_companies where id = any($1::text[])",

@@ -114,7 +114,10 @@ describe("postgres object read adapter", () => {
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
       if (sql.includes("from crm_commercial_opportunities")) return [{ entry_id: "o1", created_at: "2026-01-01", updated_at: "2026-01-01", Name: "Retired EV packs", Status: "open", Amount: 125000 }];
       if (sql.includes("from work_tasks")) return [{ entry_id: "t1", created_at: "2026-01-01", updated_at: "2026-01-01", Title: "Finalize API", Status: "Done", Project: "p1" }];
-      if (sql.includes("from projects")) return [{ id: "p1", name: "Supplier inventory lifecycle" }];
+      if (sql.includes("from projects")) return [
+        { id: "p2", name: "Safe change delivery" },
+        { id: "p1", name: "Supplier inventory lifecycle" },
+      ];
       if (sql.includes("from crm_companies")) return [{ id: "c1", name: "Acme", domain: "acme.test", website: null }];
       return [];
     });
@@ -285,6 +288,12 @@ describe("postgres object read adapter", () => {
     expect(data.object.default_view).toBe("kanban");
     expect(data.fields.find((field) => field.name === "Status")?.type).toBe("enum");
     expect(data.entries[0]).toMatchObject({ Title: "Finalize API", Status: "Done", Project: "p1" });
-    expect(data.relationLabels.Project.p1).toBe("Supplier inventory lifecycle");
+    expect(data.relationLabels.Project).toEqual({
+      p2: "Safe change delivery",
+      p1: "Supplier inventory lifecycle",
+    });
+    const projectOptionsCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("from projects"));
+    expect(projectOptionsCall?.[0]).toContain("order by name");
+    expect(projectOptionsCall?.[1]).toBeUndefined();
   });
 });

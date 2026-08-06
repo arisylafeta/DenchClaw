@@ -3804,6 +3804,15 @@ function ObjectView({
     () => members?.map((m) => ({ id: m.id, name: m.name })),
     [members],
   );
+  const filterBarRelationOptions = useMemo(
+    () => Object.fromEntries(
+      Object.entries(data.relationLabels ?? {}).map(([fieldName, labels]) => [
+        fieldName,
+        Object.entries(labels).map(([id, name]) => ({ id, name })),
+      ]),
+    ),
+    [data.relationLabels],
+  );
 
   // Include synthetic timestamp columns so view settings pickers can find date fields
   const fieldsWithTimestamps = useMemo(() => [
@@ -3947,6 +3956,7 @@ function ObjectView({
             onDeleteView={handleDeleteView}
             onSetActiveView={handleSetActiveView}
             members={filterBarMembers}
+            relationOptions={filterBarRelationOptions}
           />
 
           {/* Settings gear — description, display field, view-type settings, columns */}
