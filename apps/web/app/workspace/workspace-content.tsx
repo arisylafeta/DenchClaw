@@ -4016,7 +4016,7 @@ function ObjectView({
       {/* View renderer — full-width, no padding */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {currentViewType === "kanban" && (
-          <div className="h-full overflow-auto px-6 py-4">
+          <div className={`h-full overflow-auto ${data.object.name === "work_task" ? "p-0" : "px-6 py-4"}`}>
             <ObjectKanban
               objectName={data.object.name}
               fields={data.fields}

@@ -1,11 +1,24 @@
-# ReBattery Projects / Work Tasks MVP (prototype)
+# ReBattery Work Tasks MVP migration (prototype)
 
-This is a deliberately small, non-production fixture. Run it only against a scratch Postgres database:
+This is a non-production migration fixture. Run it only against an isolated Postgres database and workspace:
 
 ```bash
-PROJECTS_MVP_DATABASE_URL=postgres://... pnpm projects:mvp
+PROJECTS_MVP_DATABASE_URL=postgres://... \
+PROJECTS_MVP_WORKSPACE_ROOT=/path/to/isolated/workspace \
+pnpm projects:mvp
 ```
 
-The command applies the canonical schema, registers `project` as hidden reference data and `work_task` as the only sidebar object, then loads exactly one project and eight tasks. It refuses to use the normal `DATABASE_URL` or local production defaults. Work Tasks use the existing Kanban interface grouped by `Status` (`Planned`, `In Progress`, `Done`, `Retired`). The existing Filter control filters the board by the `Project` relation, resolved to `projects.name`.
+The command refuses the production `denchclaw` database and canonical Hermes workspace. It applies the schema, registers `project` as hidden reference data and `work_task` as the only sidebar object, then loads the canonical portfolio:
 
-Project/task learnings and decisions use the existing linked Markdown entry behavior (`/api/workspace/objects/{name}/entries/{id}/content`). Edit the generated/registered Markdown document through the existing detail UI or file API. This prototype intentionally does not add `PROJECT.yaml`, `TASK.yaml`, watchers, imports, sync, saved views, or Linear calls. `source_path` and `external_linear_id` preserve provenance only.
+- 13 hidden projects
+- 72 canonical Work Tasks from REB-50 through REB-122
+- explicit preservation of the missing canonical REB-83
+- explicit preservation of REB-73's external Linear ID REB-83
+- statuses mapped as `Planned`, `In Progress`, `Done`, and `Retired`
+- one linked Markdown body per Work Task
+
+`scripts/rebattery/projects-mvp-manifest.json` is the deterministic migration manifest. It records the source path and SHA-256 for each native Work Task. The runner verifies those hashes, strips YAML frontmatter, stages the readable body inside the isolated workspace, and registers it through `crm_documents`. It fails if project, task, or document cardinality differs from 13/72/72.
+
+The Work Tasks page renders a full-width, independently expandable Kanban accordion per visible project. The existing Project filter narrows those accordions. Project remains a durable relation/taxonomy, not a standalone sidebar page. REB-82 remains the shared First-party media delivery capability and intentionally has no owning project.
+
+This prototype intentionally does not add `PROJECT.yaml`, `TASK.yaml`, watchers, bidirectional sync, or Linear calls. `source_path`, source hashes, and `external_linear_id` preserve provenance.

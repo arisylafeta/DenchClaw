@@ -121,11 +121,19 @@ export function buildKanbanAccordionSections(
   for (const [key, groupedEntries] of entriesByKey) {
     sections.push({
       key,
-      label: key === "_ungrouped" ? "No project" : labels[key] ?? key,
+      label: key === "_ungrouped" ? "Shared capabilities" : labels[key] ?? key,
       entries: groupedEntries,
     });
   }
   return sections;
+}
+
+const PROJECT_ACCENT_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#0891b2", "#16a34a"];
+
+function projectAccentColor(key: string): string {
+  let hash = 0;
+  for (const char of key) {hash = (hash * 31 + char.charCodeAt(0)) >>> 0;}
+  return PROJECT_ACCENT_COLORS[hash % PROJECT_ACCENT_COLORS.length];
 }
 
 function getEntryTitle(entry: Record<string, unknown>, fields: Field[]): string {
@@ -416,6 +424,7 @@ function DroppableColumn({
   columnName,
   droppableId,
   color,
+  fluid = false,
   items,
   cardFields,
   members,
@@ -430,6 +439,7 @@ function DroppableColumn({
   columnName: string;
   droppableId: string;
   color: string;
+  fluid?: boolean;
   items: Record<string, unknown>[];
   cardFields: Field[];
   members?: Array<{ id: string; name: string }>;
@@ -488,9 +498,9 @@ function DroppableColumn({
   return (
     <div
       ref={setNodeRef}
-      className="flex-shrink-0 flex flex-col rounded-xl transition-colors duration-150"
+      className={`${fluid ? "min-w-0 w-full" : "flex-shrink-0"} flex flex-col rounded-xl transition-colors duration-150`}
       style={{
-        width: "280px",
+        width: fluid ? undefined : "280px",
         background: isOver ? "var(--color-surface)" : "var(--color-bg)",
         border: `1px solid ${isOver ? "var(--color-accent)" : "var(--color-border)"}`,
       }}
@@ -801,7 +811,12 @@ export function ObjectKanban({
     boardGroups: Record<string, Record<string, unknown>[]>,
     sectionKey: string,
   ) => (
-    <div className="flex gap-4 overflow-x-auto pb-4 px-1" style={{ minHeight: "320px" }}>
+    <div
+      className={accordionField
+        ? "grid w-full grid-cols-1 gap-3 pb-5 md:grid-cols-2 xl:grid-cols-4"
+        : "flex gap-4 overflow-x-auto pb-4 px-1"}
+      style={{ minHeight: "320px" }}
+    >
       {columns.map((col) => {
         const droppableId = columnDropId(sectionKey, col.name);
         return (
@@ -810,6 +825,7 @@ export function ObjectKanban({
             columnName={col.name}
             droppableId={droppableId}
             color={col.color}
+            fluid={Boolean(accordionField)}
             items={boardGroups[col.name] ?? []}
             cardFields={cardFields}
             members={members}
@@ -875,14 +891,15 @@ export function ObjectKanban({
       onDragEnd={handleDragEnd}
     >
       {accordionField ? (
-        <div className="flex flex-col gap-3 px-1 pb-4">
+        <div className="flex w-full flex-col">
           {accordionSections.map((section) => {
             const isExpanded = expandedSections.has(section.key);
+            const accentColor = projectAccentColor(section.key);
             return (
               <section
                 key={section.key}
-                className="rounded-xl border overflow-hidden"
-                style={{ borderColor: "var(--color-border)", background: "var(--color-bg)" }}
+                className="w-full overflow-hidden"
+                style={{ background: isExpanded ? `${accentColor}08` : "var(--color-bg)" }}
               >
                 <button
                   type="button"
@@ -892,7 +909,7 @@ export function ObjectKanban({
                     if (next.has(section.key)) {next.delete(section.key);} else {next.add(section.key);}
                     return next;
                   })}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-left cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
+                  className="w-full flex items-center gap-3 px-6 py-3.5 text-left cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
                 >
                   <svg
                     width="14"
@@ -908,7 +925,8 @@ export function ObjectKanban({
                   >
                     <path d="m9 18 6-6-6-6" />
                   </svg>
-                  <span className="font-medium flex-1" style={{ color: "var(--color-text)" }}>
+                  <span className="h-5 w-1 rounded-full" style={{ background: accentColor }} aria-hidden />
+                  <span className="font-semibold flex-1" style={{ color: "var(--color-text)" }}>
                     {section.label}
                   </span>
                   <span
@@ -919,7 +937,7 @@ export function ObjectKanban({
                   </span>
                 </button>
                 {isExpanded && (
-                  <div className="border-t px-3 pt-3" style={{ borderColor: "var(--color-border)" }}>
+                  <div className="w-full px-6 pt-1">
                     {renderBoard(groupEntriesByColumn(section.entries), section.key)}
                   </div>
                 )}
