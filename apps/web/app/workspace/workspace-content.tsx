@@ -186,6 +186,10 @@ const STORAGE_RIGHT_PANEL = "dench-workspace-right-panel-width";
 const STORAGE_RIGHT_PANEL_COLLAPSED = "dench-workspace-right-panel-collapsed";
 const STORAGE_CHAT_PANEL_COLLAPSED = "dench-workspace-chat-panel-collapsed";
 const STORAGE_FILE_TREE_COLLAPSED = "dench-workspace-file-tree-collapsed";
+
+function isDesktopWorkspaceViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
+}
 const FILE_TREE_WIDTH = 240;
 
 function clamp(n: number, min: number, max: number): number {
@@ -508,6 +512,7 @@ function WorkspacePageInner() {
   const skillTemplatePromptSentRef = useRef(false);
   // Root layout ref for resize handle position (handle follows cursor)
   const layoutRef = useRef<HTMLDivElement>(null);
+  const chatRestoreButtonRef = useRef<HTMLButtonElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
 
   // Live-reactive tree via SSE watcher (with browse-mode support)
@@ -924,15 +929,17 @@ function WorkspacePageInner() {
     if (collapsed === "0") {
       setRightPanelCollapsed(false);
     }
-    const chatCollapsed = window.localStorage.getItem(STORAGE_CHAT_PANEL_COLLAPSED);
-    if (chatCollapsed === "1") {
-      setChatPanelCollapsed(true);
+    if (isDesktopWorkspaceViewport()) {
+      const chatCollapsed = window.localStorage.getItem(STORAGE_CHAT_PANEL_COLLAPSED);
+      if (chatCollapsed === "1") {
+        setChatPanelCollapsed(true);
+      }
+      const treeCollapsed = window.localStorage.getItem(STORAGE_FILE_TREE_COLLAPSED);
+      if (treeCollapsed === "1") {
+        setFileTreeCollapsed(true);
+      }
     }
-    const treeCollapsed = window.localStorage.getItem(STORAGE_FILE_TREE_COLLAPSED);
-    if (treeCollapsed === "1") {
-      setFileTreeCollapsed(true);
-    }
-  }, []);
+  }, [isMobile]);
 
   // Whether the left sidebar is in compact (icon-only) mode.
   const isLeftSidebarCompact = leftSidebarWidth < LEFT_SIDEBAR_FULL_MIN;
@@ -994,11 +1001,20 @@ function WorkspacePageInner() {
     window.localStorage.setItem(STORAGE_RIGHT_PANEL_COLLAPSED, rightPanelCollapsed ? "1" : "0");
   }, [rightPanelCollapsed]);
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_CHAT_PANEL_COLLAPSED, chatPanelCollapsed ? "1" : "0");
-  }, [chatPanelCollapsed]);
+    if (isDesktopWorkspaceViewport()) {
+      window.localStorage.setItem(STORAGE_CHAT_PANEL_COLLAPSED, chatPanelCollapsed ? "1" : "0");
+    }
+  }, [chatPanelCollapsed, isMobile]);
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_FILE_TREE_COLLAPSED, fileTreeCollapsed ? "1" : "0");
-  }, [fileTreeCollapsed]);
+    if (isDesktopWorkspaceViewport()) {
+      window.localStorage.setItem(STORAGE_FILE_TREE_COLLAPSED, fileTreeCollapsed ? "1" : "0");
+    }
+  }, [fileTreeCollapsed, isMobile]);
+  useEffect(() => {
+    if (chatPanelCollapsed && isDesktopWorkspaceViewport()) {
+      chatRestoreButtonRef.current?.focus();
+    }
+  }, [chatPanelCollapsed, isMobile]);
 
   // Keyboard shortcuts: Cmd+B = toggle left sidebar, Cmd+Shift+B = toggle right sidebar, Cmd+J = toggle terminal
   useEffect(() => {
@@ -1419,7 +1435,7 @@ function WorkspacePageInner() {
       if (node.type === "folder") {
         return;
       }
-      if (node.type === "object" && (node.name === "project" || node.name === "work_task")) {
+      if (!isMobile && node.type === "object" && (node.name === "project" || node.name === "work_task")) {
         setChatPanelCollapsed(true);
         setFileTreeCollapsed(true);
         setRightPanelCollapsed(false);
@@ -1832,7 +1848,7 @@ function WorkspacePageInner() {
     if (tabLoadedForWorkspace.current !== (workspaceName || null)) return;
 
     const urlState = parseUrlState(searchParams);
-    if (urlState.path === "project" || urlState.path === "work_task") {
+    if (!isMobile && (urlState.path === "project" || urlState.path === "work_task")) {
       setChatPanelCollapsed(true);
       setFileTreeCollapsed(true);
       setRightPanelCollapsed(false);
@@ -2528,6 +2544,7 @@ function WorkspacePageInner() {
 
       {!isMobile && chatPanelCollapsed && (
         <button
+          ref={chatRestoreButtonRef}
           type="button"
           onClick={() => setChatPanelCollapsed(false)}
           className="absolute top-2 z-50 rounded-md border p-1.5 shadow-sm transition-colors"
@@ -2556,6 +2573,7 @@ function WorkspacePageInner() {
           transition: "width 200ms ease, min-width 200ms ease",
         }}
         aria-hidden={chatPanelCollapsed && !isMobile}
+        inert={chatPanelCollapsed && !isMobile ? true : undefined}
       >
         {/* Mobile top bar */}
         {isMobile && (
