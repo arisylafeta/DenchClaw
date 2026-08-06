@@ -1,4 +1,4 @@
-// PROTOTYPE ONLY. Never defaults to the production DenchClaw database or workspace.
+// Defaults to scratch-only. Production requires an explicit, approval-gated override.
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -21,9 +21,10 @@ if (!url)
     "Set PROJECTS_MVP_DATABASE_URL to a scratch/test Postgres URL; refusing production defaults.",
   );
 const databaseName = new URL(url).pathname.replace(/^\//, "");
-if (!databaseName || databaseName === "denchclaw") {
+const productionApproved = process.env.PROJECTS_MVP_ALLOW_PRODUCTION === "approved-after-backup";
+if (!databaseName || (databaseName === "denchclaw" && !productionApproved)) {
   throw new Error(
-    "PROJECTS_MVP_DATABASE_URL must name a scratch database, never the production denchclaw database.",
+    "PROJECTS_MVP_DATABASE_URL must name a scratch database unless production is explicitly approved after backup.",
   );
 }
 
@@ -44,8 +45,11 @@ const productionRuntimePath = resolve("/root/denchclaw");
 const productionRuntime = existsSync(productionRuntimePath)
   ? realpathSync(productionRuntimePath)
   : productionRuntimePath;
-if (workspaceRoot === productionWorkspace || workspaceRoot === productionRuntime) {
-  throw new Error("PROJECTS_MVP_WORKSPACE_ROOT must be isolated; refusing a production workspace.");
+if (
+  (workspaceRoot === productionWorkspace || workspaceRoot === productionRuntime) &&
+  !productionApproved
+) {
+  throw new Error("PROJECTS_MVP_WORKSPACE_ROOT must be isolated unless production is explicitly approved after backup.");
 }
 
 const schema = fileURLToPath(

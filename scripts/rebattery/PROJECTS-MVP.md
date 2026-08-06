@@ -8,7 +8,7 @@ PROJECTS_MVP_WORKSPACE_ROOT=/path/to/isolated/workspace \
 pnpm projects:mvp
 ```
 
-The command refuses the production `denchclaw` database and canonical Hermes workspace. It applies the schema, registers `project` as hidden reference data and `work_task` as the only sidebar object, then loads the canonical portfolio:
+The command refuses the production `denchclaw` database and canonical Hermes workspace by default. After explicit deployment approval and a verified backup, production additionally requires `PROJECTS_MVP_ALLOW_PRODUCTION=approved-after-backup`. It applies the schema, registers `project` as hidden reference data and `work_task` as the only sidebar object, then loads the canonical portfolio:
 
 - 13 hidden projects
 - 72 canonical Work Tasks from REB-50 through REB-122
