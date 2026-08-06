@@ -37,6 +37,10 @@ export type SuggestItem = {
 	type: "folder" | "file" | "document" | "database";
 };
 
+function suggestItemToStringLabel(item: SuggestItem | null): string {
+	return item?.name ?? "";
+}
+
 function indexItemToSuggestItem(item: SearchIndexItem): SuggestItem {
 	const fullPath = item.path ?? item.id;
 	const fileName = fullPath.split("/").pop() ?? item.label;
@@ -233,7 +237,7 @@ export function FileSearch({ onSelect, searchFn }: { onSelect: (item: SuggestIte
 			}}
 			onInputValueChange={handleInputValueChange}
 			filter={null}
-			itemToStringLabel={() => ""}
+			itemToStringLabel={suggestItemToStringLabel}
 		>
 			<div ref={anchorRef} className="relative">
 				<span
