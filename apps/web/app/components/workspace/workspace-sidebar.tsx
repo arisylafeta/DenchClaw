@@ -13,8 +13,6 @@ import {
 	IconFileFilled,
 	IconDatabaseFilled,
 } from "@tabler/icons-react";
-import { GoTools } from "react-icons/go";
-import { RiApps2AiLine } from "react-icons/ri";
 import { useTheme } from "next-themes";
 import { type TreeNode } from "./file-manager-tree";
 import { ProfileSwitcher } from "./profile-switcher";
@@ -29,6 +27,29 @@ export type CustomCrmObject = {
 	icon?: string;
 	defaultView?: "table" | "kanban";
 };
+
+export type SidebarObjectGroups = {
+	crm: CustomCrmObject[];
+	work: CustomCrmObject[];
+	automations: CustomCrmObject[];
+};
+
+const WORK_OBJECT_NAMES: ReadonlySet<string> = new Set(["project", "work_task"]);
+const AUTOMATION_OBJECT_NAMES: ReadonlySet<string> = new Set(["automation_loop", "automation_loop_run"]);
+
+export function categorizeSidebarObjects(objects: CustomCrmObject[] = []): SidebarObjectGroups {
+	const groups: SidebarObjectGroups = { crm: [], work: [], automations: [] };
+	for (const object of objects) {
+		if (AUTOMATION_OBJECT_NAMES.has(object.name)) {
+			groups.automations.push(object);
+		} else if (WORK_OBJECT_NAMES.has(object.name)) {
+			groups.work.push(object);
+		} else {
+			groups.crm.push(object);
+		}
+	}
+	return groups;
+}
 
 /** Shape returned by /api/workspace/suggest-files */
 export type SuggestItem = {
@@ -284,6 +305,7 @@ export function FileSearch({ onSelect, searchFn }: { onSelect: (item: SuggestIte
 export function WorkspaceSidebar({
 	orgName,
 	onFileSearchSelect,
+	loading = false,
 	mobile,
 	onClose,
 	showHidden,
@@ -364,36 +386,67 @@ export function WorkspaceSidebar({
 		},
 	];
 
-	const bottomNavItems = [
-		{
-			id: "cloud" as const,
-			label: "Cloud",
-			icon: (
-				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-					<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-				</svg>
-			),
-		},
-		{
-			id: "integrations" as const,
-			label: "Integrations",
-			icon: <RiApps2AiLine className="h-4 w-4 shrink-0" aria-hidden />,
-		},
-		{
-			id: "skills" as const,
-			label: "Skills",
-			icon: <GoTools className="h-4 w-4 shrink-0" aria-hidden />,
-		},
-		{
-			id: "cron" as const,
-			label: "Cron",
-			icon: (
-				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-					<circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-				</svg>
-			),
-		},
-	];
+	const cronNavItem = {
+		id: "cron" as const,
+		label: "Cron",
+		icon: (
+			<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+				<circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+			</svg>
+		),
+	};
+
+	const objectGroups = categorizeSidebarObjects(customCrmObjects);
+
+	const renderCompactObject = (object: CustomCrmObject) => {
+		const active = activeCrmObjectName === object.name;
+		const label = displayObjectName(object.name);
+		return (
+			<button
+				key={`crm-object-${object.name}`}
+				type="button"
+				onClick={() => onNavigateToCrmObject?.(object.name)}
+				className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors"
+				style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }}
+				onMouseEnter={(event) => {
+					if (!active) {(event.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";}
+				}}
+				onMouseLeave={(event) => {
+					if (!active) {(event.currentTarget as HTMLElement).style.background = "transparent";}
+				}}
+				title={label}
+				aria-label={label}
+			>
+				<CrmObjectIcon name={object.icon} size={16} />
+			</button>
+		);
+	};
+
+	const renderExpandedObject = (object: CustomCrmObject) => {
+		const active = activeCrmObjectName === object.name;
+		const label = displayObjectName(object.name);
+		return (
+			<button
+				key={`crm-object-${object.name}`}
+				type="button"
+				onClick={() => onNavigateToCrmObject?.(object.name)}
+				className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
+				style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }}
+				onMouseEnter={(event) => {
+					if (!active) {(event.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";}
+				}}
+				onMouseLeave={(event) => {
+					if (!active) {(event.currentTarget as HTMLElement).style.background = "transparent";}
+				}}
+				title={label}
+			>
+				<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
+					<CrmObjectIcon name={object.icon} size={16} />
+				</span>
+				{label}
+			</button>
+		);
+	};
 
 	const compactSidebar = (
 		<aside
@@ -458,6 +511,11 @@ export function WorkspaceSidebar({
 			{/* CRM nav (icons only). */}
 			{onNavigate && (
 				<div className="flex flex-col items-center gap-0.5 pt-1 pb-1">
+					{loading ? (
+						Array.from({ length: 7 }, (_, index) => (
+							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
+						))
+					) : (<>
 					{crmNavItems.map((item) => {
 						const active = activeCrmTarget === item.target;
 						return (
@@ -485,58 +543,38 @@ export function WorkspaceSidebar({
 							</button>
 						);
 					})}
-					{customCrmObjects && customCrmObjects.length > 0 && onNavigateToCrmObject && customCrmObjects.map((obj) => {
-						const active = activeCrmObjectName === obj.name;
-						const label = displayObjectName(obj.name);
-						return (
-							<button
-								key={`crm-object-${obj.name}`}
-								type="button"
-								onClick={() => onNavigateToCrmObject(obj.name)}
-								className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors"
-								style={{
-									color: "var(--color-text)",
-									background: active ? "var(--color-surface-hover)" : "transparent",
-								}}
-								onMouseEnter={(e) => {
-									if (active) return;
-									(e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
-								}}
-								onMouseLeave={(e) => {
-									if (active) return;
-									(e.currentTarget as HTMLElement).style.background = "transparent";
-								}}
-								title={label}
-								aria-label={label}
-							>
-								<CrmObjectIcon name={obj.icon} size={16} />
-							</button>
-						);
-					})}
+					{objectGroups.crm.map(renderCompactObject)}
+					{objectGroups.work.length > 0 && (
+						<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
+					)}
+					{objectGroups.work.map(renderCompactObject)}
+					</>)}
 				</div>
 			)}
 
 			{/* Spacer pushes bottom nav + footer down. */}
 			<div className="flex-1 min-h-0" />
 
-			{/* Bottom nav (icons only). */}
+			{/* Automation controls stay together at the bottom. */}
 			{onNavigate && (
 				<div className="flex flex-col items-center gap-0.5 py-1">
-					{bottomNavItems.map((item) => (
+					{loading ? (
+						Array.from({ length: 3 }, (_, index) => (
+							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
+						))
+					) : (<>
+						{objectGroups.automations.map(renderCompactObject)}
 						<button
-							key={item.id}
 							type="button"
-							onClick={() => onNavigate(item.id)}
+							onClick={() => onNavigate(cronNavItem.id)}
 							className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors"
 							style={{ color: "var(--color-text)" }}
-							onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-							onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-							title={item.label}
-							aria-label={item.label}
+							title={cronNavItem.label}
+							aria-label={cronNavItem.label}
 						>
-							{item.icon}
+							{cronNavItem.icon}
 						</button>
-					))}
+					</>)}
 				</div>
 			)}
 
@@ -698,94 +736,65 @@ export function WorkspaceSidebar({
 			<>
 		{onNavigate && (
 			<div className="px-2 pt-1 pb-1">
-				<div
-					className="px-2 pt-2 pb-1 text-[9px] lowercase"
-					style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}
-				>
-					workspace
-				</div>
-				<div className="space-y-0.5">
-					{crmNavItems.map((item) => {
-						const active = activeCrmTarget === item.target;
-						return (
-							<button
-								key={item.id}
-								type="button"
-								onClick={() => onNavigate(item.id)}
-								className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
-								style={{
-									color: "var(--color-text)",
-									background: active ? "var(--color-surface-hover)" : "transparent",
-								}}
-								onMouseEnter={(e) => {
-									if (active) return;
-									(e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
-								}}
-								onMouseLeave={(e) => {
-									if (active) return;
-									(e.currentTarget as HTMLElement).style.background = "transparent";
-								}}
-							>
-								<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{item.icon}</span>
-								{item.label}
-							</button>
-						);
-					})}
-					{customCrmObjects && customCrmObjects.length > 0 && onNavigateToCrmObject && customCrmObjects.map((obj) => {
-						const active = activeCrmObjectName === obj.name;
-						const label = displayObjectName(obj.name);
-						return (
-							<button
-								key={`crm-object-${obj.name}`}
-								type="button"
-								onClick={() => onNavigateToCrmObject(obj.name)}
-								className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
-								style={{
-									color: "var(--color-text)",
-									background: active ? "var(--color-surface-hover)" : "transparent",
-								}}
-								onMouseEnter={(e) => {
-									if (active) return;
-									(e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
-								}}
-								onMouseLeave={(e) => {
-									if (active) return;
-									(e.currentTarget as HTMLElement).style.background = "transparent";
-								}}
-								title={label}
-							>
-								<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
-									<CrmObjectIcon name={obj.icon} size={16} />
-								</span>
-								{label}
-							</button>
-						);
-					})}
-				</div>
+				{loading ? (
+					<div className="space-y-1 px-2 pt-2" aria-label="Loading navigation">
+						{Array.from({ length: 8 }, (_, index) => (
+							<div key={index} className="h-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
+						))}
+					</div>
+				) : (<>
+					<div className="px-2 pt-2 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
+						crm
+					</div>
+					<div className="space-y-0.5">
+						{crmNavItems.map((item) => {
+							const active = activeCrmTarget === item.target;
+							return (
+								<button
+									key={item.id}
+									type="button"
+									onClick={() => onNavigate(item.id)}
+									className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
+									style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }}
+								>
+									<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{item.icon}</span>
+									{item.label}
+								</button>
+							);
+						})}
+						{objectGroups.crm.map(renderExpandedObject)}
+					</div>
+
+					{objectGroups.work.length > 0 && (<>
+						<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
+							work
+						</div>
+						<div className="space-y-0.5">{objectGroups.work.map(renderExpandedObject)}</div>
+					</>)}
+
+					<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
+						automations
+					</div>
+					<div className="space-y-0.5">
+						{objectGroups.automations.map(renderExpandedObject)}
+						<button
+							type="button"
+							onClick={() => onNavigate(cronNavItem.id)}
+							className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
+							style={{ color: "var(--color-text)" }}
+						>
+							<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{cronNavItem.icon}</span>
+							{cronNavItem.label}
+						</button>
+					</div>
+				</>)}
 			</div>
 		)}
+
 
 			{/* v3: chat history moved into chat-panel header (Clock dropdown). */}
 			<div className="flex-1 min-h-0" />
 
-		{onNavigate && (
-			<div className="px-2 py-1 space-y-0.5">
-				{bottomNavItems.map((item) => (
-					<button
-						key={item.id}
-						type="button"
-						onClick={() => onNavigate(item.id)}
-						className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
-						style={{ color: "var(--color-text)" }}
-						onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-						onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-					>
-						<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{item.icon}</span>
-						{item.label}
-					</button>
-				))}
-			</div>
-		)}
 			</>
 		)}
 

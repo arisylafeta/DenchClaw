@@ -2326,6 +2326,7 @@ function WorkspacePageInner() {
 
   const sidebarCommonProps = {
     activePath: null,
+    loading: treeLoading,
     orgName: context?.organization?.name,
     browseDir,
     onFileSearchSelect: handleFileSearchSelect,
