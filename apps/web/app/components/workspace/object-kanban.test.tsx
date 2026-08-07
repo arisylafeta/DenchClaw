@@ -3,23 +3,44 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildKanbanAccordionSections, ObjectKanban } from "./object-kanban";
+import { buildKanbanAccordionSections, buildWorkTaskKanbanAccordionSections, ObjectKanban } from "./object-kanban";
 
 const entries = [
-  { entry_id: "t1", Title: "First", Status: "Planned", Project: "p1" },
-  { entry_id: "t2", Title: "Second", Status: "Done", Project: "p2" },
+  { entry_id: "t1", Title: "First", Status: "Planned", Priority: "P1", Project: "p1" },
+  { entry_id: "t2", Title: "Second", Status: "In Progress", Priority: "P1", Project: "p2" },
+  { entry_id: "t3", Title: "Historical", Status: "Done", Priority: "P0", Project: "p3" },
 ];
 const projectLabels = {
   p1: "Supplier inventory lifecycle",
   p2: "Safe change delivery",
-  p3: "Email operations",
 };
 
 describe("Work Task project accordions", () => {
-  it("builds sections for projects represented by the filtered tasks", () => {
-    expect(buildKanbanAccordionSections(entries, "Project", projectLabels)).toEqual([
+  it("builds generic sections for projects represented by the supplied tasks", () => {
+    expect(buildKanbanAccordionSections(entries.slice(0, 2), "Project", projectLabels)).toEqual([
       { key: "p1", label: "Supplier inventory lifecycle", entries: [entries[0]] },
       { key: "p2", label: "Safe change delivery", entries: [entries[1]] },
+    ]);
+  });
+
+  it("shows only actionable tasks in Active Projects and orders by planned work then importance", () => {
+    const planned = [
+      ...entries,
+      { entry_id: "t4", Title: "Third", Status: "Planned", Priority: "P2", Project: "p2" },
+      { entry_id: "t5", Title: "Fourth", Status: "Planned", Priority: "P1", Project: "p2" },
+      { entry_id: "t6", Title: "Finished project task", Status: "Planned", Priority: "P0", Project: "finished" },
+      { entry_id: "t7", Title: "Unassigned task", Status: "Planned", Priority: "P0", Project: "" },
+    ];
+
+    expect(buildWorkTaskKanbanAccordionSections(
+      planned,
+      "Project",
+      "Status",
+      "Priority",
+      projectLabels,
+    )).toEqual([
+      { key: "p2", label: "Safe change delivery", entries: [entries[1], planned[3], planned[4]] },
+      { key: "p1", label: "Supplier inventory lifecycle", entries: [entries[0]] },
     ]);
   });
 
@@ -31,6 +52,7 @@ describe("Work Task project accordions", () => {
         fields={[
           { id: "title", name: "Title", type: "text" },
           { id: "status", name: "Status", type: "enum", enum_values: ["Planned", "In Progress", "Done", "Retired"] },
+          { id: "priority", name: "Priority", type: "enum", enum_values: ["P0", "P1", "P2"] },
           { id: "project", name: "Project", type: "relation", related_object_name: "project" },
         ]}
         entries={entries}
@@ -42,6 +64,9 @@ describe("Work Task project accordions", () => {
 
     const supplier = screen.getByRole("button", { name: /Supplier inventory lifecycle/ });
     const delivery = screen.getByRole("button", { name: /Safe change delivery/ });
+    expect(screen.queryByText("Historical")).toBeNull();
+    expect(screen.queryByText("Done")).toBeNull();
+    expect(screen.queryByText("Retired")).toBeNull();
     await waitFor(() => expect(supplier.getAttribute("aria-expanded")).toBe("true"));
     expect(delivery.getAttribute("aria-expanded")).toBe("false");
 
@@ -61,6 +86,7 @@ describe("Work Task project accordions", () => {
         fields={[
           { id: "title", name: "Title", type: "text" },
           { id: "status", name: "Status", type: "enum", enum_values: ["Planned", "In Progress", "Done", "Retired"] },
+          { id: "priority", name: "Priority", type: "enum", enum_values: ["P0", "P1", "P2"] },
           { id: "project", name: "Project", type: "relation", related_object_name: "project" },
         ]}
         entries={visibleEntries}

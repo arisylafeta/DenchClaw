@@ -369,7 +369,11 @@ function collectCrmObjectNodes(
     }
   }
   walk(tree);
-  const priority = new Map([["work_task", 0]]);
+  const priority = new Map([
+    ["work_task", 0],
+    ["automation_loop", 1],
+    ["automation_loop_run", 2],
+  ]);
   return [...byName.values()].toSorted((a, b) => {
     const rankDifference = (priority.get(a.name) ?? 100) - (priority.get(b.name) ?? 100);
     return rankDifference || a.name.localeCompare(b.name);

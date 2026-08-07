@@ -23,6 +23,16 @@
  * these helpers are display-only.
  */
 
+const PLURAL_DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map([
+  ["automation_loop", "Loops"],
+  ["automation_loop_run", "Loop Runs"],
+]);
+
+const SINGULAR_DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map([
+  ["automation_loop", "Loop"],
+  ["automation_loop_run", "Loop Run"],
+]);
+
 const KNOWN_ACRONYMS: ReadonlySet<string> = new Set([
   // venture / fundraising
   "vc", "yc", "ipo", "kpi", "kyc", "roi", "mrr", "arr",
@@ -185,6 +195,8 @@ function singularizeWord(word: string): string {
  * the collection" label.
  */
 export function displayObjectName(raw: string): string {
+  const override = PLURAL_DISPLAY_NAME_OVERRIDES.get(raw);
+  if (override) {return override;}
   const tokens = splitObjectTokens(raw);
   if (tokens.length === 0) return raw ?? "";
   const last = tokens.length - 1;
@@ -201,6 +213,8 @@ export function displayObjectName(raw: string): string {
  * and per-record chip labels.
  */
 export function displayObjectNameSingular(raw: string): string {
+  const override = SINGULAR_DISPLAY_NAME_OVERRIDES.get(raw);
+  if (override) {return override;}
   const tokens = splitObjectTokens(raw);
   if (tokens.length === 0) return raw ?? "";
   const last = tokens.length - 1;

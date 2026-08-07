@@ -52,6 +52,11 @@ describe("displayObjectName (plural)", () => {
     expect(displayObjectName("my_company")).toBe("My Companies");
   });
 
+  it("uses concise labels for loop monitoring objects", () => {
+    expect(displayObjectName("automation_loop")).toBe("Loops");
+    expect(displayObjectName("automation_loop_run")).toBe("Loop Runs");
+  });
+
   it("does not all-cap regular words like 'My'", () => {
     expect(displayObjectName("my_company")).toBe("My Companies");
     expect(displayObjectName("my_lead")).toBe("My Leads");
@@ -108,6 +113,11 @@ describe("displayObjectNameSingular", () => {
     expect(displayObjectNameSingular("vc_lead")).toBe("VC Lead");
     expect(displayObjectNameSingular("Yc_founder")).toBe("YC Founder");
     expect(displayObjectNameSingular("my_company")).toBe("My Company");
+  });
+
+  it("uses concise singular labels for loop monitoring objects", () => {
+    expect(displayObjectNameSingular("automation_loop")).toBe("Loop");
+    expect(displayObjectNameSingular("automation_loop_run")).toBe("Loop Run");
   });
 
   it("singularizes already-plural inputs", () => {

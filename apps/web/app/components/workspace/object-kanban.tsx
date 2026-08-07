@@ -98,6 +98,61 @@ export type KanbanAccordionSection = {
   entries: Record<string, unknown>[];
 };
 
+const ACTIONABLE_WORK_TASK_STATUSES = new Set(["planned", "in progress"]);
+const IMPORTANT_WORK_TASK_PRIORITIES = new Set(["p0", "p1", "critical", "high"]);
+
+function normalizedEntryValue(entry: Record<string, unknown>, fieldName: string | undefined): string {
+  return fieldName ? safeString(entry[fieldName]).trim().toLowerCase() : "";
+}
+
+function countSectionEntries(
+  section: KanbanAccordionSection,
+  statusFieldName: string,
+  priorityFieldName: string | undefined,
+) {
+  let planned = 0;
+  let importantPlanned = 0;
+  let importantActionable = 0;
+  let inProgress = 0;
+  for (const entry of section.entries) {
+    const status = normalizedEntryValue(entry, statusFieldName);
+    const important = IMPORTANT_WORK_TASK_PRIORITIES.has(normalizedEntryValue(entry, priorityFieldName));
+    if (status === "planned") {
+      planned += 1;
+      if (important) {importantPlanned += 1;}
+    }
+    if (status === "in progress") {inProgress += 1;}
+    if (important) {importantActionable += 1;}
+  }
+  return { planned, importantPlanned, importantActionable, inProgress };
+}
+
+export function buildWorkTaskKanbanAccordionSections(
+  entries: Record<string, unknown>[],
+  projectFieldName: string,
+  statusFieldName: string,
+  priorityFieldName: string | undefined,
+  activeProjectLabels: Record<string, string>,
+): KanbanAccordionSection[] {
+  const activeProjectIds = new Set(Object.keys(activeProjectLabels));
+  const actionableEntries = entries.filter((entry) => {
+    if (!ACTIONABLE_WORK_TASK_STATUSES.has(normalizedEntryValue(entry, statusFieldName))) {return false;}
+    const projectId = parseRelationValue(safeString(entry[projectFieldName]))[0];
+    return Boolean(projectId && activeProjectIds.has(projectId));
+  });
+
+  return buildKanbanAccordionSections(actionableEntries, projectFieldName, activeProjectLabels)
+    .toSorted((left, right) => {
+      const a = countSectionEntries(left, statusFieldName, priorityFieldName);
+      const b = countSectionEntries(right, statusFieldName, priorityFieldName);
+      return b.planned - a.planned
+        || b.importantPlanned - a.importantPlanned
+        || b.importantActionable - a.importantActionable
+        || right.entries.length - left.entries.length
+        || left.label.localeCompare(right.label);
+    });
+}
+
 export function buildKanbanAccordionSections(
   entries: Record<string, unknown>[],
   fieldName: string,
@@ -640,16 +695,26 @@ export function ObjectKanban({
     [accordionGroupFieldName, fields],
   );
 
-  const accordionSections = useMemo(
-    () => accordionField
-      ? buildKanbanAccordionSections(
-          localEntries,
-          accordionField.name,
-          relationLabels?.[accordionField.name],
-        )
-      : [],
-    [accordionField, localEntries, relationLabels],
+  const priorityField = useMemo(
+    () => fields.find((field) => field.name.toLowerCase().includes("priority")) ?? null,
+    [fields],
   );
+  const isWorkTaskAccordion = objectName === "work_task" && Boolean(accordionField && groupField);
+
+  const accordionSections = useMemo(() => {
+    if (!accordionField) {return [];}
+    const labels = relationLabels?.[accordionField.name] ?? {};
+    if (isWorkTaskAccordion && groupField) {
+      return buildWorkTaskKanbanAccordionSections(
+        localEntries,
+        accordionField.name,
+        groupField.name,
+        priorityField?.name,
+        labels,
+      );
+    }
+    return buildKanbanAccordionSections(localEntries, accordionField.name, labels);
+  }, [accordionField, groupField, isWorkTaskAccordion, localEntries, priorityField, relationLabels]);
   const accordionSectionKeys = accordionSections.map((section) => section.key).join(" ");
 
   useEffect(() => {
@@ -669,25 +734,29 @@ export function ObjectKanban({
 
   // Determine columns
   const columns = useMemo(() => {
+    let availableColumns: Array<{ name: string; color: string }>;
     if (statuses.length > 0) {
-      return statuses.map((s) => ({
+      availableColumns = statuses.map((s) => ({
         name: s.name,
         color: s.color ?? "#94a3b8",
       }));
-    }
-    if (groupField?.enum_values) {
-      return groupField.enum_values.map((v, i) => ({
+    } else if (groupField?.enum_values) {
+      availableColumns = groupField.enum_values.map((v, i) => ({
         name: v,
         color: groupField.enum_colors?.[i] ?? "#94a3b8",
       }));
+    } else {
+      const unique = new Set<string>();
+      for (const e of localEntries) {
+        const val = groupField ? e[groupField.name] : undefined;
+        if (val) {unique.add(safeString(val));}
+      }
+      availableColumns = Array.from(unique).map((v) => ({ name: v, color: "#94a3b8" }));
     }
-    const unique = new Set<string>();
-    for (const e of localEntries) {
-      const val = groupField ? e[groupField.name] : undefined;
-      if (val) {unique.add(safeString(val));}
-    }
-    return Array.from(unique).map((v) => ({ name: v, color: "#94a3b8" }));
-  }, [statuses, groupField, localEntries]);
+    return isWorkTaskAccordion
+      ? availableColumns.filter((column) => ACTIONABLE_WORK_TASK_STATUSES.has(column.name.trim().toLowerCase()))
+      : availableColumns;
+  }, [statuses, groupField, isWorkTaskAccordion, localEntries]);
 
   const groupEntriesByColumn = useCallback((sectionEntries: Record<string, unknown>[]) => {
     const groups: Record<string, Record<string, unknown>[]> = {};
@@ -895,6 +964,9 @@ export function ObjectKanban({
           {accordionSections.map((section) => {
             const isExpanded = expandedSections.has(section.key);
             const accentColor = projectAccentColor(section.key);
+            const taskCounts = groupField
+              ? countSectionEntries(section, groupField.name, priorityField?.name)
+              : null;
             return (
               <section
                 key={section.key}
@@ -933,7 +1005,9 @@ export function ObjectKanban({
                     className="text-xs px-2 py-0.5 rounded-full"
                     style={{ background: "var(--color-surface)", color: "var(--color-text-muted)" }}
                   >
-                    {section.entries.length} {section.entries.length === 1 ? "task" : "tasks"}
+                    {isWorkTaskAccordion && taskCounts
+                      ? `${taskCounts.planned} planned · ${taskCounts.inProgress} in progress`
+                      : `${section.entries.length} ${section.entries.length === 1 ? "task" : "tasks"}`}
                   </span>
                 </button>
                 {isExpanded && (

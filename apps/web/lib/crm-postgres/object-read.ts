@@ -274,11 +274,12 @@ async function resolveRelationLabels(fields: FieldRow[], entries: Record<string,
     for (const entry of entries) for (const id of parseRelationValue(entry[field.name])) ids.add(id);
     labels[field.name] = {};
     faviconUrls[field.name] = {};
-    if (field.related_object_name === "project" || field.name === "Project") {
-      // Project is the Work Task board's filter dimension. Return the complete
-      // taxonomy so options do not disappear with pagination or active filters.
+    const isProjectRelation = field.related_object_name === "project" || field.name === "Project";
+    if (isProjectRelation) {
+      // The Work Task board is an operational view. Finished Projects remain in
+      // the database for history, but only Active Projects belong in its taxonomy.
       const rows = await queryPg<{ id: string; name: string }>(
-        "select id, name from projects order by name",
+        "select id, name from projects where status = 'Active' order by name",
       );
       for (const row of rows) labels[field.name][row.id] = row.name || row.id;
     }
@@ -303,7 +304,10 @@ async function resolveRelationLabels(fields: FieldRow[], entries: Record<string,
         if (favicon) faviconUrls[field.name][row.id] = favicon;
       }
     }
-    for (const id of ids) labels[field.name][id] ??= id;
+    // Do not re-add Finished Project IDs from historical task rows.
+    if (!isProjectRelation) {
+      for (const id of ids) labels[field.name][id] ??= id;
+    }
   }
   return { labels, faviconUrls };
 }
