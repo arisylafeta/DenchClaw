@@ -150,6 +150,15 @@ describe("crm-postgres entry mutations", () => {
     await expect(updatePostgresEntry("task", "missing_1", { Notes: "nope" })).rejects.toThrow("Entry not found: missing_1");
   });
 
+  it("rejects mutations for loop monitoring projections", async () => {
+    const { createPostgresEntry, updatePostgresEntry, deletePostgresEntry } = await import("./entry-mutations");
+
+    await expect(createPostgresEntry("automation_loop", {})).rejects.toThrow("read-only");
+    await expect(updatePostgresEntry("automation_loop_run", "activity-1", {})).rejects.toThrow("read-only");
+    await expect(deletePostgresEntry("automation_loop", "loop-1")).rejects.toThrow("read-only");
+    expect(withPgTransaction).not.toHaveBeenCalled();
+  });
+
   it("updates canonical many_to_one relation field in canonical table only", async () => {
     fieldRows = [{ id: "f_company", name: "Company", type: "relation", canonical_column: "company_id", relationship_type: "many_to_one" }];
     const { updatePostgresEntry } = await import("./entry-mutations");

@@ -29,7 +29,7 @@ const canonicalTableByObjectName: Record<string, string> = {
 // Objects exposed as read-only CRM tables (e.g. campaign metrics snapshots). Any
 // create/update/delete is rejected up front so the UI cannot silently no-op or
 // return a false-success response. Routes map the "read-only" message to HTTP 403.
-const READ_ONLY_OBJECTS = new Set(["campaign", "campaigns"]);
+const READ_ONLY_OBJECTS = new Set(["campaign", "campaigns", "automation_loop", "automation_loop_run"]);
 
 function assertMutable(objectName: string): void {
   if (READ_ONLY_OBJECTS.has(objectName.trim().toLowerCase())) {

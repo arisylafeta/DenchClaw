@@ -11,6 +11,9 @@ describe("crm postgres schema", () => {
     expect(sql).toContain("create table if not exists crm_companies");
     expect(sql).toContain("create or replace view crm_relation_links");
     expect(sql).toContain("create index if not exists crm_people_company_idx");
+    expect(sql).toContain("create table if not exists automation_loops");
+    expect(sql).toContain("create table if not exists automation_loop_runs");
+    expect(sql).toContain("automation_loop_runs.loop_id");
     expect(sql).not.toContain("strength_score");
   });
 });

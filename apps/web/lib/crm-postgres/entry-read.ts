@@ -65,6 +65,8 @@ const supportedTables: Record<string, string> = {
   campaigns: "campaigns",
   project: "projects",
   work_task: "work_tasks",
+  automation_loop: "automation_loops",
+  automation_loop_run: "automation_loop_runs",
 };
 
 function quoteIdentifier(identifier: string): string {
@@ -109,6 +111,7 @@ export async function getReverseRelationsForEntry(
              when o.name in ('company', 'companies') then 'Company Name'
              when o.name = 'work_task' then 'Title'
              when o.name = 'project' then 'Name'
+             when o.name = 'automation_loop_run' then 'Activity'
              else coalesce(o.display_field, display_field.name, 'id')
            end as display_field,
            coalesce(
@@ -120,6 +123,7 @@ export async function getReverseRelationsForEntry(
              nullif(companies.name, ''),
              nullif(work_tasks.title, ''),
              nullif(projects.name, ''),
+             nullif(automation_loop_runs.activity_name, ''),
              l.source_entry_id
            ) as label
       from crm_relation_links l
@@ -145,6 +149,7 @@ export async function getReverseRelationsForEntry(
       left join crm_companies companies on o.name in ('company', 'companies') and companies.id = l.source_entry_id
       left join work_tasks on o.name = 'work_task' and work_tasks.id = l.source_entry_id
       left join projects on o.name = 'project' and projects.id = l.source_entry_id
+      left join automation_loop_runs on o.name = 'automation_loop_run' and automation_loop_runs.id = l.source_entry_id
      where l.target_entry_id = $1
      order by f.sort_order, l.position, l.source_entry_id
   `, [entryId]);
@@ -195,6 +200,13 @@ async function resolveRelationLabels(fields: FieldRow[], entry: Record<string, u
     if (ids.length === 0) continue;
     if (field.related_object_name === "project" || field.name === "Project") {
       const rows = await queryPg<{ id: string; name: string }>("select id, name from projects where id = any($1::text[])", [Array.from(ids)]);
+      for (const row of rows) labels[field.name][row.id] = row.name || row.id;
+    }
+    if (field.related_object_name === "automation_loop") {
+      const rows = await queryPg<{ id: string; name: string }>(
+        "select id, name from automation_loops where id = any($1::text[])",
+        [Array.from(ids)],
+      );
       for (const row of rows) labels[field.name][row.id] = row.name || row.id;
     }
     if (field.related_object_name === "company" || field.name === "Company") {

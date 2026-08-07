@@ -88,6 +88,8 @@ const supportedTables: Record<string, string> = {
   campaigns: "campaigns",
   project: "projects",
   work_task: "work_tasks",
+  automation_loop: "automation_loops",
+  automation_loop_run: "automation_loop_runs",
 };
 
 const FILL_RATE_OBJECTS = new Set(["people", "company", "companies"]);
@@ -282,6 +284,13 @@ async function resolveRelationLabels(fields: FieldRow[], entries: Record<string,
     }
     if (ids.size === 0) continue;
 
+    if (field.related_object_name === "automation_loop") {
+      const rows = await queryPg<{ id: string; name: string }>(
+        "select id, name from automation_loops where id = any($1::text[])",
+        [Array.from(ids)],
+      );
+      for (const row of rows) labels[field.name][row.id] = row.name || row.id;
+    }
     if (field.related_object_name === "company" || field.name === "Company") {
       const rows = await queryPg<{ id: string; name?: string | null; domain?: string | null; website?: string | null }>(
         "select id, name, domain, website from crm_companies where id = any($1::text[])",

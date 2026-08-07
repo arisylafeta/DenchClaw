@@ -236,6 +236,86 @@ create trigger trg_projects_set_updated_at before update on projects for each ro
 drop trigger if exists trg_work_tasks_set_updated_at on work_tasks;
 create trigger trg_work_tasks_set_updated_at before update on work_tasks for each row execute function set_updated_at();
 
+-- Read-only projection of the durable loop runtime for Dench monitoring.
+-- loopctl remains authoritative; the sync command only upserts observations.
+create table if not exists automation_loops (
+  id text primary key,
+  name text not null,
+  workflow_id text,
+  workflow_name text,
+  lifecycle text not null,
+  operation text not null,
+  role text,
+  trigger_type text,
+  owner_app text,
+  objective text,
+  mode text,
+  definition_path text,
+  definition_hash text,
+  registry_hash text,
+  current_status text,
+  current_reason text,
+  current_disposition text,
+  is_blocked boolean not null default false,
+  needs_attention boolean not null default false,
+  attention_reason text,
+  latest_run_id text,
+  latest_invocation_id text,
+  last_activity_at timestamptz,
+  last_success_at timestamptz,
+  lease_owner text,
+  lease_expires_at timestamptz,
+  lease_stale boolean not null default false,
+  approval_required boolean not null default false,
+  output_exists boolean,
+  output_path text,
+  schedule_owner text,
+  latest_scheduled_at timestamptz,
+  scheduler_health text,
+  observation_error text,
+  source_schema_version integer not null,
+  observed_at timestamptz not null,
+  tombstoned_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists automation_loop_runs (
+  id text primary key,
+  activity_name text not null,
+  loop_id text not null references automation_loops(id) on delete cascade,
+  invocation_id text,
+  run_id text,
+  trigger_key_hash text,
+  occurrence_key_hash text,
+  origin text,
+  kind text,
+  status text not null,
+  reason text,
+  disposition text,
+  blocker text,
+  approval_required boolean not null default false,
+  output_path text,
+  started_at timestamptz,
+  finished_at timestamptz,
+  duration_ms bigint,
+  langfuse_trace_id text,
+  agent_session_id text,
+  source_schema_version integer not null,
+  observed_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists automation_loops_attention_idx
+  on automation_loops(needs_attention, last_activity_at desc);
+create index if not exists automation_loops_status_idx
+  on automation_loops(current_status, last_activity_at desc);
+create index if not exists automation_loop_runs_loop_started_idx
+  on automation_loop_runs(loop_id, started_at desc nulls last);
+create unique index if not exists automation_loop_runs_invocation_idx
+  on automation_loop_runs(invocation_id) where invocation_id is not null;
+
 -- crm_relation_links is a VIEW (not a table) that unions together all of the
 -- relationship edges derived from the junction tables and FK columns above.
 create or replace view crm_relation_links as
@@ -399,7 +479,11 @@ where crm_commercial_opportunities.seller_company_id is not null
 union all
 select 'reb_work_task_object'::text, 'reb_work_task_3'::text,
        work_tasks.id, work_tasks.project_id, 0, work_tasks.created_at
-from work_tasks where work_tasks.project_id is not null;
+from work_tasks where work_tasks.project_id is not null
+union all
+select 'reb_automation_loop_run_object'::text, 'reb_automation_loop_run_loop'::text,
+       automation_loop_runs.id, automation_loop_runs.loop_id, 0, automation_loop_runs.created_at
+from automation_loop_runs;
 
 -- Indexes (non-constraint indexes only; primary keys & unique constraints
 -- are declared inline above).
