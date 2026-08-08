@@ -198,18 +198,33 @@ function buildRuleCondition(rule: FilterRule, fieldsByName: Map<string, FieldRow
       return `(${expr} is not null and ${expr}::text <> '')`;
     case "is_true":
       return field.type === "boolean" ? `(${expr}) is true` : `lower(${expr}::text) = 'true'`;
+    case "is_false":
+      return field.type === "boolean"
+        ? `(${expr}) is not true`
+        : `(${expr} is null or lower(${expr}::text) in ('', 'false', '0', 'no'))`;
     case "is_any_of": {
       const values = Array.isArray(rule.value) ? rule.value : rule.value == null ? [] : [String(rule.value)];
       if (values.length === 0) return null;
       params.push(values.map(String));
       return `${expr}::text = any($${params.length}::text[])`;
     }
+    case "is_none_of": {
+      const values = Array.isArray(rule.value) ? rule.value : rule.value == null ? [] : [String(rule.value)];
+      if (values.length === 0) return null;
+      params.push(values.map(String));
+      return `(${expr} is null or not (${expr}::text = any($${params.length}::text[])))`;
+    }
     case "contains":
       params.push(`%${String(rule.value ?? "")}%`);
       return `lower(${expr}::text) like lower($${params.length})`;
     case "equals":
+    case "is":
       params.push(String(rule.value ?? ""));
-      return `${expr}::text = $${params.length}`;
+      return `lower(${expr}::text) = lower($${params.length})`;
+    case "not_equals":
+    case "is_not":
+      params.push(String(rule.value ?? ""));
+      return `(${expr} is null or lower(${expr}::text) <> lower($${params.length}))`;
     default:
       return null;
   }

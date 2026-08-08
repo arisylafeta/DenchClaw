@@ -306,4 +306,49 @@ describe("postgres object read adapter", () => {
     expect(projectOptionsCall?.[0]).toContain("order by name");
     expect(projectOptionsCall?.[1]).toBeUndefined();
   });
+
+  it("applies enum is filters to canonical Postgres columns", async () => {
+    const filters = Buffer.from(JSON.stringify({
+      id: "root",
+      conjunction: "and",
+      rules: [{ id: "status-rule", field: "Status", operator: "is", value: "In Progress" }],
+    })).toString("base64");
+
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("work_task", new URL(`http://localhost?filters=${encodeURIComponent(filters)}`));
+
+    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)") && String(sql).includes("from work_tasks"));
+    expect(String(countCall?.[0])).toContain('lower(e."status"::text) = lower($2)');
+    expect(countCall?.[1]).toEqual(["obj_work_task", "In Progress"]);
+  });
+
+
+  it("keeps unset enum values in negative enum filters", async () => {
+    const filters = Buffer.from(JSON.stringify({
+      id: "root",
+      conjunction: "and",
+      rules: [{ id: "status-rule", field: "Status", operator: "is_not", value: "Done" }],
+    })).toString("base64");
+
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("work_task", new URL(`http://localhost?filters=${encodeURIComponent(filters)}`));
+
+    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)") && String(sql).includes("from work_tasks"));
+    expect(String(countCall?.[0])).toContain('(e."status" is null or lower(e."status"::text) <> lower($2))');
+  });
+
+  it("treats unset booleans as false", async () => {
+    const filters = Buffer.from(JSON.stringify({
+      id: "root",
+      conjunction: "and",
+      rules: [{ id: "subscribed-rule", field: "Subscribed", operator: "is_false" }],
+    })).toString("base64");
+
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("people", new URL(`http://localhost?filters=${encodeURIComponent(filters)}`));
+
+    const countCall = queryPg.mock.calls.find(([sql]) => String(sql).includes("select count(*)") && String(sql).includes("from crm_people"));
+    expect(String(countCall?.[0])).toContain('(e."subscribed") is not true');
+  });
+
 });
