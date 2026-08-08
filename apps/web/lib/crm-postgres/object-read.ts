@@ -131,10 +131,33 @@ function toSavedView(row: SavedViewRow): SavedView & { id?: string } {
   };
 }
 
+const WORK_TASK_PREVIEW_LENGTH = 240;
+
+function projectWorkTaskListFields(fields: FieldRow[]): FieldRow[] {
+  const taskDetails = fields.find((field) => field.canonical_column === "task_details");
+  if (!taskDetails) {return fields;}
+
+  const preview: FieldRow = {
+    ...taskDetails,
+    id: `${taskDetails.id}_preview`,
+    name: "Preview",
+    type: "text",
+  };
+  const projected = fields.filter((field) => field !== taskDetails);
+  const titleIndex = projected.findIndex((field) => field.name === "Title" || field.canonical_column === "title");
+  projected.splice(titleIndex >= 0 ? titleIndex + 1 : 0, 0, preview);
+  return projected;
+}
+
 function buildEntrySelect(fields: FieldRow[], existingColumns: Set<string>): string {
   const canonicalSelects = fields
     .filter((field) => field.canonical_column && existingColumns.has(field.canonical_column))
-    .map((field) => `${quoteIdentifier(field.canonical_column!)} as ${quoteIdentifier(field.name)}`);
+    .map((field) => {
+      if (field.name === "Preview" && field.canonical_column === "task_details") {
+        return `left(btrim(regexp_replace(coalesce(${quoteIdentifier(field.canonical_column)}, ''), '[[:space:]]+', ' ', 'g')), ${WORK_TASK_PREVIEW_LENGTH}) as ${quoteIdentifier(field.name)}`;
+      }
+      return `${quoteIdentifier(field.canonical_column!)} as ${quoteIdentifier(field.name)}`;
+    });
 
   return [
     "id as entry_id",
@@ -341,6 +364,9 @@ export async function getPostgresObjectData(objectName: string, url: URL): Promi
   const existingColumns = tableName ? await getTableColumns(tableName) : new Set<string>();
   if (tableName) {
     fields = fields.filter((field) => !field.canonical_column || existingColumns.has(field.canonical_column));
+  }
+  if (object.name === "work_task") {
+    fields = projectWorkTaskListFields(fields);
   }
   const effectiveDisplayField = resolveDisplayField(object, fields);
   if (tableName && FILL_RATE_OBJECTS.has(object.name)) {

@@ -64,6 +64,7 @@ describe("postgres object read adapter", () => {
             { column_name: "title" },
             { column_name: "status" },
             { column_name: "project_id" },
+            { column_name: "task_details" },
           ];
         }
         return [
@@ -100,6 +101,7 @@ describe("postgres object read adapter", () => {
             { id: "wt_title", name: "Title", type: "text", canonical_column: "title", sort_order: 1 },
             { id: "wt_status", name: "Status", type: "enum", canonical_column: "status", sort_order: 2 },
             { id: "wt_project", name: "Project", type: "relation", canonical_column: "project_id", related_object_id: "reb_project_object", related_object_name: "project", relationship_type: "many_to_one", sort_order: 3 },
+            { id: "wt_details", name: "Task Details", type: "richtext", canonical_column: "task_details", sort_order: 4 },
           ];
         }
         return mockFieldRows;
@@ -113,7 +115,7 @@ describe("postgres object read adapter", () => {
       if (sql.includes("count(*)")) return [{ count: "1" }];
       if (sql.includes("from crm_people")) return [{ entry_id: "p1", created_at: "2026-01-01", updated_at: "2026-01-01", "Full Name": "Ada", Email: "ada@example.com", Company: "c1" }];
       if (sql.includes("from crm_commercial_opportunities")) return [{ entry_id: "o1", created_at: "2026-01-01", updated_at: "2026-01-01", Name: "Retired EV packs", Status: "open", Amount: 125000 }];
-      if (sql.includes("from work_tasks")) return [{ entry_id: "t1", created_at: "2026-01-01", updated_at: "2026-01-01", Title: "Finalize API", Status: "Done", Project: "p1" }];
+      if (sql.includes("from work_tasks")) return [{ entry_id: "t1", created_at: "2026-01-01", updated_at: "2026-01-01", Title: "Finalize API", Preview: "Objective: finish the API", Status: "Done", Project: "p1" }];
       if (sql.includes("from projects")) return [
         { id: "p2", name: "Safe change delivery" },
         { id: "p1", name: "Supplier inventory lifecycle" },
@@ -287,7 +289,14 @@ describe("postgres object read adapter", () => {
 
     expect(data.object.default_view).toBe("kanban");
     expect(data.fields.find((field) => field.name === "Status")?.type).toBe("enum");
-    expect(data.entries[0]).toMatchObject({ Title: "Finalize API", Status: "Done", Project: "p1" });
+    expect(data.fields.map((field) => field.name)).toContain("Preview");
+    expect(data.fields.map((field) => field.name)).not.toContain("Task Details");
+    expect(data.entries[0]).toMatchObject({ Title: "Finalize API", Preview: "Objective: finish the API", Status: "Done", Project: "p1" });
+    expect(data.entries[0]).not.toHaveProperty("Task Details");
+    const taskListCall = queryPg.mock.calls.find(([sql]) => String(sql).startsWith("select id as entry_id") && String(sql).includes("from work_tasks"));
+    expect(String(taskListCall?.[0])).toContain("regexp_replace");
+    expect(String(taskListCall?.[0])).toContain('as "Preview"');
+    expect(String(taskListCall?.[0])).not.toContain('as "Task Details"');
     expect(data.relationLabels.Project).toEqual({
       p2: "Safe change delivery",
       p1: "Supplier inventory lifecycle",
