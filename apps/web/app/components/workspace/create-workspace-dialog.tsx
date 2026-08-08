@@ -124,7 +124,7 @@ export function CreateWorkspaceDialog({ isOpen, onClose, onCreated }: CreateWork
               <button
                 onClick={onClose}
                 className="px-4 py-2 text-sm font-medium rounded-lg transition-colors hover:opacity-80 cursor-pointer"
-                style={{ background: "var(--color-accent)", color: "#fff" }}
+                style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
               >
                 Done
               </button>
@@ -203,7 +203,7 @@ export function CreateWorkspaceDialog({ isOpen, onClose, onCreated }: CreateWork
                 onClick={() => void handleCreate()}
                 disabled={creating || !workspaceName.trim()}
                 className="px-4 py-2 text-sm font-medium rounded-full transition-colors hover:opacity-80 disabled:opacity-50 cursor-pointer"
-                style={{ background: "var(--color-accent)", color: "#fff" }}
+                style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
               >
                 {creating ? "Creating..." : "Create Workspace"}
               </button>

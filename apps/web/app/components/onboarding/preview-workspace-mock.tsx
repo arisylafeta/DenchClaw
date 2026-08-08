@@ -344,7 +344,7 @@ function ScoreBar({ value, revealed }: { value: number; revealed: boolean }) {
           className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
           style={{
             width: `${revealed ? value : 0}%`,
-            background: "var(--color-accent)",
+            background: "var(--color-accent-fill)",
           }}
         />
       </div>

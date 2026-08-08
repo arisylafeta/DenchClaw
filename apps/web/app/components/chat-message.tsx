@@ -808,12 +808,12 @@ function ComposioActionButton({
 			type="button"
 			className="not-prose my-1 inline-flex items-center gap-1.5 rounded-lg px-1 py-0.5 pr-2.5 text-xs font-semibold whitespace-nowrap transition-colors"
 			style={{
-				background: "color-mix(in srgb, var(--color-accent) 10%, transparent)",
+				background: "color-mix(in srgb, var(--color-accent-fill) 10%, transparent)",
 				color: "var(--color-accent)",
 				border: "none",
 			}}
-			onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--color-accent) 15%, transparent)"; }}
-			onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--color-accent) 10%, transparent)"; }}
+			onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--color-accent-fill) 15%, transparent)"; }}
+			onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--color-accent-fill) 10%, transparent)"; }}
 			onClick={() => onPress?.(action)}
 		>
 			<span
@@ -1338,7 +1338,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 							{isRunning ? (
 								<span
 									className="inline-block w-2 h-2 rounded-full animate-pulse flex-shrink-0"
-									style={{ background: "var(--color-accent)" }}
+									style={{ background: "var(--color-accent-fill)" }}
 								/>
 							) : (
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0" style={{ color: "var(--color-accent)" }}>

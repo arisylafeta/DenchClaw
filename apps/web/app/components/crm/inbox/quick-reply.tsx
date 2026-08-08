@@ -131,8 +131,8 @@ export function QuickReply({
           title="Two-way Gmail sync is on the roadmap"
           className="rounded-lg px-3 py-1.5 text-[12px] font-medium opacity-60 cursor-not-allowed"
           style={{
-            background: "var(--color-accent)",
-            color: "#fff",
+            background: "var(--color-accent-fill)",
+            color: "var(--color-accent-foreground)",
           }}
         >
           Send

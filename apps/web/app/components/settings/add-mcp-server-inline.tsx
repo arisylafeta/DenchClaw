@@ -266,8 +266,8 @@ export function AddMcpServerInline({
               onClick={() => void handleSubmit()}
               disabled={!canSubmit}
               style={{
-                background: canSubmit ? "var(--color-accent)" : "var(--color-surface-hover)",
-                color: canSubmit ? "var(--color-bg)" : "var(--color-text-muted)",
+                background: canSubmit ? "var(--color-accent-fill)" : "var(--color-surface-hover)",
+                color: canSubmit ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
               }}
             >
               <span className="inline-flex items-center gap-2">

@@ -258,7 +258,7 @@ export function OnboardingWizard({
         <header className="flex h-16 items-center justify-between px-6 sm:px-10">
           <div className="flex items-center gap-2.5">
             <img
-              src="/dench-workspace-icon.png"
+              src="/rebattery-workspace-icon.svg"
               alt="DenchClaw"
               width={36}
               height={36}
@@ -305,7 +305,7 @@ export function OnboardingWizard({
                 title="Switch workspace"
               >
                 <img
-                  src="/dench-workspace-icon.png"
+                  src="/rebattery-workspace-icon.svg"
                   alt="DenchClaw"
                   width={36}
                   height={36}
@@ -338,7 +338,7 @@ export function OnboardingWizard({
         ) : (
           <div className="flex items-center gap-2.5">
             <img
-              src="/dench-workspace-icon.png"
+              src="/rebattery-workspace-icon.svg"
               alt="DenchClaw"
               width={36}
               height={36}

@@ -120,8 +120,8 @@ export function ComposioAppCard({
               background: "var(--color-surface-hover)",
               color: "var(--color-accent)",
             } : {
-              background: "var(--color-accent)",
-              color: "#fff",
+              background: "var(--color-accent-fill)",
+              color: "var(--color-accent-foreground)",
             }}
           >
             {connected ? "Connected" : "Connect"}

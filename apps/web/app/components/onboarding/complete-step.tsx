@@ -21,7 +21,7 @@ export function CompleteStep({ state }: { state: OnboardingState }) {
       <span
         aria-hidden
         className="relative flex h-16 w-16 items-center justify-center rounded-full"
-        style={{ background: "var(--color-accent)", color: "#fff" }}
+        style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
       >
         <svg
           width="28"

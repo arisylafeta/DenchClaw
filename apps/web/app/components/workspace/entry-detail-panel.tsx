@@ -163,7 +163,7 @@ function UserBadge({ value, members }: { value: unknown; members?: Array<{ id: s
     <span className="flex items-center gap-2">
       <span
         className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium flex-shrink-0"
-        style={{ background: "var(--color-accent)", color: "white" }}
+        style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
       >
         {(member?.name ?? memberId).charAt(0).toUpperCase()}
       </span>
@@ -440,7 +440,7 @@ function AddPropertyForm({ objectName, onCreated, onCancel }: {
       <div className="flex items-center gap-2 justify-end">
         <button type="button" onClick={onCancel} className="px-2 py-1 text-xs rounded-md" style={{ color: "var(--color-text-muted)" }}>Cancel</button>
         <button type="submit" disabled={saving || !name.trim()} className="px-3 py-1 text-xs rounded-md font-medium disabled:opacity-50"
-          style={{ background: "var(--color-accent)", color: "white" }}
+          style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
         >{saving ? "Adding..." : "Add"}</button>
       </div>
     </form>
@@ -611,7 +611,7 @@ export function EntryDetailPanel({
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <button type="button" onClick={() => void onNavigateObject?.(objectName)}
             className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors hover:opacity-80 flex-shrink-0"
-            style={{ background: "var(--color-accent-light)", color: "var(--color-accent)", border: "1px solid var(--color-border)" }}
+            style={{ background: "var(--color-accent-light)", color: "var(--color-accent-fill)", border: "1px solid var(--color-border)" }}
             title={`Go to ${objectLabel}`}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -681,7 +681,7 @@ export function EntryDetailPanel({
                           {editingField === field.name ? (
                             field.type === "tags" ? (
                               <div className="flex items-center gap-1 w-full">
-                                <div className="flex-1 px-2 py-0.5 rounded-md" style={{ background: "var(--color-surface-hover)", border: "2px solid var(--color-accent)" }}>
+                                <div className="flex-1 px-2 py-0.5 rounded-md" style={{ background: "var(--color-surface-hover)", border: "2px solid var(--color-accent-fill)" }}>
                                   <TagsEditInput value={safeString(value)} onChange={(v) => { void handleSaveField(field.name, v); }} autoFocus />
                                 </div>
                                 <button type="button" onClick={() => setEditingField(null)} className="px-1.5 py-0.5 text-xs rounded-md flex-shrink-0" style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)" }}>Done</button>
@@ -698,21 +698,21 @@ export function EntryDetailPanel({
                               <form onSubmit={(e) => { e.preventDefault(); void handleSaveField(field.name, editValue); }} className="flex items-center gap-1 w-full">
                                 {field.type === "enum" && field.enum_values ? (
                                   <select value={editValue} onChange={(e) => { setEditValue(e.target.value); void handleSaveField(field.name, e.target.value); }} autoFocus
-                                    className="flex-1 min-w-0 px-2 py-0.5 text-sm rounded-md outline-none" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent)" }}>
+                                    className="flex-1 min-w-0 px-2 py-0.5 text-sm rounded-md outline-none" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent-fill)" }}>
                                     <option value="">--</option>
                                     {field.enum_values.map((v) => <option key={v} value={v}>{v}</option>)}
                                   </select>
                                 ) : field.type === "boolean" ? (
                                   <select value={editValue} onChange={(e) => { setEditValue(e.target.value); void handleSaveField(field.name, e.target.value); }} autoFocus
-                                    className="flex-1 min-w-0 px-2 py-0.5 text-sm rounded-md outline-none" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent)" }}>
+                                    className="flex-1 min-w-0 px-2 py-0.5 text-sm rounded-md outline-none" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent-fill)" }}>
                                     <option value="true">Yes</option>
                                     <option value="false">No</option>
                                   </select>
                                 ) : (
                                   <>
                                     <input type={inputTypeForField(field.type)} value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus
-                                      className="flex-1 min-w-0 px-2 py-0.5 text-sm rounded-md outline-none" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent)" }} />
-                                    <button type="submit" disabled={saving} className="px-1.5 py-0.5 text-xs rounded-md font-medium flex-shrink-0" style={{ background: "var(--color-accent)", color: "white" }}>
+                                      className="flex-1 min-w-0 px-2 py-0.5 text-sm rounded-md outline-none" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent-fill)" }} />
+                                    <button type="submit" disabled={saving} className="px-1.5 py-0.5 text-xs rounded-md font-medium flex-shrink-0" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
                                       {saving ? "..." : "Save"}
                                     </button>
                                   </>

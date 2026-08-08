@@ -117,8 +117,8 @@ function ModeSelect<T extends string>({
 						onClick={() => onChange(opt.value)}
 						className="text-[11px] px-2.5 py-1 flex-1 transition-colors capitalize"
 						style={{
-							background: opt.value === value ? "var(--color-accent)" : "var(--color-surface)",
-							color: opt.value === value ? "#fff" : "var(--color-text-muted)",
+							background: opt.value === value ? "var(--color-accent-fill)" : "var(--color-surface)",
+							color: opt.value === value ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
 						}}
 					>
 						{opt.label}

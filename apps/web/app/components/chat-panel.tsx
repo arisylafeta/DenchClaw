@@ -2533,8 +2533,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
 								style={{
-									background: !editorEmpty || attachedFiles.length > 0 ? "linear-gradient(to top, #0065A2, #0075AA)" : "var(--color-text-muted)",
-									color: !editorEmpty || attachedFiles.length > 0 ? "white" : "var(--color-bg)",
+									background: !editorEmpty || attachedFiles.length > 0 ? "var(--color-accent-fill)" : "var(--color-text-muted)",
+									color: !editorEmpty || attachedFiles.length > 0 ? "var(--color-accent-foreground)" : "var(--color-bg)",
 								}}
 								title="Send message"
 							>
@@ -2804,7 +2804,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									style={{ color: "var(--color-text-muted)" }}
 								>
 									{/* eslint-disable-next-line @next/next/no-img-element */}
-									<img src="/dench-workspace-icon.png" alt="" width={14} height={14} className="rounded-sm" />
+									<img src="/rebattery-workspace-icon.svg" alt="" width={14} height={14} className="rounded-sm" />
 									<span className="text-xs truncate">Preparing response…</span>
 								</div>
 							</div>
@@ -2869,7 +2869,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									style={{ color: "var(--color-text-muted)" }}
 								>
 									{/* eslint-disable-next-line @next/next/no-img-element */}
-									<img src="/dench-workspace-icon.png" alt="" width={14} height={14} className="rounded-sm" />
+									<img src="/rebattery-workspace-icon.svg" alt="" width={14} height={14} className="rounded-sm" />
 									<span className="text-xs truncate">
 										{streamActivityLabel}
 									</span>

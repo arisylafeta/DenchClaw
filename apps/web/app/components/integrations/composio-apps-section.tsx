@@ -841,8 +841,8 @@ export function ComposioAppsSection({
                   onClick={() => setActiveCategory(null)}
                   className="rounded-full px-3 py-1 text-[11px] font-medium transition-colors cursor-pointer"
                   style={{
-                    background: !activeCategory ? "var(--color-accent)" : "var(--color-surface)",
-                    color: !activeCategory ? "var(--color-bg, #fff)" : "var(--color-text-muted)",
+                    background: !activeCategory ? "var(--color-accent-fill)" : "var(--color-surface)",
+                    color: !activeCategory ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                     border: `1px solid ${!activeCategory ? "var(--color-accent)" : "var(--color-border)"}`,
                   }}
                 >
@@ -855,8 +855,8 @@ export function ComposioAppsSection({
                     onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
                     className="rounded-full px-3 py-1 text-[11px] font-medium transition-colors cursor-pointer"
                     style={{
-                      background: activeCategory === cat ? "var(--color-accent)" : "var(--color-surface)",
-                      color: activeCategory === cat ? "var(--color-bg, #fff)" : "var(--color-text-muted)",
+                      background: activeCategory === cat ? "var(--color-accent-fill)" : "var(--color-surface)",
+                      color: activeCategory === cat ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                       border: `1px solid ${activeCategory === cat ? "var(--color-accent)" : "var(--color-border)"}`,
                     }}
                   >

@@ -494,7 +494,7 @@ export function ComposioConnectModal({
             <button
               type="button"
               className="rounded-full px-4 py-1.5 text-sm font-medium"
-              style={{ background: "var(--color-accent)", color: "#fff" }}
+              style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
               onClick={() => void handleConnect()}
               disabled={connecting}
             >

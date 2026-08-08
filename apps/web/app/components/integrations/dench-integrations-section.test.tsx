@@ -61,6 +61,6 @@ describe("DenchIntegrationsSection", () => {
     expect(screen.getByText("Dench Enrichments")).toBeInTheDocument();
     expect(screen.queryByText("Apollo Enrichment")).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Toggle Dench Enrichments" })).toBeInTheDocument();
-    expect(container.querySelector('img[src="/dench-workspace-icon.png"]')).toBeTruthy();
+    expect(container.querySelector('img[src="/rebattery-workspace-icon.svg"]')).toBeTruthy();
   });
 });

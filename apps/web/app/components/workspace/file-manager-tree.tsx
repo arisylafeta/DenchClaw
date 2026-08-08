@@ -370,7 +370,7 @@ function NewItemPrompt({
           <button type="button" onClick={onCancel} className="px-3 py-1.5 rounded-md text-sm" style={{ color: "var(--color-text-muted)", background: "var(--color-surface-hover)" }}>
             Cancel
           </button>
-          <button type="button" onClick={() => onSubmit(value.trim())} className="px-3 py-1.5 rounded-md text-sm text-white" style={{ background: "var(--color-accent)" }}>
+          <button type="button" onClick={() => onSubmit(value.trim())} className="px-3 py-1.5 rounded-md text-sm" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
             Create
           </button>
         </div>

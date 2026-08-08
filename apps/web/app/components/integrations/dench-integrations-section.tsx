@@ -57,7 +57,7 @@ function integrationLogo(id: DenchIntegrationId): ReactNode {
     case "apollo":
       return (
         <img
-          src="/dench-workspace-icon.png"
+          src="/rebattery-workspace-icon.svg"
           alt=""
           width={20}
           height={20}

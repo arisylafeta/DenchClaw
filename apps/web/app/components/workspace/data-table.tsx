@@ -832,8 +832,8 @@ export function DataTable<TData, TValue>({
 							onClick={onAdd}
 							className="h-8 px-3 flex items-center gap-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors shadow-[0_0_21px_0_rgba(0,0,0,0.05)]"
 							style={{
-								background: "var(--color-accent)",
-								color: "#fff",
+								background: "var(--color-accent-fill)",
+								color: "var(--color-accent-foreground)",
 							}}
 						>
 							{addButtonLabel}
@@ -1185,7 +1185,7 @@ function TableRowInner({
 				const cellStyle: React.CSSProperties = {
 					borderColor: "var(--color-border)",
 					...(isCellSelected
-						? { background: "color-mix(in srgb, var(--color-accent) 10%, var(--color-surface))" }
+						? { background: "color-mix(in srgb, var(--color-accent-fill) 10%, var(--color-surface))" }
 						: {}),
 					...((stickyShadow || selectionShadow) ? { boxShadow: [stickyShadow, selectionShadow].filter(Boolean).join(", ") } : {}),
 					...(isSticky
@@ -1193,7 +1193,7 @@ function TableRowInner({
 								position: "sticky" as const,
 								left: enableRowSelection ? 40 : 0,
 								zIndex: 2,
-								background: isCellSelected ? "color-mix(in srgb, var(--color-accent) 10%, var(--color-surface))" : stickyBg,
+								background: isCellSelected ? "color-mix(in srgb, var(--color-accent-fill) 10%, var(--color-surface))" : stickyBg,
 							}
 						: {}),
 					...(isSelectCol

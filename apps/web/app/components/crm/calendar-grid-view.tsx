@@ -123,7 +123,7 @@ function EventChip({
       }}
       className="w-full text-left text-[10px] px-1.5 py-0.5 rounded truncate cursor-pointer"
       style={{
-        background: "color-mix(in srgb, var(--color-accent) 15%, transparent)",
+        background: "color-mix(in srgb, var(--color-accent-fill) 15%, transparent)",
         color: "var(--color-accent)",
       }}
       title={time ? `${time} · ${title}` : title}
@@ -416,7 +416,7 @@ function DayView({
             className="flex"
             style={{
               borderBottom: h < 23 ? "1px solid var(--color-border)" : undefined,
-              background: isCurrentHour ? "color-mix(in srgb, var(--color-accent) 4%, transparent)" : undefined,
+              background: isCurrentHour ? "color-mix(in srgb, var(--color-accent-fill) 4%, transparent)" : undefined,
             }}
           >
             <div
@@ -505,7 +505,7 @@ function WeekView({
               className="min-h-[200px] p-1.5"
               style={{
                 borderRight: d.getDay() < 6 ? "1px solid var(--color-border)" : undefined,
-                background: isToday ? "color-mix(in srgb, var(--color-accent) 4%, transparent)" : undefined,
+                background: isToday ? "color-mix(in srgb, var(--color-accent-fill) 4%, transparent)" : undefined,
               }}
             >
               <div className="space-y-0.5">
@@ -593,7 +593,7 @@ function MonthView({
                 style={{
                   borderRight: day.getDay() < 6 ? "1px solid var(--color-border)" : undefined,
                   opacity: isCurrentMonth ? 1 : 0.4,
-                  background: isToday ? "color-mix(in srgb, var(--color-accent) 5%, transparent)" : undefined,
+                  background: isToday ? "color-mix(in srgb, var(--color-accent-fill) 5%, transparent)" : undefined,
                 }}
               >
                 <div

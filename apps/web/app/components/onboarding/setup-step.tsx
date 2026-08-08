@@ -194,7 +194,7 @@ function DenchCloudIcon() {
   return (
     /* eslint-disable-next-line @next/next/no-img-element */
     <img
-      src="/dench-workspace-icon.png"
+      src="/rebattery-workspace-icon.svg"
       alt=""
       width={28}
       height={28}
@@ -1003,8 +1003,8 @@ export function SetupStep({
           disabled={!canContinue || advancing}
           className="flex h-10 items-center justify-center rounded-lg px-5 text-[13.5px] font-medium transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50"
           style={{
-            background: "var(--color-accent)",
-            color: "#fff",
+            background: "var(--color-accent-fill)",
+            color: "var(--color-accent-foreground)",
           }}
           onMouseEnter={(e) => {
             if (!advancing && canContinue) {
@@ -1133,8 +1133,8 @@ function SkipGmailDialog({
             autoFocus
             className="flex h-10 items-center justify-center rounded-lg px-5 text-[13.5px] font-medium transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50"
             style={{
-              background: "var(--color-accent)",
-              color: "#fff",
+              background: "var(--color-accent-fill)",
+              color: "var(--color-accent-foreground)",
             }}
             onMouseEnter={(e) => {
               if (!submitting) {

@@ -171,7 +171,7 @@ function UserBadge({
     <span className="flex items-center gap-2">
       <span
         className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0"
-        style={{ background: "var(--color-accent)", color: "white" }}
+        style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
       >
         {(member?.name ?? memberId).charAt(0).toUpperCase()}
       </span>
@@ -710,7 +710,7 @@ export function EntryDetailModal({
                       {editingField === field.name ? (
                         field.type === "tags" ? (
                           <div className="flex items-center gap-2 w-full">
-                            <div className="flex-1 px-2 py-1 rounded-lg" style={{ background: "var(--color-surface-hover)", border: "2px solid var(--color-accent)" }}>
+                            <div className="flex-1 px-2 py-1 rounded-lg" style={{ background: "var(--color-surface-hover)", border: "2px solid var(--color-accent-fill)" }}>
                               <TagsEditInput
                                 value={safeString(value)}
                                 onChange={(v) => { void handleSaveField(field.name, v); }}
@@ -747,7 +747,7 @@ export function EntryDetailModal({
                               onChange={(e) => { setEditValue(e.target.value); void handleSaveField(field.name, e.target.value); }}
                               autoFocus
                               className="flex-1 px-2 py-1 text-sm rounded-lg outline-none"
-                              style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent)" }}
+                              style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent-fill)" }}
                             >
                               <option value="">--</option>
                               {field.enum_values.map((v) => <option key={v} value={v}>{v}</option>)}
@@ -758,7 +758,7 @@ export function EntryDetailModal({
                               onChange={(e) => { setEditValue(e.target.value); void handleSaveField(field.name, e.target.value); }}
                               autoFocus
                               className="flex-1 px-2 py-1 text-sm rounded-lg outline-none"
-                              style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent)" }}
+                              style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent-fill)" }}
                             >
                               <option value="true">Yes</option>
                               <option value="false">No</option>
@@ -771,9 +771,9 @@ export function EntryDetailModal({
                                 onChange={(e) => setEditValue(e.target.value)}
                                 autoFocus
                                 className="flex-1 px-2 py-1 text-sm rounded-lg outline-none"
-                                style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent)" }}
+                                style={{ background: "var(--color-surface-hover)", color: "var(--color-text)", border: "2px solid var(--color-accent-fill)" }}
                               />
-                              <button type="submit" disabled={saving} className="px-2 py-1 text-xs rounded-lg font-medium" style={{ background: "var(--color-accent)", color: "white" }}>
+                              <button type="submit" disabled={saving} className="px-2 py-1 text-xs rounded-lg font-medium" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
                                 {saving ? "..." : "Save"}
                               </button>
                             </>

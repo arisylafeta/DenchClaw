@@ -465,8 +465,8 @@ export function DirectoryPickerModal({
               disabled={!displayDir}
               className="px-3 py-1.5 rounded-lg text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
-                color: "white",
-                background: displayDir ? "var(--color-accent)" : "var(--color-border-strong)",
+                color: "var(--color-accent-foreground)",
+                background: displayDir ? "var(--color-accent-fill)" : "var(--color-border-strong)",
               }}
             >
               Select This Folder

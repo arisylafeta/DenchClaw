@@ -513,7 +513,7 @@ export function WorkspaceSidebar({
 						>
 							{/* eslint-disable-next-line @next/next/no-img-element */}
 							<img
-								src="/dench-workspace-icon.png"
+								src="/rebattery-workspace-icon.svg"
 								alt=""
 								className="w-7 h-7 object-cover"
 								draggable={false}

@@ -344,8 +344,8 @@ export function SkillStorePanel({ embedded }: { embedded?: boolean } = {}) {
             onClick={() => handleCategoryClick(null)}
             className="rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer"
             style={{
-              background: !activeCategory ? "var(--color-accent)" : "var(--color-surface)",
-              color: !activeCategory ? "var(--color-bg, #fff)" : "var(--color-text-muted)",
+              background: !activeCategory ? "var(--color-accent-fill)" : "var(--color-surface)",
+              color: !activeCategory ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
               border: !activeCategory ? "none" : "1px solid var(--color-border)",
             }}
           >
@@ -358,8 +358,8 @@ export function SkillStorePanel({ embedded }: { embedded?: boolean } = {}) {
               onClick={() => handleCategoryClick(activeCategory === cat ? null : cat)}
               className="rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer"
               style={{
-                background: activeCategory === cat ? "var(--color-accent)" : "var(--color-surface)",
-                color: activeCategory === cat ? "var(--color-bg, #fff)" : "var(--color-text-muted)",
+                background: activeCategory === cat ? "var(--color-accent-fill)" : "var(--color-surface)",
+                color: activeCategory === cat ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                 border: activeCategory === cat ? "none" : "1px solid var(--color-border)",
               }}
             >
@@ -462,7 +462,7 @@ function InstalledTab({
       <div className="p-8 text-center rounded-2xl" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
         <p className="text-sm mb-3" style={{ color: "var(--color-text-muted)" }}>Could not load installed skills</p>
         <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>{error}</p>
-        <button type="button" onClick={onRetry} className="text-xs px-3 py-1.5 rounded-lg cursor-pointer" style={{ background: "var(--color-accent)", color: "var(--color-bg)" }}>
+        <button type="button" onClick={onRetry} className="text-xs px-3 py-1.5 rounded-lg cursor-pointer" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
           Retry
         </button>
       </div>
@@ -534,7 +534,7 @@ function BrowseTab({
       <div className="p-8 text-center rounded-2xl" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
         <p className="text-sm mb-3" style={{ color: "var(--color-text-muted)" }}>Could not load skills</p>
         <p className="text-xs mb-4" style={{ color: "var(--color-text-muted)" }}>{error}</p>
-        <button type="button" onClick={onRetry} className="text-xs px-3 py-1.5 rounded-lg cursor-pointer" style={{ background: "var(--color-accent)", color: "var(--color-bg)" }}>
+        <button type="button" onClick={onRetry} className="text-xs px-3 py-1.5 rounded-lg cursor-pointer" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
           Retry
         </button>
       </div>

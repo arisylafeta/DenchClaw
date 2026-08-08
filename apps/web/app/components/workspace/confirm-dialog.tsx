@@ -109,9 +109,9 @@ export function ConfirmDialog({
 						disabled={loading}
 						className="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
 						style={{
-							background: isDestructive ? "#dc2626" : "var(--color-accent)",
+							background: isDestructive ? "#dc2626" : "var(--color-accent-fill)",
 							border: "none",
-							color: "#fff",
+							color: "var(--color-accent-foreground)",
 							opacity: loading ? 0.7 : 1,
 						}}
 					>

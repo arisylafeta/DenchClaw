@@ -101,12 +101,12 @@ export function ThreadListRow({
         }}
         className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border cursor-pointer"
         style={{
-          background: inBulkSelection ? "var(--color-accent)" : "transparent",
+          background: inBulkSelection ? "var(--color-accent-fill)" : "transparent",
           borderColor: inBulkSelection ? "var(--color-accent)" : "var(--color-border-strong)",
         }}
       >
         {inBulkSelection && (
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-foreground)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         )}
@@ -178,7 +178,7 @@ export function ThreadListRow({
               width: 6,
               height: 6,
               borderRadius: 99,
-              background: "var(--color-accent)",
+              background: "var(--color-accent-fill)",
             }}
           />
         )}

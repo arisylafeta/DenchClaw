@@ -507,7 +507,7 @@ function EventChip({ ev, onSelectJob }: { ev: DayEvent; onSelectJob: (id: string
     return (
       <button type="button" onClick={() => onSelectJob(ev.job.id)}
         className="w-full text-left text-[10px] px-1.5 py-0.5 rounded truncate cursor-pointer"
-        style={{ background: "color-mix(in srgb, var(--color-accent) 15%, transparent)", color: "var(--color-accent)" }}
+        style={{ background: "color-mix(in srgb, var(--color-accent-fill) 15%, transparent)", color: "var(--color-accent-fill)" }}
         title={`Scheduled: ${ev.job.name} at ${time}`}
       >{time} {ev.job.name}</button>
     );
@@ -665,7 +665,7 @@ function DayView({ anchor, eventsByDay, todayStr, onSelectJob }: {
         const nowHour = new Date().getHours();
         const isCurrentHour = isToday && h === nowHour;
         return (
-          <div key={h} className="flex" style={{ borderBottom: h < 23 ? "1px solid var(--color-border)" : undefined, background: isCurrentHour ? "color-mix(in srgb, var(--color-accent) 4%, transparent)" : undefined }}>
+          <div key={h} className="flex" style={{ borderBottom: h < 23 ? "1px solid var(--color-border)" : undefined, background: isCurrentHour ? "color-mix(in srgb, var(--color-accent-fill) 4%, transparent)" : undefined }}>
             <div className="w-16 flex-shrink-0 px-3 py-2 text-right text-[11px] font-medium" style={{ color: "var(--color-text-muted)", borderRight: "1px solid var(--color-border)" }}>
               {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
             </div>
@@ -721,7 +721,7 @@ function WeekView({ anchor, eventsByDay, todayStr, onSelectJob, onDateChange, on
           const isToday = dk === todayStr;
           return (
             <div key={dk} className="min-h-[200px] p-1.5"
-              style={{ borderRight: d.getDay() < 6 ? "1px solid var(--color-border)" : undefined, background: isToday ? "color-mix(in srgb, var(--color-accent) 4%, transparent)" : undefined }}
+              style={{ borderRight: d.getDay() < 6 ? "1px solid var(--color-border)" : undefined, background: isToday ? "color-mix(in srgb, var(--color-accent-fill) 4%, transparent)" : undefined }}
             >
               <div className="space-y-0.5">
                 {events.slice(0, 8).map((ev, i) => <EventChip key={i} ev={ev} onSelectJob={onSelectJob} />)}
@@ -776,7 +776,7 @@ function MonthView({ anchor, eventsByDay, todayStr, onSelectJob }: {
               <div key={dk} className="min-h-[80px] p-1.5" style={{
                 borderRight: day.getDay() < 6 ? "1px solid var(--color-border)" : undefined,
                 opacity: isCurrentMonth ? 1 : 0.4,
-                background: isToday ? "color-mix(in srgb, var(--color-accent) 5%, transparent)" : undefined,
+                background: isToday ? "color-mix(in srgb, var(--color-accent-fill) 5%, transparent)" : undefined,
               }}>
                 <div className="text-xs font-medium mb-1" style={{ color: isToday ? "var(--color-accent)" : "var(--color-text-muted)" }}>{day.getDate()}</div>
                 <div className="space-y-0.5">
@@ -1157,8 +1157,8 @@ function HeartbeatSettingCard({
               onClick={() => setEditUnit(u.value)}
               className="px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer"
               style={{
-                background: editUnit === u.value ? "var(--color-accent)" : "var(--color-surface-hover)",
-                color: editUnit === u.value ? "white" : "var(--color-text-muted)",
+                background: editUnit === u.value ? "var(--color-accent-fill)" : "var(--color-surface-hover)",
+                color: editUnit === u.value ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
               }}
               aria-label={`Unit: ${u.label}`}
               aria-pressed={editUnit === u.value}
@@ -1174,8 +1174,8 @@ function HeartbeatSettingCard({
             disabled={saving}
             className="px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer disabled:opacity-50"
             style={{
-              background: "var(--color-accent)",
-              color: "white",
+              background: "var(--color-accent-fill)",
+              color: "var(--color-accent-foreground)",
             }}
           >
             {saving ? "..." : "Save"}
@@ -1224,7 +1224,7 @@ function TimelineSection({ jobs }: { jobs: CronJob[] }) {
           <div className="space-y-3">
             {upcoming.map((job) => (
               <div key={job.id} className="flex items-center gap-3 pl-1">
-                <div className="relative z-10 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent)", opacity: 0.8 }}>
+                <div className="relative z-10 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "var(--color-accent-fill)", opacity: 0.8 }}>
                   <div className="w-2 h-2 rounded-full" style={{ background: "var(--color-bg)" }} />
                 </div>
                 <div className="flex-1 min-w-0">

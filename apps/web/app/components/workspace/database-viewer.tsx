@@ -176,8 +176,8 @@ export function DuckDBMissing() {
         }}
         className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
         style={{
-          background: "var(--color-accent)",
-          color: "white",
+          background: "var(--color-accent-fill)",
+          color: "var(--color-accent-foreground)",
         }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -503,12 +503,12 @@ export function DatabaseViewer({ dbPath, filename }: DatabaseViewerProps) {
               onClick={() => { setSelectedTable(t.table_name); setPage(0); setQueryMode(false); }}
               className="px-2.5 py-1 text-[11px] rounded-full whitespace-nowrap shrink-0 font-medium flex items-center gap-1"
               style={{
-                background: isActive ? "var(--color-accent)" : "var(--color-surface-hover)",
-                color: isActive ? "white" : "var(--color-text-muted)",
+                background: isActive ? "var(--color-accent-fill)" : "var(--color-surface-hover)",
+                color: isActive ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                 border: isActive ? "none" : "1px solid var(--color-border)",
               }}
             >
-              <span className="flex-shrink-0" style={{ color: isActive ? "white" : (isView ? "#60a5fa" : "var(--color-accent)") }}>
+              <span className="flex-shrink-0" style={{ color: isActive ? "var(--color-accent-foreground)" : (isView ? "#60a5fa" : "var(--color-accent)") }}>
                 {isView ? <ViewIcon /> : <TableIcon />}
               </span>
               {t.table_name}
@@ -520,8 +520,8 @@ export function DatabaseViewer({ dbPath, filename }: DatabaseViewerProps) {
           onClick={() => setQueryMode(!queryMode)}
           className="px-2.5 py-1 text-[11px] rounded-full whitespace-nowrap shrink-0 font-medium flex items-center gap-1"
           style={{
-            background: queryMode ? "var(--color-accent)" : "var(--color-surface-hover)",
-            color: queryMode ? "white" : "var(--color-text-muted)",
+            background: queryMode ? "var(--color-accent-fill)" : "var(--color-surface-hover)",
+            color: queryMode ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
             border: queryMode ? "none" : "1px solid var(--color-border)",
           }}
         >
@@ -813,8 +813,8 @@ function QueryPanel({
             disabled={queryRunning || !sqlInput.trim()}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-100 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
-              background: "var(--color-accent)",
-              color: "white",
+              background: "var(--color-accent-fill)",
+              color: "var(--color-accent-foreground)",
             }}
           >
             {queryRunning ? (

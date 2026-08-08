@@ -1073,7 +1073,7 @@ function FetchGroup({ items }: { items: ToolPart[] }) {
 								{tool.status === "running" ? (
 									<span
 										className="w-2 h-2 rounded-full animate-pulse flex-shrink-0"
-										style={{ background: "var(--color-accent)" }}
+										style={{ background: "var(--color-accent-fill)" }}
 									/>
 								) : url ? (
 									<span

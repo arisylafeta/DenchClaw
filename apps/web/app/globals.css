@@ -27,10 +27,13 @@
   --color-text-secondary: #44443e;
   --color-text-muted: #8a8a82;
 
-  /* Accent */
-  --color-accent: #0065A2;
-  --color-accent-hover: #004F80;
-  --color-accent-light: rgba(0, 101, 162, 0.08);
+  /* ReBattery brand accent. Use the darker text token on light surfaces. */
+  --color-accent: #687000;
+  --color-accent-hover: #505700;
+  --color-accent-fill: #E7F346;
+  --color-accent-fill-hover: #D4E030;
+  --color-accent-foreground: #1c1c1a;
+  --color-accent-light: rgba(231, 243, 70, 0.22);
 
   /* Chat */
   --color-user-bubble: #eae8e4;
@@ -118,10 +121,13 @@
   --color-text-secondary: #b0b0b0;
   --color-text-muted: #8e8e8e;
 
-  /* Accent */
-  --color-accent: #0a84ff;
-  --color-accent-hover: #409cff;
-  --color-accent-light: rgba(10, 132, 255, 0.15);
+  /* ReBattery brand accent */
+  --color-accent: #E7F346;
+  --color-accent-hover: #F0F875;
+  --color-accent-fill: #E7F346;
+  --color-accent-fill-hover: #D4E030;
+  --color-accent-foreground: #1c1c1a;
+  --color-accent-light: rgba(231, 243, 70, 0.18);
 
   /* Chat */
   --color-user-bubble: #333333;
@@ -612,7 +618,7 @@ label {
 }
 
 .workspace-prose input[type="checkbox"]:checked {
-  background: var(--color-accent);
+  background: var(--color-accent-fill);
   border-color: var(--color-accent);
 }
 
@@ -794,7 +800,7 @@ label {
 }
 
 .editor-content-area .tiptap ul[data-type="taskList"] li label input[type="checkbox"]:checked {
-  background: var(--color-accent);
+  background: var(--color-accent-fill);
   border-color: var(--color-accent);
 }
 
@@ -1031,13 +1037,13 @@ label {
   font-weight: 500;
   border-radius: 0.5rem;
   border: none;
-  background: var(--color-accent);
-  color: white;
+  background: var(--color-accent-fill);
+  color: var(--color-accent-foreground);
   cursor: pointer;
 }
 
 .editor-save-button:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  background: var(--color-accent-fill-hover);
 }
 
 .editor-save-button:disabled {
@@ -1782,7 +1788,7 @@ label {
 }
 
 .chat-prose input[type="checkbox"]:checked {
-  background: var(--color-accent);
+  background: var(--color-accent-fill);
   border-color: var(--color-accent);
 }
 
@@ -2132,8 +2138,8 @@ body {
 }
 
 .spreadsheet-editor-grid .Spreadsheet__header--selected {
-  background: var(--color-accent);
-  color: #fff;
+  background: var(--color-accent-fill);
+  color: var(--color-accent-foreground);
 }
 
 .spreadsheet-editor-grid .Spreadsheet__active-cell {
@@ -2267,7 +2273,7 @@ body.resizing .sidebar-animate {
   width: 2px;
   left: 3px;
   border-radius: 1px;
-  background: var(--color-accent);
+  background: var(--color-accent-fill);
 }
 th:hover .dt-resize-handle,
 .dt-resize-active {
@@ -2275,7 +2281,7 @@ th:hover .dt-resize-handle,
 }
 .dt-resize-active::after {
   width: 2px;
-  background: var(--color-accent);
+  background: var(--color-accent-fill);
   box-shadow: 0 0 4px var(--color-accent);
 }
 

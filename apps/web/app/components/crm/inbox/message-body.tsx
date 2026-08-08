@@ -297,7 +297,7 @@ function buildSrcdoc(html: string, token: string): string {
     body * { max-width: 100% !important; }
     img, video { max-width: 100% !important; height: auto !important; }
     table { border-collapse: collapse; max-width: 100% !important; }
-    a { color: #0065A2; text-decoration: underline; }
+    a { color: #687000; text-decoration: underline; }
     blockquote { margin: 0 0 0 8px; padding-left: 12px; border-left: 2px solid rgba(0,0,0,0.12); color: #555; }
     pre, code { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; }
     pre { white-space: pre-wrap; }

@@ -229,7 +229,7 @@ function UserCell({ value, members }: { value: unknown; members?: Array<{ id: st
 	const member = members?.find((m) => m.id === memberId);
 	return (
 		<span className="flex items-center gap-1.5">
-			<span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium flex-shrink-0" style={{ background: "var(--color-accent)", color: "white" }}>
+			<span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium flex-shrink-0" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
 				{(member?.name ?? memberId).charAt(0).toUpperCase()}
 			</span>
 			<span className="truncate">{member?.name ?? memberId}</span>
@@ -2011,7 +2011,7 @@ export function AddEntryModal({
 						onClick={() => void handleSave()}
 						disabled={saving}
 						className="px-4 py-2 text-sm font-medium rounded-lg"
-						style={{ background: "var(--color-accent)", color: "white", opacity: saving ? 0.7 : 1 }}
+						style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)", opacity: saving ? 0.7 : 1 }}
 					>
 						{saving ? "Saving..." : "Save"}
 					</button>

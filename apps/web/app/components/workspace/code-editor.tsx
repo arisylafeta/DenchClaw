@@ -384,8 +384,8 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 							disabled={saveState !== "dirty"}
 							className="text-[11px] px-2 py-0.5 rounded transition-colors"
 							style={{
-								background: saveState === "dirty" ? "var(--color-accent)" : "var(--color-surface-hover)",
-								color: saveState === "dirty" ? "#fff" : "var(--color-text-muted)",
+								background: saveState === "dirty" ? "var(--color-accent-fill)" : "var(--color-surface-hover)",
+								color: saveState === "dirty" ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
 								cursor: saveState === "dirty" ? "pointer" : "default",
 								opacity: saveState === "dirty" ? 1 : 0.5,
 							}}

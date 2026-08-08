@@ -369,7 +369,7 @@ function CardContent({
                           rel={fmt.linkType === "url" || fmt.linkType === "file" ? "noopener noreferrer" : undefined}
                           onClick={(e) => e.stopPropagation()}
                           className="inline-flex items-center gap-1 px-1.5 py-0 rounded text-[11px] font-medium hover:underline underline-offset-2 max-w-[220px]"
-                          style={{ background: "rgba(148, 163, 184, 0.12)", color: "var(--color-accent)" }}
+                          style={{ background: "rgba(148, 163, 184, 0.12)", color: "var(--color-accent-fill)" }}
                         >
                           {showFavicon && (
                             <UrlFavicon

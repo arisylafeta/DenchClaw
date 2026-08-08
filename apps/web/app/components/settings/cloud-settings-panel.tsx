@@ -78,7 +78,7 @@ function apiKeySubtitle(validationError?: string): string {
 type IntegrationDraftState = Record<DenchIntegrationId, boolean>;
 
 const ENRICHMENT_WATERFALL_PROVIDERS = [
-  { id: "dench", name: "Dench", src: "/dench-workspace-icon.png", rounded: true },
+  { id: "dench", name: "Dench", src: "/rebattery-workspace-icon.svg", rounded: true },
   { id: "aviato", name: "Aviato", src: "/integrations/aviato.ico", rounded: true },
   { id: "apollo", name: "Apollo", src: "/integrations/apollo.ico", rounded: true },
   { id: "pdl", name: "People Data Labs", src: "/integrations/people-data-labs.ico", rounded: true },
@@ -407,7 +407,7 @@ function ModelSelector({
         style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
       >
         <img
-          src="/dench-workspace-icon.png"
+          src="/rebattery-workspace-icon.svg"
           alt=""
           width={36}
           height={36}
@@ -980,8 +980,8 @@ export function CloudSettingsPanel() {
           type="button"
           className="min-w-28 shrink-0 rounded-lg px-5 text-sm font-semibold"
           style={{
-            background: "var(--color-accent)",
-            color: "var(--color-bg)",
+            background: "var(--color-accent-fill)",
+            color: "var(--color-accent-foreground)",
           }}
           onClick={() => void handleSaveActiveSettings()}
           disabled={!hasUnsavedChanges || savingActive || integrationsLoading || Boolean(integrationsError)}

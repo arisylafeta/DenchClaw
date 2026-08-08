@@ -93,7 +93,7 @@ export function ChatQuestionCard({ question, onAnswer }: ChatQuestionCardProps) 
         <span
           className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium"
           style={{
-            background: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
+            background: "color-mix(in srgb, var(--color-accent-fill) 12%, transparent)",
             color: "var(--color-accent)",
           }}
         >
@@ -128,7 +128,7 @@ export function ChatQuestionCard({ question, onAnswer }: ChatQuestionCardProps) 
                 disabled={!!submitted}
                 aria-pressed={selected}
                 onClick={() => toggleOption(option.id)}
-                className="flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-[background,border-color] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-default disabled:opacity-70"
+                className="flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-[background,border-color] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fill)] disabled:cursor-default disabled:opacity-70"
                 style={{
                   borderColor: selected
                     ? "var(--color-accent)"
@@ -142,8 +142,8 @@ export function ChatQuestionCard({ question, onAnswer }: ChatQuestionCardProps) 
                   className="mt-[1px] flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-semibold"
                   style={{
                     borderColor: selected ? "var(--color-accent)" : "var(--color-border)",
-                    background: selected ? "var(--color-accent)" : "transparent",
-                    color: selected ? "#fff" : "var(--color-text-muted)",
+                    background: selected ? "var(--color-accent-fill)" : "transparent",
+                    color: selected ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                   }}
                 >
                   {letter}
@@ -239,8 +239,8 @@ export function ChatQuestionCard({ question, onAnswer }: ChatQuestionCardProps) 
               onClick={submitAnswer}
               className="h-7 rounded-md px-3 text-[12px] font-semibold transition-opacity disabled:opacity-50"
               style={{
-                background: "var(--color-accent)",
-                color: "#fff",
+                background: "var(--color-accent-fill)",
+                color: "var(--color-accent-foreground)",
               }}
             >
               {submitted ? "Sent" : "Continue"}

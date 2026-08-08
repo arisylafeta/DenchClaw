@@ -385,7 +385,7 @@ export function SelectOptionsEditor({
 					disabled={saving || !draft.trim()}
 					onClick={() => void addDraft()}
 					className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition-colors disabled:opacity-40"
-					style={{ background: "var(--color-accent)", color: "white" }}
+					style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
 					aria-label="Add option"
 				>
 					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
@@ -874,7 +874,7 @@ export function AddColumnPopover({
 										onClick={() => void handleEnrichCreate()}
 										disabled={saving || !enrichInputField}
 										className="px-3 py-1.5 text-xs font-medium rounded-l-lg transition-colors disabled:opacity-40 flex items-center gap-1.5"
-										style={{ background: "var(--color-accent)", color: "white" }}
+										style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
 									>
 										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" /></svg>
 										{saving ? "Enriching..." : `${selectedOutputExists ? "Enrich" : "Create & Enrich"} ${enrichScopeButtonLabel(enrichScope)}`}
@@ -887,8 +887,8 @@ export function AddColumnPopover({
 										disabled={saving || !enrichInputField}
 										className="px-2 py-1.5 text-xs font-medium rounded-r-lg transition-colors disabled:opacity-40"
 										style={{
-											background: "var(--color-accent)",
-											color: "white",
+											background: "var(--color-accent-fill)",
+											color: "var(--color-accent-foreground)",
 											borderLeft: "1px solid rgba(255,255,255,0.24)",
 										}}
 									>
@@ -1040,7 +1040,7 @@ export function AddColumnPopover({
 									onClick={() => void handleCreate()}
 									disabled={saving || (type === "enum" && enumInput.split(",").map((s) => s.trim()).filter(Boolean).length === 0)}
 									className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-40"
-									style={{ background: "var(--color-accent)", color: "white" }}
+									style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
 								>
 									{saving ? "Creating..." : "Create"}
 								</button>

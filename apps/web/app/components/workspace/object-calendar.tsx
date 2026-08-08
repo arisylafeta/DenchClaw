@@ -430,8 +430,8 @@ function DraggableTimeEvent({
 			style={{
 				top: renderTop,
 				height: Math.min(renderHeight, hourHeight * 6),
-				backgroundColor: event.color ?? "var(--color-accent)",
-				color: "#fff",
+				backgroundColor: event.color ?? "var(--color-accent-fill)",
+				color: "var(--color-accent-foreground)",
 				lineHeight: "16px",
 				zIndex: dragging ? 20 : 2,
 				cursor: onEntryDateChange ? (dragging === "move" ? "grabbing" : "grab") : "pointer",
@@ -674,7 +674,7 @@ function YearView({
 										{hasEvents && inMonth && (
 											<div
 												className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
-												style={{ backgroundColor: "var(--color-accent)" }}
+												style={{ backgroundColor: "var(--color-accent-fill)" }}
 											/>
 										)}
 									</div>
@@ -768,8 +768,8 @@ export function ObjectCalendar({
 							onClick={() => onModeChange(m)}
 							className="text-[11px] px-3 py-1 capitalize transition-colors"
 							style={{
-								background: m === mode ? "var(--color-accent)" : "var(--color-surface)",
-								color: m === mode ? "#fff" : "var(--color-text-muted)",
+								background: m === mode ? "var(--color-accent-fill)" : "var(--color-surface)",
+								color: m === mode ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
 								borderRight: m !== "year" ? "1px solid var(--color-border)" : undefined,
 							}}
 						>

@@ -285,7 +285,7 @@ function NextRunCard({ job }: { job: CronJob }) {
         <div className="flex items-center gap-2">
           <span
             className="w-2 h-2 rounded-full animate-pulse"
-            style={{ background: "var(--color-accent)" }}
+            style={{ background: "var(--color-accent-fill)" }}
           />
           <span className="text-2xl font-semibold" style={{ color: "var(--color-accent)" }}>
             Running now
@@ -526,12 +526,12 @@ function ActionButton({ children, onClick, disabled, accent, danger }: {
   danger?: boolean;
 }) {
   const bg = accent
-    ? "var(--color-accent)"
+    ? "var(--color-accent-fill)"
     : danger
       ? "color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent)"
       : "var(--color-surface-hover)";
   const fg = accent
-    ? "white"
+    ? "var(--color-accent-foreground)"
     : danger
       ? "var(--color-error, #ef4444)"
       : "var(--color-text-muted)";

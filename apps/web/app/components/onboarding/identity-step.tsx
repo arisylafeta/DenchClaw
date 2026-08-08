@@ -175,8 +175,8 @@ export function IdentityStep({
         disabled={submitting}
         className="flex h-10 w-full items-center justify-center rounded-lg text-[13.5px] font-medium transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-60"
         style={{
-          background: "var(--color-accent)",
-          color: "#fff",
+          background: "var(--color-accent-fill)",
+          color: "var(--color-accent-foreground)",
         }}
         onMouseEnter={(e) => {
           if (!submitting) (e.currentTarget as HTMLElement).style.opacity = "0.92";

@@ -65,8 +65,8 @@ export function PreviewEditorial({
           <div
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full font-instrument text-[15px] font-medium transition-all duration-300"
             style={{
-              background: initials ? "var(--color-accent)" : "var(--color-surface-hover)",
-              color: initials ? "#fff" : "var(--color-text-muted)",
+              background: initials ? "var(--color-accent-fill)" : "var(--color-surface-hover)",
+              color: initials ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
               border: initials ? "none" : "1px dashed var(--color-border-strong)",
             }}
           >

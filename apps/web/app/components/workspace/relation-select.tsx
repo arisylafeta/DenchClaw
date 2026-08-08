@@ -243,11 +243,11 @@ export function RelationSelect({
 										onClick={() => toggleSelect(opt.id)}
 										className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors"
 										style={{
-											background: isSelected ? "var(--color-accent-light, rgba(96, 165, 250, 0.08))" : "transparent",
+											background: isSelected ? "var(--color-accent-light, rgba(231, 243, 70, 0.22))" : "transparent",
 											color: "var(--color-text)",
 										}}
 										onMouseEnter={(e) => { if (!isSelected) {(e.currentTarget.style.background = "var(--color-surface-hover, rgba(255,255,255,0.04))");}}}
-										onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "var(--color-accent-light, rgba(96, 165, 250, 0.08))" : "transparent"; }}
+										onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "var(--color-accent-light, rgba(231, 243, 70, 0.22))" : "transparent"; }}
 									>
 										{/* Checkbox for multi-select */}
 										{multiple && (
@@ -255,11 +255,11 @@ export function RelationSelect({
 												className="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
 												style={{
 													borderColor: isSelected ? "var(--color-accent)" : "var(--color-border)",
-													background: isSelected ? "var(--color-accent)" : "transparent",
+													background: isSelected ? "var(--color-accent-fill)" : "transparent",
 												}}
 											>
 												{isSelected && (
-													<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+													<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-foreground)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
 														<path d="M20 6 9 17l-5-5" />
 													</svg>
 												)}

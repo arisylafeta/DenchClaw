@@ -155,7 +155,7 @@ function ListRow({
 								rel={fmt.linkType === "url" || fmt.linkType === "file" ? "noopener noreferrer" : undefined}
 								onClick={(e) => e.stopPropagation()}
 								className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 hover:underline underline-offset-2 max-w-[220px]"
-								style={{ background: "rgba(148, 163, 184, 0.12)", color: "var(--color-accent)", border: "1px solid var(--color-border)" }}
+								style={{ background: "rgba(148, 163, 184, 0.12)", color: "var(--color-accent-fill)", border: "1px solid var(--color-border)" }}
 							>
 								{showFavicon && (
 									<UrlFavicon

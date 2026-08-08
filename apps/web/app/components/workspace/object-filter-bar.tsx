@@ -869,8 +869,8 @@ export function ObjectFilterBar({
 							onClick={handleSaveView}
 							className="px-2 py-1 rounded-md text-xs transition-colors cursor-pointer"
 							style={{
-								background: "var(--color-accent)",
-								color: "white",
+								background: "var(--color-accent-fill)",
+								color: "var(--color-accent-foreground)",
 							}}
 						>
 							Save

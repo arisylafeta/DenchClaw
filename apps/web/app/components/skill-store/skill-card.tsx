@@ -52,7 +52,7 @@ function AvatarImg({ source, size = 36, emoji, isManaged }: { source: string; si
   if (isManaged) {
     return (
       <img
-        src="/dench-workspace-icon.png"
+        src="/rebattery-workspace-icon.svg"
         alt="DenchClaw"
         width={size}
         height={size}
@@ -386,7 +386,7 @@ export function BrowseSkillCard({
 export function StatusNotice({ tone, children }: { tone: "info" | "success" | "error"; children: ReactNode }) {
   const styles = {
     info: {
-      background: "color-mix(in srgb, var(--color-accent) 10%, transparent)",
+      background: "color-mix(in srgb, var(--color-accent-fill) 10%, transparent)",
       color: "var(--color-text)",
       border: "1px solid color-mix(in srgb, var(--color-accent) 30%, transparent)",
     },

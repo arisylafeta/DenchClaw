@@ -59,7 +59,7 @@ export function PreviewOrbit() {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/dench-workspace-icon.png"
+          src="/rebattery-workspace-icon.svg"
           alt=""
           width={DENCH_SIZE}
           height={DENCH_SIZE}

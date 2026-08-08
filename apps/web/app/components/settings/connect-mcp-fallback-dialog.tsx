@@ -177,7 +177,7 @@ export function ConnectMcpFallbackDialog({
             onClick={() => void handleSubmit()}
             disabled={submitting || !token.trim()}
             className="rounded-lg px-5"
-            style={{ background: "var(--color-accent)", color: "var(--color-bg)" }}
+            style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
           >
             <span className="inline-flex items-center gap-2">
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}

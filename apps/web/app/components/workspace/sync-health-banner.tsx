@@ -372,7 +372,7 @@ export function SyncHealthBanner({
                     type="button"
                     onClick={handleReconnect}
                     className="rounded-md px-2 py-1 text-[11px] font-medium transition-opacity hover:opacity-90"
-                    style={{ background: "var(--color-accent)", color: "#fff" }}
+                    style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
                   >
                     Reconnect
                   </button>

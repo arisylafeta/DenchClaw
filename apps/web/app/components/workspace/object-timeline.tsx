@@ -441,8 +441,8 @@ export function ObjectTimeline({
 								onClick={() => onZoomChange(z)}
 								className="text-[11px] px-3 py-1 capitalize transition-colors"
 								style={{
-									background: z === zoom ? "var(--color-accent)" : "var(--color-surface)",
-									color: z === zoom ? "#fff" : "var(--color-text-muted)",
+									background: z === zoom ? "var(--color-accent-fill)" : "var(--color-surface)",
+									color: z === zoom ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
 									borderRight: z !== "quarter" ? "1px solid var(--color-border)" : undefined,
 								}}
 							>
@@ -545,7 +545,7 @@ export function ObjectTimeline({
 							{todayX >= 0 && todayX <= totalWidth && (
 								<div
 									className="absolute top-0 bottom-0 pointer-events-none"
-									style={{ left: todayX, width: 2, backgroundColor: "var(--color-accent)", opacity: 0.6, zIndex: 10 }}
+									style={{ left: todayX, width: 2, backgroundColor: "var(--color-accent-fill)", opacity: 0.6, zIndex: 10 }}
 								/>
 							)}
 						</div>

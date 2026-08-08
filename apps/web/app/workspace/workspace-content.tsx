@@ -3999,8 +3999,8 @@ function ObjectView({
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
             style={{
-              background: "var(--color-accent)",
-              color: "#fff",
+              background: "var(--color-accent-fill)",
+              color: "var(--color-accent-foreground)",
             }}
             title={`Add ${displayObjectNameSingular(data.object.name)}`}
           >

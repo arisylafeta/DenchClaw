@@ -186,8 +186,8 @@ export function SyncStep({
           disabled={!readyToOpen || completing}
           className="flex h-10 items-center justify-center rounded-lg px-5 text-[13.5px] font-medium transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50"
           style={{
-            background: "var(--color-accent)",
-            color: "#fff",
+            background: "var(--color-accent-fill)",
+            color: "var(--color-accent-foreground)",
           }}
           onMouseEnter={(e) => {
             if (readyToOpen && !completing) {
@@ -299,7 +299,7 @@ function PhaseMark({ state }: { state: "done" | "active" | "pending" }) {
     return (
       <span
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-        style={{ background: "var(--color-accent)", color: "#fff" }}
+        style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
         aria-label="Done"
       >
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">

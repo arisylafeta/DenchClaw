@@ -358,8 +358,8 @@ function ToolbarButton({
         height: "28px",
         borderRadius: "6px",
         border: "none",
-        background: accent ? "var(--color-accent)" : "transparent",
-        color: accent ? "#fff" : "var(--color-text-muted)",
+        background: accent ? "var(--color-accent-fill)" : "transparent",
+        color: accent ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.35 : 1,
         flexShrink: 0,
@@ -1090,7 +1090,7 @@ export function SpreadsheetEditor({
                     left: 0,
                     right: 0,
                     height: "2px",
-                    background: "var(--color-accent)",
+                    background: "var(--color-accent-fill)",
                     borderRadius: "0 0 2px 2px",
                   }}
                 />

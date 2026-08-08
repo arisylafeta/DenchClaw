@@ -148,7 +148,7 @@ export function BulkActionBar({
 			<div className="flex items-center gap-2 pr-3" style={{ borderRight: "1px solid var(--color-border)" }}>
 				<span
 					className="flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold"
-					style={{ background: "var(--color-accent)", color: "#fff" }}
+					style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
 				>
 					{selectedCount}
 				</span>
@@ -190,7 +190,7 @@ export function BulkActionBar({
 						disabled={enrichBusy}
 						className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
 						style={{
-							background: "color-mix(in srgb, var(--color-accent) 8%, transparent)",
+							background: "color-mix(in srgb, var(--color-accent-fill) 8%, transparent)",
 							border: "1px solid color-mix(in srgb, var(--color-accent) 22%, transparent)",
 							color: "var(--color-accent)",
 							opacity: enrichBusy ? 0.7 : 1,
