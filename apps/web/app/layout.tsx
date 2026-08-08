@@ -6,11 +6,11 @@ import { PostHogProvider } from "./components/posthog-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ReBattery",
+  title: "CRM",
   description:
     "AI Workspace with an agent that connects to your apps and does the work for you",
   icons: {
-    icon: "/rebattery-workspace-icon.svg",
+    icon: "/rebattery-favicon.svg",
     apple: "/rebattery-workspace-icon.svg",
   },
 };
