@@ -56,6 +56,8 @@ type ServerPaginationProps = {
 type ObjectTableProps = {
 	objectName: string;
 	fields: Field[];
+	/** Field whose value opens the entry detail, independent of column order. */
+	displayField?: string;
 	entries: Record<string, unknown>[];
 	members?: Array<{ id: string; name: string }>;
 	relationLabels?: Record<string, Record<string, string>>;
@@ -824,6 +826,7 @@ type EnrichmentProgress = {
 export function ObjectTable({
 	objectName,
 	fields,
+	displayField,
 	entries,
 	members,
 	relationLabels,
@@ -1252,6 +1255,8 @@ export function ObjectTable({
 		}
 	}, [dataFields, handleColumnReorder]);
 
+	const displayFieldName = displayField ?? dataFields[0]?.name;
+
 	// Build TanStack columns from fields (excluding action fields).
 	// We use stable, hoisted memo'd cell components (FirstColumnCell,
 	// EditableCell) so flexRender's child subtree can be skipped when
@@ -1327,7 +1332,7 @@ export function ObjectTable({
 					const entryId = String(eid != null && typeof eid === "object" ? JSON.stringify(eid) : (eid ?? ""));
 					const justEnriched = enrichedCellIds.has(entryId) && enrichmentProgress?.fieldId === field.id;
 
-					if (fieldIdx === 0 && onEntryClick) {
+					if (field.name === displayFieldName && onEntryClick) {
 						return (
 							<FirstColumnCell
 								value={info.getValue()}
@@ -1351,7 +1356,7 @@ export function ObjectTable({
 							onNavigateEntry={onNavigateToEntry}
 							onLocalValueChange={updateLocalEntryField}
 							onSaved={onRefresh}
-							showUrlFavicon={fieldIdx !== 0}
+							showUrlFavicon={field.name !== displayFieldName}
 						/>
 					);
 
@@ -1481,7 +1486,7 @@ export function ObjectTable({
 		// `onEntryClick` and `updateLocalEntryField` are read inside the `cell`
 		// closures and were missing from the original deps (stale-closure bug);
 		// they're included now.
-	}, [dataFields, actionFields, activeReverseRelations, objectName, members, relationLabels, relationFaviconUrls, onNavigateToObject, onNavigateToEntry, onEntryClick, onRefresh, updateLocalEntryField, showToast, renamingFieldId, handleRenameColumn, handleUpdateColumnOptions, handleDeleteColumn, handleMoveColumn, enrichmentProgress, handleReEnrich, enrichedCellIds, openMenuFieldId]);
+	}, [dataFields, displayFieldName, actionFields, activeReverseRelations, objectName, members, relationLabels, relationFaviconUrls, onNavigateToObject, onNavigateToEntry, onEntryClick, onRefresh, updateLocalEntryField, showToast, renamingFieldId, handleRenameColumn, handleUpdateColumnOptions, handleDeleteColumn, handleMoveColumn, enrichmentProgress, handleReEnrich, enrichedCellIds, openMenuFieldId]);
 
 	// Add entry handler — delegates to parent when provided, otherwise opens local modal.
 	const handleAdd = useCallback(() => {

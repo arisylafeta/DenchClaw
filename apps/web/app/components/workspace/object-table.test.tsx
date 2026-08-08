@@ -90,6 +90,44 @@ describe("ObjectTable selection context", () => {
 	});
 });
 
+describe("ObjectTable display field", () => {
+	beforeEach(() => {
+		Element.prototype.scrollIntoView = vi.fn();
+		global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			if (url === "/api/workspace/enrichment-status") {
+				return new Response(JSON.stringify({ available: false }));
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+	});
+
+	it("puts the entry-open affordance on the configured display field instead of the first column", () => {
+		const onEntryClick = vi.fn();
+		render(
+			<ObjectTable
+				objectName="people"
+				displayField="Full Name"
+				fields={[
+					{ id: "opted-out", name: "Email Opted Out", type: "boolean" },
+					{ id: "full-name", name: "Full Name", type: "text" },
+				]}
+				entries={[{ entry_id: "p1", "Email Opted Out": false, "Full Name": "Ada Lovelace" }]}
+				hideInternalToolbar
+				onEntryClick={onEntryClick}
+			/>,
+		);
+
+		expect(screen.getByText("No").closest("span")).not.toHaveClass("font-semibold");
+		fireEvent.click(screen.getByText("No"));
+		expect(onEntryClick).not.toHaveBeenCalled();
+
+		expect(screen.getByText("Ada Lovelace")).toHaveClass("font-semibold");
+		fireEvent.click(screen.getByText("Ada Lovelace"));
+		expect(onEntryClick).toHaveBeenCalledWith("p1");
+	});
+});
+
 describe("ObjectTable server sort", () => {
 	beforeEach(() => {
 		Element.prototype.scrollIntoView = vi.fn();

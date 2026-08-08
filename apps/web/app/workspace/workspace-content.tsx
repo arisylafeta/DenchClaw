@@ -4034,6 +4034,7 @@ function ObjectView({
           <ObjectTable
             objectName={data.object.name}
             fields={data.fields}
+            displayField={data.effectiveDisplayField}
             entries={filteredEntries}
             members={members}
             relationLabels={data.relationLabels}
