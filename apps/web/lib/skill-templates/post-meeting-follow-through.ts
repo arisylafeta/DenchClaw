@@ -7,7 +7,7 @@ export const postMeetingFollowThrough = defineSkillTemplate({
   category: "Prep Meetings",
   outcome: "Summarizes meeting outcomes, drafts or sends next-step emails, updates CRM, and creates scheduled reminders.",
   userUseCase:
-    "Use this after meetings to turn Calendar events, Gmail threads, notes, Dench CRM records, HubSpot context, and Notion notes into follow-up drafts, CRM updates, tasks, and reminders. It should run manually after a selected meeting or on a cron schedule for recently completed meetings.",
+    "Use this after meetings to turn Calendar events, Gmail threads, notes, ReBattery CRM records, HubSpot context, and Notion notes into follow-up drafts, CRM updates, tasks, and reminders. It should run manually after a selected meeting or on a cron schedule for recently completed meetings.",
   personas: ["Founder", "Sales", "Customer Success", "Recruiter"],
   requiredApps: [externalApps.googleCalendar, externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
@@ -35,7 +35,7 @@ export const postMeetingFollowThrough = defineSkillTemplate({
         { id: "calendar-description", label: "Calendar description" },
         { id: "gmail-thread", label: "Gmail thread" },
         { id: "notion-notes", label: "Notion notes" },
-        { id: "dench-chat", label: "Dench chat" },
+        { id: "dench-chat", label: "ReBattery chat" },
         { id: "manual-summary", label: "Manual summary" },
       ],
     },
@@ -78,7 +78,7 @@ export const postMeetingFollowThrough = defineSkillTemplate({
   ],
   skillInstructions: [
     "Support manual post-meeting runs and cron/scheduled scans of recently completed Calendar events only.",
-    "Use Calendar event details to identify attendees, then gather Gmail, Dench CRM, HubSpot, Notion, and manual notes as available.",
+    "Use Calendar event details to identify attendees, then gather Gmail, ReBattery CRM, HubSpot, Notion, and manual notes as available.",
     "Create follow-up drafts, CRM notes, tasks, and Notion actions only according to the configured action policy.",
     "For CRM writes, use additive notes with source attribution, meeting date, attendees, confidence score, and linked source records.",
     "Never overwrite existing CRM fields, deal stages, owners, or next steps unless the user explicitly configures that overwrite policy.",

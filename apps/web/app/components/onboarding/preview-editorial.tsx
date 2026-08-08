@@ -39,7 +39,7 @@ export function PreviewEditorial({
           className="text-[11px] font-semibold uppercase tracking-[0.22em]"
           style={{ color: "var(--color-text-muted)" }}
         >
-          DenchClaw
+          ReBattery
         </p>
         <p
           className="mt-4 font-instrument text-[32px] leading-[1.15] tracking-tight"

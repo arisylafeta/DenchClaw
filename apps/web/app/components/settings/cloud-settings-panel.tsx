@@ -62,15 +62,15 @@ type ActionNotice = {
 };
 
 function isNetworkValidationError(message: string): boolean {
-  return message.startsWith("Could not reach Dench Cloud gateway");
+  return message.startsWith("Could not reach ReBattery Cloud gateway");
 }
 
 function apiKeySubtitle(validationError?: string): string {
   if (!validationError) {
-    return "Connect to Dench Cloud for AI model access.";
+    return "Connect to ReBattery Cloud for AI model access.";
   }
   if (isNetworkValidationError(validationError)) {
-    return "Could not reach Dench Cloud. Check your connection and try again.";
+    return "Could not reach ReBattery Cloud. Check your connection and try again.";
   }
   return "Your API key is invalid. Enter a new one below.";
 }
@@ -78,7 +78,7 @@ function apiKeySubtitle(validationError?: string): string {
 type IntegrationDraftState = Record<DenchIntegrationId, boolean>;
 
 const ENRICHMENT_WATERFALL_PROVIDERS = [
-  { id: "dench", name: "Dench", src: "/rebattery-workspace-icon.svg", rounded: true },
+  { id: "dench", name: "ReBattery", src: "/rebattery-workspace-icon.svg", rounded: true },
   { id: "aviato", name: "Aviato", src: "/integrations/aviato.ico", rounded: true },
   { id: "apollo", name: "Apollo", src: "/integrations/apollo.ico", rounded: true },
   { id: "pdl", name: "People Data Labs", src: "/integrations/people-data-labs.ico", rounded: true },
@@ -145,7 +145,7 @@ function applyIntegrationDraft(
         enabled: draft[integration.id],
         locked: true,
         lockReason: "dench_not_primary",
-        lockBadge: "Use Dench Cloud",
+        lockBadge: "Use ReBattery Cloud",
         available: false,
       };
     }),
@@ -174,7 +174,7 @@ function EnrichmentWaterfallCard({
   enrichmentIntegration: DenchIntegrationState | null;
   onToggleEnrichment: (integration: DenchIntegrationState, enabled: boolean) => void;
 }) {
-  const enrichmentLabel = "Dench Enrichments";
+  const enrichmentLabel = "ReBattery Enrichments";
 
   return (
     <div
@@ -184,7 +184,7 @@ function EnrichmentWaterfallCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="text-sm font-medium" style={{ color: "var(--color-text)" }}>
-            Dench Enrichment
+            ReBattery Enrichment
           </div>
           <div className="max-w-[42rem] text-xs leading-5" style={{ color: "var(--color-text-muted)" }}>
             Enrich people and company data with multiple providers.
@@ -297,7 +297,7 @@ function ApiKeyEntry({
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium" style={{ color: "var(--color-text)" }}>
-            Dench Cloud
+            ReBattery Cloud
           </div>
           <div className="text-[11px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
             {apiKeySubtitle(validationError)}
@@ -337,7 +337,7 @@ function ApiKeyEntry({
                 onSave(keyInput.trim());
               }
             }}
-            placeholder="Paste your Dench API key..."
+            placeholder="Paste your ReBattery API key..."
             className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm outline-none transition-colors"
             style={{
               background: "var(--color-surface)",
@@ -417,7 +417,7 @@ function ModelSelector({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium" style={{ color: "var(--color-text)" }}>
-              Dench Cloud
+              ReBattery Cloud
             </span>
             <span
               className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -432,7 +432,7 @@ function ModelSelector({
           <div className="text-[11px] mt-0.5" style={{ color: "var(--color-text-muted)" }}>
             {isDenchPrimary
               ? "Connected and active as your primary provider."
-              : "Connected. Select a model to use Dench Cloud as your primary provider."}
+              : "Connected. Select a model to use ReBattery Cloud as your primary provider."}
           </div>
         </div>
         <a

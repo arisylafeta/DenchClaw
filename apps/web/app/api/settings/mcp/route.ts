@@ -27,12 +27,12 @@ function legacyState(authority: HermesMcpAuthority) {
     summary: {
       owner: "hermes",
       message:
-        "Hermes MCP config is the active MCP authority. Dench MCP settings are legacy and exposed here as a read-only client surface.",
+        "Hermes MCP config is the active MCP authority. ReBattery MCP settings are legacy and exposed here as a read-only client surface.",
     },
     legacyDenchMcp: {
       disabled: true,
       archived: true,
-      wouldMutate: ["Dench MCP server registry"],
+      wouldMutate: ["ReBattery MCP server registry"],
       servers: [],
     },
   };
@@ -71,7 +71,7 @@ export async function POST(req: Request): Promise<Response> {
     {
       error: "legacy_mcp_settings",
       message:
-        "Hermes MCP config is the integration authority; Dench MCP settings are legacy and read-only until ownership is proven.",
+        "Hermes MCP config is the integration authority; ReBattery MCP settings are legacy and read-only until ownership is proven.",
       changed: false,
       readOnly: true,
       managedByHermes: true,
@@ -81,7 +81,7 @@ export async function POST(req: Request): Promise<Response> {
       legacyDenchMcp: {
         disabled: true,
         archived: true,
-        wouldMutate: ["Dench MCP server registry"],
+        wouldMutate: ["ReBattery MCP server registry"],
       },
     },
     { status: 409 },
@@ -104,7 +104,7 @@ export async function DELETE(req: Request): Promise<Response> {
     {
       error: "legacy_mcp_settings",
       message:
-        "Hermes MCP config is the integration authority; Dench MCP settings are legacy and read-only until ownership is proven.",
+        "Hermes MCP config is the integration authority; ReBattery MCP settings are legacy and read-only until ownership is proven.",
       changed: false,
       readOnly: true,
       managedByHermes: true,
@@ -114,7 +114,7 @@ export async function DELETE(req: Request): Promise<Response> {
       legacyDenchMcp: {
         disabled: true,
         archived: true,
-        wouldMutate: ["Dench MCP server registry"],
+        wouldMutate: ["ReBattery MCP server registry"],
       },
     },
     { status: 409 },

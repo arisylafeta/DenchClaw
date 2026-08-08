@@ -31,7 +31,7 @@ export const executiveDailyBrief = defineSkillTemplate({
       options: [
         { id: "calendar", label: "Calendar" },
         { id: "gmail", label: "Gmail" },
-        { id: "dench-crm", label: "Dench CRM" },
+        { id: "dench-crm", label: "ReBattery CRM" },
         { id: "hubspot", label: "HubSpot" },
         { id: "notion", label: "Notion" },
         { id: "slack", label: "Slack" },
@@ -70,7 +70,7 @@ export const executiveDailyBrief = defineSkillTemplate({
       options: [
         { id: "gmail", label: "Gmail" },
         { id: "notion", label: "Notion" },
-        { id: "dench-chat", label: "Dench chat" },
+        { id: "dench-chat", label: "ReBattery chat" },
         { id: "slack", label: "Slack" },
       ],
       freeformHint: "Include recipients, page or channel destinations, and desired brief length.",
@@ -78,7 +78,7 @@ export const executiveDailyBrief = defineSkillTemplate({
   ],
   skillInstructions: [
     "Support manual runs and cron-scheduled morning briefs only; do not assume passive app listeners.",
-    "Use Calendar as the daily structure, then rank Gmail, Dench CRM, HubSpot, Notion, and Slack signals by urgency, importance, and meeting relevance.",
+    "Use Calendar as the daily structure, then rank Gmail, ReBattery CRM, HubSpot, Notion, and Slack signals by urgency, importance, and meeting relevance.",
     "Include source attribution for deal, customer, investor, hiring, and relationship context that influences priority.",
     "Do not send emails, update CRM, or modify tasks unless explicitly configured; default to a read-only brief with suggested actions.",
     "Call out low-confidence or conflicting data instead of presenting it as fact, especially for pipeline risk or relationship status.",

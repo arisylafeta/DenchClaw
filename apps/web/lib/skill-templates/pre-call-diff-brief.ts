@@ -75,7 +75,7 @@ export const preCallDiffBrief = defineSkillTemplate({
   ],
   skillInstructions: [
     "Anchor on the calendar event or selected meeting, then find the last meaningful interaction with the attendee, company, or opportunity.",
-    "Use Gmail, HubSpot/Dench CRM, Calendar, enrichment, notes/files, and relevant public changes to lead with what changed since that last touch; skip static biography or company background unless it alters the recommended meeting plan.",
+    "Use Gmail, HubSpot/ReBattery CRM, Calendar, enrichment, notes/files, and relevant public changes to lead with what changed since that last touch; skip static biography or company background unless it alters the recommended meeting plan.",
     "Keep the brief to the configured maximum length and put the recommended ask or CTA in the first screen.",
     "Separate commitments made by the user from commitments owed by the other party.",
     "Label sensitive internal context and low-confidence claims according to the configured visibility policy.",

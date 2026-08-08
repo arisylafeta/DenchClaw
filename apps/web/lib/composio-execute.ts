@@ -174,7 +174,7 @@ async function gatewayFetch(
 ): Promise<Response> {
   const apiKey = resolveComposioApiKey();
   if (!apiKey) {
-    throw new Error("Dench Cloud API key is not configured.");
+    throw new Error("ReBattery Cloud API key is not configured.");
   }
   const url = `${resolveComposioGatewayUrl()}${path}`;
   const headers = new Headers({

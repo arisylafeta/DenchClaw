@@ -232,7 +232,7 @@ function GoogleCalendarIcon() {
 }
 
 /**
- * Step 2. Consolidates Dench Cloud + Gmail + Calendar into a single
+ * Step 2. Consolidates ReBattery Cloud + Gmail + Calendar into a single
  * checklist-style screen. Each card owns its own connect logic but we keep
  * the shared surface (header, status bar, primary CTA) here so the three
  * sources feel like one setup moment, not three.
@@ -297,7 +297,7 @@ export function SetupStep({
     onStageChange(stage);
   }, [denchCloudConnected, gmailConnected, calendarConnected, onStageChange]);
 
-  // Load Dench Cloud status (checks env/CLI config on disk).
+  // Load ReBattery Cloud status (checks env/CLI config on disk).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -310,7 +310,7 @@ export function SetupStep({
       } catch (err) {
         if (cancelled) {return;}
         setDenchCloudError(
-          err instanceof Error ? err.message : "Could not check Dench Cloud.",
+          err instanceof Error ? err.message : "Could not check ReBattery Cloud.",
         );
       } finally {
         if (!cancelled) {setDenchCloudLoading(false);}
@@ -321,7 +321,7 @@ export function SetupStep({
     };
   }, []);
 
-  // If Dench Cloud was configured via CLI but not yet recorded in onboarding
+  // If ReBattery Cloud was configured via CLI but not yet recorded in onboarding
   // state, auto-accept it so the step advances without a redundant click.
   useEffect(() => {
     if (denchCloudLoading) {return;}
@@ -338,7 +338,7 @@ export function SetupStep({
         onAdvance(next);
       } catch (err) {
         setDenchCloudError(
-          err instanceof Error ? err.message : "Could not record Dench Cloud.",
+          err instanceof Error ? err.message : "Could not record ReBattery Cloud.",
         );
       }
     })();
@@ -406,7 +406,7 @@ export function SetupStep({
     [persistToolkitConnection],
   );
 
-  // Dench Cloud/Composio is the source of truth for OAuth. If a user already
+  // ReBattery Cloud/Composio is the source of truth for OAuth. If a user already
   // connected Gmail in a prior attempt but local onboarding metadata was never
   // written, adopt that active account instead of showing a misleading
   // "Connect" button that can only end in an "already connected" error.
@@ -559,7 +559,7 @@ export function SetupStep({
         );
         if (!popup) {
           throw new Error(
-            "Popup was blocked. Allow popups for DenchClaw and try again.",
+            "Popup was blocked. Allow popups for ReBattery and try again.",
           );
         }
         popupRef.current = popup;
@@ -593,7 +593,7 @@ export function SetupStep({
     setDenchCloudError(null);
     const trimmed = denchCloudKeyInput.trim();
     if (!trimmed) {
-      setDenchCloudError("Paste your Dench Cloud API key to continue.");
+      setDenchCloudError("Paste your ReBattery Cloud API key to continue.");
       return;
     }
     setDenchCloudSubmitting(true);
@@ -716,11 +716,11 @@ export function SetupStep({
         : "idle";
 
   const requiredComplete = denchCloudConnected && gmailConnected;
-  // User may have skipped Dench Cloud (which also implicitly means skipping
+  // User may have skipped ReBattery Cloud (which also implicitly means skipping
   // Gmail). In that case they still need a path forward: the state machine
   // auto-advances through subsequent steps when DC is skipped, so we treat
   // being past `connect-calendar` as "ready for sync".
-  // Continue is live as soon as the two required connections (Dench Cloud
+  // Continue is live as soon as the two required connections (ReBattery Cloud
   // + Gmail) are in place. If calendar isn't connected we silently skip
   // it on click (see handleContinueToSync). This replaces the old
   // separate "Skip" affordance on the calendar row.
@@ -789,12 +789,12 @@ export function SetupStep({
       </div>
 
       <div className="divide-y divide-[var(--color-border)]">
-        {/* Dench Cloud */}
+        {/* ReBattery Cloud */}
         <ConnectionCard
           id="dc-card"
           required
           icon={<DenchCloudIcon />}
-          title="Dench Cloud"
+          title="ReBattery Cloud"
           description="Runs the models that power Gmail and Calendar sync."
           secondaryLabel={
             denchCloudConnected
@@ -840,12 +840,12 @@ export function SetupStep({
                 className="text-[11px] font-medium uppercase tracking-[0.06em]"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                Dench Cloud API key
+                ReBattery Cloud API key
               </label>
               <input
                 id="dench-cloud-key"
                 type="password"
-                placeholder="dench_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                placeholder="Paste API key"
                 value={denchCloudKeyInput}
                 onChange={(e) => setDenchCloudKeyInput(e.target.value)}
                 autoComplete="off"
@@ -879,7 +879,7 @@ export function SetupStep({
                   rel="noreferrer"
                   style={{ color: "var(--color-accent)" }}
                 >
-                  dench.com/api
+                  ReBattery API portal
                 </a>
                 .
               </p>
@@ -910,11 +910,11 @@ export function SetupStep({
             gmailConnected
               ? formatAccountLabel(state.connections?.gmail?.accountEmail)
               : gmailBlocked
-                ? "Connect Dench Cloud first."
+                ? "Connect ReBattery Cloud first."
                 : "We read your inbox so People and Companies can appear."
           }
           status={gmailStatusValue}
-          disabledReason={gmailBlocked ? "Requires Dench Cloud." : undefined}
+          disabledReason={gmailBlocked ? "Requires ReBattery Cloud." : undefined}
           actions={
             gmailConnected ? null : (
               <div className="flex items-center gap-3">
@@ -995,7 +995,7 @@ export function SetupStep({
             ? null
             : denchCloudConnected
               ? "Connect Gmail for the full experience, or skip ahead."
-              : "Dench Cloud unlocks the other two."}
+              : "ReBattery Cloud unlocks the other two."}
         </p>
         <button
           type="button"

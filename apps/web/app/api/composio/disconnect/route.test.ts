@@ -181,7 +181,7 @@ describe("Composio disconnect API", () => {
     expect(mockedDisconnectComposioApp).not.toHaveBeenCalled();
   });
 
-  it("rejects ineligible Dench Cloud profile (403)", async () => {
+  it("rejects ineligible ReBattery Cloud profile (403)", async () => {
     mockedResolveComposioEligibility.mockReturnValue({
       eligible: false,
       lockReason: "primary_provider_mismatch" as never,

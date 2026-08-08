@@ -49,7 +49,7 @@ export const investorUpdateBuilder = defineSkillTemplate({
       options: [
         { id: "files", label: "Files" },
         { id: "notion", label: "Notion" },
-        { id: "crm", label: "Dench CRM" },
+        { id: "crm", label: "ReBattery CRM" },
         { id: "hubspot", label: "HubSpot" },
         { id: "gmail-calendar", label: "Gmail/Calendar" },
         { id: "manual-context", label: "Manual context" },
@@ -80,7 +80,7 @@ export const investorUpdateBuilder = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use files, Notion, Dench CRM, HubSpot, Gmail, Calendar, and manual context only as configured sources for metrics, wins, risks, asks, and prior investor commitments.",
+    "Use files, Notion, ReBattery CRM, HubSpot, Gmail, Calendar, and manual context only as configured sources for metrics, wins, risks, asks, and prior investor commitments.",
     "Separate facts from narrative; cite the source for every metric, customer proof point, runway claim, hiring update, and investor ask that influences the draft.",
     "Create audience-specific versions such as private founder notes, current-investor update, prospective-investor version, board-safe version, and follow-up task list.",
     "Follow the send and CRM write policies exactly: default to drafts, log updates only when approved, use additive notes with attribution, and never overwrite investor relationship fields without permission.",

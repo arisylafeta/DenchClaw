@@ -6,7 +6,7 @@ export const pipelineHygieneDigest = defineSkillTemplate({
   summary: "Send a digest of stale deals, missing next steps, and risky CRM gaps.",
   category: "Keep CRM Clean",
   outcome: "Audits pipeline records, surfaces the highest-impact hygiene issues, and posts action-oriented cleanup recommendations.",
-  userUseCase: "Use this before forecast reviews or on a recurring schedule to audit Dench CRM and HubSpot pipeline data for stale deals, missing next steps, bad close dates, weak attribution, and owner-specific cleanup work.",
+  userUseCase: "Use this before forecast reviews or on a recurring schedule to audit ReBattery CRM and HubSpot pipeline data for stale deals, missing next steps, bad close dates, weak attribution, and owner-specific cleanup work.",
   personas: ["Founder", "Sales", "RevOps"],
   requiredApps: [externalApps.hubspot, externalApps.slack],
   triggerModes: ["manual", "scheduled"],
@@ -24,7 +24,7 @@ export const pipelineHygieneDigest = defineSkillTemplate({
         { id: "late-stage", label: "Late stage" },
         { id: "named-view", label: "Named CRM view" },
       ],
-      freeformHint: "Name the Dench CRM view, HubSpot pipeline, owners, stages, or forecast period.",
+      freeformHint: "Name the ReBattery CRM view, HubSpot pipeline, owners, stages, or forecast period.",
     },
     {
       id: "hygiene-checks",
@@ -65,7 +65,7 @@ export const pipelineHygieneDigest = defineSkillTemplate({
       options: [
         { id: "slack", label: "Slack" },
         { id: "gmail", label: "Gmail" },
-        { id: "dench-summary", label: "Dench summary" },
+        { id: "dench-summary", label: "ReBattery summary" },
         { id: "manual-only", label: "Manual only" },
       ],
       freeformHint: "Include cron cadence, timezone, recipients, and whether owners need separate sections.",
@@ -73,7 +73,7 @@ export const pipelineHygieneDigest = defineSkillTemplate({
   ],
   skillInstructions: [
     "Support manual audits and cron/scheduled digest runs only; do not rely on CRM deal-change webhooks.",
-    "Audit Dench CRM first and reconcile HubSpot fields when connected, preserving external record IDs and source attribution.",
+    "Audit ReBattery CRM first and reconcile HubSpot fields when connected, preserving external record IDs and source attribution.",
     "Flag each issue with severity, owner, affected field, evidence, recommended fix, and confidence.",
     "Only write safe hygiene fields or owner tasks when configured; never overwrite amount, stage, owner, close date, or user-authored forecast notes without explicit approval.",
     "Use configured stale thresholds by stage, and keep missing next step, missing attribution, and no recent activity as separate explainable findings.",

@@ -261,7 +261,7 @@ describe("dench cloud settings", () => {
     });
   });
 
-  it("refreshes integrations when saving the Dench Cloud API key", async () => {
+  it("refreshes integrations when saving the ReBattery Cloud API key", async () => {
     const result = await saveApiKey("dc-key");
 
     expect(mocks.refreshIntegrationsRuntime).toHaveBeenCalledTimes(1);
@@ -291,7 +291,7 @@ describe("dench cloud settings", () => {
     expect(written.tools.byProvider["dench-cloud"].alsoAllow).toBeUndefined();
   });
 
-  it("preserves unrelated auth profiles when saving the Dench Cloud API key", async () => {
+  it("preserves unrelated auth profiles when saving the ReBattery Cloud API key", async () => {
     mocks.state.authText = JSON.stringify({
       version: 1,
       profiles: {
@@ -335,11 +335,11 @@ describe("dench cloud settings", () => {
       },
     });
     mocks.state.authText = existingAuthProfile;
-    mocks.validateDenchCloudApiKey.mockRejectedValueOnce(new Error("Invalid Dench Cloud API key."));
+    mocks.validateDenchCloudApiKey.mockRejectedValueOnce(new Error("Invalid ReBattery Cloud API key."));
 
     const result = await saveApiKey("bad-key");
 
-    expect(result.error).toBe("Invalid Dench Cloud API key.");
+    expect(result.error).toBe("Invalid ReBattery Cloud API key.");
     expect(mocks.validateDenchCloudApiKey).toHaveBeenCalledTimes(1);
     expect(mocks.state.authText).toBe(existingAuthProfile);
     expect(mocks.refreshIntegrationsRuntime).not.toHaveBeenCalled();
@@ -347,18 +347,18 @@ describe("dench cloud settings", () => {
 
   it("returns invalid-key state without re-validating when API key validation fails", async () => {
     mocks.validateDenchCloudApiKey.mockRejectedValueOnce(
-      new Error("Could not reach Dench Cloud gateway at https://gateway.example.com/v1 (fetch failed)."),
+      new Error("Could not reach ReBattery Cloud gateway at https://gateway.example.com/v1 (fetch failed)."),
     );
 
     const result = await saveApiKey("bad-key");
 
     expect(mocks.validateDenchCloudApiKey).toHaveBeenCalledTimes(1);
     expect(result.state.status).toBe("invalid_key");
-    expect(result.state.validationError).toContain("Could not reach Dench Cloud gateway");
-    expect(result.error).toContain("Could not reach Dench Cloud gateway");
+    expect(result.state.validationError).toContain("Could not reach ReBattery Cloud gateway");
+    expect(result.error).toContain("Could not reach ReBattery Cloud gateway");
   });
 
-  it("refreshes integrations when switching the primary model to Dench Cloud", async () => {
+  it("refreshes integrations when switching the primary model to ReBattery Cloud", async () => {
     mocks.state.configText = JSON.stringify({
       models: {
         providers: {

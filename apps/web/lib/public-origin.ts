@@ -11,11 +11,11 @@
  *   `request.url`. Without this helper the Composio gateway would
  *   register `http://localhost:3100/api/composio/callback` as the OAuth
  *   redirect URI, which fails the moment the app is hosted behind any
- *   reverse proxy (Dench Cloud, ngrok, your own k8s ingress, etc.).
+ *   reverse proxy (ReBattery Cloud, ngrok, your own k8s ingress, etc.).
  *
  * Priority:
  *   1. **Trusted forwarded headers** (`X-Forwarded-Host` +
- *      `X-Forwarded-Proto`). On Dench Cloud the in-container Nginx sets
+ *      `X-Forwarded-Proto`). On ReBattery Cloud the in-container Nginx sets
  *      both, so this naturally reflects the *current* public subdomain.
  *      That matters for warm-pool slug rebinds where the underlying
  *      container keeps running across the rebind: the env var below

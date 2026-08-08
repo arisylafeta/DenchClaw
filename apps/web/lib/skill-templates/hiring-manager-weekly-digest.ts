@@ -72,7 +72,7 @@ export const hiringManagerWeeklyDigest = defineSkillTemplate({
     "Include only hiring information the audience is authorized to see, and minimize candidate personal data in broad digests.",
     "Use role-related and process-related signals only: stage, next step, feedback status, interview schedule, scorecard completion, and authorized notes.",
     "Do not mention, infer, rank, or summarize candidates using protected-class or sensitive attributes.",
-    "Cite private digest claims with Dench records, Calendar events, Gmail threads, files, Slack threads, or Notion pages.",
+    "Cite private digest claims with ReBattery records, Calendar events, Gmail threads, files, Slack threads, or Notion pages.",
     "Prioritize blockers that require hiring-manager attention in the next week, not every low-level pipeline detail.",
     "For weekly cron digests, compare against the prior week and highlight stage movement, newly stale candidates, and resolved blockers.",
     "Format the digest as executive summary, pipeline snapshot, priority decisions, overdue feedback, upcoming interviews, blockers, and recommended actions.",

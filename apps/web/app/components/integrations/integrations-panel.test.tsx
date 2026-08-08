@@ -37,7 +37,7 @@ const toolkitsPayload = {
 const connectionsPayload = { connections: [] };
 
 const statusPayload = {
-  summary: { level: "healthy", verified: true, message: "Dench Integrations is healthy." },
+  summary: { level: "healthy", verified: true, message: "ReBattery Integrations is healthy." },
   config: { status: "pass", detail: "OK." },
   gatewayTools: { status: "pass", detail: "OK.", toolCount: 4 },
   liveAgent: { status: "pass", detail: "OK.", evidence: [] },
@@ -89,7 +89,7 @@ describe("IntegrationsPanel", () => {
     });
   });
 
-  it("shows Dench Cloud lock badge when not eligible", async () => {
+  it("shows ReBattery Cloud lock badge when not eligible", async () => {
     const lockedPayload = {
       ...eligiblePayload,
       denchCloud: {
@@ -108,9 +108,9 @@ describe("IntegrationsPanel", () => {
     render(<IntegrationsPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText("Available with Dench Cloud")).toBeInTheDocument();
+      expect(screen.getByText("Available with ReBattery Cloud")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Get Dench Cloud API Key")).toBeInTheDocument();
+    expect(screen.getByText("Get ReBattery Cloud API Key")).toBeInTheDocument();
   });
 });

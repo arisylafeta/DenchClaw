@@ -44,7 +44,7 @@ export const partnerPipelineBuilder = defineSkillTemplate({
       required: true,
       allowMultiple: true,
       options: [
-        { id: "crm", label: "Dench CRM" },
+        { id: "crm", label: "ReBattery CRM" },
         { id: "gmail", label: "Gmail" },
         { id: "calendar", label: "Calendar" },
         { id: "slack", label: "Slack" },
@@ -78,7 +78,7 @@ export const partnerPipelineBuilder = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use Dench CRM, native enrichment, web search, and files to identify partner candidates and evidence; optionally use Gmail, Calendar, HubSpot, Notion, and Slack for prior relationship and account context.",
+    "Use ReBattery CRM, native enrichment, web search, and files to identify partner candidates and evidence; optionally use Gmail, Calendar, HubSpot, Notion, and Slack for prior relationship and account context.",
     "Support manual builds and cron/scheduled refreshes only; do not assume partner form submissions, CRM webhooks, or event listeners.",
     "Make runs idempotent by deduping companies, domains, contacts, existing partner records, and previously dismissed targets before creating notes or tasks.",
     "Follow the CRM write policy: additive partner notes, source attribution, confidence, and owner tasks are preferred; do not overwrite stages, owners, or custom fields unless explicitly allowed.",

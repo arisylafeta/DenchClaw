@@ -71,9 +71,9 @@ export const fundingSignalProspector = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Search public web sources, Dench-native enrichment, HubSpot account context, CRM history, and uploaded/source lists for funding events that match the selected stage and freshness window.",
+    "Search public web sources, ReBattery-native enrichment, HubSpot account context, CRM history, and uploaded/source lists for funding events that match the selected stage and freshness window.",
     "Verify funding amount, date, stage, investors, and company identity from credible sources before including a company.",
-    "Filter funded companies through the requested ICP, exclusions, HubSpot/Dench CRM ownership, Gmail history, and duplicate checks before ranking them.",
+    "Filter funded companies through the requested ICP, exclusions, HubSpot/ReBattery CRM ownership, Gmail history, and duplicate checks before ranking them.",
     "Explain the likely post-funding spend trigger for each account and tie it to observable evidence.",
     "Enrich each qualified account with domain, size, headquarters, relevant leaders, and source URLs.",
     "Write only additive CRM notes, scores, tasks, or drafts with source attribution and confidence; do not overwrite user-authored fields.",

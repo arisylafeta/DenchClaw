@@ -6,7 +6,7 @@
  * 1. Loopback-only — non-localhost host headers get 403, with no key read
  *    or tick attempted (saves I/O on misconfigured public deployments).
  * 2. Bearer token must be present and equal (constant-time compare) to
- *    the Dench Cloud API key the `dench-ai-gateway` plugin reads.
+ *    the ReBattery Cloud API key the `dench-ai-gateway` plugin reads.
  * 3. When backfill is running, the tick is skipped (returns ok+skipped)
  *    so the gateway-driven cron doesn't pile work on top of an in-flight
  *    backfill.
@@ -117,7 +117,7 @@ describe("/api/sync/poll-tick", () => {
     expect(mockedTick).not.toHaveBeenCalled();
   });
 
-  it("returns 503 when no Dench Cloud key is configured", async () => {
+  it("returns 503 when no ReBattery Cloud key is configured", async () => {
     mockedReadKey.mockReturnValue(undefined);
     const res = await POST(makeRequest({
       authorization: `Bearer ${VALID_KEY}`,

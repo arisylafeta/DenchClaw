@@ -42,7 +42,7 @@ export const boardMeetingPrep = defineSkillTemplate({
       options: [
         { id: "files", label: "Files" },
         { id: "notion", label: "Notion" },
-        { id: "crm", label: "Dench CRM" },
+        { id: "crm", label: "ReBattery CRM" },
         { id: "hubspot", label: "HubSpot" },
         { id: "gmail-calendar", label: "Gmail/Calendar" },
         { id: "slack", label: "Slack" },
@@ -74,7 +74,7 @@ export const boardMeetingPrep = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use Dench files, CRM, enrichment, and web search as default context; use Gmail, Calendar, Notion, HubSpot, and Slack for prior commitments, meeting logistics, source docs, and sensitive context when connected.",
+    "Use ReBattery files, CRM, enrichment, and web search as default context; use Gmail, Calendar, Notion, HubSpot, and Slack for prior commitments, meeting logistics, source docs, and sensitive context when connected.",
     "Support manual packet prep and scheduled prep reminders only; do not rely on calendar webhooks or automatic document callbacks.",
     "Tie scheduled outputs to the board meeting date and packet version, updating the same draft or checklist instead of creating duplicates.",
     "Keep private founder prep, exec-team action lists, and board-safe packets separate so sensitive working notes do not leak into external materials.",

@@ -13,14 +13,14 @@ export async function GET() {
 	if (!state.denchCloud.isPrimaryProvider) {
 		return Response.json({
 			available: false,
-			reason: "Dench Cloud is not the active provider.",
+			reason: "ReBattery Cloud is not the active provider.",
 		});
 	}
 
 	if (!state.denchCloud.hasKey) {
 		return Response.json({
 			available: false,
-			reason: "No Dench Cloud API key configured.",
+			reason: "No ReBattery Cloud API key configured.",
 		});
 	}
 

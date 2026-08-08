@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * DenchClaw MCP Server
+ * ReBattery CRM MCP Server
  *
  * Exposes DenchClaw tools (Exa search, Apollo enrichment, Composio integrations,
  * and a curated CRM DB tool layer) as MCP tools over stdio via the direct
  * Composio API (backend.composio.dev).
  *
- * No Dench Cloud gateway key required — uses COMPOSIO_API_KEY + COMPOSIO_USER_ID
+ * No ReBattery Cloud gateway key required — uses COMPOSIO_API_KEY + COMPOSIO_USER_ID
  * from environment, with connected accounts from composio.json.
  *
  * CRM DB layer:

@@ -6,7 +6,7 @@ import { PostHogProvider } from "./components/posthog-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DenchClaw",
+  title: "ReBattery",
   description:
     "AI Workspace with an agent that connects to your apps and does the work for you",
   icons: {

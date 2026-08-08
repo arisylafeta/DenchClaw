@@ -15,7 +15,7 @@ export const noShowRecovery = defineSkillTemplate({
   interviewQuestions: [
     {
       id: "meeting-source",
-      prompt: "How should DenchClaw identify no-shows?",
+      prompt: "How should ReBattery identify no-shows?",
       required: true,
       allowMultiple: true,
       options: [

@@ -7,7 +7,7 @@ export const duplicateRecordCleaner = defineSkillTemplate({
   category: "Keep CRM Clean",
   outcome: "Detects duplicate records, ranks merge confidence, proposes canonical records, and queues safe cleanup actions.",
   userUseCase:
-    "Use this when Dench CRM or HubSpot contains duplicate people, companies, or deals that break attribution, ownership, and reporting. The skill should identify duplicate clusters, recommend canonical records, preserve history, and only merge or update when confidence and overwrite rules are explicit.",
+    "Use this when ReBattery CRM or HubSpot contains duplicate people, companies, or deals that break attribution, ownership, and reporting. The skill should identify duplicate clusters, recommend canonical records, preserve history, and only merge or update when confidence and overwrite rules are explicit.",
   personas: ["RevOps", "Sales"],
   requiredApps: [externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
@@ -35,7 +35,7 @@ export const duplicateRecordCleaner = defineSkillTemplate({
         { id: "name-company", label: "Name + company" },
         { id: "hubspot-ids", label: "HubSpot IDs" },
         { id: "gmail-calendar-history", label: "Activity history" },
-        { id: "dench-enrichment", label: "Dench enrichment" },
+        { id: "dench-enrichment", label: "ReBattery enrichment" },
       ],
     },
     {
@@ -65,7 +65,7 @@ export const duplicateRecordCleaner = defineSkillTemplate({
       required: true,
       allowMultiple: true,
       options: [
-        { id: "dench-crm-note", label: "Dench CRM note" },
+        { id: "dench-crm-note", label: "ReBattery CRM note" },
         { id: "hubspot-note", label: "HubSpot note" },
         { id: "notion-table", label: "Notion table" },
         { id: "digest-only", label: "Digest only" },
@@ -74,7 +74,7 @@ export const duplicateRecordCleaner = defineSkillTemplate({
   ],
   skillInstructions: [
     "Support only manual duplicate checks and cron/scheduled duplicate hygiene runs.",
-    "Compare Dench CRM records with HubSpot records when connected, keeping Dench attribution and external IDs intact.",
+    "Compare ReBattery CRM records with HubSpot records when connected, keeping ReBattery attribution and external IDs intact.",
     "Score each duplicate cluster with match reasons, conflicting fields, canonical recommendation, and merge confidence.",
     "Do not merge or overwrite records below the configured confidence threshold; route them to review with evidence.",
     "Preserve field provenance by carrying source attribution, original record IDs, timestamps, owners, and activity history into the canonical record or audit note.",

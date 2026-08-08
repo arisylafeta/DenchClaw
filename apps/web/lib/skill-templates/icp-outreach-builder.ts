@@ -6,7 +6,7 @@ export const icpOutreachBuilder = defineSkillTemplate({
   summary: "Build a guardrailed outbound skill from an ICP, offer, and send policy.",
   category: "Find Leads",
   outcome: "Researches ICP-matched leads, writes personalized messages, follows the configured send policy, and logs activity to CRM.",
-  userUseCase: "Use when a founder or seller knows the customer profile and offer but needs DenchClaw to turn that into a repeatable prospecting skill. The workflow should find accounts and people with Dench-native CRM, enrichment, and web research, draft outreach grounded in evidence, and only send when explicit rules exist.",
+  userUseCase: "Use when a founder or seller knows the customer profile and offer but needs ReBattery to turn that into a repeatable prospecting skill. The workflow should find accounts and people with ReBattery-native CRM, enrichment, and web research, draft outreach grounded in evidence, and only send when explicit rules exist.",
   personas: ["Founder", "Sales"],
   requiredApps: [externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
@@ -20,7 +20,7 @@ export const icpOutreachBuilder = defineSkillTemplate({
     },
     {
       id: "buyer-personas",
-      prompt: "Which buyer personas should DenchClaw research at each account?",
+      prompt: "Which buyer personas should ReBattery research at each account?",
       required: true,
       allowMultiple: true,
       options: [
@@ -61,11 +61,11 @@ export const icpOutreachBuilder = defineSkillTemplate({
   ],
   skillInstructions: [
     "Translate the ICP into concrete account, contact, exclusion, and evidence rules before searching.",
-    "Use Dench CRM, native enrichment, Apollo-style native data, web search, HubSpot context, and Gmail history to find and prioritize accounts; never require Apollo as an external app.",
+    "Use ReBattery CRM, native enrichment, Apollo-style native data, web search, HubSpot context, and Gmail history to find and prioritize accounts; never require Apollo as an external app.",
     "For each lead, capture account fit, buyer-persona rationale, source links, personalization evidence, and confidence.",
     "Write outreach that is concise, specific, and tied to observable evidence; do not fabricate familiarity, private details, or unsupported claims.",
     "Default to drafts unless the user approves explicit send rules; enforce caps, quiet hours, dedupe, stop conditions, and CRM do-not-contact fields before sending.",
-    "For scheduled runs, make each campaign idempotent by checking prior Dench runs, Gmail history, and CRM notes before creating new drafts or sends.",
+    "For scheduled runs, make each campaign idempotent by checking prior ReBattery runs, Gmail history, and CRM notes before creating new drafts or sends.",
     "Create the final SKILL.md with manual invocation examples, an exact scheduled message if enabled, CRM write fields, send policy, and a run summary format.",
   ],
   activityLogInstructions: [

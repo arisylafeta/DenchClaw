@@ -41,7 +41,7 @@ export const competitorMonitor = defineSkillTemplate({
       options: [
         { id: "web", label: "Web and news" },
         { id: "company-sites", label: "Company sites" },
-        { id: "crm", label: "Dench CRM" },
+        { id: "crm", label: "ReBattery CRM" },
         { id: "files", label: "Battlecards/files" },
         { id: "slack-notion", label: "Slack/Notion" },
       ],
@@ -61,7 +61,7 @@ export const competitorMonitor = defineSkillTemplate({
       prompt: "Where should the monitor publish results and what action guidance should it include?",
       required: true,
       options: [
-        { id: "dench-note", label: "Dench note" },
+        { id: "dench-note", label: "ReBattery note" },
         { id: "slack-digest", label: "Slack digest" },
         { id: "notion", label: "Notion page" },
         { id: "gmail-draft", label: "Gmail draft" },
@@ -71,7 +71,7 @@ export const competitorMonitor = defineSkillTemplate({
   ],
   skillInstructions: [
     "Monitor only the requested competitors, categories, and signal types unless the user explicitly expands scope.",
-    "Use primary sources, company sites, reputable news, HubSpot/Dench CRM context, enrichment, and supplied files before lower-quality commentary.",
+    "Use primary sources, company sites, reputable news, HubSpot/ReBattery CRM context, enrichment, and supplied files before lower-quality commentary.",
     "Cite each signal with source title, URL or file reference, publisher, and observed date.",
     "Deduplicate repeated coverage of the same event and suppress unchanged signals in scheduled digests.",
     "Separate verified changes from interpretation, and label confidence for each implication or recommended response.",
@@ -79,7 +79,7 @@ export const competitorMonitor = defineSkillTemplate({
     "For scheduled runs, publish only net-new or materially changed findings since the prior run.",
   ],
   activityLogInstructions: [
-    "Append competitor-monitor entries to the digest history, battlecard, or Slack/Dench destination for the monitored watchlist.",
+    "Append competitor-monitor entries to the digest history, battlecard, or Slack/ReBattery destination for the monitored watchlist.",
     "Log competitors and signals checked, source titles/URLs, observed dates, verified changes, implications drafted, recommendations, and duplicate coverage suppressed.",
     "For each action recommendation, record confidence, affected sales/CS motion, source quality, owner, and whether it was published or held for review.",
     "For scheduled monitors, append only net-new changes, material updates to prior findings, no-signal runs, and watchlist or source failures.",

@@ -6,9 +6,9 @@
  * web app just runs one Gmail/Calendar incremental cycle per call. This
  * lets the cron survive `denchclaw update` and Next.js restarts.
  *
- * Auth: validates a Bearer token against the same Dench Cloud API key the
+ * Auth: validates a Bearer token against the same ReBattery Cloud API key the
  * plugin reads (`<stateDir>/agents/main/agent/auth-profiles.json#profiles["dench-cloud:default"].key`).
- * No new secret to provision — if Dench Cloud isn't connected, the
+ * No new secret to provision — if ReBattery Cloud isn't connected, the
  * plugin doesn't fire requests AND the endpoint rejects them.
  *
  * Hardening:
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
   const expected = readDenchAuthProfileKey();
   if (!expected) {
     return Response.json(
-      { error: "Dench Cloud API key not configured" },
+      { error: "ReBattery Cloud API key not configured" },
       { status: 503 },
     );
   }

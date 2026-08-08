@@ -318,7 +318,7 @@ describe("ChatMessage", () => {
     );
   });
 
-  it("renders persisted Dench Integration failures with their error details", async () => {
+  it("renders persisted ReBattery Integration failures with their error details", async () => {
     const user = userEvent.setup();
 
     render(
@@ -359,7 +359,7 @@ describe("ChatMessage", () => {
     expect(screen.getByText(/"project_id": "proj_123"/)).toBeInTheDocument();
   });
 
-  it("renders live Dench Integration failures with streamed output errors", async () => {
+  it("renders live ReBattery Integration failures with streamed output errors", async () => {
     const user = userEvent.setup();
 
     render(

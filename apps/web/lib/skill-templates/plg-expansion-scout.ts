@@ -64,7 +64,7 @@ export const plgExpansionScout = defineSkillTemplate({
   skillInstructions: [
     "Accept product usage from uploaded exports, pasted tables, saved reports, HubSpot properties, CRM notes, or workspace lists, then group each signal to the correct customer account before recommending expansion; flag uncertain account mapping as missing data.",
     "Rank expansion signals by evidence strength, account value, relationship context, and urgency instead of surfacing every usage increase.",
-    "Use HubSpot/Dench CRM ownership, Gmail relationship history, enrichment, and account notes to explain the exact behavior that changed and why it creates a plausible expansion conversation.",
+    "Use HubSpot/ReBattery CRM ownership, Gmail relationship history, enrichment, and account notes to explain the exact behavior that changed and why it creates a plausible expansion conversation.",
     "Produce CSM-led talk tracks and owner-reviewed drafts; never auto-send customer-facing expansion outreach by default.",
     "Separate expansion opportunity from renewal risk so owners can decide whether to sell, nurture, or protect the relationship.",
     "For scheduled runs, suppress unchanged signals and resurface only when the signal crosses a new threshold or owner action becomes due.",

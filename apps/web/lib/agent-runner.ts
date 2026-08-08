@@ -558,7 +558,7 @@ export function enhanceScopeError(raw: string): string | null {
 	return [
 		`missing scope: ${scope}.`,
 		"The Gateway did not grant operator scopes — device identity may be missing or invalid.",
-		"Fix: run `npx denchclaw bootstrap` to re-pair the device.",
+		"Fix: re-pair the workspace device identity from setup.",
 	].join(" ");
 }
 

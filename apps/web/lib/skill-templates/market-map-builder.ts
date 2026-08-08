@@ -52,7 +52,7 @@ export const marketMapBuilder = defineSkillTemplate({
       options: [
         { id: "web", label: "Public web" },
         { id: "enrichment", label: "Native enrichment" },
-        { id: "crm", label: "Dench CRM" },
+        { id: "crm", label: "ReBattery CRM" },
         { id: "files", label: "Uploaded files" },
         { id: "linkedin", label: "LinkedIn" },
         { id: "notion-slack", label: "Notion or Slack" },
@@ -73,7 +73,7 @@ export const marketMapBuilder = defineSkillTemplate({
   ],
   skillInstructions: [
     "Define the market boundaries before collecting companies, including what is intentionally out of scope.",
-    "Build the map from HubSpot/Dench CRM, native enrichment, web search, LinkedIn, and supplied files; use connected Notion, Slack, Gmail, or Calendar when they add relevant context.",
+    "Build the map from HubSpot/ReBattery CRM, native enrichment, web search, LinkedIn, and supplied files; use connected Notion, Slack, Gmail, or Calendar when they add relevant context.",
     "Cite each included company and material attribute with primary or reputable sources.",
     "Assign companies to clear categories and explain ambiguous classifications instead of forcing weak fits.",
     "Include confidence levels for company fit, market category, and important inferred attributes.",

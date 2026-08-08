@@ -6,7 +6,7 @@ export const fundraisingTargetBuilder = defineSkillTemplate({
   summary: "Build and maintain a prioritized investor target list for a fundraise.",
   category: "Run Founder Ops",
   outcome: "Maps investor fit, enriches partners, finds warm paths, ranks targets, and creates investor CRM records.",
-  userUseCase: "Use when a founder is preparing or maintaining a fundraise target list and wants DenchClaw to find, enrich, rank, and track relevant investors. The skill should identify fund-stage fit, partner ownership, portfolio conflicts, warm paths, and the next action that moves each investor forward.",
+  userUseCase: "Use when a founder is preparing or maintaining a fundraise target list and wants ReBattery to find, enrich, rank, and track relevant investors. The skill should identify fund-stage fit, partner ownership, portfolio conflicts, warm paths, and the next action that moves each investor forward.",
   personas: ["Founder", "Investor/BD"],
   requiredApps: [externalApps.gmail, externalApps.notion],
   triggerModes: ["manual", "scheduled"],
@@ -38,7 +38,7 @@ export const fundraisingTargetBuilder = defineSkillTemplate({
       required: true,
       allowMultiple: true,
       options: [
-        { id: "dench-crm", label: "Dench CRM" },
+        { id: "dench-crm", label: "ReBattery CRM" },
         { id: "gmail", label: "Gmail" },
         { id: "calendar", label: "Calendar" },
         { id: "notion-files", label: "Notion/files" },
@@ -72,7 +72,7 @@ export const fundraisingTargetBuilder = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use Dench CRM, native enrichment, web search, and files to build investor evidence; optionally use Gmail, Calendar, HubSpot, Notion, and Slack for prior interactions, warm paths, and notes.",
+    "Use ReBattery CRM, native enrichment, web search, and files to build investor evidence; optionally use Gmail, Calendar, HubSpot, Notion, and Slack for prior interactions, warm paths, and notes.",
     "Support only manual list-building runs and cron-scheduled refreshes; do not assume investor news or CRM update webhooks.",
     "Deduplicate investors, firms, partners, domains, prior targets, and active fundraising opportunities before creating records or tasks.",
     "Score each investor with stage fit, sector fit, check-size fit, portfolio relevance, warm-path strength, and timing rationale.",

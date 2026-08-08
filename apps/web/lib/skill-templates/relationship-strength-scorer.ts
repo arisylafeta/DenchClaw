@@ -6,7 +6,7 @@ export const relationshipStrengthScorer = defineSkillTemplate({
   summary: "Score relationships from recent emails, meetings, roles, and momentum.",
   category: "Keep CRM Clean",
   outcome: "Updates relationship strength, recency, confidence, and next-action fields across important contacts and accounts.",
-  userUseCase: "Use this when founders, sellers, investor-relations owners, or RevOps teams need Dench CRM relationship strength to reflect actual recent interaction instead of stale gut feel. The skill scores named accounts, investors, partners, customers, or open opportunities from Gmail, Calendar, CRM history, and enrichment context.",
+  userUseCase: "Use this when founders, sellers, investor-relations owners, or RevOps teams need ReBattery CRM relationship strength to reflect actual recent interaction instead of stale gut feel. The skill scores named accounts, investors, partners, customers, or open opportunities from Gmail, Calendar, CRM history, and enrichment context.",
   personas: ["Founder", "Sales", "Investor/BD", "RevOps"],
   requiredApps: [externalApps.gmail, externalApps.googleCalendar],
   triggerModes: ["manual", "scheduled"],
@@ -34,7 +34,7 @@ export const relationshipStrengthScorer = defineSkillTemplate({
       options: [
         { id: "gmail", label: "Gmail", description: "Recency, reply balance, thread depth, unresolved asks." },
         { id: "calendar", label: "Calendar", description: "Meetings, attendance, cancellations, next touch." },
-        { id: "dench-crm", label: "Dench CRM", description: "Native activities, tags, stage, owner, notes." },
+        { id: "dench-crm", label: "ReBattery CRM", description: "Native activities, tags, stage, owner, notes." },
         { id: "enrichment", label: "Enrichment", description: "Role seniority, company importance, public context." },
       ],
     },
@@ -75,7 +75,7 @@ export const relationshipStrengthScorer = defineSkillTemplate({
   ],
   skillInstructions: [
     "Support manual scoring for selected records and scheduled scoring for configured CRM segments only.",
-    "Use Dench CRM as the relationship record, with Gmail, Calendar, and enrichment signals as attributed evidence sources.",
+    "Use ReBattery CRM as the relationship record, with Gmail, Calendar, and enrichment signals as attributed evidence sources.",
     "Compute scores from recency, reply balance, meeting attendance, stakeholder seniority, account importance, sentiment, and unresolved asks according to the configured weights.",
     "Write CRM scores only when confidence meets the selected threshold, including evidence, source attribution, calculation timestamp, and score rationale.",
     "Do not overwrite a user-authored relationship score unless explicitly allowed; otherwise create a proposed score with conflict details.",

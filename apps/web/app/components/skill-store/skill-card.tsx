@@ -53,7 +53,7 @@ function AvatarImg({ source, size = 36, emoji, isManaged }: { source: string; si
     return (
       <img
         src="/rebattery-workspace-icon.svg"
-        alt="DenchClaw"
+        alt="ReBattery"
         width={size}
         height={size}
         className="rounded-xl shrink-0"
@@ -195,7 +195,7 @@ export function InstalledSkillCard({
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[10px] truncate" style={{ color: "var(--color-text-muted)" }}>
-                {skill.source === "managed" ? "DenchClaw" : orgFromSource(skill.source)}
+                {skill.source === "managed" ? "ReBattery" : orgFromSource(skill.source)}
               </span>
               <span
                 className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
@@ -217,7 +217,7 @@ export function InstalledSkillCard({
                     background: "color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent)",
                     color: "var(--color-warning, #f59e0b)",
                   }}
-                  title="Required by DenchClaw"
+                  title="Required by ReBattery"
                 >
                   <LockIcon />
                   protected

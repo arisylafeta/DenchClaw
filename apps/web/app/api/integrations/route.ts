@@ -54,7 +54,7 @@ async function applyHermesAuthority(
       level: "archived",
       verified: false,
       message:
-        "Retained for audit only. Hermes MCP is the active integration authority; this legacy Dench plugin entry is not a live remediation target.",
+        "Retained for audit only. Hermes MCP is the active integration authority; this legacy ReBattery integration entry is not a live remediation target.",
     },
     legacyEvidence: plugin.healthIssues,
   }));
@@ -69,20 +69,20 @@ async function applyHermesAuthority(
   wrapped.summary = {
     owner: "hermes",
     message:
-      "Hermes MCP config is the active integration authority. Dench exposes integrations here as a read-only client surface backed by Hermes.",
+      "Hermes MCP config is the active integration authority. ReBattery exposes integrations here as a read-only client surface backed by Hermes.",
   };
   wrapped.legacyManagedPlugins = {
     disabled: true,
     archived: true,
     message:
-      "Archived legacy Dench plugin metadata is retained for audit only. Hermes MCP is the active integration authority.",
+      "Archived legacy ReBattery integration metadata is retained for audit only. Hermes MCP is the active integration authority.",
     items: archivedPlugins,
-    wouldUse: "Dench plugin health control plane",
+    wouldUse: "ReBattery integration health control plane",
   };
   wrapped.ownershipNotes = {
     exa: "Exa is surfaced from its standalone Hermes MCP server entry.",
     apollo:
-      "Apollo is surfaced through the Hermes-managed denchclaw MCP adapter rather than a standalone Hermes MCP server entry.",
+      "Apollo is surfaced through the Hermes-managed ReBattery CRM MCP adapter rather than a standalone Hermes MCP server entry.",
   };
 
   for (const integration of wrapped.integrations as Array<Record<string, any>>) {
@@ -96,7 +96,7 @@ async function applyHermesAuthority(
       integration.locked = false;
       integration.lockReason = null;
       integration.lockBadge = isApolloHermesManaged
-        ? "Managed by Hermes DenchClaw MCP"
+        ? "Managed by Hermes ReBattery CRM MCP"
         : "Managed by Hermes MCP";
       integration.managedByDench = false;
       integration.managedByHermes = true;

@@ -6,7 +6,7 @@ export const recruitingOutreachBuilder = defineSkillTemplate({
   summary: "Create personalized candidate outreach with role-specific proof and guardrails.",
   category: "Hire People",
   outcome: "Researches candidates, drafts or sends role-specific messages, handles follow-ups, and logs candidate status.",
-  userUseCase: "Use Dench CRM, enrichment, web search, files, and optional LinkedIn/Gmail context to draft role-relevant recruiting outreach that feels researched without crossing privacy lines.",
+  userUseCase: "Use ReBattery CRM, enrichment, web search, files, and optional LinkedIn/Gmail context to draft role-relevant recruiting outreach that feels researched without crossing privacy lines.",
   personas: ["Recruiter", "Founder"],
   requiredApps: [externalApps.gmail, externalApps.linkedin],
   triggerModes: ["manual", "scheduled"],

@@ -45,7 +45,7 @@ describe("ensureComposioAppsSkillInWorkspaces", () => {
   it("re-seeds the skill when the bundled SKILL.md hash changes", () => {
     writeFileSync(
       path.join(packageRoot, "skills", "dench-integrations", "SKILL.md"),
-      "# bundled skill\nUse Dench Integrations.\n",
+      "# bundled skill\nUse ReBattery Integrations.\n",
       "utf-8",
     );
     writeFileSync(
@@ -63,7 +63,7 @@ describe("ensureComposioAppsSkillInWorkspaces", () => {
   });
 
   it("does not rewrite the skill when the bundled hash matches", () => {
-    const content = "# bundled skill\nUse Dench Integrations.\n";
+    const content = "# bundled skill\nUse ReBattery Integrations.\n";
     writeFileSync(path.join(packageRoot, "skills", "dench-integrations", "SKILL.md"), content, "utf-8");
     writeFileSync(path.join(workspaceDir, "skills", "dench-integrations", "SKILL.md"), content, "utf-8");
 

@@ -6,7 +6,7 @@ export const companyDeepResearcher = defineSkillTemplate({
   summary: "Create a sourced company dossier for sales, hiring, investing, or strategy.",
   category: "Research Anything",
   outcome: "Builds a sourced company brief with business model, team, market, recent news, risks, and recommended actions.",
-  userUseCase: "Use this when a user needs a cited company brief that can support a sales account plan, investor diligence, recruiting context, partnership evaluation, or strategic research. The skill should combine Dench-native CRM, enrichment, web search, and files first, then use connected Gmail, Calendar, Notion, Slack, or LinkedIn context only when relevant and authorized.",
+  userUseCase: "Use this when a user needs a cited company brief that can support a sales account plan, investor diligence, recruiting context, partnership evaluation, or strategic research. The skill should combine ReBattery-native CRM, enrichment, web search, and files first, then use connected Gmail, Calendar, Notion, Slack, or LinkedIn context only when relevant and authorized.",
   personas: ["Founder", "Sales", "Investor/BD", "Knowledge Worker"],
   requiredApps: [externalApps.hubspot, externalApps.gmail, externalApps.linkedin],
   triggerModes: ["manual"],
@@ -63,7 +63,7 @@ export const companyDeepResearcher = defineSkillTemplate({
       prompt: "Where should the final brief be saved or delivered?",
       required: true,
       options: [
-        { id: "dench-note", label: "Dench note" },
+        { id: "dench-note", label: "ReBattery note" },
         { id: "markdown", label: "Markdown" },
         { id: "gmail-draft", label: "Gmail draft" },
         { id: "notion-page", label: "Notion page" },
@@ -72,7 +72,7 @@ export const companyDeepResearcher = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use HubSpot/Dench CRM records, native enrichment, web search, LinkedIn context, Gmail history, and user-provided files as the baseline source set; use other connected apps only when they add relevant authorized context.",
+    "Use HubSpot/ReBattery CRM records, native enrichment, web search, LinkedIn context, Gmail history, and user-provided files as the baseline source set; use other connected apps only when they add relevant authorized context.",
     "Cite every material factual claim, including company size, funding, leadership, customers, pricing, news, market position, and risks.",
     "Prefer primary and high-quality sources such as company websites, filings, official blogs, reputable news, customer evidence, and supplied files.",
     "Do not invent facts; if sources conflict, cite both sides, explain the conflict, and mark the field unresolved.",
@@ -80,7 +80,7 @@ export const companyDeepResearcher = defineSkillTemplate({
     "Keep private CRM, email, Slack, and file excerpts scoped to the requested business purpose and visible audience.",
   ],
   activityLogInstructions: [
-    "Append research activity entries to the company dossier or Dench note, keyed by company, research goal, and brief version.",
+    "Append research activity entries to the company dossier or ReBattery note, keyed by company, research goal, and brief version.",
     "Log source sets checked, material claims added, conflicts found, unresolved fields, private context included or withheld, and output destination.",
     "For each recommendation or risk, record supporting sources, confidence, decision relevance, and open questions that still need human follow-up.",
     "On reruns, log only new sources, changed facts, resolved conflicts, updated recommendations, and sections removed because evidence no longer supports them.",

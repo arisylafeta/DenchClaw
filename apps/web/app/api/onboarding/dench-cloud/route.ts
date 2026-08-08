@@ -74,13 +74,13 @@ export async function POST(req: Request) {
   const acceptCli = body.acceptCli === true;
 
   if (acceptCli) {
-    // Confirm Dench Cloud really *is* set up (defends against a stale
+    // Confirm ReBattery Cloud really *is* set up (defends against a stale
     // detection from before the user ran the CLI bootstrap).
     const config = readOpenClawConfig();
     const apiKey = resolveComposioApiKey();
     if (!apiKey || !isDenchCloudPrimary(config).ok) {
       return Response.json(
-        { error: "Dench Cloud is not configured yet. Paste your API key to continue." },
+        { error: "ReBattery Cloud is not configured yet. Paste your API key to continue." },
         { status: 400 },
       );
     }
@@ -101,7 +101,7 @@ export async function POST(req: Request) {
   }
   if (!apiKey.startsWith("dench_")) {
     return Response.json(
-      { error: "Dench Cloud API keys start with `dench_`. Double-check the value you pasted." },
+      { error: "That API key format is invalid. Double-check the value you pasted." },
       { status: 400 },
     );
   }
@@ -146,7 +146,7 @@ export async function DELETE() {
   const current = readOnboardingState();
   if (current.currentStep !== "dench-cloud") {
     return Response.json(
-      { error: "Skip is only available from the Dench Cloud step." },
+      { error: "Skip is only available from the ReBattery Cloud step." },
       { status: 400 },
     );
   }

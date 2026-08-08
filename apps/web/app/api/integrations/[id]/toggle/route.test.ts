@@ -249,7 +249,7 @@ describe("integrations toggle API", () => {
             available: false,
             locked: true,
             lockReason: "missing_dench_key",
-            lockBadge: "Get Dench Cloud API Key",
+            lockBadge: "Get ReBattery Cloud API Key",
             gatewayBaseUrl: "https://gateway.merseoriginals.com",
             auth: { configured: false, source: "missing" },
             plugin: null,
@@ -277,6 +277,6 @@ describe("integrations toggle API", () => {
     const response = await POST(request, { params: Promise.resolve({ id: "exa" }) });
     expect(response.status).toBe(409);
     const json = await response.json();
-    expect(json.error).toBe("This integration requires a Dench Cloud API key.");
+    expect(json.error).toBe("This integration requires a ReBattery Cloud API key.");
   });
 });

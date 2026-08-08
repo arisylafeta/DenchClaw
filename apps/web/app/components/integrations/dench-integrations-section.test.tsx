@@ -58,9 +58,9 @@ describe("DenchIntegrationsSection", () => {
       />,
     );
 
-    expect(screen.getByText("Dench Enrichments")).toBeInTheDocument();
+    expect(screen.getByText("ReBattery Enrichments")).toBeInTheDocument();
     expect(screen.queryByText("Apollo Enrichment")).not.toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Toggle Dench Enrichments" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Toggle ReBattery Enrichments" })).toBeInTheDocument();
     expect(container.querySelector('img[src="/rebattery-workspace-icon.svg"]')).toBeTruthy();
   });
 });

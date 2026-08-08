@@ -468,7 +468,7 @@ export function McpServersSection() {
             MCP Servers
           </h2>
           <p className="mt-1 text-xs leading-5" style={{ color: "var(--color-text-muted)" }}>
-            Connect remote MCP servers to expose additional tools in DenchClaw.
+            Connect remote MCP servers to expose additional tools in ReBattery.
           </p>
         </div>
       </div>

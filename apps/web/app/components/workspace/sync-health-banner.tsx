@@ -137,7 +137,7 @@ function buildEntry(
       errorKey: `${source}:stale:${status.lastPolledAt ?? "never"}`,
       title: `${sourceLabel} sync hasn't run recently`,
       description:
-        "The gateway daemon may be down. Try `denchclaw start` to relaunch the cron.",
+        "The workspace service may be down. Restart it to relaunch background sync.",
       needsReconnect: false,
     };
   }

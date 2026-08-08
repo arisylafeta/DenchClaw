@@ -197,7 +197,7 @@ export async function POST(request: Request): Promise<Response> {
       client = await registerOAuthClient({
         asMetadata: discovered.authServer,
         redirectUri,
-        clientName: `DenchClaw (${key})`,
+        clientName: `ReBattery (${key})`,
         scope,
       });
     } catch (err) {

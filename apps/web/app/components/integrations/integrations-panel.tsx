@@ -46,7 +46,7 @@ export function IntegrationsPanel({ embedded }: { embedded?: boolean } = {}) {
               className="mt-1 text-sm"
               style={{ color: "var(--color-text-muted)" }}
             >
-              Connect third-party apps to your Dench Cloud workspace.
+              Connect third-party apps to your ReBattery Cloud workspace.
             </p>
           </div>
           <a
@@ -93,9 +93,9 @@ export function IntegrationsPanel({ embedded }: { embedded?: boolean } = {}) {
           eligible={Boolean(data.denchCloud.hasKey && data.denchCloud.isPrimaryProvider)}
           lockBadge={
             !data.denchCloud.hasKey
-              ? "Get Dench Cloud API Key"
+              ? "Get ReBattery Cloud API Key"
               : !data.denchCloud.isPrimaryProvider
-                ? "Use Dench Cloud"
+                ? "Use ReBattery Cloud"
                 : null
           }
         />

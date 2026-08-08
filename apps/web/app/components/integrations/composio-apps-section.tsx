@@ -678,7 +678,7 @@ export function ComposioAppsSection({
         >
           <div className="text-center">
             <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-              Available with Dench Cloud
+              Available with ReBattery Cloud
             </p>
             {lockBadge && (
               <span

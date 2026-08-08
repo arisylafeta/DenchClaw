@@ -6,7 +6,7 @@ export const crmContactEnricher = defineSkillTemplate({
   summary: "Fill missing contact and company fields with attributed enrichment.",
   category: "Keep CRM Clean",
   outcome: "Finds incomplete records, enriches missing fields from native data and external CRM context, and writes confidence-scored updates.",
-  userUseCase: "Use this when Dench CRM or HubSpot contacts are missing firmographic, role, company, source, owner, lifecycle, or relationship fields. The skill should run manually for a named list or on a schedule for incomplete records, enrich from Dench-native data first, and write only attributed, confidence-scored CRM updates.",
+  userUseCase: "Use this when ReBattery CRM or HubSpot contacts are missing firmographic, role, company, source, owner, lifecycle, or relationship fields. The skill should run manually for a named list or on a schedule for incomplete records, enrich from ReBattery-native data first, and write only attributed, confidence-scored CRM updates.",
   personas: ["RevOps", "Sales"],
   requiredApps: [externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
@@ -24,7 +24,7 @@ export const crmContactEnricher = defineSkillTemplate({
         { id: "target-accounts", label: "Target accounts" },
         { id: "named-list", label: "Named list" },
       ],
-      freeformHint: "Name the Dench view, HubSpot list, owner, lifecycle stage, or saved segment.",
+      freeformHint: "Name the ReBattery view, HubSpot list, owner, lifecycle stage, or saved segment.",
     },
     {
       id: "fields-to-enrich",
@@ -72,7 +72,7 @@ export const crmContactEnricher = defineSkillTemplate({
   ],
   skillInstructions: [
     "Support only manual runs and cron/scheduled agent messages; do not assume contact-created webhooks or real-time CRM callbacks.",
-    "Use Dench CRM as the system of record, with Dench-native enrichment first and HubSpot, Gmail, or Calendar context only when connected and relevant.",
+    "Use ReBattery CRM as the system of record, with ReBattery-native enrichment first and HubSpot, Gmail, or Calendar context only when connected and relevant.",
     "For every proposed or written CRM value, store source attribution, observed date, confidence score, and a short evidence note.",
     "Never overwrite user-authored CRM fields unless the configured overwrite policy explicitly allows it; otherwise create a review queue of conflicts.",
     "Write enriched values only when they meet the configured confidence threshold; below-threshold findings should remain suggestions.",

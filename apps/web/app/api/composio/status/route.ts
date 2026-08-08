@@ -45,17 +45,17 @@ async function applyHermesAuthority(status: Record<string, unknown>) {
         level: "archived",
         verified: false,
         message:
-          "Legacy Dench Cloud status is retained for audit only and is not the active integration authority under Hermes MCP.",
+          "Legacy ReBattery Cloud status is retained for audit only and is not the active integration authority under Hermes MCP.",
       },
     },
     gatewayUrl: null,
     eligible: true,
     lockReason: null,
-    lockBadge: "Managed by Hermes DenchClaw MCP",
+    lockBadge: "Managed by Hermes ReBattery CRM MCP",
     config: {
       status: "pass",
       detail:
-        "Hermes config registers the denchclaw MCP adapter; Dench Cloud gateway config is not the integration authority.",
+        "Hermes config registers the ReBattery CRM MCP adapter; ReBattery Cloud gateway config is not the integration authority.",
       checkedAt: generatedAt,
       matchesExpected: true,
       configured: {
@@ -71,7 +71,7 @@ async function applyHermesAuthority(status: Record<string, unknown>) {
     },
     gatewayTools: {
       status: "unknown",
-      detail: "Dench Cloud gateway probe was skipped because Hermes MCP is the integration authority.",
+      detail: "ReBattery Cloud gateway probe was skipped because Hermes MCP is the integration authority.",
       checkedAt: generatedAt,
       toolCount: null,
     },
@@ -79,12 +79,12 @@ async function applyHermesAuthority(status: Record<string, unknown>) {
       level: "healthy",
       verified: false,
       message:
-        "Dench Integrations are managed through the Hermes denchclaw MCP adapter; Dench Cloud gateway is not required for the Hermes-backed Exa and Apollo integrations.",
+        "ReBattery Integrations are managed through the Hermes ReBattery CRM MCP adapter; ReBattery Cloud gateway is not required for the Hermes-backed Exa and Apollo integrations.",
     },
     managedVia: "denchclaw-mcp-tool",
     managedByServer: "denchclaw",
     ownershipNote:
-      "This status surface is backed by the Hermes-managed denchclaw MCP adapter rather than a standalone Dench Cloud gateway authority.",
+      "This status surface is backed by the Hermes-managed ReBattery CRM MCP adapter rather than a standalone ReBattery Cloud gateway authority.",
   };
 }
 

@@ -101,7 +101,7 @@ const integrationsState: IntegrationsState = {
       available: false,
       locked: true,
       lockReason: "dench_not_primary",
-      lockBadge: "Use Dench Cloud",
+      lockBadge: "Use ReBattery Cloud",
       gatewayBaseUrl: "https://gateway.merseoriginals.com",
       auth: { configured: true, source: "config" },
       plugin: null,
@@ -123,7 +123,7 @@ const integrationsState: IntegrationsState = {
       available: false,
       locked: true,
       lockReason: "dench_not_primary",
-      lockBadge: "Use Dench Cloud",
+      lockBadge: "Use ReBattery Cloud",
       gatewayBaseUrl: "https://gateway.merseoriginals.com",
       auth: { configured: true, source: "config" },
       plugin: null,
@@ -145,7 +145,7 @@ const integrationsState: IntegrationsState = {
       available: false,
       locked: true,
       lockReason: "dench_not_primary",
-      lockBadge: "Use Dench Cloud",
+      lockBadge: "Use ReBattery Cloud",
       gatewayBaseUrl: "https://gateway.merseoriginals.com",
       auth: { configured: true, source: "config" },
       plugin: null,
@@ -168,7 +168,7 @@ describe("CloudSettingsPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the rich picker placeholder when Dench Cloud is not primary", async () => {
+  it("shows the rich picker placeholder when ReBattery Cloud is not primary", async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/settings/cloud") {
@@ -313,12 +313,12 @@ describe("CloudSettingsPanel", () => {
     render(<CloudSettingsPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText("Dench Enrichment")).toBeInTheDocument();
+      expect(screen.getByText("ReBattery Enrichment")).toBeInTheDocument();
     });
     expect(screen.getByText("Enrich people and company data with multiple providers.")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Toggle Dench Enrichments" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Toggle ReBattery Enrichments" })).toBeInTheDocument();
 
-    expect(screen.getByTitle("Dench")).toBeInTheDocument();
+    expect(screen.getByTitle("ReBattery")).toBeInTheDocument();
     expect(screen.getByTitle("Aviato")).toBeInTheDocument();
     expect(screen.getByTitle("Apollo")).toBeInTheDocument();
     expect(screen.getByTitle("People Data Labs")).toBeInTheDocument();

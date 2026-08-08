@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   const apiKey = resolveComposioApiKey();
   if (!apiKey) {
     return Response.json(
-      { error: "Dench Cloud API key is required." },
+      { error: "ReBattery Cloud API key is required." },
       { status: 403 },
     );
   }
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   if (!eligibility.eligible) {
     return Response.json(
       {
-        error: "Dench Cloud must be the primary provider.",
+        error: "ReBattery Cloud must be the primary provider.",
         lockReason: eligibility.lockReason,
         lockBadge: eligibility.lockBadge,
       },

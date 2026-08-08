@@ -73,7 +73,7 @@ function integrationLogo(id: DenchIntegrationId): ReactNode {
 function integrationDisplayNameFromId(id: DenchIntegrationId, fallbackLabel?: string): string {
   switch (id) {
     case "apollo":
-      return "Dench Enrichments";
+      return "ReBattery Enrichments";
     case "exa":
       return fallbackLabel ?? "Exa";
     case "elevenlabs":
@@ -84,13 +84,13 @@ function integrationDisplayNameFromId(id: DenchIntegrationId, fallbackLabel?: st
 function repairDisplayNameFromId(id: ManagedPluginRepairId): string {
   switch (id) {
     case "apollo":
-      return "Dench Enrichments";
+      return "ReBattery Enrichments";
     case "exa":
       return "Exa";
     case "dench-ai-gateway":
-      return "Dench AI Gateway";
+      return "ReBattery AI Gateway";
     case "dench-identity":
-      return "Dench Identity";
+      return "ReBattery Identity";
     case "posthog":
       return "PostHog";
   }
@@ -120,7 +120,7 @@ function IntegrationCard({
   const statusText = isSaving
     ? "Saving..."
     : integration.locked
-      ? "Unavailable until Dench Cloud is ready"
+      ? "Unavailable until ReBattery Cloud is ready"
       : description;
 
   return (

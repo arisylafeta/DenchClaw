@@ -45,7 +45,7 @@ export const investorMeetingPrep = defineSkillTemplate({
       allowMultiple: true,
       options: [
         { id: "notion", label: "Notion" },
-        { id: "dench-crm", label: "Dench CRM" },
+        { id: "dench-crm", label: "ReBattery CRM" },
         { id: "hubspot", label: "HubSpot" },
         { id: "gmail", label: "Gmail" },
         { id: "manual-context", label: "Manual context" },
@@ -71,14 +71,14 @@ export const investorMeetingPrep = defineSkillTemplate({
       options: [
         { id: "notion-page", label: "Notion page" },
         { id: "gmail-draft", label: "Gmail draft" },
-        { id: "dench-chat", label: "Dench chat" },
+        { id: "dench-chat", label: "ReBattery chat" },
         { id: "calendar-note", label: "Calendar note" },
       ],
     },
   ],
   skillInstructions: [
     "Support manual prep for a selected investor or meeting and scheduled prep for qualifying calendar events only.",
-    "Use calendar attendees as the anchor, then combine Dench CRM relationship history, Gmail threads, HubSpot stages, Notion narrative sources, and Dench enrichment.",
+    "Use calendar attendees as the anchor, then combine ReBattery CRM relationship history, Gmail threads, HubSpot stages, Notion narrative sources, and ReBattery enrichment.",
     "Attribute investor facts, portfolio claims, prior interactions, CRM status, and company metrics to their sources with freshness and confidence.",
     "Never invent fundraising metrics, commitments, terms, or investor interest; use only approved Notion, CRM, file, or user-provided context.",
     "Deliver a brief with investor background, relationship history, portfolio fit, likely objections, tailored talking points, and follow-up suggestions.",

@@ -70,7 +70,7 @@ export const customerVoiceMiner = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use only customer data available to the requesting user through HubSpot/Dench CRM, Gmail, Slack, Notion, local files, uploads, and connected apps.",
+    "Use only customer data available to the requesting user through HubSpot/ReBattery CRM, Gmail, Slack, Notion, local files, uploads, and connected apps.",
     "Cite each theme with source references, dates, account or segment context, and representative quotes where permitted.",
     "Redact sensitive personal data unless necessary for the requested business purpose and avoid exposing private email or Slack content beyond relevant excerpts.",
     "Group similar feedback into themes, quantify frequency when possible, and avoid overstating conclusions from small samples.",

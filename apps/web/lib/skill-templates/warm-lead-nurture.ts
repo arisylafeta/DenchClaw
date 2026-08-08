@@ -7,7 +7,7 @@ export const warmLeadNurture = defineSkillTemplate({
   category: "Follow Up",
   outcome: "Segments warm leads, chooses relevant touchpoints, drafts or sends helpful check-ins, and logs future timing.",
   userUseCase:
-    "Use this when leads are interested but not ready to buy, meet, invest, partner, or hire yet, and you want DenchClaw to keep them warm with useful, low-pressure touches. The skill should segment leads, find timely reasons to reach out, and maintain nurture state from manual runs or scheduled checks without relying on webhooks.",
+    "Use this when leads are interested but not ready to buy, meet, invest, partner, or hire yet, and you want ReBattery to keep them warm with useful, low-pressure touches. The skill should segment leads, find timely reasons to reach out, and maintain nurture state from manual runs or scheduled checks without relying on webhooks.",
   personas: ["Founder", "Sales"],
   requiredApps: [externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
@@ -42,7 +42,7 @@ export const warmLeadNurture = defineSkillTemplate({
     },
     {
       id: "touchpoint-types",
-      prompt: "What kinds of nurture touches should DenchClaw use?",
+      prompt: "What kinds of nurture touches should ReBattery use?",
       required: true,
       allowMultiple: true,
       options: [
@@ -74,7 +74,7 @@ export const warmLeadNurture = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Build the nurture queue from Dench CRM, enriched company/contact data, uploaded files, or connected HubSpot lists, then segment leads by persona, account fit, reason for delay, and last meaningful interaction.",
+    "Build the nurture queue from ReBattery CRM, enriched company/contact data, uploaded files, or connected HubSpot lists, then segment leads by persona, account fit, reason for delay, and last meaningful interaction.",
     "Use web search and enrichment to find timely but non-invasive context, such as company news, hiring, funding, product launches, role changes, or relevant content hooks.",
     "Select the lowest-pressure useful touch for each lead, prioritizing relevance over frequency and avoiding generic check-ins when a better trigger exists.",
     "Draft or send through the approved channel only under explicit send rules, including channel preference, daily caps, quiet hours, exclusions, and duplicate prevention.",

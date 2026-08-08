@@ -208,7 +208,7 @@ const DENCH_MANAGED_BUNDLED_PLUGINS: ManagedBundledPluginSpec[] = [
     id: "dench-ai-gateway",
     pluginId: DENCH_AI_GATEWAY_PLUGIN_ID,
     sourceDirName: DENCH_AI_GATEWAY_PLUGIN_ID,
-    label: "Dench AI Gateway",
+    label: "ReBattery AI Gateway",
     required: true,
     defaultEnabled: true,
   },
@@ -216,7 +216,7 @@ const DENCH_MANAGED_BUNDLED_PLUGINS: ManagedBundledPluginSpec[] = [
     id: "dench-identity",
     pluginId: DENCH_IDENTITY_PLUGIN_ID,
     sourceDirName: DENCH_IDENTITY_PLUGIN_ID,
-    label: "Dench Identity",
+    label: "ReBattery Identity",
     required: true,
     defaultEnabled: true,
   },
@@ -658,7 +658,7 @@ function resolveDenchCloudEligibility(
       primaryModel,
       locked: true,
       lockReason: "missing_dench_key",
-      lockBadge: "Get Dench Cloud API Key",
+      lockBadge: "Get ReBattery Cloud API Key",
     };
   }
   if (!isPrimaryProvider) {
@@ -668,7 +668,7 @@ function resolveDenchCloudEligibility(
       primaryModel,
       locked: true,
       lockReason: "dench_not_primary",
-      lockBadge: "Use Dench Cloud",
+      lockBadge: "Use ReBattery Cloud",
     };
   }
   return {
@@ -684,9 +684,9 @@ function resolveDenchCloudEligibility(
 function getLockErrorMessage(lockReason: DenchIntegrationLockReason | null): string {
   switch (lockReason) {
     case "missing_dench_key":
-      return "This integration requires a Dench Cloud API key.";
+      return "This integration requires a ReBattery Cloud API key.";
     case "dench_not_primary":
-      return "This integration requires Dench Cloud to be the primary provider.";
+      return "This integration requires ReBattery Cloud to be the primary provider.";
     default:
       return "This integration is currently locked.";
   }
@@ -1467,7 +1467,7 @@ export function setElevenLabsIntegrationEnabled(enabled: boolean): IntegrationTo
 }
 
 /**
- * Resolve the Dench Cloud API key and gateway URL for server-side enrichment calls.
+ * Resolve the ReBattery Cloud API key and gateway URL for server-side enrichment calls.
  */
 export function resolveDenchGatewayCredentials(): {
   apiKey: string | null;

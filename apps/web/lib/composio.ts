@@ -353,7 +353,7 @@ export function resolveComposioEligibility(): {
     return {
       eligible: false,
       lockReason: "missing_dench_key",
-      lockBadge: "Get Dench Cloud API Key",
+      lockBadge: "Get ReBattery Cloud API Key",
     };
   }
   const agents = asRecord(config.agents);
@@ -366,7 +366,7 @@ export function resolveComposioEligibility(): {
     return {
       eligible: false,
       lockReason: "dench_not_primary",
-      lockBadge: "Use Dench Cloud",
+      lockBadge: "Use ReBattery Cloud",
     };
   }
   return { eligible: true, lockReason: null, lockBadge: null };

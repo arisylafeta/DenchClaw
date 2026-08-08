@@ -14,7 +14,7 @@ export const proposalChaser = defineSkillTemplate({
   interviewQuestions: [
     {
       id: "proposal-source",
-      prompt: "Where should DenchClaw find proposals to chase?",
+      prompt: "Where should ReBattery find proposals to chase?",
       required: true,
       allowMultiple: true,
       options: [
@@ -40,7 +40,7 @@ export const proposalChaser = defineSkillTemplate({
     },
     {
       id: "chase-timing",
-      prompt: "When should DenchClaw follow up after a proposal is sent?",
+      prompt: "When should ReBattery follow up after a proposal is sent?",
       required: true,
       options: [
         { id: "2-business-days", label: "2 business days" },
@@ -75,7 +75,7 @@ export const proposalChaser = defineSkillTemplate({
     "Draft follow-ups that match the stage: confirm receipt, offer clarification, surface a useful detail, ask about blockers, propose a decision meeting, or send a polite close-the-loop note.",
     "Do not invent proposal terms, pricing, deadlines, discounts, or legal claims; quote only from CRM fields, user-provided files, or the actual thread.",
     "Send only under explicit rules with daily caps, quiet hours, recipient allowlists, and duplicate checks; otherwise create drafts and CRM tasks for owner review.",
-    "For scheduled runs, compare against Gmail and CRM activity plus prior Dench notes so the same proposal is not chased twice after a reply, meeting, or owner action.",
+    "For scheduled runs, compare against Gmail and CRM activity plus prior ReBattery notes so the same proposal is not chased twice after a reply, meeting, or owner action.",
     "Stop or hand off when a reply is detected, proposal is accepted or rejected, a meeting is booked, deal stage changes, procurement/legal owner takes over, contact opts out, or the user marks the opportunity paused.",
   ],
   activityLogInstructions: [

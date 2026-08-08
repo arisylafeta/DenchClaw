@@ -60,7 +60,7 @@ export const candidateGhostingRecovery = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Detect ghosting from stage-specific silence across Dench CRM, Gmail threads, Calendar events, Notion scorecards, and uploaded ATS exports, not one universal timer; include the last candidate touch and expected next step.",
+    "Detect ghosting from stage-specific silence across ReBattery CRM, Gmail threads, Calendar events, Notion scorecards, and uploaded ATS exports, not one universal timer; include the last candidate touch and expected next step.",
     "Before drafting, summarize candidate context, role stage, recent interaction, likely reason for silence if evidence exists, and recommended owner action.",
     "Keep all candidate-facing messages draft-only by default and never create rejection language unless explicitly requested.",
     "Reference only role-relevant, candidate-provided, or authorized context; avoid pressure, guilt, or assumptions about personal circumstances.",

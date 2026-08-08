@@ -6,7 +6,7 @@
  * Why this exists alongside `/api/sync/poll-tick`:
  *
  * - `poll-tick` is the gateway-cron path. It demands a Bearer token
- *   matching the Dench Cloud API key — appropriate for the long-lived
+ *   matching the ReBattery Cloud API key — appropriate for the long-lived
  *   gateway daemon, but the browser can't read that key from the
  *   workspace state directory, so a UI "Refresh now" button can't use
  *   it.

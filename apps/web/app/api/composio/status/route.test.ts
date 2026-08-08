@@ -58,14 +58,14 @@ describe("Composio status API", () => {
     expect(mockedGetComposioMcpHealth).toHaveBeenCalledWith({ autoRepairConfig: true });
   });
 
-  it("GET uses Dench Integrations branding for fallback load errors", async () => {
+  it("GET uses ReBattery Integrations branding for fallback load errors", async () => {
     mockedGetComposioMcpHealth.mockRejectedValueOnce("boom");
 
     const response = await GET();
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe("Failed to load Dench Integrations status.");
+    expect(body.error).toBe("Failed to load ReBattery Integrations status.");
   });
 
   it("POST repairs MCP registration when requested", async () => {
@@ -110,7 +110,7 @@ describe("Composio status API", () => {
     });
   });
 
-  it("POST uses Dench Integrations branding for fallback update errors", async () => {
+  it("POST uses ReBattery Integrations branding for fallback update errors", async () => {
     mockedGetComposioMcpHealth.mockRejectedValueOnce("boom");
     const request = new Request("http://localhost/api/composio/status", {
       method: "POST",
@@ -122,7 +122,7 @@ describe("Composio status API", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe("Failed to update Dench Integrations status.");
+    expect(body.error).toBe("Failed to update ReBattery Integrations status.");
   });
 
   it("POST rejects unknown actions", async () => {

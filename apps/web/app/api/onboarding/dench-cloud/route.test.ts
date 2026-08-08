@@ -87,7 +87,7 @@ function makeRequest(body: unknown): Request {
   });
 }
 
-describe("Dench Cloud onboarding API", () => {
+describe("ReBattery Cloud onboarding API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedSaveApiKey.mockResolvedValue({ state: cloudState, changed: true, refresh: refreshOk });
@@ -108,7 +108,7 @@ describe("Dench Cloud onboarding API", () => {
       state: { ...cloudState, status: "no_key", apiKeySource: "missing", models: [] },
       changed: false,
       refresh: { attempted: false, restarted: false, error: null, profile: "default" },
-      error: "Invalid Dench Cloud API key.",
+      error: "Invalid ReBattery Cloud API key.",
     });
 
     const res = await POST(makeRequest({ apiKey: "dench_bad_key" }));
@@ -132,7 +132,7 @@ describe("Dench Cloud onboarding API", () => {
     expect(mockedWriteAuthProfile).not.toHaveBeenCalled();
   });
 
-  it("routes users who skip Dench Cloud to starter skill selection", async () => {
+  it("routes users who skip ReBattery Cloud to starter skill selection", async () => {
     const res = await DELETE();
 
     expect(res.status).toBe(200);

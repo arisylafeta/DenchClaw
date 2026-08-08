@@ -66,7 +66,7 @@ export const monthEndMetricsAssembler = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Build a source map for every requested metric using HubSpot/Dench CRM, Gmail context, Notion/docs, uploaded spreadsheets, pasted numbers, and linked files; clearly separate verified values, user-provided values, stale values, and missing values.",
+    "Build a source map for every requested metric using HubSpot/ReBattery CRM, Gmail context, Notion/docs, uploaded spreadsheets, pasted numbers, and linked files; clearly separate verified values, user-provided values, stale values, and missing values.",
     "Calculate month-over-month and forecast deltas from source values or explicitly user-provided values only; otherwise flag the gap instead of inventing a number.",
     "Lead with the metrics that changed meaningfully and explain why each change matters for runway, fundraising, customer traction, or hiring.",
     "Create audience-specific versions only when requested; default to one private founder snapshot plus a concise update-ready summary.",

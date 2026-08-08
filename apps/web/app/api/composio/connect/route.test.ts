@@ -96,7 +96,7 @@ describe("Composio connect API", () => {
     });
   });
 
-  it("uses DENCHCLAW_PUBLIC_URL for the callback origin when set (Dench Cloud sandbox)", async () => {
+  it("uses DENCHCLAW_PUBLIC_URL for the callback origin when set (ReBattery Cloud sandbox)", async () => {
     process.env.DENCHCLAW_PUBLIC_URL =
       "https://dench-com.sandbox.merseoriginals.com";
 

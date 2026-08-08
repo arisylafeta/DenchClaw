@@ -530,7 +530,7 @@ export async function selectModel(stableId: string): Promise<CloudSettingsUpdate
       state: await getCloudSettingsState(),
       changed: false,
       refresh: { attempted: false, restarted: false, error: null, profile: "default" },
-      error: "No Dench Cloud API key configured.",
+      error: "No ReBattery Cloud API key configured.",
     };
   }
 
@@ -631,7 +631,7 @@ export async function saveActiveCloudSettings(
         integrationsState: getIntegrationsState(),
         changed: false,
         refresh: { attempted: false, restarted: false, error: null, profile: "default" },
-        error: "No Dench Cloud API key configured.",
+        error: "No ReBattery Cloud API key configured.",
       };
     }
 

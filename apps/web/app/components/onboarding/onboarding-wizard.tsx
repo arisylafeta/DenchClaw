@@ -259,7 +259,7 @@ export function OnboardingWizard({
           <div className="flex items-center gap-2.5">
             <img
               src="/rebattery-workspace-icon.svg"
-              alt="DenchClaw"
+              alt="ReBattery"
               width={36}
               height={36}
               className="h-9 w-9 rounded-xl"
@@ -269,7 +269,7 @@ export function OnboardingWizard({
               className="font-instrument text-3xl tracking-tight leading-none"
               style={{ color: "var(--color-text)" }}
             >
-              DenchClaw
+              ReBattery
             </span>
           </div>
           <ThemeToggle />
@@ -306,7 +306,7 @@ export function OnboardingWizard({
               >
                 <img
                   src="/rebattery-workspace-icon.svg"
-                  alt="DenchClaw"
+                  alt="ReBattery"
                   width={36}
                   height={36}
                   className="h-9 w-9 rounded-xl"
@@ -316,7 +316,7 @@ export function OnboardingWizard({
                   className="font-instrument text-3xl tracking-tight leading-none"
                   style={{ color: "var(--color-text)" }}
                 >
-                  DenchClaw
+                  ReBattery
                 </span>
                 <svg
                   width="16"
@@ -339,7 +339,7 @@ export function OnboardingWizard({
           <div className="flex items-center gap-2.5">
             <img
               src="/rebattery-workspace-icon.svg"
-              alt="DenchClaw"
+              alt="ReBattery"
               width={36}
               height={36}
               className="h-9 w-9 rounded-xl"
@@ -349,7 +349,7 @@ export function OnboardingWizard({
               className="font-instrument text-3xl tracking-tight leading-none"
               style={{ color: "var(--color-text)" }}
             >
-              DenchClaw
+              ReBattery
             </span>
           </div>
         )}

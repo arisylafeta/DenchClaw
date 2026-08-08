@@ -260,7 +260,7 @@ describe("agent-runner", () => {
 			proc.kill("SIGTERM");
 		});
 
-		it("patches the selected Dench Cloud model before sending the chat request", async () => {
+		it("patches the selected ReBattery Cloud model before sending the chat request", async () => {
 			const MockWs = installMockWsModule();
 			const { spawnAgentProcess } = await import("./agent-runner.js");
 
@@ -907,7 +907,7 @@ describe("agent-runner", () => {
 			const { enhanceScopeError } = await import("./agent-runner.js");
 			const result = enhanceScopeError("missing scope: operator.write");
 			expect(result).toContain("missing scope: operator.write");
-			expect(result).toContain("npx denchclaw bootstrap");
+			expect(result).toContain("re-pair the workspace device identity from setup");
 			expect(result).toContain("device identity");
 		});
 
@@ -915,7 +915,7 @@ describe("agent-runner", () => {
 			const { enhanceScopeError } = await import("./agent-runner.js");
 			const result = enhanceScopeError("missing scope: operator.read");
 			expect(result).toContain("missing scope: operator.read");
-			expect(result).toContain("npx denchclaw bootstrap");
+			expect(result).toContain("re-pair the workspace device identity from setup");
 		});
 
 		it("returns null for non-scope errors", async () => {
@@ -951,7 +951,7 @@ describe("agent-runner", () => {
 
 			await waitFor(() => errorEmitted, { attempts: 80, delayMs: 10 });
 			expect(stderr).toContain("missing scope: operator.write");
-			expect(stderr).toContain("npx denchclaw bootstrap");
+			expect(stderr).toContain("re-pair the workspace device identity from setup");
 			proc.kill("SIGTERM");
 		});
 

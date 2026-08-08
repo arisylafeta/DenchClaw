@@ -114,7 +114,7 @@ describe("cloud settings API", () => {
       state: noKeyState,
       changed: false,
       refresh: { attempted: false, restarted: false, error: null, profile: "default" },
-      error: "Invalid Dench Cloud API key.",
+      error: "Invalid ReBattery Cloud API key.",
     });
     const req = new Request("http://localhost/api/settings/cloud", {
       method: "POST",

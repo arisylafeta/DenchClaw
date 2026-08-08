@@ -408,7 +408,7 @@ export function Sidebar({
       <div className="px-4 py-3 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-1.5">
           <h1 className="text-base font-bold flex items-center gap-2">
-            <span>DenchClaw</span>
+            <span>ReBattery</span>
           </h1>
           <button
             onClick={onNewSession}

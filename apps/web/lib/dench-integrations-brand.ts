@@ -1,10 +1,10 @@
 export const denchIntegrationsBrand = {
-  displayName: "Dench Integrations",
-  singularDisplayName: "Dench Integration",
-  searchLabel: "Searching Dench Integrations",
-  callLabel: "Calling Dench Integration",
-  genericToolLabel: "Using Dench Integrations",
-  attentionLabel: "Dench Integrations needs attention",
+  displayName: "ReBattery Integrations",
+  singularDisplayName: "ReBattery Integration",
+  searchLabel: "Searching ReBattery Integrations",
+  callLabel: "Calling ReBattery Integration",
+  genericToolLabel: "Using ReBattery Integrations",
+  attentionLabel: "ReBattery Integrations needs attention",
 } as const;
 
 export function formatDenchIntegrationsStatusError(

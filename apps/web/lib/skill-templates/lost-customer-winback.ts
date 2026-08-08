@@ -70,7 +70,7 @@ export const lostCustomerWinback = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use Dench CRM churn history, closed-lost notes, enrichment, web search, files, and connected Gmail or HubSpot context to understand why each account left before recommending re-engagement.",
+    "Use ReBattery CRM churn history, closed-lost notes, enrichment, web search, files, and connected Gmail or HubSpot context to understand why each account left before recommending re-engagement.",
     "Prioritize accounts only when there is a credible reactivation reason tied to a product change, customer change, company signal, relationship warmth, or new offer.",
     "Make scheduled runs idempotent by checking prior winback notes, tasks, draft messages, and recent outreach before creating anything new.",
     "Follow the CRM write policy exactly: prefer additive notes with source links, timestamps, confidence, and rationale; never overwrite user-authored loss reasons or stages unless explicitly allowed.",

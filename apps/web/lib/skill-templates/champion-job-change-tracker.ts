@@ -65,7 +65,7 @@ export const championJobChangeTracker = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Identify likely champion role changes from HubSpot/Dench CRM contact changes, Gmail bounces or OOO replies, Dench-native enrichment, public profile/web evidence, and uploaded review lists; separate confirmed changes from weak hints.",
+    "Identify likely champion role changes from HubSpot/ReBattery CRM contact changes, Gmail bounces or OOO replies, ReBattery-native enrichment, public profile/web evidence, and uploaded review lists; separate confirmed changes from weak hints.",
     "For the old account, summarize why the champion mattered, open renewal or expansion exposure, likely replacement contacts, and the recommended owner action.",
     "For the champion's new company, use enrichment, CRM ownership, prior Gmail relationship history, and public account evidence to assess fit, timing, account ownership, and relationship context before suggesting outreach.",
     "Draft personal follow-up that reads like a relationship note, not a marketing reactivation email, and never auto-send by default.",

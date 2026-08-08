@@ -7,7 +7,7 @@ export const staleThreadFollowUpAgent = defineSkillTemplate({
   category: "Follow Up",
   outcome: "Scans stale conversations, ranks which deserve action, drafts or sends tasteful nudges, and updates CRM status.",
   userUseCase:
-    "Use this when important conversations have gone quiet and you need DenchClaw to find the threads worth reviving, understand the last ask, draft a tasteful next step, and keep CRM state honest.",
+    "Use this when important conversations have gone quiet and you need ReBattery to find the threads worth reviving, understand the last ask, draft a tasteful next step, and keep CRM state honest.",
   personas: ["Founder", "Sales", "Customer Success"],
   requiredApps: [externalApps.gmail, externalApps.hubspot],
   triggerModes: ["manual", "scheduled"],
@@ -15,7 +15,7 @@ export const staleThreadFollowUpAgent = defineSkillTemplate({
   interviewQuestions: [
     {
       id: "thread-sources",
-      prompt: "Where should DenchClaw look for stale conversations?",
+      prompt: "Where should ReBattery look for stale conversations?",
       required: true,
       allowMultiple: true,
       options: [
@@ -75,7 +75,7 @@ export const staleThreadFollowUpAgent = defineSkillTemplate({
     "Before drafting, summarize the thread history, last unanswered ask, likely next step, and CRM facts that change the recommendation.",
     "Draft follow-ups that reference the real prior conversation, avoid guilt or pressure, and choose the lightest useful CTA for the thread state.",
     "Send only when explicit rules allow it; otherwise create drafts or CRM tasks with the recommended send window.",
-    "For scheduled runs, check Gmail, CRM, HubSpot, and prior Dench notes to avoid duplicate nudges and skip threads already handled by a teammate.",
+    "For scheduled runs, check Gmail, CRM, HubSpot, and prior ReBattery notes to avoid duplicate nudges and skip threads already handled by a teammate.",
     "Stop when a reply is detected, a meeting is booked, the CRM stage closes or disqualifies, the contact opts out, or the owner marks the thread done.",
   ],
   activityLogInstructions: [

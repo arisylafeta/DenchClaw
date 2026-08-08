@@ -423,10 +423,10 @@ export async function getComposioMcpHealth(options?: {
       ? (matchesExpected ? "pass" : "fail")
       : "unknown",
     detail: !apiKey
-      ? "No Dench Cloud API key is configured."
+      ? "No ReBattery Cloud API key is configured."
       : matchesExpected
         ? `The ${denchIntegrationsBrand.displayName} server matches the expected gateway URL, transport, and Authorization header.`
-        : `The ${denchIntegrationsBrand.displayName} server is missing or does not match the expected Dench Cloud gateway configuration.`,
+        : `The ${denchIntegrationsBrand.displayName} server is missing or does not match the expected ReBattery Cloud gateway configuration.`,
     checkedAt: generatedAt,
     matchesExpected,
     configured: latestConfiguredServer,

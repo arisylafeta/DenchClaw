@@ -44,7 +44,7 @@ describe("ChainOfThought image steps", () => {
 });
 
 describe("ChainOfThought integration steps", () => {
-	it("renders a Dench Integrations search label with schema details", () => {
+	it("renders a ReBattery Integrations search label with schema details", () => {
 		const parts: ChainPart[] = [
 			{
 				kind: "tool",
@@ -99,7 +99,7 @@ describe("ChainOfThought integration steps", () => {
 		expect(screen.getByText("Schema details")).toBeTruthy();
 	});
 
-	it("renders a Dench Integration execution label with pagination summary", () => {
+	it("renders a ReBattery Integration execution label with pagination summary", () => {
 		const parts: ChainPart[] = [
 			{
 				kind: "tool",
@@ -142,7 +142,7 @@ describe("ChainOfThought integration steps", () => {
 		expect(screen.getByText("1 result")).toBeTruthy();
 	});
 
-	it("shows recovery details for an auto-healed Dench Integration call", () => {
+	it("shows recovery details for an auto-healed ReBattery Integration call", () => {
 		const parts: ChainPart[] = [
 			{
 				kind: "tool",
@@ -183,7 +183,7 @@ describe("ChainOfThought integration steps", () => {
 		).toBeTruthy();
 	});
 
-	it("keeps Dench Integration call details visible when the tool fails", () => {
+	it("keeps ReBattery Integration call details visible when the tool fails", () => {
 		const parts: ChainPart[] = [
 			{
 				kind: "tool",
@@ -202,7 +202,7 @@ describe("ChainOfThought integration steps", () => {
 					toolkit: "posthog",
 					account: "ca_obBGycWy7ChR",
 					tool_router_session_id: "trs_posthog_123",
-					error: "Dench Integration execution failed (HTTP 400).",
+					error: "ReBattery Integration execution failed (HTTP 400).",
 				},
 			},
 		];
@@ -212,7 +212,7 @@ describe("ChainOfThought integration steps", () => {
 
 		expect(screen.getByText(denchIntegrationsBrand.callLabel)).toBeTruthy();
 		expect(
-			screen.getByText(/Dench Integration execution failed \(HTTP 400\)/i),
+			screen.getByText(/ReBattery Integration execution failed \(HTTP 400\)/i),
 		).toBeTruthy();
 		expect(screen.getByText(/Tool:/i)).toBeTruthy();
 		expect(
@@ -225,7 +225,7 @@ describe("ChainOfThought integration steps", () => {
 		expect(screen.getByText(/execution_ref: exec_posthog_1/)).toBeTruthy();
 	});
 
-	it("keeps Dench Integrations search details visible when the tool fails", () => {
+	it("keeps ReBattery Integrations search details visible when the tool fails", () => {
 		const parts: ChainPart[] = [
 			{
 				kind: "tool",

@@ -55,7 +55,7 @@ function DefaultHeader({ mode }: { mode: SkillTemplateGalleryMode }) {
       ? {
           title: "Start from a template.",
           description:
-            "Pick a proven workflow and DenchClaw will open a chat to shape it into your own reusable skill.",
+            "Pick a proven workflow and ReBattery will open a chat to shape it into your own reusable skill.",
         }
       : {
           title: "What do you want me to do?",

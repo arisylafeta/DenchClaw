@@ -59,7 +59,7 @@ const POSTGRES_OBJECT_TABLES: Record<string, string> = {
 
 /**
  * POST /api/workspace/objects/[name]/enrich
- * Enriches entries via Apollo through the Dench Cloud gateway.
+ * Enriches entries via Apollo through the ReBattery Cloud gateway.
  * Streams progress as SSE so the frontend can show a waterfall effect.
  */
 export async function POST(
@@ -75,10 +75,10 @@ export async function POST(
 	// --- Gating checks ---
 	const state = getIntegrationsState();
 	if (!state.denchCloud.isPrimaryProvider) {
-		return Response.json({ error: "Dench Cloud is not the active provider." }, { status: 403 });
+		return Response.json({ error: "ReBattery Cloud is not the active provider." }, { status: 403 });
 	}
 	if (!state.denchCloud.hasKey) {
-		return Response.json({ error: "No Dench Cloud API key configured." }, { status: 403 });
+		return Response.json({ error: "No ReBattery Cloud API key configured." }, { status: 403 });
 	}
 	const apollo = state.integrations.find((i) => i.id === "apollo");
 	if (!apollo?.enabled) {

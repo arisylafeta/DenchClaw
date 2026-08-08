@@ -3088,7 +3088,7 @@ function ContentRenderer({
           <div className="mx-auto max-w-5xl p-6">
             <div className="mb-6">
               <h1 className="font-instrument text-3xl tracking-tight" style={{ color: "var(--color-text)" }}>Cloud</h1>
-              <p className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>Manage your Dench Cloud connection and model settings.</p>
+              <p className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>Manage your ReBattery Cloud connection and model settings.</p>
             </div>
             <CloudSettingsPanel />
           </div>

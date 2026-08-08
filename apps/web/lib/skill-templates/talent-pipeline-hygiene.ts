@@ -17,7 +17,7 @@ export const talentPipelineHygiene = defineSkillTemplate({
       id: "pipeline-scope",
       prompt: "Which talent pipeline should be audited?",
       required: true,
-      freeformHint: "Specify roles, departments, hiring stages, recruiters, date range, or saved Dench CRM views.",
+      freeformHint: "Specify roles, departments, hiring stages, recruiters, date range, or saved ReBattery CRM views.",
     },
     {
       id: "hygiene-checks",
@@ -39,7 +39,7 @@ export const talentPipelineHygiene = defineSkillTemplate({
       required: true,
       allowMultiple: true,
       options: [
-        { id: "crm", label: "Dench CRM" },
+        { id: "crm", label: "ReBattery CRM" },
         { id: "files", label: "Files" },
         { id: "gmail", label: "Gmail" },
         { id: "calendar", label: "Calendar" },
@@ -61,7 +61,7 @@ export const talentPipelineHygiene = defineSkillTemplate({
       prompt: "How should issues and actions be reported?",
       required: true,
       options: [
-        { id: "dench-tasks", label: "Dench tasks" },
+        { id: "dench-tasks", label: "ReBattery tasks" },
         { id: "slack-digest", label: "Slack digest" },
         { id: "notion-table", label: "Notion table" },
         { id: "gmail-summary", label: "Gmail summary" },
@@ -70,9 +70,9 @@ export const talentPipelineHygiene = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Audit only authorized candidate and hiring records available through Dench CRM and connected systems.",
+    "Audit only authorized candidate and hiring records available through ReBattery CRM and connected systems.",
     "Do not surface, infer, or act on protected-class or sensitive attributes; hygiene findings must be process-based and role-related.",
-    "Use Gmail threads, Calendar interviews, Notion scorecards, Slack handoff context, uploaded ATS exports, and Dench CRM records to flag missing or stale operational fields such as owner, stage, next step, last contact, feedback, scheduled interview, or duplicate record.",
+    "Use Gmail threads, Calendar interviews, Notion scorecards, Slack handoff context, uploaded ATS exports, and ReBattery CRM records to flag missing or stale operational fields such as owner, stage, next step, last contact, feedback, scheduled interview, or duplicate record.",
     "Cite each issue with the relevant record, timestamp, Calendar event, Gmail thread, file, Slack thread, or Notion page when available.",
     "Prioritize issues by candidate impact, hiring urgency, process risk, and age of inactivity.",
     "For cron audits, report changes since the previous run and avoid repeatedly flagging acknowledged issues unless they become more urgent.",

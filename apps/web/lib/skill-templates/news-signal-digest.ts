@@ -64,7 +64,7 @@ export const newsSignalDigest = defineSkillTemplate({
       prompt: "Where should the digest go and how should it read?",
       required: true,
       options: [
-        { id: "dench-note", label: "Dench note" },
+        { id: "dench-note", label: "ReBattery note" },
         { id: "slack", label: "Slack post" },
         { id: "gmail", label: "Gmail draft" },
         { id: "notion", label: "Notion page" },
@@ -73,7 +73,7 @@ export const newsSignalDigest = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use web search, HubSpot/Dench CRM records, enrichment, and files to identify relevant news; use connected Slack, Gmail, Notion, Calendar, or LinkedIn only when helpful.",
+    "Use web search, HubSpot/ReBattery CRM records, enrichment, and files to identify relevant news; use connected Slack, Gmail, Notion, Calendar, or LinkedIn only when helpful.",
     "Cite every news item with source name, title, URL or file reference, publication date, and retrieval date when available.",
     "Rank items by relevance to the chosen scope, recency, credibility, and potential business impact.",
     "Filter duplicate syndications, stale articles, SEO spam, and unsupported rumors unless rumor monitoring is explicitly requested.",

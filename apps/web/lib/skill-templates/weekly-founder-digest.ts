@@ -77,7 +77,7 @@ export const weeklyFounderDigest = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use Dench CRM, enrichment, web search, files, Gmail, Calendar, and Slack to extract meetings, commitments, decisions, asks, unresolved threads, and material business changes.",
+    "Use ReBattery CRM, enrichment, web search, files, Gmail, Calendar, and Slack to extract meetings, commitments, decisions, asks, unresolved threads, and material business changes.",
     "Support manual generation and cron-scheduled weekly digest messages only; do not rely on automatic app events.",
     "Make each scheduled digest idempotent by recording the covered week, source windows, generated digest ID, and created task IDs.",
     "Respect the workspace write policy: prefer additive tasks and notes with source attribution; never overwrite human-authored status fields without explicit approval.",

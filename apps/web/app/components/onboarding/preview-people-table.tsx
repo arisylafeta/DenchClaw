@@ -154,7 +154,7 @@ function BrowserChrome() {
         className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[10.5px]"
         style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
       >
-        <span>denchclaw</span>
+        <span>ReBattery</span>
         <span style={{ opacity: 0.5 }}>·</span>
         <span>People</span>
       </div>

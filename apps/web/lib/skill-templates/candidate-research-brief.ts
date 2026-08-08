@@ -65,7 +65,7 @@ export const candidateResearchBrief = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Use only job-relevant, candidate-provided, public, or authorized internal information from Dench CRM, enrichment, files, and connected apps.",
+    "Use only job-relevant, candidate-provided, public, or authorized internal information from ReBattery CRM, enrichment, files, and connected apps.",
     "Do not infer, mention, score, or use protected-class or sensitive attributes such as age, race, religion, health, family status, gender identity, national origin, disability, veteran status, or photos.",
     "Cite role-relevant claims with source references such as resume lines, portfolio pages, public work, CRM notes, or interview feedback.",
     "Separate evidence from hypotheses and phrase fit as role-related observations or questions to validate.",

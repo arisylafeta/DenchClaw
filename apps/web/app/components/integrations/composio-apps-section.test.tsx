@@ -141,7 +141,7 @@ const statusPayload: {
   summary: {
     level: "healthy" as const,
     verified: true,
-    message: "Dench Integrations is healthy.",
+    message: "ReBattery Integrations is healthy.",
   },
   config: {
     status: "pass" as const,
@@ -311,7 +311,7 @@ describe("ComposioAppsSection", () => {
       summary: {
         level: "error" as const,
         verified: false,
-        message: "Dench Integrations is configured, but a live agent session could not see the tools directly.",
+        message: "ReBattery Integrations is configured, but a live agent session could not see the tools directly.",
       },
       liveAgent: {
         status: "fail" as const,
@@ -324,7 +324,7 @@ describe("ComposioAppsSection", () => {
     render(<ComposioAppsSection eligible lockBadge={null} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Dench Integrations is configured, but a live agent session could not see the tools directly.")).toBeInTheDocument();
+      expect(screen.getByText("ReBattery Integrations is configured, but a live agent session could not see the tools directly.")).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/Composio MCP/i)).not.toBeInTheDocument();
@@ -339,7 +339,7 @@ describe("ComposioAppsSection", () => {
       summary: {
         level: "healthy" as const,
         verified: false,
-        message: "Dench Integrations is configured and the gateway is reachable. Live-agent verification is pending.",
+        message: "ReBattery Integrations is configured and the gateway is reachable. Live-agent verification is pending.",
       },
       liveAgent: {
         status: "unknown" as const,
@@ -382,9 +382,9 @@ describe("ComposioAppsSection", () => {
   });
 
   it("shows lock badge when not eligible", () => {
-    render(<ComposioAppsSection eligible={false} lockBadge="Get Dench Cloud API Key" />);
+    render(<ComposioAppsSection eligible={false} lockBadge="Get ReBattery Cloud API Key" />);
 
-    expect(screen.getByText("Available with Dench Cloud")).toBeInTheDocument();
-    expect(screen.getByText("Get Dench Cloud API Key")).toBeInTheDocument();
+    expect(screen.getByText("Available with ReBattery Cloud")).toBeInTheDocument();
+    expect(screen.getByText("Get ReBattery Cloud API Key")).toBeInTheDocument();
   });
 });

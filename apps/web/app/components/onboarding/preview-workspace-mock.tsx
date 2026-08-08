@@ -111,7 +111,7 @@ export function PreviewWorkspaceMock({
               color: "var(--color-text-muted)",
             }}
           >
-            <span>denchclaw</span>
+            <span>ReBattery</span>
             <span style={{ opacity: 0.5 }}>·</span>
             <span>People</span>
           </div>

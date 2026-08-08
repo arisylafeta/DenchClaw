@@ -26,7 +26,7 @@ describe("composio config resolution", () => {
     vi.restoreAllMocks();
   });
 
-  it("prefers the Dench Cloud provider baseUrl when resolving the Composio gateway URL", () => {
+  it("prefers the ReBattery Cloud provider baseUrl when resolving the Composio gateway URL", () => {
     writeFileSync(
       path.join(stateDir, "openclaw.json"),
       JSON.stringify({

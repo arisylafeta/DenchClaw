@@ -297,12 +297,12 @@ describe("integrations state", () => {
     for (const integration of state.integrations) {
       expect(integration.locked).toBe(true);
       expect(integration.lockReason).toBe("missing_dench_key");
-      expect(integration.lockBadge).toBe("Get Dench Cloud API Key");
+      expect(integration.lockBadge).toBe("Get ReBattery Cloud API Key");
       expect(integration.enabled).toBe(false);
     }
   });
 
-  it("locks Dench integrations when Dench Cloud is not primary", async () => {
+  it("locks Dench integrations when ReBattery Cloud is not primary", async () => {
     const { existsSync, readFileSync } = await import("node:fs");
     const mockExists = vi.mocked(existsSync);
     const mockRead = vi.mocked(readFileSync);
@@ -347,12 +347,12 @@ describe("integrations state", () => {
     expect(exa).toMatchObject({
       locked: true,
       lockReason: "dench_not_primary",
-      lockBadge: "Use Dench Cloud",
+      lockBadge: "Use ReBattery Cloud",
       enabled: false,
     });
   });
 
-  it("rejects enabling Exa when Dench Cloud is locked", async () => {
+  it("rejects enabling Exa when ReBattery Cloud is locked", async () => {
     const { existsSync, readFileSync } = await import("node:fs");
     const mockExists = vi.mocked(existsSync);
     const mockRead = vi.mocked(readFileSync);
@@ -383,7 +383,7 @@ describe("integrations state", () => {
     const { setExaIntegrationEnabled } = await import("./integrations.js");
     const result = setExaIntegrationEnabled(true);
     expect(result.changed).toBe(false);
-    expect(result.error).toBe("This integration requires Dench Cloud to be the primary provider.");
+    expect(result.error).toBe("This integration requires ReBattery Cloud to be the primary provider.");
   });
 
   it("enables Exa and suppresses built-in web search", async () => {

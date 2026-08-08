@@ -1,7 +1,7 @@
 /**
  * Web-side mirror of `extensions/shared/dench-auth.ts#readDenchAuthProfileKey`.
  *
- * Reads the Dench Cloud API key from the same single source of truth
+ * Reads the ReBattery Cloud API key from the same single source of truth
  * (`<stateDir>/agents/main/agent/auth-profiles.json#profiles["dench-cloud:default"].key`)
  * that the OpenClaw gateway and bundled plugins use, with the same
  * env-var fallback. Kept as a separate file (rather than importing from

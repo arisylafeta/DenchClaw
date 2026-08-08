@@ -22,7 +22,7 @@ export async function DELETE(
   // Managed DenchClaw skills are required for core behavior and must stay installed.
   if (PROTECTED_SKILLS.includes(slug)) {
     return Response.json(
-      { ok: false, error: "This skill is required by DenchClaw and cannot be removed" },
+      { ok: false, error: "This skill is required by ReBattery and cannot be removed" },
       { status: 403 },
     );
   }

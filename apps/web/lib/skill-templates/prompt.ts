@@ -50,12 +50,12 @@ export function buildSkillTemplatePromptText(template: SkillTemplateDefinition):
   const personas = template.personas.join(", ");
   const suggestedApps = template.suggestedApps.length
     ? template.suggestedApps.map((app) => app.name).join(", ")
-    : "no external apps; use Dench-native CRM, enrichment, web search, local files, and workspace context";
+    : "no external apps; use ReBattery-native CRM, enrichment, web search, local files, and workspace context";
   const suggestedAppConnections = formatSuggestedAppConnections(template);
 
-  return `I want to create a reusable DenchClaw skill called "${template.title}".
+  return `I want to create a reusable ReBattery skill called "${template.title}".
 
-This should become a durable DenchClaw skill, not a one-off chat. DenchClaw is my AI workspace with built-in CRM, enrichment, Apollo-style data, web search, local files, and optional connected apps. Treat Dench-native capabilities as available by default, and use connected apps only when they are required or helpful.
+This should become a durable ReBattery skill, not a one-off chat. ReBattery is my AI workspace with built-in CRM, enrichment, Apollo-style data, web search, local files, and optional connected apps. Treat ReBattery-native capabilities as available by default, and use connected apps only when they are required or helpful.
 
 This template is mainly for these personas: ${personas}.
 
@@ -74,7 +74,7 @@ Available trigger modes for this product are only manual trigger and cron/schedu
 
 Start by interviewing me one question at a time. Do not echo this setup back to me. Ask only 3-5 focused questions before creating the skill unless a safety-critical automation rule is still missing. Ask the smallest next question needed, keep each interview turn under 120 words unless options are essential, wait for my answer, then ask the next question. Do not create or edit any files until you have enough context to tailor the workflow.
 
-When the next question has clear choices, ask it with a Dench question card instead of plain text bullets. Use this exact fenced JSON shape, then stop and wait for my selection:
+When the next question has clear choices, ask it with a ReBattery question card instead of plain text bullets. Use this exact fenced JSON shape, then stop and wait for my selection:
 \`\`\`dench-question
 {
   "id": "short-stable-question-id",

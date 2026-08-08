@@ -71,11 +71,11 @@ export const hiringSignalProspector = defineSkillTemplate({
     },
   ],
   skillInstructions: [
-    "Search public job postings, company career pages, LinkedIn context, Dench-native enrichment, HubSpot/Dench CRM context, uploaded lists, and Gmail history for hiring signals that match the requested roles.",
+    "Search public job postings, company career pages, LinkedIn context, ReBattery-native enrichment, HubSpot/ReBattery CRM context, uploaded lists, and Gmail history for hiring signals that match the requested roles.",
     "Group related openings by company to detect team-level growth rather than isolated one-off roles.",
     "Interpret job descriptions for buying intent, tool mentions, department priorities, urgency, and timing cues.",
     "Prioritize companies where hiring activity maps directly to the user's product thesis and target buyer.",
-    "Exclude companies already owned by active HubSpot/Dench CRM opportunities or recent Gmail outreach unless the user explicitly wants them reviewed.",
+    "Exclude companies already owned by active HubSpot/ReBattery CRM opportunities or recent Gmail outreach unless the user explicitly wants them reviewed.",
     "Return each prospect with relevant job links, signal interpretation, likely buyer, recommended contact path, and CRM-safe source notes.",
     "For scheduled runs, dedupe against prior findings and only surface new or materially changed hiring signals since the last run.",
   ],

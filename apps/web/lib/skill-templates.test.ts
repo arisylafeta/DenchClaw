@@ -49,7 +49,7 @@ describe("skill templates", () => {
     expect(prompt).toContain("Do not create or edit any files until");
     expect(prompt).toContain("manual trigger and cron/scheduled agent messages");
     expect(prompt).toContain("explicit send rules");
-    expect(prompt).toContain("Which buyer personas should DenchClaw");
+    expect(prompt).toContain("Which buyer personas should ReBattery");
     expect(prompt).toContain("Who this skill is for");
     expect(prompt).toContain("idempotency checks");
     expect(prompt).toContain("Suggested app connections");

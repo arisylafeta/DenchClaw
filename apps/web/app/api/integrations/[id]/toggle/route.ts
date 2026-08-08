@@ -51,8 +51,8 @@ export async function POST(
       };
     return Response.json({
       error: target.lockReason === "missing_dench_key"
-        ? "This integration requires a Dench Cloud API key."
-        : "This integration requires Dench Cloud to be the primary provider.",
+        ? "This integration requires a ReBattery Cloud API key."
+        : "This integration requires ReBattery Cloud to be the primary provider.",
       integration: id,
       changed: normalized.changed,
       refresh,
