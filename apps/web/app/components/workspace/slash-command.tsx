@@ -42,7 +42,9 @@ type SlashItem = {
 };
 
 /** Search function signature accepted by createWorkspaceMention. */
-export type MentionSearchFn = (query: string, limit?: number) => SearchIndexItem[];
+export type MentionSearchFn = ((query: string, limit?: number) => SearchIndexItem[]) & {
+  ensureLoaded?: () => Promise<void>;
+};
 
 function nodeTypeIcon(type: string) {
   switch (type) {
@@ -601,6 +603,15 @@ export function createSlashCommand() {
  * "@" mention command -- unified workspace search (files + objects + entries).
  * Accepts a search function from the useSearchIndex hook for fast fuzzy matching.
  */
+export async function loadMentionSearchResults(
+  searchFn: MentionSearchFn,
+  query: string,
+  limit = 15,
+): Promise<SearchIndexItem[]> {
+  await searchFn.ensureLoaded?.();
+  return searchFn(query, limit);
+}
+
 export function createWorkspaceMention(searchFn: MentionSearchFn) {
   return Extension.create({
     name: "fileMention",
@@ -614,8 +625,8 @@ export function createWorkspaceMention(searchFn: MentionSearchFn) {
           command: ({ editor, range, props: item }: { editor: Editor; range: Range; props: SlashItem }) => {
             item.command({ editor, range });
           },
-          items: ({ query }: { query: string }) => {
-            const results = searchFn(query, 15);
+          items: async ({ query }: { query: string }) => {
+            const results = await loadMentionSearchResults(searchFn, query, 15);
             return results.map(searchItemToSlashItem);
           },
           render: createSuggestionRenderer(),

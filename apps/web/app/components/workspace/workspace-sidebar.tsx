@@ -202,6 +202,7 @@ export function FileSearch({ onSelect, searchFn }: { onSelect: (item: SuggestIte
 	const [results, setResults] = useState<SuggestItem[]>([]);
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
+	const latestQueryRef = useRef("");
 	const justSelectedRef = useRef(false);
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const anchorRef = useRef<HTMLDivElement>(null);
@@ -216,15 +217,29 @@ export function FileSearch({ onSelect, searchFn }: { onSelect: (item: SuggestIte
 			return;
 		}
 		setQuery(inputValue);
+		latestQueryRef.current = inputValue;
 		if (!inputValue.trim()) {
 			setResults([]);
 			setOpen(false);
 			return;
 		}
 		if (searchFn) {
-			const hits = searchFn(inputValue.trim(), 20);
-			setResults(hits.map(indexItemToSuggestItem));
-			setOpen(true);
+			const lazySearch = searchFn as typeof searchFn & {
+				ensureLoaded?: () => Promise<void>;
+				isLoaded?: () => boolean;
+			};
+			const requestedQuery = inputValue.trim();
+			if (lazySearch.ensureLoaded && lazySearch.isLoaded && !lazySearch.isLoaded()) {
+				setResults([]);
+				setOpen(true);
+				void lazySearch.ensureLoaded().then(() => {
+					if (latestQueryRef.current.trim() !== requestedQuery) {return;}
+					setResults(lazySearch(requestedQuery, 20).map(indexItemToSuggestItem));
+				});
+			} else {
+				setResults(lazySearch(requestedQuery, 20).map(indexItemToSuggestItem));
+				setOpen(true);
+			}
 		} else {
 			if (timerRef.current) clearTimeout(timerRef.current);
 			timerRef.current = setTimeout(async () => {

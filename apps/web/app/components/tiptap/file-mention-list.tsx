@@ -333,8 +333,22 @@ export function createFileMentionRenderer(searchFnRef?: React.RefObject<((query:
 		}
 
 		function searchInstant(query: string) {
-			const fn = searchFnRef?.current;
+			const fn = searchFnRef?.current as (((query: string, limit?: number) => SearchIndexItem[]) & {
+				ensureLoaded?: () => Promise<void>;
+				isLoaded?: () => boolean;
+			}) | null | undefined;
 			if (fn) {
+				if (fn.ensureLoaded && fn.isLoaded && !fn.isLoaded()) {
+					isLoading = true;
+					render();
+					void fn.ensureLoaded().then(() => {
+						if (searchFnRef?.current !== fn) {return;}
+						currentItems = fn(currentQuery, 20).map(indexItemToSuggest);
+						isLoading = false;
+						render();
+					});
+					return true;
+				}
 				currentItems = fn(query, 20).map(indexItemToSuggest);
 				isLoading = false;
 				render();

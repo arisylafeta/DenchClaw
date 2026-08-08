@@ -531,18 +531,9 @@ function WorkspacePageInner() {
     showHidden, setShowHidden,
   } = useWorkspaceWatcher();
 
-  // Track tree changes to refresh search index
-  const treeRefreshCount = useRef(0);
-  const [searchRefreshSignal, setSearchRefreshSignal] = useState(0);
-  useEffect(() => {
-    if (tree.length > 0) {
-      treeRefreshCount.current += 1;
-      setSearchRefreshSignal(treeRefreshCount.current);
-    }
-  }, [tree]);
-
-  // Search index for @ mention fuzzy search (files + entries)
-  const { search: searchIndex } = useSearchIndex(searchRefreshSignal);
+  // The multi-megabyte search index loads only when search is first used.
+  // Filesystem events must not refetch it on every workspace-tree change.
+  const { search: searchIndex } = useSearchIndex();
 
   const [context, setContext] = useState<WorkspaceContext | null>(null);
 

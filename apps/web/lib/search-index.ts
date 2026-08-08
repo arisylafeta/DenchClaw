@@ -5,6 +5,11 @@ import Fuse from "fuse.js";
 
 // --- Types (must match the API response) ---
 
+export type SearchFunction = ((query: string, limit?: number) => SearchIndexItem[]) & {
+  ensureLoaded: () => Promise<void>;
+  isLoaded: () => boolean;
+};
+
 export type SearchIndexItem = {
   id: string;
   label: string;
@@ -54,31 +59,43 @@ function enrichForSearch(
  * Hook that fetches the workspace search index and provides fuzzy search.
  * Refetches when `refreshSignal` changes (wire to tree watcher refresh count).
  */
-export function useSearchIndex(refreshSignal?: number) {
+export function useSearchIndex() {
   const [items, setItems] = useState<SearchIndexItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
+  const loadedRef = useRef(false);
+  const loadPromiseRef = useRef<Promise<void> | null>(null);
 
-  const fetchIndex = useCallback(async () => {
-    try {
-      const res = await fetch("/api/workspace/search-index");
-      const data = await res.json();
-      if (mountedRef.current) {
-        setItems(data.items ?? []);
-        setLoading(false);
+  const ensureLoaded = useCallback((): Promise<void> => {
+    if (loadedRef.current) {return Promise.resolve();}
+    if (loadPromiseRef.current) {return loadPromiseRef.current;}
+
+    setLoading(true);
+    const request = (async () => {
+      try {
+        const res = await fetch("/api/workspace/search-index");
+        const data = await res.json();
+        if (mountedRef.current) {
+          setItems(data.items ?? []);
+          loadedRef.current = true;
+        }
+      } catch {
+        // A later search attempt may retry after a transient failure.
+      } finally {
+        loadPromiseRef.current = null;
+        if (mountedRef.current) {setLoading(false);}
       }
-    } catch {
-      if (mountedRef.current) {setLoading(false);}
-    }
+    })();
+    loadPromiseRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
     mountedRef.current = true;
-    void fetchIndex();
     return () => {
       mountedRef.current = false;
     };
-  }, [fetchIndex, refreshSignal]);
+  }, []);
 
   // Build the Fuse instance whenever items change
   const fuse = useMemo(() => {
@@ -117,12 +134,15 @@ export function useSearchIndex(refreshSignal?: number) {
    * Stable search function -- identity never changes, but always delegates
    * to the latest searchImpl via ref. Safe to capture in closures/extensions.
    */
-  const search = useCallback(
-    (query: string, limit?: number): SearchIndexItem[] => {
+  const search = useMemo<SearchFunction>(() => {
+    const fn = ((query: string, limit?: number): SearchIndexItem[] => {
+      if (!loadedRef.current) {void ensureLoaded();}
       return searchImplRef.current(query, limit);
-    },
-    [],
-  );
+    }) as SearchFunction;
+    fn.ensureLoaded = ensureLoaded;
+    fn.isLoaded = () => loadedRef.current;
+    return fn;
+  }, [ensureLoaded]);
 
-  return { items, loading, search };
+  return { items, loading, search, ensureLoaded };
 }
