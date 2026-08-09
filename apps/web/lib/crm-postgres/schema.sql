@@ -260,7 +260,15 @@ alter table projects add column if not exists status text not null default 'Acti
 alter table projects add column if not exists objective text;
 alter table work_tasks add column if not exists task_details text;
 alter table crm_users add column if not exists display_name text;
-update crm_users set display_name=case when email='ari@rebattery.io' then 'Ari' when email='alex@rebattery.io' then 'Alex' else email end where display_name is null;
+update crm_users
+set display_name = case
+  when email = 'ari@rebattery.io' then 'Ari'
+  when email = 'alex@rebattery.io' then 'Alex'
+  else email
+end
+where display_name is null;
+alter table crm_users alter column display_name set default '';
+alter table crm_users alter column display_name set not null;
 alter table work_tasks add column if not exists assignee_id uuid references crm_users(id) on delete set null;
 create index if not exists work_tasks_project_idx on work_tasks(project_id);
 create index if not exists work_tasks_assignee_idx on work_tasks(assignee_id);
@@ -276,15 +284,24 @@ values ('reb_work_task_object', 'work_task', 'work_tasks', 'ReBattery Work Tasks
 on conflict (name) do update set entity_table=excluded.entity_table;
 
 insert into crm_objects (id, name, entity_table, description, display_field, immutable, hidden_in_sidebar)
-values ('crm_users_object', 'crm_user', 'crm_users', 'Invite-only CRM users', 'Email', true, true)
+values ('crm_users_object', 'crm_user', 'crm_users', 'Invite-only CRM users', 'Name', true, true)
 on conflict (name) do update set entity_table=excluded.entity_table, display_field=excluded.display_field, hidden_in_sidebar=true;
 insert into crm_fields (id, object_id, name, type, canonical_column, related_object_id, relationship_type, sort_order)
 select 'reb_work_task_assignee', o.id, 'Assignee', 'relation', 'assignee_id', u.id, 'many_to_one', 6
 from crm_objects o cross join crm_objects u where o.name='work_task' and u.name='crm_user'
 on conflict (object_id, name) do update set canonical_column=excluded.canonical_column, related_object_id=excluded.related_object_id, relationship_type=excluded.relationship_type;
+update crm_fields
+set sort_order = 7
+where object_id = (select id from crm_objects where name = 'work_task')
+  and name = 'Task Details';
 insert into crm_fields (id, object_id, name, type, canonical_column, sort_order)
-select 'crm_user_email_field', o.id, 'Email', 'email', 'email', 0 from crm_objects o where o.name='crm_user'
-on conflict (object_id, name) do update set canonical_column=excluded.canonical_column;
+select 'crm_user_name_field', o.id, 'Name', 'text', 'display_name', 0
+from crm_objects o where o.name = 'crm_user'
+on conflict (object_id, name) do update set canonical_column = excluded.canonical_column, sort_order = excluded.sort_order;
+insert into crm_fields (id, object_id, name, type, canonical_column, sort_order)
+select 'crm_user_email_field', o.id, 'Email', 'email', 'email', 1
+from crm_objects o where o.name = 'crm_user'
+on conflict (object_id, name) do update set canonical_column = excluded.canonical_column, sort_order = excluded.sort_order;
 
 -- Read-only projection of the durable loop runtime for Dench monitoring.
 -- loopctl remains authoritative; the sync command only upserts observations.
