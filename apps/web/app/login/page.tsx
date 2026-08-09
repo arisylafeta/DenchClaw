@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getSafeLoginDestination } from "@/lib/login-destination";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -28,7 +29,8 @@ export default function LoginPage() {
         );
         return;
       }
-      router.replace("/");
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.replace(getSafeLoginDestination(next, window.location.origin));
     } finally {
       setSubmitting(false);
     }

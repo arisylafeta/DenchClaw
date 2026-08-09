@@ -68,6 +68,12 @@ function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
 
+function assertPostgresObjectMutable(
+  object: Pick<PostgresObjectRow, "name" | "immutable">,
+): void {
+  if (object.immutable) throw new Error(`Object '${object.name}' is read-only`);
+}
+
 export async function getPostgresObjectByName(name: string): Promise<PostgresObjectRow | null> {
   const rows = await queryPg<PostgresObjectRow>(
     `select id, name, description, default_view, display_field, immutable, hidden_in_sidebar, sort_order, created_at, updated_at, entity_table
@@ -136,6 +142,7 @@ export async function createPostgresObject(input: CreatePostgresObjectInput): Pr
 export async function updatePostgresDisplayField(objectName: string, displayField: string): Promise<{ ok: true; displayField: string }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object not found: ${objectName}`);
+  assertPostgresObjectMutable(object);
 
   const fields = await queryPg<Pick<PostgresFieldRow, "id" | "name">>(
     `select id, name
@@ -158,13 +165,14 @@ export async function updatePostgresDisplayField(objectName: string, displayFiel
 
 export async function reorderPostgresFields(objectName: string, fieldOrder: string[]): Promise<{ ok: true }> {
   await withPgTransaction(async (tx) => {
-    const objects = await txQuery<{ id: string; name: string }>(
+    const objects = await txQuery<{ id: string; name: string; immutable?: boolean | null }>(
       tx,
-      "select id, name from crm_objects where name = $1 limit 1",
+      "select id, name, immutable from crm_objects where name = $1 limit 1",
       [objectName],
     );
     const object = objects[0];
     if (!object) throw new Error(`Object not found: ${objectName}`);
+    assertPostgresObjectMutable(object);
 
     const existingFields = await txQuery<{ id: string }>(
       tx,
@@ -199,6 +207,7 @@ export async function createPostgresField(
 ): Promise<{ ok: true; fieldId: string; name: string; type: string }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
+  assertPostgresObjectMutable(object);
 
   const fieldName = body.name?.trim();
   const fieldType = body.type?.trim();
@@ -250,6 +259,7 @@ export async function updatePostgresField(
 ): Promise<{ ok: true }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
+  assertPostgresObjectMutable(object);
 
   const fields = await queryPg<{ id: string; object_id: string; type: string }>(
     `select id, object_id, type
@@ -299,6 +309,7 @@ export async function updatePostgresField(
 export async function deletePostgresField(objectName: string, fieldId: string): Promise<{ ok: true }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
+  assertPostgresObjectMutable(object);
 
   const field = await queryPg<{ id: string }>(
     `select id from crm_fields where id = $1 and object_id = $2 limit 1`,
@@ -318,6 +329,7 @@ export async function renamePostgresEnumValue(
 ): Promise<{ ok: true; updated: boolean }> {
   const object = await getPostgresObjectByName(objectName);
   if (!object) throw new Error(`Object '${objectName}' not found`);
+  assertPostgresObjectMutable(object);
 
   const fields = await queryPg<{ id: string; object_id: string; enum_values: unknown; canonical_column?: string | null }>(
     `select id, object_id, enum_values, canonical_column

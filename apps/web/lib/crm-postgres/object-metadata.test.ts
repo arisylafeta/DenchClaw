@@ -169,4 +169,41 @@ describe("crm-postgres object metadata", () => {
       .resolves.toEqual({ ok: true, updated: true });
     expect(queryPg).toHaveBeenNthCalledWith(3, expect.stringContaining("update crm_fields"), [JSON.stringify(["Prospect", "Customer"]), "field1", "obj1"]);
   });
+
+  it("rejects every field metadata mutation for immutable objects", async () => {
+    const immutable = { id: "users", name: "crm_user", immutable: true };
+    const {
+      createPostgresField,
+      deletePostgresField,
+      renamePostgresEnumValue,
+      updatePostgresDisplayField,
+      updatePostgresField,
+    } = await import("./object-metadata");
+
+    for (const mutate of [
+      () => updatePostgresDisplayField("crm_user", "Display Name"),
+      () => createPostgresField("crm_user", { name: "Unsafe", type: "text" }),
+      () => updatePostgresField("crm_user", "field1", { name: "Unsafe" }),
+      () => deletePostgresField("crm_user", "field1"),
+      () => renamePostgresEnumValue("crm_user", "field1", "A", "B"),
+    ]) {
+      queryPg.mockReset();
+      queryPg.mockResolvedValueOnce([immutable]);
+      await expect(mutate()).rejects.toThrow("Object 'crm_user' is read-only");
+      expect(queryPg).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("rejects field reordering for immutable objects before issuing writes", async () => {
+    const txQuery = vi.fn().mockResolvedValueOnce({
+      rows: [{ id: "users", name: "crm_user", immutable: true }],
+    });
+    withPgTransaction.mockImplementationOnce(async (fn) => fn({ query: txQuery }));
+
+    const { reorderPostgresFields } = await import("./object-metadata");
+    await expect(reorderPostgresFields("crm_user", ["field1"]))
+      .rejects.toThrow("Object 'crm_user' is read-only");
+    expect(txQuery).toHaveBeenCalledTimes(1);
+  });
+
 });
