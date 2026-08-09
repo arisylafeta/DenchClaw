@@ -222,6 +222,7 @@ execute function set_updated_at();
 create table if not exists crm_users (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
+  display_name text not null,
   password_hash text not null,
   is_active boolean not null default true,
   failed_login_count integer not null default 0,
@@ -258,6 +259,8 @@ create table if not exists work_tasks (
 alter table projects add column if not exists status text not null default 'Active';
 alter table projects add column if not exists objective text;
 alter table work_tasks add column if not exists task_details text;
+alter table crm_users add column if not exists display_name text;
+update crm_users set display_name=case when email='ari@rebattery.io' then 'Ari' when email='alex@rebattery.io' then 'Alex' else email end where display_name is null;
 alter table work_tasks add column if not exists assignee_id uuid references crm_users(id) on delete set null;
 create index if not exists work_tasks_project_idx on work_tasks(project_id);
 create index if not exists work_tasks_assignee_idx on work_tasks(assignee_id);
