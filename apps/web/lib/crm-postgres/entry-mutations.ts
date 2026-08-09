@@ -29,7 +29,13 @@ const canonicalTableByObjectName: Record<string, string> = {
 // Objects exposed as read-only CRM tables (e.g. campaign metrics snapshots). Any
 // create/update/delete is rejected up front so the UI cannot silently no-op or
 // return a false-success response. Routes map the "read-only" message to HTTP 403.
-const READ_ONLY_OBJECTS = new Set(["campaign", "campaigns", "automation_loop", "automation_loop_run"]);
+const READ_ONLY_OBJECTS = new Set([
+  "campaign",
+  "campaigns",
+  "automation_loop",
+  "automation_loop_run",
+  "crm_user",
+]);
 
 function assertMutable(objectName: string): void {
   if (READ_ONLY_OBJECTS.has(objectName.trim().toLowerCase())) {
@@ -37,11 +43,37 @@ function assertMutable(objectName: string): void {
   }
 }
 
-const JUNCTION_TABLE_MAP: Record<string, { table: string; sourceCol: string; targetCol: string; extraCols?: Record<string, string> }> = {
-  "seed_fld_emthread_people_00000": { table: "crm_email_thread_participants", sourceCol: "thread_id", targetCol: "person_id" },
-  "seed_fld_emmsg_to_0000000000000": { table: "crm_email_message_recipients", sourceCol: "message_id", targetCol: "person_id", extraCols: { recipient_type: "to" } },
-  "seed_fld_emmsg_cc_0000000000000": { table: "crm_email_message_recipients", sourceCol: "message_id", targetCol: "person_id", extraCols: { recipient_type: "cc" } },
-  "seed_fld_calev_attend_000000000": { table: "crm_calendar_event_attendees", sourceCol: "event_id", targetCol: "person_id" },
+const JUNCTION_TABLE_MAP: Record<
+  string,
+  {
+    table: string;
+    sourceCol: string;
+    targetCol: string;
+    extraCols?: Record<string, string>;
+  }
+> = {
+  seed_fld_emthread_people_00000: {
+    table: "crm_email_thread_participants",
+    sourceCol: "thread_id",
+    targetCol: "person_id",
+  },
+  seed_fld_emmsg_to_0000000000000: {
+    table: "crm_email_message_recipients",
+    sourceCol: "message_id",
+    targetCol: "person_id",
+    extraCols: { recipient_type: "to" },
+  },
+  seed_fld_emmsg_cc_0000000000000: {
+    table: "crm_email_message_recipients",
+    sourceCol: "message_id",
+    targetCol: "person_id",
+    extraCols: { recipient_type: "cc" },
+  },
+  seed_fld_calev_attend_000000000: {
+    table: "crm_calendar_event_attendees",
+    sourceCol: "event_id",
+    targetCol: "person_id",
+  },
 };
 
 function quoteIdentifier(identifier: string): string {
@@ -58,33 +90,45 @@ function rowCountFrom<T>(result: QueryLikeResult<T>): number {
   return result.rows?.length ?? 0;
 }
 
-function resolveEntityTable(object: Pick<ObjectRow, "name" | "entity_table">): string | null {
+function resolveEntityTable(
+  object: Pick<ObjectRow, "name" | "entity_table">,
+): string | null {
   if (object.entity_table) return object.entity_table;
   return canonicalTableByObjectName[object.name.trim().toLowerCase()] ?? null;
 }
 
-function normalizeRelationIds(ids: string[], relationshipType?: string | null): string[] {
+function normalizeRelationIds(
+  ids: string[],
+  relationshipType?: string | null,
+): string[] {
   if (relationshipType === "many_to_many") return ids;
   return ids.length > 0 ? [ids[0]] : [];
 }
 
-async function loadObjectAndFields(tx: PgTransaction, objectName: string): Promise<{ object: ObjectRow; fields: FieldRow[] }> {
-  const objectRows = rowsFrom(await tx.query(
-    `select id, name, entity_table
+async function loadObjectAndFields(
+  tx: PgTransaction,
+  objectName: string,
+): Promise<{ object: ObjectRow; fields: FieldRow[] }> {
+  const objectRows = rowsFrom(
+    await tx.query(
+      `select id, name, entity_table
      from crm_objects
      where name = $1
      limit 1`,
-    [objectName],
-  ));
+      [objectName],
+    ),
+  );
   const object = objectRows[0];
   if (!object) throw new Error(`Object not found: ${objectName}`);
 
-  const fields = rowsFrom(await tx.query(
-    `select id, object_id, name, type, canonical_column, relationship_type
+  const fields = rowsFrom(
+    await tx.query(
+      `select id, object_id, name, type, canonical_column, relationship_type
      from crm_fields
      where object_id = $1`,
-    [object.id],
-  ));
+      [object.id],
+    ),
+  );
 
   return { object, fields };
 }
@@ -106,7 +150,10 @@ async function replaceRelationLinks(
         [entryId, junction.extraCols.recipient_type],
       );
     } else {
-      await tx.query(`delete from ${junction.table} where ${junction.sourceCol} = $1`, [entryId]);
+      await tx.query(
+        `delete from ${junction.table} where ${junction.sourceCol} = $1`,
+        [entryId],
+      );
     }
     for (const [position, targetEntryId] of relationIds.entries()) {
       if (junction.extraCols && junction.extraCols.recipient_type) {
@@ -126,10 +173,19 @@ async function replaceRelationLinks(
   // the canonical column write handles it — no relation_links needed.
 }
 
-async function entryExists(tx: PgTransaction, object: ObjectRow, entryId: string): Promise<boolean> {
+async function entryExists(
+  tx: PgTransaction,
+  object: ObjectRow,
+  entryId: string,
+): Promise<boolean> {
   const entityTable = resolveEntityTable(object);
   if (entityTable) {
-    const rows = rowsFrom(await tx.query(`select id from ${quoteIdentifier(entityTable)} where id = $1 limit 1`, [entryId]));
+    const rows = rowsFrom(
+      await tx.query(
+        `select id from ${quoteIdentifier(entityTable)} where id = $1 limit 1`,
+        [entryId],
+      ),
+    );
     return rows.length > 0;
   }
   return false;
@@ -142,19 +198,29 @@ export async function createPostgresEntry(
   assertMutable(objectName);
   const entryId = randomUUID();
   await withPgTransaction(async (tx) => {
-    const { object, fields: objectFields } = await loadObjectAndFields(tx, objectName);
-    const fieldByName = new Map(objectFields.map((field) => [field.name, field]));
+    const { object, fields: objectFields } = await loadObjectAndFields(
+      tx,
+      objectName,
+    );
+    const fieldByName = new Map(
+      objectFields.map((field) => [field.name, field]),
+    );
 
     const canonicalColumns: string[] = ["id"];
     const canonicalValues: unknown[] = [entryId];
 
     for (const [fieldName, value] of Object.entries(fields)) {
       const field = fieldByName.get(fieldName);
-      if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
+      if (!field)
+        throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
-      const relationIds = field.type === "relation"
-        ? normalizeRelationIds(parseRelationIds(value), field.relationship_type)
-        : null;
+      const relationIds =
+        field.type === "relation"
+          ? normalizeRelationIds(
+              parseRelationIds(value),
+              field.relationship_type,
+            )
+          : null;
 
       if (relationIds && !field.canonical_column) {
         await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
@@ -162,17 +228,28 @@ export async function createPostgresEntry(
 
       if (field.canonical_column) {
         canonicalColumns.push(field.canonical_column);
-        canonicalValues.push(relationIds ? relationStorageValue(relationIds, field.relationship_type) : value);
+        canonicalValues.push(
+          relationIds
+            ? relationStorageValue(relationIds, field.relationship_type)
+            : value,
+        );
       } else if (field.type !== "relation") {
-        throw new Error(`Non-canonical field "${fieldName}" on "${objectName}" has no column mapping. Add a real column and canonical_column to crm_fields.`);
+        throw new Error(
+          `Non-canonical field "${fieldName}" on "${objectName}" has no column mapping. Add a real column and canonical_column to crm_fields.`,
+        );
       }
     }
 
     const entityTable = resolveEntityTable(object);
     if (entityTable) {
       const cols = canonicalColumns.map(quoteIdentifier).join(", ");
-      const placeholders = canonicalValues.map((_, index) => `$${index + 1}`).join(", ");
-      await tx.query(`insert into ${quoteIdentifier(entityTable)} (${cols}) values (${placeholders})`, canonicalValues);
+      const placeholders = canonicalValues
+        .map((_, index) => `$${index + 1}`)
+        .join(", ");
+      await tx.query(
+        `insert into ${quoteIdentifier(entityTable)} (${cols}) values (${placeholders})`,
+        canonicalValues,
+      );
     }
   });
 
@@ -186,8 +263,13 @@ export async function updatePostgresEntry(
 ): Promise<{ ok: true; updatedCount: number }> {
   assertMutable(objectName);
   const updatedCount = await withPgTransaction(async (tx) => {
-    const { object, fields: objectFields } = await loadObjectAndFields(tx, objectName);
-    const fieldByName = new Map(objectFields.map((field) => [field.name, field]));
+    const { object, fields: objectFields } = await loadObjectAndFields(
+      tx,
+      objectName,
+    );
+    const fieldByName = new Map(
+      objectFields.map((field) => [field.name, field]),
+    );
     const entityTable = resolveEntityTable(object);
 
     if (!(await entryExists(tx, object, entryId))) {
@@ -199,21 +281,34 @@ export async function updatePostgresEntry(
 
     for (const [fieldName, value] of Object.entries(fields)) {
       const field = fieldByName.get(fieldName);
-      if (!field) throw new Error(`Field not found on ${objectName}: ${fieldName}`);
+      if (!field)
+        throw new Error(`Field not found on ${objectName}: ${fieldName}`);
 
-      const relationIds = field.type === "relation"
-        ? normalizeRelationIds(parseRelationIds(value), field.relationship_type)
-        : null;
+      const relationIds =
+        field.type === "relation"
+          ? normalizeRelationIds(
+              parseRelationIds(value),
+              field.relationship_type,
+            )
+          : null;
 
       if (relationIds && !field.canonical_column) {
         await replaceRelationLinks(tx, object.id, entryId, field, relationIds);
       }
 
       if (field.canonical_column) {
-        canonicalAssignments.push(`${quoteIdentifier(field.canonical_column)} = $${canonicalValues.length + 1}`);
-        canonicalValues.push(relationIds ? relationStorageValue(relationIds, field.relationship_type) : value);
+        canonicalAssignments.push(
+          `${quoteIdentifier(field.canonical_column)} = $${canonicalValues.length + 1}`,
+        );
+        canonicalValues.push(
+          relationIds
+            ? relationStorageValue(relationIds, field.relationship_type)
+            : value,
+        );
       } else if (field.type !== "relation") {
-        throw new Error(`Non-canonical field "${fieldName}" on "${objectName}" has no column mapping. Add a real column and canonical_column to crm_fields.`);
+        throw new Error(
+          `Non-canonical field "${fieldName}" on "${objectName}" has no column mapping. Add a real column and canonical_column to crm_fields.`,
+        );
       }
     }
 
@@ -226,7 +321,8 @@ export async function updatePostgresEntry(
         [...canonicalValues, entryId],
       );
       canonicalUpdated = rowCountFrom(result);
-      if (canonicalUpdated === 0) throw new Error(`Entry not found: ${entryId}`);
+      if (canonicalUpdated === 0)
+        throw new Error(`Entry not found: ${entryId}`);
     }
 
     return canonicalUpdated;
@@ -235,20 +331,35 @@ export async function updatePostgresEntry(
   return { ok: true, updatedCount };
 }
 
-export async function deletePostgresEntry(objectName: string, entryId: string): Promise<{ ok: true }> {
+export async function deletePostgresEntry(
+  objectName: string,
+  entryId: string,
+): Promise<{ ok: true }> {
   assertMutable(objectName);
   await withPgTransaction(async (tx) => {
     const { object } = await loadObjectAndFields(tx, objectName);
     const entityTable = resolveEntityTable(object);
 
     // Clean up junction table entries
-    await tx.query("delete from crm_email_thread_participants where thread_id = $1 or person_id = $1", [entryId]);
-    await tx.query("delete from crm_email_message_recipients where message_id = $1 or person_id = $1", [entryId]);
-    await tx.query("delete from crm_calendar_event_attendees where event_id = $1 or person_id = $1", [entryId]);
+    await tx.query(
+      "delete from crm_email_thread_participants where thread_id = $1 or person_id = $1",
+      [entryId],
+    );
+    await tx.query(
+      "delete from crm_email_message_recipients where message_id = $1 or person_id = $1",
+      [entryId],
+    );
+    await tx.query(
+      "delete from crm_calendar_event_attendees where event_id = $1 or person_id = $1",
+      [entryId],
+    );
     await tx.query("delete from crm_documents where entry_id = $1", [entryId]);
 
     if (entityTable) {
-      await tx.query(`delete from ${quoteIdentifier(entityTable)} where id = $1`, [entryId]);
+      await tx.query(
+        `delete from ${quoteIdentifier(entityTable)} where id = $1`,
+        [entryId],
+      );
     }
   });
 
@@ -267,13 +378,28 @@ export async function bulkDeletePostgresEntries(
     const entityTable = resolveEntityTable(object);
 
     // Clean up junction table entries
-    await tx.query("delete from crm_email_thread_participants where thread_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
-    await tx.query("delete from crm_email_message_recipients where message_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
-    await tx.query("delete from crm_calendar_event_attendees where event_id = any($1::text[]) or person_id = any($1::text[])", [entryIds]);
-    await tx.query("delete from crm_documents where entry_id = any($1::text[])", [entryIds]);
+    await tx.query(
+      "delete from crm_email_thread_participants where thread_id = any($1::text[]) or person_id = any($1::text[])",
+      [entryIds],
+    );
+    await tx.query(
+      "delete from crm_email_message_recipients where message_id = any($1::text[]) or person_id = any($1::text[])",
+      [entryIds],
+    );
+    await tx.query(
+      "delete from crm_calendar_event_attendees where event_id = any($1::text[]) or person_id = any($1::text[])",
+      [entryIds],
+    );
+    await tx.query(
+      "delete from crm_documents where entry_id = any($1::text[])",
+      [entryIds],
+    );
 
     if (entityTable) {
-      const result = await tx.query(`delete from ${quoteIdentifier(entityTable)} where id = any($1::text[]) returning id`, [entryIds]);
+      const result = await tx.query(
+        `delete from ${quoteIdentifier(entityTable)} where id = any($1::text[]) returning id`,
+        [entryIds],
+      );
       return rowCountFrom(result);
     }
 
