@@ -267,6 +267,22 @@ create trigger trg_projects_set_updated_at before update on projects for each ro
 drop trigger if exists trg_work_tasks_set_updated_at on work_tasks;
 create trigger trg_work_tasks_set_updated_at before update on work_tasks for each row execute function set_updated_at();
 
+-- Work Task assignee relation metadata. User identities are intentionally not a public CRM sidebar object.
+insert into crm_objects (id, name, entity_table, description, display_field, immutable, hidden_in_sidebar)
+values ('reb_work_task_object', 'work_task', 'work_tasks', 'ReBattery Work Tasks', 'Title', false, false)
+on conflict (name) do update set entity_table=excluded.entity_table;
+
+insert into crm_objects (id, name, entity_table, description, display_field, immutable, hidden_in_sidebar)
+values ('crm_users_object', 'crm_user', 'crm_users', 'Invite-only CRM users', 'Email', true, true)
+on conflict (name) do update set entity_table=excluded.entity_table, display_field=excluded.display_field, hidden_in_sidebar=true;
+insert into crm_fields (id, object_id, name, type, canonical_column, related_object_id, relationship_type, sort_order)
+select 'reb_work_task_assignee', o.id, 'Assignee', 'relation', 'assignee_id', u.id, 'many_to_one', 6
+from crm_objects o cross join crm_objects u where o.name='work_task' and u.name='crm_user'
+on conflict (object_id, name) do update set canonical_column=excluded.canonical_column, related_object_id=excluded.related_object_id, relationship_type=excluded.relationship_type;
+insert into crm_fields (id, object_id, name, type, canonical_column, sort_order)
+select 'crm_user_email_field', o.id, 'Email', 'email', 'email', 0 from crm_objects o where o.name='crm_user'
+on conflict (object_id, name) do update set canonical_column=excluded.canonical_column;
+
 -- Read-only projection of the durable loop runtime for Dench monitoring.
 -- loopctl remains authoritative; the sync command only upserts observations.
 create table if not exists automation_loops (
