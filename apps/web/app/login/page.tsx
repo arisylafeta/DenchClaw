@@ -1,1 +1,50 @@
-"use client"; import {FormEvent,useState} from "react"; import {useRouter} from "next/navigation"; export default function Login(){const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const router=useRouter();async function submit(e:FormEvent){e.preventDefault();setError("");const r=await fetch("/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email,password})});if(!r.ok){setError("Invalid credentials");return}router.replace("/");}return <main style={{maxWidth:360,margin:"10vh auto",padding:24}}><h1>CRM login</h1><form onSubmit={submit}><label>Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input required type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p role="alert">{error}</p>}<button type="submit">Log in</button></form></main>;}
+"use client";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+export default function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const router = useRouter();
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!r.ok) {
+      setError("Invalid credentials");
+      return;
+    }
+    router.replace("/");
+  }
+  return (
+    <main style={{ maxWidth: 360, margin: "10vh auto", padding: 24 }}>
+      <h1>CRM login</h1>
+      <form onSubmit={submit}>
+        <label>
+          Email
+          <input
+            required
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+        <label>
+          Password
+          <input
+            required
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        {error && <p role="alert">{error}</p>}
+        <button type="submit">Log in</button>
+      </form>
+    </main>
+  );
+}

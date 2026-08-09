@@ -1,2 +1,21 @@
-import { NextResponse } from "next/server"; import { createSession, login, sessionCookie } from "@/lib/auth";
-export async function POST(req:Request){try{const body=await req.json(); const user=await login(String(body.email??""),String(body.password??"")); if(!user)return NextResponse.json({error:"Invalid credentials"},{status:401}); const response=NextResponse.json({user:{email:user.email}}); response.cookies.set(sessionCookie(await createSession(user.id))); return response;}catch{return NextResponse.json({error:"Invalid request"},{status:400});}}
+import { NextResponse } from "next/server";
+import { createSession, login, sessionCookie } from "@/lib/auth";
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const user = await login(
+      String(body.email ?? ""),
+      String(body.password ?? ""),
+    );
+    if (!user)
+      return NextResponse.json(
+        { error: "Invalid credentials" },
+        { status: 401 },
+      );
+    const response = NextResponse.json({ user: { email: user.email } });
+    response.cookies.set(sessionCookie(await createSession(user.id)));
+    return response;
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  }
+}
