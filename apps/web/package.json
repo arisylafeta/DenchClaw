@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "db:pg:schema": "tsx scripts/apply-postgres-schema.ts",
     "db:pg:migrate:plan": "tsx scripts/migrate-duckdb-to-postgres.ts",
-    "db:pg:migrate": "tsx scripts/migrate-duckdb-to-postgres.ts --apply"
+    "db:pg:migrate": "tsx scripts/migrate-duckdb-to-postgres.ts --apply",
+    "db:auth:bootstrap": "tsx scripts/bootstrap-crm-users.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.75",

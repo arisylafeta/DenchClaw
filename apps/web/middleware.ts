@@ -1,0 +1,4 @@
+import { NextResponse, type NextRequest } from "next/server";
+const PUBLIC=["/login","/api/auth/login","/api/auth/logout","/api/auth/me","/api/apps/webhooks/","/api/composio/callback","/api/settings/mcp/connect/callback"];
+export function middleware(req:NextRequest){const p=req.nextUrl.pathname;if(PUBLIC.some(x=>p===x||p.startsWith(x)))return NextResponse.next(); if(!req.cookies.get("denchclaw_session")){if(p.startsWith("/api/"))return NextResponse.json({error:"Unauthorized"},{status:401}); const u=req.nextUrl.clone();u.pathname="/login";u.searchParams.set("next",p);return NextResponse.redirect(u);} if(req.method!=="GET"&&req.method!=="HEAD"&&req.method!=="OPTIONS"){const origin=req.headers.get("origin"); if(origin&&origin!==req.nextUrl.origin)return NextResponse.json({error:"CSRF check failed"},{status:403});} return NextResponse.next();}
+export const config={matcher:["/((?!_next/static|_next/image|favicon.ico).*)"]};

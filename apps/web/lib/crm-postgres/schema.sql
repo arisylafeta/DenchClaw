@@ -1,3 +1,5 @@
+create extension if not exists pgcrypto;
+
 -- Denchclaw CRM schema — matches production database as of 2026-06-21
 --
 -- This file mirrors the live `denchclaw` database schema exactly.
@@ -216,6 +218,29 @@ before update on crm_commercial_opportunities
 for each row
 execute function set_updated_at();
 
+-- First-class invite-only CRM identities and revocable sessions.
+create table if not exists crm_users (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  password_hash text not null,
+  is_active boolean not null default true,
+  failed_login_count integer not null default 0,
+  locked_until timestamptz,
+  last_login_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create table if not exists crm_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references crm_users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+create index if not exists crm_sessions_active_idx on crm_sessions(token_hash, expires_at) where revoked_at is null;
+
 -- ReBattery Projects / Work Tasks prototype: canonical tables intentionally keep a small,
 -- explicit field set so the existing object table/detail/Kanban interfaces can render them.
 create table if not exists projects (
@@ -225,6 +250,7 @@ create table if not exists projects (
 create table if not exists work_tasks (
   id text primary key, reb_key text not null unique, title text not null, status text not null,
   project_id text references projects(id) on delete set null, priority text, repository text, task_details text,
+  assignee_id uuid references crm_users(id) on delete set null,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 -- Upgrade Projects/Work Tasks created by the earlier prototype without
@@ -232,7 +258,9 @@ create table if not exists work_tasks (
 alter table projects add column if not exists status text not null default 'Active';
 alter table projects add column if not exists objective text;
 alter table work_tasks add column if not exists task_details text;
+alter table work_tasks add column if not exists assignee_id uuid references crm_users(id) on delete set null;
 create index if not exists work_tasks_project_idx on work_tasks(project_id);
+create index if not exists work_tasks_assignee_idx on work_tasks(assignee_id);
 create index if not exists work_tasks_status_idx on work_tasks(status);
 drop trigger if exists trg_projects_set_updated_at on projects;
 create trigger trg_projects_set_updated_at before update on projects for each row execute function set_updated_at();
