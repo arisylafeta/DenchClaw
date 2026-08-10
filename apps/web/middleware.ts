@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { validateSessionToken } from "@/lib/auth";
-import { hasSameOrigin } from "@/lib/request-origin";
+import { hasSameOrigin, requestOrigin } from "@/lib/request-origin";
 
 const PUBLIC_ASSETS = new Set([
   "/rebattery-favicon.svg",
@@ -33,9 +33,7 @@ export async function middleware(req: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const loginUrl = req.nextUrl.clone();
-    loginUrl.pathname = "/login";
-    loginUrl.search = "";
+    const loginUrl = new URL("/login", requestOrigin(req));
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }

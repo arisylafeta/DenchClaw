@@ -12,16 +12,30 @@ import { middleware } from "../middleware";
 
 function request(
   path: string,
-  options: { method?: string; origin?: string; token?: string } = {},
+  options: {
+    method?: string;
+    origin?: string;
+    token?: string;
+    forwardedHost?: string;
+    forwardedProto?: string;
+    requestBase?: string;
+  } = {},
 ) {
   const headers = new Headers();
   if (options.origin) headers.set("origin", options.origin);
   if (options.token)
     headers.set("cookie", `denchclaw_session=${options.token}`);
-  return new NextRequest(`https://crm.rebattery.io${path}`, {
-    method: options.method ?? "GET",
-    headers,
-  });
+  if (options.forwardedHost)
+    headers.set("x-forwarded-host", options.forwardedHost);
+  if (options.forwardedProto)
+    headers.set("x-forwarded-proto", options.forwardedProto);
+  return new NextRequest(
+    `${options.requestBase ?? "https://crm.rebattery.io"}${path}`,
+    {
+      method: options.method ?? "GET",
+      headers,
+    },
+  );
 }
 
 describe("CRM auth middleware", () => {
@@ -56,6 +70,19 @@ describe("CRM auth middleware", () => {
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("next")).toBe("/workspace");
     expect(location.search).not.toContain("secret");
+  });
+
+  it("redirects to the validated public reverse-proxy origin", async () => {
+    const response = await middleware(
+      request("/workspace", {
+        forwardedHost: "crm.rebattery.io",
+        forwardedProto: "https",
+        requestBase: "http://localhost:3100",
+      }),
+    );
+    expect(response.headers.get("location")).toBe(
+      "https://crm.rebattery.io/login?next=%2Fworkspace",
+    );
   });
 
   it("returns 401 for missing, forged, malformed, expired, or revoked API sessions", async () => {
