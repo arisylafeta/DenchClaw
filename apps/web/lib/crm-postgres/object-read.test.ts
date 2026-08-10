@@ -587,7 +587,9 @@ describe("postgres object read adapter", () => {
     const projectOptionsCall = queryPg.mock.calls.find(([sql]) =>
       String(sql).includes("from projects"),
     );
-    expect(projectOptionsCall?.[0]).toContain("where status = 'Active'");
+    expect(projectOptionsCall?.[0]).toContain(
+      "where status in ('Active', 'In Progress')",
+    );
     expect(projectOptionsCall?.[0]).toContain("order by name");
     expect(projectOptionsCall?.[1]).toBeUndefined();
   });

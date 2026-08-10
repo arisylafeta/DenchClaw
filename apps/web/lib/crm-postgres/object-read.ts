@@ -462,10 +462,10 @@ async function resolveRelationLabels(
     const isProjectRelation =
       field.related_object_name === "project" || field.name === "Project";
     if (isProjectRelation) {
-      // The Work Task board is an operational view. Finished Projects remain in
-      // the database for history, but only Active Projects belong in its taxonomy.
+      // The Work Task board is operational. Support both the canonical Active
+      // status and legacy In Progress rows while excluding finished history.
       const rows = await queryPg<{ id: string; name: string }>(
-        "select id, name from projects where status = 'Active' order by name",
+        "select id, name from projects where status in ('Active', 'In Progress') order by name",
       );
       for (const row of rows) labels[field.name][row.id] = row.name || row.id;
     }
