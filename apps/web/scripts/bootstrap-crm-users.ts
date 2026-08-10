@@ -1,10 +1,6 @@
 import { ALLOWED_EMAILS, hashPassword } from "../lib/auth";
 import { withPgTransaction } from "../lib/postgres";
-
-const USERS = [
-  { email: "ari@rebattery.io", displayName: "Ari" },
-  { email: "alex@rebattery.io", displayName: "Alex" },
-] as const;
+import { hashCrmBootstrapUsers } from "../lib/crm-bootstrap";
 
 const ACTIONABLE_ASSIGNMENTS = [
   ["REB-62", "alex@rebattery.io"],
@@ -27,24 +23,13 @@ const ACTIONABLE_ASSIGNMENTS = [
 ] as const;
 
 async function main() {
-  const password = process.env.CRM_BOOTSTRAP_PASSWORD;
-  if (!password) {
-    throw new Error(
-      "CRM_BOOTSTRAP_PASSWORD must be injected at runtime and is never persisted by this script",
-    );
-  }
-  if (password.length < 12 || password.length > 1024) {
-    throw new Error(
-      "CRM_BOOTSTRAP_PASSWORD must be between 12 and 1024 characters",
-    );
-  }
-  if (USERS.some((user) => !ALLOWED_EMAILS.has(user.email))) {
+  const usersWithHashes = await hashCrmBootstrapUsers(hashPassword);
+  if (usersWithHashes.some((user) => !ALLOWED_EMAILS.has(user.email))) {
     throw new Error("bootstrap users must match the authentication allowlist");
   }
 
-  const passwordHash = await hashPassword(password);
   await withPgTransaction(async (tx) => {
-    for (const user of USERS) {
+    for (const user of usersWithHashes) {
       await tx.query(
         `insert into crm_users(email, display_name, password_hash)
          values($1, $2, $3)
@@ -55,7 +40,7 @@ async function main() {
                failed_login_count = 0,
                locked_until = null,
                updated_at = now()`,
-        [user.email, user.displayName, passwordHash],
+        [user.email, user.displayName, user.passwordHash],
       );
     }
 
@@ -103,7 +88,7 @@ async function main() {
   });
 
   console.log(
-    `Bootstrapped ${USERS.length} allowlisted CRM users and reconciled actionable Work Task assignments`,
+    `Bootstrapped ${usersWithHashes.length} allowlisted CRM users and reconciled actionable Work Task assignments`,
   );
 }
 
