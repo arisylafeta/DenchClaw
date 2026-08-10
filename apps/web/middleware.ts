@@ -4,6 +4,7 @@ import { hasSameOrigin, requestOrigin } from "@/lib/request-origin";
 
 const PUBLIC_ASSETS = new Set([
   "/rebattery-favicon.svg",
+  "/rebattery-logo-all-black.svg",
   "/rebattery-workspace-icon.svg",
 ]);
 const PUBLIC_ROUTES = new Set([

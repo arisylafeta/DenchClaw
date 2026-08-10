@@ -49,6 +49,7 @@ describe("CRM auth middleware", () => {
     "/api/settings/mcp/connect/callback",
     "/api/apps/webhooks/example",
     "/rebattery-favicon.svg",
+    "/rebattery-logo-all-black.svg",
     "/rebattery-workspace-icon.svg",
   ])("allows the explicit public path %s", async (path) => {
     const response = await middleware(request(path));
