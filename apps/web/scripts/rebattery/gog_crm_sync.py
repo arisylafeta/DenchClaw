@@ -353,11 +353,23 @@ def set_sync_state(conn, account, status):
 # Gmail search
 # ---------------------------------------------------------------------------
 
-def search_label_crm(account, after_date=None):
-    """Search for messages with CRM label, optionally after a date."""
-    query = "label:CRM"
+def build_search_query(base_query, after_date=None):
+    """Scope a Gmail query while authoritatively excluding draft messages."""
+    query = f"({base_query}) -label:DRAFT"
     if after_date:
         query += f" after:{after_date}"
+    return query
+
+
+def is_draft_message(raw_message):
+    """Return True when Gmail marks a fetched message as a draft."""
+    labels = raw_message.get("labelIds", []) if isinstance(raw_message, dict) else []
+    return any(str(label).upper() == "DRAFT" for label in labels)
+
+
+def search_label_crm(account, after_date=None):
+    """Search for non-draft messages with CRM label, optionally after a date."""
+    query = build_search_query("label:CRM", after_date)
     print(f"  [{account}] Searching {query}...")
     try:
         result = gog(account, "gmail", "messages", "search", query, "--max", "500")
@@ -393,9 +405,7 @@ def search_by_crm_people(account, crm_emails, owner_emails, after_date=None):
         for email in batch:
             clauses.append(f"from:{email}")
             clauses.append(f"to:{email}")
-        query = " OR ".join(clauses)
-        if after_date:
-            query += f" after:{after_date}"
+        query = build_search_query(" OR ".join(clauses), after_date)
 
         batch_num = i // SEARCH_BATCH_SIZE + 1
         try:
@@ -432,6 +442,105 @@ def search_by_crm_people(account, crm_emails, owner_emails, after_date=None):
 
     print(f"    Total unique messages from CRM people: {len(all_messages)}")
     return all_messages
+
+
+def search_draft_message_ids(account):
+    """Return authoritative Gmail draft message IDs for one mailbox."""
+    result = gog(
+        account,
+        "gmail",
+        "messages",
+        "search",
+        "label:DRAFT",
+        "--max",
+        "10000",
+    )
+    messages = result if isinstance(result, list) else result.get("messages", [])
+    return {
+        message.get("id")
+        for message in messages
+        if isinstance(message, dict) and message.get("id")
+    }
+
+
+def purge_imported_drafts(conn, account, dry_run=False):
+    """Remove previously imported messages that Gmail still marks as drafts."""
+    owner_id = get_mailbox_owner_id(conn, account)
+    draft_ids = sorted(search_draft_message_ids(account))
+    stats = {
+        "gmail_drafts": len(draft_ids),
+        "messages": 0,
+        "interactions": 0,
+        "threads": 0,
+    }
+    if not draft_ids:
+        return stats
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT count(*)
+                 FROM crm_email_messages
+                WHERE mailbox_owner_id = %s
+                  AND gmail_message_id = ANY(%s::text[])""",
+            (owner_id, draft_ids),
+        )
+        stats["messages"] = cur.fetchone()[0]
+        if dry_run or not stats["messages"]:
+            return stats
+
+        cur.execute(
+            """SELECT DISTINCT i.person_id
+                 FROM crm_interactions i
+                 JOIN crm_email_messages m ON m.id = i.email_message_id
+                WHERE m.mailbox_owner_id = %s
+                  AND m.gmail_message_id = ANY(%s::text[])
+                  AND i.person_id IS NOT NULL""",
+            (owner_id, draft_ids),
+        )
+        affected_person_ids = [row[0] for row in cur.fetchall()]
+
+        cur.execute(
+            """DELETE FROM crm_interactions i
+                  USING crm_email_messages m
+                 WHERE i.email_message_id = m.id
+                   AND m.mailbox_owner_id = %s
+                   AND m.gmail_message_id = ANY(%s::text[])""",
+            (owner_id, draft_ids),
+        )
+        stats["interactions"] = cur.rowcount
+
+        cur.execute(
+            """DELETE FROM crm_email_messages
+                 WHERE mailbox_owner_id = %s
+                   AND gmail_message_id = ANY(%s::text[])""",
+            (owner_id, draft_ids),
+        )
+
+        cur.execute(
+            """DELETE FROM crm_email_threads t
+                 WHERE t.mailbox_owner_id = %s
+                   AND NOT EXISTS (
+                       SELECT 1 FROM crm_email_messages m WHERE m.thread_id = t.id
+                   )""",
+            (owner_id,),
+        )
+        stats["threads"] = cur.rowcount
+
+        if affected_person_ids:
+            cur.execute(
+                """UPDATE crm_people p
+                      SET last_interaction_at = (
+                          SELECT max(i.occurred_at)
+                            FROM crm_interactions i
+                           WHERE i.person_id = p.id
+                      ),
+                          updated_at = now()
+                    WHERE p.id = ANY(%s::text[])""",
+                (affected_person_ids,),
+            )
+
+    conn.commit()
+    return stats
 
 
 def fetch_message(account, message_id):
@@ -624,6 +733,7 @@ def sync_account(
         "imported": 0,
         "skipped": 0,
         "errors": 0,
+        "drafts_skipped": 0,
         "threads": 0,
         "recipients": 0,
         "participants": 0,
@@ -710,6 +820,12 @@ def sync_account(
         thread_id = raw_msg.get("threadId", "")
         internal_date = raw_msg.get("internalDate")
         label_ids = raw_msg.get("labelIds", [])
+
+        # Search excludes drafts, and this authoritative fetched-message guard
+        # prevents import if Gmail returns a stale or unexpectedly labelled hit.
+        if is_draft_message(raw_msg):
+            stats["drafts_skipped"] += 1
+            continue
 
         if not thread_id:
             print(f"    Warning: no threadId for message {msg_id}, skipping")
@@ -903,6 +1019,11 @@ def main():
     parser.add_argument(
         "--max-fetch", type=int, default=None, help="Max messages to fetch per account (newest first)"
     )
+    parser.add_argument(
+        "--purge-drafts",
+        action="store_true",
+        help="Delete previously imported messages that Gmail currently marks as drafts",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -923,6 +1044,19 @@ def main():
     crm_people = get_crm_people(conn)
     owner_emails = get_owner_emails()
     person_company_map = get_person_company_map(conn)
+
+    if args.purge_drafts:
+        print("\nPurging previously imported Gmail drafts...")
+        for account in accounts:
+            purge_stats = purge_imported_drafts(conn, account, dry_run=args.dry_run)
+            mode = "would remove" if args.dry_run else "removed"
+            print(
+                f"  [{account}] {purge_stats['gmail_drafts']} Gmail drafts; "
+                f"{mode} {purge_stats['messages']} messages, "
+                f"{purge_stats['interactions']} interactions, "
+                f"{purge_stats['threads']} empty threads"
+            )
+
     existing_message_ids = get_existing_message_ids(conn)
     print(f"  {len(crm_people)} CRM people with emails")
     print(f"  {len(person_company_map)} people with company links")
