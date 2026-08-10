@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { validateSessionToken } from "@/lib/auth";
+import { hasSameOrigin } from "@/lib/request-origin";
 
 const PUBLIC_ASSETS = new Set([
   "/rebattery-favicon.svg",
@@ -40,8 +41,7 @@ export async function middleware(req: NextRequest) {
   }
 
   if (!SAFE_METHODS.has(req.method)) {
-    const origin = req.headers.get("origin");
-    if (!origin || origin !== req.nextUrl.origin) {
+    if (!hasSameOrigin(req)) {
       return NextResponse.json({ error: "CSRF check failed" }, { status: 403 });
     }
   }

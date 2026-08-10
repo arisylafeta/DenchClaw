@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { createSession, login, sessionCookie } from "@/lib/auth";
+import { hasSameOrigin } from "@/lib/request-origin";
 
 export async function POST(req: Request) {
-  const origin = req.headers.get("origin");
-  if (!origin || origin !== new URL(req.url).origin) {
+  if (!hasSameOrigin(req)) {
     return NextResponse.json({ error: "CSRF check failed" }, { status: 403 });
   }
 
