@@ -345,6 +345,36 @@ export function WorkspaceSidebar({
 	// Top-level tab: "home" shows the workspace / CRM / bottom nav. "chats"
 	// swaps the body with a chat history list provided by the host.
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
+  const [authUser, setAuthUser] = useState<{
+    displayName: string;
+    email: string;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/auth/me", { cache: "no-store" })
+      .then(async (response) =>
+        response.ok
+          ? (response.json() as Promise<{
+              user?: { displayName?: string; email?: string };
+            }>)
+          : null,
+      )
+      .then((payload) => {
+        if (!active || !payload?.user?.email) return;
+        setAuthUser({
+          displayName: payload.user.displayName || payload.user.email,
+          email: payload.user.email,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  const signOut = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  }, []);
 
 	const crmNavItems = [
 		{
@@ -812,6 +842,37 @@ export function WorkspaceSidebar({
 
 			</>
 		)}
+
+      {authUser && !isCompact && (
+        <div
+          className="mx-2 mb-1 flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
+          style={{ background: "var(--color-surface-hover)" }}
+        >
+          <div className="min-w-0">
+            <div
+              className="truncate text-[11px] font-medium"
+              style={{ color: "var(--color-text)" }}
+            >
+              {authUser.displayName}
+            </div>
+            <div
+              className="truncate text-[9px]"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {authUser.email}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="shrink-0 rounded px-1.5 py-1 text-[9px]"
+            style={{ color: "var(--color-text-muted)" }}
+            aria-label="Sign out"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
 
 		<div className="px-2 py-1.5 flex items-center justify-between">
 			<a

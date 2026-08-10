@@ -1,3 +1,4 @@
+import { currentUser } from "@/lib/auth";
 import { getPostgresPersonActivity } from "@/lib/crm-postgres/activity";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,8 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
   const personId = id?.trim();
   if (!personId) {
@@ -32,7 +35,10 @@ export async function GET(
   const offset = Math.max(0, parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
 
   try {
-    const activity = await getPostgresPersonActivity({ personId, limit, offset });
+    const activity = await getPostgresPersonActivity(
+      { personId, limit, offset },
+      user.id,
+    );
     return Response.json(activity);
   } catch (error) {
     const code = (error as { code?: string } | null)?.code;

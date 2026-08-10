@@ -175,6 +175,12 @@ const COMPANY_REQUIRED_FIELDS = Object.freeze(["name"]);
 const PERSON_REQUIRED_FIELDS = Object.freeze([]);
 
 const SEARCH_HARD_LIMIT = 50;
+const USER_SCOPED_TABLE_PATTERN =
+  /(^|[^a-z0-9_])(crm_email_threads|crm_email_messages|crm_email_thread_participants|crm_email_message_recipients|crm_interactions|crm_relation_links|work_tasks)([^a-z0-9_]|$)/i;
+
+function referencesUserScopedData(sql) {
+  return USER_SCOPED_TABLE_PATTERN.test(sql);
+}
 
 function quoteIdentifier(identifier) {
   return `"${String(identifier).replace(/"/g, '""')}"`;
@@ -1031,6 +1037,12 @@ export async function executeTool(name, args) {
         result = { error: "crm_query rejects multi-statement input. Provide a single SELECT statement." };
         break;
       }
+      if (referencesUserScopedData(withoutTrailingSemicolon)) {
+        result = {
+          error: "Raw MCP SQL access to user-scoped CRM data is disabled.",
+        };
+        break;
+      }
       const limit = Math.min(args.limit || 100, 1000);
       const params = Array.isArray(args.params) ? args.params : [];
       // For simple SELECTs without a LIMIT clause, push LIMIT into SQL so the
@@ -1047,6 +1059,12 @@ export async function executeTool(name, args) {
       const sql = typeof args.sql === "string" ? args.sql.trim() : "";
       if (!sql) {
         result = { error: "sql is required." };
+        break;
+      }
+      if (referencesUserScopedData(sql)) {
+        result = {
+          error: "Raw MCP SQL access to user-scoped CRM data is disabled.",
+        };
         break;
       }
       const params = Array.isArray(args.params) ? args.params : [];

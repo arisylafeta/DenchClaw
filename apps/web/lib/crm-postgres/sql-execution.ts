@@ -3,6 +3,13 @@ import { queryPg } from "@/lib/postgres";
 const READ_ONLY_PATTERN = /^\s*(SELECT|WITH|EXPLAIN|SHOW|DESCRIBE)\b/i;
 const BLOCKED_PATTERN = /^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|VACUUM|ANALYZE|ATTACH|DETACH|COPY|EXPORT|INSTALL|LOAD|PRAGMA|\.)\b/i;
 
+
+const USER_SCOPED_TABLE_PATTERN =
+  /(^|[^a-z0-9_])(crm_email_threads|crm_email_messages|crm_email_thread_participants|crm_email_message_recipients|crm_interactions|crm_relation_links|work_tasks)([^a-z0-9_]|$)/i;
+
+export function referencesUserScopedData(sql: string): boolean {
+  return USER_SCOPED_TABLE_PATTERN.test(sql);
+}
 export type IntrospectedTable = {
   table_name: string;
   column_count: number;
@@ -19,6 +26,9 @@ export async function postgresReadOnlyQuery(sql: string): Promise<Record<string,
     throw new Error("Only read-only queries are allowed");
   }
 
+  if (referencesUserScopedData(sql)) {
+    throw new Error("Raw SQL access to user-scoped CRM data is disabled");
+  }
   return await queryPg<Record<string, unknown>>(sql);
 }
 

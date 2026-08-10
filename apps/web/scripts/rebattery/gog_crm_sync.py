@@ -142,12 +142,28 @@ def get_person_company_map(conn):
 
 
 def get_existing_message_ids(conn):
-    """Load already-imported Gmail message IDs."""
+    """Load imported Gmail message IDs, scoped to their owning mailbox."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT gmail_message_id FROM crm_email_messages WHERE gmail_message_id IS NOT NULL"
+            """SELECT u.email, m.gmail_message_id
+                 FROM crm_email_messages m
+                 JOIN crm_users u ON u.id = m.mailbox_owner_id
+                WHERE m.gmail_message_id IS NOT NULL"""
         )
-        return {row[0] for row in cur.fetchall()}
+        return {(row[0].lower(), row[1]) for row in cur.fetchall()}
+
+
+def get_mailbox_owner_id(conn, account):
+    """Resolve a configured mailbox to exactly one active CRM identity."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM crm_users WHERE lower(email) = lower(%s) AND is_active",
+            (account,),
+        )
+        rows = cur.fetchall()
+    if len(rows) != 1:
+        raise RuntimeError(f"No unique active crm_users identity for configured account: {account}")
+    return rows[0][0]
 
 
 def get_owner_emails():
@@ -469,37 +485,39 @@ def check_should_import(headers, crm_emails, owner_emails, has_crm_label):
 # Postgres upserts
 # ---------------------------------------------------------------------------
 
-def upsert_thread(cur, gmail_thread_id, subject, sent_at):
-    """Upsert email thread. Returns thread PK."""
-    thread_pk = f"gmail_thread_{gmail_thread_id}"
+def upsert_thread(cur, owner_id, account, gmail_thread_id, subject, sent_at):
+    """Upsert an email thread inside one authoritative mailbox."""
+    scoped_key = f"{account.lower()}:{gmail_thread_id}"
+    thread_pk = "gmail_thread_" + hashlib.sha256(scoped_key.encode()).hexdigest()[:32]
     cur.execute(
         """
-        INSERT INTO crm_email_threads (id, subject, gmail_thread_id, last_message_at, message_count)
-        VALUES (%s, %s, %s, %s, 1)
-        ON CONFLICT (gmail_thread_id) DO UPDATE
+        INSERT INTO crm_email_threads (id, subject, gmail_thread_id, mailbox_owner_id, last_message_at, message_count)
+        VALUES (%s, %s, %s, %s, %s, 1)
+        ON CONFLICT (mailbox_owner_id, gmail_thread_id) WHERE mailbox_owner_id IS NOT NULL AND gmail_thread_id IS NOT NULL DO UPDATE
         SET subject = EXCLUDED.subject,
             last_message_at = GREATEST(crm_email_threads.last_message_at, EXCLUDED.last_message_at),
             updated_at = now()
         RETURNING id
         """,
-        (thread_pk, subject, gmail_thread_id, sent_at),
+        (thread_pk, subject, gmail_thread_id, owner_id, sent_at),
     )
     return cur.fetchone()[0]
 
 
 def upsert_message(
-    cur, gmail_msg_id, thread_pk, subject, sent_at,
+    cur, owner_id, account, gmail_msg_id, thread_pk, subject, sent_at,
     from_person_id, from_email, body_preview, body, has_attachments,
 ):
-    """Upsert email message. Returns message PK."""
-    msg_pk = f"gmail_msg_{gmail_msg_id}"
+    """Upsert an email message inside one authoritative mailbox."""
+    scoped_key = f"{account.lower()}:{gmail_msg_id}"
+    msg_pk = "gmail_msg_" + hashlib.sha256(scoped_key.encode()).hexdigest()[:32]
     cur.execute(
         """
         INSERT INTO crm_email_messages
             (id, thread_id, subject, sent_at, from_person_id, from_email,
-             body_preview, body, has_attachments, gmail_message_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (gmail_message_id) DO UPDATE
+             body_preview, body, has_attachments, gmail_message_id, mailbox_owner_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (mailbox_owner_id, gmail_message_id) WHERE mailbox_owner_id IS NOT NULL AND gmail_message_id IS NOT NULL DO UPDATE
         SET subject = EXCLUDED.subject,
             sent_at = EXCLUDED.sent_at,
             from_person_id = COALESCE(EXCLUDED.from_person_id, crm_email_messages.from_person_id),
@@ -513,7 +531,7 @@ def upsert_message(
         (
             msg_pk, thread_pk, subject, sent_at, from_person_id, from_email,
             body_preview, body[:50000] if body else None,
-            has_attachments, gmail_msg_id,
+            has_attachments, gmail_msg_id, owner_id,
         ),
     )
     return cur.fetchone()[0]
@@ -598,6 +616,8 @@ def sync_account(
     max_fetch=None,
 ):
     """Sync one Gmail account. Returns stats dict."""
+    owner_id = get_mailbox_owner_id(conn, account)
+    account_key = account.lower()
     stats = {
         "found": 0,
         "fetched": 0,
@@ -634,7 +654,7 @@ def sync_account(
     print(f"\n  [{account}] Total unique messages to process: {len(all_msgs)}")
     stats["found"] = len(all_msgs)
 
-    already_imported = [msg_id for msg_id in all_msgs if msg_id in existing_message_ids]
+    already_imported = [msg_id for msg_id in all_msgs if (account_key, msg_id) in existing_message_ids]
     if already_imported:
         print(
             f"  [{account}] Already imported, skipping fetch for {len(already_imported)} messages"
@@ -663,7 +683,7 @@ def sync_account(
                 f"(imported: {stats['imported']}, skipped: {stats['skipped']})"
             )
 
-        if msg_id in existing_message_ids:
+        if (account_key, msg_id) in existing_message_ids:
             stats["skipped"] += 1
             continue
 
@@ -760,16 +780,16 @@ def sync_account(
                 if from_email and from_email in crm_people:
                     from_person_id = crm_people[from_email]
 
-            thread_pk = upsert_thread(cur, thread_id, subject, sent_at)
+            thread_pk = upsert_thread(cur, owner_id, account, thread_id, subject, sent_at)
             stats["threads"] += 1
 
             # Upsert message
             sender_email = normalize_email(from_parties[0][1]) if from_parties else None
             msg_pk = upsert_message(
-                cur, msg_id, thread_pk, subject, sent_at,
+                cur, owner_id, account, msg_id, thread_pk, subject, sent_at,
                 from_person_id, sender_email, body_preview, body, bool(attachments),
             )
-            existing_message_ids.add(msg_id)
+            existing_message_ids.add((account_key, msg_id))
 
             # Upsert recipients (to and cc) - only CRM people
             pos = 0
@@ -859,6 +879,7 @@ def update_thread_aggregates(conn):
             FROM (
                 SELECT thread_id, count(*) as cnt, max(sent_at) as latest
                 FROM crm_email_messages
+                WHERE mailbox_owner_id IS NOT NULL
                 GROUP BY thread_id
             ) sub
             WHERE t.id = sub.thread_id

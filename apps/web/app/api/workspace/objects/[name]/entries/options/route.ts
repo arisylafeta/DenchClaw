@@ -1,3 +1,7 @@
+import {
+  isolatedBackendResponse,
+  requiresIsolatedPostgres,
+} from "@/lib/crm-postgres/user-scope";
 import { duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +51,8 @@ export async function GET(
 	if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
 		return Response.json({ error: "Invalid object name" }, { status: 400 });
 	}
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {

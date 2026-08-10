@@ -95,6 +95,14 @@ describe("postgres object read adapter", () => {
               display_field: "Title",
             },
           ];
+        if (objectName === "interaction")
+          return [
+            {
+              id: "obj_interaction",
+              name: "interaction",
+              default_view: "table",
+            },
+          ];
         if (objectName === "company")
           return [
             { id: "obj_company", name: "company", display_field: "Name" },
@@ -135,6 +143,15 @@ describe("postgres object read adapter", () => {
             { column_name: "title" },
             { column_name: "status" },
             { column_name: "price_amount" },
+          ];
+        }
+        if (table === "crm_interactions") {
+          return [
+            { column_name: "id" },
+            { column_name: "created_at" },
+            { column_name: "updated_at" },
+            { column_name: "type" },
+            { column_name: "email_message_id" },
           ];
         }
         if (table === "work_tasks") {
@@ -180,6 +197,25 @@ describe("postgres object read adapter", () => {
         sql.includes("from crm_fields") &&
         sql.includes("left join crm_objects")
       ) {
+        if (params?.[0] === "obj_interaction") {
+          return [
+            {
+              id: "int_type",
+              name: "Type",
+              type: "text",
+              canonical_column: "type",
+              sort_order: 1,
+            },
+            {
+              id: "int_email",
+              name: "Email",
+              type: "relation",
+              canonical_column: "email_message_id",
+              related_object_name: "email_message",
+              sort_order: 2,
+            },
+          ];
+        }
         if (params?.[0] === "obj_opportunity") {
           return mockOpportunityFieldRows;
         }
@@ -584,9 +620,9 @@ describe("postgres object read adapter", () => {
         String(sql).includes("from work_tasks"),
     );
     expect(String(countCall?.[0])).toContain(
-      'lower(e."status"::text) = lower($2)',
+      'lower(e."status"::text) = lower($3)',
     );
-    expect(countCall?.[1]).toEqual(["obj_work_task", "In Progress"]);
+    expect(countCall?.[1]).toEqual(["obj_work_task", "", "In Progress"]);
   });
 
   it("keeps unset enum values in negative enum filters", async () => {
@@ -617,8 +653,33 @@ describe("postgres object read adapter", () => {
         String(sql).includes("from work_tasks"),
     );
     expect(String(countCall?.[0])).toContain(
-      '(e."status" is null or lower(e."status"::text) <> lower($2))',
+      '(e."status" is null or lower(e."status"::text) <> lower($3))',
     );
+  });
+
+  it("scopes email-linked interactions to the authenticated mailbox", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData(
+      "interaction",
+      new URL("http://localhost"),
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    const countCall = queryPg.mock.calls.find(
+      ([sql]) =>
+        String(sql).includes("select count(*)") &&
+        String(sql).includes("from crm_interactions"),
+    );
+    expect(String(countCall?.[0])).toContain(
+      "e.email_message_id is null or exists",
+    );
+    expect(String(countCall?.[0])).toContain(
+      "scoped_message.mailbox_owner_id = $2::uuid",
+    );
+    expect(countCall?.[1]).toEqual([
+      "obj_interaction",
+      "11111111-1111-4111-8111-111111111111",
+    ]);
   });
 
   it("treats unset booleans as false", async () => {

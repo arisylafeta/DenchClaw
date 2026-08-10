@@ -518,6 +518,7 @@ async function resolveRelationLabels(
 export async function getPostgresObjectData(
   objectName: string,
   url: URL,
+  userId = "",
 ): Promise<PostgresObjectData> {
   const objects = await queryPg<ObjectRow>(
     "select * from crm_objects where name = $1 limit 1",
@@ -568,7 +569,21 @@ export async function getPostgresObjectData(
   const fieldsByName = new Map(fields.map((field) => [field.name, field]));
   const params: unknown[] = [object.id];
   const search = url.searchParams.get("search");
+  const rowScope =
+    object.name === "work_task"
+      ? (params.push(userId), `e.assignee_id = $${params.length}::uuid`)
+      : object.name === "email_thread" || object.name === "email_message"
+        ? (params.push(userId), `e.mailbox_owner_id = $${params.length}::uuid`)
+        : object.name === "interaction"
+          ? (params.push(userId),
+            `(e.email_message_id is null or exists (
+            select 1 from crm_email_messages scoped_message
+             where scoped_message.id = e.email_message_id
+               and scoped_message.mailbox_owner_id = $${params.length}::uuid
+          ))`)
+          : null;
   const conditions = [
+    rowScope,
     buildSearchCondition(search, fields, "e", existingColumns, params),
     buildFilterCondition(
       parseFilters(url.searchParams.get("filters")),

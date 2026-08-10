@@ -46,7 +46,10 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Vary", "Cookie");
+  return response;
 }
 
 export const runtime = "nodejs";

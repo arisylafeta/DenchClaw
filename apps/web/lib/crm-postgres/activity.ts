@@ -63,6 +63,7 @@ function normalizeDirection(value: string | null): "Sent" | "Received" | "Intern
 
 export async function getPostgresPersonActivity(
   params: PostgresPersonActivityParams,
+  userId = "",
 ): Promise<PostgresActivityResult> {
   const personId = params.personId?.trim();
   if (!personId) {
@@ -72,8 +73,12 @@ export async function getPostgresPersonActivity(
   }
 
   const countRows = await queryPg<{ total: number | string | null }>(
-    "select count(*)::bigint as total from crm_interactions where person_id = $1",
-    [personId],
+    `select count(*)::bigint as total
+       from crm_interactions i
+       left join crm_email_messages m on m.id = i.email_message_id
+      where i.person_id = $1
+        and (i.email_message_id is null or m.mailbox_owner_id = $2::uuid)`,
+    [personId, userId],
   );
   const total = countRows[0]?.total ? Number(countRows[0].total) : 0;
   if (!Number.isFinite(total) || total <= 0) {
@@ -88,9 +93,10 @@ export async function getPostgresPersonActivity(
        left join crm_email_messages m on m.id = i.email_message_id
        left join crm_calendar_events e on e.id = i.calendar_event_id
       where i.person_id = $1
+        and (i.email_message_id is null or m.mailbox_owner_id = $4::uuid)
       order by i.occurred_at desc nulls last
       limit $2 offset $3`,
-    [personId, params.limit, params.offset],
+    [personId, params.limit, params.offset, userId],
   );
 
   const fromIds = Array.from(new Set(rows.map((row) => row.from_person_id).filter(Boolean))) as string[];

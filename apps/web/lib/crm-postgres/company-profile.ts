@@ -261,7 +261,10 @@ function numberOrNull(value: number | string | null): number | null {
   return Number.isFinite(next) ? next : null;
 }
 
-export async function getPostgresCompanyProfile(companyId: string): Promise<PostgresCompanyProfile | null> {
+export async function getPostgresCompanyProfile(
+  companyId: string,
+  userId = "",
+): Promise<PostgresCompanyProfile | null> {
   const companyRows = await queryPg<CompanyRow>(`
     select id,
            name,
@@ -355,6 +358,7 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
         select m.body_preview, m.from_person_id
           from crm_email_messages m
          where m.thread_id = t.id
+           and m.mailbox_owner_id = $2::uuid
          order by m.sent_at desc nulls last
          limit 1
       ) msg on true
@@ -362,9 +366,10 @@ export async function getPostgresCompanyProfile(companyId: string): Promise<Post
      where o.name = 'email_thread'
        and f.name = 'Companies'
        and l.target_entry_id = $1
+       and t.mailbox_owner_id = $2::uuid
      order by t.last_message_at desc nulls last
      limit 50
-  `, [company.id]);
+  `, [company.id, userId]);
 
   const events = await queryPg<EventRow>(`
     select e.id,

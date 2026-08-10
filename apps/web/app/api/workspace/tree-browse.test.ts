@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Dirent } from "node:fs";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 // Mock node:fs
 vi.mock("node:fs", () => ({
   readdirSync: vi.fn(() => []),
@@ -540,7 +548,11 @@ describe("Workspace Tree & Browse API", () => {
       expect(workspace.discoverDuckDBPaths).not.toHaveBeenCalled();
       expect(workspace.duckdbQueryOnFileAsync).not.toHaveBeenCalled();
       expect(pgSuggest.searchPostgresObjects).toHaveBeenCalledWith("ada", 10);
-      expect(pgSuggest.searchPostgresEntries).toHaveBeenCalledWith("ada", 15);
+      expect(pgSuggest.searchPostgresEntries).toHaveBeenCalledWith(
+        "ada",
+        15,
+        "11111111-1111-4111-8111-111111111111",
+      );
       expect(json.items).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: "workspace:object:people" }),
         expect.objectContaining({ path: "workspace:entry:people:person-1" }),

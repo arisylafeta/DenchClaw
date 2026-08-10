@@ -1,3 +1,8 @@
+import {
+  isolatedBackendResponse,
+  requiresIsolatedPostgres,
+} from "@/lib/crm-postgres/user-scope";
+import { currentUser } from "@/lib/auth";
 import { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
 import { trackServer } from "@/lib/telemetry";
 import { createPostgresEntry } from "@/lib/crm-postgres/entry-mutations";
@@ -28,6 +33,8 @@ export async function POST(
 	}
 
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 		let body: { fields?: Record<string, string> } = {};
 		try {
 			body = await req.json();
@@ -39,12 +46,18 @@ export async function POST(
 		}
 
 		try {
-			const created = await createPostgresEntry(name, body.fields ?? {});
+      const created = await createPostgresEntry(
+        name,
+        body.fields ?? {},
+        user.id,
+      );
 			trackServer("object_entry_created");
 			return Response.json(Object.assign({ ok: true }, created), { status: 201 });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Failed to create entry";
-			const status = /read.only/i.test(message)
+      const status = /read.only|authenticated user|assignment cannot/i.test(
+        message,
+      )
 				? 403
 				: /not found/i.test(message)
 					? 404
@@ -54,6 +67,8 @@ export async function POST(
 			return Response.json({ error: message }, { status });
 		}
 	}
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
 	let body: { fields?: Record<string, string> } = {};
 	try {

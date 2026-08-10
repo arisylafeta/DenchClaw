@@ -120,7 +120,10 @@ async function loadCompany(companyId: string | null, email: string | null): Prom
   return rows[0] ?? null;
 }
 
-export async function getPostgresPersonProfile(personId: string): Promise<PostgresPersonProfile | null> {
+export async function getPostgresPersonProfile(
+  personId: string,
+  userId = "",
+): Promise<PostgresPersonProfile | null> {
   const rows = await queryPg<PersonRow>(`
     select p.id,
            p.full_name as name,
@@ -175,6 +178,7 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
         select m.body_preview, m.from_person_id
           from crm_email_messages m
          where m.thread_id = t.id
+           and m.mailbox_owner_id = $2::uuid
          order by m.sent_at desc nulls last
          limit 1
       ) msg on true
@@ -182,9 +186,10 @@ export async function getPostgresPersonProfile(personId: string): Promise<Postgr
      where o.name = 'email_thread'
        and f.name = 'Participants'
        and l.target_entry_id = $1
+       and t.mailbox_owner_id = $2::uuid
      order by t.last_message_at desc nulls last
      limit 50
-  `, [person.id]);
+  `, [person.id, userId]);
 
   const events = await queryPg<EventRow>(`
     select e.id,

@@ -1,3 +1,8 @@
+import {
+  isolatedBackendResponse,
+  requiresIsolatedPostgres,
+} from "@/lib/crm-postgres/user-scope";
+import { currentUser } from "@/lib/auth";
 import { duckdbExecOnFile, duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
 import { bulkDeletePostgresEntries } from "@/lib/crm-postgres/entry-mutations";
 
@@ -48,8 +53,10 @@ export async function POST(
 	}
 
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 		try {
-			const deleted = await bulkDeletePostgresEntries(name, entryIds);
+      const deleted = await bulkDeletePostgresEntries(name, entryIds, user.id);
 			return Response.json(Object.assign({ ok: true }, deleted));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Failed to delete entries";
@@ -63,6 +70,8 @@ export async function POST(
 			return Response.json({ error: message }, { status });
 		}
 	}
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {

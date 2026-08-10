@@ -1,3 +1,4 @@
+import { requiresIsolatedPostgres } from "@/lib/crm-postgres/user-scope";
 import {
 	duckdbQueryOnFile,
 	duckdbExecOnFile,
@@ -67,6 +68,12 @@ export async function POST(
 	{ params }: { params: Promise<{ name: string }> },
 ) {
 	const { name } = await params;
+  if (requiresIsolatedPostgres(name)) {
+    return Response.json(
+      { error: "Actions are disabled for user-scoped objects." },
+      { status: 403 },
+    );
+  }
 
 	if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
 		return Response.json({ error: "Invalid object name" }, { status: 400 });

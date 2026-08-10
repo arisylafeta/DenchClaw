@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 const {
 	createPostgresObject,
 	updatePostgresDisplayField,

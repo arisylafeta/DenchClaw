@@ -1,3 +1,4 @@
+import { currentUser } from "@/lib/auth";
 import { readdirSync, type Dirent } from "node:fs";
 import { join, dirname, resolve, basename } from "node:path";
 import { homedir } from "node:os";
@@ -230,6 +231,8 @@ function resolveDisplayField(obj: ObjectRow, fields: FieldRow[]): string {
 }
 
 export async function GET(req: Request) {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 	const url = new URL(req.url);
 	const pathQuery = url.searchParams.get("path");
 	const searchQuery = url.searchParams.get("q");
@@ -242,7 +245,7 @@ export async function GET(req: Request) {
 		searchFiles(workspaceRoot, searchQuery, fileResults, 15);
 
 		const objectResults = await searchPostgresObjects(searchQuery, 10);
-		const entryResults = await searchPostgresEntries(searchQuery, 15);
+    const entryResults = await searchPostgresEntries(searchQuery, 15, user.id);
 
 		// Deduplicate: if an object matches, remove the duplicate folder
 		const objectNames = new Set(objectResults.map((o) => o.name));

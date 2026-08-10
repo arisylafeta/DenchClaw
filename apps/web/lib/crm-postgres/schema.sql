@@ -48,7 +48,8 @@ create table if not exists crm_email_threads (
   subject text,
   last_message_at timestamptz,
   message_count integer,
-  gmail_thread_id text unique,
+  gmail_thread_id text,
+  mailbox_owner_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -63,7 +64,8 @@ create table if not exists crm_email_messages (
   body_preview text,
   body text,
   has_attachments boolean,
-  gmail_message_id text unique,
+  gmail_message_id text,
+  mailbox_owner_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -241,6 +243,22 @@ create table if not exists crm_sessions (
   last_seen_at timestamptz not null default now()
 );
 create index if not exists crm_sessions_active_idx on crm_sessions(token_hash, expires_at) where revoked_at is null;
+alter table crm_email_threads drop constraint if exists crm_email_threads_gmail_thread_id_key;
+alter table crm_email_messages drop constraint if exists crm_email_messages_gmail_message_id_key;
+alter table crm_email_threads add column if not exists mailbox_owner_id uuid references crm_users(id) on delete restrict;
+alter table crm_email_messages add column if not exists mailbox_owner_id uuid references crm_users(id) on delete restrict;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'crm_email_threads_mailbox_owner_id_fkey') then
+    alter table crm_email_threads add constraint crm_email_threads_mailbox_owner_id_fkey foreign key (mailbox_owner_id) references crm_users(id) on delete restrict;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'crm_email_messages_mailbox_owner_id_fkey') then
+    alter table crm_email_messages add constraint crm_email_messages_mailbox_owner_id_fkey foreign key (mailbox_owner_id) references crm_users(id) on delete restrict;
+  end if;
+end $$;
+create unique index if not exists crm_email_threads_owner_gmail_uidx on crm_email_threads(mailbox_owner_id, gmail_thread_id) where mailbox_owner_id is not null and gmail_thread_id is not null;
+create unique index if not exists crm_email_messages_owner_gmail_uidx on crm_email_messages(mailbox_owner_id, gmail_message_id) where mailbox_owner_id is not null and gmail_message_id is not null;
+create index if not exists crm_email_threads_owner_last_idx on crm_email_threads(mailbox_owner_id, last_message_at desc);
+create index if not exists crm_email_messages_owner_thread_idx on crm_email_messages(mailbox_owner_id, thread_id, sent_at desc);
 
 -- ReBattery Projects / Work Tasks prototype: canonical tables intentionally keep a small,
 -- explicit field set so the existing object table/detail/Kanban interfaces can render them.

@@ -35,7 +35,10 @@ function iso(value: string | Date | null): string | null {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-export async function getPostgresInbox(params: PostgresInboxParams) {
+export async function getPostgresInbox(
+  params: PostgresInboxParams,
+  mailboxOwnerId: string,
+) {
   const senderFilter = VALID_SENDER_FILTERS.has(params.senderFilter) ? params.senderFilter : "person";
   const rows = await queryPg<InboxThreadRow>(`
     with latest_msg as (
@@ -46,6 +49,7 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
              m.from_email
         from crm_email_messages m
        where m.thread_id is not null
+         and m.mailbox_owner_id = $5::uuid
        order by m.thread_id, m.sent_at desc nulls last, m.id desc
     ),
     filtered as (
@@ -69,7 +73,8 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
         from crm_email_threads t
         left join latest_msg on latest_msg.thread_id = t.id
         left join crm_people sender on sender.id = latest_msg.from_person_id
-       where ($1::text = '' or lower(coalesce(t.subject, '')) like '%' || $1::text || '%')
+       where t.mailbox_owner_id = $5::uuid
+         and ($1::text = '' or lower(coalesce(t.subject, '')) like '%' || $1::text || '%')
          and ($2::text is null or exists (
            select 1
              from crm_email_thread_participants p
@@ -100,7 +105,13 @@ export async function getPostgresInbox(params: PostgresInboxParams) {
          where participant_link.thread_id = page.id
       ) participants on true
      order by page.last_message_at desc nulls last, page.id
-  `, [params.search.toLowerCase(), params.personId, params.limit, params.offset]);
+  `, [
+    params.search.toLowerCase(),
+    params.personId,
+    params.limit,
+    params.offset,
+    mailboxOwnerId,
+  ]);
 
   const threads = rows.map((row) => ({
     id: row.id,

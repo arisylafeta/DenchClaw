@@ -1,3 +1,4 @@
+import { currentUser } from "@/lib/auth";
 import {
   duckdbPathAsync,
   parseRelationValue,
@@ -13,6 +14,10 @@ import {
 import { deserializeFilters, buildWhereClause, buildOrderByClause, type FieldMeta } from "@/lib/object-filters";
 import { getPostgresObjectData } from "@/lib/crm-postgres/object-read";
 import { buildGoogleFaviconUrl } from "@/lib/workspace-cell-format";
+import {
+  isolatedBackendResponse,
+  requiresIsolatedPostgres,
+} from "@/lib/crm-postgres/user-scope";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -390,10 +395,14 @@ export async function GET(
   const { name } = await params;
 
   if (process.env.CRM_DB_BACKEND === "postgres") {
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     const url = new URL(_req.url);
-    const data = await getPostgresObjectData(name, url);
+    const data = await getPostgresObjectData(name, url, user.id);
     return Response.json(data);
   }
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
   if (!resolveDuckdbBin()) {
     return Response.json(

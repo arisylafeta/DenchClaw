@@ -65,7 +65,11 @@ export async function searchPostgresObjects(query: string, max: number): Promise
   }));
 }
 
-export async function searchPostgresEntries(query: string, max: number): Promise<SuggestItemLike[]> {
+export async function searchPostgresEntries(
+  query: string,
+  max: number,
+  userId: string,
+): Promise<SuggestItemLike[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
 
@@ -117,8 +121,21 @@ export async function searchPostgresEntries(query: string, max: number): Promise
       if (cols.length > 0) {
         const coalesceExpr = cols.map((col) => `nullif(${quoteIdentifier(col)}::text, '')`).join(", ");
         const whereExpr = cols.map((col) => `lower(${quoteIdentifier(col)}::text) like lower($1)`).join(" or ");
-        const sql = `select id as entry_id, coalesce(${coalesceExpr}, id::text) as label from ${tableName} where ${whereExpr} order by updated_at desc nulls last, id desc limit $2`;
-        const rows = await queryPg<{ entry_id: string; label: string }>(sql, [`%${trimmed}%`, remaining]);
+        const scopeExpr =
+          object.name === "email_thread" || object.name === "email_message"
+            ? "mailbox_owner_id = $3::uuid"
+            : object.name === "work_task"
+              ? "assignee_id = $3::uuid"
+              : object.name === "interaction"
+                ? "(email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $3::uuid))"
+                : null;
+        const sql = `select id as entry_id, coalesce(${coalesceExpr}, id::text) as label from ${tableName} where (${whereExpr}) ${scopeExpr ? `and ${scopeExpr}` : ""} order by updated_at desc nulls last, id desc limit $2`;
+        const rows = await queryPg<{ entry_id: string; label: string }>(
+          sql,
+          scopeExpr
+            ? [`%${trimmed}%`, remaining, userId]
+            : [`%${trimmed}%`, remaining],
+        );
         for (const row of rows) {
           if (!row.entry_id || seenEntryIds.has(row.entry_id)) continue;
           seenEntryIds.add(row.entry_id);

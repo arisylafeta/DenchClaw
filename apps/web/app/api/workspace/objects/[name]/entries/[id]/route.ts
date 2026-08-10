@@ -1,4 +1,9 @@
 import {
+  isolatedBackendResponse,
+  requiresIsolatedPostgres,
+} from "@/lib/crm-postgres/user-scope";
+import { currentUser } from "@/lib/auth";
+import {
 	duckdbQueryOnFile,
 	duckdbExecOnFile,
 	findDuckDBForObject,
@@ -106,14 +111,18 @@ export async function GET(
 	}
 
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 		try {
-			const data = await getPostgresEntryData(name, id);
+      const data = await getPostgresEntryData(name, id, user.id);
 			return Response.json(data);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Entry not found";
 			return Response.json({ error: message }, { status: 404 });
 		}
 	}
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {
@@ -330,6 +339,8 @@ export async function PATCH(
 	}
 
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 		let body: { fields?: Record<string, string> };
 		try {
 			body = await req.json();
@@ -342,11 +353,11 @@ export async function PATCH(
 		const fieldUpdates: Record<string, string> = body.fields ?? {};
 
 		try {
-			const updated = await updatePostgresEntry(name, id, fieldUpdates);
+			const updated = await updatePostgresEntry(name, id, fieldUpdates, user.id);
 			return Response.json(Object.assign({ ok: true }, updated));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Failed to update entry";
-			const status = /read.only/i.test(message)
+			const status = /read.only|authenticated user|assignment cannot/i.test(message)
 				? 403
 				: /not found/i.test(message)
 					? 404
@@ -359,6 +370,8 @@ export async function PATCH(
 
 	const body = await req.json();
 	const fieldUpdates: Record<string, string> = body.fields ?? {};
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {
@@ -449,12 +462,14 @@ export async function DELETE(
 	}
 
 	if (process.env.CRM_DB_BACKEND === "postgres") {
+		const user = await currentUser();
+		if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 		try {
-			const deleted = await deletePostgresEntry(name, id);
+			const deleted = await deletePostgresEntry(name, id, user.id);
 			return Response.json(Object.assign({ ok: true }, deleted));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Failed to delete entry";
-			const status = /read.only/i.test(message)
+			const status = /read.only|authenticated user|assignment cannot/i.test(message)
 				? 403
 				: /not found/i.test(message)
 					? 404
@@ -464,6 +479,8 @@ export async function DELETE(
 			return Response.json({ error: message }, { status });
 		}
 	}
+
+  if (requiresIsolatedPostgres(name)) return isolatedBackendResponse();
 
 	const dbFile = findDuckDBForObject(name);
 	if (!dbFile) {

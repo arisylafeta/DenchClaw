@@ -35,7 +35,10 @@ const OWNER_NAMES: Record<string, string> = {
   "ari.sylafeta@gmail.com": "Ari Sylafeta",
 };
 
-export async function getPostgresInboxThread(threadId: string) {
+export async function getPostgresInboxThread(
+  threadId: string,
+  mailboxOwnerId: string,
+) {
   const messages = await queryPg<MessageRow>(`
     select m.id,
            m.subject,
@@ -62,8 +65,15 @@ export async function getPostgresInboxThread(threadId: string) {
            and r.recipient_type = 'cc'
       ) cc_people on true
      where m.thread_id = $1
+       and m.mailbox_owner_id = $2::uuid
+       and exists (
+         select 1 from crm_email_threads t
+          where t.id = m.thread_id and t.mailbox_owner_id = $2::uuid
+       )
      order by m.sent_at asc nulls last, m.id
-  `, [threadId]);
+  `, [threadId, mailboxOwnerId]);
+
+  if (messages.length === 0) return null;
 
   const personIds = new Set<string>();
   for (const message of messages) {

@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 const { getPostgresPersonProfileMock } = vi.hoisted(() => ({
   getPostgresPersonProfileMock: vi.fn(),
 }));
@@ -58,6 +66,9 @@ describe("CRM person profile API", () => {
     await expect(res.json()).resolves.toMatchObject({
       person: { id: "person_pg", name: "Postgres Person" },
     });
-    expect(getPostgresPersonProfileMock).toHaveBeenCalledWith("person_pg");
+    expect(getPostgresPersonProfileMock).toHaveBeenCalledWith(
+      "person_pg",
+      "11111111-1111-4111-8111-111111111111",
+    );
   });
 });

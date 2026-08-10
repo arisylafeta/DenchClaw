@@ -1,3 +1,4 @@
+import { requiresIsolatedPostgres } from "@/lib/crm-postgres/user-scope";
 import { duckdbQueryOnFile, findDuckDBForObject } from "@/lib/workspace";
 import { getPostgresActionRuns } from "@/lib/crm-postgres/actions";
 
@@ -18,6 +19,12 @@ export async function GET(
 	{ params }: { params: Promise<{ name: string }> },
 ) {
 	const { name } = await params;
+  if (requiresIsolatedPostgres(name)) {
+    return Response.json(
+      { error: "Actions are disabled for user-scoped objects." },
+      { status: 403 },
+    );
+  }
 	const url = new URL(req.url);
 	const fieldId = url.searchParams.get("fieldId");
 	const entryId = url.searchParams.get("entryId");

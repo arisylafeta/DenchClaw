@@ -301,6 +301,11 @@ describe("crm-postgres entry mutations", () => {
     await expect(
       updatePostgresEntry("crm_user", "user-1", { Name: "Changed" }),
     ).rejects.toThrow("read-only");
+    await expect(
+      updatePostgresEntry("interaction", "foreign-interaction", {
+        Type: "email",
+      }),
+    ).rejects.toThrow("read-only");
     expect(withPgTransaction).not.toHaveBeenCalled();
   });
 

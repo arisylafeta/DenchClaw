@@ -66,24 +66,44 @@ async function main() {
       rebKey,
       email,
     ]);
-    const result = await tx.query(
+    await tx.query(
       `update work_tasks task
           set assignee_id = crm_user.id
          from (values ${placeholders}) as assignment(reb_key, email)
          join crm_users crm_user on crm_user.email = assignment.email and crm_user.is_active
         where task.reb_key = assignment.reb_key
+          and task.assignee_id is null
           and task.status in ('Planned', 'In Progress')`,
       parameters,
     );
-    if (result.rowCount !== ACTIONABLE_ASSIGNMENTS.length) {
-      throw new Error(
-        `expected ${ACTIONABLE_ASSIGNMENTS.length} actionable Work Tasks, assigned ${result.rowCount ?? 0}`,
+
+    const legacyColumn = await tx.query<{ present: boolean }>(
+      `select exists (
+         select 1 from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'work_tasks'
+            and column_name = 'assignee_email'
+       ) as present`,
+    );
+    if (legacyColumn.rows[0]?.present) {
+      await tx.query(
+        `update work_tasks task
+            set assignee_id = crm_user.id
+           from crm_users crm_user
+          where task.status in ('Planned', 'In Progress')
+            and task.assignee_email is not null
+            and lower(btrim(task.assignee_email)) = lower(crm_user.email)
+            and crm_user.is_active
+            and lower(crm_user.email) in ('ari@rebattery.io', 'alex@rebattery.io')`,
       );
     }
+    await tx.query(
+      `update work_tasks set assignee_id = null where status in ('Done', 'Retired')`,
+    );
   });
 
   console.log(
-    `Bootstrapped ${USERS.length} allowlisted CRM users and assigned ${ACTIONABLE_ASSIGNMENTS.length} actionable Work Tasks`,
+    `Bootstrapped ${USERS.length} allowlisted CRM users and reconciled actionable Work Task assignments`,
   );
 }
 

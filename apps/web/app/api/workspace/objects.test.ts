@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 // Mock node:child_process
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(() => ""),
@@ -517,7 +525,11 @@ describe("Workspace Objects API", () => {
 
       expect(res.status).toBe(201);
       await expect(res.json()).resolves.toMatchObject({ ok: true, entryId: "pg-entry-1" });
-      expect(createPostgresEntry).toHaveBeenCalledWith("leads", { name: "Acme" });
+      expect(createPostgresEntry).toHaveBeenCalledWith(
+        "leads",
+        { name: "Acme" },
+        "11111111-1111-4111-8111-111111111111",
+      );
       expect(findDuckDBForObject).not.toHaveBeenCalled();
       expect(duckdbQueryOnFile).not.toHaveBeenCalled();
       expect(duckdbExecOnFile).not.toHaveBeenCalled();
@@ -759,7 +771,11 @@ describe("Workspace Objects API", () => {
       const res = await POST(req, { params: Promise.resolve({ name: "leads" }) });
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toMatchObject({ ok: true, deletedCount: 2 });
-      expect(bulkDeletePostgresEntries).toHaveBeenCalledWith("leads", ["e1", "e2"]);
+      expect(bulkDeletePostgresEntries).toHaveBeenCalledWith(
+        "leads",
+        ["e1", "e2"],
+        "11111111-1111-4111-8111-111111111111",
+      );
       expect(findDuckDBForObject).not.toHaveBeenCalled();
       expect(duckdbQueryOnFile).not.toHaveBeenCalled();
       expect(duckdbExecOnFile).not.toHaveBeenCalled();

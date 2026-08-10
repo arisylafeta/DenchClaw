@@ -35,6 +35,9 @@ const READ_ONLY_OBJECTS = new Set([
   "automation_loop",
   "automation_loop_run",
   "crm_user",
+  "email_thread",
+  "email_message",
+  "interaction",
 ]);
 
 function assertMutable(objectName: string): void {
@@ -177,13 +180,14 @@ async function entryExists(
   tx: PgTransaction,
   object: ObjectRow,
   entryId: string,
+  userId: string,
 ): Promise<boolean> {
   const entityTable = resolveEntityTable(object);
   if (entityTable) {
     const rows = rowsFrom(
       await tx.query(
-        `select id from ${quoteIdentifier(entityTable)} where id = $1 limit 1`,
-        [entryId],
+        `select id from ${quoteIdentifier(entityTable)} where id = $1 ${object.name === "work_task" ? "and assignee_id = $2::uuid" : ""} limit 1`,
+        object.name === "work_task" ? [entryId, userId] : [entryId],
       ),
     );
     return rows.length > 0;
@@ -194,8 +198,19 @@ async function entryExists(
 export async function createPostgresEntry(
   objectName: string,
   fields: Record<string, unknown>,
+  userId = "",
 ): Promise<{ entryId: string; ok: true }> {
   assertMutable(objectName);
+  const effectiveFields = { ...fields };
+  if (objectName.trim().toLowerCase() === "work_task") {
+    const requested = parseRelationIds(effectiveFields.Assignee);
+    if (requested.length > 0 && requested[0] !== userId) {
+      throw new Error(
+        "Work Tasks can only be assigned to the authenticated user.",
+      );
+    }
+    effectiveFields.Assignee = userId;
+  }
   const entryId = randomUUID();
   await withPgTransaction(async (tx) => {
     const { object, fields: objectFields } = await loadObjectAndFields(
@@ -209,7 +224,7 @@ export async function createPostgresEntry(
     const canonicalColumns: string[] = ["id"];
     const canonicalValues: unknown[] = [entryId];
 
-    for (const [fieldName, value] of Object.entries(fields)) {
+    for (const [fieldName, value] of Object.entries(effectiveFields)) {
       const field = fieldByName.get(fieldName);
       if (!field)
         throw new Error(`Field not found on ${objectName}: ${fieldName}`);
@@ -260,8 +275,17 @@ export async function updatePostgresEntry(
   objectName: string,
   entryId: string,
   fields: Record<string, unknown>,
+  userId = "",
 ): Promise<{ ok: true; updatedCount: number }> {
   assertMutable(objectName);
+  if (objectName.trim().toLowerCase() === "work_task" && "Assignee" in fields) {
+    const requested = parseRelationIds(fields.Assignee);
+    if (requested.length !== 1 || requested[0] !== userId) {
+      throw new Error(
+        "Work Task assignment cannot be changed to another user or cleared.",
+      );
+    }
+  }
   const updatedCount = await withPgTransaction(async (tx) => {
     const { object, fields: objectFields } = await loadObjectAndFields(
       tx,
@@ -272,7 +296,7 @@ export async function updatePostgresEntry(
     );
     const entityTable = resolveEntityTable(object);
 
-    if (!(await entryExists(tx, object, entryId))) {
+    if (!(await entryExists(tx, object, entryId, userId))) {
       throw new Error(`Entry not found: ${entryId}`);
     }
 
@@ -334,11 +358,15 @@ export async function updatePostgresEntry(
 export async function deletePostgresEntry(
   objectName: string,
   entryId: string,
+  userId = "",
 ): Promise<{ ok: true }> {
   assertMutable(objectName);
   await withPgTransaction(async (tx) => {
     const { object } = await loadObjectAndFields(tx, objectName);
     const entityTable = resolveEntityTable(object);
+    if (!(await entryExists(tx, object, entryId, userId))) {
+      throw new Error(`Entry not found: ${entryId}`);
+    }
 
     // Clean up junction table entries
     await tx.query(
@@ -369,6 +397,7 @@ export async function deletePostgresEntry(
 export async function bulkDeletePostgresEntries(
   objectName: string,
   entryIds: string[],
+  userId = "",
 ): Promise<{ ok: true; deletedCount: number }> {
   assertMutable(objectName);
   if (entryIds.length === 0) return { ok: true, deletedCount: 0 };
@@ -376,6 +405,11 @@ export async function bulkDeletePostgresEntries(
   const deletedCount = await withPgTransaction(async (tx) => {
     const { object } = await loadObjectAndFields(tx, objectName);
     const entityTable = resolveEntityTable(object);
+    for (const entryId of entryIds) {
+      if (!(await entryExists(tx, object, entryId, userId))) {
+        throw new Error(`Entry not found: ${entryId}`);
+      }
+    }
 
     // Clean up junction table entries
     await tx.query(

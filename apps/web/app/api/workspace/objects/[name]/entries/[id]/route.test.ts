@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 vi.mock("@/lib/workspace", () => ({
   duckdbQueryOnFile: vi.fn(() => []),
   duckdbExecOnFile: vi.fn(),
@@ -47,7 +55,11 @@ describe("entry detail route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ entry: { entry_id: "p1" } });
-    expect(getPostgresEntryData).toHaveBeenCalledWith("people", "p1");
+    expect(getPostgresEntryData).toHaveBeenCalledWith(
+      "people",
+      "p1",
+      "11111111-1111-4111-8111-111111111111",
+    );
     expect(findDuckDBForObject).not.toHaveBeenCalled();
     expect(duckdbQueryOnFile).not.toHaveBeenCalled();
     expect(duckdbExecOnFile).not.toHaveBeenCalled();
@@ -68,7 +80,12 @@ describe("entry detail route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true, updatedCount: 1 });
-    expect(updatePostgresEntry).toHaveBeenCalledWith("people", "p1", { first_name: "Ari" });
+    expect(updatePostgresEntry).toHaveBeenCalledWith(
+      "people",
+      "p1",
+      { first_name: "Ari" },
+      "11111111-1111-4111-8111-111111111111",
+    );
     expect(findDuckDBForObject).not.toHaveBeenCalled();
     expect(duckdbQueryOnFile).not.toHaveBeenCalled();
     expect(duckdbExecOnFile).not.toHaveBeenCalled();
@@ -129,7 +146,11 @@ describe("entry detail route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true });
-    expect(deletePostgresEntry).toHaveBeenCalledWith("people", "p1");
+    expect(deletePostgresEntry).toHaveBeenCalledWith(
+      "people",
+      "p1",
+      "11111111-1111-4111-8111-111111111111",
+    );
     expect(findDuckDBForObject).not.toHaveBeenCalled();
     expect(duckdbQueryOnFile).not.toHaveBeenCalled();
     expect(duckdbExecOnFile).not.toHaveBeenCalled();

@@ -117,6 +117,7 @@ function buildEntrySelect(
 export async function getReverseRelationsForEntry(
   _objectName: string,
   entryId: string,
+  userId = "",
 ): Promise<PostgresReverseRelation[]> {
   const rows = await queryPg<ReverseRelationRow>(
     `
@@ -173,9 +174,17 @@ export async function getReverseRelationsForEntry(
       left join projects on o.name = 'project' and projects.id = l.source_entry_id
       left join automation_loop_runs on o.name = 'automation_loop_run' and automation_loop_runs.id = l.source_entry_id
      where l.target_entry_id = $1
+       and (o.name <> 'work_task' or work_tasks.assignee_id = $2::uuid)
+       and (o.name <> 'email_message' or email_messages.mailbox_owner_id = $2::uuid)
+       and (o.name <> 'email_thread' or email_threads.mailbox_owner_id = $2::uuid)
+       and (o.name <> 'interaction' or interactions.email_message_id is null or exists (
+         select 1 from crm_email_messages scoped_message
+          where scoped_message.id = interactions.email_message_id
+            and scoped_message.mailbox_owner_id = $2::uuid
+       ))
      order by f.sort_order, l.position, l.source_entry_id
   `,
-    [entryId],
+    [entryId, userId],
   );
 
   const grouped = new Map<string, PostgresReverseRelation>();
@@ -285,6 +294,7 @@ async function resolveRelationLabels(
 export async function getPostgresEntryData(
   objectName: string,
   entryId: string,
+  userId = "",
 ): Promise<PostgresEntryData> {
   const objects = await queryPg<ObjectRow>(
     "select * from crm_objects where name = $1 limit 1",
@@ -317,8 +327,18 @@ export async function getPostgresEntryData(
   const entry = tableName
     ? (
         await queryPg<Record<string, unknown>>(
-          `select ${buildEntrySelect(fields, existingColumns)} from ${tableName} where id = $1 limit 1`,
-          [entryId],
+          `select ${buildEntrySelect(fields, existingColumns)} from ${tableName}
+            where id = $1
+              ${object.name === "work_task" ? "and assignee_id = $2::uuid" : ""}
+              ${object.name === "email_thread" || object.name === "email_message" ? "and mailbox_owner_id = $2::uuid" : ""}
+              ${object.name === "interaction" ? "and (email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $2::uuid))" : ""}
+            limit 1`,
+          object.name === "work_task" ||
+            object.name === "email_thread" ||
+            object.name === "email_message" ||
+            object.name === "interaction"
+            ? [entryId, userId]
+            : [entryId],
         )
       )[0]
     : await loadCustomOnlyEntry(object.id, entryId);
@@ -334,7 +354,11 @@ export async function getPostgresEntryData(
     entry,
     relationLabels: resolvedRelations.labels,
     relationFaviconUrls: resolvedRelations.faviconUrls,
-    reverseRelations: await getReverseRelationsForEntry(object.name, entryId),
+    reverseRelations: await getReverseRelationsForEntry(
+      object.name,
+      entryId,
+      userId,
+    ),
     effectiveDisplayField: resolveDisplayField(object, fields),
   };
 }

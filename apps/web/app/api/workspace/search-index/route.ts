@@ -1,3 +1,4 @@
+import { currentUser } from "@/lib/auth";
 import { readdirSync, readFileSync, existsSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import {
@@ -127,7 +128,10 @@ async function readPostgresFields(objectId: string): Promise<FieldRow[]> {
   );
 }
 
-async function buildPostgresEntryItems(objects: ObjectRow[]): Promise<SearchIndexItem[]> {
+async function buildPostgresEntryItems(
+  objects: ObjectRow[],
+  userId: string,
+): Promise<SearchIndexItem[]> {
   const items: SearchIndexItem[] = [];
 
   for (const obj of objects) {
@@ -139,11 +143,21 @@ async function buildPostgresEntryItems(objects: ObjectRow[]): Promise<SearchInde
     const tableName = POSTGRES_TABLE_BY_OBJECT[obj.name];
     if (!tableName) {continue;}
     const existingColumns = await getTableColumns(tableName);
+    const rowScope =
+      obj.name === "email_thread" || obj.name === "email_message"
+        ? "where mailbox_owner_id = $1::uuid"
+        : obj.name === "work_task"
+          ? "where assignee_id = $1::uuid"
+          : obj.name === "interaction"
+            ? "where email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $1::uuid)"
+            : "";
     const entries = await queryPg<Record<string, unknown>>(
       `select ${buildPostgresEntrySelect(fields, existingColumns)}
          from ${tableName}
+         ${rowScope}
         order by created_at desc
         limit 500`,
+      rowScope ? [userId] : [],
     );
     const objIcon = readObjectYamlIcon(obj.name);
 
@@ -270,6 +284,8 @@ const CRM_NAV_ITEMS: SearchIndexItem[] = [
 ];
 
 export async function GET() {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const items: SearchIndexItem[] = [];
   const postgresObjects = await readPostgresObjects();
 
@@ -289,7 +305,7 @@ export async function GET() {
   }
 
   // 2. Entries from all objects in Postgres.
-  items.push(...await buildPostgresEntryItems(postgresObjects));
+  items.push(...await buildPostgresEntryItems(postgresObjects, user.id));
 
   // 3. CRM nav shortcuts (People / Companies / Inbox / Calendar). Always
   // present so they're reachable even when the workspace is empty.

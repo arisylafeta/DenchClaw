@@ -16,6 +16,24 @@ describe("crm-postgres sql execution", () => {
     );
   });
 
+  it("rejects raw reads from user-scoped tables", async () => {
+    const { postgresReadOnlyQuery } = await import("./sql-execution");
+    await expect(
+      postgresReadOnlyQuery("SELECT * FROM work_tasks"),
+    ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
+    await expect(
+      postgresReadOnlyQuery(
+        "WITH x AS (SELECT * FROM crm_email_messages) SELECT * FROM x",
+      ),
+    ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
+    await expect(
+      postgresReadOnlyQuery("SELECT * FROM crm_interactions"),
+    ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
+    await expect(
+      postgresReadOnlyQuery("SELECT * FROM crm_relation_links"),
+    ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
+  });
+
   it("passes read-only SQL to postgres", async () => {
     const { queryPg } = await import("@/lib/postgres");
     vi.mocked(queryPg).mockResolvedValueOnce([{ id: 1 }]);

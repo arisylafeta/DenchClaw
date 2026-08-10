@@ -533,6 +533,20 @@ describe("executeTool: crm_query (fallback)", () => {
   beforeEach(() => __resetPgPoolForTests());
   afterEach(() => __resetPgPoolForTests());
 
+  it("rejects reads from user-scoped CRM tables", async () => {
+    const result = await executeTool("crm_query", {
+      sql: "SELECT * FROM work_tasks",
+    });
+    expect(parseResult(result).error).toMatch(/user-scoped/i);
+  });
+
+  it("rejects writes to user-scoped CRM tables", async () => {
+    const result = await executeTool("crm_execute", {
+      sql: "UPDATE work_tasks SET title = 'x'",
+    });
+    expect(parseResult(result).error).toMatch(/user-scoped/i);
+  });
+
   it("rejects non-SELECT", async () => {
     const result = await executeTool("crm_query", { sql: "DELETE FROM crm_companies" });
     expect(parseResult(result).error).toMatch(/select/i);

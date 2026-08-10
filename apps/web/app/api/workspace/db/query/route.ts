@@ -1,5 +1,8 @@
 import { safeResolvePath, duckdbQueryOnFileAsync } from "@/lib/workspace";
-import { postgresReadOnlyQuery } from "@/lib/crm-postgres/sql-execution";
+import {
+  postgresReadOnlyQuery,
+  referencesUserScopedData,
+} from "@/lib/crm-postgres/sql-execution";
 
 const APP_DB_PATH = "app://crm";
 

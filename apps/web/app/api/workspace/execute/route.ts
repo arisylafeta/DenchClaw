@@ -1,5 +1,8 @@
 import { duckdbQueryAsync } from "@/lib/workspace";
-import { postgresReadOnlyQuery } from "@/lib/crm-postgres/sql-execution";
+import {
+  postgresReadOnlyQuery,
+  referencesUserScopedData,
+} from "@/lib/crm-postgres/sql-execution";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,6 +34,16 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (
+      process.env.CRM_DB_BACKEND === "postgres" &&
+      referencesUserScopedData(sql)
+    ) {
+      return Response.json(
+        { error: "Raw SQL access to user-scoped CRM data is disabled" },
+        { status: 403 },
+      );
+    }
+
     const rows = process.env.CRM_DB_BACKEND === "postgres"
       ? await postgresReadOnlyQuery(sql)
       : await duckdbQueryAsync(sql);

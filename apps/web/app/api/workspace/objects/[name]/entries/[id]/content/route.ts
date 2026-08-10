@@ -1,3 +1,4 @@
+import { requiresIsolatedPostgres } from "@/lib/crm-postgres/user-scope";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join, relative } from "path";
 import {
@@ -384,6 +385,12 @@ export async function GET(
 	{ params }: { params: Promise<{ name: string; id: string }> },
 ) {
 	const { name, id } = await params;
+	if (requiresIsolatedPostgres(name)) {
+		return Response.json(
+			{ error: "Entry documents are disabled for user-scoped objects." },
+			{ status: 403 },
+		);
+	}
 
 	if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
 		return Response.json({ error: "Invalid object name" }, { status: 400 });
@@ -434,6 +441,12 @@ export async function PUT(
 	{ params }: { params: Promise<{ name: string; id: string }> },
 ) {
 	const { name, id } = await params;
+  if (requiresIsolatedPostgres(name)) {
+    return Response.json(
+      { error: "Entry documents are disabled for user-scoped objects." },
+      { status: 403 },
+    );
+  }
 
 	if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
 		return Response.json({ error: "Invalid object name" }, { status: 400 });

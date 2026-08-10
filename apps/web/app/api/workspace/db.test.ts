@@ -24,6 +24,7 @@ vi.mock("@/lib/report-filters", () => ({
 
 vi.mock("@/lib/crm-postgres/sql-execution", () => ({
   postgresReadOnlyQuery: vi.fn(async () => []),
+  referencesUserScopedData: vi.fn(() => false),
   introspectPostgresCrm: vi.fn(async () => []),
 }));
 
@@ -50,6 +51,7 @@ describe("Workspace DB & Reports API", () => {
     }));
     vi.mock("@/lib/crm-postgres/sql-execution", () => ({
       postgresReadOnlyQuery: vi.fn(async () => []),
+      referencesUserScopedData: vi.fn(() => false),
       introspectPostgresCrm: vi.fn(async () => []),
     }));
     delete process.env.CRM_DB_BACKEND;

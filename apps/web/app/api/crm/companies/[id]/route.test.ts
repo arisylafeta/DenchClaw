@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 const { getPostgresCompanyProfileMock } = vi.hoisted(() => ({
   getPostgresCompanyProfileMock: vi.fn(),
 }));
@@ -76,7 +84,10 @@ describe("CRM company profile API", () => {
         roles: [],
       },
     });
-    expect(getPostgresCompanyProfileMock).toHaveBeenCalledWith("comp_pg");
+    expect(getPostgresCompanyProfileMock).toHaveBeenCalledWith(
+      "comp_pg",
+      "11111111-1111-4111-8111-111111111111",
+    );
   });
 
   it("returns 404 when the Postgres profile is not found", async () => {

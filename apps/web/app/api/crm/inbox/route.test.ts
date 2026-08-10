@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 const { loadCrmFieldMapsMock, safeQueryMock } = vi.hoisted(() => ({
   loadCrmFieldMapsMock: vi.fn(),
   safeQueryMock: vi.fn(),
@@ -46,13 +54,16 @@ describe("CRM inbox API", () => {
       offset: 5,
       sender: "person",
     });
-    expect(getPostgresInboxMock).toHaveBeenCalledWith({
-      search: "solar",
-      senderFilter: "person",
-      personId: null,
-      limit: 25,
-      offset: 5,
-    });
+    expect(getPostgresInboxMock).toHaveBeenCalledWith(
+      {
+        search: "solar",
+        senderFilter: "person",
+        personId: null,
+        limit: 25,
+        offset: 5,
+      },
+      "11111111-1111-4111-8111-111111111111",
+    );
     expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
     expect(safeQueryMock).not.toHaveBeenCalled();
   });
