@@ -1,11 +1,11 @@
 ---
 name: monid
 description: >-
-  Use Monid as the fallback catalog for fetching, scraping, enrichment, search,
-  and external-service tasks after the official Composio CLI has no suitable
-  tool. Trigger when `composio search` returns no appropriate tool, Composio is
-  unavailable, or the user explicitly asks for Monid. Do not run Monid first
-  when Composio could handle the task.
+  Fallback-only access to Monid. Trigger only after an agent has already run
+  `composio search` for the same task and confirmed that Composio has no suitable
+  tool, when Composio is unavailable, or when the user explicitly asks for
+  Monid. Never trigger from a generic request to fetch, search, scrape, enrich,
+  or use an external service.
 metadata:
   version: 0.1.5
 ---
