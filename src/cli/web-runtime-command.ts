@@ -9,7 +9,6 @@ import { stylePromptMessage } from "../terminal/prompt-style.js";
 import { theme } from "../terminal/theme.js";
 import { VERSION } from "../version.js";
 import { applyCliProfileEnv } from "./profile.js";
-import { kickoffSyncPoll, summarizeKickoffSyncPoll } from "./sync-poll.js";
 import {
   installWebRuntimeLaunchAgent,
   uninstallWebRuntimeLaunchAgent,
@@ -136,7 +135,9 @@ async function openUrl(url: string): Promise<boolean> {
         ? ["cmd", "/c", "start", "", url]
         : ["xdg-open", url];
   const [cmd, ...args] = argv;
-  if (!cmd) return false;
+  if (!cmd) {
+    return false;
+  }
   return new Promise<boolean>((resolve) => {
     const child = spawn(cmd, args, {
       stdio: "ignore",
@@ -163,13 +164,17 @@ async function promptAndOpenWebUi(params: {
   noOpen?: boolean;
   runtime: RuntimeEnv;
 }): Promise<void> {
-  if (params.noOpen || params.json || !process.stdin.isTTY) return;
+  if (params.noOpen || params.json || !process.stdin.isTTY) {
+    return;
+  }
   const webUrl = `http://localhost:${params.webPort}`;
   const wantOpen = await confirm({
     message: stylePromptMessage(`Open ${webUrl} in your browser?`),
     initialValue: true,
   });
-  if (isCancel(wantOpen) || !wantOpen) return;
+  if (isCancel(wantOpen) || !wantOpen) {
+    return;
+  }
   const opened = await openUrl(webUrl);
   if (!opened) {
     params.runtime.log(theme.muted("Browser open failed; copy/paste the URL above."));
@@ -488,22 +493,6 @@ export async function updateWebRuntimeCommand(
 
   cleanupManagedWebRuntimeBackup(stateDir);
 
-  // Web runtime is verified healthy AND we just replaced the standalone
-  // bundle, so any in-flight gateway sync-trigger 404s should now resolve.
-  // Fire one explicit kickoff to start the first Gmail/Calendar incremental
-  // immediately rather than waiting for the gateway plugin's next 5-min tick.
-  // Best-effort: a failure here just delays sync to the next gateway tick.
-  const kickoff = await kickoffSyncPoll({
-    stateDir,
-    port: selectedPort,
-  });
-  if (!opts.json) {
-    const summaryLine = summarizeKickoffSyncPoll(kickoff);
-    if (summaryLine) {
-      runtime.log(theme.muted(summaryLine));
-    }
-  }
-
   await promptAndOpenWebUi({
     webPort: selectedPort,
     json: opts.json,
@@ -685,20 +674,6 @@ export async function startWebRuntimeCommand(
   }
 
   cleanupManagedWebRuntimeBackup(stateDir);
-
-  // Same rationale as `updateWebRuntimeCommand`: kick off the first
-  // Gmail/Calendar sync as soon as the web runtime is verified healthy
-  // instead of waiting for the gateway plugin's 5-min interval to tick.
-  const kickoff = await kickoffSyncPoll({
-    stateDir,
-    port: selectedPort,
-  });
-  if (!opts.json) {
-    const summaryLine = summarizeKickoffSyncPoll(kickoff);
-    if (summaryLine) {
-      runtime.log(theme.muted(summaryLine));
-    }
-  }
 
   await promptAndOpenWebUi({
     webPort: selectedPort,

@@ -31,7 +31,7 @@ function makeRequest(opts: {
   if (opts.host) {
     headers.set("host", opts.host);
   }
-  return new Request(opts.url ?? "http://localhost:3100/api/composio/connect", {
+  return new Request(opts.url ?? "http://localhost:3100/api/settings/mcp/connect/start", {
     method: "POST",
     headers,
   });
@@ -110,7 +110,7 @@ describe("resolveAppPublicOrigin", () => {
       process.env.DENCHCLAW_PUBLIC_URL = "this is not a url";
       const origin = resolveAppPublicOrigin(
         makeRequest({
-          url: "http://localhost:3100/api/composio/connect",
+          url: "http://localhost:3100/api/settings/mcp/connect/start",
         }),
       );
       expect(origin).toBe("http://localhost:3100");
@@ -121,7 +121,7 @@ describe("resolveAppPublicOrigin", () => {
     it("returns the request.url origin when neither forwarded headers nor env var are set", () => {
       const origin = resolveAppPublicOrigin(
         makeRequest({
-          url: "http://localhost:3100/api/composio/connect",
+          url: "http://localhost:3100/api/settings/mcp/connect/start",
         }),
       );
       expect(origin).toBe("http://localhost:3100");
@@ -132,7 +132,7 @@ describe("resolveAppPublicOrigin", () => {
         makeRequest({
           forwardedHost: "   ",
           forwardedProto: "https",
-          url: "http://localhost:3100/api/composio/connect",
+          url: "http://localhost:3100/api/settings/mcp/connect/start",
         }),
       );
       expect(origin).toBe("http://localhost:3100");

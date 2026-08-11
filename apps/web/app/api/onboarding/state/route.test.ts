@@ -66,7 +66,7 @@ describe("onboarding state API", () => {
 
   it("rejects skill template patches from other steps", async () => {
     const res = await PUT(makeRequest({
-      from: "backfill",
+      from: "dench-cloud",
       to: "skill-template",
       skillTemplate: { templateId: "icp-outreach-builder" },
     }));

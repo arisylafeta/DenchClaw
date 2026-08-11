@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DiffCard } from "./diff-viewer";
-import { denchIntegrationsBrand } from "@/lib/dench-integrations-brand";
 
 /* ─── Diff synthesis from edit tool args ─── */
 
@@ -220,177 +219,9 @@ function formatArgs(args: Record<string, unknown>): string {
 	return joined.length > 2000 ? joined.slice(0, 2000) + "\n..." : joined;
 }
 
-function asRecordValue(value: unknown): Record<string, unknown> | null {
-	return value && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function asRecordArrayValue(value: unknown): Record<string, unknown>[] {
-	return Array.isArray(value)
-		? value.filter(
-				(item): item is Record<string, unknown> =>
-					Boolean(item) && typeof item === "object" && !Array.isArray(item),
-			)
-		: [];
-}
-
-function readStringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readStringArrayValue(value: unknown): string[] {
-	return Array.isArray(value)
-		? value
-				.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-				.map((item) => item.trim())
-		: [];
-}
-
-function buildComposioSearchCardData(output?: Record<string, unknown>) {
-	if (!output) {return null;}
-	const results = asRecordArrayValue(output.results);
-	const recommended = asRecordValue(output.recommended_result) ?? results[0];
-	const topTools = results
-		.slice(0, 3)
-		.map((result) => readStringValue(result.tool) ?? readStringValue(result.tool_slug) ?? readStringValue(result.name))
-		.filter((tool): tool is string => Boolean(tool));
-	const selectedAccount = asRecordValue(recommended?.selected_account);
-	const accountCandidates = asRecordArrayValue(recommended?.account_candidates ?? recommended?.accounts);
-	const inputSchema = asRecordValue(recommended?.input_schema ?? recommended?.input_parameters);
-	const schemaProperties = asRecordValue(inputSchema?.properties);
-	const schemaPropertyNames = schemaProperties ? Object.keys(schemaProperties) : [];
-	const requiredFields = readStringArrayValue(inputSchema?.required);
-	const planSteps = readStringArrayValue(recommended?.recommended_plan_steps ?? output.next_steps_guidance).slice(0, 3);
-	const pitfalls = readStringArrayValue(recommended?.known_pitfalls).slice(0, 2);
-	const accountCount = typeof recommended?.account_count === "number" ? recommended.account_count : accountCandidates.length;
-	const toolkitRec = asRecordValue(recommended?.toolkit);
-	const toolkitName = readStringValue(toolkitRec?.name) ?? readStringValue(toolkitRec?.slug);
-	const resultCount = typeof output.result_count === "number" ? output.result_count : results.length;
-	const connectedToolkits = readStringArrayValue(output.connected_toolkits);
-	const toolkitFilter = readStringValue(output.toolkit_filter) ?? readStringValue(output.app_filter);
-	const resultSummary = resultCount > 0
-		? `${resultCount} tool${resultCount === 1 ? "" : "s"} found`
-		: toolkitFilter
-			? `No ${toolkitFilter} tools matched`
-			: "No tools matched";
-	return {
-		resultSummary,
-		connectedToolkits: connectedToolkits.length > 0 ? connectedToolkits.join(", ") : null,
-		topTools,
-		sessionId: readStringValue(output.search_session_id),
-		accountSummary:
-			readStringValue(selectedAccount?.display_label) ??
-			(accountCount > 0
-				? `${accountCount} connected account${accountCount === 1 ? "" : "s"}${toolkitName ? ` (${toolkitName})` : ""}`
-				: recommended?.is_connected === true ? "Connected" : null),
-		schemaSummary:
-			schemaPropertyNames.length > 0
-				? `${schemaPropertyNames.length} input fields${requiredFields.length > 0 ? `, ${requiredFields.length} required` : ""}`
-				: null,
-		schemaText: inputSchema ? JSON.stringify(inputSchema, null, 2) : null,
-		planSteps,
-		pitfalls,
-	};
-}
-
-function buildComposioCallCardData(
-	args?: Record<string, unknown>,
-	output?: Record<string, unknown>,
-) {
-	const execution = asRecordValue(output?.execution);
-	const recovery = asRecordValue(output?.recovery);
-	const toolName =
-		readStringValue(args?.tool_name) ??
-		readStringValue(args?.tool_slug) ??
-		readStringValue(output?.tool_slug) ??
-		readStringValue(execution?.tool_name);
-	if (!toolName) {return null;}
-	const toolArgs = asRecordValue(args?.arguments);
-	const keyArgs = toolArgs
-		? Object.entries(toolArgs)
-				.slice(0, 3)
-				.map(([key, value]) => {
-					const formatted =
-						typeof value === "string" ? value : JSON.stringify(value);
-					return `${key}: ${formatted}`;
-				})
-		: [];
-	const structuredContent = asRecordValue(output?.structuredContent);
-	const dataSource = structuredContent ?? output;
-	const items =
-		Array.isArray(dataSource?.data) ? dataSource.data :
-		Array.isArray(dataSource?.items) ? dataSource.items :
-		undefined;
-	const resultSummary =
-		items
-			? `${items.length} result${items.length === 1 ? "" : "s"}`
-			: readStringValue(output?.status) ?? null;
-	const paginationBits = [
-		Object.hasOwn(dataSource ?? {}, "has_more")
-			? `has_more: ${String(dataSource?.has_more)}`
-			: null,
-		readStringValue(dataSource?.next_cursor)
-			? `next_cursor: ${readStringValue(dataSource?.next_cursor)}`
-			: null,
-		readStringValue(dataSource?.starting_after)
-			? `starting_after: ${readStringValue(dataSource?.starting_after)}`
-			: null,
-	].filter((value): value is string => Boolean(value));
-	const recoveryBits = [
-		readStringValue(recovery?.recovered_via),
-		readStringValue(recovery?.retried_with_account)
-			? `account: ${readStringValue(recovery?.retried_with_account)}`
-			: null,
-		readStringValue(recovery?.refreshed_execution_ref)
-			? "refreshed execution_ref returned"
-			: null,
-	].filter((value): value is string => Boolean(value));
-	const toolSlugParts = toolName.split("_");
-	const inferredToolkit = toolSlugParts.length > 1 ? toolSlugParts[0]?.toLowerCase() : null;
-	return {
-		app:
-			readStringValue(args?.app) ??
-			readStringValue(output?.toolkit) ??
-			readStringValue(execution?.toolkit) ??
-			inferredToolkit,
-		toolName,
-		account:
-			readStringValue(args?.account) ??
-			readStringValue(output?.account) ??
-			readStringValue(execution?.account) ??
-			readStringValue(args?.connected_account_id) ??
-			readStringValue(output?.connectedAccountId) ??
-			readStringValue(args?.account_identity),
-		keyArgs,
-		pagination: paginationBits.length > 0 ? paginationBits.join(" | ") : null,
-		resultSummary,
-		sessionId:
-			readStringValue(output?.tool_router_session_id) ??
-			readStringValue(execution?.tool_router_session_id),
-		recoverySummary: recoveryBits.length > 0 ? recoveryBits.join(" | ") : null,
-	};
-}
-
-function SummaryRow({
-	label,
-	value,
-}: {
-	label: string;
-	value: string;
-}) {
-	return (
-		<div className="text-[11px] leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
-			<span style={{ color: "var(--color-text-muted)" }}>{label}: </span>
-			<span>{value}</span>
-		</div>
-	);
-}
-
 /* ─── Classify tool steps ─── */
 
 type StepKind =
-	| "composio"
 	| "search"
 	| "fetch"
 	| "read"
@@ -404,9 +235,6 @@ function classifyTool(
 	args?: Record<string, unknown>,
 	output?: Record<string, unknown>,
 ): StepKind {
-	if (name === "dench_search_integrations" || name === "dench_execute_integrations" || name === "composio_search_tools" || name === "composio_call_tool" || name.includes("dench_search_integrations") || name.includes("dench_execute_integrations")) {
-		return "composio";
-	}
 	const n = name.toLowerCase().replace(/[_-]/g, "");
 	if (
 		[
@@ -507,12 +335,6 @@ function buildStepLabel(
 	};
 
 	switch (kind) {
-		case "composio":
-			return toolName.includes("search_integrations") || toolName === "composio_search_tools"
-				? denchIntegrationsBrand.searchLabel
-				: toolName.includes("execute_integrations") || toolName === "composio_call_tool"
-					? denchIntegrationsBrand.callLabel
-					: denchIntegrationsBrand.genericToolLabel;
 		case "search": {
 			const q =
 				strVal("query") ??
@@ -1387,23 +1209,14 @@ function ToolStep({
 	errorText?: string;
 }) {
 	const kind = classifyTool(toolName, args, output);
-	const isComposioSearch = toolName === "dench_search_integrations" || toolName === "composio_search_tools" || toolName.includes("dench_search_integrations");
-	const isComposioCall = toolName === "dench_execute_integrations" || toolName === "composio_call_tool" || toolName.includes("dench_execute_integrations");
-	const isComposioTool = isComposioSearch || isComposioCall;
 	// Show output by default for exec/command tools — these are the most
 	// useful to see inline.  Other tools default to collapsed.
 	const [showOutput, setShowOutput] = useState(
-		!isComposioTool && (kind === "exec" || kind === "generic"),
+		(kind === "exec" || kind === "generic"),
 	);
 	// Auto-expand diffs for write tool steps
 	const [showDiff, setShowDiff] = useState(true);
 	const label = buildStepLabel(kind, toolName, args, output);
-	const composioSearchCard = isComposioSearch
-		? buildComposioSearchCardData(output)
-		: null;
-	const composioCallCard = isComposioCall
-		? buildComposioCallCardData(args, output)
-		: null;
 	const domains =
 		kind === "search"
 			? getSearchDomains(output)
@@ -1644,174 +1457,6 @@ function ToolStep({
 					</div>
 				)}
 
-				{composioSearchCard && (
-					<div
-						className="mt-1.5 rounded-lg px-2.5 py-2"
-						style={{
-							background: "var(--color-bg)",
-							border: "1px solid var(--color-border)",
-						}}
-					>
-						<SummaryRow
-							label="Results"
-							value={composioSearchCard.resultSummary}
-						/>
-						{composioSearchCard.connectedToolkits && (
-							<SummaryRow
-								label="Connected"
-								value={composioSearchCard.connectedToolkits}
-							/>
-						)}
-						{composioSearchCard.topTools.length > 0 && (
-							<SummaryRow
-								label="Top matches"
-								value={composioSearchCard.topTools.join(", ")}
-							/>
-						)}
-						{composioSearchCard.accountSummary && (
-							<SummaryRow
-								label="Accounts"
-								value={composioSearchCard.accountSummary}
-							/>
-						)}
-						{composioSearchCard.schemaSummary && (
-							<SummaryRow
-								label="Schema"
-								value={composioSearchCard.schemaSummary}
-							/>
-						)}
-						{composioSearchCard.planSteps.length > 0 && (
-							<SummaryRow
-								label="Plan"
-								value={composioSearchCard.planSteps.join(" -> ")}
-							/>
-						)}
-						{composioSearchCard.pitfalls.length > 0 && (
-							<SummaryRow
-								label="Pitfalls"
-								value={composioSearchCard.pitfalls.join(" | ")}
-							/>
-						)}
-						{composioSearchCard.sessionId && (
-							<SummaryRow
-								label="Session"
-								value={composioSearchCard.sessionId}
-							/>
-						)}
-						{composioSearchCard.schemaText && (
-							<details className="mt-2">
-								<summary
-									className="text-[11px] cursor-pointer"
-									style={{ color: "var(--color-text-secondary)" }}
-								>
-									Schema details
-								</summary>
-								<pre
-									className="mt-2 text-[11px] font-mono rounded-lg px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-all max-h-56 overflow-y-auto leading-relaxed"
-									style={{
-										color: "var(--color-text-muted)",
-										background: "var(--color-surface-hover)",
-									}}
-								>
-									{composioSearchCard.schemaText}
-								</pre>
-							</details>
-						)}
-					</div>
-				)}
-
-				{composioCallCard && (
-					<div
-						className="mt-1.5 rounded-lg px-2.5 py-2"
-						style={{
-							background: "var(--color-bg)",
-							border: "1px solid var(--color-border)",
-						}}
-					>
-						<SummaryRow
-							label="Tool"
-							value={
-								composioCallCard.app
-									? `${composioCallCard.app} / ${composioCallCard.toolName}`
-									: composioCallCard.toolName
-							}
-						/>
-						{composioCallCard.account && (
-							<SummaryRow
-								label="Account"
-								value={composioCallCard.account}
-							/>
-						)}
-						{composioCallCard.sessionId && (
-							<SummaryRow
-								label="Session"
-								value={composioCallCard.sessionId}
-							/>
-						)}
-						{composioCallCard.recoverySummary && (
-							<SummaryRow
-								label="Recovery"
-								value={composioCallCard.recoverySummary}
-							/>
-						)}
-						{composioCallCard.keyArgs.length > 0 && (
-							<SummaryRow
-								label="Args"
-								value={composioCallCard.keyArgs.join(" | ")}
-							/>
-						)}
-						{composioCallCard.pagination && (
-							<SummaryRow
-								label="Pagination"
-								value={composioCallCard.pagination}
-							/>
-						)}
-						{composioCallCard.resultSummary && (
-							<SummaryRow
-								label="Result"
-								value={composioCallCard.resultSummary}
-							/>
-						)}
-					</div>
-				)}
-
-				{/* Composio fallback — when structured output isn't available, show input info */}
-				{isComposioSearch && !composioSearchCard && status === "done" && (() => {
-					const query = typeof args?.query === "string" ? args.query : typeof args?.search === "string" ? args.search : null;
-					const toolkit = typeof args?.toolkit === "string" ? args.toolkit : null;
-					const preview = typeof args?.preview === "string" ? args.preview : null;
-					const displayQuery = query ?? preview;
-					return displayQuery || toolkit ? (
-						<div
-							className="mt-1.5 rounded-lg px-2.5 py-2"
-							style={{
-								background: "var(--color-bg)",
-								border: "1px solid var(--color-border)",
-							}}
-						>
-							{displayQuery && <SummaryRow label="Query" value={displayQuery} />}
-							{toolkit && <SummaryRow label="Toolkit" value={toolkit} />}
-						</div>
-					) : null;
-				})()}
-
-				{isComposioCall && !composioCallCard && status === "done" && (() => {
-					const toolSlug = typeof args?.tool_slug === "string" ? args.tool_slug : typeof args?.tool_name === "string" ? args.tool_name : null;
-					const preview = typeof args?.preview === "string" ? args.preview : null;
-					const displayTool = toolSlug ?? preview;
-					return displayTool ? (
-						<div
-							className="mt-1.5 rounded-lg px-2.5 py-2"
-							style={{
-								background: "var(--color-bg)",
-								border: "1px solid var(--color-border)",
-							}}
-						>
-							<SummaryRow label="Tool" value={displayTool} />
-						</div>
-					) : null;
-				})()}
-
 				{/* Args summary — show for tools with no output/diff so they're never opaque */}
 				{!outputText &&
 					!diffText &&
@@ -1890,11 +1535,6 @@ function StepIcon({ kind }: { kind: StepKind }) {
 	const size = 16;
 
 	switch (kind) {
-		case "composio":
-			return (
-				/* eslint-disable-next-line @next/next/no-img-element */
-				<img src="/dench-integrations-icon.png" alt="" width={size} height={size} className="rounded-sm" />
-			);
 		case "search":
 			return (
 				<svg

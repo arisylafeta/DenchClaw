@@ -30,11 +30,6 @@ export type DenchIntegrationMetadata = {
   };
   apollo?: Record<string, never>;
   elevenlabs?: Record<string, never>;
-  future?: {
-    composio?: {
-      providers?: string[];
-    };
-  };
 };
 
 export type IntegrationAuthSummary = {
@@ -325,7 +320,6 @@ export function readIntegrationsMetadata(): DenchIntegrationMetadata {
       ? { apollo: asRecord(parsed)?.apollo as DenchIntegrationMetadata["apollo"] }
       : {}),
     ...(asRecord(parsed)?.elevenlabs ? { elevenlabs: {} } : {}),
-    ...(asRecord(parsed)?.future ? { future: asRecord(parsed)?.future as DenchIntegrationMetadata["future"] } : {}),
   };
 }
 
@@ -1096,7 +1090,6 @@ export function getIntegrationsState(): IntegrationsState {
       },
       ...(metadata.apollo ? { apollo: {} } : {}),
       ...(metadata.elevenlabs ? { elevenlabs: {} } : {}),
-      ...(metadata.future ? { future: metadata.future } : {}),
     },
     search: {
       builtIn: builtInSearch,

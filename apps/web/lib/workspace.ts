@@ -674,7 +674,7 @@ export function resolveWebChatDir(): string {
 
 /**
  * Resolve the per-workspace `.denchclaw/` directory used as the source of
- * truth for onboarding state, Composio connection metadata, sync cursors,
+ * truth for onboarding state and workspace metadata,
  * and the user-extended personal-email blocklist. Mirrors `resolveWebChatDir`
  * for fallbacks so first-run flows still produce a valid path.
  */

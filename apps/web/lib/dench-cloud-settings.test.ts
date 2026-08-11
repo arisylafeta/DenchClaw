@@ -92,18 +92,9 @@ const mocks = vi.hoisted(() => {
         },
       },
       tools: {
-        alsoAllow: [
-          "dench_search_integrations",
-          "dench_execute_integrations",
-        ],
         byProvider: {
           "dench-cloud": {
-            allow: [
-              "read",
-              "exec",
-              "dench_search_integrations",
-              "dench_execute_integrations",
-            ],
+            allow: ["read", "exec"],
           },
         },
       },
@@ -277,17 +268,37 @@ describe("dench cloud settings", () => {
       key: "dc-key",
     });
     expect(written.mcp).toBeUndefined();
-    expect(written.tools.alsoAllow).toEqual([
-      "dench_execute_integrations",
-      "dench_search_integrations",
-    ]);
-    expect(written.tools.byProvider["dench-cloud"].allow).toEqual([
-      "dench_execute_integrations",
-      "dench_search_integrations",
-      "exec",
-      "read",
-    ]);
+    expect(written.tools.alsoAllow).toBeUndefined();
+    expect(written.tools.byProvider["dench-cloud"].allow).toEqual(["exec", "read"]);
     expect(written.tools.byProvider["dench-cloud"].profile).toBeUndefined();
+    expect(written.tools.byProvider["dench-cloud"].alsoAllow).toBeUndefined();
+  });
+
+  it("removes legacy integration wrappers and the Composio MCP server while saving", async () => {
+    mocks.state.configText = JSON.stringify({
+      mcp: {
+        servers: {
+          composio: { url: "https://legacy.example.com/mcp" },
+          internal: { command: "internal-mcp" },
+        },
+      },
+      tools: {
+        alsoAllow: ["read", "dench_search_integrations", "dench_execute_integrations"],
+        byProvider: {
+          "dench-cloud": {
+            allow: ["exec", "dench_execute_integrations"],
+            alsoAllow: ["read", "dench_search_integrations"],
+          },
+        },
+      },
+    });
+
+    await saveApiKey("dc-key");
+
+    const written = JSON.parse(mocks.state.configText);
+    expect(written.mcp.servers).toEqual({ internal: { command: "internal-mcp" } });
+    expect(written.tools.alsoAllow).toEqual(["read"]);
+    expect(written.tools.byProvider["dench-cloud"].allow).toEqual(["exec", "read"]);
     expect(written.tools.byProvider["dench-cloud"].alsoAllow).toBeUndefined();
   });
 
@@ -376,16 +387,8 @@ describe("dench cloud settings", () => {
     const written = JSON.parse(mocks.state.configText);
     expect(written.agents.defaults.model.primary).toBe("dench-cloud/claude-sonnet-4.6");
     expect(written.mcp).toBeUndefined();
-    expect(written.tools.alsoAllow).toEqual([
-      "dench_execute_integrations",
-      "dench_search_integrations",
-    ]);
-    expect(written.tools.byProvider["dench-cloud"].allow).toEqual([
-      "dench_execute_integrations",
-      "dench_search_integrations",
-      "exec",
-      "read",
-    ]);
+    expect(written.tools.alsoAllow).toBeUndefined();
+    expect(written.tools.byProvider["dench-cloud"].allow).toEqual(["exec", "read"]);
     expect(written.tools.byProvider["dench-cloud"].profile).toBeUndefined();
     expect(written.tools.byProvider["dench-cloud"].alsoAllow).toBeUndefined();
   });

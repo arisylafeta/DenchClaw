@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import type { UIMessage } from "ai";
 import posthog from "posthog-js";
 import { useThumbSurvey } from "posthog-js/react/surveys";
-import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Components } from "react-markdown";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
@@ -19,12 +19,7 @@ import type { ReportConfig } from "./charts/types";
 import { DiffCard } from "./diff-viewer";
 import { MessageVoiceButton } from "./message-voice-button";
 import { SyntaxBlock } from "./syntax-block";
-import {
-	type ComposioChatAction,
-	parseComposioChatAction,
-} from "@/lib/composio-chat-actions";
 import { Dialog, DialogContent } from "./ui/dialog";
-import { useComposioToolkitBrand } from "@/lib/composio-toolkit-brand";
 
 // Lazy-load ReportCard (uses Recharts which is heavy)
 const ReportCard = dynamic(
@@ -776,85 +771,13 @@ function PreviewableImage({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLIm
 
 /* ─── Markdown component overrides for chat ─── */
 
-function ComposioActionButton({
-	action,
-	children,
-	onPress,
-}: {
-	action: ComposioChatAction;
-	children: ReactNode;
-	onPress?: (action: ComposioChatAction) => void;
-}) {
-	const brand = useComposioToolkitBrand({
-		toolkitSlug: action.toolkitSlug ?? null,
-		toolkitName: action.toolkitName ?? null,
-	});
-	const toolkitName = brand.name?.trim()
-		|| action.toolkitName?.trim()
-		|| action.toolkitSlug?.trim().replace(/-/g, " ")
-		|| "app";
-	const logo = brand.logo;
-	const initials = toolkitName
-		.split(/\s+/)
-		.filter(Boolean)
-		.slice(0, 2)
-		.map((token) => token.charAt(0))
-		.join("")
-		.toUpperCase() || "AP";
-	const isConnectAction = action.action === "connect";
-
-	return (
-		<button
-			type="button"
-			className="not-prose my-1 inline-flex items-center gap-1.5 rounded-lg px-1 py-0.5 pr-2.5 text-xs font-semibold whitespace-nowrap transition-colors"
-			style={{
-				background: "color-mix(in srgb, var(--color-accent-fill) 10%, transparent)",
-				color: "var(--color-accent)",
-				border: "none",
-			}}
-			onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--color-accent-fill) 15%, transparent)"; }}
-			onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--color-accent-fill) 10%, transparent)"; }}
-			onClick={() => onPress?.(action)}
-		>
-			<span
-				className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded"
-				aria-hidden="true"
-				style={isConnectAction
-					? {
-						background: "rgba(255, 255, 255, 0.16)",
-						color: "#fff",
-					}
-					: {
-						background: "var(--color-surface-hover)",
-						color: "var(--color-text-muted)",
-					}}
-			>
-				{logo ? (
-					<img
-						src={logo}
-						alt=""
-						className="h-4 w-4 object-contain"
-						loading="lazy"
-						decoding="async"
-					/>
-				) : (
-					<span className="text-[10px] font-bold uppercase">{initials}</span>
-				)}
-			</span>
-			<span className="leading-none">{children}</span>
-		</button>
-	);
-}
-
 function createMarkdownComponents(
 	onFilePathClick?: FilePathClickHandler,
-	onComposioAction?: (action: ComposioChatAction) => void,
 ): Components {
 	return {
 		// Open external links in new tab; intercept local file-path links
 		a: ({ href, children, ...props }) => {
 			const rawHref = typeof href === "string" ? href : "";
-			const composioAction = parseComposioChatAction(rawHref);
 			const normalizedHref = normalizePathReference(rawHref);
 			const isExternal =
 				rawHref && (rawHref.startsWith("http://") || rawHref.startsWith("https://") || rawHref.startsWith("//"));
@@ -863,16 +786,6 @@ function createMarkdownComponents(
 				!isWorkspaceAppLink &&
 				(Boolean(rawHref.startsWith("file://")) ||
 					looksLikeFilePath(normalizedHref));
-			if (composioAction) {
-				return (
-					<ComposioActionButton
-						action={composioAction}
-						onPress={onComposioAction}
-					>
-						{children}
-					</ComposioActionButton>
-				);
-			}
 			return (
 				<a
 					href={href}
@@ -1110,7 +1023,6 @@ type ChatMessageProps = {
 	isStreaming?: boolean;
 	onSubagentClick?: (task: string) => void;
 	onFilePathClick?: FilePathClickHandler;
-	onComposioAction?: (action: ComposioChatAction) => void;
 	onQuestionAnswer?: (answerText: string) => void;
 	sessionId?: string | null;
 	voicePlaybackEnabled?: boolean;
@@ -1118,7 +1030,7 @@ type ChatMessageProps = {
 	copyable?: boolean;
 };
 
-export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onSubagentClick, onFilePathClick, onComposioAction, onQuestionAnswer, sessionId, voicePlaybackEnabled = false, userHtmlMap, copyable = false }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onSubagentClick, onFilePathClick, onQuestionAnswer, sessionId, voicePlaybackEnabled = false, userHtmlMap, copyable = false }: ChatMessageProps) {
 	const isUser = message.role === "user";
 	const segments = useMemo(() => groupParts(message.parts), [message.parts]);
 	const speechText = useMemo(() => extractSpeechText(segments), [segments]);
@@ -1128,8 +1040,8 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 	);
 	const showCopyAction = copyable && !!copyText;
 	const markdownComponents = useMemo(
-		() => createMarkdownComponents(onFilePathClick, onComposioAction),
-		[onComposioAction, onFilePathClick],
+		() => createMarkdownComponents(onFilePathClick),
+		[onFilePathClick],
 	);
 
 	if (isUser) {
@@ -1265,11 +1177,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 				<ReactMarkdown
 					remarkPlugins={[remarkGfm]}
 					components={markdownComponents}
-					urlTransform={(url) =>
-						parseComposioChatAction(url)
-							? url
-							: defaultUrlTransform(url)
-					}
+					urlTransform={defaultUrlTransform}
 				>
 					{segment.text}
 				</ReactMarkdown>

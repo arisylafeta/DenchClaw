@@ -109,7 +109,7 @@ describe("dench-cloud helpers", () => {
     ).rejects.toThrow("Could not reach Dench Cloud gateway");
   });
 
-  it("builds the Dench Cloud config patch with provider models, agent aliases, and Dench Integrations tools", () => {
+  it("builds the Dench Cloud config patch with provider models, agent aliases, and core gateway tools", () => {
     const patch = buildDenchCloudConfigPatch({
       gatewayUrl: "https://gateway.merseoriginals.com",
       apiKey: "dench_live_key",
@@ -164,13 +164,9 @@ describe("dench-cloud helpers", () => {
     });
     expect((patch.messages.tts as Record<string, unknown>).elevenlabs).toBeUndefined();
     expect((patch as Record<string, unknown>).mcp).toBeUndefined();
-    expect(patch.tools.alsoAllow).toEqual([
-      "dench_search_integrations",
-      "dench_execute_integrations",
-    ]);
+    expect((patch.tools as Record<string, unknown>).alsoAllow).toBeUndefined();
     expect(patch.tools.byProvider["dench-cloud"].allow).toContain("read");
     expect(patch.tools.byProvider["dench-cloud"].allow).toContain("exec");
-    expect(patch.tools.byProvider["dench-cloud"].allow).toContain("dench_search_integrations");
     expect(patch.tools.byProvider["dench-cloud"].allow).not.toContain("bundle-mcp");
   });
 

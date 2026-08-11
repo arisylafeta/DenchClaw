@@ -1,6 +1,6 @@
 /**
  * Resolves the public origin DenchClaw is reachable at — used when
- * registering OAuth callbacks (e.g. Composio) and computing the
+ * registering OAuth callbacks and computing the
  * `postMessage` target origin in OAuth callback popups.
  *
  * Why this helper exists:
@@ -8,9 +8,9 @@
  *   DenchClaw is listening on (`http://localhost:3100`), not the public
  *   URL the user's browser is using.
  * - Next.js does NOT honor `X-Forwarded-*` headers when materializing
- *   `request.url`. Without this helper the Composio gateway would
- *   register `http://localhost:3100/api/composio/callback` as the OAuth
- *   redirect URI, which fails the moment the app is hosted behind any
+ *   `request.url`. Without this helper an OAuth provider could register
+ *   `http://localhost:3100` as the redirect URI, which fails the moment the app
+ *   is hosted behind any
  *   reverse proxy (ReBattery Cloud, ngrok, your own k8s ingress, etc.).
  *
  * Priority:
@@ -32,7 +32,7 @@
  *      probes, server-internal calls) and as a debugging aid.
  *   3. **`new URL(request.url).origin`.** Local dev fallback. With
  *      `bun run dev` and no proxy in front, this is
- *      `http://localhost:3100` and Composio happily accepts a localhost
+ *      `http://localhost:3100`, which breaks externally hosted OAuth callbacks.
  *      callback URL during development.
  */
 export function resolveAppPublicOrigin(request: Request): string {

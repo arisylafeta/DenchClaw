@@ -16,7 +16,6 @@ type IconKind =
   | "calendar"
   | "cloud"
   | "skills"
-  | "integrations"
   | "cron"
   | "app"
   | "object"
@@ -28,24 +27,23 @@ function resolveIconKind(tab: ContentTab): IconKind {
   // People / Companies render through the standard object pipeline now,
   // so the canonical paths are `people` / `company`. The `~crm/*` checks
   // remain for back-compat with bookmarked legacy URLs.
-  if (tab.kind === "object" && (path === "people" || path === "~crm/people")) return "people";
+  if (tab.kind === "object" && (path === "people" || path === "~crm/people")) {return "people";}
   if (
     tab.kind === "object" &&
     (path === "company" || path === "companies" || path === "~crm/companies")
   ) {
     return "company";
   }
-  if (tab.kind === "crm-person") return "people";
-  if (tab.kind === "crm-company") return "company";
-  if (tab.kind === "crm-inbox") return "inbox";
-  if (tab.kind === "crm-calendar") return "calendar";
-  if (tab.kind === "cloud") return "cloud";
-  if (tab.kind === "skills") return "skills";
-  if (tab.kind === "integrations") return "integrations";
-  if (tab.kind === "cron-dashboard" || tab.kind === "cron-job") return "cron";
-  if (tab.kind === "app" || path.includes(".dench.app")) return "app";
-  if (tab.kind === "object") return "object";
-  if (tab.kind === "directory" || tab.kind === "browse") return "folder";
+  if (tab.kind === "crm-person") {return "people";}
+  if (tab.kind === "crm-company") {return "company";}
+  if (tab.kind === "crm-inbox") {return "inbox";}
+  if (tab.kind === "crm-calendar") {return "calendar";}
+  if (tab.kind === "cloud") {return "cloud";}
+  if (tab.kind === "skills") {return "skills";}
+  if (tab.kind === "cron-dashboard" || tab.kind === "cron-job") {return "cron";}
+  if (tab.kind === "app" || path.includes(".dench.app")) {return "app";}
+  if (tab.kind === "object") {return "object";}
+  if (tab.kind === "directory" || tab.kind === "browse") {return "folder";}
   return "file";
 }
 
@@ -107,15 +105,6 @@ export function TabIcon({ tab }: { tab: ContentTab }) {
       return (
         <svg {...common}>
           <path d="m12 3 1.9 5.84H20l-4.95 3.6L16.95 18 12 14.4 7.05 18l1.9-5.56L4 8.84h6.1Z" />
-        </svg>
-      );
-    case "integrations":
-      return (
-        <svg {...common}>
-          <rect width="7" height="7" x="3" y="3" rx="1" />
-          <rect width="7" height="7" x="14" y="3" rx="1" />
-          <rect width="7" height="7" x="14" y="14" rx="1" />
-          <rect width="7" height="7" x="3" y="14" rx="1" />
         </svg>
       );
     case "cron":

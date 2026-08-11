@@ -9,7 +9,7 @@
  *   1. Tags each message with `Sender Type = <classifier kind>`.
  *   2. For each `email_message` whose sender is now `isBulk`:
  *        a. Clears the `From` relation on the message (raw sender stays
- *           recoverable from the headers via Composio if needed later).
+ *           recoverable from the message headers if needed later).
  *        b. Deletes the From-side `interaction` rows tied to that message.
  *   3. Deletes Person rows whose only remaining interactions are zero
  *      (orphaned by step 2).
@@ -20,7 +20,7 @@
  *      `~/.openclaw-dench/workspace/.denchclaw/cleanup-backups/<ts>.jsonl`
  *      so a misclassification can be restored offline.
  *
- * Triggered via `POST /api/onboarding/sync/start` with `{ cleanup: true }`.
+ * Exposed as an explicit maintenance helper for retroactive cleanup.
  * Idempotent: re-runs are safe — already-cleaned messages just have their
  * Sender Type re-confirmed.
  */

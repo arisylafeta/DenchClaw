@@ -1,8 +1,7 @@
 /**
- * Per-workspace `.denchclaw/` persistence: onboarding state, Composio
- * connection metadata, sync cursors, and user-extended personal-email
- * blocklist. The DuckDB workspace remains authoritative for CRM rows; this
- * directory is the source of truth for everything *outside* the database
+ * Per-workspace `.denchclaw/` persistence for onboarding state and the
+ * user-extended personal-email blocklist. The DuckDB workspace remains
+ * authoritative for CRM rows; this directory is the source of truth for metadata
  * that needs to survive process restarts and browser refreshes.
  *
  * All writes are atomic (write to temp + rename) so a crash in the middle
@@ -33,10 +32,7 @@ function isValidSkillTemplateId(value: unknown): value is SkillTemplateId {
 // ---------------------------------------------------------------------------
 
 const ONBOARDING_FILENAME = "onboarding.json";
-const CONNECTIONS_FILENAME = "connections.json";
-const SYNC_CURSORS_FILENAME = "sync-cursors.json";
 const PERSONAL_DOMAINS_FILENAME = "personal-domains.json";
-const EMAIL_BODY_HYDRATION_FILENAME = "email-body-hydration-attempted.json";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,9 +42,6 @@ export type OnboardingStep =
   | "welcome"
   | "identity"
   | "dench-cloud"
-  | "connect-gmail"
-  | "connect-calendar"
-  | "backfill"
   | "skill-template"
   | "complete";
 
@@ -56,9 +49,6 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   "welcome",
   "identity",
   "dench-cloud",
-  "connect-gmail",
-  "connect-calendar",
-  "backfill",
   "skill-template",
   "complete",
 ];
@@ -75,28 +65,6 @@ export type OnboardingDenchCloud = {
   configuredAt: string;
 };
 
-export type ConnectionRecord = {
-  connectionId: string;
-  toolkitSlug: string;
-  accountEmail?: string;
-  accountLabel?: string;
-  connectedAt: string;
-};
-
-export type BackfillProgress = {
-  startedAt: string;
-  completedAt?: string;
-  pageToken?: string | null;
-  messagesProcessed: number;
-  peopleProcessed: number;
-  companiesProcessed: number;
-  threadsProcessed: number;
-  /** Set when the initial page is being processed; cleared on first completion. */
-  inProgress: boolean;
-  /** Optional last error so the wizard can surface a retry button. */
-  lastError?: string;
-};
-
 export type OnboardingSkillTemplate = {
   templateId?: SkillTemplateId;
   selectedAt?: string;
@@ -109,48 +77,8 @@ export type OnboardingState = {
   completedSteps: OnboardingStep[];
   identity?: OnboardingIdentity;
   denchCloud?: OnboardingDenchCloud;
-  connections?: {
-    gmail?: ConnectionRecord;
-    calendar?: ConnectionRecord;
-  };
-  backfill?: {
-    gmail?: BackfillProgress;
-    calendar?: BackfillProgress;
-  };
   skillTemplate?: OnboardingSkillTemplate;
   startedAt: string;
-  updatedAt: string;
-};
-
-export type ConnectionsFile = {
-  version: 1;
-  gmail?: ConnectionRecord;
-  calendar?: ConnectionRecord;
-  updatedAt: string;
-};
-
-export type SyncCursors = {
-  version: 1;
-  gmail?: {
-    historyId?: string;
-    backfillPageToken?: string | null;
-    messagesProcessed?: number;
-    lastPolledAt?: string;
-    lastBackfillCompletedAt?: string;
-    /** ISO timestamp of the last Google profile-photo sync. Used by
-     *  incremental polls to throttle the People API call (at most once
-     *  per hour) so a fast polling interval doesn't hammer Composio. */
-    lastPhotoSyncAt?: string;
-  };
-  calendar?: {
-    syncToken?: string;
-    backfillPageToken?: string | null;
-    eventsProcessed?: number;
-    lastPolledAt?: string;
-    lastBackfillCompletedAt?: string;
-  };
-  /** Polling interval override in milliseconds; defaults to 5 minutes. */
-  pollIntervalMs?: number;
   updatedAt: string;
 };
 
@@ -180,14 +108,6 @@ function defaultOnboardingState(): OnboardingState {
     startedAt: now,
     updatedAt: now,
   };
-}
-
-function defaultConnections(): ConnectionsFile {
-  return { version: 1, updatedAt: nowIso() };
-}
-
-function defaultSyncCursors(): SyncCursors {
-  return { version: 1, updatedAt: nowIso() };
 }
 
 function defaultPersonalDomains(): PersonalDomainsFile {
@@ -280,9 +200,16 @@ function sanitizeOnboardingState(input: unknown): OnboardingState {
   const completed = Array.isArray(raw.completedSteps)
     ? (raw.completedSteps as unknown[]).filter(isValidStep)
     : [];
+  const currentStep: OnboardingStep = ["connect-gmail", "connect-calendar", "backfill"].includes(
+    typeof raw.currentStep === "string" ? raw.currentStep : "",
+  )
+    ? "skill-template"
+    : isValidStep(raw.currentStep)
+      ? raw.currentStep
+      : "welcome";
   return {
     version: 1,
-    currentStep: isValidStep(raw.currentStep) ? raw.currentStep : "welcome",
+    currentStep,
     completedSteps: completed,
     identity:
       raw.identity && typeof raw.identity === "object"
@@ -291,14 +218,6 @@ function sanitizeOnboardingState(input: unknown): OnboardingState {
     denchCloud:
       raw.denchCloud && typeof raw.denchCloud === "object"
         ? (raw.denchCloud as OnboardingDenchCloud)
-        : undefined,
-    connections:
-      raw.connections && typeof raw.connections === "object"
-        ? (raw.connections as OnboardingState["connections"])
-        : undefined,
-    backfill:
-      raw.backfill && typeof raw.backfill === "object"
-        ? (raw.backfill as OnboardingState["backfill"])
         : undefined,
     skillTemplate: sanitizeSkillTemplate(raw.skillTemplate),
     startedAt: typeof raw.startedAt === "string" ? raw.startedAt : fallback.startedAt,
@@ -355,72 +274,6 @@ export function isOnboardingComplete(workspaceName?: string | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Connections
-// ---------------------------------------------------------------------------
-
-export function readConnections(workspaceName?: string | null): ConnectionsFile {
-  return readJsonFile<ConnectionsFile>(
-    denchClawFilePath(CONNECTIONS_FILENAME, workspaceName),
-    defaultConnections(),
-  );
-}
-
-export function writeConnection(
-  toolkit: "gmail" | "calendar",
-  record: ConnectionRecord,
-  workspaceName?: string | null,
-): ConnectionsFile {
-  const current = readConnections(workspaceName);
-  const next: ConnectionsFile = {
-    ...current,
-    version: 1,
-    [toolkit]: record,
-    updatedAt: nowIso(),
-  };
-  writeJsonFileAtomic(denchClawFilePath(CONNECTIONS_FILENAME, workspaceName), next);
-  return next;
-}
-
-export function clearConnection(
-  toolkit: "gmail" | "calendar",
-  workspaceName?: string | null,
-): ConnectionsFile {
-  const current = readConnections(workspaceName);
-  const next: ConnectionsFile = { ...current, version: 1, updatedAt: nowIso() };
-  delete next[toolkit];
-  writeJsonFileAtomic(denchClawFilePath(CONNECTIONS_FILENAME, workspaceName), next);
-  return next;
-}
-
-// ---------------------------------------------------------------------------
-// Sync cursors
-// ---------------------------------------------------------------------------
-
-export function readSyncCursors(workspaceName?: string | null): SyncCursors {
-  return readJsonFile<SyncCursors>(
-    denchClawFilePath(SYNC_CURSORS_FILENAME, workspaceName),
-    defaultSyncCursors(),
-  );
-}
-
-export function writeSyncCursors(
-  patch: Partial<SyncCursors>,
-  workspaceName?: string | null,
-): SyncCursors {
-  const current = readSyncCursors(workspaceName);
-  const next: SyncCursors = {
-    ...current,
-    ...patch,
-    gmail: patch.gmail ? { ...current.gmail, ...patch.gmail } : current.gmail,
-    calendar: patch.calendar ? { ...current.calendar, ...patch.calendar } : current.calendar,
-    version: 1,
-    updatedAt: nowIso(),
-  };
-  writeJsonFileAtomic(denchClawFilePath(SYNC_CURSORS_FILENAME, workspaceName), next);
-  return next;
-}
-
-// ---------------------------------------------------------------------------
 // Personal-email domain overrides
 // ---------------------------------------------------------------------------
 
@@ -466,77 +319,5 @@ export function writePersonalDomainsOverrides(
     updatedAt: nowIso(),
   };
   writeJsonFileAtomic(denchClawFilePath(PERSONAL_DOMAINS_FILENAME, workspaceName), next);
-  return next;
-}
-
-// ---------------------------------------------------------------------------
-// Email body HTML re-hydration tracking
-//
-// The Composio Gmail sync used to store plain-text bodies for every
-// message because `extractFullBody` short-circuited on the normalized
-// `messageText` field before walking the MIME tree for HTML. After that
-// bug was fixed, the inbox detail route re-hydrates any stored body
-// that doesn't *look* like HTML so existing data flips to the rich
-// rendering on next open.
-//
-// To keep that re-hydration from hitting Composio every single time a
-// thread is opened on a genuinely plain-text email (e.g. a coworker's
-// reply), we persist the set of email_message entry IDs we've already
-// attempted. Once an entry is in the set we never try again, regardless
-// of whether the attempt successfully produced HTML.
-//
-// Manual recovery: delete this file to force a one-time retry across
-// every plain-text message in the workspace.
-// ---------------------------------------------------------------------------
-
-export type EmailBodyHydrationAttemptedFile = {
-  version: 1;
-  /** Sorted list of email_message entry IDs we've already attempted. */
-  attempted: string[];
-  updatedAt: string;
-};
-
-function defaultEmailBodyHydrationAttempted(): EmailBodyHydrationAttemptedFile {
-  return { version: 1, attempted: [], updatedAt: nowIso() };
-}
-
-export function readEmailBodyHydrationAttempted(
-  workspaceName?: string | null,
-): Set<string> {
-  const raw = readJsonFile<unknown>(
-    denchClawFilePath(EMAIL_BODY_HYDRATION_FILENAME, workspaceName),
-    null,
-  );
-  if (!raw || typeof raw !== "object") {
-    return new Set();
-  }
-  const list = (raw as Record<string, unknown>).attempted;
-  if (!Array.isArray(list)) {
-    return new Set();
-  }
-  return new Set(list.filter((v): v is string => typeof v === "string" && Boolean(v)));
-}
-
-/**
- * Mark a batch of email_message entry IDs as "we've already attempted
- * to hydrate their HTML body". Idempotent: re-marking is a no-op for
- * the on-disk set, but always bumps `updatedAt` for observability.
- */
-export function markEmailBodyHydrationAttempted(
-  entryIds: ReadonlyArray<string>,
-  workspaceName?: string | null,
-): EmailBodyHydrationAttemptedFile {
-  const current = readEmailBodyHydrationAttempted(workspaceName);
-  for (const id of entryIds) {
-    if (typeof id === "string" && id) {
-      current.add(id);
-    }
-  }
-  const next: EmailBodyHydrationAttemptedFile = {
-    version: 1,
-    attempted: Array.from(current).sort(),
-    updatedAt: nowIso(),
-  };
-  writeJsonFileAtomic(denchClawFilePath(EMAIL_BODY_HYDRATION_FILENAME, workspaceName), next);
   return next;
 }

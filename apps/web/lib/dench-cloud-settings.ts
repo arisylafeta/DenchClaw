@@ -79,6 +79,11 @@ function resolveDenchApiKey(config: UnknownRecord): string | null {
   return null;
 }
 
+/** Read the configured ReBattery Cloud API key for web and onboarding callers. */
+export function resolveDenchCloudApiKey(config: UnknownRecord = readConfig()): string | null {
+  return resolveDenchApiKey(config);
+}
+
 function resolveGatewayUrl(config: UnknownRecord): string {
   const settings = readConfiguredDenchCloudSettings(config);
   return settings.gatewayUrl ?? normalizeDenchGatewayUrl(
@@ -131,6 +136,49 @@ function ensureRecord(parent: UnknownRecord, key: string): UnknownRecord {
   const fresh: UnknownRecord = {};
   parent[key] = fresh;
   return fresh;
+}
+
+const LEGACY_INTEGRATION_TOOL_NAMES = new Set([
+  "dench_search_integrations",
+  "dench_execute_integrations",
+]);
+
+function removeLegacyIntegrationConfig(config: UnknownRecord): void {
+  const tools = asRecord(config.tools);
+  if (tools) {
+    for (const key of ["allow", "alsoAllow"] as const) {
+      const filtered = readStringList(tools[key]).filter(
+        (name) => !LEGACY_INTEGRATION_TOOL_NAMES.has(name),
+      );
+      if (filtered.length > 0) {tools[key] = filtered;}
+      else {delete tools[key];}
+    }
+    for (const policy of Object.values(asRecord(tools.byProvider) ?? {})) {
+      const record = asRecord(policy);
+      if (!record) {
+        continue;
+      }
+      for (const key of ["allow", "alsoAllow"] as const) {
+        const filtered = readStringList(record[key]).filter(
+          (name) => !LEGACY_INTEGRATION_TOOL_NAMES.has(name),
+        );
+        if (filtered.length > 0) {record[key] = filtered;}
+        else {delete record[key];}
+      }
+    }
+  }
+
+  const mcp = asRecord(config.mcp);
+  const servers = asRecord(mcp?.servers);
+  if (mcp && servers) {
+    delete servers.composio;
+    if (Object.keys(servers).length === 0) {
+      delete mcp.servers;
+    }
+    if (Object.keys(mcp).length === 0) {
+      delete config.mcp;
+    }
+  }
 }
 
 function syncAllowedTools(config: UnknownRecord, toolNames: string[]): void {
@@ -494,15 +542,7 @@ export async function saveApiKey(
 
   syncEnabledElevenLabsCredentials(config, { gatewayUrl, apiKey });
 
-  const patchMcp = asRecord((patch as UnknownRecord).mcp);
-  if (patchMcp) {
-    const mcp = ensureRecord(config, "mcp");
-    const servers = ensureRecord(mcp, "servers");
-    const patchServers = asRecord(patchMcp.servers);
-    if (patchServers) {
-      Object.assign(servers, patchServers);
-    }
-  }
+  removeLegacyIntegrationConfig(config);
 
   const patchTools = asRecord((patch as UnknownRecord).tools);
   syncAllowedTools(config, readStringList(patchTools?.alsoAllow));
@@ -562,15 +602,7 @@ export async function selectModel(stableId: string): Promise<CloudSettingsUpdate
   }
   syncEnabledElevenLabsCredentials(config, { gatewayUrl, apiKey });
 
-  const patchMcp = asRecord((patch as UnknownRecord).mcp);
-  if (patchMcp) {
-    const mcp = ensureRecord(config, "mcp");
-    const servers = ensureRecord(mcp, "servers");
-    const patchServers = asRecord(patchMcp.servers);
-    if (patchServers) {
-      Object.assign(servers, patchServers);
-    }
-  }
+  removeLegacyIntegrationConfig(config);
 
   const patchTools = asRecord((patch as UnknownRecord).tools);
   syncAllowedTools(config, readStringList(patchTools?.alsoAllow));
@@ -664,15 +696,7 @@ export async function saveActiveCloudSettings(
 
     syncEnabledElevenLabsCredentials(config, { gatewayUrl, apiKey });
 
-    const patchMcp = asRecord((patch as UnknownRecord).mcp);
-    if (patchMcp) {
-      const mcp = ensureRecord(config, "mcp");
-      const servers = ensureRecord(mcp, "servers");
-      const patchServers = asRecord(patchMcp.servers);
-      if (patchServers) {
-        Object.assign(servers, patchServers);
-      }
-    }
+    removeLegacyIntegrationConfig(config);
 
     const patchTools = asRecord((patch as UnknownRecord).tools);
     syncAllowedTools(config, readStringList(patchTools?.alsoAllow));

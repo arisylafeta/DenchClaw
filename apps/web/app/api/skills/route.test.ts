@@ -5,8 +5,8 @@ vi.mock("@/lib/workspace", () => ({
   resolveOpenClawStateDir: vi.fn(() => "/tmp/state"),
 }));
 
-vi.mock("@/lib/ensure-composio-apps-skill", () => ({
-  ensureComposioAppsSkillInWorkspaces: vi.fn(),
+vi.mock("@/lib/ensure-service-cli-skills", () => ({
+  ensureServiceCliSkillsInWorkspaces: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({

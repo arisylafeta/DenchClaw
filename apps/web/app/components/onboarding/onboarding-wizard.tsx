@@ -9,7 +9,6 @@ import {
 import { IdentityStep } from "./identity-step";
 import { SetupStep } from "./setup-step";
 import { SkillTemplateStep } from "./skill-template-step";
-import { SyncStep } from "./sync-step";
 import { CompleteStep } from "./complete-step";
 import { PreviewPane, type PreviewVariant } from "./preview-pane";
 import { PreviewEditorial } from "./preview-editorial";
@@ -22,20 +21,18 @@ import {
 import { ProfileSwitcher } from "../workspace/profile-switcher";
 import { CreateWorkspaceDialog } from "../workspace/create-workspace-dialog";
 
-type ClientStep = "identity" | "setup" | "sync" | "skill-template";
+type ClientStep = "identity" | "setup" | "skill-template";
 
 const CLIENT_STEPS: Array<{ id: ClientStep; label: string }> = [
   { id: "identity", label: "Identity" },
   { id: "setup", label: "Setup" },
-  { id: "sync", label: "Sync" },
   { id: "skill-template", label: "Template" },
 ];
 
 /**
- * Maps the server's fine-grained onboarding state (6 steps) onto the client's
- * compressed step view. `welcome` and `identity` collapse to Step 1. The
- * three connection steps + dench-cloud fold into a single "Setup" screen.
- * `backfill` is Sync. `skill-template` is the final choice before the full-screen landing.
+ * Maps the persisted onboarding state onto the client flow. `welcome` and
+ * `identity` collapse to Step 1; ReBattery Cloud is configured in Setup; the
+ * template choice is the final step before the full-screen landing.
  */
 function clientStepFor(server: OnboardingStep): ClientStep | "complete" {
   switch (server) {
@@ -43,11 +40,7 @@ function clientStepFor(server: OnboardingStep): ClientStep | "complete" {
     case "identity":
       return "identity";
     case "dench-cloud":
-    case "connect-gmail":
-    case "connect-calendar":
       return "setup";
-    case "backfill":
-      return "sync";
     case "skill-template":
       return "skill-template";
     case "complete":
@@ -89,12 +82,12 @@ export function OnboardingWizard({
     }),
   );
   const [mockStage, setMockStage] = useState<WorkspaceMockStage>("empty");
-  const [liveStats, setLiveStats] = useState<LiveStats>({
+  const liveStats: LiveStats = {
     messages: 0,
     people: 0,
     companies: 0,
     events: 0,
-  });
+  };
 
   const reloadAfterWorkspaceChange = useCallback(() => {
     window.location.reload();
@@ -222,14 +215,6 @@ export function OnboardingWizard({
         previewVariant: variant,
         previewKey: "setup:orbit",
         previewNode: <PreviewOrbit />,
-      };
-    }
-    if (activeClientStep === "sync") {
-      const variant: PreviewVariant = "workspace-live";
-      return {
-        previewVariant: variant,
-        previewKey: "sync:people-table",
-        previewNode: <PreviewPeopleTable liveStats={liveStats} />,
       };
     }
     if (activeClientStep === "skill-template") {
@@ -372,7 +357,7 @@ export function OnboardingWizard({
               className="hidden text-[11px] uppercase tracking-wider sm:inline"
               style={{ color: "var(--color-text-muted)" }}
             >
-              Syncing…
+              Refreshing…
             </span>
           )}
           <ThemeToggle />
@@ -459,7 +444,6 @@ export function OnboardingWizard({
               onRefresh={refresh}
               onIdentityTyping={setTypedIdentity}
               onSetupStageChange={setMockStage}
-              onLiveStats={setLiveStats}
             />
           </div>
         </main>
@@ -490,7 +474,6 @@ function StepContent({
   onRefresh,
   onIdentityTyping,
   onSetupStageChange,
-  onLiveStats,
 }: {
   activeClientStep: ClientStep | "complete";
   state: OnboardingState;
@@ -498,7 +481,6 @@ function StepContent({
   onRefresh: () => Promise<void>;
   onIdentityTyping: (v: { name: string; email: string }) => void;
   onSetupStageChange: (stage: WorkspaceMockStage) => void;
-  onLiveStats: (stats: LiveStats) => void;
 }) {
   switch (activeClientStep) {
     case "identity":
@@ -516,14 +498,6 @@ function StepContent({
           onAdvance={onAdvance}
           onRefresh={onRefresh}
           onStageChange={(stage) => onSetupStageChange(stage as WorkspaceMockStage)}
-        />
-      );
-    case "sync":
-      return (
-        <SyncStep
-          state={state}
-          onAdvance={onAdvance}
-          onLiveStats={onLiveStats}
         />
       );
     case "skill-template":

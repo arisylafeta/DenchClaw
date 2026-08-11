@@ -42,7 +42,6 @@ export class McpServerError extends Error {
   }
 }
 
-const RESERVED_MCP_SERVER_KEYS = new Set(["composio"]);
 const MCP_SERVER_KEY_PATTERN = /^[A-Za-z0-9_-]+$/;
 const REMOTE_MCP_TRANSPORT = "streamable-http";
 const STATE_SIDECAR_FILENAME = ".mcp-states.json";
@@ -164,9 +163,6 @@ function assertServerKey(key: string): string {
       "Field 'key' must use only letters, numbers, hyphens, or underscores.",
     );
   }
-  if (RESERVED_MCP_SERVER_KEYS.has(normalizedKey)) {
-    throw new McpServerError(400, `MCP server '${normalizedKey}' is managed internally.`);
-  }
   return normalizedKey;
 }
 
@@ -258,7 +254,6 @@ export function listMcpServers(): McpServerEntry[] {
   const states = readStatesSidecar();
 
   return Object.entries(servers)
-    .filter(([key]) => !RESERVED_MCP_SERVER_KEYS.has(key))
     .map(([key, rawServer]) => {
       const server = asRecord(rawServer);
       return server ? buildEntry(key, server, states) : null;

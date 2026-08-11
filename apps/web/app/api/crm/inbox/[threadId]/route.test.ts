@@ -29,16 +29,6 @@ vi.mock("@/lib/crm-postgres/inbox-thread", () => ({
   getPostgresInboxThread: getPostgresInboxThreadMock,
 }));
 
-vi.mock("@/lib/gmail-body-hydrate", () => ({
-  bodyLooksLikeHtml: vi.fn(() => true),
-  hydrateMessageBodies: vi.fn(async () => ({ bodies: new Map(), failed: 0, skipped: false })),
-}));
-
-vi.mock("@/lib/denchclaw-state", () => ({
-  markEmailBodyHydrationAttempted: vi.fn(),
-  readEmailBodyHydrationAttempted: vi.fn(() => new Set()),
-}));
-
 describe("CRM inbox thread API", () => {
   beforeEach(() => {
     vi.clearAllMocks();

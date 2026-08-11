@@ -5,25 +5,6 @@ import {
   type DenchCloudCatalogModel,
 } from "./models.js";
 
-export type DenchCloudProviderConfig = {
-  baseUrl: string;
-  apiKey: string;
-  api: "openai-completions" | "openai-responses";
-  models: ReturnType<typeof buildDenchCloudProviderModels>;
-};
-
-export type ComposioMcpServerConfig = {
-  url: string;
-  transport: "streamable-http";
-  headers: {
-    Authorization: string;
-  };
-};
-
-const DENCH_COMPOSIO_WRAPPER_TOOLS = [
-  "dench_search_integrations",
-  "dench_execute_integrations",
-] as const;
 const DENCH_CLOUD_TOOL_ALLOWLIST = [
   "read",
   "write",
@@ -49,21 +30,14 @@ const DENCH_CLOUD_TOOL_ALLOWLIST = [
   "image_generate",
   "music_generate",
   "video_generate",
-  ...DENCH_COMPOSIO_WRAPPER_TOOLS,
 ] as const;
 
-export function buildComposioMcpServerConfig(
-  gatewayUrl: string,
-  apiKey: string,
-): ComposioMcpServerConfig {
-  return {
-    url: `${gatewayUrl}/v1/composio/mcp`,
-    transport: "streamable-http",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  };
-}
+export type DenchCloudProviderConfig = {
+  baseUrl: string;
+  apiKey: string;
+  api: "openai-completions" | "openai-responses";
+  models: ReturnType<typeof buildDenchCloudProviderModels>;
+};
 
 export function buildDenchCloudProviderConfig(params: {
   gatewayUrl: string;
@@ -107,7 +81,6 @@ export function buildDenchCloudConfigPatch(params: {
       },
     },
     tools: {
-      alsoAllow: [...DENCH_COMPOSIO_WRAPPER_TOOLS],
       byProvider: {
         "dench-cloud": {
           allow: [...DENCH_CLOUD_TOOL_ALLOWLIST],

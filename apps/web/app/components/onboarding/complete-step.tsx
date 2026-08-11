@@ -5,9 +5,9 @@ import { Button } from "../ui/button";
 import type { OnboardingState } from "@/lib/denchclaw-state";
 
 /**
- * Full-screen landing moment shown after the user explicitly clicks "I'm
- * ready" on the sync step. No auto-redirect: the peak-end of the flow
- * deserves a beat of finality, and the user controls when they leave.
+ * Full-screen landing moment shown after the user finishes the skill-template
+ * step. No auto-redirect: the peak-end of the flow deserves a beat of finality,
+ * and the user controls when they leave.
  */
 export function CompleteStep({ state }: { state: OnboardingState }) {
   const firstName = useMemo(() => {
@@ -56,8 +56,8 @@ export function CompleteStep({ state }: { state: OnboardingState }) {
           className="mx-auto max-w-md text-[15px] leading-relaxed"
           style={{ color: "var(--color-text-muted)" }}
         >
-          Your workspace is ready. New email and meetings will flow in as they
-          arrive — no more setup from here.
+          Your workspace is ready. Ask DenchClaw to connect a service through
+          Composio whenever you need it.
         </p>
       </div>
 

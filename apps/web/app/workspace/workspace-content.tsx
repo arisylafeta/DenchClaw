@@ -76,8 +76,6 @@ import { isSeedPeopleObjectId, isSeedCompanyObjectId } from "@/lib/seed-object-i
 import { CronDashboard } from "../components/cron/cron-dashboard";
 import { SkillStorePanel } from "../components/skill-store/skill-store-panel";
 import { SkillTemplateGalleryPanel } from "../components/templates/skill-template-gallery-panel";
-import { IntegrationsPanel } from "../components/integrations/integrations-panel";
-import { ChatComposioModalHost } from "../components/integrations/chat-composio-modal-host";
 import { CloudSettingsPanel } from "../components/settings/cloud-settings-panel";
 import { CronJobDetail } from "../components/cron/cron-job-detail";
 import { CronSessionView } from "../components/cron/cron-session-view";
@@ -93,7 +91,6 @@ import {
 } from "@/lib/object-filters";
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
-import { SyncHealthBanner } from "../components/workspace/sync-health-banner";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
@@ -131,7 +128,6 @@ import {
   isVirtualPath,
 } from "@/lib/workspace-paths";
 import dynamic from "next/dynamic";
-import type { ComposioChatAction } from "@/lib/composio-chat-actions";
 import { startSkillTemplateChatFromDashboard } from "@/lib/skill-template-chat-start";
 import type { SkillTemplateId } from "@/lib/skill-templates";
 
@@ -390,7 +386,6 @@ function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   if (path === "~cron") return "cron-dashboard";
   if (path.startsWith("~cron/")) return "cron-job";
   if (path === "~skills") return "skills";
-  if (path === "~integrations") return "integrations";
   if (path === "~cloud") return "cloud";
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/calendar") return "crm-calendar";
@@ -492,11 +487,6 @@ export function WorkspaceShell() {
       }>
         <WorkspacePageInner />
       </Suspense>
-      {/* Polls /api/sync/status and shows a sticky banner when Gmail or
-       *  Calendar incremental sync is failing. Outside the Suspense
-       *  boundary so it shows even while the workspace is hydrating —
-       *  a stuck sync is most useful to surface immediately on load. */}
-      <SyncHealthBanner />
     </ToastProvider>
   );
 }
@@ -588,7 +578,6 @@ function WorkspacePageInner() {
   // Terminal drawer state
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
-  const [pendingComposioAction, setPendingComposioAction] = useState<ComposioChatAction | null>(null);
   const [tableSelectionContext, setTableSelectionContext] = useState<TableSelectionContext | null>(null);
 
   useEffect(() => {
@@ -1056,7 +1045,7 @@ function WorkspacePageInner() {
   // Exclude reserved virtual paths (~chats, ~cron, etc.) where file-scoped chat is irrelevant.
   const fileContext = useMemo(() => {
     if (!activePath) { return undefined; }
-    // v3: include virtual paths (~crm/*, ~cloud, ~skills, ~integrations, ~cron, etc.) so
+    // v3: include virtual paths (~crm/*, ~cloud, ~skills, ~cron, etc.) so
     // the agent is aware when the user is viewing CRM tables, cloud settings, etc.
     const filename = (() => {
       if (activePath.startsWith("~crm/")) {
@@ -1064,7 +1053,6 @@ function WorkspacePageInner() {
         return `CRM ${view.charAt(0).toUpperCase()}${view.slice(1)}`;
       }
       if (activePath === "~cloud") return "Cloud settings";
-      if (activePath === "~integrations") return "Integrations panel";
       if (activePath === "~skills") return "Skills store";
       if (activePath === "~cron") return "Cron dashboard";
       if (activePath.startsWith("~cron/")) return `Cron job ${activePath.slice("~cron/".length)}`;
@@ -1308,7 +1296,6 @@ function WorkspacePageInner() {
     (
       target:
         | "cloud"
-        | "integrations"
         | "skills"
         | "cron"
         | "crm-people"
@@ -1339,7 +1326,6 @@ function WorkspacePageInner() {
       // Map sidebar nav targets directly to content tabs in the new model.
       const config = {
         cloud: { path: "~cloud", name: "Cloud" },
-        integrations: { path: "~integrations", name: "Integrations" },
         skills: { path: "~skills", name: "Skills" },
         cron: { path: "~cron", name: "Cron" },
         "crm-inbox": { path: "~crm/inbox", name: "Inbox" },
@@ -1350,22 +1336,6 @@ function WorkspacePageInner() {
     },
     [openTabForNode, tree, ensureRightPanelOpenWide, closeEntryModalIfOpen],
   );
-
-  const handleComposioActionFromChat = useCallback((action: ComposioChatAction) => {
-    setPendingComposioAction({
-      action: action.action,
-      toolkitSlug: action.toolkitSlug ?? null,
-      toolkitName: action.toolkitName ?? null,
-    });
-  }, []);
-
-  const handleComposioActionHandled = useCallback(() => {
-    setPendingComposioAction(null);
-  }, []);
-
-  const handleComposioFallbackToIntegrations = useCallback(() => {
-    handleNavigate("integrations");
-  }, [handleNavigate]);
 
   const handleNodeSelect = useCallback(
     (node: TreeNode) => {
@@ -1421,7 +1391,6 @@ function WorkspacePageInner() {
         return;
       }
       if (node.path === "~skills") { handleNavigate("skills"); return; }
-      if (node.path === "~integrations") { handleNavigate("integrations"); return; }
       if (node.path === "~cloud") { handleNavigate("cloud"); return; }
       if (node.path === "~cron" || node.path.startsWith("~cron/")) {
         openTabForNode(node);
@@ -2692,7 +2661,6 @@ function WorkspacePageInner() {
                   onConversationActivity={() => promoteTabById(tab.id)}
                   onSubagentClick={handleSubagentClickFromChat}
                   onFilePathClick={handleFilePathClickFromChat}
-                  onComposioAction={handleComposioActionFromChat}
                   onDeleteSession={isGateway || tab.sessionKey ? undefined : handleDeleteSession}
                   onRenameSession={isGateway || tab.sessionKey ? undefined : handleRenameSession}
                   compact={isMobile}
@@ -2718,12 +2686,6 @@ function WorkspacePageInner() {
             );
           })}
         </div>
-
-        <ChatComposioModalHost
-          request={pendingComposioAction}
-          onRequestHandled={handleComposioActionHandled}
-          onFallbackToIntegrations={handleComposioFallbackToIntegrations}
-        />
 
         <SkillTemplateGalleryPanel
           open={templatesPanelOpen}
@@ -3069,15 +3031,6 @@ function ContentRenderer({
         <div className="h-full overflow-y-auto">
           <div className="mx-auto max-w-5xl p-6">
             <SkillStorePanel />
-          </div>
-        </div>
-      );
-
-    case "integrations":
-      return (
-        <div className="h-full overflow-y-auto">
-          <div className="mx-auto max-w-5xl p-6">
-            <IntegrationsPanel />
           </div>
         </div>
       );

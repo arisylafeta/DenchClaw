@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMessage } from "./chat-message";
-import { buildComposioChatActionHref } from "@/lib/composio-chat-actions";
 
 vi.mock("next/dynamic", () => ({
   default: () => () => null,
@@ -27,36 +26,6 @@ vi.mock("posthog-js/react/surveys", () => ({
 beforeEach(() => {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url.startsWith("/api/composio/toolkits?")) {
-      const search = new URL(url, "http://localhost").searchParams.get("search")?.toLowerCase();
-      if (search === "slack") {
-        return new Response(JSON.stringify({
-          items: [{
-            slug: "slack",
-            name: "Slack",
-            description: "Messages and channels",
-            logo: "https://gateway.example/slack.svg",
-            categories: ["Communication"],
-            auth_schemes: ["oauth2"],
-            tools_count: 4,
-          }],
-        }));
-      }
-      if (search === "stripe") {
-        return new Response(JSON.stringify({
-          items: [{
-            slug: "stripe",
-            name: "Stripe",
-            description: "Payments infrastructure",
-            logo: "https://gateway.example/stripe.svg",
-            categories: ["Payments"],
-            auth_schemes: ["oauth2"],
-            tools_count: 12,
-          }],
-        }));
-      }
-      return new Response(JSON.stringify({ items: [] }));
-    }
     throw new Error(`Unexpected fetch: ${url}`);
   }) as typeof fetch;
 });
@@ -140,56 +109,6 @@ describe("ChatMessage", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Play voice" })).not.toBeInTheDocument();
-  });
-
-  it("intercepts assistant composio action links inline", async () => {
-    const user = userEvent.setup();
-    const onComposioAction = vi.fn();
-
-    render(
-      <ChatMessage
-        message={{
-          id: "assistant-3",
-          role: "assistant",
-          parts: [{
-            type: "text",
-            text: `Slack is not connected yet. [Connect Slack](${buildComposioChatActionHref("connect", { toolkitSlug: "slack", toolkitName: "Slack" })})`,
-          }],
-        }}
-        onComposioAction={onComposioAction}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Connect Slack" }));
-
-    expect(onComposioAction).toHaveBeenCalledWith({
-      action: "connect",
-      toolkitSlug: "slack",
-      toolkitName: "Slack",
-    });
-  });
-
-  it("renders the branded Stripe connect action from gateway toolkit data", async () => {
-    render(
-      <ChatMessage
-        message={{
-          id: "assistant-4",
-          role: "assistant",
-          parts: [{
-            type: "text",
-            text: `Stripe needs attention. [Connect Stripe](${buildComposioChatActionHref("connect", { toolkitSlug: "stripe", toolkitName: "Stripe" })})`,
-          }],
-        }}
-      />,
-    );
-
-    const button = screen.getByRole("button", { name: "Connect Stripe" });
-    await waitFor(() => {
-      const logo = button.querySelector('img[src="https://gateway.example/stripe.svg"]');
-      expect(logo).toBeTruthy();
-    });
-
-    expect(button.querySelector('img[src="/integrations/stripe-logomark.svg"]')).toBeNull();
   });
 
   it("renders dench-question blocks as single-choice cards", async () => {
@@ -318,7 +237,7 @@ describe("ChatMessage", () => {
     );
   });
 
-  it("renders persisted ReBattery Integration failures with their error details", async () => {
+  it("renders persisted tool failures with their error details", async () => {
     const user = userEvent.setup();
 
     render(
@@ -329,7 +248,7 @@ describe("ChatMessage", () => {
           parts: [{
             type: "tool-invocation",
             toolCallId: "tool-call-error",
-            toolName: "composio_call_tool",
+            toolName: "github_create_issue",
             args: {
               execution_ref: "exec_posthog_1",
               arguments: {
@@ -342,7 +261,7 @@ describe("ChatMessage", () => {
               tool_router_session_id: "trs_posthog_123",
             },
             errorText:
-              "Validation failed for tool \"composio_call_tool\": execution_ref is required.",
+              "Validation failed for tool \"github_create_issue\": execution_ref is required.",
           } as never],
         }}
       />,
@@ -351,15 +270,12 @@ describe("ChatMessage", () => {
     await user.click(screen.getByRole("button", { name: /thought/i }));
 
     expect(
-      screen.getByText(/Validation failed for tool "composio_call_tool"/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/posthog \/ POSTHOG_LIST_ALL_PROJECTS_ACROSS_ORGANIZATIONS/),
+      screen.getByText(/Validation failed for tool "github_create_issue"/),
     ).toBeInTheDocument();
     expect(screen.getByText(/"project_id": "proj_123"/)).toBeInTheDocument();
   });
 
-  it("renders live ReBattery Integration failures with streamed output errors", async () => {
+  it("renders live tool failures with streamed output errors", async () => {
     const user = userEvent.setup();
 
     render(
@@ -370,7 +286,7 @@ describe("ChatMessage", () => {
           parts: [{
             type: "dynamic-tool",
             toolCallId: "tool-call-live-error",
-            toolName: "composio_call_tool",
+            toolName: "github_create_issue",
             state: "error",
             input: {
               execution_ref: "exec_posthog_1",
@@ -390,9 +306,6 @@ describe("ChatMessage", () => {
 
     expect(
       screen.getByText(/Gateway rejected the bridge invocation./),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/posthog \/ POSTHOG_LIST_ALL_PROJECTS_ACROSS_ORGANIZATIONS/),
     ).toBeInTheDocument();
   });
 

@@ -13,9 +13,7 @@
  * because some MCP servers return SSE-framed JSON-RPC messages even for a
  * simple `tools/list` reply.
  *
- * The SSE / JSON parsing is intentionally similar to the Composio gateway
- * client in `apps/web/lib/composio.ts` — kept as a separate module so the
- * generic MCP code path doesn't depend on Composio-specific gateway logic.
+ * Handles SSE and JSON responses without depending on a provider-specific client.
  */
 
 type UnknownRecord = Record<string, unknown>;

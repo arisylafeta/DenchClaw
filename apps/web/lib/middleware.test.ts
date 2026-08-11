@@ -45,7 +45,6 @@ describe("CRM auth middleware", () => {
     "/login",
     "/api/auth/login",
     "/api/auth/me",
-    "/api/composio/callback",
     "/api/settings/mcp/connect/callback",
     "/api/apps/webhooks/example",
     "/rebattery-favicon.svg",

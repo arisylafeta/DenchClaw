@@ -12,7 +12,6 @@ import {
 	useState,
 } from "react";
 import { HeroSuggestions } from "./hero-suggestions";
-import { HeroRecommendedAppsBadge } from "./hero-recommended-apps-badge";
 import { ChatMessage } from "./chat-message";
 import { ChatEditor, type ChatEditorHandle } from "./tiptap/chat-editor";
 import { ChatVoiceInputButton } from "./chat-voice-input-button";
@@ -37,7 +36,6 @@ import {
 	hasAssistantText,
 	hasAssistantToolActivity,
 } from "./chat-stream-status";
-import type { ComposioChatAction } from "@/lib/composio-chat-actions";
 import type { ChatModelOption } from "@/lib/chat-models";
 import { prepareFilesForChatUpload } from "@/lib/chat-image-preparation";
 import { formatTableSelectionContext, type TableSelectionContext } from "@/lib/table-selection";
@@ -860,8 +858,6 @@ type ChatPanelProps = {
 	onSubagentClick?: (task: string) => void;
 	/** Called when user clicks an inline file path in chat output. */
 	onFilePathClick?: (path: string) => Promise<boolean | void> | boolean | void;
-	/** Called when the assistant emits a Composio connect/reconnect action link. */
-	onComposioAction?: (action: ComposioChatAction) => void;
 	/** Called when user deletes the current session (e.g. from header menu). */
 	onDeleteSession?: (sessionId: string) => void;
 	/** Called when user renames the current session. */
@@ -945,7 +941,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			onSubagentSpawned,
 			onSubagentClick,
 			onFilePathClick,
-			onComposioAction,
 			onDeleteSession,
 			onRenameSession: _onRenameSession,
 			sessionKey: subagentSessionKey,
@@ -2780,11 +2775,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							<HeroSuggestions
 								compact={!!compact}
 								onPromptClick={handlePromptClick}
-							/>
-							<HeroRecommendedAppsBadge
-								className="absolute inset-x-0 bottom-6 md:bottom-10"
-							/>
-						</div>
+							/>						</div>
 					) : optimisticUserText !== null && messages.length === 0 ? (
 						<div className={`${compact ? "" : "max-w-2xl mx-auto"} py-3`}>
 							<div className="flex justify-end py-2">
@@ -2853,8 +2844,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									isStreaming={isStreaming && i === uniqueMessages.length - 1}
 									onSubagentClick={onSubagentClick}
 									onFilePathClick={onFilePathClick}
-									onComposioAction={onComposioAction}
-									onQuestionAnswer={handleQuestionAnswer}
+																		onQuestionAnswer={handleQuestionAnswer}
 									sessionId={currentSessionId}
 									voicePlaybackEnabled={voicePlaybackEnabled}
 									userHtmlMap={userHtmlMapRef.current}

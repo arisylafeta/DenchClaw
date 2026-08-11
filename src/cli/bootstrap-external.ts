@@ -42,7 +42,6 @@ import {
   type DenchCloudCatalogModel,
 } from "./dench-cloud.js";
 import { applyCliProfileEnv } from "./profile.js";
-import { kickoffSyncPoll, summarizeKickoffSyncPoll } from "./sync-poll.js";
 import {
   DEFAULT_WEB_APP_PORT,
   ensureManagedWebRuntime,
@@ -80,7 +79,6 @@ export type BootstrapCheck = {
     | "openclaw-cli"
     | "profile"
     | "gateway"
-    | "composio"
     | "agent-auth"
     | "web-ui"
     | "state-isolation"
@@ -510,18 +508,66 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+const LEGACY_INTEGRATION_TOOL_NAMES = new Set([
+  "dench_search_integrations",
+  "dench_execute_integrations",
+]);
+
+function removeLegacyIntegrationConfig(config: Record<string, unknown>): void {
+  const tools = asRecord(config.tools);
+  if (tools) {
+    const removeLegacyNames = (policy: Record<string, unknown>): void => {
+      for (const key of ["allow", "alsoAllow"] as const) {
+        const filtered = toStringArray(policy[key]).filter(
+          (name) => !LEGACY_INTEGRATION_TOOL_NAMES.has(name),
+        );
+        if (filtered.length > 0) {
+          policy[key] = filtered;
+        } else {
+          delete policy[key];
+        }
+      }
+    };
+    removeLegacyNames(tools);
+    for (const policy of Object.values(asRecord(tools.byProvider) ?? {})) {
+      const record = asRecord(policy);
+      if (record) {
+        removeLegacyNames(record);
+      }
+    }
+  }
+
+  const mcp = asRecord(config.mcp);
+  const servers = asRecord(mcp?.servers);
+  if (!mcp || !servers) {
+    return;
+  }
+  delete servers.composio;
+  if (Object.keys(servers).length === 0) {
+    delete mcp.servers;
+  }
+  if (Object.keys(mcp).length === 0) {
+    delete config.mcp;
+  }
+}
+
 function mergeAllowedTools(existingTools: unknown, patchTools: unknown): string[] {
   const existing = asRecord(existingTools);
   const patch = asRecord(patchTools);
-  const merged = new Set([
-    ...toStringArray(existing?.alsoAllow),
-    ...toStringArray(existing?.allow),
-    ...toStringArray(patch?.alsoAllow),
-  ]);
+  const merged = new Set(
+    [
+      ...toStringArray(existing?.alsoAllow),
+      ...toStringArray(existing?.allow),
+      ...toStringArray(patch?.alsoAllow),
+    ].filter((name) => !LEGACY_INTEGRATION_TOOL_NAMES.has(name)),
+  );
   return [...merged].sort((left, right) => left.localeCompare(right));
 }
 
-function mergeProviderToolPolicies(existingTools: unknown, patchTools: unknown): Record<string, unknown> {
+function mergeProviderToolPolicies(
+  existingTools: unknown,
+  patchTools: unknown,
+): Record<string, unknown> {
   const existingByProvider = asRecord(asRecord(existingTools)?.byProvider) ?? {};
   const patchByProvider = asRecord(asRecord(patchTools)?.byProvider) ?? {};
   const mergedByProvider: Record<string, unknown> = { ...existingByProvider };
@@ -534,16 +580,20 @@ function mergeProviderToolPolicies(existingTools: unknown, patchTools: unknown):
 
     const existingPolicy = asRecord(mergedByProvider[providerId]) ?? {};
     const nextPolicy: Record<string, unknown> = { ...existingPolicy };
-    const allow = uniqueStrings([
-      ...toStringArray(existingPolicy.allow),
-      ...toStringArray(existingPolicy.alsoAllow),
-      ...toStringArray(patchPolicy.allow),
-    ]).sort((left, right) => left.localeCompare(right));
-    const alsoAllow = uniqueStrings([
-      ...toStringArray(existingPolicy.alsoAllow),
-      ...toStringArray(existingPolicy.allow),
-      ...toStringArray(patchPolicy.alsoAllow),
-    ]).sort((left, right) => left.localeCompare(right));
+    const allow = uniqueStrings(
+      [
+        ...toStringArray(existingPolicy.allow),
+        ...toStringArray(existingPolicy.alsoAllow),
+        ...toStringArray(patchPolicy.allow),
+      ].filter((name) => !LEGACY_INTEGRATION_TOOL_NAMES.has(name)),
+    ).sort((left, right) => left.localeCompare(right));
+    const alsoAllow = uniqueStrings(
+      [
+        ...toStringArray(existingPolicy.alsoAllow),
+        ...toStringArray(existingPolicy.allow),
+        ...toStringArray(patchPolicy.alsoAllow),
+      ].filter((name) => !LEGACY_INTEGRATION_TOOL_NAMES.has(name)),
+    ).sort((left, right) => left.localeCompare(right));
 
     if (allow.length > 0) {
       delete nextPolicy.alsoAllow;
@@ -1014,6 +1064,7 @@ function stagePreOnboardConfig(
   },
 ): void {
   const raw = readBootstrapConfig(stateDir) ?? {};
+  removeLegacyIntegrationConfig(raw);
 
   const agents = { ...(asRecord(raw.agents) ?? {}) };
   const defaults = { ...(asRecord(agents.defaults) ?? {}) };
@@ -2361,10 +2412,6 @@ function readBootstrapConfig(stateDir: string): Record<string, unknown> | undefi
   return undefined;
 }
 
-function hasConfiguredComposioServer(_stateDir: string): boolean {
-  return true;
-}
-
 function resolveBootstrapWorkspaceDir(stateDir: string): string {
   return path.join(stateDir, "workspace");
 }
@@ -2497,7 +2544,6 @@ export function buildBootstrapDiagnostics(params: {
   gatewayUrl: string;
   gatewayProbe: { ok: boolean; detail?: string };
   denchCloudEnabled: boolean;
-  composioConfigured: boolean;
   webPort: number;
   webReachable: boolean;
   rolloutStage: BootstrapRolloutStage;
@@ -2554,21 +2600,6 @@ export function buildBootstrapDiagnostics(params: {
           params.gatewayPort,
           params.profile,
         ),
-      ),
-    );
-  }
-
-  if (params.denchCloudEnabled) {
-    checks.push(
-      createCheck(
-        "composio",
-        params.composioConfigured ? "pass" : "warn",
-        params.composioConfigured
-          ? "Dench Integrations configured via Dench Cloud gateway."
-          : "Dench Integrations not configured. Check Dench Cloud gateway connectivity.",
-        params.composioConfigured
-          ? undefined
-          : `Open Settings > Integrations or run \`openclaw --profile ${DEFAULT_DENCHCLAW_PROFILE} gateway restart\` to repair the Dench Cloud config.`,
       ),
     );
   }
@@ -2848,6 +2879,8 @@ function preStageDenchCloudConfig(params: {
     const rawConfig = readBootstrapConfig(params.stateDir) ?? {};
     const nextConfig = { ...rawConfig };
 
+    removeLegacyIntegrationConfig(nextConfig);
+
     const models = { ...asRecord(nextConfig.models) };
     models.mode = models.mode ?? "merge";
     const providers = { ...asRecord(models.providers) };
@@ -3094,7 +3127,7 @@ async function applyDenchCloudBootstrapConfig(params: {
       profile: params.profile,
       key: "tools.alsoAllow",
       value: nextAlsoAllow,
-      errorMessage: "Failed to enable Dench Integrations wrapper tools.",
+      errorMessage: "Failed to update the global tool allowlist.",
     });
   }
 
@@ -3769,28 +3802,8 @@ export async function bootstrapCommand(
       : "Post-onboard setup complete (web runtime unhealthy).",
   );
 
-  // Web runtime is verified healthy at this point — fire one explicit
-  // Gmail/Calendar sync kickoff so the user doesn't have to wait for the
-  // gateway plugin's first 5-min interval. Best-effort: a failure here
-  // (no Dench Cloud key, transient network) just falls back to that
-  // gateway-driven interval. See `extensions/dench-ai-gateway/sync-trigger.ts`
-  // for why the plugin no longer fires its own immediate-on-arm tick.
-  if (webRuntimeStatus.ready && !opts.json) {
-    const kickoff = await kickoffSyncPoll({
-      stateDir,
-      port: preferredWebPort,
-    });
-    const kickoffSummary = summarizeKickoffSyncPoll(kickoff);
-    if (kickoffSummary) {
-      runtime.log(theme.muted(kickoffSummary));
-    }
-  }
-
   const webReachable = webRuntimeStatus.ready;
   const webUrl = `http://localhost:${preferredWebPort}`;
-  const composioConfigured = denchCloudSelection.enabled
-    ? hasConfiguredComposioServer(stateDir)
-    : false;
   const diagnostics = buildBootstrapDiagnostics({
     profile,
     openClawCliAvailable: installResult.available,
@@ -3799,7 +3812,6 @@ export async function bootstrapCommand(
     gatewayUrl,
     gatewayProbe,
     denchCloudEnabled: denchCloudSelection.enabled,
-    composioConfigured,
     webPort: preferredWebPort,
     webReachable,
     rolloutStage,

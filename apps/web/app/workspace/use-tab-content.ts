@@ -264,7 +264,6 @@ function kindIsDerived(kind: ContentTab["kind"]): boolean {
     case "cron-dashboard":
     case "cron-job":
     case "skills":
-    case "integrations":
     case "cloud":
     case "crm-inbox":
     case "crm-calendar":
@@ -308,8 +307,6 @@ function resolveDerivedContent(
     }
     case "skills":
       return { kind: "skill-store" };
-    case "integrations":
-      return { kind: "integrations" };
     case "cloud":
       return { kind: "cloud" };
     case "crm-inbox":

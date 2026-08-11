@@ -1,5 +1,4 @@
 import { readDenchAuthProfileKey } from "../shared/dench-auth.js";
-import { registerDenchIntegrationsBridge } from "./composio-bridge.js";
 import { buildDenchCloudConfigPatch, buildDenchCloudProviderConfig } from "./config-patch.js";
 import {
   buildDenchGatewayApiBaseUrl,
@@ -12,8 +11,6 @@ import {
   resolveDenchCloudModel,
   type DenchCloudCatalogModel,
 } from "./models.js";
-import { registerSyncRefreshTools } from "./sync-refresh-tools.js";
-import { armSyncTrigger } from "./sync-trigger.js";
 export { buildDenchCloudConfigPatch } from "./config-patch.js";
 
 export const id = "dench-ai-gateway";
@@ -314,26 +311,6 @@ export default function register(api: any) {
       },
     },
   } as any);
-
-  registerDenchIntegrationsBridge(api, gatewayUrl);
-
-  // Arm the gateway-driven Gmail/Calendar sync poll trigger. Lives here
-  // (not in the Next.js process) so the timer survives `denchclaw update`
-  // and web-runtime restarts. No-op when no Dench Cloud key is present
-  // or when `syncTrigger.enabled` is explicitly disabled in plugin config.
-  armSyncTrigger(api);
-
-  // Register on-demand sync tools the agent can call when the user
-  // asks for a manual refresh. Gated on the same key check as
-  // `armSyncTrigger`: without a Dench Cloud key, the underlying
-  // sync runner can't talk to Composio, so exposing the tools would
-  // just produce confusing failures.
-  if (typeof api?.registerTool === "function" && readDenchAuthProfileKey()) {
-    const registered = registerSyncRefreshTools(api);
-    api.logger?.info?.(
-      `[dench-ai-gateway] registered sync refresh tools: ${registered.join(", ")}`,
-    );
-  }
 
   api.registerService({
     id: "dench-ai-gateway",

@@ -97,7 +97,6 @@ export type ContentState =
   | { kind: "directory"; node: TreeNode }
   | { kind: "cron-dashboard" }
   | { kind: "skill-store" }
-  | { kind: "integrations" }
   | { kind: "cloud" }
   | { kind: "cron-job"; jobId: string; job: CronJob }
   | { kind: "cron-session"; jobId: string; job: CronJob; sessionId: string; run: CronRunLogEntry }

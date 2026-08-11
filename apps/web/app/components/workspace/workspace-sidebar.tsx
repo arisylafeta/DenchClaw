@@ -107,11 +107,10 @@ type WorkspaceSidebarProps = {
   activeWorkspace?: string | null;
   /** Called after workspace switches or workspace creation so parent can refresh state. */
   onWorkspaceChanged?: () => void;
-  /** Navigate to a sidebar section (cloud, integrations, skills, cron). */
+  /** Navigate to a sidebar section (cloud, skills, cron). */
   onNavigate?: (
     target:
       | "cloud"
-      | "integrations"
       | "skills"
       | "cron"
       | "crm-people"

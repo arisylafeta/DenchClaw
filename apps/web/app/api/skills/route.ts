@@ -1,12 +1,12 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { ensureComposioAppsSkillInWorkspaces } from "@/lib/ensure-composio-apps-skill";
+import { ensureServiceCliSkillsInWorkspaces } from "@/lib/ensure-service-cli-skills";
 import { parseSkillFrontmatter, readSkillsLock, type SkillsLock } from "@/lib/skills";
 import { resolveOpenClawStateDir, resolveWorkspaceRoot } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-const PROTECTED_SKILLS = ["crm", "browser", "dench-integrations"];
+const PROTECTED_SKILLS = ["crm", "browser", "composio-cli", "monid"];
 
 type SkillEntry = {
   name: string;
@@ -58,7 +58,7 @@ function scanSkillDir(dir: string, source: string, skillsLock: SkillsLock = {}):
 
 export async function GET() {
   const stateDir = resolveOpenClawStateDir();
-  ensureComposioAppsSkillInWorkspaces();
+  ensureServiceCliSkillsInWorkspaces();
   const workspaceRoot = resolveWorkspaceRoot();
 
   const managedSkills = scanSkillDir(join(stateDir, "skills"), "managed");

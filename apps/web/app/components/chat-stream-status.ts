@@ -182,16 +182,6 @@ export function getIncompleteAssistantReplyReason(message: UIMessage | null): st
 	if (didToolPartEndInError(lastTool)) {
 		return "Tool execution failed and the agent stopped without summarizing the failure.";
 	}
-	const toolNames = message.parts
-		.filter((part) => isToolLikePart(part))
-		.map((part) => resolveToolName(part))
-		.filter((toolName): toolName is string => Boolean(toolName));
-	if (
-		toolNames.includes("composio_search_tools") &&
-		!toolNames.includes("composio_call_tool")
-	) {
-		return "Search completed but the agent never followed through with the tool call.";
-	}
 	return "Agent finished tool activity but did not send a final text reply.";
 }
 

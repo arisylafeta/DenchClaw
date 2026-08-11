@@ -103,6 +103,16 @@ describe("denchclaw-mcp-server: curated tool registration", () => {
     expect(toolNames()).toContain("crm_tables");
   });
 
+  it("exposes only CRM-owned tools", () => {
+    expect(toolNames()).toEqual([
+      ...expected,
+      "crm_query",
+      "crm_execute",
+      "crm_tables",
+      "crm_enrichment_query",
+    ]);
+  });
+
   it("marks crm_execute as an escape hatch in its description", () => {
     const t = TOOLS.find((x) => x.name === "crm_execute");
     expect(t.description.toLowerCase()).toContain("escape hatch");

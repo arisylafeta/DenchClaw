@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/denchclaw-state", () => ({
-  advanceOnboardingStep: vi.fn(() => ({ currentStep: "connect-gmail" })),
+  advanceOnboardingStep: vi.fn(() => ({ currentStep: "skill-template" })),
   readOnboardingState: vi.fn(() => ({ currentStep: "dench-cloud" })),
 }));
 
@@ -9,8 +9,8 @@ vi.mock("@/lib/workspace", () => ({
   resolveOpenClawStateDir: vi.fn(() => "/home/testuser/.openclaw-dench"),
 }));
 
-vi.mock("@/lib/composio", () => ({
-  resolveComposioApiKey: vi.fn(() => null),
+vi.mock("@/lib/dench-cloud-settings", () => ({
+  resolveDenchCloudApiKey: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/dench-auth", () => ({

@@ -5,16 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ONBOARDING_STEPS,
   advanceOnboardingStep,
-  clearConnection,
   isOnboardingComplete,
-  readConnections,
   readOnboardingState,
   readPersonalDomainsOverrides,
-  readSyncCursors,
-  writeConnection,
   writeOnboardingState,
   writePersonalDomainsOverrides,
-  writeSyncCursors,
   type OnboardingState,
 } from "./denchclaw-state";
 
@@ -40,9 +35,6 @@ describe("ONBOARDING_STEPS", () => {
       "welcome",
       "identity",
       "dench-cloud",
-      "connect-gmail",
-      "connect-calendar",
-      "backfill",
       "skill-template",
       "complete",
     ]);
@@ -106,58 +98,6 @@ describe("advanceOnboardingStep", () => {
   it("advances to `complete` and isOnboardingComplete returns true", () => {
     advanceOnboardingStep("welcome", "complete", {});
     expect(isOnboardingComplete()).toBe(true);
-  });
-});
-
-describe("connections file", () => {
-  it("starts empty", () => {
-    const conn = readConnections();
-    expect(conn.gmail).toBeUndefined();
-    expect(conn.calendar).toBeUndefined();
-  });
-
-  it("writes + clears per toolkit", () => {
-    writeConnection("gmail", {
-      connectionId: "ca_gmail_1",
-      toolkitSlug: "gmail",
-      accountEmail: "sarah@acme.com",
-      connectedAt: "2026-04-15T00:00:00Z",
-    });
-    writeConnection("calendar", {
-      connectionId: "ca_cal_1",
-      toolkitSlug: "google-calendar",
-      connectedAt: "2026-04-15T00:00:00Z",
-    });
-    let conn = readConnections();
-    expect(conn.gmail?.connectionId).toBe("ca_gmail_1");
-    expect(conn.calendar?.connectionId).toBe("ca_cal_1");
-
-    clearConnection("calendar");
-    conn = readConnections();
-    expect(conn.gmail?.connectionId).toBe("ca_gmail_1");
-    expect(conn.calendar).toBeUndefined();
-  });
-});
-
-describe("sync cursors", () => {
-  it("starts empty and merges patches per toolkit", () => {
-    expect(readSyncCursors().gmail).toBeUndefined();
-    writeSyncCursors({ gmail: { historyId: "1234", messagesProcessed: 100 } });
-    let cursors = readSyncCursors();
-    expect(cursors.gmail?.historyId).toBe("1234");
-    expect(cursors.gmail?.messagesProcessed).toBe(100);
-
-    writeSyncCursors({ gmail: { backfillPageToken: "tok-2" } });
-    cursors = readSyncCursors();
-    // Patch should merge — historyId stays, pageToken added.
-    expect(cursors.gmail?.historyId).toBe("1234");
-    expect(cursors.gmail?.backfillPageToken).toBe("tok-2");
-    expect(cursors.gmail?.messagesProcessed).toBe(100);
-  });
-
-  it("supports a pollIntervalMs override", () => {
-    writeSyncCursors({ pollIntervalMs: 30_000 });
-    expect(readSyncCursors().pollIntervalMs).toBe(30_000);
   });
 });
 

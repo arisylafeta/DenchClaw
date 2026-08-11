@@ -24,11 +24,5 @@ export async function register() {
       }
     }
 
-    // Note: the Gmail/Calendar incremental poll loop is no longer armed
-    // from inside the Next.js process. The OpenClaw gateway daemon's
-    // `dench-ai-gateway` plugin owns the timing now and POSTs to
-    // `/api/sync/poll-tick` every ~5 minutes. That process survives
-    // `denchclaw update` and web-runtime restarts, so the cron stays
-    // alive without depending on Next.js boot hooks.
   }
 }

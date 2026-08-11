@@ -6,11 +6,6 @@
   "activation": {
     "onStartup": true
   },
-  "contracts": {
-    "tools": [
-      "dench_search_integrations"
-    ]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

@@ -7,8 +7,8 @@
  * Per-interaction `Score Contribution` is computed during ingestion (cheap,
  * pure function) and stored on the `interaction` row. The aggregated
  * `Strength Score` on `people` and `company` is recomputed by the
- * `recomputeAllScores` helper, which the sync-runner calls after a backfill
- * finishes and on a nightly tick to apply decay.
+ * `recomputeAllScores` helper after importing or merging interactions and
+ * whenever a caller needs to apply time-based decay.
  *
  * The whole model is intentionally tweakable in one place — change the
  * constants here, re-run `recomputeAllScores`, the People view re-sorts.

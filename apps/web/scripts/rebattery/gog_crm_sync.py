@@ -7,7 +7,7 @@ Only imports emails where:
   1. The email has 'CRM' label in Gmail, OR
   2. At least one counterparty (from/to/cc, excluding account owner) is in CRM people
 
-Writes directly to Postgres crm_* tables. No DuckDB, no Composio.
+Writes directly to Postgres crm_* tables.
 
 Usage:
     python3 gog_crm_sync.py [--dry-run] [--account ari@rebattery.io]

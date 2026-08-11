@@ -7,9 +7,6 @@
  * env-var fallback. Kept as a separate file (rather than importing from
  * `../../extensions/shared/dench-auth.ts`) so the Next.js bundler
  * doesn't have to reach across the workspace boundary.
- *
- * Used by the loopback `/api/sync/poll-tick` endpoint to validate the
- * Bearer token sent by the `dench-ai-gateway` plugin's sync trigger.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEnv } from "../runtime.js";
-import { bootstrapCommand, buildBootstrapDiagnostics } from "./bootstrap-external.js";
+import { bootstrapCommand } from "./bootstrap-external.js";
 
 const promptMocks = vi.hoisted(() => {
   const cancelSignal = Symbol("clack-cancel");
@@ -972,6 +972,23 @@ describe("bootstrapCommand always-onboard behavior", () => {
 
   it("keeps Dench-only integrations off when Dench Cloud is declined", async () => {
     promptMocks.confirmDecision = false;
+    const legacyConfigPath = path.join(stateDir, "openclaw.json");
+    const legacyConfig = JSON.parse(readFileSync(legacyConfigPath, "utf-8"));
+    legacyConfig.mcp = {
+      servers: {
+        composio: { url: "https://legacy.example.com/mcp" },
+        internal: { command: "internal-mcp" },
+      },
+    };
+    legacyConfig.tools = {
+      alsoAllow: ["read", "dench_search_integrations"],
+      byProvider: {
+        "dench-cloud": {
+          allow: ["exec", "dench_execute_integrations"],
+        },
+      },
+    };
+    writeFileSync(legacyConfigPath, JSON.stringify(legacyConfig));
     const runtime: RuntimeEnv = {
       log: vi.fn(),
       error: vi.fn(),
@@ -999,6 +1016,9 @@ describe("bootstrapCommand always-onboard behavior", () => {
     );
 
     const updatedConfig = JSON.parse(readFileSync(path.join(stateDir, "openclaw.json"), "utf-8"));
+    expect(updatedConfig.mcp.servers).toEqual({ internal: { command: "internal-mcp" } });
+    expect(updatedConfig.tools.alsoAllow).toEqual(["read"]);
+    expect(updatedConfig.tools.byProvider["dench-cloud"].allow).toEqual(["exec"]);
     expect(updatedConfig.plugins.entries["exa-search"]).toEqual(
       expect.objectContaining({ enabled: false }),
     );
@@ -2335,63 +2355,5 @@ describe("bootstrapCommand always-onboard behavior", () => {
         expect(leakedKeys).toEqual([]);
       }
     }
-  });
-});
-
-describe("buildBootstrapDiagnostics", () => {
-  let stateDir = "";
-
-  beforeEach(() => {
-    stateDir = createTempStateDir();
-    writeBootstrapFixtures(stateDir);
-  });
-
-  afterEach(() => {
-    rmSync(stateDir, { recursive: true, force: true });
-  });
-
-  function buildDiagnostics(params?: {
-    denchCloudEnabled?: boolean;
-    composioConfigured?: boolean;
-  }) {
-    return buildBootstrapDiagnostics({
-      profile: "dench",
-      openClawCliAvailable: true,
-      openClawVersion: "OpenClaw 2026.3.31",
-      gatewayPort: 19001,
-      gatewayUrl: "http://127.0.0.1:19001",
-      gatewayProbe: { ok: true },
-      denchCloudEnabled: params?.denchCloudEnabled ?? true,
-      composioConfigured: params?.composioConfigured ?? true,
-      webPort: 3100,
-      webReachable: true,
-      rolloutStage: "default",
-      legacyFallbackEnabled: false,
-      stateDir,
-      env: process.env,
-    });
-  }
-
-  it("reports Dench Integrations as configured when Dench Cloud is enabled", () => {
-    const diagnostics = buildDiagnostics();
-    const check = diagnostics.checks.find((entry) => entry.id === "composio");
-    expect(check).toMatchObject({
-      id: "composio",
-      status: "pass",
-      detail: "Dench Integrations configured via Dench Cloud gateway.",
-    });
-  });
-
-  it("warns when Dench Cloud is enabled but Dench Integrations is not configured", () => {
-    const diagnostics = buildDiagnostics({ composioConfigured: false });
-    const check = diagnostics.checks.find((entry) => entry.id === "composio");
-    expect(check?.status).toBe("warn");
-    expect(check?.detail).toContain("Dench Integrations not configured");
-    expect(check?.remediation).toContain("Settings > Integrations");
-  });
-
-  it("omits the Composio check when Dench Cloud is disabled", () => {
-    const diagnostics = buildDiagnostics({ denchCloudEnabled: false, composioConfigured: false });
-    expect(diagnostics.checks.some((entry) => entry.id === "composio")).toBe(false);
   });
 });

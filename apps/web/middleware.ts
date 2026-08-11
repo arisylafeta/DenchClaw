@@ -11,7 +11,6 @@ const PUBLIC_ROUTES = new Set([
   "/login",
   "/api/auth/login",
   "/api/auth/me",
-  "/api/composio/callback",
   "/api/settings/mcp/connect/callback",
 ]);
 const PUBLIC_PREFIXES = ["/api/apps/webhooks/"];

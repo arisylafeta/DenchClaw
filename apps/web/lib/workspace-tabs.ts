@@ -64,7 +64,6 @@ export type ContentTabKind =
   | "cron-dashboard"
   | "cron-job"
   | "skills"
-  | "integrations"
   | "cloud"
   | "crm-inbox"
   | "crm-calendar"
@@ -344,7 +343,6 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
   if (path === "~cron") return "cron-dashboard";
   if (path.startsWith("~cron/")) return "cron-job";
   if (path === "~skills") return "skills";
-  if (path === "~integrations") return "integrations";
   if (path === "~cloud") return "cloud";
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/calendar") return "crm-calendar";
@@ -357,7 +355,6 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~cron") return "Cron";
   if (path.startsWith("~cron/")) return path.slice("~cron/".length) || "Cron Job";
   if (path === "~skills") return "Skills";
-  if (path === "~integrations") return "Integrations";
   if (path === "~cloud") return "Cloud";
   if (path === "~crm/inbox") return "Inbox";
   if (path === "~crm/calendar") return "Calendar";

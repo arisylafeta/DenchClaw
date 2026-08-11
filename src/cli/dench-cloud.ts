@@ -128,10 +128,6 @@ export function buildDenchGatewayCatalogUrl(gatewayUrl: string | undefined): str
 }
 
 export const RECOMMENDED_DENCH_CLOUD_MODEL_ID = "claude-sonnet-4.6";
-export const DENCH_COMPOSIO_WRAPPER_TOOLS = [
-  "dench_search_integrations",
-  "dench_execute_integrations",
-] as const;
 export const DENCH_CLOUD_TOOL_ALLOWLIST = [
   "read",
   "write",
@@ -157,7 +153,6 @@ export const DENCH_CLOUD_TOOL_ALLOWLIST = [
   "image_generate",
   "music_generate",
   "video_generate",
-  ...DENCH_COMPOSIO_WRAPPER_TOOLS,
 ] as const;
 
 // Fallback list used only when the live gateway catalog is unreachable.
@@ -396,6 +391,7 @@ export async function validateDenchCloudApiKey(gatewayUrl: string, apiKey: strin
     const cause = err instanceof Error ? err.message : String(err);
     throw new Error(
       `Could not reach Dench Cloud gateway at ${apiBaseUrl} (${cause}). Check your network connection and gateway URL, then try again.`,
+      { cause: err },
     );
   }
 
@@ -443,27 +439,6 @@ export type DenchCloudProviderConfig = {
   models: ReturnType<typeof buildDenchCloudProviderModels>;
 };
 
-export type ComposioMcpServerConfig = {
-  url: string;
-  transport: "streamable-http";
-  headers: {
-    Authorization: string;
-  };
-};
-
-export function buildComposioMcpServerConfig(
-  gatewayUrl: string,
-  apiKey: string,
-): ComposioMcpServerConfig {
-  return {
-    url: `${gatewayUrl}/v1/composio/mcp`,
-    transport: "streamable-http",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  };
-}
-
 export function buildDenchCloudProviderConfig(params: {
   gatewayUrl: string;
   apiKey: string;
@@ -506,7 +481,6 @@ export function buildDenchCloudConfigPatch(params: {
       },
     },
     tools: {
-      alsoAllow: [...DENCH_COMPOSIO_WRAPPER_TOOLS],
       byProvider: {
         "dench-cloud": {
           allow: [...DENCH_CLOUD_TOOL_ALLOWLIST],
@@ -530,8 +504,12 @@ export function resolveDenchCloudModel(
 
 export function formatDenchCloudModelHint(model: DenchCloudCatalogModel): string {
   const parts: string[] = [model.provider];
-  if (model.reasoning) parts.push("reasoning");
-  if (model.id === RECOMMENDED_DENCH_CLOUD_MODEL_ID) parts.push("recommended");
+  if (model.reasoning) {
+    parts.push("reasoning");
+  }
+  if (model.id === RECOMMENDED_DENCH_CLOUD_MODEL_ID) {
+    parts.push("recommended");
+  }
   return parts.join(" · ");
 }
 

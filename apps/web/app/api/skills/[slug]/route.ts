@@ -6,7 +6,7 @@ import { resolveWorkspaceRoot } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-const PROTECTED_SKILLS = ["crm", "browser", "dench-integrations"];
+const PROTECTED_SKILLS = ["crm", "browser", "composio-cli", "monid"];
 
 export async function DELETE(
   _req: Request,

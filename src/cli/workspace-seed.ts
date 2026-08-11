@@ -139,7 +139,8 @@ export function generateWorkspaceMd(objects: SeedObject[]): string {
 
 export const MANAGED_SKILLS: ReadonlyArray<{ name: string; templatePaths?: boolean }> = [
   { name: "crm", templatePaths: true },
-  { name: "dench-integrations" },
+  { name: "composio-cli" },
+  { name: "monid" },
 ];
 
 export function seedSkill(

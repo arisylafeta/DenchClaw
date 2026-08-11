@@ -7,9 +7,6 @@ import {
 import { resolveOpenClawStateDir } from "@/lib/workspace";
 import { writeDenchAuthProfileKey } from "@/lib/dench-auth";
 import {
-  resolveComposioApiKey,
-} from "@/lib/composio";
-import {
   saveApiKey,
   selectModel,
 } from "@/lib/dench-cloud-settings";
@@ -17,6 +14,7 @@ import {
   RECOMMENDED_DENCH_CLOUD_MODEL_ID,
   readConfiguredDenchCloudSettings,
 } from "../../../../../../src/cli/dench-cloud";
+import { resolveDenchCloudApiKey } from "@/lib/dench-cloud-settings";
 import { trackServer } from "@/lib/telemetry";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +49,7 @@ function isDenchCloudPrimary(config: UnknownRecord): { ok: boolean; primary: str
 
 export async function GET() {
   const config = readOpenClawConfig();
-  const apiKey = resolveComposioApiKey();
+  const apiKey = resolveDenchCloudApiKey();
   const primary = isDenchCloudPrimary(config);
 
   return Response.json({
@@ -77,14 +75,14 @@ export async function POST(req: Request) {
     // Confirm ReBattery Cloud really *is* set up (defends against a stale
     // detection from before the user ran the CLI bootstrap).
     const config = readOpenClawConfig();
-    const apiKey = resolveComposioApiKey();
+    const apiKey = resolveDenchCloudApiKey();
     if (!apiKey || !isDenchCloudPrimary(config).ok) {
       return Response.json(
         { error: "ReBattery Cloud is not configured yet. Paste your API key to continue." },
         { status: 400 },
       );
     }
-    const next = advanceOnboardingStep("dench-cloud", "connect-gmail", {
+    const next = advanceOnboardingStep("dench-cloud", "skill-template", {
       denchCloud: {
         source: "cli",
         skipped: false,
@@ -131,7 +129,7 @@ export async function POST(req: Request) {
   // Mirror into auth-profiles.json so the agent runtime sees the same key.
   writeDenchAuthProfileKey(apiKey);
 
-  const next = advanceOnboardingStep("dench-cloud", "connect-gmail", {
+  const next = advanceOnboardingStep("dench-cloud", "skill-template", {
     denchCloud: {
       source: "web",
       skipped: false,
