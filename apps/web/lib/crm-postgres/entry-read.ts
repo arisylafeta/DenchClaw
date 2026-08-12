@@ -258,12 +258,12 @@ async function resolveRelationLabels(
       for (const row of rows) labels[field.name][row.id] = row.name || row.id;
     }
     if (field.related_object_name === "crm_user") {
-      const rows = await queryPg<{ id: string; display_name: string }>(
-        "select id::text, display_name from crm_users where id = any($1::uuid[]) and is_active",
+      const rows = await queryPg<{ id: string; email: string }>(
+        "select id::text, email from crm_users where id = any($1::uuid[]) and is_active",
         [ids],
       );
       for (const row of rows)
-        labels[field.name][row.id] = row.display_name || row.id;
+        labels[field.name][row.id] = row.email || row.id;
     }
     if (field.related_object_name === "company" || field.name === "Company") {
       const rows = await queryPg<{

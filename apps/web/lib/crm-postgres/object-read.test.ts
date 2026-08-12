@@ -320,7 +320,7 @@ describe("postgres object read adapter", () => {
         return [{ id: "c1", name: "Acme", domain: "acme.test", website: null }];
       if (sql.includes("from crm_users"))
         return [
-          { id: "11111111-1111-4111-8111-111111111111", display_name: "Ari" },
+          { id: "11111111-1111-4111-8111-111111111111", email: "ari@rebattery.io" },
         ];
       return [];
     });
@@ -582,7 +582,7 @@ describe("postgres object read adapter", () => {
       p1: "Supplier inventory lifecycle",
     });
     expect(data.relationLabels.Assignee).toEqual({
-      "11111111-1111-4111-8111-111111111111": "Ari",
+      "11111111-1111-4111-8111-111111111111": "ari@rebattery.io",
     });
     const projectOptionsCall = queryPg.mock.calls.find(([sql]) =>
       String(sql).includes("from projects"),

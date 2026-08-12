@@ -162,7 +162,7 @@ describe("postgres entry read", () => {
       expect(data.relationLabels.Company.c1).toBe("Acme");
     });
 
-    it("resolves a Work Task assignee to the CRM user display name", async () => {
+    it("resolves a Work Task assignee to the CRM user email", async () => {
       queryPg.mockImplementation(async (sql: string, params?: unknown[]) => {
         if (
           sql.includes("from crm_objects") &&
@@ -218,7 +218,7 @@ describe("postgres entry read", () => {
         if (sql.includes("from crm_users")) {
           expect(params?.[0]).toEqual(["11111111-1111-4111-8111-111111111111"]);
           return [
-            { id: "11111111-1111-4111-8111-111111111111", display_name: "Ari" },
+            { id: "11111111-1111-4111-8111-111111111111", email: "ari@rebattery.io" },
           ];
         }
         if (sql.includes("from crm_relation_links")) return [];
@@ -228,7 +228,7 @@ describe("postgres entry read", () => {
       const { getPostgresEntryData } = await import("./entry-read");
       const data = await getPostgresEntryData("work_task", "task-1");
       expect(data.relationLabels.Assignee).toEqual({
-        "11111111-1111-4111-8111-111111111111": "Ari",
+        "11111111-1111-4111-8111-111111111111": "ari@rebattery.io",
       });
     });
 
