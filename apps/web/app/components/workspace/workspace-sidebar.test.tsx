@@ -27,7 +27,7 @@ describe("workspace sidebar navigation", () => {
     });
   });
 
-  it("renders categorized links with loop monitoring beside Cron", () => {
+	it("renders categorized automation links beside Cron", () => {
     render(
       <WorkspaceSidebar
         onNavigate={vi.fn()}
@@ -45,10 +45,10 @@ describe("workspace sidebar navigation", () => {
 
     const navigationLabels = screen.getAllByRole("button").map((button) => button.textContent?.trim()).filter(Boolean);
     expect(navigationLabels).toEqual(expect.arrayContaining([
-      "People", "Companies", "Inbox", "Calendar", "Campaigns", "Work Tasks", "Loops", "Loop Runs", "Cron",
-    ]));
-    expect(navigationLabels.indexOf("Loops")).toBeLessThan(navigationLabels.indexOf("Loop Runs"));
-    expect(navigationLabels.indexOf("Loop Runs")).toBeLessThan(navigationLabels.indexOf("Cron"));
+		"People", "Companies", "Inbox", "Calendar", "Campaigns", "Work Tasks", "Automation Loops", "Automation Loop Runs", "Cron",
+		]));
+		expect(navigationLabels.indexOf("Automation Loops")).toBeLessThan(navigationLabels.indexOf("Automation Loop Runs"));
+		expect(navigationLabels.indexOf("Automation Loop Runs")).toBeLessThan(navigationLabels.indexOf("Cron"));
   });
 
   it("does not flash the fixed CRM links before dynamic objects load", () => {

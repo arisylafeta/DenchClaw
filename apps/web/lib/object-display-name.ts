@@ -23,15 +23,9 @@
  * these helpers are display-only.
  */
 
-const PLURAL_DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map([
-  ["automation_loop", "Loops"],
-  ["automation_loop_run", "Loop Runs"],
-]);
+const PLURAL_DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map();
 
-const SINGULAR_DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map([
-  ["automation_loop", "Loop"],
-  ["automation_loop_run", "Loop Run"],
-]);
+const SINGULAR_DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map();
 
 const KNOWN_ACRONYMS: ReadonlySet<string> = new Set([
   // venture / fundraising

@@ -52,9 +52,9 @@ describe("displayObjectName (plural)", () => {
     expect(displayObjectName("my_company")).toBe("My Companies");
   });
 
-  it("uses concise labels for loop monitoring objects", () => {
-    expect(displayObjectName("automation_loop")).toBe("Loops");
-    expect(displayObjectName("automation_loop_run")).toBe("Loop Runs");
+	it("uses generic labels for retired loop monitoring object names", () => {
+		expect(displayObjectName("automation_loop")).toBe("Automation Loops");
+		expect(displayObjectName("automation_loop_run")).toBe("Automation Loop Runs");
   });
 
   it("does not all-cap regular words like 'My'", () => {
@@ -115,9 +115,9 @@ describe("displayObjectNameSingular", () => {
     expect(displayObjectNameSingular("my_company")).toBe("My Company");
   });
 
-  it("uses concise singular labels for loop monitoring objects", () => {
-    expect(displayObjectNameSingular("automation_loop")).toBe("Loop");
-    expect(displayObjectNameSingular("automation_loop_run")).toBe("Loop Run");
+	it("uses generic singular labels for retired loop monitoring object names", () => {
+		expect(displayObjectNameSingular("automation_loop")).toBe("Automation Loop");
+		expect(displayObjectNameSingular("automation_loop_run")).toBe("Automation Loop Run");
   });
 
   it("singularizes already-plural inputs", () => {

@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { importLoopMonitorSnapshot, type LoopMonitorSnapshot } from "../lib/crm-postgres/loop-monitor-import";
-import { pgPool, queryPg } from "../lib/postgres";
-import { writeLoopMonitorWorkspace } from "../../../scripts/rebattery/loop-monitor-workspace.mjs";
+import { pgPool } from "../lib/postgres";
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -28,18 +27,9 @@ function loadSnapshot(): LoopMonitorSnapshot {
 }
 
 try {
-  const workspaceRoot = process.env.LOOP_MONITOR_WORKSPACE_ROOT;
-  if (!workspaceRoot) throw new Error("Set LOOP_MONITOR_WORKSPACE_ROOT explicitly.");
   const snapshot = loadSnapshot();
   const imported = await importLoopMonitorSnapshot(snapshot);
-  const [loopCountRows, runCountRows] = await Promise.all([
-    queryPg<{ count: string }>("select count(*)::text as count from automation_loops where tombstoned_at is null"),
-    queryPg<{ count: string }>("select count(*)::text as count from automation_loop_runs"),
-  ]);
-  const loopCount = Number(loopCountRows[0]?.count ?? 0);
-  const runCount = Number(runCountRows[0]?.count ?? 0);
-  writeLoopMonitorWorkspace(workspaceRoot, loopCount, runCount);
-  console.log(JSON.stringify({ ok: true, generatedAt: snapshot.generatedAt, imported, visibleLoops: loopCount, retainedRuns: runCount }));
+  console.log(JSON.stringify({ ok: true, generatedAt: snapshot.generatedAt, imported }));
 } finally {
   await pgPool.end();
 }
