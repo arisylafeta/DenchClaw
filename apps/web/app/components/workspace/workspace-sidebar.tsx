@@ -351,6 +351,8 @@ export function WorkspaceSidebar({
 	// Top-level tab: "home" shows the workspace / CRM / bottom nav. "chats"
 	// swaps the body with a chat history list provided by the host.
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
+	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
+	const [adminTreeOpen, setAdminTreeOpen] = useState(true);
   const [authUser, setAuthUser] = useState<{
     displayName: string;
     email: string;
@@ -594,6 +596,7 @@ export function WorkspaceSidebar({
 							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
 						))
 					) : (<>
+					<div role="group" aria-label="CRM" className="flex flex-col items-center gap-0.5">
 					{crmNavItems.map((item) => {
 						const active = activeCrmTarget === item.target;
 						return (
@@ -621,6 +624,10 @@ export function WorkspaceSidebar({
 							</button>
 						);
 					})}
+					{objectGroups.crm.map(renderCompactObject)}
+					</div>
+					<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
+					<div role="group" aria-label="Admin" className="flex flex-col items-center gap-0.5">
 					{platformNavItems.map((item) => {
 						const active = activePlatformTarget === item.target;
 						return (
@@ -629,7 +636,7 @@ export function WorkspaceSidebar({
 							</button>
 						);
 					})}
-					{objectGroups.crm.map(renderCompactObject)}
+					</div>
 					{objectGroups.work.length > 0 && (
 						<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
 					)}
@@ -829,10 +836,20 @@ export function WorkspaceSidebar({
 						))}
 					</div>
 				) : (<>
-					<div className="px-2 pt-2 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-						crm
-					</div>
-					<div className="space-y-0.5">
+					<button
+						type="button"
+						onClick={() => setCrmTreeOpen((open) => !open)}
+						aria-expanded={crmTreeOpen}
+						aria-controls="sidebar-crm-tree"
+						className="w-full flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.05em]"
+						style={{ color: "var(--color-text-muted)" }}
+					>
+						<svg className={`h-3 w-3 transition-transform ${crmTreeOpen ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+							<path d="m9 18 6-6-6-6" />
+						</svg>
+						CRM
+					</button>
+					{crmTreeOpen && <div id="sidebar-crm-tree" role="group" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
 						{crmNavItems.map((item) => {
 							const active = activeCrmTarget === item.target;
 							return (
@@ -849,12 +866,22 @@ export function WorkspaceSidebar({
 							);
 						})}
 						{objectGroups.crm.map(renderExpandedObject)}
-					</div>
+					</div>}
 
-					<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-						platform
-					</div>
-					<div className="space-y-0.5">
+					<button
+						type="button"
+						onClick={() => setAdminTreeOpen((open) => !open)}
+						aria-expanded={adminTreeOpen}
+						aria-controls="sidebar-admin-tree"
+						className="mt-2 w-full flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.05em]"
+						style={{ color: "var(--color-text-muted)" }}
+					>
+						<svg className={`h-3 w-3 transition-transform ${adminTreeOpen ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+							<path d="m9 18 6-6-6-6" />
+						</svg>
+						Admin
+					</button>
+					{adminTreeOpen && <div id="sidebar-admin-tree" role="group" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
 						{platformNavItems.map((item) => {
 							const active = activePlatformTarget === item.target;
 							return (
@@ -864,7 +891,7 @@ export function WorkspaceSidebar({
 								</button>
 							);
 						})}
-					</div>
+					</div>}
 
 					{objectGroups.work.length > 0 && (<>
 						<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>

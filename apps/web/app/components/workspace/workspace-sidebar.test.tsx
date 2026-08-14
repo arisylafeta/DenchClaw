@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { categorizeSidebarObjects, WorkspaceSidebar } from "./workspace-sidebar";
 
 vi.mock("./profile-switcher", () => ({
@@ -36,9 +36,9 @@ describe("workspace sidebar navigation", () => {
       />,
     );
 
-    expect(screen.getByText("crm")).toBeTruthy();
     expect(screen.getByText("work")).toBeTruthy();
-    expect(screen.getByText("platform")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CRM" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Admin" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("automations")).toBeTruthy();
     expect(screen.queryByText("Cloud")).toBeNull();
     expect(screen.queryByText("Integrations")).toBeNull();
@@ -50,6 +50,55 @@ describe("workspace sidebar navigation", () => {
     ]));
     expect(navigationLabels.indexOf("Loops")).toBeLessThan(navigationLabels.indexOf("Loop Runs"));
     expect(navigationLabels.indexOf("Loop Runs")).toBeLessThan(navigationLabels.indexOf("Cron"));
+  });
+
+  it("collapses CRM and Admin as independent trees", () => {
+    render(
+      <WorkspaceSidebar
+        onNavigate={vi.fn()}
+        onNavigateToCrmObject={vi.fn()}
+        customCrmObjects={objects}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "CRM" }));
+    expect(screen.queryByRole("button", { name: "People" })).toBeNull();
+  });
+
+  it("keeps compact CRM and Admin links in separate ordered groups", () => {
+    render(
+      <WorkspaceSidebar
+        compact
+        onNavigate={vi.fn()}
+        onNavigateToCrmObject={vi.fn()}
+        customCrmObjects={objects}
+      />,
+    );
+
+    const crmGroup = screen.getByRole("group", { name: "CRM" });
+    const adminGroup = screen.getByRole("group", { name: "Admin" });
+    expect(crmGroup).toContainElement(screen.getByRole("button", { name: "Campaigns" }));
+    expect(adminGroup).toContainElement(screen.getByRole("button", { name: "Accounts" }));
+    expect(crmGroup.compareDocumentPosition(adminGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("uses the same collapsible trees in the mobile drawer", () => {
+    render(
+      <WorkspaceSidebar
+        mobile
+        onNavigate={vi.fn()}
+        onNavigateToCrmObject={vi.fn()}
+        customCrmObjects={objects}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
   });
 
   it("does not flash the fixed CRM links before dynamic objects load", () => {
