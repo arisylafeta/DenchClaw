@@ -82,6 +82,12 @@ export type DenchAppManifest = {
   routes?: Record<string, string>;
 };
 
+export type PlatformAdminSection =
+  | "proposals"
+  | "accounts"
+  | "battery-review"
+  | "payout-reviews";
+
 export type ContentState =
   | { kind: "none" }
   | { kind: "loading" }
@@ -98,6 +104,7 @@ export type ContentState =
   | { kind: "cron-dashboard" }
   | { kind: "skill-store" }
   | { kind: "cloud" }
+  | { kind: "platform-admin"; section: PlatformAdminSection }
   | { kind: "cron-job"; jobId: string; job: CronJob }
   | { kind: "cron-session"; jobId: string; job: CronJob; sessionId: string; run: CronRunLogEntry }
   | { kind: "duckdb-missing" }

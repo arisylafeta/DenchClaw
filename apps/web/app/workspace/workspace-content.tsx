@@ -387,6 +387,7 @@ function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   if (path.startsWith("~cron/")) return "cron-job";
   if (path === "~skills") return "skills";
   if (path === "~cloud") return "cloud";
+  if (path.startsWith("~platform-admin/")) return "platform-admin";
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/calendar") return "crm-calendar";
   switch (nodeType) {
@@ -1053,6 +1054,9 @@ function WorkspacePageInner() {
         return `CRM ${view.charAt(0).toUpperCase()}${view.slice(1)}`;
       }
       if (activePath === "~cloud") return "Cloud settings";
+      if (activePath.startsWith("~platform-admin/")) {
+        return inferContentTabTitle(activePath);
+      }
       if (activePath === "~skills") return "Skills store";
       if (activePath === "~cron") return "Cron dashboard";
       if (activePath.startsWith("~cron/")) return `Cron job ${activePath.slice("~cron/".length)}`;
@@ -1301,7 +1305,11 @@ function WorkspacePageInner() {
         | "crm-people"
         | "crm-companies"
         | "crm-inbox"
-        | "crm-calendar",
+        | "crm-calendar"
+        | "platform-proposals"
+        | "platform-accounts"
+        | "platform-battery-review"
+        | "platform-payout-reviews",
     ) => {
       // Make sure the right panel is open and wide enough to actually use
       // when the user clicks one of the data tabs (People, Companies, etc.).
@@ -1330,6 +1338,10 @@ function WorkspacePageInner() {
         cron: { path: "~cron", name: "Cron" },
         "crm-inbox": { path: "~crm/inbox", name: "Inbox" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
+        "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
+        "platform-accounts": { path: "~platform-admin/accounts", name: "Accounts" },
+        "platform-battery-review": { path: "~platform-admin/battery-review", name: "Battery review" },
+        "platform-payout-reviews": { path: "~platform-admin/payout-reviews", name: "Payout reviews" },
       }[target];
       openTabForNode({ path: config.path, name: config.name, type: "folder" }, { preview: false });
       closeEntryModalIfOpen();
@@ -1748,6 +1760,7 @@ function WorkspacePageInner() {
         const view = path.slice("~crm/".length).split("/")[0];
         if (view === "people" || view === "companies") return "object";
       }
+      if (path.startsWith("~platform-admin/")) return "platform-admin";
       return null;
     },
   }), [tree]);
@@ -2309,6 +2322,9 @@ function WorkspacePageInner() {
               ? "calendar" as const
               : null
     ),
+    activePlatformTarget: activeContentTab?.kind === "platform-admin"
+      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "accounts" | "battery-review" | "payout-reviews"
+      : null,
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
     onNavigateToCrmObject: handleNavigateToObject,
@@ -3046,6 +3062,15 @@ function ContentRenderer({
             <CloudSettingsPanel />
           </div>
         </div>
+      );
+
+    case "platform-admin":
+      return (
+        <iframe
+          className="h-full w-full border-0 bg-background"
+          src={`/platform-admin/${content.section}`}
+          title={inferContentTabTitle(`~platform-admin/${content.section}`)}
+        />
       );
 
     case "cron-job":

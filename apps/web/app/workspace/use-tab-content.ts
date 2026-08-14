@@ -265,6 +265,7 @@ function kindIsDerived(kind: ContentTab["kind"]): boolean {
     case "cron-job":
     case "skills":
     case "cloud":
+    case "platform-admin":
     case "crm-inbox":
     case "crm-calendar":
     case "crm-person":
@@ -309,6 +310,18 @@ function resolveDerivedContent(
       return { kind: "skill-store" };
     case "cloud":
       return { kind: "cloud" };
+    case "platform-admin": {
+      const section = tab.path.replace(/^~platform-admin\//, "");
+      if (
+        section === "proposals" ||
+        section === "accounts" ||
+        section === "battery-review" ||
+        section === "payout-reviews"
+      ) {
+        return { kind: "platform-admin", section };
+      }
+      return { kind: "none" };
+    }
     case "crm-inbox":
       return { kind: "crm-inbox" };
     case "crm-calendar":

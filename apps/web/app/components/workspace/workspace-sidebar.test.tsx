@@ -38,6 +38,7 @@ describe("workspace sidebar navigation", () => {
 
     expect(screen.getByText("crm")).toBeTruthy();
     expect(screen.getByText("work")).toBeTruthy();
+    expect(screen.getByText("platform")).toBeTruthy();
     expect(screen.getByText("automations")).toBeTruthy();
     expect(screen.queryByText("Cloud")).toBeNull();
     expect(screen.queryByText("Integrations")).toBeNull();
@@ -45,7 +46,7 @@ describe("workspace sidebar navigation", () => {
 
     const navigationLabels = screen.getAllByRole("button").map((button) => button.textContent?.trim()).filter(Boolean);
     expect(navigationLabels).toEqual(expect.arrayContaining([
-      "People", "Companies", "Inbox", "Calendar", "Campaigns", "Work Tasks", "Loops", "Loop Runs", "Cron",
+      "People", "Companies", "Inbox", "Calendar", "Recycler selection", "Accounts", "Battery review", "Payout reviews", "Campaigns", "Work Tasks", "Loops", "Loop Runs", "Cron",
     ]));
     expect(navigationLabels.indexOf("Loops")).toBeLessThan(navigationLabels.indexOf("Loop Runs"));
     expect(navigationLabels.indexOf("Loop Runs")).toBeLessThan(navigationLabels.indexOf("Cron"));

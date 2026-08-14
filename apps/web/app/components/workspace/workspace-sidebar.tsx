@@ -116,10 +116,16 @@ type WorkspaceSidebarProps = {
       | "crm-people"
       | "crm-companies"
       | "crm-inbox"
-      | "crm-calendar",
+      | "crm-calendar"
+      | "platform-proposals"
+      | "platform-accounts"
+      | "platform-battery-review"
+      | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
   activeCrmTarget?: "people" | "companies" | "inbox" | "calendar" | null;
+  /** Currently-active marketplace operations page. */
+  activePlatformTarget?: "proposals" | "accounts" | "battery-review" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
   customCrmObjects?: CustomCrmObject[];
   /** Currently-active custom CRM object name, used to highlight the row. */
@@ -332,6 +338,7 @@ export function WorkspaceSidebar({
   onWorkspaceChanged,
   onNavigate,
   activeCrmTarget = null,
+  activePlatformTarget = null,
   customCrmObjects,
   activeCrmObjectName = null,
   onNavigateToCrmObject,
@@ -427,6 +434,33 @@ export function WorkspaceSidebar({
 					<line x1="3" y1="10" x2="21" y2="10" />
 				</svg>
 			),
+		},
+	];
+
+	const platformNavItems = [
+		{
+			id: "platform-proposals" as const,
+			label: "Recycler selection",
+			target: "proposals" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-2-2h-2.3l-1.2-2H8.5L7.3 6H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2Z" /><path d="m8 13 2 2 4-4" /></svg>,
+		},
+		{
+			id: "platform-accounts" as const,
+			label: "Accounts",
+			target: "accounts" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="m19 8 2 2 3-3" /></svg>,
+		},
+		{
+			id: "platform-battery-review" as const,
+			label: "Battery review",
+			target: "battery-review" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4" /><path d="m7 10 3 2-3 2" /></svg>,
+		},
+		{
+			id: "platform-payout-reviews" as const,
+			label: "Payout reviews",
+			target: "payout-reviews" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /><path d="m16 15 2 2 3-3" /></svg>,
 		},
 	];
 
@@ -583,6 +617,14 @@ export function WorkspaceSidebar({
 								title={item.label}
 								aria-label={item.label}
 							>
+								{item.icon}
+							</button>
+						);
+					})}
+					{platformNavItems.map((item) => {
+						const active = activePlatformTarget === item.target;
+						return (
+							<button key={item.id} type="button" onClick={() => onNavigate(item.id)} className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors" style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }} title={item.label} aria-label={item.label}>
 								{item.icon}
 							</button>
 						);
@@ -807,6 +849,21 @@ export function WorkspaceSidebar({
 							);
 						})}
 						{objectGroups.crm.map(renderExpandedObject)}
+					</div>
+
+					<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
+						platform
+					</div>
+					<div className="space-y-0.5">
+						{platformNavItems.map((item) => {
+							const active = activePlatformTarget === item.target;
+							return (
+								<button key={item.id} type="button" onClick={() => onNavigate(item.id)} className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors" style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }}>
+									<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{item.icon}</span>
+									{item.label}
+								</button>
+							);
+						})}
 					</div>
 
 					{objectGroups.work.length > 0 && (<>
