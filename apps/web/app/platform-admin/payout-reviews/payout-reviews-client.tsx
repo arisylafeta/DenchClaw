@@ -130,7 +130,7 @@ export function PayoutReviewsClient({
   return (
     <div className="space-y-6 p-6 lg:p-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Payout reviews</h1>
+        <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Payout reviews</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Review UK Confirmation of Payee exceptions. Approval acknowledges the bank-name result in Stripe; it never releases deal funds.
         </p>

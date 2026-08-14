@@ -271,7 +271,7 @@ function AccountDetailsSheet({
           )}
 
           {!isLoading && error && (
-            <div className="text-sm text-destructive">{error}</div>
+            <div className="text-sm text-[var(--color-error)]">{error}</div>
           )}
 
           {!isLoading && !error && details && (
@@ -346,7 +346,7 @@ function AccountDetailsSheet({
                     </dl>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">public_fields_json</p>
-                      <pre className="max-h-44 overflow-auto rounded bg-muted p-2 text-xs">
+                      <pre className="max-h-44 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
                         {formatJson(details.publicProfile.public_fields_json)}
                       </pre>
                     </div>
@@ -376,19 +376,19 @@ function AccountDetailsSheet({
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">billing_address</p>
-                      <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
+                      <pre className="max-h-40 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
                         {formatJson(details.privateProfile.billing_address)}
                       </pre>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">addresses_json</p>
-                      <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
+                      <pre className="max-h-40 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
                         {formatJson(details.privateProfile.addresses_json)}
                       </pre>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">ops_json</p>
-                      <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
+                      <pre className="max-h-40 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
                         {formatJson(details.privateProfile.ops_json)}
                       </pre>
                     </div>
@@ -482,7 +482,7 @@ function ComposeSheet({ open, onOpenChange, recipients, onSent }: ComposeSheetPr
         <SheetHeader>
           <SheetTitle>Send email</SheetTitle>
           <SheetDescription>
-            To: <span className="font-medium text-foreground">{recipientLabel}</span>
+            To: <span className="font-medium text-[var(--color-text)]">{recipientLabel}</span>
           </SheetDescription>
         </SheetHeader>
 
@@ -789,11 +789,11 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-6 p-6 lg:p-8">
         {/* Page heading */}
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Accounts</h1>
+            <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Accounts</h1>
             <p className="text-sm text-muted-foreground mt-1">
               {accounts.length} account{accounts.length !== 1 ? "s" : ""} total
             </p>
@@ -860,7 +860,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
 
           {TABS.map(({ value }) => (
             <TabsContent key={value} value={value}>
-              <div className="rounded-lg border bg-background overflow-hidden mt-4">
+              <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
                 <Table className="min-w-[980px]">
                   <TableHeader>
                     <TableRow>
@@ -912,7 +912,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
                             <button
                               type="button"
                               onClick={() => handleOpenAccountDetails(account.id)}
-                              className="font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                              className="font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] hover:underline"
                             >
                               {account.name}
                             </button>

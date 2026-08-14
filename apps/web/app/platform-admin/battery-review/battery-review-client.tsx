@@ -176,7 +176,7 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
   };
 
   const sortLabel = (column: string, label: string) => (
-    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort(column)}>
+    <button type="button" className="inline-flex items-center gap-1 hover:text-[var(--color-text)]" onClick={() => toggleSort(column)}>
       {label}
       {sort === column ? (ascending ? <ArrowUpIcon className="size-3" /> : <ArrowDownIcon className="size-3" />) : null}
     </button>
@@ -185,7 +185,7 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
   return (
     <div className="space-y-6 p-6 lg:p-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Battery review</h1>
+        <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Battery review</h1>
         <p className="mt-1 text-sm text-muted-foreground">Browse the live canonical battery catalogue and captured evidence. Review decisions are intentionally not enabled yet.</p>
       </div>
 

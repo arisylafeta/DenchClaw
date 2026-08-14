@@ -404,11 +404,11 @@ export function ProposalsClient({
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-4 sm:p-6 space-y-6">
+    <div className="space-y-6 p-6 lg:p-8">
       {/* ── Page header ── */}
       <div>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Proposals</h1>
+          <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Proposals</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Invite recyclers to published listings and manage opportunity links.
           </p>
@@ -416,7 +416,7 @@ export function ProposalsClient({
       </div>
 
       <nav
-        className="grid gap-2 rounded-lg border bg-muted/30 p-2 lg:grid-cols-3"
+        className="grid gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-hover)]/60 p-2 lg:grid-cols-3"
         aria-label="Proposal workflow"
       >
         <Button
@@ -426,7 +426,7 @@ export function ProposalsClient({
           aria-pressed={activeView === "listing"}
           onClick={() => setActiveView("listing")}
         >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border bg-background text-xs">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-xs">
             {selectedListing ? <Check className="size-3.5" /> : "1"}
           </span>
           <span className="min-w-0 text-left">
@@ -443,7 +443,7 @@ export function ProposalsClient({
           aria-pressed={activeView === "recyclers"}
           onClick={() => setActiveView("recyclers")}
         >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border bg-background text-xs">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-xs">
             {selectedRecyclerCount > 0 ? <Check className="size-3.5" /> : "2"}
           </span>
           <span className="min-w-0 text-left">
@@ -462,7 +462,7 @@ export function ProposalsClient({
           aria-pressed={activeView === "proposals"}
           onClick={() => setActiveView("proposals")}
         >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border bg-background text-xs">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-xs">
             3
           </span>
           <span className="min-w-0 text-left">
@@ -594,7 +594,7 @@ export function ProposalsClient({
                           <div
                             className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
                               isSelected
-                                ? "border-primary bg-primary"
+                                ? "border-[var(--color-accent-fill)] bg-[var(--color-accent-fill)]"
                                 : "border-muted-foreground/30"
                             }`}
                           >
@@ -770,7 +770,7 @@ export function ProposalsClient({
               {recyclers.totalCount} recycler
               {recyclers.totalCount !== 1 ? "s" : ""}
               {selectedRecyclerCount > 0 && (
-                <span className="ml-1.5 font-medium text-foreground">
+                <span className="ml-1.5 font-medium text-[var(--color-text)]">
                   &middot; {selectedRecyclerCount} selected
                 </span>
               )}
@@ -1257,7 +1257,7 @@ export function ProposalsClient({
                                 )}
                                 {canArchive && (
                                   <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
+                                    className="text-[var(--color-error)] focus:text-[var(--color-error)]"
                                     onSelect={() =>
                                       handleStateChange(proposal.id, "archived", "Archive")
                                     }
@@ -1297,11 +1297,11 @@ export function ProposalsClient({
             <DialogTitle>Send Invitations</DialogTitle>
             <DialogDescription>
               You are about to invite{" "}
-              <span className="font-medium text-foreground">
+              <span className="font-medium text-[var(--color-text)]">
                 {selectedRecyclerCount} recycler{selectedRecyclerCount !== 1 ? "s" : ""}
               </span>{" "}
               to{" "}
-              <span className="font-medium text-foreground">
+              <span className="font-medium text-[var(--color-text)]">
                 {selectedListing?.title ?? "this listing"}
               </span>
               . Optionally add an internal note that will be stored on each opportunity link.

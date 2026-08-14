@@ -11,6 +11,15 @@ type AccountStatus = Enums<"account_status">;
 type AccountRole = Enums<"account_role">;
 
 const ACCOUNT_ROLES: readonly AccountRole[] = ["buyer", "supplier", "recycler"];
+const ACCOUNT_QUERY_BATCH_SIZE = 100;
+
+function batches<T>(values: T[]): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += ACCOUNT_QUERY_BATCH_SIZE) {
+    result.push(values.slice(index, index + ACCOUNT_QUERY_BATCH_SIZE));
+  }
+  return result;
+}
 
 export type AccountMemberDetails = {
   user_id: string;
@@ -90,52 +99,59 @@ export async function getAccounts() {
     throw new Error(accountsError.message);
   }
 
-  const { data: profiles, error: profilesError } = await supabase
-    .from("account_profiles_public")
-    .select("account_id, display_name");
-
-  if (profilesError) {
-    throw new Error(profilesError.message);
-  }
-
   const accountIds = (accounts ?? []).map((a) => a.id);
+  const accountIdBatches = batches(accountIds);
+
+  const profiles: Array<{ account_id: string; display_name: string }> = [];
+  for (const accountIdBatch of accountIdBatches) {
+    const { data, error } = await supabase
+      .from("account_profiles_public")
+      .select("account_id, display_name")
+      .in("account_id", accountIdBatch);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+    profiles.push(...(data ?? []));
+  }
 
   const privateProfileMap = new Map<
     string,
     { city: string | null; region: string | null; country: string | null }
   >();
 
-  if (accountIds.length > 0) {
-    const { data: privateProfiles, error: privError } = await supabase
+  // Keep UUID filters below proxy URL limits. One unbounded 576-ID filter made
+  // 20KB+ URLs and failed in production before the request reached PostgREST.
+  for (const accountIdBatch of accountIdBatches) {
+    const { data, error } = await supabase
       .from("account_profiles_private")
       .select("account_id, addresses_json")
-      .in("account_id", accountIds);
+      .in("account_id", accountIdBatch);
 
-    if (privError) {
-      throw new Error(privError.message);
+    if (error) {
+      throw new Error(error.message);
     }
 
-    for (const pp of privateProfiles ?? []) {
+    for (const pp of data ?? []) {
       const { city, region, country } = parseAddressLocation(pp.addresses_json);
       privateProfileMap.set(pp.account_id, { city, region, country });
     }
   }
 
-  let primaryUserByAccount = new Map<string, string>();
+  const primaryUserByAccount = new Map<string, string>();
 
-  if (accountIds.length > 0) {
-    const { data: memberships, error: membershipsError } = await supabase
+  for (const accountIdBatch of accountIdBatches) {
+    const { data: memberships, error } = await supabase
       .from("account_memberships")
       .select("account_id, user_id, is_primary, created_at")
-      .in("account_id", accountIds)
+      .in("account_id", accountIdBatch)
       .order("is_primary", { ascending: false })
       .order("created_at", { ascending: true });
 
-    if (membershipsError) {
-      throw new Error(membershipsError.message);
+    if (error) {
+      throw new Error(error.message);
     }
 
-    primaryUserByAccount = new Map<string, string>();
     for (const membership of memberships ?? []) {
       if (!primaryUserByAccount.has(membership.account_id)) {
         primaryUserByAccount.set(membership.account_id, membership.user_id);
@@ -145,18 +161,20 @@ export async function getAccounts() {
 
   const primaryUserIds = [...new Set(primaryUserByAccount.values())];
 
-  let userEmailById = new Map<string, string>();
-  if (primaryUserIds.length > 0) {
-    const { data: users, error: usersError } = await supabase
+  const userEmailById = new Map<string, string>();
+  for (const primaryUserIdBatch of batches(primaryUserIds)) {
+    const { data: users, error } = await supabase
       .from("users")
       .select("id, email")
-      .in("id", primaryUserIds);
+      .in("id", primaryUserIdBatch);
 
-    if (usersError) {
-      throw new Error(usersError.message);
+    if (error) {
+      throw new Error(error.message);
     }
 
-    userEmailById = new Map((users ?? []).map((u) => [u.id, u.email]));
+    for (const user of users ?? []) {
+      userEmailById.set(user.id, user.email);
+    }
   }
 
   const profileMap = new Map(
