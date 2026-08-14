@@ -1244,6 +1244,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const isUserScrollingRef = useRef(false);
 		const userScrollResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 		const repinRafRef = useRef(0);
+		const repinAfterUserScrollRef = useRef(false);
 		const [showScrollButton, setShowScrollButton] = useState(false);
 
 		const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -1269,6 +1270,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				}
 				userScrollResetTimerRef.current = setTimeout(() => {
 					isUserScrollingRef.current = false;
+					if (!repinAfterUserScrollRef.current) {return;}
+					repinAfterUserScrollRef.current = false;
+					const elInner = scrollContainerRef.current;
+					if (!elInner || !wantsToBePinnedRef.current) {return;}
+					scrollChatToBottom(elInner, "auto");
 				}, 200);
 			};
 
@@ -1287,6 +1293,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			el.addEventListener("scroll", onScroll, { passive: true });
 
 			return () => {
+				repinAfterUserScrollRef.current = false;
 				if (userScrollResetTimerRef.current) {
 					clearTimeout(userScrollResetTimerRef.current);
 				}
@@ -1313,7 +1320,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					const elInner = scrollContainerRef.current;
 					if (!elInner) {return;}
 					if (!wantsToBePinnedRef.current) {return;}
-					if (isUserScrollingRef.current) {return;}
+					if (isUserScrollingRef.current) {
+						repinAfterUserScrollRef.current = true;
+						return;
+					}
 					scrollChatToBottom(elInner, "auto");
 				});
 			};
