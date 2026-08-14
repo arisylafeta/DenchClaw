@@ -542,7 +542,7 @@ export function ProposalsClient({
           </div>
 
           {/* Listing table */}
-          <div className="rounded-md border">
+          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
             <Table className="min-w-[920px] table-fixed">
               <TableHeader>
                 <TableRow>
@@ -801,7 +801,7 @@ export function ProposalsClient({
           </div>
 
           {/* Recycler table */}
-          <div className="rounded-md border">
+          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
             <Table className="min-w-[1160px] table-fixed">
               <TableHeader>
                 <TableRow>
@@ -841,7 +841,9 @@ export function ProposalsClient({
                         <TableCell>
                           <Checkbox
                             checked={checked}
-                            aria-label={`Select ${recycler.name}`}
+                            onClick={(event) => event.stopPropagation()}
+                            onCheckedChange={() => toggleRecycler(recycler.id)}
+                            aria-label={`${checked ? "Deselect" : "Select"} ${recycler.name}`}
                           />
                         </TableCell>
                         <TableCell>
@@ -1068,7 +1070,7 @@ export function ProposalsClient({
           </div>
 
           {/* Table */}
-          <div className="rounded-md border">
+          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
             <Table className="min-w-[1240px] table-fixed">
               <TableHeader>
                 <TableRow>

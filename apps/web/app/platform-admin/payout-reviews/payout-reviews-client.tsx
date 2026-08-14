@@ -157,7 +157,7 @@ export function PayoutReviewsClient({
               No payout reviews in this view.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border">
+            <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
               <Table>
                 <TableHeader>
                   <TableRow>

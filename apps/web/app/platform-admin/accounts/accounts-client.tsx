@@ -860,7 +860,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
 
           {TABS.map(({ value }) => (
             <TabsContent key={value} value={value}>
-              <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+              <div className="mt-4 overflow-hidden rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
                 <Table className="min-w-[980px]">
                   <TableHeader>
                     <TableRow>

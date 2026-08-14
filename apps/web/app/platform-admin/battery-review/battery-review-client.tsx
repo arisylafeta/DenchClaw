@@ -221,7 +221,7 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
 
           {isPending ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2Icon className="size-4 animate-spin" /> Loading live data…</div> : null}
 
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
             {tab === "canonical" ? (
               <Table>
                 <TableHeader><TableRow>
