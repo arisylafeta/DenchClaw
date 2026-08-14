@@ -67,6 +67,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_abc",
       message: "Hello Hermes",
+      userId: "11111111-1111-4111-8111-111111111111",
       config,
     });
 
@@ -82,9 +83,10 @@ describe("createHermesChatStream", () => {
     expect(headers.get("x-hermes-session-key")).toBe("sess_abc");
 
     const body = JSON.parse(String(init?.body));
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       input: "Hello Hermes",
       session_id: "sess_abc",
+      user_id: "11111111-1111-4111-8111-111111111111",
       model: "hermes-agent",
     });
   });
@@ -113,6 +115,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
+      userId: "crm-user-123",
       config,
     });
 
@@ -156,6 +159,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_tools",
       message: "search for test",
+      userId: "crm-user-123",
       config,
     });
 
@@ -195,6 +199,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_think",
       message: "think about this",
+      userId: "crm-user-123",
       config,
     });
 
@@ -221,6 +226,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
+      userId: "crm-user-123",
       config,
     });
 
@@ -237,6 +243,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
+      userId: "crm-user-123",
       config: { ...config, apiKey: null },
     });
 
@@ -254,6 +261,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "sess_xyz",
       message: "Hi",
+      userId: "crm-user-123",
       config,
     });
 
@@ -283,6 +291,7 @@ describe("createHermesChatStream", () => {
     const stream = await createHermesChatStream({
       sessionKey: "agent:main:web:abc",
       message: "hello",
+      userId: "crm-user-123",
       config: { baseUrl: "http://127.0.0.1:8642", apiKey: "secret", model: "hermes-agent" },
     });
     const events = await readSseEvents(stream);

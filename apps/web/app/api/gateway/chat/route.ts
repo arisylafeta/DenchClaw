@@ -11,10 +11,16 @@ import {
 } from "@/lib/chat-image-attachments";
 import { resolveAgentBackend, resolveHermesConfig } from "@/lib/agent-backend";
 import { createHermesChatStream } from "@/lib/hermes-client";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+	const user = await currentUser();
+	if (!user) {
+		return new Response("Unauthorized", { status: 401 });
+	}
+
 	const { sessionKey, message }: { sessionKey: string; message: string } = await req.json();
 
 	if (!sessionKey || !message?.trim()) {
@@ -36,6 +42,7 @@ export async function POST(req: Request) {
 		const stream = await createHermesChatStream({
 			sessionKey,
 			message,
+			userId: user.id,
 			config: resolveHermesConfig(),
 		});
 

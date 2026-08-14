@@ -40,6 +40,7 @@ import {
 	buildAgentMessage,
 	type WorkspaceContext,
 } from "@/lib/agent-message";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -88,6 +89,11 @@ function normalizeLiveStreamEvent(event: SseEvent): SseEvent | null {
 }
 
 export async function POST(req: Request) {
+	const user = await currentUser();
+	if (!user) {
+		return new Response("Unauthorized", { status: 401 });
+	}
+
 	const {
 		messages,
 		sessionId,
@@ -230,6 +236,7 @@ export async function POST(req: Request) {
 		const hermesStream = await createHermesChatStream({
 			sessionKey: hermesSessionKey,
 			message: agentMessage,
+			userId: user.id,
 			config: resolveHermesConfig(),
 		});
 

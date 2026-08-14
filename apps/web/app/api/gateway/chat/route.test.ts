@@ -29,6 +29,14 @@ vi.mock("@/lib/hermes-client", () => ({
 	}),
 }));
 
+vi.mock("@/lib/auth", () => ({
+	currentUser: vi.fn(async () => ({
+		id: "11111111-1111-4111-8111-111111111111",
+		email: "ari@rebattery.io",
+		displayName: "Ari",
+	})),
+}));
+
 vi.mock("@/lib/workspace", () => ({
 	resolveWorkspaceRoot: vi.fn(() => "/home/testuser/.openclaw-dench/workspace"),
 }));
@@ -171,6 +179,7 @@ describe("POST /api/gateway/chat", () => {
 		expect(createHermesChatStream).toHaveBeenCalledWith({
 			sessionKey: "hermes-session",
 			message: "Hello Hermes",
+			userId: "11111111-1111-4111-8111-111111111111",
 			config: expect.objectContaining({
 				baseUrl: "http://127.0.0.1:8642",
 				apiKey: "sk-test",

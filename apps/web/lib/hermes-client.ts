@@ -4,6 +4,7 @@ import { readActiveProfileName } from "./workspace";
 export type HermesChatStreamParams = {
   sessionKey: string;
   message: string;
+  userId: string;
   config: HermesConfig;
 };
 
@@ -41,7 +42,7 @@ function nextId(prefix: string): string {
 export async function createHermesChatStream(
   params: HermesChatStreamParams,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { sessionKey, message, config } = params;
+  const { sessionKey, message, userId, config } = params;
 
   if (!config.apiKey) {
     return errorStream("Missing Hermes API key");
@@ -72,6 +73,7 @@ export async function createHermesChatStream(
           body: JSON.stringify({
             input: message,
             session_id: sessionKey,
+            user_id: userId,
             model: config.model,
             ...(readActiveProfileName() ? { profile: readActiveProfileName() } : {}),
           }),

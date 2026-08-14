@@ -46,6 +46,14 @@ vi.mock("@/lib/hermes-client", () => ({
   }),
 }));
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: vi.fn(async () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ari@rebattery.io",
+    displayName: "Ari",
+  })),
+}));
+
 // Mock workspace module
 vi.mock("@/lib/workspace", () => ({
   ensureManagedWorkspaceRouting: vi.fn(),
@@ -227,6 +235,7 @@ describe("Chat API routes", () => {
         expect.objectContaining({
           sessionKey: "s1",
           message: "hello",
+          userId: "11111111-1111-4111-8111-111111111111",
         }),
       );
       expect(startRun).not.toHaveBeenCalled();
