@@ -501,29 +501,46 @@ export function ProposalsClient({
       {activeView !== "proposals" && (
         <Card>
         <CardHeader>
-          <CardTitle className="text-base">
-            {activeView === "listing" ? "1. Choose a Listing" : "2. Choose Recyclers"}
-            {selectedListing && (
-              <Badge variant="secondary" className="ml-2 font-normal">
-                <Check className="mr-1 h-3 w-3" />
-                {selectedListing.reference
-                  ? `${selectedListing.reference} · ${selectedListing.title}`
-                  : selectedListing.title}
-              </Badge>
-            )}
-            {selectedRecyclerCount > 0 && (
-              <Badge variant="secondary" className="ml-2 font-normal">
-                {selectedRecyclerCount} selected
-              </Badge>
-            )}
-          </CardTitle>
-          <CardDescription>
-            {activeView === "listing"
-              ? "Pick the published recycling listing you want to share."
-              : selectedListing
-                ? `Select recyclers to invite to ${selectedListing.title}.`
-                : "Select a listing first, then return here to choose recyclers."}
-          </CardDescription>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 space-y-1.5">
+              <CardTitle className="text-base">
+                {activeView === "listing" ? "1. Choose a Listing" : "2. Choose Recyclers"}
+                {selectedListing && (
+                  <Badge variant="secondary" className="ml-2 max-w-full font-normal">
+                    <Check className="mr-1 h-3 w-3 shrink-0" />
+                    <span className="truncate">
+                      {selectedListing.reference
+                        ? `${selectedListing.reference} · ${selectedListing.title}`
+                        : selectedListing.title}
+                    </span>
+                  </Badge>
+                )}
+                {selectedRecyclerCount > 0 && (
+                  <Badge variant="secondary" className="ml-2 font-normal">
+                    {selectedRecyclerCount} selected
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                {activeView === "listing"
+                  ? "Pick the published recycling listing you want to share."
+                  : selectedListing
+                    ? `Select recyclers to invite to ${selectedListing.title}.`
+                    : "Select a listing first, then return here to choose recyclers."}
+              </CardDescription>
+            </div>
+            {activeView === "listing" ? (
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                disabled={!selectedListing}
+                onClick={() => setActiveView("recyclers")}
+              >
+                Continue to recyclers
+              </Button>
+            ) : null}
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           {activeView === "listing" ? (
@@ -692,16 +709,6 @@ export function ProposalsClient({
               updateParams({ listingPage: page <= 1 ? null : String(page) })
             }
           />
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              disabled={!selectedListing}
-              onClick={() => setActiveView("recyclers")}
-            >
-              Continue to recyclers
-            </Button>
-          </div>
           </div>
 
           ) : (

@@ -2,11 +2,13 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2Icon, LandmarkIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
+import { CrmListShell } from "@/app/components/crm/crm-list-shell";
+import { DataTable } from "@/app/components/workspace/data-table";
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/platform-admin/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -17,21 +19,14 @@ import {
 } from "@/app/components/platform-admin/ui/dialog";
 import { Input } from "@/app/components/platform-admin/ui/input";
 import { Label } from "@/app/components/platform-admin/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/app/components/platform-admin/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/app/components/platform-admin/ui/tabs";
 import { Textarea } from "@/app/components/platform-admin/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/app/components/platform-admin/ui/select";
 import { approvePayoutCopReview, rejectPayoutCopReview } from "./actions";
 import type { PayoutCopReviewListItem, PayoutCopReviewStatus } from "./types";
 
 type Decision = "approve" | "reject";
-type Filter = "open" | "approved" | "rejected" | "all";
+type Filter = "open" | PayoutCopReviewStatus | "all";
+type ResultFilter = PayoutCopReviewListItem["matchResult"] | "all";
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -70,6 +65,7 @@ export function PayoutReviewsClient({
 }) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("open");
+  const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
   const [selected, setSelected] = useState<PayoutCopReviewListItem | null>(null);
   const [decision, setDecision] = useState<Decision>("approve");
   const [reviewerName, setReviewerName] = useState("");
@@ -77,14 +73,13 @@ export function PayoutReviewsClient({
   const [isPending, startTransition] = useTransition();
 
   const filtered = useMemo(() => {
-    if (filter === "all") return reviews;
-    if (filter === "open") {
-      return reviews.filter((review) =>
-        ["requested", "processing"].includes(review.status),
-      );
-    }
-    return reviews.filter((review) => review.status === filter);
-  }, [filter, reviews]);
+    return reviews.filter((review) => {
+      const matchesStatus = filter === "all"
+        || (filter === "open" && ["requested", "processing"].includes(review.status))
+        || review.status === filter;
+      return matchesStatus && (resultFilter === "all" || review.matchResult === resultFilter);
+    });
+  }, [filter, resultFilter, reviews]);
 
   const openDecision = (review: PayoutCopReviewListItem, next: Decision) => {
     setSelected(review);
@@ -127,115 +122,125 @@ export function PayoutReviewsClient({
     });
   };
 
-  return (
-    <div className="space-y-6 p-6 lg:p-8">
-      <div>
-        <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Payout reviews</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Review UK Confirmation of Payee exceptions. Approval acknowledges the bank-name result in Stripe; it never releases deal funds.
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader className="gap-4">
-          <div className="flex items-center gap-2">
-            <LandmarkIcon className="size-5" />
-            <CardTitle>Confirmation of Payee queue</CardTitle>
+  const columns = useMemo<ColumnDef<PayoutCopReviewListItem>[]>(() => [
+    {
+      id: "account",
+      accessorFn: (review) => `${review.accountName} ${review.accountRole} ${review.accountId}`,
+      header: "Account",
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{row.original.accountName}</div>
+          <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            {row.original.accountRole} · {row.original.accountId}
           </div>
-          <Tabs value={filter} onValueChange={(value) => setFilter(value as Filter)}>
-            <TabsList>
-              <TabsTrigger value="open">Open</TabsTrigger>
-              <TabsTrigger value="approved">Approved</TabsTrigger>
-              <TabsTrigger value="rejected">Rejected</TabsTrigger>
-              <TabsTrigger value="all">All</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </CardHeader>
-        <CardContent>
-          {filtered.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-              No payout reviews in this view.
+        </div>
+      ),
+      size: 260,
+    },
+    {
+      id: "bank",
+      accessorFn: (review) => [review.payoutMethodLast4, review.payoutCountry, review.payoutCurrency].filter(Boolean).join(" "),
+      header: "Bank",
+      cell: ({ row }) => (
+        <div>
+          <div>Ending {row.original.payoutMethodLast4 ?? "unknown"}</div>
+          <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            {[row.original.payoutCountry, row.original.payoutCurrency].filter(Boolean).join(" · ") || "No corridor recorded"}
+          </div>
+        </div>
+      ),
+      size: 180,
+    },
+    {
+      accessorKey: "matchResult",
+      header: "Result",
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{resultLabel(row.original.matchResult)}</div>
+          {row.original.providerMessage ? (
+            <div className="mt-1 truncate text-xs" style={{ color: "var(--color-text-muted)" }} title={row.original.providerMessage}>
+              {row.original.providerMessage}
             </div>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Account</TableHead>
-                    <TableHead>Bank</TableHead>
-                    <TableHead>Result</TableHead>
-                    <TableHead>Requested</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((review) => (
-                    <TableRow key={review.id}>
-                      <TableCell>
-                        <div className="font-medium">{review.accountName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {review.accountRole} · {review.accountId}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div>Ending {review.payoutMethodLast4 ?? "unknown"}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {[review.payoutCountry, review.payoutCurrency]
-                            .filter(Boolean)
-                            .join(" · ") || "No corridor recorded"}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{resultLabel(review.matchResult)}</div>
-                        {review.providerMessage ? (
-                          <div className="mt-1 max-w-md text-xs text-muted-foreground">
-                            {review.providerMessage}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>{formatDate(review.requestedAt)}</TableCell>
-                      <TableCell>
-                        {statusBadge(review.status)}
-                        {review.reviewedBy ? (
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {review.reviewedBy} · {formatDate(review.reviewedAt)}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {review.status === "requested" || review.status === "processing" ? (
-                          <div className="flex justify-end gap-2">
-                            {review.status === "requested" ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openDecision(review, "reject")}
-                              >
-                                <XCircleIcon />
-                                Reject
-                              </Button>
-                            ) : null}
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => openDecision(review, "approve")}
-                            >
-                              <CheckCircle2Icon />
-                              {review.status === "processing" ? "Retry approval" : "Approve"}
-                            </Button>
-                          </div>
-                        ) : null}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+          ) : null}
+        </div>
+      ),
+      size: 280,
+    },
+    { accessorKey: "requestedAt", header: "Requested", cell: ({ getValue }) => formatDate(String(getValue())), size: 180 },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => (
+        <div>
+          {statusBadge(row.original.status)}
+          {row.original.reviewedBy ? (
+            <div className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              {row.original.reviewedBy} · {formatDate(row.original.reviewedAt)}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          ) : null}
+        </div>
+      ),
+      size: 200,
+    },
+  ], []);
+
+  return (
+    <>
+      <CrmListShell title="Payout reviews" count={reviews.length}>
+        <div className="h-full min-h-0">
+          <DataTable
+            columns={columns}
+            data={filtered}
+            enableGlobalFilter
+            searchPlaceholder="Search payout reviews..."
+            enableSorting
+            enableRowSelection
+            getRowId={(review) => review.id}
+            pageSize={50}
+            toolbarExtra={(
+              <>
+                <Select value={filter} onValueChange={(value) => setFilter(value as Filter)}>
+                  <SelectTrigger className="h-8 w-36 text-xs" aria-label="Filter by review status">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="requested">Requested</SelectItem>
+                    <SelectItem value="processing">Processing</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                    <SelectItem value="all">All statuses</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={resultFilter} onValueChange={(value) => setResultFilter(value as ResultFilter)}>
+                  <SelectTrigger className="h-8 w-40 text-xs" aria-label="Filter by match result">
+                    <SelectValue placeholder="Match result" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All results</SelectItem>
+                    <SelectItem value="partial_match">Partial match</SelectItem>
+                    <SelectItem value="mismatch">Mismatch</SelectItem>
+                    <SelectItem value="unavailable">Unavailable</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+            rowActions={(review) => {
+              if (review.status === "requested") {
+                return [
+                  { label: "Approve", icon: <CheckCircle2Icon />, onClick: () => openDecision(review, "approve") },
+                  { label: "Reject", icon: <XCircleIcon />, variant: "destructive", onClick: () => openDecision(review, "reject") },
+                ];
+              }
+              if (review.status === "processing") {
+                return [{ label: "Retry approval", icon: <CheckCircle2Icon />, onClick: () => openDecision(review, "approve") }];
+              }
+              return [];
+            }}
+          />
+        </div>
+      </CrmListShell>
 
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent>
@@ -287,6 +292,6 @@ export function PayoutReviewsClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

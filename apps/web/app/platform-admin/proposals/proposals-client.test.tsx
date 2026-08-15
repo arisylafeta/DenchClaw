@@ -126,6 +126,7 @@ describe("recycler selection", () => {
     expect(row).not.toBeNull();
     await user.click(row!);
     expect(screen.getByRole("checkbox", { name: "Deselect Battery lot" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Continue to recyclers" }).closest('[data-slot="card-header"]')).not.toBeNull();
 
     await user.click(screen.getByRole("checkbox", { name: "Deselect Battery lot" }));
     expect(screen.getByRole("checkbox", { name: "Select Battery lot" })).not.toBeChecked();
@@ -138,8 +139,8 @@ describe("recycler selection", () => {
       id: "proposal-1",
       listing_id: "listing-1",
       recycler_account_id: "recycler-1",
-      link_type: "invited",
-      state: "active",
+      link_type: "invited" as const,
+      state: "active" as const,
       rebattery_notes: null,
       created_at: "2026-08-15T00:00:00.000Z",
       updated_at: "2026-08-15T00:00:00.000Z",

@@ -464,6 +464,7 @@ export function DataTable<TData, TValue>({
 						type="checkbox"
 						checked={table.getIsAllPageRowsSelected()}
 						onChange={table.getToggleAllPageRowsSelectedHandler()}
+						aria-label="Select all visible rows"
 						className="w-3.5 h-3.5 rounded accent-[var(--color-accent)] cursor-pointer"
 					/>
 				),
@@ -473,6 +474,7 @@ export function DataTable<TData, TValue>({
 						checked={row.getIsSelected()}
 						onChange={row.getToggleSelectedHandler()}
 						onClick={(e) => e.stopPropagation()}
+						aria-label={`${row.getIsSelected() ? "Deselect" : "Select"} row ${row.index + 1}`}
 						className="w-3.5 h-3.5 rounded accent-[var(--color-accent)] cursor-pointer"
 					/>
 				),
@@ -818,6 +820,7 @@ export function DataTable<TData, TValue>({
 						<button
 							type="button"
 							onClick={onRefresh}
+							aria-label="Refresh"
 							className="h-8 w-8 rounded-full flex items-center justify-center cursor-pointer transition-colors backdrop-blur-sm shadow-[0_0_21px_0_rgba(0,0,0,0.05)]"
 							style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text-muted)" }}
 						>
@@ -865,7 +868,7 @@ export function DataTable<TData, TValue>({
 									<tr
 										key={headerGroup.id}
 										style={{ borderColor: "var(--color-border)" }}
-										className="border-b-2 backdrop-blur-sm"
+										className="border-b backdrop-blur-sm"
 									>
 										<SortableContext items={sortableHeaderIds} strategy={horizontalListSortingStrategy}>
 											{headerGroup.headers.map((header, colIdx) => {
@@ -1128,8 +1131,19 @@ function TableRowInner({
 		[selectedCellColumnIds],
 	);
 
-	const handleClick = useCallback(() => {
+	const handleClick = useCallback((event: React.MouseEvent<HTMLTableRowElement>) => {
+		if (isEditableEventTarget(event.target)) {
+			return;
+		}
 		onRowClick?.(row.original, rowIdx);
+	}, [onRowClick, row.original, rowIdx]);
+
+	const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTableRowElement>) => {
+		if (!onRowClick || isEditableEventTarget(event.target)) return;
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			onRowClick(row.original, rowIdx);
+		}
 	}, [onRowClick, row.original, rowIdx]);
 
 	const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLTableRowElement>) => {
@@ -1146,6 +1160,7 @@ function TableRowInner({
 
 	return (
 		<tr
+			tabIndex={onRowClick ? 0 : undefined}
 			data-state={isSelected ? "selected" : isActive ? "active" : undefined}
 			className={cn(
 				"border-b transition-colors duration-100 group/row",
@@ -1157,6 +1172,7 @@ function TableRowInner({
 				background: baseBg,
 			}}
 			onClick={handleClick}
+			onKeyDown={handleKeyDown}
 			onMouseEnter={handleMouseEnter}
 			onMouseLeave={handleMouseLeave}
 		>
@@ -1246,7 +1262,7 @@ function TableRowInner({
 							}
 						}}
 						onClick={(event) => {
-							if (isRownumCol || isDataCell) {
+							if (isRownumCol || (isDataCell && !onRowClick)) {
 								event.stopPropagation();
 							}
 						}}
@@ -1463,9 +1479,12 @@ function PaginationButton({ onClick, disabled, label }: { onClick: () => void; d
 }
 
 function RowActionsMenu<TData>({ row, actions }: { row: TData; actions: RowAction<TData>[] }) {
+	if (actions.length === 0) return null;
+
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
+				aria-label="Row actions"
 				className="p-1 rounded-md cursor-pointer"
 				style={{ color: "var(--color-text-muted)" }}
 				onClick={(e) => e.stopPropagation()}
@@ -1493,7 +1512,7 @@ function LoadingSkeleton({ columnCount }: { columnCount: number }) {
 	return (
 		<div className="w-full">
 			{/* Skeleton header */}
-			<div className="flex gap-0 border-b-2" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+			<div className="flex gap-0 border-b" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
 				{Array.from({ length: Math.min(columnCount, 6) }).map((_col, j) => (
 					<div key={j} className="flex-1 h-11 px-4 flex items-center" style={{ borderRight: j < Math.min(columnCount, 6) - 1 ? "1px solid var(--color-border)" : "none" }}>
 						<div

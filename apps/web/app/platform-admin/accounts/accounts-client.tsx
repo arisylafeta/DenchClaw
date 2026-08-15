@@ -1,13 +1,20 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { MailIcon, MoreHorizontalIcon, SendIcon, Trash2Icon } from "lucide-react";
+import { ArrowLeftIcon, MailIcon, MoreHorizontalIcon, SendIcon, Trash2Icon } from "lucide-react";
+import type { ColumnDef, OnChangeFn } from "@tanstack/react-table";
+
+import {
+  CrmEmptyState,
+  CrmListShell,
+  CrmLoadingState,
+} from "@/app/components/crm/crm-list-shell";
+import { DataTable } from "@/app/components/workspace/data-table";
 
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
-import { Checkbox } from "@/app/components/platform-admin/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,21 +40,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/app/components/platform-admin/ui/sheet";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/app/components/platform-admin/ui/table";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/app/components/platform-admin/ui/tabs";
 import { Textarea } from "@/app/components/platform-admin/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/app/components/platform-admin/ui/select";
 
 import {
   getAccountDetails,
@@ -78,19 +78,10 @@ type Account = {
   location: string | null;
 };
 
-type Tab = "all" | AccountRole;
-
 type DeleteTarget =
   | { kind: "single"; account: Account }
   | { kind: "bulk"; accountIds: string[]; count: number }
   | null;
-
-const TABS: { value: Tab; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "buyer", label: "Buyers" },
-  { value: "supplier", label: "Suppliers" },
-  { value: "recycler", label: "Recyclers" },
-];
 
 function roleBadgeClass(role: AccountRole): string {
   switch (role) {
@@ -138,14 +129,6 @@ function formatDateTime(dateStr: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return "Unable to render JSON";
-  }
 }
 
 function AccountActions({
@@ -240,199 +223,204 @@ interface ComposeSheetProps {
   onSent: () => void;
 }
 
-interface AccountDetailsSheetProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface AccountDetailsViewProps {
+  onBack: () => void;
   isLoading: boolean;
   error: string | null;
   details: AccountDetails | null;
 }
 
-function AccountDetailsSheet({
-  open,
-  onOpenChange,
+function formatAddress(value: unknown): string {
+  const addresses = Array.isArray(value) ? value : value ? [value] : [];
+  const formatted = addresses.flatMap((address) => {
+    if (!address || typeof address !== "object") return [];
+    const record = address as Record<string, unknown>;
+    const parts = [
+      record.line1,
+      record.line2,
+      record.city,
+      record.region,
+      record.postcode ?? record.postal_code,
+      record.country,
+    ].filter((part): part is string => typeof part === "string" && part.trim().length > 0);
+    return parts.length > 0 ? [parts.join(", ")] : [];
+  });
+  return formatted.join(" · ") || "—";
+}
+
+type MetadataRow = { id: string; source: string; field: string; value: string };
+
+function metadataRows(source: string, value: unknown): MetadataRow[] {
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value as Record<string, unknown>).map(([field, fieldValue]) => ({
+    id: `${source}:${field}`,
+    source,
+    field,
+    value: typeof fieldValue === "string"
+      ? fieldValue
+      : fieldValue == null
+        ? "—"
+        : JSON.stringify(fieldValue, null, 2),
+  }));
+}
+
+function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
+        {label}
+      </dt>
+      <dd className="mt-1 break-words text-sm" style={{ color: "var(--color-text)" }}>
+        {value || "—"}
+      </dd>
+    </div>
+  );
+}
+
+function AccountDetailsView({
+  onBack,
   isLoading,
   error,
   details,
-}: AccountDetailsSheetProps) {
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl flex flex-col">
-        <SheetHeader>
-          <SheetTitle>Account details</SheetTitle>
-          <SheetDescription>
-            Public + private data connected to this account.
-          </SheetDescription>
-        </SheetHeader>
-
-        <div className="flex-1 overflow-y-auto py-4 space-y-5">
-          {isLoading && (
-            <div className="text-sm text-muted-foreground">Loading account details…</div>
-          )}
-
-          {!isLoading && error && (
-            <div className="text-sm text-[var(--color-error)]">{error}</div>
-          )}
-
-          {!isLoading && !error && details && (
-            <>
-              <section className="rounded-lg border p-4 space-y-2">
-                <h3 className="text-sm font-semibold">Account</h3>
-                <dl className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <dt className="text-muted-foreground">Name</dt>
-                    <dd>{details.account.name}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Role</dt>
-                    <dd>{capitalize(details.account.role)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Type</dt>
-                    <dd>{capitalize(details.account.account_type)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Status</dt>
-                    <dd>{capitalize(details.account.status)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Sector</dt>
-                    <dd>{details.account.sector ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Stripe connect status</dt>
-                    <dd>{details.account.stripe_connect_status}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Created</dt>
-                    <dd>{formatDateTime(details.account.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Updated</dt>
-                    <dd>{formatDateTime(details.account.updated_at)}</dd>
-                  </div>
-                  <div className="col-span-2">
-                    <dt className="text-muted-foreground">Account ID</dt>
-                    <dd className="font-mono text-xs break-all">{details.account.id}</dd>
-                  </div>
-                  <div className="col-span-2">
-                    <dt className="text-muted-foreground">Stripe account ID</dt>
-                    <dd>{details.account.stripe_connect_account_id ?? "—"}</dd>
-                  </div>
-                </dl>
-              </section>
-
-              <section className="rounded-lg border p-4 space-y-2">
-                <h3 className="text-sm font-semibold">Public profile</h3>
-                {details.publicProfile ? (
-                  <>
-                    <dl className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <dt className="text-muted-foreground">Display name</dt>
-                        <dd>{details.publicProfile.display_name}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Website</dt>
-                        <dd>{details.publicProfile.website_url ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">SEO slug</dt>
-                        <dd>{details.publicProfile.seo_slug ?? "—"}</dd>
-                      </div>
-                      <div className="col-span-2">
-                        <dt className="text-muted-foreground">About</dt>
-                        <dd>{details.publicProfile.about ?? "—"}</dd>
-                      </div>
-                    </dl>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">public_fields_json</p>
-                      <pre className="max-h-44 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
-                        {formatJson(details.publicProfile.public_fields_json)}
-                      </pre>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No public profile record found.</p>
-                )}
-              </section>
-
-              <section className="rounded-lg border p-4 space-y-2">
-                <h3 className="text-sm font-semibold">Private profile</h3>
-                {details.privateProfile ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <dt className="text-muted-foreground">Tax registered</dt>
-                        <dd>{details.privateProfile.tax_registered ? "Yes" : "No"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Tax ID</dt>
-                        <dd>{details.privateProfile.tax_id ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Company number</dt>
-                        <dd>{details.privateProfile.company_number ?? "—"}</dd>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">billing_address</p>
-                      <pre className="max-h-40 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
-                        {formatJson(details.privateProfile.billing_address)}
-                      </pre>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">addresses_json</p>
-                      <pre className="max-h-40 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
-                        {formatJson(details.privateProfile.addresses_json)}
-                      </pre>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">ops_json</p>
-                      <pre className="max-h-40 overflow-auto rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs">
-                        {formatJson(details.privateProfile.ops_json)}
-                      </pre>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No private profile record found.</p>
-                )}
-              </section>
-
-              <section className="rounded-lg border p-4 space-y-3">
-                <h3 className="text-sm font-semibold">Members</h3>
-                {details.members.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No membership records found.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {details.members.map((member) => (
-                      <div key={member.user_id} className="rounded border p-3 text-sm space-y-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-medium">{member.full_name ?? "Unnamed user"}</p>
-                          {member.is_primary && (
-                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                              Primary
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-muted-foreground">Email: {member.email ?? "—"}</p>
-                        <p className="text-muted-foreground">Role: {member.membership_role}</p>
-                        <p className="text-muted-foreground">Status: {member.status ?? "—"}</p>
-                        <p className="text-muted-foreground">Phone: {member.phone_number ?? "—"}</p>
-                        <p className="text-muted-foreground">Position: {member.position ?? "—"}</p>
-                        <p className="text-muted-foreground">Joined: {formatDateTime(member.joined_at)}</p>
-                        <p className="font-mono text-xs text-muted-foreground break-all">
-                          User ID: {member.user_id}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
+}: AccountDetailsViewProps) {
+  const memberColumns = useMemo<ColumnDef<AccountDetails["members"][number]>[]>(() => [
+    {
+      id: "name",
+      accessorFn: (member) => member.full_name ?? "Unnamed user",
+      header: "Name",
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{row.original.full_name ?? "Unnamed user"}</div>
+          {row.original.is_primary ? (
+            <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Primary contact</div>
+          ) : null}
         </div>
-      </SheetContent>
-    </Sheet>
+      ),
+    },
+    { accessorKey: "email", header: "Email", cell: ({ getValue }) => String(getValue() ?? "—") },
+    { accessorKey: "phone_number", header: "Phone", cell: ({ getValue }) => String(getValue() ?? "—") },
+    { accessorKey: "membership_role", header: "Membership" },
+    { accessorKey: "position", header: "Position", cell: ({ getValue }) => String(getValue() ?? "—") },
+    { accessorKey: "status", header: "Status", cell: ({ getValue }) => capitalize(String(getValue() ?? "—")) },
+    { accessorKey: "joined_at", header: "Joined", cell: ({ getValue }) => formatDate(String(getValue())) },
+    { accessorKey: "user_id", header: "User ID", cell: ({ getValue }) => <span className="font-mono text-xs">{String(getValue())}</span> },
+  ], []);
+
+  const profileRows = useMemo(() => [
+    ...metadataRows("Public profile", details?.publicProfile?.public_fields_json),
+    ...metadataRows("Operations", details?.privateProfile?.ops_json),
+  ], [details]);
+
+  const address = details
+    ? (() => {
+        const addresses = formatAddress(details.privateProfile?.addresses_json);
+        return addresses === "—" ? formatAddress(details.privateProfile?.billing_address) : addresses;
+      })()
+    : "—";
+
+  const profileColumns = useMemo<ColumnDef<MetadataRow>[]>(() => [
+    { accessorKey: "source", header: "Source", size: 160 },
+    { accessorKey: "field", header: "Field", size: 220 },
+    {
+      accessorKey: "value",
+      header: "Value",
+      cell: ({ getValue }) => <span className="whitespace-pre-wrap break-words font-mono text-xs">{String(getValue())}</span>,
+      enableSorting: false,
+    },
+  ], []);
+
+  return (
+    <CrmListShell
+      title={details?.account.name ?? "Account details"}
+      toolbar={(
+        <Button type="button" variant="ghost" size="sm" onClick={onBack} aria-label="Back to Accounts">
+          <ArrowLeftIcon className="size-4" />
+          Accounts
+        </Button>
+      )}
+    >
+      {isLoading ? <CrmLoadingState label="Loading account…" /> : null}
+      {!isLoading && error ? (
+        <CrmEmptyState title="Couldn’t load this account" description={error} />
+      ) : null}
+      {!isLoading && !error && details ? (
+        <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className={roleBadgeClass(details.account.role)}>
+              {capitalize(details.account.role)}
+            </Badge>
+            <Badge variant="outline" className={statusBadgeClass(details.account.status)}>
+              {capitalize(details.account.status)}
+            </Badge>
+            <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+              {capitalize(details.account.account_type)} account
+            </span>
+          </div>
+
+          {details.publicProfile?.about ? (
+            <section>
+              <h2 className="mb-3 text-sm font-semibold">About</h2>
+              <p className="max-w-3xl text-sm leading-6" style={{ color: "var(--color-text-muted)" }}>
+                {details.publicProfile.about}
+              </p>
+            </section>
+          ) : null}
+
+          <section className="border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
+            <h2 className="mb-4 text-sm font-semibold">Account</h2>
+            <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+              <DetailField label="Display name" value={details.publicProfile?.display_name ?? details.account.name} />
+              <DetailField label="Website" value={details.publicProfile?.website_url ? (
+                <a className="hover:underline" href={details.publicProfile.website_url} target="_blank" rel="noreferrer">
+                  {details.publicProfile.website_url}
+                </a>
+              ) : "—"} />
+              <DetailField label="Sector" value={details.account.sector ?? "—"} />
+              <DetailField label="Company number" value={details.privateProfile?.company_number ?? "—"} />
+              <DetailField label="Tax registration" value={details.privateProfile?.tax_registered ? details.privateProfile.tax_id ?? "Registered" : "Not registered"} />
+              <DetailField label="Address" value={address} />
+              <DetailField label="SEO slug" value={details.publicProfile?.seo_slug ?? "—"} />
+              <DetailField label="Stripe Connect" value={capitalize(details.account.stripe_connect_status)} />
+              <DetailField label="Stripe account ID" value={details.account.stripe_connect_account_id ? <span className="font-mono text-xs">{details.account.stripe_connect_account_id}</span> : "—"} />
+              <DetailField label="Stripe onboarded" value={details.account.stripe_connect_onboarded_at ? formatDateTime(details.account.stripe_connect_onboarded_at) : "—"} />
+              <DetailField label="Created" value={formatDateTime(details.account.created_at)} />
+              <DetailField label="Updated" value={formatDateTime(details.account.updated_at)} />
+              <DetailField label="Account ID" value={<span className="font-mono text-xs">{details.account.id}</span>} />
+            </dl>
+          </section>
+
+          <section className="h-[360px] border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
+            <DataTable
+              columns={memberColumns}
+              data={details.members}
+              title="Members"
+              enableGlobalFilter
+              searchPlaceholder="Search members..."
+              enableSorting
+              stickyFirstColumn={false}
+              getRowId={(member) => member.user_id}
+              pageSize={20}
+            />
+          </section>
+
+          {profileRows.length > 0 ? (
+            <section className="h-[360px] border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
+              <DataTable
+                columns={profileColumns}
+                data={profileRows}
+                title="Profile fields"
+                enableGlobalFilter
+                searchPlaceholder="Search profile fields..."
+                enableSorting
+                stickyFirstColumn={false}
+                getRowId={(row) => row.id}
+                pageSize={20}
+              />
+            </section>
+          ) : null}
+        </div>
+      ) : null}
+    </CrmListShell>
   );
 }
 
@@ -540,7 +528,9 @@ function ComposeSheet({ open, onOpenChange, recipients, onSent }: ComposeSheetPr
 
 export function AccountsClient({ accounts }: { accounts: Account[] }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | AccountRole>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | AccountStatus>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | AccountType>("all");
   const [isPending, startTransition] = useTransition();
   const [isDetailsPending, startDetailsTransition] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -549,45 +539,35 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
   const [detailsSheetOpen, setDetailsSheetOpen] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [details, setDetails] = useState<AccountDetails | null>(null);
+  const detailsRequestId = useRef(0);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
 
-  const filtered =
-    activeTab === "all"
-      ? accounts
-      : accounts.filter((a) => a.role === activeTab);
+  const filtered = useMemo(
+    () => accounts.filter((account) =>
+      (roleFilter === "all" || account.role === roleFilter) &&
+      (statusFilter === "all" || account.status === statusFilter) &&
+      (typeFilter === "all" || account.account_type === typeFilter)
+    ),
+    [accounts, roleFilter, statusFilter, typeFilter],
+  );
 
-  // Keep selection in sync when tab changes (only keep ids that are in filtered)
+  // Bulk actions apply only to rows visible under the current filters.
   const filteredIds = new Set(filtered.map((a) => a.id));
   const activeSelected = new Set([...selectedIds].filter((id) => filteredIds.has(id)));
-  const allSelected = filtered.length > 0 && filtered.every((a) => activeSelected.has(a.id));
-  const someSelected = activeSelected.size > 0 && !allSelected;
-
-  function toggleAll() {
-    if (allSelected) {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        filtered.forEach((a) => next.delete(a.id));
-        return next;
+  const rowSelection = Object.fromEntries([...activeSelected].map((id) => [id, true]));
+  const handleRowSelectionChange: OnChangeFn<Record<string, boolean>> = (updater) => {
+    const nextVisible = typeof updater === "function" ? updater(rowSelection) : updater;
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      filtered.forEach((account) => next.delete(account.id));
+      Object.entries(nextVisible).forEach(([id, selected]) => {
+        if (selected) next.add(id);
       });
-    } else {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        filtered.forEach((a) => next.add(a.id));
-        return next;
-      });
-    }
-  }
-
-  function toggleOne(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
       return next;
     });
-  }
+  };
 
   function openComposeFor(recipients: Account[]) {
     setSheetRecipients(recipients);
@@ -665,25 +645,6 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
       } else {
         toast.success(`${label} ${count} account${count === 1 ? "" : "s"}.`);
       }
-      setSelectedIds(new Set());
-      router.refresh();
-    });
-  }
-
-  function handleBulkMarkPending() {
-    const accountIds = [...activeSelected];
-    startTransition(async () => {
-      const result = await updateAccountStatusesBulk(accountIds, "pending");
-      if (!result.success) {
-        toast.error(result.error ?? "Failed to update selected accounts.");
-        return;
-      }
-
-      toast.success(
-        `Marked ${result.updatedAccounts ?? accountIds.length} account${
-          (result.updatedAccounts ?? accountIds.length) === 1 ? "" : "s"
-        } as pending.`,
-      );
       setSelectedIds(new Set());
       router.refresh();
     });
@@ -772,38 +733,185 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
   }
 
   function handleOpenAccountDetails(accountId: string) {
+    const requestId = ++detailsRequestId.current;
     setDetailsSheetOpen(true);
     setDetailsError(null);
     setDetails(null);
 
     startDetailsTransition(async () => {
-      const result = await getAccountDetails(accountId);
-      if (!result.success) {
-        setDetailsError(result.error ?? "Failed to load account details.");
-        return;
-      }
+      try {
+        const result = await getAccountDetails(accountId);
+        if (requestId !== detailsRequestId.current) return;
+        if (!result.success) {
+          setDetailsError(result.error ?? "Failed to load account details.");
+          return;
+        }
 
-      setDetails(result.data ?? null);
+        setDetails(result.data ?? null);
+      } catch (error) {
+        if (requestId !== detailsRequestId.current) return;
+        setDetailsError(error instanceof Error ? error.message : "Failed to load account details.");
+      }
     });
+  }
+
+  const accountTypes = [...new Set(accounts.map((account) => account.account_type))];
+  const accountStatuses = [...new Set(accounts.map((account) => account.status))];
+  const columns = useMemo<ColumnDef<Account>[]>(() => [
+    {
+      id: "name",
+      accessorFn: (account) => [account.name, account.display_name].filter(Boolean).join(" "),
+      header: "Name",
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{row.original.name}</div>
+          {row.original.display_name ? (
+            <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+              {row.original.display_name}
+            </div>
+          ) : null}
+        </div>
+      ),
+      size: 230,
+    },
+    { accessorKey: "email", header: "Email", cell: ({ getValue }) => String(getValue() ?? "—"), size: 230 },
+    {
+      accessorKey: "role",
+      header: "Role",
+      cell: ({ row }) => (
+        <Badge variant="outline" className={roleBadgeClass(row.original.role)}>
+          {capitalize(row.original.role)}
+        </Badge>
+      ),
+      size: 120,
+    },
+    { accessorKey: "account_type", header: "Type", cell: ({ getValue }) => capitalize(String(getValue())), size: 120 },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => (
+        <Badge variant="outline" className={statusBadgeClass(row.original.status)}>
+          {capitalize(row.original.status)}
+        </Badge>
+      ),
+      size: 130,
+    },
+    { accessorKey: "location", header: "Location", cell: ({ getValue }) => String(getValue() ?? "—"), size: 220 },
+    { accessorKey: "created_at", header: "Joined", cell: ({ getValue }) => formatDate(String(getValue())), size: 140 },
+    {
+      id: "account_actions",
+      header: "",
+      cell: ({ row }) => (
+        <AccountActions
+          account={row.original}
+          isPending={isPending}
+          onStatusAction={handleStatusAction}
+          onRoleAction={handleRoleAction}
+          onDeleteAction={handleDeleteAction}
+          onEmailAction={(account) => openComposeFor([account])}
+        />
+      ),
+      size: 64,
+      enableSorting: false,
+      enableHiding: false,
+    },
+  // The action handlers only close over stable React setters, server actions, and the router.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [isPending]);
+
+  if (detailsSheetOpen) {
+    return (
+      <AccountDetailsView
+        onBack={() => {
+          detailsRequestId.current += 1;
+          setDetailsSheetOpen(false);
+          setDetails(null);
+          setDetailsError(null);
+        }}
+        isLoading={isDetailsPending}
+        error={detailsError}
+        details={details}
+      />
+    );
   }
 
   return (
     <>
-      <div className="space-y-6 p-6 lg:p-8">
-        {/* Page heading */}
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Accounts</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {accounts.length} account{accounts.length !== 1 ? "s" : ""} total
-            </p>
-          </div>
-
-          {activeSelected.size > 0 && (
-            <div className="flex items-center gap-2">
+      <CrmListShell title="Accounts" count={accounts.length}>
+        <div className="h-full min-h-0">
+          <DataTable
+            columns={columns}
+            data={filtered}
+            enableGlobalFilter
+            searchPlaceholder="Search accounts..."
+            enableSorting
+            enableRowSelection
+            rowSelection={rowSelection}
+            onRowSelectionChange={handleRowSelectionChange}
+            onRowClick={(account) => handleOpenAccountDetails(account.id)}
+            getRowId={(account) => account.id}
+            pageSize={50}
+            onRefresh={() => router.refresh()}
+            toolbarExtra={(
+              <>
+                <Select
+                  value={roleFilter}
+                  onValueChange={(value) => {
+                    setRoleFilter(value as "all" | AccountRole);
+                    setSelectedIds(new Set());
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-32 text-xs" aria-label="Filter by role">
+                    <SelectValue placeholder="All roles" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All roles</SelectItem>
+                    <SelectItem value="buyer">Buyers</SelectItem>
+                    <SelectItem value="supplier">Suppliers</SelectItem>
+                    <SelectItem value="recycler">Recyclers</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value as "all" | AccountStatus);
+                    setSelectedIds(new Set());
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-36 text-xs" aria-label="Filter by status">
+                    <SelectValue placeholder="All statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    {accountStatuses.map((status) => (
+                      <SelectItem key={status} value={status}>{capitalize(status)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={typeFilter}
+                  onValueChange={(value) => {
+                    setTypeFilter(value as "all" | AccountType);
+                    setSelectedIds(new Set());
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-32 text-xs" aria-label="Filter by type">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    {accountTypes.map((type) => (
+                      <SelectItem key={type} value={type}>{capitalize(type)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+            bulkActions={activeSelected.size > 0 ? (
+              <>
               <Button variant="outline" size="sm" onClick={handleBulkEmail}>
-                <MailIcon className="size-4 mr-1.5" />
-                Email {activeSelected.size} selected
+                <MailIcon className="size-4" />
+                Email
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -841,151 +949,11 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
-          )}
+              </>
+            ) : null}
+          />
         </div>
-
-        {/* Tabs + table */}
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v as Tab)}
-        >
-          <TabsList>
-            {TABS.map(({ value, label }) => (
-              <TabsTrigger key={value} value={value}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {TABS.map(({ value }) => (
-            <TabsContent key={value} value={value}>
-              <div className="mt-4 overflow-hidden rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
-                <Table className="min-w-[980px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="pl-4 w-10">
-                        <Checkbox
-                          checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                          onCheckedChange={toggleAll}
-                          aria-label="Select all"
-                        />
-                      </TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Joined</TableHead>
-                      <TableHead className="w-10" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.length === 0 ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={9}
-                          className="text-center text-muted-foreground py-10"
-                        >
-                          No accounts found.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filtered.map((account) => (
-                        <TableRow
-                          key={account.id}
-                          className={isPending ? "opacity-60" : undefined}
-                          data-selected={activeSelected.has(account.id) ? "true" : undefined}
-                        >
-                          {/* Checkbox */}
-                          <TableCell className="pl-4">
-                            <Checkbox
-                              checked={activeSelected.has(account.id)}
-                              onCheckedChange={() => toggleOne(account.id)}
-                              aria-label={`Select ${account.name}`}
-                            />
-                          </TableCell>
-
-                          {/* Name */}
-                          <TableCell>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenAccountDetails(account.id)}
-                              className="font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] hover:underline"
-                            >
-                              {account.name}
-                            </button>
-                            {account.display_name && (
-                              <div className="text-xs text-muted-foreground">
-                                {account.display_name}
-                              </div>
-                            )}
-                          </TableCell>
-
-                          {/* Email */}
-                          <TableCell>
-                            <span className={account.email ? "text-muted-foreground text-sm" : "text-muted-foreground"}>
-                              {account.email ?? "—"}
-                            </span>
-                          </TableCell>
-
-                          {/* Role */}
-                          <TableCell>
-                            <Badge
-                              className={roleBadgeClass(account.role)}
-                              variant="outline"
-                            >
-                              {capitalize(account.role)}
-                            </Badge>
-                          </TableCell>
-
-                          {/* Type */}
-                          <TableCell className="text-muted-foreground text-sm">
-                            {capitalize(account.account_type)}
-                          </TableCell>
-
-                          {/* Status */}
-                          <TableCell>
-                            <Badge
-                              className={statusBadgeClass(account.status)}
-                              variant="outline"
-                            >
-                              {capitalize(account.status)}
-                            </Badge>
-                          </TableCell>
-
-                          {/* Location */}
-                          <TableCell className="text-muted-foreground text-sm">
-                            {account.location ?? "—"}
-                          </TableCell>
-
-                          {/* Joined */}
-                          <TableCell className="text-muted-foreground text-sm">
-                            {formatDate(account.created_at)}
-                          </TableCell>
-
-                          {/* Actions */}
-                          <TableCell className="pr-4">
-                            <AccountActions
-                              account={account}
-                              isPending={isPending}
-                              onStatusAction={handleStatusAction}
-                              onRoleAction={handleRoleAction}
-                              onDeleteAction={handleDeleteAction}
-                              onEmailAction={(a) => openComposeFor([a])}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </TabsContent>
-          ))}
-        </Tabs>
-      </div>
+      </CrmListShell>
 
       <ComposeSheet
         open={sheetOpen}
@@ -1048,13 +1016,6 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
         </DialogContent>
       </Dialog>
 
-      <AccountDetailsSheet
-        open={detailsSheetOpen}
-        onOpenChange={setDetailsSheetOpen}
-        isLoading={isDetailsPending}
-        error={detailsError}
-        details={details}
-      />
     </>
   );
 }

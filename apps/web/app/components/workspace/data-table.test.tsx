@@ -123,4 +123,39 @@ describe("DataTable cell selection", () => {
 		fireEvent.click(screen.getByText("Name"));
 		expect(onSortChange).toHaveBeenLastCalledWith([{ id: "name", desc: true }]);
 	});
+
+	it("opens rows from data cells without treating embedded controls as row clicks", () => {
+		const onRowClick = vi.fn();
+		const onAction = vi.fn();
+		const columnsWithAction: ColumnDef<Row>[] = [
+			...columns,
+			{
+				id: "action",
+				header: "",
+				cell: () => <button type="button" onClick={onAction}>Act</button>,
+			},
+		];
+
+		render(
+			<DataTable
+				columns={columnsWithAction}
+				data={rows}
+				onRowClick={onRowClick}
+				hideToolbar
+				getRowId={(row) => row.id}
+			/>,
+		);
+
+		fireEvent.click(screen.getByText("Ada"));
+		expect(onRowClick).toHaveBeenCalledWith(rows[0], 0);
+
+		fireEvent.click(screen.getAllByRole("button", { name: "Act" })[0]);
+		expect(onAction).toHaveBeenCalledOnce();
+		expect(onRowClick).toHaveBeenCalledOnce();
+
+		const firstRow = screen.getByText("Ada").closest("tr");
+		expect(firstRow).toHaveAttribute("tabindex", "0");
+		fireEvent.keyDown(firstRow!, { key: "Enter" });
+		expect(onRowClick).toHaveBeenCalledTimes(2);
+	});
 });
