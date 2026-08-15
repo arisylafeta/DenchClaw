@@ -18,7 +18,12 @@ type EvidencePage = BatteryReviewPage<BatteryEvidenceRow>;
 
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
-  if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "—";
+    return value.every((item) => item == null || ["string", "number", "boolean"].includes(typeof item))
+      ? value.join(", ")
+      : JSON.stringify(value);
+  }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
@@ -54,9 +59,11 @@ function evidenceChanges(row: BatteryEvidenceRow): EvidenceChange[] {
   const changedFields = Array.isArray(row.changed_fields)
     ? row.changed_fields.filter((field): field is string => typeof field === "string")
     : [];
-  const fields = changedFields.length > 0
-    ? changedFields
-    : [...new Set([...Object.keys(previousValues), ...Object.keys(submittedValues)])];
+  const fields = [...new Set([
+    ...changedFields,
+    ...Object.keys(previousValues),
+    ...Object.keys(submittedValues),
+  ])];
 
   return fields.map((field) => ({
     field,
@@ -101,19 +108,50 @@ function ChangeSet({ changes, detailed = false }: { changes: EvidenceChange[]; d
   );
 }
 
-function JsonDetails({ row, title }: { row: BatteryReviewRow; title: string }) {
+const BATTERY_FACT_FIELDS = [
+  "manufacturer", "model", "variant", "chemistry", "nominal_kwh", "usable_kwh",
+  "voltage", "cell_format", "from_year", "to_year", "part_number", "status",
+] as const;
+
+const AUDIT_FIELDS = ["source", "source_context", "source_flow", "created_at", "updated_at"] as const;
+
+function fieldLabel(field: string): string {
+  return field.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function BatteryFact({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-        {Object.entries(row).filter(([key]) => key !== "linked_battery").map(([key, value]) => (
-          <div key={key} className="min-w-0">
-            <dt className="text-xs font-medium text-muted-foreground">{key}</dt>
-            <dd className="mt-1 break-words text-sm">{display(value)}</dd>
-          </div>
-        ))}
-      </dl>
+    <div className="min-w-0">
+      <dt className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>{label}</dt>
+      <dd className="mt-1 break-words text-[13px]" style={{ color: "var(--color-text)" }}>{display(value)}</dd>
     </div>
+  );
+}
+
+function BatteryFactCard({ title, row, fields }: { title: string; row: BatteryReviewRow; fields: readonly string[] }) {
+  const visible = fields.filter((field) => row[field] !== null && row[field] !== undefined && row[field] !== "");
+  if (visible.length === 0) return null;
+  return (
+    <section>
+      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>{title}</h3>
+      <dl className="grid gap-x-6 gap-y-4 rounded-2xl border p-5 sm:grid-cols-2 lg:grid-cols-3" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+        {visible.map((field) => <BatteryFact key={field} label={fieldLabel(field)} value={row[field]} />)}
+      </dl>
+    </section>
+  );
+}
+
+function AdditionalBatteryFields({ row, excluded }: { row: BatteryReviewRow; excluded: readonly string[] }) {
+  const excludedSet = new Set([...excluded, "linked_battery", "previous_values", "submitted_values", "changed_fields"]);
+  const additional = Object.entries(row).filter(([field, value]) => !excludedSet.has(field) && value != null && value !== "");
+  if (additional.length === 0) return null;
+  return (
+    <details className="rounded-2xl border px-5 py-4" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+      <summary className="cursor-pointer text-[13px] font-medium">Additional platform fields ({additional.length})</summary>
+      <dl className="mt-4 grid gap-x-6 gap-y-4 border-t pt-4 sm:grid-cols-2" style={{ borderColor: "var(--color-border)" }}>
+        {additional.map(([field, value]) => <BatteryFact key={field} label={fieldLabel(field)} value={value} />)}
+      </dl>
+    </details>
   );
 }
 
@@ -370,9 +408,53 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
       </CrmListShell>
 
       <Dialog open={Boolean(details)} onOpenChange={(open) => !open && setDetails(null)}>
-        <DialogContent className="max-h-[85vh] max-w-5xl overflow-y-auto">
-          <DialogHeader><DialogTitle>{details?.label} details</DialogTitle><DialogDescription>Raw live table values are shown read-only. Evidence comparison uses only the explicitly selected canonical link.</DialogDescription></DialogHeader>
-          {details ? <div className="space-y-7">{details.label === "Battery evidence" ? <><section className="space-y-3"><h3 className="text-sm font-semibold">Proposed field changes</h3><ChangeSet changes={evidenceChanges(details.row as BatteryEvidenceRow)} detailed /></section><JsonDetails row={details.linked ?? { status: "No selected canonical battery is linked to this evidence row." }} title="Current selected canonical context" /></> : null}<JsonDetails row={details.row} title={details.label} /></div> : null}
+        <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto p-0">
+          {details ? (
+            <>
+              <DialogHeader className="border-b px-6 py-5" style={{ borderColor: "var(--color-border)" }}>
+                <div className="flex items-start gap-3 pr-8">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text-muted)" }}>
+                    <ImageIcon className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <DialogTitle className="font-instrument text-xl tracking-tight">
+                      {details.label === "Battery evidence" ? display(details.row.source_context) : canonicalLabel(details.row)}
+                    </DialogTitle>
+                    <DialogDescription className="mt-1">
+                      {details.label === "Battery evidence"
+                        ? "Review the submitted changes against the explicitly selected canonical battery."
+                        : "Canonical battery record and catalogue metadata."}
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+              <div className="space-y-7 px-6 py-6">
+                {details.label === "Battery evidence" ? (
+                  <>
+                    <section>
+                      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>Proposed changes</h3>
+                      <ChangeSet changes={evidenceChanges(details.row as BatteryEvidenceRow)} detailed />
+                    </section>
+                    <BatteryFactCard title="Evidence context" row={details.row} fields={["selected_battery_id", "matched_battery_id", ...AUDIT_FIELDS]} />
+                    {details.linked ? (
+                      <BatteryFactCard title="Selected canonical battery" row={details.linked} fields={BATTERY_FACT_FIELDS} />
+                    ) : (
+                      <div className="rounded-2xl border border-dashed px-5 py-6 text-center text-[13px]" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
+                        No canonical battery is linked to this evidence row.
+                      </div>
+                    )}
+                    <AdditionalBatteryFields row={details.row} excluded={["selected_battery_id", "matched_battery_id", ...AUDIT_FIELDS]} />
+                  </>
+                ) : (
+                  <>
+                    <BatteryFactCard title="Battery specification" row={details.row} fields={BATTERY_FACT_FIELDS} />
+                    <BatteryFactCard title="Catalogue and audit" row={details.row} fields={AUDIT_FIELDS} />
+                    <AdditionalBatteryFields row={details.row} excluded={[...BATTERY_FACT_FIELDS, ...AUDIT_FIELDS]} />
+                  </>
+                )}
+              </div>
+            </>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

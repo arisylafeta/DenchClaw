@@ -598,6 +598,7 @@ export function DataTable<TData, TValue>({
 		enableRowSelection,
 		enableSorting,
 		globalFilterFn: fuzzyFilter,
+		getRowId: getRowId ? (row) => getRowId(row) : undefined,
 		columnResizeMode: "onChange",
 		defaultColumn: { minSize: 150 },
 	});

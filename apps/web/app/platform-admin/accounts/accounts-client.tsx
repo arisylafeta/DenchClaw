@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeftIcon, MailIcon, MoreHorizontalIcon, SendIcon, Trash2Icon } from "lucide-react";
+import { Building2Icon, MailIcon, MoreHorizontalIcon, SendIcon, Trash2Icon } from "lucide-react";
 import type { ColumnDef, OnChangeFn } from "@tanstack/react-table";
 
 import {
@@ -119,6 +119,10 @@ function formatDate(dateStr: string): string {
 
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function humanize(value: string): string {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatDateTime(dateStr: string): string {
@@ -277,12 +281,43 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
   );
 }
 
+function DetailCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
+        {title}
+      </h2>
+      <dl
+        className="grid gap-x-6 gap-y-5 rounded-2xl border p-5 sm:grid-cols-2"
+        style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+      >
+        {children}
+      </dl>
+    </section>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div
+      className="rounded-2xl border px-4 py-3"
+      style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+    >
+      <div className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>{label}</div>
+      <div className="mt-1 truncate text-lg font-semibold" style={{ color: "var(--color-text)" }}>{value}</div>
+    </div>
+  );
+}
+
+type AccountDetailTab = "overview" | "members" | "platform";
+
 function AccountDetailsView({
   onBack,
   isLoading,
   error,
   details,
 }: AccountDetailsViewProps) {
+  const [tab, setTab] = useState<AccountDetailTab>("overview");
   const memberColumns = useMemo<ColumnDef<AccountDetails["members"][number]>[]>(() => [
     {
       id: "name",
@@ -329,86 +364,157 @@ function AccountDetailsView({
     },
   ], []);
 
+  if (isLoading && !details) {
+    return (
+      <div className="flex h-full flex-col" style={{ background: "var(--color-background)" }}>
+        <header className="shrink-0 border-b px-6 py-4" style={{ borderColor: "var(--color-border)" }}>
+          <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-[12px] hover:underline" style={{ color: "var(--color-text-muted)" }} aria-label="Back to Accounts">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
+            Accounts
+          </button>
+        </header>
+        <CrmLoadingState label="Loading account…" />
+      </div>
+    );
+  }
+
+  if (error || !details) {
+    return (
+      <div className="flex h-full flex-col" style={{ background: "var(--color-background)" }}>
+        <CrmEmptyState
+          title="Couldn’t load this account"
+          description={error ?? "The account may no longer exist."}
+          cta={<Button type="button" variant="outline" size="sm" onClick={onBack}>Back to Accounts</Button>}
+        />
+      </div>
+    );
+  }
+
+  const tabs: Array<{ id: AccountDetailTab; label: string; count?: number }> = [
+    { id: "overview", label: "Overview" },
+    { id: "members", label: "Members", count: details.members.length },
+    { id: "platform", label: "Platform data", count: profileRows.length },
+  ];
+
   return (
-    <CrmListShell
-      title={details?.account.name ?? "Account details"}
-      toolbar={(
-        <Button type="button" variant="ghost" size="sm" onClick={onBack} aria-label="Back to Accounts">
-          <ArrowLeftIcon className="size-4" />
-          Accounts
-        </Button>
-      )}
-    >
-      {isLoading ? <CrmLoadingState label="Loading account…" /> : null}
-      {!isLoading && error ? (
-        <CrmEmptyState title="Couldn’t load this account" description={error} />
-      ) : null}
-      {!isLoading && !error && details ? (
-        <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className={roleBadgeClass(details.account.role)}>
-              {capitalize(details.account.role)}
-            </Badge>
-            <Badge variant="outline" className={statusBadgeClass(details.account.status)}>
-              {capitalize(details.account.status)}
-            </Badge>
-            <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-              {capitalize(details.account.account_type)} account
-            </span>
+    <div className="flex h-full min-h-0 flex-col" style={{ background: "var(--color-background)" }}>
+      <header
+        className="shrink-0 px-6 pt-4"
+        style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-background)" }}
+      >
+        <div className="mb-3 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+          <button type="button" onClick={onBack} className="inline-flex items-center gap-1 hover:underline" aria-label="Back to Accounts">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m15 18-6-6 6-6" /></svg>
+            Accounts
+          </button>
+        </div>
+        <div className="flex items-start gap-4">
+          <div
+            className="flex size-12 shrink-0 items-center justify-center rounded-2xl border"
+            style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text-muted)" }}
+          >
+            <Building2Icon className="size-5" />
           </div>
-
-          {details.publicProfile?.about ? (
-            <section>
-              <h2 className="mb-3 text-sm font-semibold">About</h2>
-              <p className="max-w-3xl text-sm leading-6" style={{ color: "var(--color-text-muted)" }}>
-                {details.publicProfile.about}
-              </p>
-            </section>
-          ) : null}
-
-          <section className="border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
-            <h2 className="mb-4 text-sm font-semibold">Account</h2>
-            <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-              <DetailField label="Display name" value={details.publicProfile?.display_name ?? details.account.name} />
-              <DetailField label="Website" value={details.publicProfile?.website_url ? (
-                <a className="hover:underline" href={details.publicProfile.website_url} target="_blank" rel="noreferrer">
-                  {details.publicProfile.website_url}
+          <div className="min-w-0 flex-1">
+            <h1 className="font-instrument truncate text-2xl tracking-tight" style={{ color: "var(--color-text)" }}>{details.account.name}</h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px]" style={{ color: "var(--color-text-muted)" }}>
+              <Badge variant="outline" className={roleBadgeClass(details.account.role)}>{humanize(details.account.role)}</Badge>
+              <Badge variant="outline" className={statusBadgeClass(details.account.status)}>{humanize(details.account.status)}</Badge>
+              <span>{humanize(details.account.account_type)}</span>
+              {details.publicProfile?.website_url ? (
+                <a href={details.publicProfile.website_url} target="_blank" rel="noreferrer" className="truncate hover:underline">
+                  {details.publicProfile.website_url.replace(/^https?:\/\//, "")}
                 </a>
-              ) : "—"} />
-              <DetailField label="Sector" value={details.account.sector ?? "—"} />
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <nav className="mt-5 flex items-center gap-4 -mb-px" aria-label="Account details" role="tablist">
+          {tabs.map((item) => {
+            const active = item.id === tab;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(item.id)}
+                className="relative flex items-center gap-1.5 px-1 py-2 text-[13px] font-medium transition-colors"
+                style={{ color: active ? "var(--color-text)" : "var(--color-text-muted)", borderBottom: active ? "2px solid var(--color-text)" : "2px solid transparent" }}
+              >
+                {item.label}
+                {typeof item.count === "number" && item.count > 0 ? (
+                  <span className="rounded-full px-1.5 text-[10px]" style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}>{item.count}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+      </header>
+
+      <div className="min-h-0 flex-1">
+        {tab === "overview" ? (
+          <div className="mx-auto h-full w-full max-w-4xl space-y-7 overflow-y-auto px-6 py-6" role="tabpanel">
+            <section>
+              <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>At a glance</h2>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <DetailStat label="Members" value={details.members.length} />
+                <DetailStat label="Role" value={humanize(details.account.role)} />
+                <DetailStat label="Status" value={humanize(details.account.status)} />
+                <DetailStat label="Stripe" value={humanize(details.account.stripe_connect_status)} />
+              </div>
+            </section>
+
+            {details.publicProfile?.about ? (
+              <section>
+                <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>About</h2>
+                <p className="max-w-3xl text-[13px] leading-6" style={{ color: "var(--color-text)" }}>{details.publicProfile.about}</p>
+              </section>
+            ) : null}
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <DetailCard title="Organisation">
+              <DetailField label="Display name" value={details.publicProfile?.display_name ?? details.account.name} />
+              <DetailField label="Sector" value={details.account.sector ? humanize(details.account.sector) : "—"} />
               <DetailField label="Company number" value={details.privateProfile?.company_number ?? "—"} />
               <DetailField label="Tax registration" value={details.privateProfile?.tax_registered ? details.privateProfile.tax_id ?? "Registered" : "Not registered"} />
               <DetailField label="Address" value={address} />
               <DetailField label="SEO slug" value={details.publicProfile?.seo_slug ?? "—"} />
-              <DetailField label="Stripe Connect" value={capitalize(details.account.stripe_connect_status)} />
+              </DetailCard>
+              <DetailCard title="Payments and audit">
+              <DetailField label="Stripe Connect" value={humanize(details.account.stripe_connect_status)} />
               <DetailField label="Stripe account ID" value={details.account.stripe_connect_account_id ? <span className="font-mono text-xs">{details.account.stripe_connect_account_id}</span> : "—"} />
               <DetailField label="Stripe onboarded" value={details.account.stripe_connect_onboarded_at ? formatDateTime(details.account.stripe_connect_onboarded_at) : "—"} />
               <DetailField label="Created" value={formatDateTime(details.account.created_at)} />
               <DetailField label="Updated" value={formatDateTime(details.account.updated_at)} />
               <DetailField label="Account ID" value={<span className="font-mono text-xs">{details.account.id}</span>} />
-            </dl>
-          </section>
+              </DetailCard>
+            </div>
+          </div>
+        ) : null}
 
-          <section className="h-[360px] border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
+        {tab === "members" ? (
+          <div className="h-full min-h-0 p-4" role="tabpanel">
             <DataTable
               columns={memberColumns}
               data={details.members}
-              title="Members"
               enableGlobalFilter
               searchPlaceholder="Search members..."
               enableSorting
+              enableRowSelection
               stickyFirstColumn={false}
               getRowId={(member) => member.user_id}
               pageSize={20}
             />
-          </section>
+          </div>
+        ) : null}
 
-          {profileRows.length > 0 ? (
-            <section className="h-[360px] border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
+        {tab === "platform" ? (
+          profileRows.length > 0 ? (
+            <div className="h-full min-h-0 p-4" role="tabpanel">
               <DataTable
                 columns={profileColumns}
                 data={profileRows}
-                title="Profile fields"
                 enableGlobalFilter
                 searchPlaceholder="Search profile fields..."
                 enableSorting
@@ -416,11 +522,11 @@ function AccountDetailsView({
                 getRowId={(row) => row.id}
                 pageSize={20}
               />
-            </section>
-          ) : null}
-        </div>
-      ) : null}
-    </CrmListShell>
+            </div>
+          ) : <CrmEmptyState title="No platform fields" description="This account has no public profile or operations fields." />
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -558,8 +664,13 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
   const activeSelected = new Set([...selectedIds].filter((id) => filteredIds.has(id)));
   const rowSelection = Object.fromEntries([...activeSelected].map((id) => [id, true]));
   const handleRowSelectionChange: OnChangeFn<Record<string, boolean>> = (updater) => {
-    const nextVisible = typeof updater === "function" ? updater(rowSelection) : updater;
     setSelectedIds((previous) => {
+      const currentVisible = Object.fromEntries(
+        filtered
+          .filter((account) => previous.has(account.id))
+          .map((account) => [account.id, true]),
+      );
+      const nextVisible = typeof updater === "function" ? updater(currentVisible) : updater;
       const next = new Set(previous);
       filtered.forEach((account) => next.delete(account.id));
       Object.entries(nextVisible).forEach(([id, selected]) => {

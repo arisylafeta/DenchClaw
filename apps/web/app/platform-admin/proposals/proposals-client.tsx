@@ -64,6 +64,7 @@ import {
 } from "@/app/components/platform-admin/ui/table";
 import { Textarea } from "@/app/components/platform-admin/ui/textarea";
 import { TablePagination } from "@/app/components/platform-admin/table-pagination";
+import { CrmListShell } from "@/app/components/crm/crm-list-shell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -425,16 +426,8 @@ export function ProposalsClient({
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 p-6 lg:p-8">
-      {/* ── Page header ── */}
-      <div>
-        <div>
-          <h1 className="font-instrument text-3xl tracking-tight text-[var(--color-text)]">Proposals</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Invite recyclers to published listings and manage opportunity links.
-          </p>
-        </div>
-      </div>
+    <CrmListShell title="Proposals" count={proposals.allCount}>
+    <div className="space-y-6 p-5 lg:p-6">
 
       <nav
         className="grid gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-hover)]/60 p-2 lg:grid-cols-3"
@@ -1420,5 +1413,6 @@ export function ProposalsClient({
         </DialogContent>
       </Dialog>
     </div>
+    </CrmListShell>
   );
 }

@@ -45,4 +45,15 @@ describe("PayoutReviewsClient", () => {
     expect(screen.getByText("Acme Recycling")).toBeInTheDocument();
     expect(screen.queryByText("Other Seller")).not.toBeInTheDocument();
   });
+
+  it("shows the payout context before an operator decides", async () => {
+    const user = userEvent.setup();
+    render(<PayoutReviewsClient reviews={[review]} />);
+
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    expect(screen.getByText("Approve payout method?")).toBeInTheDocument();
+    expect(screen.getByText("recycler · bank ending 4242")).toBeInTheDocument();
+    expect(screen.getAllByText("Partial match").length).toBeGreaterThan(0);
+  });
 });

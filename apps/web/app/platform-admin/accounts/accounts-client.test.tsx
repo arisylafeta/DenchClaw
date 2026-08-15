@@ -68,6 +68,19 @@ describe("AccountsClient", () => {
     expect(screen.getByRole("combobox", { name: "Filter by type" })).toBeInTheDocument();
   });
 
+  it("keeps multiple account rows selected and exposes bulk actions", async () => {
+    const user = userEvent.setup();
+    render(<AccountsClient accounts={accounts} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Select row 1" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select row 2" }));
+
+    expect(screen.getByRole("checkbox", { name: "Deselect row 1" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Deselect row 2" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Bulk actions" })).toBeInTheDocument();
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+  });
+
   it("opens account details as a full shared view and returns to the list", async () => {
     const user = userEvent.setup();
     vi.mocked(getAccountDetails).mockResolvedValue({
@@ -123,10 +136,14 @@ describe("AccountsClient", () => {
 
     expect(await screen.findByRole("button", { name: "Back to Accounts" })).toBeInTheDocument();
     expect(await screen.findByText("A recycler")).toBeInTheDocument();
-    expect(screen.getByText("Alex Operator")).toBeInTheDocument();
     expect(screen.getByText("Dover, United Kingdom")).toBeInTheDocument();
     expect(screen.getByText("acct_123")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Members/ }));
+    expect(screen.getByText("Alex Operator")).toBeInTheDocument();
     expect(screen.getByText("+44 20 1234 5678")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Platform data/ }));
     expect(screen.getByText("Priority recycler")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back to Accounts" }));

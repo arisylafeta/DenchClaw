@@ -182,6 +182,18 @@ export function PayoutReviewsClient({
       ),
       size: 200,
     },
+    {
+      id: "review",
+      header: "",
+      cell: ({ row }) => row.original.status === "requested" || row.original.status === "processing" ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => openDecision(row.original, "approve")}>
+          {row.original.status === "processing" ? "Retry" : "Review"}
+        </Button>
+      ) : null,
+      size: 100,
+      enableSorting: false,
+      enableHiding: false,
+    },
   ], []);
 
   return (
@@ -226,24 +238,12 @@ export function PayoutReviewsClient({
                 </Select>
               </>
             )}
-            rowActions={(review) => {
-              if (review.status === "requested") {
-                return [
-                  { label: "Approve", icon: <CheckCircle2Icon />, onClick: () => openDecision(review, "approve") },
-                  { label: "Reject", icon: <XCircleIcon />, variant: "destructive", onClick: () => openDecision(review, "reject") },
-                ];
-              }
-              if (review.status === "processing") {
-                return [{ label: "Retry approval", icon: <CheckCircle2Icon />, onClick: () => openDecision(review, "approve") }];
-              }
-              return [];
-            }}
           />
         </div>
       </CrmListShell>
 
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {decision === "approve" ? "Approve payout method?" : "Reject payout review?"}
@@ -254,7 +254,45 @@ export function PayoutReviewsClient({
                 : "The payout method will remain restricted. Tell the seller what must be corrected before they request another review."}
             </DialogDescription>
           </DialogHeader>
+          {selected ? (
+            <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">{selected.accountName}</div>
+                  <div className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    {selected.accountRole} · bank ending {selected.payoutMethodLast4 ?? "unknown"}
+                  </div>
+                </div>
+                {statusBadge(selected.status)}
+              </div>
+              <div className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2" style={{ borderColor: "var(--color-border)" }}>
+                <div>
+                  <div className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>Match result</div>
+                  <div className="mt-1 text-sm font-medium">{resultLabel(selected.matchResult)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>Corridor</div>
+                  <div className="mt-1 text-sm">{[selected.payoutCountry, selected.payoutCurrency].filter(Boolean).join(" · ") || "Not recorded"}</div>
+                </div>
+              </div>
+              {selected.providerMessage ? (
+                <p className="mt-4 border-t pt-4 text-xs leading-5" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
+                  {selected.providerMessage}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Decision">
+              <Button type="button" variant={decision === "approve" ? "default" : "outline"} onClick={() => setDecision("approve")}>
+                <CheckCircle2Icon className="size-4" />
+                Approve
+              </Button>
+              <Button type="button" variant={decision === "reject" ? "destructive" : "outline"} onClick={() => setDecision("reject")}>
+                <XCircleIcon className="size-4" />
+                Reject
+              </Button>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="reviewer-name">Operator name</Label>
               <Input
