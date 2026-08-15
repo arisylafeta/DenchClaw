@@ -109,6 +109,8 @@ import {
 import { resolveActiveViewSyncDecision } from "./object-view-active-view";
 import { mergeNewlySeenColumns } from "./object-view-column-discovery";
 import { resetWorkspaceStateOnSwitch } from "./workspace-switch";
+import { contentUsesFullView, type WorkspacePanelLayout } from "./content-layout";
+import { useContentFullView } from "./use-content-full-view";
 // Note: TabBar (the chrome-tabs strip used by the legacy single-strip layout)
 // is no longer used here — the v3 layout has separate inline strips for
 // chats and content. Keep the file for components that may still mount it.
@@ -664,6 +666,17 @@ function WorkspacePageInner() {
   const activeChatTabId = tabsState.activeChatId;
   const contentTabs = tabsState.contentTabs;
   const mainChatTabs = tabsState.chatTabs;
+  const fullViewActive = !isMobile && contentUsesFullView(activePath);
+  const applyPanelLayout = useCallback((layout: WorkspacePanelLayout) => {
+    setChatPanelCollapsed(layout.chatPanelCollapsed);
+    setFileTreeCollapsed(layout.fileTreeCollapsed);
+    setRightPanelCollapsed(layout.rightPanelCollapsed);
+  }, []);
+  const suspendPanelLayoutPersistence = useContentFullView({
+    active: fullViewActive,
+    layout: { chatPanelCollapsed, fileTreeCollapsed, rightPanelCollapsed },
+    applyLayout: applyPanelLayout,
+  });
 
   // Ref for the keyboard shortcut to close the active tab.
   const tabCloseActiveRef = useRef<(() => void) | null>(null);
@@ -986,18 +999,21 @@ function WorkspacePageInner() {
     window.localStorage.setItem(STORAGE_RIGHT_PANEL, String(rightPanelWidth));
   }, [rightPanelWidth]);
   useEffect(() => {
+    if (suspendPanelLayoutPersistence) return;
     window.localStorage.setItem(STORAGE_RIGHT_PANEL_COLLAPSED, rightPanelCollapsed ? "1" : "0");
-  }, [rightPanelCollapsed]);
+  }, [rightPanelCollapsed, suspendPanelLayoutPersistence]);
   useEffect(() => {
+    if (suspendPanelLayoutPersistence) return;
     if (isDesktopWorkspaceViewport()) {
       window.localStorage.setItem(STORAGE_CHAT_PANEL_COLLAPSED, chatPanelCollapsed ? "1" : "0");
     }
-  }, [chatPanelCollapsed, isMobile]);
+  }, [chatPanelCollapsed, isMobile, suspendPanelLayoutPersistence]);
   useEffect(() => {
+    if (suspendPanelLayoutPersistence) return;
     if (isDesktopWorkspaceViewport()) {
       window.localStorage.setItem(STORAGE_FILE_TREE_COLLAPSED, fileTreeCollapsed ? "1" : "0");
     }
-  }, [fileTreeCollapsed, isMobile]);
+  }, [fileTreeCollapsed, isMobile, suspendPanelLayoutPersistence]);
   useEffect(() => {
     if (chatPanelCollapsed && isDesktopWorkspaceViewport()) {
       document.getElementById("workspace-show-chat")?.focus();
@@ -1313,8 +1329,7 @@ function WorkspacePageInner() {
     ) => {
       // Make sure the right panel is open and wide enough to actually use
       // when the user clicks one of the data tabs (People, Companies, etc.).
-      // Without this, clicking a tab does nothing visible if the panel is
-      // collapsed.
+      // The active route applies any full-view policy after the tab changes.
       ensureRightPanelOpenWide();
 
       // People / Companies render through the standard ObjectView pipeline
@@ -1828,11 +1843,6 @@ function WorkspacePageInner() {
     if (tabLoadedForWorkspace.current !== (workspaceName || null)) return;
 
     const urlState = parseUrlState(searchParams);
-    if (!isMobile && (urlState.path === "project" || urlState.path === "work_task")) {
-      setChatPanelCollapsed(true);
-      setFileTreeCollapsed(true);
-      setRightPanelCollapsed(false);
-    }
     const shell = buildShellUrlState();
     dispatch({ type: "applyUrl", url: urlState, shell });
 

@@ -43,6 +43,9 @@ describe("workspace sidebar navigation", () => {
     expect(screen.queryByText("Cloud")).toBeNull();
     expect(screen.queryByText("Integrations")).toBeNull();
     expect(screen.queryByText("Skills")).toBeNull();
+    expect(screen.queryByText(/dench\.com/)).toBeNull();
+    expect(screen.queryByTitle(/dotfiles/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Open user menu" })).toBeInTheDocument();
 
     const navigationLabels = screen.getAllByRole("button").map((button) => button.textContent?.trim()).filter(Boolean);
     expect(navigationLabels).toEqual(expect.arrayContaining([

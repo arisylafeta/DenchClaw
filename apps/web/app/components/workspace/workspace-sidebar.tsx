@@ -13,10 +13,10 @@ import {
 	IconFileFilled,
 	IconDatabaseFilled,
 } from "@tabler/icons-react";
-import { useTheme } from "next-themes";
 import { type TreeNode } from "./file-manager-tree";
 import { ProfileSwitcher } from "./profile-switcher";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
+import { NavUser, type NavUserData } from "./nav-user";
 import type { SearchIndexItem } from "@/lib/search-index";
 import { displayObjectName } from "@/lib/object-display-name";
 import { CrmObjectIcon } from "./crm-object-icon";
@@ -32,6 +32,11 @@ export type SidebarObjectGroups = {
 	crm: CustomCrmObject[];
 	work: CustomCrmObject[];
 	automations: CustomCrmObject[];
+};
+
+const FALLBACK_NAV_USER: NavUserData = {
+	displayName: "Account",
+	email: "User settings",
 };
 
 const WORK_OBJECT_NAMES: ReadonlySet<string> = new Set(["project", "work_task"]);
@@ -140,39 +145,6 @@ type WorkspaceSidebarProps = {
   /** Invoked when the user hits the "+" next to the Chats tab. */
   onNewChatSession?: () => void;
 };
-
-function ThemeToggle() {
-	const { resolvedTheme, setTheme } = useTheme();
-	const [mounted, setMounted] = useState(false);
-	useEffect(() => setMounted(true), []);
-	if (!mounted) return <div className="w-[26px] h-[26px]" />;
-	const isDark = resolvedTheme === "dark";
-	return (
-		<button
-			type="button"
-			onClick={() => setTheme(isDark ? "light" : "dark")}
-			className="p-1.5 rounded-lg transition-colors"
-			style={{ color: "var(--color-text-muted)" }}
-			onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-			onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-			title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-		>
-			{isDark ? (
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-					<circle cx="12" cy="12" r="4" />
-					<path d="M12 2v2" /><path d="M12 20v2" />
-					<path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" />
-					<path d="M2 12h2" /><path d="M20 12h2" />
-					<path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" />
-				</svg>
-			) : (
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-					<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-				</svg>
-			)}
-		</button>
-	);
-}
 
 function SearchIcon() {
 	return (
@@ -328,8 +300,6 @@ export function WorkspaceSidebar({
 	loading = false,
 	mobile,
 	onClose,
-	showHidden,
-	onToggleHidden,
 	width: widthProp,
 	onCollapse,
 	compact = false,
@@ -353,10 +323,7 @@ export function WorkspaceSidebar({
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
 	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
 	const [adminTreeOpen, setAdminTreeOpen] = useState(true);
-  const [authUser, setAuthUser] = useState<{
-    displayName: string;
-    email: string;
-  } | null>(null);
+  const [authUser, setAuthUser] = useState<NavUserData | null>(null);
   useEffect(() => {
     let active = true;
     void fetch("/api/auth/me", { cache: "no-store" })
@@ -671,37 +638,7 @@ export function WorkspaceSidebar({
 				</div>
 			)}
 
-			{/* Footer: theme toggle + dotfiles toggle, stacked. */}
-			<div className="flex flex-col items-center py-1.5 gap-0.5">
-				{onToggleHidden && (
-					<button
-						type="button"
-						onClick={onToggleHidden}
-						className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors"
-						style={{ color: showHidden ? "var(--color-text)" : "var(--color-text-muted)" }}
-						onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-						onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-						title={showHidden ? "Hide dotfiles" : "Show dotfiles"}
-					>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							{showHidden ? (
-								<>
-									<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-									<circle cx="12" cy="12" r="3" />
-								</>
-							) : (
-								<>
-									<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
-									<path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
-									<path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
-									<path d="m2 2 20 20" />
-								</>
-							)}
-						</svg>
-					</button>
-				)}
-				<ThemeToggle />
-			</div>
+			<NavUser user={authUser ?? FALLBACK_NAV_USER} onSignOut={signOut} compact />
 		</aside>
 	);
 
@@ -926,76 +863,7 @@ export function WorkspaceSidebar({
 			</>
 		)}
 
-      {authUser && !isCompact && (
-        <div
-          className="mx-2 mb-1 flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
-          style={{ background: "var(--color-surface-hover)" }}
-        >
-          <div className="min-w-0">
-            <div
-              className="truncate text-[11px] font-medium"
-              style={{ color: "var(--color-text)" }}
-            >
-              {authUser.displayName}
-            </div>
-            <div
-              className="truncate text-[9px]"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              {authUser.email}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="shrink-0 rounded px-1.5 py-1 text-[9px]"
-            style={{ color: "var(--color-text-muted)" }}
-            aria-label="Sign out"
-          >
-            Sign out
-          </button>
-        </div>
-      )}
-
-		<div className="px-2 py-1.5 flex items-center justify-between">
-			<a
-				href="https://dench.com"
-				target="_blank"
-				rel="noopener noreferrer"
-				className="flex items-center gap-2 px-2 py-1 rounded-lg text-[11px]"
-				style={{ color: "var(--color-text-muted)" }}
-			>
-				dench.com{process.env.NEXT_PUBLIC_DENCHCLAW_VERSION ? ` v${process.env.NEXT_PUBLIC_DENCHCLAW_VERSION}` : ""}
-			</a>
-			<div className="flex items-center gap-0.5">
-				{onToggleHidden && (
-					<button
-						type="button"
-						onClick={onToggleHidden}
-						className="p-1.5 rounded-lg transition-colors"
-						style={{ color: showHidden ? "var(--color-text)" : "var(--color-text-muted)" }}
-						title={showHidden ? "Hide dotfiles" : "Show dotfiles"}
-					>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							{showHidden ? (
-								<>
-									<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-									<circle cx="12" cy="12" r="3" />
-								</>
-							) : (
-								<>
-									<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
-									<path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
-									<path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
-									<path d="m2 2 20 20" />
-								</>
-							)}
-						</svg>
-					</button>
-				)}
-				<ThemeToggle />
-			</div>
-		</div>
+		<NavUser user={authUser ?? FALLBACK_NAV_USER} onSignOut={signOut} />
 
 		</aside>
 	);
