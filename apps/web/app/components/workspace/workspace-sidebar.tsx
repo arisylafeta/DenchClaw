@@ -323,6 +323,7 @@ export function WorkspaceSidebar({
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
 	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
 	const [adminTreeOpen, setAdminTreeOpen] = useState(true);
+	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(true);
   const [authUser, setAuthUser] = useState<NavUserData | null>(null);
   useEffect(() => {
     let active = true;
@@ -604,25 +605,9 @@ export function WorkspaceSidebar({
 						);
 					})}
 					</div>
-					{objectGroups.work.length > 0 && (
-						<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
-					)}
-					{objectGroups.work.map(renderCompactObject)}
-					</>)}
-				</div>
-			)}
-
-			{/* Spacer pushes bottom nav + footer down. */}
-			<div className="flex-1 min-h-0" />
-
-			{/* Automation controls stay together at the bottom. */}
-			{onNavigate && (
-				<div className="flex flex-col items-center gap-0.5 py-1">
-					{loading ? (
-						Array.from({ length: 3 }, (_, index) => (
-							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
-						))
-					) : (<>
+					<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
+					<div role="group" aria-label="Workspace" className="flex flex-col items-center gap-0.5">
+						{objectGroups.work.map(renderCompactObject)}
 						{objectGroups.automations.map(renderCompactObject)}
 						<button
 							type="button"
@@ -634,9 +619,13 @@ export function WorkspaceSidebar({
 						>
 							{cronNavItem.icon}
 						</button>
+					</div>
 					</>)}
 				</div>
 			)}
+
+			{/* Spacer pushes the user menu down. */}
+			<div className="flex-1 min-h-0" />
 
 			<NavUser user={authUser ?? FALLBACK_NAV_USER} onSignOut={signOut} compact />
 		</aside>
@@ -830,17 +819,21 @@ export function WorkspaceSidebar({
 						})}
 					</div>}
 
-					{objectGroups.work.length > 0 && (<>
-						<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-							work
-						</div>
-						<div className="space-y-0.5">{objectGroups.work.map(renderExpandedObject)}</div>
-					</>)}
-
-					<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-						automations
-					</div>
-					<div className="space-y-0.5">
+					<button
+						type="button"
+						onClick={() => setWorkspaceTreeOpen((open) => !open)}
+						aria-expanded={workspaceTreeOpen}
+						aria-controls="sidebar-workspace-tree"
+						className="mt-2 w-full flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.05em]"
+						style={{ color: "var(--color-text-muted)" }}
+					>
+						<svg className={`h-3 w-3 transition-transform ${workspaceTreeOpen ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+							<path d="m9 18 6-6-6-6" />
+						</svg>
+						Workspace
+					</button>
+					{workspaceTreeOpen && <div id="sidebar-workspace-tree" role="group" aria-label="Workspace" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
+						{objectGroups.work.map(renderExpandedObject)}
 						{objectGroups.automations.map(renderExpandedObject)}
 						<button
 							type="button"
@@ -851,7 +844,7 @@ export function WorkspaceSidebar({
 							<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{cronNavItem.icon}</span>
 							{cronNavItem.label}
 						</button>
-					</div>
+					</div>}
 				</>)}
 			</div>
 		)}

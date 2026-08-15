@@ -36,10 +36,12 @@ describe("workspace sidebar navigation", () => {
       />,
     );
 
-    expect(screen.getByText("work")).toBeTruthy();
     expect(screen.getByRole("button", { name: "CRM" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Admin" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("automations")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("group", { name: "Workspace" })).toContainElement(screen.getByRole("button", { name: "Work Tasks" }));
+    expect(screen.queryByText("work")).toBeNull();
+    expect(screen.queryByText("automations")).toBeNull();
     expect(screen.queryByText("Cloud")).toBeNull();
     expect(screen.queryByText("Integrations")).toBeNull();
     expect(screen.queryByText("Skills")).toBeNull();
@@ -55,7 +57,7 @@ describe("workspace sidebar navigation", () => {
     expect(navigationLabels.indexOf("Loop Runs")).toBeLessThan(navigationLabels.indexOf("Cron"));
   });
 
-  it("collapses CRM and Admin as independent trees", () => {
+  it("collapses CRM, Admin, and Workspace as independent trees", () => {
     render(
       <WorkspaceSidebar
         onNavigate={vi.fn()}
@@ -70,9 +72,15 @@ describe("workspace sidebar navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "CRM" }));
     expect(screen.queryByRole("button", { name: "People" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Work Tasks" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.queryByRole("button", { name: "Work Tasks" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Loops" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cron" })).toBeNull();
   });
 
-  it("keeps compact CRM and Admin links in separate ordered groups", () => {
+  it("keeps compact CRM, Admin, and Workspace links in separate ordered groups", () => {
     render(
       <WorkspaceSidebar
         compact
@@ -84,9 +92,14 @@ describe("workspace sidebar navigation", () => {
 
     const crmGroup = screen.getByRole("group", { name: "CRM" });
     const adminGroup = screen.getByRole("group", { name: "Admin" });
+    const workspaceGroup = screen.getByRole("group", { name: "Workspace" });
     expect(crmGroup).toContainElement(screen.getByRole("button", { name: "Campaigns" }));
     expect(adminGroup).toContainElement(screen.getByRole("button", { name: "Accounts" }));
+    expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Work Tasks" }));
+    expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Loops" }));
+    expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Cron" }));
     expect(crmGroup.compareDocumentPosition(adminGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(adminGroup.compareDocumentPosition(workspaceGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("uses the same collapsible trees in the mobile drawer", () => {
@@ -102,6 +115,10 @@ describe("workspace sidebar navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
     expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
     expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.queryByRole("button", { name: "Work Tasks" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cron" })).toBeNull();
   });
 
   it("does not flash the fixed CRM links before dynamic objects load", () => {
