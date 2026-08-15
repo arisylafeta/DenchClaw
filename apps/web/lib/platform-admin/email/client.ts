@@ -12,7 +12,11 @@ let _client: postmark.ServerClient | null = null;
 export function getPostmarkClient(): postmark.ServerClient {
   if (!_client) {
     const env = getPostmarkEnv();
-    _client = new postmark.ServerClient(env.postmarkServerToken);
+    _client = new postmark.ServerClient(
+      env.postmarkServerToken,
+      // Postmark's SDK timeout is expressed in seconds.
+      new postmark.Models.ClientOptions.Configuration(true, undefined, 15),
+    );
   }
   return _client;
 }

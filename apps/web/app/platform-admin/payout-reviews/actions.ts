@@ -1,6 +1,7 @@
 "use server";
 
 import { unstable_noStore as noStore, revalidatePath } from "next/cache";
+import { readRowsInBatches } from "@/lib/platform-admin/queries";
 import { getSupabaseAdminClient } from "@/lib/platform-admin/supabase";
 import { getStripeGlobalPayoutsAdminClient } from "@/lib/platform-admin/payouts/stripe-global-payouts";
 import type {
@@ -38,6 +39,7 @@ type ProfileRow = {
 };
 
 type AccountRow = { id: string; name: string; role: string };
+const REVIEW_COLUMNS = "id, payout_profile_id, account_id, provider_recipient_id, provider_payout_method_id, confirmation_of_payee_match_result, provider_message, status, requested_at, reviewed_at, reviewed_by, review_reason";
 
 function adminDb() {
   // The admin app's copied generated types predate Held Payouts. This cast is
@@ -68,7 +70,7 @@ async function loadReviewAndProfile(reviewId: string): Promise<{
   const db = adminDb();
   const { data: review, error: reviewError } = await db
     .from("payout_cop_reviews")
-    .select("*")
+    .select(REVIEW_COLUMNS)
     .eq("id", reviewId)
     .single();
   if (reviewError || !review) {
@@ -95,7 +97,7 @@ export async function getPayoutCopReviews(): Promise<
   const db = adminDb();
   const { data: reviews, error } = await db
     .from("payout_cop_reviews")
-    .select("*")
+    .select(REVIEW_COLUMNS)
     .order("requested_at", { ascending: false })
     .limit(250);
   if (error) throw new Error(error.message);
@@ -106,26 +108,27 @@ export async function getPayoutCopReviews(): Promise<
   const profileIds = [
     ...new Set(typedReviews.map((review) => review.payout_profile_id)),
   ];
-  const [accountsResult, profilesResult] = await Promise.all([
-    db.from("accounts").select("id, name, role").in("id", accountIds),
-    db
+  const [accountRows, profileRows] = await Promise.all([
+    readRowsInBatches<AccountRow>(accountIds, (ids) => db
+      .from("accounts")
+      .select("id, name, role")
+      .in("id", ids)),
+    readRowsInBatches<ProfileRow>(profileIds, (ids) => db
       .from("account_payout_profiles")
       .select(
         "id, provider_recipient_id, provider_payout_method_id, status, method_last4, country, default_currency",
       )
-      .in("id", profileIds),
+      .in("id", ids)),
   ]);
-  if (accountsResult.error) throw new Error(accountsResult.error.message);
-  if (profilesResult.error) throw new Error(profilesResult.error.message);
 
   const accounts = new Map<string, AccountRow>(
-    ((accountsResult.data ?? []) as AccountRow[]).map((account) => [
+    accountRows.map((account) => [
       account.id,
       account,
     ]),
   );
   const profiles = new Map<string, ProfileRow>(
-    ((profilesResult.data ?? []) as ProfileRow[]).map((profile) => [
+    profileRows.map((profile) => [
       profile.id,
       profile,
     ]),
@@ -190,7 +193,7 @@ export async function approvePayoutCopReview(input: {
         })
         .eq("id", review.id)
         .eq("status", "requested")
-        .select("*")
+        .select(REVIEW_COLUMNS)
         .maybeSingle();
       if (claimError) throw new Error(claimError.message);
       if (!claimed) throw new Error("This review is already being processed");

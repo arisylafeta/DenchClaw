@@ -1756,19 +1756,9 @@ export type Database = {
         | "energy_storage"
         | "marine"
         | "other"
-      listing_channel_mode: "sale" | "recycling" | "both"
-      listing_status:
-        | "draft"
-        | "published"
-        | "in_negotiation"
-        | "under_deal"
-        | "completed"
-        | "withdrawn"
-      listing_visibility:
-        | "private"
-        | "organization"
-        | "public_marketplace"
-        | "recycler_network"
+      listing_channel_mode: "sale" | "recycling"
+      listing_status: "draft" | "published" | "withdrawn" | "completed"
+      listing_visibility: "public" | "buyer_network"
       membership_role: "owner" | "admin" | "member"
       message_type: "user" | "offer_intro" | "system"
       offer_kind:
@@ -1784,7 +1774,7 @@ export type Database = {
         | "rejected"
         | "withdrawn"
         | "expired"
-      opportunity_link_state: "active" | "paused" | "archived"
+      opportunity_link_state: "active" | "paused" | "archived" | "claimed"
       opportunity_link_type: "suggested" | "assigned" | "invited"
       payment_status:
         | "requires_action"
@@ -1983,21 +1973,9 @@ export const Constants = {
         "marine",
         "other",
       ],
-      listing_channel_mode: ["sale", "recycling", "both"],
-      listing_status: [
-        "draft",
-        "published",
-        "in_negotiation",
-        "under_deal",
-        "completed",
-        "withdrawn",
-      ],
-      listing_visibility: [
-        "private",
-        "organization",
-        "public_marketplace",
-        "recycler_network",
-      ],
+      listing_channel_mode: ["sale", "recycling"],
+      listing_status: ["draft", "published", "withdrawn", "completed"],
+      listing_visibility: ["public", "buyer_network"],
       membership_role: ["owner", "admin", "member"],
       message_type: ["user", "offer_intro", "system"],
       offer_kind: [
@@ -2015,7 +1993,7 @@ export const Constants = {
         "withdrawn",
         "expired",
       ],
-      opportunity_link_state: ["active", "paused", "archived"],
+      opportunity_link_state: ["active", "paused", "archived", "claimed"],
       opportunity_link_type: ["suggested", "assigned", "invited"],
       payment_status: [
         "requires_action",

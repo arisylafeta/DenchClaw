@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/app/components/platform-admin/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/app/components/platform-admin/ui/tabs";
 import { TablePagination } from "@/app/components/platform-admin/table-pagination";
-import { getBatteryReviewPage } from "./actions";
+import { getBatteryReviewDetails, getBatteryReviewPage } from "./actions";
 import type { BatteryEvidenceRow, BatteryFilterOptions, BatteryReviewPage, BatteryReviewRow, BatteryReviewTab } from "./actions";
 
 type CanonicalPage = BatteryReviewPage<BatteryReviewRow>;
@@ -128,7 +128,9 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
   const [sort, setSort] = useState("updated_at");
   const [ascending, setAscending] = useState(false);
   const [details, setDetails] = useState<{ row: BatteryReviewRow; linked: BatteryReviewRow | null; label: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isDetailsPending, startDetailsTransition] = useTransition();
 
   const active = tab === "canonical" ? canonical : evidence;
 
@@ -140,9 +142,14 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
     const nextSort = next.sort ?? sort;
     const nextAscending = next.ascending ?? ascending;
     startTransition(async () => {
-      const result = await getBatteryReviewPage({ tab: nextTab, page: next.page ?? 1, search: nextSearch, manufacturer: nextManufacturer, chemistry: nextChemistry, sort: nextSort, ascending: nextAscending });
-      if (nextTab === "canonical") setCanonical(result as CanonicalPage);
-      else setEvidence(result as EvidencePage);
+      setLoadError(null);
+      try {
+        const result = await getBatteryReviewPage({ tab: nextTab, page: next.page ?? 1, search: nextSearch, manufacturer: nextManufacturer, chemistry: nextChemistry, sort: nextSort, ascending: nextAscending });
+        if (nextTab === "canonical") setCanonical(result as CanonicalPage);
+        else setEvidence(result as EvidencePage);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "Could not load battery review data");
+      }
     });
   };
 
@@ -152,8 +159,10 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
     setSearch("");
     setManufacturer("");
     setChemistry("");
-    setSort(nextTab === "canonical" ? "updated_at" : "created_at");
+    const nextSort = nextTab === "canonical" ? "updated_at" : "created_at";
+    setSort(nextSort);
     setAscending(false);
+    load({ tab: nextTab, page: 1, search: "", manufacturer: "", chemistry: "", sort: nextSort, ascending: false });
   };
 
   const submitSearch = (event: React.FormEvent) => {
@@ -173,6 +182,22 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
     setSort(column);
     setAscending(nextAscending);
     load({ page: 1, sort: column, ascending: nextAscending });
+  };
+
+  const openDetails = (detailTab: BatteryReviewTab, id: unknown) => {
+    if (typeof id !== "string") return;
+    setLoadError(null);
+    startDetailsTransition(async () => {
+      try {
+        const result = await getBatteryReviewDetails({ tab: detailTab, id });
+        setDetails({
+          ...result,
+          label: detailTab === "canonical" ? "Canonical battery" : "Battery evidence",
+        });
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "Could not load battery details");
+      }
+    });
   };
 
   const sortLabel = (column: string, label: string) => (
@@ -220,6 +245,7 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
           </form>
 
           {isPending ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2Icon className="size-4 animate-spin" /> Loading live data…</div> : null}
+          {loadError ? <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p> : null}
 
           <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
             {tab === "canonical" ? (
@@ -228,7 +254,7 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
                   <TableHead className="w-14">Image</TableHead><TableHead>{sortLabel("manufacturer", "Manufacturer")}</TableHead><TableHead>{sortLabel("model", "Model")}</TableHead><TableHead>{sortLabel("chemistry", "Chemistry")}</TableHead><TableHead>{sortLabel("nominal_kwh", "Nominal kWh")}</TableHead><TableHead>Part number</TableHead><TableHead>{sortLabel("updated_at", "Updated")}</TableHead><TableHead className="text-right">Details</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>{canonical.rows.length ? canonical.rows.map((row) => <TableRow key={String(row.id)}>
-                  <TableCell>{catalogueImageUrl(row) ? <img src={catalogueImageUrl(row) ?? ""} alt="" className="size-9 rounded border object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <ImageIcon className="size-4 text-muted-foreground" aria-label="No catalogue image" />}</TableCell><TableCell className="font-medium">{display(row.manufacturer)}</TableCell><TableCell>{display(row.model)}</TableCell><TableCell>{display(row.chemistry)}</TableCell><TableCell>{display(row.nominal_kwh)}</TableCell><TableCell>{display(row.part_number)}</TableCell><TableCell>{date(row.updated_at)}</TableCell><TableCell className="text-right"><Button type="button" size="sm" variant="ghost" onClick={() => setDetails({ row, linked: null, label: "Canonical battery" })}><EyeIcon /> View</Button></TableCell>
+                  <TableCell>{catalogueImageUrl(row) ? <img src={catalogueImageUrl(row) ?? ""} alt="" className="size-9 rounded border object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <ImageIcon className="size-4 text-muted-foreground" aria-label="No catalogue image" />}</TableCell><TableCell className="font-medium">{display(row.manufacturer)}</TableCell><TableCell>{display(row.model)}</TableCell><TableCell>{display(row.chemistry)}</TableCell><TableCell>{display(row.nominal_kwh)}</TableCell><TableCell>{display(row.part_number)}</TableCell><TableCell>{date(row.updated_at)}</TableCell><TableCell className="text-right"><Button type="button" size="sm" variant="ghost" disabled={isDetailsPending} onClick={() => openDetails("canonical", row.id)}><EyeIcon /> View</Button></TableCell>
                 </TableRow>) : <TableRow><TableCell colSpan={8} className="h-28 text-center text-muted-foreground">No canonical batteries match this view.</TableCell></TableRow>}</TableBody>
               </Table>
             ) : (
@@ -237,7 +263,7 @@ export function BatteryReviewClient({ initialCanonical, initialEvidence, filterO
                   <TableHead>Canonical context</TableHead><TableHead className="min-w-96">Proposed change</TableHead><TableHead>{sortLabel("source_context", "Source")}</TableHead><TableHead>{sortLabel("created_at", "Captured")}</TableHead><TableHead className="text-right">Inspect</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>{evidence.rows.length ? evidence.rows.map((row) => <TableRow key={row.id}>
-                  <TableCell><div className="font-medium">{canonicalLabel(row.linked_battery)}</div><div className="mt-1 font-mono text-xs text-muted-foreground">{row.selected_battery_id ?? "No selected ID"}</div>{row.matched_battery_id && row.matched_battery_id !== row.selected_battery_id ? <div className="mt-1 text-xs text-muted-foreground">Identity match also recorded</div> : null}</TableCell><TableCell><ChangeSet changes={evidenceChanges(row)} /></TableCell><TableCell><div>{display(row.source_context)}</div><div className="text-xs text-muted-foreground">{display(row.source_flow)}</div></TableCell><TableCell>{date(row.created_at)}</TableCell><TableCell className="text-right"><Button type="button" size="sm" variant="ghost" onClick={() => setDetails({ row, linked: row.linked_battery, label: "Battery evidence" })}><FileSearchIcon /> Inspect</Button></TableCell>
+                  <TableCell><div className="font-medium">{canonicalLabel(row.linked_battery)}</div><div className="mt-1 font-mono text-xs text-muted-foreground">{row.selected_battery_id ?? "No selected ID"}</div>{row.matched_battery_id && row.matched_battery_id !== row.selected_battery_id ? <div className="mt-1 text-xs text-muted-foreground">Identity match also recorded</div> : null}</TableCell><TableCell><ChangeSet changes={evidenceChanges(row)} /></TableCell><TableCell><div>{display(row.source_context)}</div><div className="text-xs text-muted-foreground">{display(row.source_flow)}</div></TableCell><TableCell>{date(row.created_at)}</TableCell><TableCell className="text-right"><Button type="button" size="sm" variant="ghost" disabled={isDetailsPending} onClick={() => openDetails("evidence", row.id)}><FileSearchIcon /> Inspect</Button></TableCell>
                 </TableRow>) : <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">No battery evidence matches this view.</TableCell></TableRow>}</TableBody>
               </Table>
             )}

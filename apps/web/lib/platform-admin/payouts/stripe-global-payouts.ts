@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getStripeGlobalPayoutsEnv } from "@/lib/platform-admin/env";
+import { fetchWithTimeout } from "@/lib/platform-admin/network";
 import { normalisePayoutReviewContext } from "./cop";
 
 export const STRIPE_GLOBAL_PAYOUTS_API_VERSION = "2026-06-24.preview";
@@ -45,7 +46,7 @@ export class StripeGlobalPayoutsAdminClient {
       body?: JsonObject;
     } = {},
   ): Promise<{ payload: JsonObject; requestId: string | null }> {
-    const response = await this.fetcher(`${STRIPE_V2_BASE_URL}${path}`, {
+    const response = await fetchWithTimeout(`${STRIPE_V2_BASE_URL}${path}`, {
       method: input.method ?? "GET",
       headers: {
         Authorization: `Bearer ${this.secretKey}`,
@@ -60,7 +61,7 @@ export class StripeGlobalPayoutsAdminClient {
       },
       ...(input.body ? { body: JSON.stringify(input.body) } : {}),
       cache: "no-store",
-    });
+    }, 15_000, this.fetcher);
     const payload = (await response.json().catch(() => ({}))) as JsonObject;
     const requestId = response.headers.get("request-id");
     if (!response.ok) {

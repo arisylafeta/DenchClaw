@@ -1,6 +1,7 @@
 "use server";
 
 import { unstable_noStore as noStore } from "next/cache";
+import { readAllRows, readRowsInBatches } from "@/lib/platform-admin/queries";
 import { getSupabaseAdminClient } from "@/lib/platform-admin/supabase";
 
 export type BatteryReviewTab = "canonical" | "evidence";
@@ -38,6 +39,8 @@ export type BatteryFilterOptions = {
 };
 
 const PAGE_SIZE = 25;
+const CANONICAL_LIST_COLUMNS = "id, manufacturer, model, chemistry, nominal_kwh, part_number, updated_at, catalogue_image_url";
+const EVIDENCE_LIST_COLUMNS = "id, selected_battery_id, matched_battery_id, changed_fields, previous_values, submitted_values, source_context, source_flow, created_at";
 
 const CANONICAL_SORT_COLUMNS = new Set([
   "updated_at",
@@ -86,17 +89,18 @@ function uniqueLabels(rows: Array<Record<string, unknown>> | null, field: string
 export async function getBatteryFilterOptions(): Promise<BatteryFilterOptions> {
   noStore();
   const db = reviewDb();
-  const [manufacturers, chemistries] = await Promise.all([
-    db.from("batteries").select("manufacturer").range(0, 4_999),
-    db.from("batteries").select("chemistry").range(0, 4_999),
-  ]);
-
-  if (manufacturers.error) throw new Error(manufacturers.error.message);
-  if (chemistries.error) throw new Error(chemistries.error.message);
+  const rows = await readAllRows<Record<string, unknown>>(
+    (from, to) => db
+      .from("batteries")
+      .select("manufacturer, chemistry")
+      .order("id", { ascending: true })
+      .range(from, to),
+    { maxRows: 10_000 },
+  );
 
   return {
-    manufacturers: uniqueLabels(manufacturers.data as Array<Record<string, unknown>> | null, "manufacturer"),
-    chemistries: uniqueLabels(chemistries.data as Array<Record<string, unknown>> | null, "chemistry"),
+    manufacturers: uniqueLabels(rows, "manufacturer"),
+    chemistries: uniqueLabels(rows, "chemistry"),
   };
 }
 
@@ -112,12 +116,12 @@ export async function getBatteryReviewPage(
   if (input.tab === "canonical") {
     let query = db
       .from("batteries")
-      .select("*", { count: "exact" })
+      .select(CANONICAL_LIST_COLUMNS, { count: "exact" })
       .order(sort, { ascending, nullsFirst: false })
       .range(from, to);
 
     if (search) {
-      const term = `%${search.replaceAll(",", " ")}%`;
+      const term = `%${search.replace(/[,().%]/g, " ")}%`;
       query = query.or(`manufacturer.ilike.${term},model.ilike.${term},chemistry.ilike.${term},part_number.ilike.${term}`);
     }
     if (manufacturer) query = query.ilike("manufacturer", `%${manufacturer}%`);
@@ -130,12 +134,12 @@ export async function getBatteryReviewPage(
 
   let query = db
     .from("battery_evidence")
-    .select("*", { count: "exact" })
+    .select(EVIDENCE_LIST_COLUMNS, { count: "exact" })
     .order(sort, { ascending, nullsFirst: false })
     .range(from, to);
 
   if (search) {
-    const term = `%${search.replaceAll(",", " ")}%`;
+    const term = `%${search.replace(/[,().%]/g, " ")}%`;
     query = query.or(`source_flow.ilike.${term},source_context.ilike.${term},submitted_values_hash.ilike.${term}`);
   }
 
@@ -152,13 +156,12 @@ export async function getBatteryReviewPage(
   const batteriesById = new Map<string, BatteryReviewRow>();
 
   if (batteryIds.length > 0) {
-    const { data: batteries, error: batteriesError } = await db
+    const batteries = await readRowsInBatches<BatteryReviewRow>(batteryIds, (ids) => db
       .from("batteries")
-      .select("*")
-      .in("id", batteryIds);
-    if (batteriesError) throw new Error(batteriesError.message);
-    for (const battery of batteries ?? []) {
-      batteriesById.set(battery.id, battery as BatteryReviewRow);
+      .select("id, manufacturer, model, nominal_kwh")
+      .in("id", ids));
+    for (const battery of batteries) {
+      if (typeof battery.id === "string") batteriesById.set(battery.id, battery);
     }
   }
 
@@ -173,4 +176,35 @@ export async function getBatteryReviewPage(
     page,
     pageSize,
   };
+}
+
+export async function getBatteryReviewDetails(input: {
+  tab: BatteryReviewTab;
+  id: string;
+}): Promise<{ row: BatteryReviewRow; linked: BatteryReviewRow | null }> {
+  noStore();
+  const id = input.id.trim();
+  if (!id || id.length > 120) throw new Error("Invalid battery review row ID");
+
+  const db = reviewDb();
+  const table = input.tab === "canonical" ? "batteries" : "battery_evidence";
+  const { data, error } = await db.from(table).select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Battery review row not found");
+
+  const row = data as BatteryReviewRow;
+  if (input.tab === "canonical") return { row, linked: null };
+
+  const selectedBatteryId = row.selected_battery_id;
+  if (typeof selectedBatteryId !== "string" || !selectedBatteryId) {
+    return { row, linked: null };
+  }
+
+  const { data: linked, error: linkedError } = await db
+    .from("batteries")
+    .select("*")
+    .eq("id", selectedBatteryId)
+    .maybeSingle();
+  if (linkedError) throw new Error(linkedError.message);
+  return { row, linked: (linked as BatteryReviewRow | null) ?? null };
 }

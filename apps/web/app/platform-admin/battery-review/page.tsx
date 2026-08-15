@@ -6,11 +6,16 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function BatteryReviewPage() {
-  const [canonical, evidence, filterOptions] = await Promise.all([
+  const [canonical, filterOptions] = await Promise.all([
     getBatteryReviewPage({ tab: "canonical" }),
-    getBatteryReviewPage({ tab: "evidence" }),
     getBatteryFilterOptions(),
   ]);
+  const evidence: BatteryReviewPage<BatteryEvidenceRow> = {
+    rows: [],
+    totalCount: 0,
+    page: 1,
+    pageSize: 25,
+  };
 
   return <BatteryReviewClient initialCanonical={canonical as BatteryReviewPage<BatteryReviewRow>} initialEvidence={evidence as BatteryReviewPage<BatteryEvidenceRow>} filterOptions={filterOptions} />;
 }

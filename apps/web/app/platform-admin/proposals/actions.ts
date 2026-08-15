@@ -6,6 +6,8 @@ import { getSiteEnv } from "@/lib/platform-admin/env";
 import { sendRecyclerOpportunityInvitationEmail } from "@/lib/platform-admin/email/templates/recycler-opportunity-invitation";
 import type { Database } from "@/lib/platform-admin/database.types";
 import { filterProposals, getUniqueProposalListings } from "@/lib/platform-admin/proposals/proposal-filter-utils";
+import { mapWithConcurrency } from "@/lib/platform-admin/async";
+import { readAllRows, readAllRowsInBatches, readRowsInBatches } from "@/lib/platform-admin/queries";
 
 // ─── Row types derived from the generated types ───────────────────────────────
 
@@ -247,46 +249,39 @@ async function getProposalDataWithParams({
   noStore();
   const supabase = getSupabaseAdminClient();
 
-  const [proposalsResult, listingsResult, recyclersResult] = await Promise.all([
-    // Fetch all opportunity links with joined listing title, recycler name + public/private profiles
-    supabase
+  const [proposalRows, listingRows, recyclerRows] = await Promise.all([
+    readAllRows((from, to) => supabase
       .from("recycler_opportunity_links")
       .select(
-        "*, listings(title, reference, accounts!listings_supplier_account_id_fkey(name)), accounts!recycler_opportunity_links_recycler_account_id_fkey(name, account_profiles_public(display_name, public_fields_json), account_profiles_private(addresses_json, ops_json))"
+        "id, listing_id, recycler_account_id, link_type, state, rebattery_notes, created_at, updated_at, expires_at, listings(title, reference, accounts!listings_supplier_account_id_fkey(name)), accounts!recycler_opportunity_links_recycler_account_id_fkey(name, account_profiles_public(display_name, public_fields_json), account_profiles_private(addresses_json, ops_json))"
       )
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to), { maxRows: 10_000 }),
 
-    // Fetch published listings eligible for recycling proposals
-    supabase
+    readAllRows((from, to) => supabase
       .from("listings")
       .select("id, title, reference, channel_mode, visibility, listing_status, created_at, accounts!listings_supplier_account_id_fkey(name)")
       .eq("listing_status", "published")
-      .in("channel_mode", ["recycling", "both"])
-      .order("created_at", { ascending: false }),
+      .in("channel_mode", ["recycling"])
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to), { maxRows: 5_000 }),
 
-    // Fetch active/approved recycler accounts with public + private profiles
-    supabase
+    readAllRows((from, to) => supabase
       .from("accounts")
       .select(
         "id, name, status, account_profiles_public(display_name, public_fields_json), account_profiles_private(addresses_json, ops_json)"
       )
       .eq("role", "recycler")
       .in("status", ["active", "approved"])
-      .order("name", { ascending: true }),
+      .order("name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to), { maxRows: 5_000 }),
   ]);
 
-  if (proposalsResult.error) {
-    throw new Error(proposalsResult.error.message);
-  }
-  if (listingsResult.error) {
-    throw new Error(listingsResult.error.message);
-  }
-  if (recyclersResult.error) {
-    throw new Error(recyclersResult.error.message);
-  }
-
   // Flatten nested join data into ProposalRow shape
-  const proposals: ProposalRow[] = (proposalsResult.data ?? []).map((row) => {
+  const proposals: ProposalRow[] = proposalRows.map((row) => {
     const { listings, accounts, ...rest } = row as typeof row & {
       listings: {
         title: string;
@@ -338,46 +333,36 @@ async function getProposalDataWithParams({
   });
 
   // Fetch activity counts (enquiries + deals) for all eligible listings
-  const listingIds = (listingsResult.data ?? []).map((row) => row.id);
+  const listingIds = listingRows.map((row) => row.id);
   const activityCounts = new Map<string, { enquiry_count: number; deal_count: number }>();
   const inviteCounts = new Map<string, number>();
 
   if (listingIds.length > 0) {
-    const [countsResult, invitesResult] = await Promise.all([
-      supabase.rpc("get_listing_activity_counts", {
-        listing_ids: listingIds,
-      }),
-      supabase
+    const [countsData, invitesData] = await Promise.all([
+      readRowsInBatches(listingIds, (ids) => supabase.rpc("get_listing_activity_counts", {
+        listing_ids: ids,
+      })),
+      readAllRowsInBatches(listingIds, (ids, from, to) => supabase
         .from("recycler_opportunity_links")
-        .select("listing_id"),
+        .select("id, listing_id")
+        .in("listing_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to), { maxRowsPerBatch: 10_000 }),
     ]);
 
-    const countsData = countsResult.data;
-    const invitesData = invitesResult.data;
-
-    if (countsData) {
-      for (const row of countsData) {
-        activityCounts.set(row.listing_id, {
-          enquiry_count: Number(row.enquiry_count),
-          deal_count: Number(row.deal_count),
-        });
-      }
+    for (const row of countsData) {
+      activityCounts.set(row.listing_id, {
+        enquiry_count: Number(row.enquiry_count),
+        deal_count: Number(row.deal_count),
+      });
     }
 
-    if (invitesData) {
-      const eligibleListingIds = new Set(listingIds);
-
-      for (const row of invitesData) {
-        if (!eligibleListingIds.has(row.listing_id)) {
-          continue;
-        }
-
-        inviteCounts.set(row.listing_id, (inviteCounts.get(row.listing_id) ?? 0) + 1);
-      }
+    for (const row of invitesData) {
+      inviteCounts.set(row.listing_id, (inviteCounts.get(row.listing_id) ?? 0) + 1);
     }
   }
 
-  const listings = (listingsResult.data ?? []).map((row) => {
+  const listings = listingRows.map((row) => {
       const { accounts, ...rest } = row as typeof row & {
         accounts: { name: string } | null;
       };
@@ -392,7 +377,7 @@ async function getProposalDataWithParams({
       } satisfies EligibleListing;
     });
 
-  const recyclers = (recyclersResult.data ?? []).map((row) => {
+  const recyclers = recyclerRows.map((row) => {
       const pubProfile = Array.isArray(row.account_profiles_public)
         ? row.account_profiles_public[0] ?? null
         : row.account_profiles_public;
@@ -572,6 +557,17 @@ export async function createInvitations(
       error: "Listing and at least one recycler are required.",
     };
   }
+  if (recyclerIds.length > 100) {
+    return {
+      success: false,
+      created: 0,
+      reactivated: 0,
+      alreadyActive: 0,
+      emailSent: 0,
+      emailFailed: 0,
+      error: "Send invitations to no more than 100 recyclers at a time.",
+    };
+  }
 
   const supabase = getSupabaseAdminClient();
 
@@ -582,7 +578,7 @@ export async function createInvitations(
     )
     .eq("id", listingId)
     .eq("listing_status", "published")
-    .in("channel_mode", ["recycling", "both"])
+    .eq("channel_mode", "recycling")
     .maybeSingle();
 
   if (listingError || !listing) {
@@ -597,14 +593,24 @@ export async function createInvitations(
     };
   }
 
-  const { data: eligibleRecyclerRows, error: eligibleRecyclerError } = await supabase
-    .from("accounts")
-    .select("id")
-    .in("id", recyclerIds)
-    .eq("role", "recycler")
-    .in("status", ["active", "approved"]);
-
-  if (eligibleRecyclerError) {
+  let eligibleRecyclerRows: Array<{ id: string }>;
+  let existingLinks: Array<{ id: string; recycler_account_id: string; state: string }>;
+  try {
+    [eligibleRecyclerRows, existingLinks] = await Promise.all([
+      readRowsInBatches(recyclerIds, (ids) => supabase
+        .from("accounts")
+        .select("id")
+        .in("id", ids)
+        .eq("role", "recycler")
+        .in("status", ["active", "approved"])),
+      readRowsInBatches(recyclerIds, (ids) => supabase
+        .from("recycler_opportunity_links")
+        .select("id, recycler_account_id, state")
+        .eq("listing_id", listingId)
+        .eq("link_type", "invited")
+        .in("recycler_account_id", ids)),
+    ]);
+  } catch (error) {
     return {
       success: false,
       created: 0,
@@ -612,12 +618,12 @@ export async function createInvitations(
       alreadyActive: 0,
       emailSent: 0,
       emailFailed: 0,
-      error: eligibleRecyclerError.message,
+      error: error instanceof Error ? error.message : "Could not validate the selected recyclers.",
     };
   }
 
   const eligibleRecyclerIds = new Set(
-    (eligibleRecyclerRows ?? []).map((recycler) => recycler.id),
+    eligibleRecyclerRows.map((recycler) => recycler.id),
   );
   if (recyclerIds.some((recyclerId) => !eligibleRecyclerIds.has(recyclerId))) {
     return {
@@ -631,27 +637,8 @@ export async function createInvitations(
     };
   }
 
-  const { data: existingLinks, error: existingError } = await supabase
-    .from("recycler_opportunity_links")
-    .select("id, recycler_account_id, state")
-    .eq("listing_id", listingId)
-    .eq("link_type", "invited")
-    .in("recycler_account_id", recyclerIds);
-
-  if (existingError) {
-    return {
-      success: false,
-      created: 0,
-      reactivated: 0,
-      alreadyActive: 0,
-      emailSent: 0,
-      emailFailed: 0,
-      error: existingError.message,
-    };
-  }
-
   const byRecycler = new Map(
-    (existingLinks ?? []).map((link) => [link.recycler_account_id, link])
+    existingLinks.map((link) => [link.recycler_account_id, link])
   );
 
   const notes = rebatteryNotes?.trim() || null;
@@ -679,7 +666,7 @@ export async function createInvitations(
       continue;
     }
 
-    if (existing.state === "active") {
+    if (existing.state === "active" || existing.state === "claimed") {
       alreadyActive += 1;
     } else {
       toReactivateIds.push(existing.id);
@@ -773,15 +760,16 @@ export async function createInvitations(
         ? (listingSpec.pack_weight_kg * units).toFixed(0)
         : "—";
 
-    const recipients = await Promise.all(
-      activatedRecyclerIds.map(async (accountId) => {
-        const recipient = await getAccountRecipient(accountId);
-        return recipient;
-      }),
+    const recipients = await mapWithConcurrency(
+      activatedRecyclerIds,
+      5,
+      (accountId) => getAccountRecipient(accountId),
     );
 
-    const sendResults = await Promise.all(
-      recipients.map(async (recipient) => {
+    const sendResults = await mapWithConcurrency(
+      recipients,
+      5,
+      async (recipient) => {
         if (!recipient) return { success: false as const };
 
         const result = await sendRecyclerOpportunityInvitationEmail(recipient.email, {
@@ -799,7 +787,7 @@ export async function createInvitations(
         });
 
         return { success: result.success };
-      }),
+      },
     );
 
     for (const row of sendResults) {

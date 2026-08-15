@@ -77,7 +77,7 @@ interface ProposalsClientProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type LinkState = "active" | "paused" | "archived";
+type LinkState = Database["public"]["Enums"]["opportunity_link_state"];
 type LinkType = "suggested" | "assigned" | "invited";
 type ProposalView = "listing" | "recyclers" | "proposals";
 
@@ -93,6 +93,10 @@ const STATE_STYLES: Record<LinkState, { label: string; className: string }> = {
   archived: {
     label: "Archived",
     className: "bg-gray-100 text-gray-600 border-gray-200",
+  },
+  claimed: {
+    label: "Claimed",
+    className: "bg-blue-100 text-blue-800 border-blue-200",
   },
 };
 
@@ -116,13 +120,9 @@ const CHANNEL_STYLES: Record<string, { label: string; className: string }> = {
     label: "Recycling",
     className: "bg-emerald-50 text-emerald-700 border-emerald-200",
   },
-  resale: {
-    label: "Resale",
+  sale: {
+    label: "Sale",
     className: "bg-sky-50 text-sky-700 border-sky-200",
-  },
-  both: {
-    label: "Both",
-    className: "bg-violet-50 text-violet-700 border-violet-200",
   },
 };
 
@@ -131,12 +131,8 @@ const VISIBILITY_STYLES: Record<string, { label: string; className: string }> = 
     label: "Public",
     className: "bg-green-50 text-green-700 border-green-200",
   },
-  private: {
-    label: "Private",
-    className: "bg-gray-50 text-gray-600 border-gray-200",
-  },
-  invite_only: {
-    label: "Invite only",
+  buyer_network: {
+    label: "Buyer network",
     className: "bg-orange-50 text-orange-700 border-orange-200",
   },
 };
@@ -148,11 +144,6 @@ const LISTING_STATUS_STYLES: Record<
   published: { label: "Published", className: "bg-green-100 text-green-800 border-green-200" },
   draft: { label: "Draft", className: "bg-gray-100 text-gray-700 border-gray-200" },
   withdrawn: { label: "Withdrawn", className: "bg-red-100 text-red-700 border-red-200" },
-  in_negotiation: {
-    label: "In Negotiation",
-    className: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  },
-  under_deal: { label: "Under Deal", className: "bg-blue-100 text-blue-800 border-blue-200" },
   completed: { label: "Completed", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
 };
 
@@ -536,7 +527,6 @@ export function ProposalsClient({
               <SelectContent>
                 <SelectItem value="all">All channels</SelectItem>
                 <SelectItem value="recycling">Recycling</SelectItem>
-                <SelectItem value="both">Both</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1065,6 +1055,7 @@ export function ProposalsClient({
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="paused">Paused</SelectItem>
                 <SelectItem value="archived">Archived</SelectItem>
+                <SelectItem value="claimed">Claimed</SelectItem>
               </SelectContent>
             </Select>
           </div>
