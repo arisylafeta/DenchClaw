@@ -208,6 +208,7 @@ export function ProposalsClient({
     Pick<EligibleListing, "id" | "title" | "reference"> | null
   >(null);
   const [selectedRecyclerIds, setSelectedRecyclerIds] = useState<string[]>([]);
+  const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [rebatteryNote, setRebatteryNote] = useState("");
@@ -353,6 +354,18 @@ export function ProposalsClient({
     );
   }
 
+  function toggleListing(listing: Pick<EligibleListing, "id" | "title" | "reference">) {
+    setSelectedListing((current) => current?.id === listing.id ? null : listing);
+  }
+
+  function toggleProposal(proposalId: string) {
+    setSelectedProposalIds((current) =>
+      current.includes(proposalId)
+        ? current.filter((id) => id !== proposalId)
+        : [...current, proposalId]
+    );
+  }
+
   function toggleSelectAllFiltered() {
     const filteredIds = recyclers.rows.map((recycler) => recycler.id);
     const allSelected = filteredIds.every((id) => selectedRecyclerIds.includes(id));
@@ -361,6 +374,15 @@ export function ProposalsClient({
     } else {
       setSelectedRecyclerIds((cur) => Array.from(new Set([...cur, ...filteredIds])));
     }
+  }
+
+  function toggleSelectAllVisibleProposals() {
+    const visibleIds = proposals.rows.map((proposal) => proposal.id);
+    const allSelected = visibleIds.every((id) => selectedProposalIds.includes(id));
+    setSelectedProposalIds((current) => allSelected
+      ? current.filter((id) => !visibleIds.includes(id))
+      : Array.from(new Set([...current, ...visibleIds]))
+    );
   }
 
   // ── Update proposal state ────────────────────────────────────────────────
@@ -391,6 +413,14 @@ export function ProposalsClient({
   const allFilteredSelected =
     recyclers.rows.length > 0 &&
     recyclers.rows.every((recycler) => selectedRecyclerIds.includes(recycler.id));
+  const someFilteredSelected =
+    recyclers.rows.some((recycler) => selectedRecyclerIds.includes(recycler.id));
+  const selectedProposalCount = selectedProposalIds.length;
+  const allVisibleProposalsSelected =
+    proposals.rows.length > 0 &&
+    proposals.rows.every((proposal) => selectedProposalIds.includes(proposal.id));
+  const someVisibleProposalsSelected =
+    proposals.rows.some((proposal) => selectedProposalIds.includes(proposal.id));
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -573,7 +603,7 @@ export function ProposalsClient({
                         className="cursor-pointer"
                         data-state={isSelected ? "selected" : undefined}
                         onClick={() =>
-                          setSelectedListing({
+                          toggleListing({
                             id: listing.id,
                             title: listing.title,
                             reference: listing.reference,
@@ -581,15 +611,16 @@ export function ProposalsClient({
                         }
                       >
                         <TableCell>
-                          <div
-                            className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
-                              isSelected
-                                ? "border-[var(--color-accent-fill)] bg-[var(--color-accent-fill)]"
-                                : "border-muted-foreground/30"
-                            }`}
-                          >
-                            {isSelected && <Check className="h-3 w-3 text-primary-foreground" />}
-                          </div>
+                          <Checkbox
+                            checked={isSelected}
+                            onClick={(event) => event.stopPropagation()}
+                            onCheckedChange={() => toggleListing({
+                              id: listing.id,
+                              title: listing.title,
+                              reference: listing.reference,
+                            })}
+                            aria-label={`${isSelected ? "Deselect" : "Select"} ${listing.title}`}
+                          />
                         </TableCell>
                         <TableCell>
                           <div className="font-medium">{listing.title}</div>
@@ -795,7 +826,14 @@ export function ProposalsClient({
             <Table className="min-w-[1160px] table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10" />
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleSelectAllFiltered}
+                      disabled={recyclers.rows.length === 0}
+                      aria-label={allFilteredSelected ? "Deselect visible recyclers" : "Select visible recyclers"}
+                    />
+                  </TableHead>
                   <TableHead>Recycler</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Chemistries</TableHead>
@@ -963,6 +1001,7 @@ export function ProposalsClient({
                 {hasActiveProposalFilters
                   ? `${proposals.totalCount} of ${proposals.allCount} proposals`
                   : `${proposals.allCount} proposal${proposals.allCount !== 1 ? "s" : ""} total`}
+                {selectedProposalCount > 0 ? ` · ${selectedProposalCount} selected` : ""}
               </CardDescription>
             </div>
             {hasActiveProposalFilters && (
@@ -1060,11 +1099,36 @@ export function ProposalsClient({
             </Select>
           </div>
 
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              {selectedProposalCount > 0
+                ? `${selectedProposalCount} proposal${selectedProposalCount === 1 ? "" : "s"} selected`
+                : "Select proposals individually or select the visible page."}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleSelectAllVisibleProposals}
+              disabled={proposals.rows.length === 0}
+              className="h-8 px-2.5 text-xs"
+            >
+              {allVisibleProposalsSelected ? "Deselect visible" : "Select visible"}
+            </Button>
+          </div>
+
           {/* Table */}
           <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
-            <Table className="min-w-[1240px] table-fixed">
+            <Table className="min-w-[1280px] table-fixed">
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allVisibleProposalsSelected ? true : someVisibleProposalsSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleSelectAllVisibleProposals}
+                      disabled={proposals.rows.length === 0}
+                      aria-label={allVisibleProposalsSelected ? "Deselect visible proposals" : "Select visible proposals"}
+                    />
+                  </TableHead>
                   <TableHead className="min-w-[180px]">Listing</TableHead>
                   <TableHead className="min-w-[160px]">Recycler</TableHead>
                   <TableHead>Chemistries</TableHead>
@@ -1081,7 +1145,7 @@ export function ProposalsClient({
                 {proposals.rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                       colSpan={10}
+                       colSpan={11}
                        className="text-center text-muted-foreground py-10"
                      >
                       {hasActiveProposalFilters
@@ -1092,6 +1156,7 @@ export function ProposalsClient({
                 ) : (
                   proposals.rows.map((proposal) => {
                     const stateKey = proposal.state as LinkState;
+                    const isSelected = selectedProposalIds.includes(proposal.id);
                     const typeKey = proposal.link_type as LinkType;
                     const stateMeta = STATE_STYLES[stateKey] ?? STATE_STYLES["active"];
                     const typeMeta = TYPE_STYLES[typeKey] ?? TYPE_STYLES["suggested"];
@@ -1109,7 +1174,20 @@ export function ProposalsClient({
                     );
 
                     return (
-                      <TableRow key={proposal.id}>
+                      <TableRow
+                        key={proposal.id}
+                        className="cursor-pointer"
+                        data-state={isSelected ? "selected" : undefined}
+                        onClick={() => toggleProposal(proposal.id)}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={isSelected}
+                            onClick={(event) => event.stopPropagation()}
+                            onCheckedChange={() => toggleProposal(proposal.id)}
+                            aria-label={`${isSelected ? "Deselect" : "Select"} ${proposal.listing_title ?? "Unknown listing"} proposal for ${proposal.recycler_display_name ?? proposal.recycler_name ?? "unknown recycler"}`}
+                          />
+                        </TableCell>
                         <TableCell>
                           <div
                             className="font-medium leading-tight max-w-[220px] truncate"
@@ -1216,7 +1294,7 @@ export function ProposalsClient({
                          <TableCell className="text-muted-foreground tabular-nums text-sm whitespace-nowrap">
                            {formatDate(proposal.created_at)}
                          </TableCell>
-                        <TableCell>
+                        <TableCell onClick={(event) => event.stopPropagation()}>
                           {hasActions && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
