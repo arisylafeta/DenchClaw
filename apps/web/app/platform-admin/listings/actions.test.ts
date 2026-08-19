@@ -98,4 +98,67 @@ describe("marketplace listings reads", () => {
     expect(marketplace.eq).not.toHaveBeenCalled();
     expect(marketplace.order).toHaveBeenNthCalledWith(1, "updated_at", { ascending: false, nullsFirst: false });
   });
+
+  it("reads location from the marketplace view's JSON address instead of stale columns", async () => {
+    const marketplace = makeBuilder([
+      {
+        id: "listing-1",
+        title: "Pack stock",
+        listing_status: "published",
+        visibility: "public",
+        channel_mode: "sale",
+        supplier_account_id: "supplier-1",
+        supplier_display_name: "Supplier One",
+        pack_kwh: 42,
+        pack_weight_kg: 320,
+        quantity: 12,
+        chemistry: "NMC",
+        location_address: {
+          city: "London",
+          region: "Greater London",
+          countryCode: "GB",
+        },
+        filter_location_country: "GB",
+        seo_slug: "pack-stock",
+        created_at: "2026-08-18T00:00:00.000Z",
+        updated_at: "2026-08-19T00:00:00.000Z",
+      },
+    ], 1);
+    const listings = makeBuilder([{ id: "listing-1", reference: "REF-1", seo_slug: "pack-stock" }]);
+    getSupabaseAdminClient.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "listings_marketplace_v") return marketplace;
+        return listings;
+      }),
+    });
+
+    const { getListingPage } = await import("./actions");
+    const result = await getListingPage();
+
+    expect(result.rows[0]).toMatchObject({
+      locationCity: "London",
+      locationRegion: "Greater London",
+      locationCountry: "GB",
+    });
+    expect(String(marketplace.select.mock.calls[0]?.[0])).not.toContain("location_city");
+    expect(String(marketplace.select.mock.calls[0]?.[0])).toContain("location_address");
+  });
+
+  it("does not apply text search operators to the enum-backed specs chemistry field", async () => {
+    const marketplace = makeBuilder([{ id: "listing-1" }], 1);
+    const listings = makeBuilder([{ id: "listing-1" }]);
+    const specs = makeBuilder([{ listing_id: "listing-1" }]);
+    getSupabaseAdminClient.mockReturnValue({
+      from: vi.fn((table: string) => {
+        if (table === "listings_marketplace_v") return marketplace;
+        if (table === "listing_specs") return specs;
+        return listings;
+      }),
+    });
+
+    const { getListingPage } = await import("./actions");
+    await getListingPage({ search: "battery" });
+
+    expect(String(specs.or.mock.calls[0]?.[0])).not.toContain("chemistry.ilike");
+  });
 });

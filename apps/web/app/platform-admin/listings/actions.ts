@@ -2,7 +2,7 @@
 
 import { unstable_noStore as noStore } from "next/cache";
 
-import type { Database } from "@/lib/platform-admin/database.types";
+import type { Database, Json } from "@/lib/platform-admin/database.types";
 import { getSupabaseAdminClient } from "@/lib/platform-admin/supabase";
 import {
   normalizeListingFilters,
@@ -18,6 +18,10 @@ const MAX_PAGE = 10_000;
 const MAX_SEARCH_MATCHES = 250;
 
 type MarketplaceRow = Database["public"]["Views"]["listings_marketplace_v"]["Row"];
+type MarketplaceRuntimeRow = MarketplaceRow & {
+  location_address?: Json | null;
+  filter_location_country?: string | null;
+};
 type ListingRow = Pick<
   Database["public"]["Tables"]["listings"]["Row"],
   | "id"
@@ -52,9 +56,8 @@ const LISTING_COLUMNS = [
   "pack_weight_kg",
   "quantity",
   "chemistry",
-  "location_city",
-  "location_region",
-  "location_country",
+  "location_address",
+  "filter_location_country",
   "seo_slug",
   "created_at",
   "updated_at",
@@ -123,9 +126,7 @@ async function resolveSearchListingIds(
           `title.ilike.${pattern}`,
           `supplier_display_name.ilike.${pattern}`,
           `chemistry.ilike.${pattern}`,
-          `location_city.ilike.${pattern}`,
-          `location_region.ilike.${pattern}`,
-          `location_country.ilike.${pattern}`,
+          `filter_location_country.ilike.${pattern}`,
         ].join(","))
         .limit(MAX_SEARCH_MATCHES),
     ),
@@ -144,10 +145,10 @@ async function resolveSearchListingIds(
           `manufacturer.ilike.${pattern}`,
           `model.ilike.${pattern}`,
           `format.ilike.${pattern}`,
-          `chemistry.ilike.${pattern}`,
-          `location_city.ilike.${pattern}`,
-          `location_region.ilike.${pattern}`,
-          `location_country.ilike.${pattern}`,
+          `location_address->>city.ilike.${pattern}`,
+          `location_address->>region.ilike.${pattern}`,
+          `location_address->>country.ilike.${pattern}`,
+          `location_address->>countryCode.ilike.${pattern}`,
         ].join(","))
         .limit(MAX_SEARCH_MATCHES),
     ),
@@ -162,12 +163,32 @@ async function resolveSearchListingIds(
   return uniqueIds([...marketplaceRows, ...listingRows, ...specsRows, ...directListingRows]);
 }
 
+type LocationFields = {
+  city: string | null;
+  region: string | null;
+  country: string | null;
+};
+
+function parseLocation(address: Json | null | undefined, fallbackCountry: string | null = null): LocationFields {
+  if (!address || typeof address !== "object" || Array.isArray(address)) {
+    return { city: null, region: null, country: fallbackCountry };
+  }
+  const value = address as Record<string, Json | undefined>;
+  const read = (key: string): string | null => typeof value[key] === "string" ? value[key] as string : null;
+  return {
+    city: read("city"),
+    region: read("region"),
+    country: read("country") ?? read("countryCode") ?? fallbackCountry,
+  };
+}
+
 function mapListRow(
-  row: MarketplaceRow,
+  row: MarketplaceRuntimeRow,
   referenceById: Map<string, { reference: string | null; seo_slug: string | null }>,
 ): ListingListRow | null {
   if (!row.id) { return null; }
   const listing = referenceById.get(row.id);
+  const location = parseLocation(row.location_address, row.filter_location_country);
   return {
     id: row.id,
     title: row.title,
@@ -182,9 +203,9 @@ function mapListRow(
     packKwh: row.pack_kwh,
     packWeightKg: row.pack_weight_kg,
     chemistry: row.chemistry,
-    locationCity: row.location_city,
-    locationRegion: row.location_region,
-    locationCountry: row.location_country,
+    locationCity: location.city ?? row.location_city,
+    locationRegion: location.region ?? row.location_region,
+    locationCountry: location.country ?? row.location_country,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
   };
@@ -222,7 +243,7 @@ export async function getListingPage(input: ListingPageInput = {}): Promise<List
 
   const response = await query;
   if (response.error) { throwReadError(); }
-  const rawRows = (response.data ?? []) as unknown as MarketplaceRow[];
+  const rawRows = (response.data ?? []) as unknown as MarketplaceRuntimeRow[];
   const ids = rawRows.flatMap((row) => row.id ? [row.id] : []);
   const referenceRows = ids.length > 0
     ? await readRows<{ id: string; reference: string | null; seo_slug: string | null }>(
@@ -269,6 +290,7 @@ export async function getListingDetails(listingId: string): Promise<ListingDetai
       supabase.from("accounts").select("id, name").eq("id", listing.supplier_account_id).maybeSingle(),
     ),
   ]);
+  const location = parseLocation(specs?.location_address);
 
   return {
     id: listing.id,
@@ -284,9 +306,9 @@ export async function getListingDetails(listingId: string): Promise<ListingDetai
     packKwh: specs?.pack_kwh ?? null,
     packWeightKg: specs?.pack_weight_kg ?? null,
     chemistry: specs?.chemistry ?? null,
-    locationCity: specs?.location_city ?? null,
-    locationRegion: specs?.location_region ?? null,
-    locationCountry: specs?.location_country ?? null,
+    locationCity: location.city,
+    locationRegion: location.region,
+    locationCountry: location.country,
     updatedAt: listing.updated_at,
     createdAt: listing.created_at,
     description: listing.description,
