@@ -82,9 +82,6 @@ async function main() {
             and lower(crm_user.email) in ('ari@rebattery.io', 'alex@rebattery.io')`,
       );
     }
-    await tx.query(
-      `update work_tasks set assignee_id = null where status in ('Done', 'Retired')`,
-    );
   });
 
   console.log(
