@@ -51,7 +51,7 @@ describe("workspace sidebar navigation", () => {
 
     const navigationLabels = screen.getAllByRole("button").map((button) => button.textContent?.trim()).filter(Boolean);
     expect(navigationLabels).toEqual(expect.arrayContaining([
-      "People", "Companies", "Inbox", "Calendar", "Recycler selection", "Accounts", "Battery review", "Payout reviews",
+      "People", "Companies", "Inbox", "Calendar", "Recycler selection", "Listings", "Accounts", "Battery review", "Payout reviews",
       "Campaigns", "Work Tasks", "Automation Loops", "Automation Loop Runs", "Message monitoring", "Cron",
     ]));
     expect(navigationLabels.indexOf("Automation Loops")).toBeLessThan(navigationLabels.indexOf("Automation Loop Runs"));

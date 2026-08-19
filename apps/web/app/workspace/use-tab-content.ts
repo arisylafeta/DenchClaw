@@ -314,6 +314,7 @@ function resolveDerivedContent(
       const section = tab.path.replace(/^~platform-admin\//, "");
       if (
         section === "proposals" ||
+        section === "listings" ||
         section === "accounts" ||
         section === "battery-review" ||
         section === "messages" ||

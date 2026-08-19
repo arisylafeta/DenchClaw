@@ -4,6 +4,7 @@ import { contentUsesFullView } from "./content-layout";
 describe("contentUsesFullView", () => {
   it("gives payout reviews the full workspace canvas", () => {
     expect(contentUsesFullView("~platform-admin/payout-reviews")).toBe(true);
+    expect(contentUsesFullView("~platform-admin/listings")).toBe(true);
   });
 
   it("gives message monitoring the full workspace canvas", () => {

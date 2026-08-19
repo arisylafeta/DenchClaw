@@ -123,6 +123,7 @@ type WorkspaceSidebarProps = {
       | "crm-inbox"
       | "crm-calendar"
       | "platform-proposals"
+      | "platform-listings"
       | "platform-accounts"
       | "platform-battery-review"
       | "platform-messages"
@@ -131,7 +132,7 @@ type WorkspaceSidebarProps = {
   /** Currently-active CRM nav item, used to highlight the row. */
   activeCrmTarget?: "people" | "companies" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
-  activePlatformTarget?: "proposals" | "accounts" | "battery-review" | "messages" | "payout-reviews" | null;
+  activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
   customCrmObjects?: CustomCrmObject[];
   /** Currently-active custom CRM object name, used to highlight the row. */
@@ -414,6 +415,12 @@ export function WorkspaceSidebar({
 			label: "Recycler selection",
 			target: "proposals" as const,
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-2-2h-2.3l-1.2-2H8.5L7.3 6H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2Z" /><path d="m8 13 2 2 4-4" /></svg>,
+		},
+		{
+			id: "platform-listings" as const,
+			label: "Listings",
+			target: "listings" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /></svg>,
 		},
 		{
 			id: "platform-accounts" as const,
