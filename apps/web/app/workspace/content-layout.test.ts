@@ -6,6 +6,10 @@ describe("contentUsesFullView", () => {
     expect(contentUsesFullView("~platform-admin/payout-reviews")).toBe(true);
   });
 
+  it("gives message monitoring the full workspace canvas", () => {
+    expect(contentUsesFullView("~platform-admin/messages")).toBe(true);
+  });
+
   it("keeps the split view for the other admin pages", () => {
     expect(contentUsesFullView("~platform-admin/accounts")).toBe(false);
     expect(contentUsesFullView("~platform-admin/battery-review")).toBe(false);

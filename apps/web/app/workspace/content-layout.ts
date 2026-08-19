@@ -1,7 +1,8 @@
 export function contentUsesFullView(path: string | null | undefined): boolean {
   return path === "project"
     || path === "work_task"
-    || path === "~platform-admin/payout-reviews";
+    || path === "~platform-admin/payout-reviews"
+    || path === "~platform-admin/messages";
 }
 
 export type WorkspacePanelLayout = {

@@ -55,6 +55,7 @@ describe("platform operations tabs", () => {
     expect(inferContentTabTitle("~platform-admin/proposals")).toBe("Recycler selection");
     expect(inferContentTabTitle("~platform-admin/accounts")).toBe("Accounts");
     expect(inferContentTabTitle("~platform-admin/battery-review")).toBe("Battery review");
+    expect(inferContentTabTitle("~platform-admin/messages")).toBe("Message monitoring");
     expect(inferContentTabTitle("~platform-admin/payout-reviews")).toBe("Payout reviews");
   });
 });

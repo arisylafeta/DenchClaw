@@ -1325,6 +1325,7 @@ function WorkspacePageInner() {
         | "platform-proposals"
         | "platform-accounts"
         | "platform-battery-review"
+        | "platform-messages"
         | "platform-payout-reviews",
     ) => {
       // Make sure the right panel is open and wide enough to actually use
@@ -1356,6 +1357,7 @@ function WorkspacePageInner() {
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-accounts": { path: "~platform-admin/accounts", name: "Accounts" },
         "platform-battery-review": { path: "~platform-admin/battery-review", name: "Battery review" },
+        "platform-messages": { path: "~platform-admin/messages", name: "Message monitoring" },
         "platform-payout-reviews": { path: "~platform-admin/payout-reviews", name: "Payout reviews" },
       }[target];
       openTabForNode({ path: config.path, name: config.name, type: "folder" }, { preview: false });
@@ -2333,7 +2335,7 @@ function WorkspacePageInner() {
               : null
     ),
     activePlatformTarget: activeContentTab?.kind === "platform-admin"
-      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "accounts" | "battery-review" | "payout-reviews"
+      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "accounts" | "battery-review" | "messages" | "payout-reviews"
       : null,
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,

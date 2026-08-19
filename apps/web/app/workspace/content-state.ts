@@ -86,6 +86,7 @@ export type PlatformAdminSection =
   | "proposals"
   | "accounts"
   | "battery-review"
+  | "messages"
   | "payout-reviews";
 
 export type ContentState =

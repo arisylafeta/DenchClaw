@@ -125,12 +125,13 @@ type WorkspaceSidebarProps = {
       | "platform-proposals"
       | "platform-accounts"
       | "platform-battery-review"
+      | "platform-messages"
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
   activeCrmTarget?: "people" | "companies" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
-  activePlatformTarget?: "proposals" | "accounts" | "battery-review" | "payout-reviews" | null;
+  activePlatformTarget?: "proposals" | "accounts" | "battery-review" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
   customCrmObjects?: CustomCrmObject[];
   /** Currently-active custom CRM object name, used to highlight the row. */
@@ -425,6 +426,12 @@ export function WorkspaceSidebar({
 			label: "Battery review",
 			target: "battery-review" as const,
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4" /><path d="m7 10 3 2-3 2" /></svg>,
+		},
+		{
+			id: "platform-messages" as const,
+			label: "Message monitoring",
+			target: "messages" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-4.2-1.1L3 20l1.6-4.2A8.5 8.5 0 1 1 21 11.5Z" /><path d="M8 12h.01M12 12h.01M16 12h.01" /></svg>,
 		},
 		{
 			id: "platform-payout-reviews" as const,

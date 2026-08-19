@@ -316,6 +316,7 @@ function resolveDerivedContent(
         section === "proposals" ||
         section === "accounts" ||
         section === "battery-review" ||
+        section === "messages" ||
         section === "payout-reviews"
       ) {
         return { kind: "platform-admin", section };

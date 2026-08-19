@@ -79,6 +79,123 @@ export type Database = {
           },
         ]
       }
+      conversation_messages: {
+        Row: {
+          attachment_content_type: string | null
+          attachment_file_name: string | null
+          attachment_size_bytes: number | null
+          attachment_url: string | null
+          body: string
+          conversation_id: string
+          created_at: string
+          deal_document_id: string | null
+          id: string
+          is_system_seeded: boolean
+          message_type: string
+          moderation_attempt_count: number | null
+          moderation_decided_at: string | null
+          moderation_decision_source: string | null
+          moderation_failure_code: string | null
+          moderation_policy_version: string | null
+          moderation_reason_code: string | null
+          moderation_reason_text: string | null
+          moderation_status: string
+          sender_membership_id: string | null
+          source_offer_id: string | null
+          source_offer_type: string | null
+          updated_at: string
+        }
+        Insert: {
+          attachment_content_type?: string | null
+          attachment_file_name?: string | null
+          attachment_size_bytes?: number | null
+          attachment_url?: string | null
+          body: string
+          conversation_id: string
+          created_at?: string
+          deal_document_id?: string | null
+          id?: string
+          is_system_seeded?: boolean
+          message_type?: string
+          moderation_attempt_count?: number | null
+          moderation_decided_at?: string | null
+          moderation_decision_source?: string | null
+          moderation_failure_code?: string | null
+          moderation_policy_version?: string | null
+          moderation_reason_code?: string | null
+          moderation_reason_text?: string | null
+          moderation_status?: string
+          sender_membership_id?: string | null
+          source_offer_id?: string | null
+          source_offer_type?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attachment_content_type?: string | null
+          attachment_file_name?: string | null
+          attachment_size_bytes?: number | null
+          attachment_url?: string | null
+          body?: string
+          conversation_id?: string
+          created_at?: string
+          deal_document_id?: string | null
+          id?: string
+          is_system_seeded?: boolean
+          message_type?: string
+          moderation_attempt_count?: number | null
+          moderation_decided_at?: string | null
+          moderation_decision_source?: string | null
+          moderation_failure_code?: string | null
+          moderation_policy_version?: string | null
+          moderation_reason_code?: string | null
+          moderation_reason_text?: string | null
+          moderation_status?: string
+          sender_membership_id?: string | null
+          source_offer_id?: string | null
+          source_offer_type?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      conversations: {
+        Row: {
+          conversation_type: string
+          counterparty_account_id: string
+          created_at: string
+          id: string
+          last_message_at: string | null
+          last_message_preview: string | null
+          listing_id: string
+          status: string
+          supplier_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          conversation_type: string
+          counterparty_account_id: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          listing_id: string
+          status?: string
+          supplier_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          conversation_type?: string
+          counterparty_account_id?: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          listing_id?: string
+          status?: string
+          supplier_account_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       account_profiles_private: {
         Row: {
           account_id: string
