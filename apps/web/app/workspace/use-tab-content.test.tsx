@@ -61,6 +61,27 @@ function makeObjectTab(name: string): ContentTab {
   };
 }
 
+describe("platform operations content", () => {
+  it("resolves a platform tab without fetching", () => {
+    const tab: ContentTab = {
+      id: "~platform-admin/proposals",
+      kind: "platform-admin",
+      path: "~platform-admin/proposals",
+      title: "Recycler selection",
+      preview: false,
+      pinned: false,
+    };
+
+    const { result } = renderHook(() => useTabContent(tab, makeDeps()));
+
+    expect(result.current.content).toEqual({
+      kind: "platform-admin",
+      section: "proposals",
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
 function makeObjectData(overrides?: Partial<ObjectData>): ObjectData {
   return {
     object: { id: "obj1", name: "people" },

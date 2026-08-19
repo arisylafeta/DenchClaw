@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ThemeProvider } from "next-themes";
 import { getOrCreateAnonymousId, readPersonInfo, readPrivacyMode } from "@/lib/telemetry";
 import { PostHogProvider } from "./components/posthog-provider";
+import { Toaster } from "./components/platform-admin/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -70,6 +71,7 @@ export default function RootLayout({
           <Suspense fallback={null}>
             <PostHogProvider anonymousId={anonymousId} personInfo={personInfo ?? undefined} privacyMode={privacyMode}>
               {children}
+              <Toaster />
             </PostHogProvider>
           </Suspense>
         </ThemeProvider>

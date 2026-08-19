@@ -4,6 +4,27 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Semantic utilities used by the marketplace operations components. */
+@theme inline {
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-text);
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-text);
+  --color-primary: var(--color-text);
+  --color-primary-foreground: var(--color-surface);
+  --color-secondary: var(--color-surface-hover);
+  --color-secondary-foreground: var(--color-text);
+  --color-muted: var(--color-surface-hover);
+  --color-muted-foreground: var(--color-text-muted);
+  --color-accent-foreground: var(--color-accent-foreground);
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: white;
+  --color-input: var(--color-border-strong);
+  --color-ring: var(--color-accent);
+}
+
 /* ============================================================
    Theme System — Light (default) & Dark (.dark)
    ============================================================ */

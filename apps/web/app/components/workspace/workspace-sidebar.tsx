@@ -13,10 +13,10 @@ import {
 	IconFileFilled,
 	IconDatabaseFilled,
 } from "@tabler/icons-react";
-import { useTheme } from "next-themes";
 import { type TreeNode } from "./file-manager-tree";
 import { ProfileSwitcher } from "./profile-switcher";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
+import { NavUser, type NavUserData } from "./nav-user";
 import type { SearchIndexItem } from "@/lib/search-index";
 import { displayObjectName } from "@/lib/object-display-name";
 import { CrmObjectIcon } from "./crm-object-icon";
@@ -32,6 +32,11 @@ export type SidebarObjectGroups = {
 	crm: CustomCrmObject[];
 	work: CustomCrmObject[];
 	automations: CustomCrmObject[];
+};
+
+const FALLBACK_NAV_USER: NavUserData = {
+	displayName: "Account",
+	email: "User settings",
 };
 
 const WORK_OBJECT_NAMES: ReadonlySet<string> = new Set(["project", "work_task"]);
@@ -116,10 +121,16 @@ type WorkspaceSidebarProps = {
       | "crm-people"
       | "crm-companies"
       | "crm-inbox"
-      | "crm-calendar",
+      | "crm-calendar"
+      | "platform-proposals"
+      | "platform-accounts"
+      | "platform-battery-review"
+      | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
   activeCrmTarget?: "people" | "companies" | "inbox" | "calendar" | null;
+  /** Currently-active marketplace operations page. */
+  activePlatformTarget?: "proposals" | "accounts" | "battery-review" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
   customCrmObjects?: CustomCrmObject[];
   /** Currently-active custom CRM object name, used to highlight the row. */
@@ -134,39 +145,6 @@ type WorkspaceSidebarProps = {
   /** Invoked when the user hits the "+" next to the Chats tab. */
   onNewChatSession?: () => void;
 };
-
-function ThemeToggle() {
-	const { resolvedTheme, setTheme } = useTheme();
-	const [mounted, setMounted] = useState(false);
-	useEffect(() => setMounted(true), []);
-	if (!mounted) return <div className="w-[26px] h-[26px]" />;
-	const isDark = resolvedTheme === "dark";
-	return (
-		<button
-			type="button"
-			onClick={() => setTheme(isDark ? "light" : "dark")}
-			className="p-1.5 rounded-lg transition-colors"
-			style={{ color: "var(--color-text-muted)" }}
-			onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-			onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-			title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-		>
-			{isDark ? (
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-					<circle cx="12" cy="12" r="4" />
-					<path d="M12 2v2" /><path d="M12 20v2" />
-					<path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" />
-					<path d="M2 12h2" /><path d="M20 12h2" />
-					<path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" />
-				</svg>
-			) : (
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-					<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-				</svg>
-			)}
-		</button>
-	);
-}
 
 function SearchIcon() {
 	return (
@@ -322,8 +300,6 @@ export function WorkspaceSidebar({
 	loading = false,
 	mobile,
 	onClose,
-	showHidden,
-	onToggleHidden,
 	width: widthProp,
 	onCollapse,
 	compact = false,
@@ -332,6 +308,7 @@ export function WorkspaceSidebar({
   onWorkspaceChanged,
   onNavigate,
   activeCrmTarget = null,
+  activePlatformTarget = null,
   customCrmObjects,
   activeCrmObjectName = null,
   onNavigateToCrmObject,
@@ -344,10 +321,10 @@ export function WorkspaceSidebar({
 	// Top-level tab: "home" shows the workspace / CRM / bottom nav. "chats"
 	// swaps the body with a chat history list provided by the host.
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
-  const [authUser, setAuthUser] = useState<{
-    displayName: string;
-    email: string;
-  } | null>(null);
+	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
+	const [adminTreeOpen, setAdminTreeOpen] = useState(true);
+	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(true);
+  const [authUser, setAuthUser] = useState<NavUserData | null>(null);
   useEffect(() => {
     let active = true;
     void fetch("/api/auth/me", { cache: "no-store" })
@@ -427,6 +404,33 @@ export function WorkspaceSidebar({
 					<line x1="3" y1="10" x2="21" y2="10" />
 				</svg>
 			),
+		},
+	];
+
+	const platformNavItems = [
+		{
+			id: "platform-proposals" as const,
+			label: "Recycler selection",
+			target: "proposals" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-2-2h-2.3l-1.2-2H8.5L7.3 6H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2Z" /><path d="m8 13 2 2 4-4" /></svg>,
+		},
+		{
+			id: "platform-accounts" as const,
+			label: "Accounts",
+			target: "accounts" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="m19 8 2 2 3-3" /></svg>,
+		},
+		{
+			id: "platform-battery-review" as const,
+			label: "Battery review",
+			target: "battery-review" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4" /><path d="m7 10 3 2-3 2" /></svg>,
+		},
+		{
+			id: "platform-payout-reviews" as const,
+			label: "Payout reviews",
+			target: "payout-reviews" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /><path d="m16 15 2 2 3-3" /></svg>,
 		},
 	];
 
@@ -560,6 +564,7 @@ export function WorkspaceSidebar({
 							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
 						))
 					) : (<>
+					<div role="group" aria-label="CRM" className="flex flex-col items-center gap-0.5">
 					{crmNavItems.map((item) => {
 						const active = activeCrmTarget === item.target;
 						return (
@@ -588,25 +593,21 @@ export function WorkspaceSidebar({
 						);
 					})}
 					{objectGroups.crm.map(renderCompactObject)}
-					{objectGroups.work.length > 0 && (
-						<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
-					)}
-					{objectGroups.work.map(renderCompactObject)}
-					</>)}
-				</div>
-			)}
-
-			{/* Spacer pushes bottom nav + footer down. */}
-			<div className="flex-1 min-h-0" />
-
-			{/* Automation controls stay together at the bottom. */}
-			{onNavigate && (
-				<div className="flex flex-col items-center gap-0.5 py-1">
-					{loading ? (
-						Array.from({ length: 3 }, (_, index) => (
-							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
-						))
-					) : (<>
+					</div>
+					<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
+					<div role="group" aria-label="Admin" className="flex flex-col items-center gap-0.5">
+					{platformNavItems.map((item) => {
+						const active = activePlatformTarget === item.target;
+						return (
+							<button key={item.id} type="button" onClick={() => onNavigate(item.id)} className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors" style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }} title={item.label} aria-label={item.label}>
+								{item.icon}
+							</button>
+						);
+					})}
+					</div>
+					<div className="my-1 h-px w-6" style={{ background: "var(--color-border)" }} aria-hidden />
+					<div role="group" aria-label="Workspace" className="flex flex-col items-center gap-0.5">
+						{objectGroups.work.map(renderCompactObject)}
 						{objectGroups.automations.map(renderCompactObject)}
 						<button
 							type="button"
@@ -618,41 +619,15 @@ export function WorkspaceSidebar({
 						>
 							{cronNavItem.icon}
 						</button>
+					</div>
 					</>)}
 				</div>
 			)}
 
-			{/* Footer: theme toggle + dotfiles toggle, stacked. */}
-			<div className="flex flex-col items-center py-1.5 gap-0.5">
-				{onToggleHidden && (
-					<button
-						type="button"
-						onClick={onToggleHidden}
-						className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors"
-						style={{ color: showHidden ? "var(--color-text)" : "var(--color-text-muted)" }}
-						onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-						onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-						title={showHidden ? "Hide dotfiles" : "Show dotfiles"}
-					>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							{showHidden ? (
-								<>
-									<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-									<circle cx="12" cy="12" r="3" />
-								</>
-							) : (
-								<>
-									<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
-									<path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
-									<path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
-									<path d="m2 2 20 20" />
-								</>
-							)}
-						</svg>
-					</button>
-				)}
-				<ThemeToggle />
-			</div>
+			{/* Spacer pushes the user menu down. */}
+			<div className="flex-1 min-h-0" />
+
+			<NavUser user={authUser ?? FALLBACK_NAV_USER} onSignOut={signOut} compact />
 		</aside>
 	);
 
@@ -787,10 +762,20 @@ export function WorkspaceSidebar({
 						))}
 					</div>
 				) : (<>
-					<div className="px-2 pt-2 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-						crm
-					</div>
-					<div className="space-y-0.5">
+					<button
+						type="button"
+						onClick={() => setCrmTreeOpen((open) => !open)}
+						aria-expanded={crmTreeOpen}
+						aria-controls="sidebar-crm-tree"
+						className="w-full flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.05em]"
+						style={{ color: "var(--color-text-muted)" }}
+					>
+						<svg className={`h-3 w-3 transition-transform ${crmTreeOpen ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+							<path d="m9 18 6-6-6-6" />
+						</svg>
+						CRM
+					</button>
+					{crmTreeOpen && <div id="sidebar-crm-tree" role="group" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
 						{crmNavItems.map((item) => {
 							const active = activeCrmTarget === item.target;
 							return (
@@ -807,19 +792,48 @@ export function WorkspaceSidebar({
 							);
 						})}
 						{objectGroups.crm.map(renderExpandedObject)}
-					</div>
+					</div>}
 
-					{objectGroups.work.length > 0 && (<>
-						<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-							work
-						</div>
-						<div className="space-y-0.5">{objectGroups.work.map(renderExpandedObject)}</div>
-					</>)}
+					<button
+						type="button"
+						onClick={() => setAdminTreeOpen((open) => !open)}
+						aria-expanded={adminTreeOpen}
+						aria-controls="sidebar-admin-tree"
+						className="mt-2 w-full flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.05em]"
+						style={{ color: "var(--color-text-muted)" }}
+					>
+						<svg className={`h-3 w-3 transition-transform ${adminTreeOpen ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+							<path d="m9 18 6-6-6-6" />
+						</svg>
+						Admin
+					</button>
+					{adminTreeOpen && <div id="sidebar-admin-tree" role="group" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
+						{platformNavItems.map((item) => {
+							const active = activePlatformTarget === item.target;
+							return (
+								<button key={item.id} type="button" onClick={() => onNavigate(item.id)} className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors" style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }}>
+									<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{item.icon}</span>
+									{item.label}
+								</button>
+							);
+						})}
+					</div>}
 
-					<div className="px-2 pt-3 pb-1 text-[9px] lowercase" style={{ color: "var(--color-text-muted)", letterSpacing: "0.05em" }}>
-						automations
-					</div>
-					<div className="space-y-0.5">
+					<button
+						type="button"
+						onClick={() => setWorkspaceTreeOpen((open) => !open)}
+						aria-expanded={workspaceTreeOpen}
+						aria-controls="sidebar-workspace-tree"
+						className="mt-2 w-full flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.05em]"
+						style={{ color: "var(--color-text-muted)" }}
+					>
+						<svg className={`h-3 w-3 transition-transform ${workspaceTreeOpen ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+							<path d="m9 18 6-6-6-6" />
+						</svg>
+						Workspace
+					</button>
+					{workspaceTreeOpen && <div id="sidebar-workspace-tree" role="group" aria-label="Workspace" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
+						{objectGroups.work.map(renderExpandedObject)}
 						{objectGroups.automations.map(renderExpandedObject)}
 						<button
 							type="button"
@@ -830,7 +844,7 @@ export function WorkspaceSidebar({
 							<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{cronNavItem.icon}</span>
 							{cronNavItem.label}
 						</button>
-					</div>
+					</div>}
 				</>)}
 			</div>
 		)}
@@ -842,76 +856,7 @@ export function WorkspaceSidebar({
 			</>
 		)}
 
-      {authUser && !isCompact && (
-        <div
-          className="mx-2 mb-1 flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
-          style={{ background: "var(--color-surface-hover)" }}
-        >
-          <div className="min-w-0">
-            <div
-              className="truncate text-[11px] font-medium"
-              style={{ color: "var(--color-text)" }}
-            >
-              {authUser.displayName}
-            </div>
-            <div
-              className="truncate text-[9px]"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              {authUser.email}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="shrink-0 rounded px-1.5 py-1 text-[9px]"
-            style={{ color: "var(--color-text-muted)" }}
-            aria-label="Sign out"
-          >
-            Sign out
-          </button>
-        </div>
-      )}
-
-		<div className="px-2 py-1.5 flex items-center justify-between">
-			<a
-				href="https://dench.com"
-				target="_blank"
-				rel="noopener noreferrer"
-				className="flex items-center gap-2 px-2 py-1 rounded-lg text-[11px]"
-				style={{ color: "var(--color-text-muted)" }}
-			>
-				dench.com{process.env.NEXT_PUBLIC_DENCHCLAW_VERSION ? ` v${process.env.NEXT_PUBLIC_DENCHCLAW_VERSION}` : ""}
-			</a>
-			<div className="flex items-center gap-0.5">
-				{onToggleHidden && (
-					<button
-						type="button"
-						onClick={onToggleHidden}
-						className="p-1.5 rounded-lg transition-colors"
-						style={{ color: showHidden ? "var(--color-text)" : "var(--color-text-muted)" }}
-						title={showHidden ? "Hide dotfiles" : "Show dotfiles"}
-					>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							{showHidden ? (
-								<>
-									<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-									<circle cx="12" cy="12" r="3" />
-								</>
-							) : (
-								<>
-									<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
-									<path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
-									<path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
-									<path d="m2 2 20 20" />
-								</>
-							)}
-						</svg>
-					</button>
-				)}
-				<ThemeToggle />
-			</div>
-		</div>
+		<NavUser user={authUser ?? FALLBACK_NAV_USER} onSignOut={signOut} />
 
 		</aside>
 	);

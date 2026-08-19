@@ -100,6 +100,25 @@ describe("DataTable cell selection", () => {
 		expect(firstRowCheckbox.checked).toBe(true);
 	});
 
+	it("keeps existing rows selected when another row is selected", () => {
+		render(
+			<DataTable
+				columns={columns}
+				data={rows}
+				enableRowSelection
+				hideToolbar
+				getRowId={(row) => row.id}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("checkbox", { name: "Select row 1" }));
+		fireEvent.click(screen.getByRole("checkbox", { name: "Select row 2" }));
+
+		expect(screen.getByRole("checkbox", { name: "Deselect row 1" })).toBeChecked();
+		expect(screen.getByRole("checkbox", { name: "Deselect row 2" })).toBeChecked();
+		expect(screen.getByText(/2 selected/)).toBeInTheDocument();
+	});
+
 	it("forwards header sort clicks to onSortChange so consumers can mirror to the server", () => {
 		const onSortChange = vi.fn();
 		render(
@@ -122,5 +141,40 @@ describe("DataTable cell selection", () => {
 
 		fireEvent.click(screen.getByText("Name"));
 		expect(onSortChange).toHaveBeenLastCalledWith([{ id: "name", desc: true }]);
+	});
+
+	it("opens rows from data cells without treating embedded controls as row clicks", () => {
+		const onRowClick = vi.fn();
+		const onAction = vi.fn();
+		const columnsWithAction: ColumnDef<Row>[] = [
+			...columns,
+			{
+				id: "action",
+				header: "",
+				cell: () => <button type="button" onClick={onAction}>Act</button>,
+			},
+		];
+
+		render(
+			<DataTable
+				columns={columnsWithAction}
+				data={rows}
+				onRowClick={onRowClick}
+				hideToolbar
+				getRowId={(row) => row.id}
+			/>,
+		);
+
+		fireEvent.click(screen.getByText("Ada"));
+		expect(onRowClick).toHaveBeenCalledWith(rows[0], 0);
+
+		fireEvent.click(screen.getAllByRole("button", { name: "Act" })[0]);
+		expect(onAction).toHaveBeenCalledOnce();
+		expect(onRowClick).toHaveBeenCalledOnce();
+
+		const firstRow = screen.getByText("Ada").closest("tr");
+		expect(firstRow).toHaveAttribute("tabindex", "0");
+		fireEvent.keyDown(firstRow!, { key: "Enter" });
+		expect(onRowClick).toHaveBeenCalledTimes(2);
 	});
 });
