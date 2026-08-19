@@ -1065,14 +1065,18 @@ export function ObjectTable({
 			return;
 		}
 
-		const selectedRowIndexes = Object.keys(rowSelection)
+		const selectedRows = Object.keys(rowSelection)
 			.filter((index) => rowSelection[index])
-			.map(Number)
-			.filter((index) => Number.isInteger(index) && localEntries[index]);
+			.map((rowId) => {
+				const rowIndex = localEntries.findIndex((entry) => getRowIdFromEntry(entry) === rowId);
+				const fallbackIndex = Number(rowId);
+				const resolvedIndex = rowIndex >= 0 ? rowIndex : (Number.isInteger(fallbackIndex) ? fallbackIndex : -1);
+				return { rowIndex: resolvedIndex, entry: localEntries[resolvedIndex] };
+			})
+			.filter(({ entry }) => entry);
 
-		if (selectedRowIndexes.length > 0) {
-			const rows = selectedRowIndexes.map((rowIndex) => {
-				const entry = localEntries[rowIndex];
+		if (selectedRows.length > 0) {
+			const rows = selectedRows.map(({ rowIndex, entry }) => {
 				const values: Record<string, string> = {};
 				for (const [columnId, label] of selectionColumns) {
 					values[label] = readSelectionValue(entry, columnId, label);
@@ -1500,7 +1504,12 @@ export function ObjectTable({
 	const getSelectedEntryIds = useCallback(() => {
 		return Object.keys(rowSelection)
 			.filter((k) => rowSelection[k])
-			.map((idx) => safeString(localEntries[Number(idx)]?.entry_id))
+			.map((rowId) => {
+				const entry = localEntries.find((candidate) => getRowIdFromEntry(candidate) === rowId);
+				if (entry) return safeString(entry.entry_id);
+				const fallbackIndex = Number(rowId);
+				return Number.isInteger(fallbackIndex) ? safeString(localEntries[fallbackIndex]?.entry_id) : rowId;
+			})
 			.filter(Boolean);
 	}, [rowSelection, localEntries]);
 
@@ -1508,15 +1517,22 @@ export function ObjectTable({
 		const selectedIds = getSelectedEntryIds();
 		if (selectedIds.length === 0) return;
 		try {
-			await fetch(`/api/workspace/objects/${encodeURIComponent(objectName)}/entries/bulk-delete`, {
+			const res = await fetch(`/api/workspace/objects/${encodeURIComponent(objectName)}/entries/bulk-delete`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ entryIds: selectedIds }),
 			});
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as { error?: string };
+				showToast(body.error ?? `Could not delete the selected ${selectedIds.length === 1 ? "entry" : "entries"}.`, { type: "error" });
+				return;
+			}
 			setRowSelection({});
 			onRefresh?.();
-		} catch { /* ignore */ }
-	}, [getSelectedEntryIds, objectName, onRefresh]);
+		} catch {
+			showToast(`Could not delete the selected ${selectedIds.length === 1 ? "entry" : "entries"}.`, { type: "error" });
+		}
+	}, [getSelectedEntryIds, objectName, onRefresh, showToast]);
 
 	const handleBulkDelete = useCallback(() => {
 		const count = getSelectedEntryIds().length;

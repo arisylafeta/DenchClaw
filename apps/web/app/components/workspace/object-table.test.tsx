@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectTable } from "./object-table";
 import type { TableSelectionContext } from "@/lib/table-selection";
+import { ToastProvider } from "./toast";
 
 describe("ObjectTable selection context", () => {
 	beforeEach(() => {
@@ -198,5 +199,50 @@ describe("ObjectTable server sort", () => {
 		// Nothing to assert on onServerSort (it was never wired); the
 		// fact that no exception fires is the guarantee.
 		expect(true).toBe(true);
+	});
+});
+
+describe("ObjectTable bulk delete failures", () => {
+	beforeEach(() => {
+		Element.prototype.scrollIntoView = vi.fn();
+	});
+
+	it("keeps the selection and shows the server error when a company cannot be deleted", async () => {
+		const onRefresh = vi.fn();
+		global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			if (url === "/api/workspace/enrichment-status") {
+				return new Response(JSON.stringify({ available: false }));
+			}
+			if (url === "/api/workspace/objects/company/entries/bulk-delete") {
+				return new Response(
+					JSON.stringify({ error: "Cannot delete companies with linked CRM records: 2 people." }),
+					{ status: 409, headers: { "Content-Type": "application/json" } },
+				);
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+
+		render(
+			<ToastProvider>
+				<ObjectTable
+					objectName="company"
+					fields={[{ id: "name", name: "Company Name", type: "text" }]}
+					entries={[{ entry_id: "company-1", "Company Name": "Acme" }]}
+					hideInternalToolbar
+					onRefresh={onRefresh}
+				/>
+			</ToastProvider>,
+		);
+
+		fireEvent.click(screen.getAllByRole("checkbox")[1]);
+		await screen.findByText("selected");
+		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		await screen.findByText("Delete 1 entry?");
+		fireEvent.click(screen.getAllByRole("button", { name: "Delete", exact: true }).at(-1)!);
+
+		await screen.findByText("Cannot delete companies with linked CRM records: 2 people.");
+		expect(screen.getAllByRole("checkbox")[1]).toBeChecked();
+		expect(onRefresh).not.toHaveBeenCalled();
 	});
 });
