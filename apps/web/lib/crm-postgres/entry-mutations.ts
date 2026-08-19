@@ -195,6 +195,44 @@ async function entryExists(
   return false;
 }
 
+async function assertNoLinkedCompanyRecords(
+  tx: PgTransaction,
+  objectName: string,
+  entryIds: string[],
+): Promise<void> {
+  if (!new Set(["company", "companies"]).has(objectName.trim().toLowerCase())) return;
+
+  await tx.query(
+    "select id from crm_companies where id = any($1::text[]) for update",
+    [entryIds],
+  );
+
+  const [counts] = rowsFrom(
+    await tx.query<{ people: number | string; interactions: number | string; opportunities: number | string }>(
+      `select
+        (select count(*)::int from crm_people where company_id = any($1::text[])) as people,
+        (select count(*)::int from crm_interactions where company_id = any($1::text[])) as interactions,
+        (select count(*)::int from crm_commercial_opportunities
+          where company_id = any($1::text[])
+             or buyer_company_id = any($1::text[])
+             or seller_company_id = any($1::text[])) as opportunities`,
+      [entryIds],
+    ),
+  );
+  const linked = [
+    { count: Number(counts?.people ?? 0), singular: "person", plural: "people" },
+    { count: Number(counts?.interactions ?? 0), singular: "interaction", plural: "interactions" },
+    { count: Number(counts?.opportunities ?? 0), singular: "opportunity", plural: "opportunities" },
+  ].filter(({ count }) => Number.isFinite(count) && count > 0);
+
+  if (linked.length > 0) {
+    const summary = linked
+      .map(({ count, singular, plural }) => `${count} ${count === 1 ? singular : plural}`)
+      .join(", ");
+    throw new Error(`Cannot delete companies with linked CRM records: ${summary}.`);
+  }
+}
+
 export async function createPostgresEntry(
   objectName: string,
   fields: Record<string, unknown>,
@@ -367,6 +405,7 @@ export async function deletePostgresEntry(
     if (!(await entryExists(tx, object, entryId, userId))) {
       throw new Error(`Entry not found: ${entryId}`);
     }
+    await assertNoLinkedCompanyRecords(tx, objectName, [entryId]);
 
     // Clean up junction table entries
     await tx.query(
@@ -410,6 +449,7 @@ export async function bulkDeletePostgresEntries(
         throw new Error(`Entry not found: ${entryId}`);
       }
     }
+    await assertNoLinkedCompanyRecords(tx, objectName, entryIds);
 
     // Clean up junction table entries
     await tx.query(

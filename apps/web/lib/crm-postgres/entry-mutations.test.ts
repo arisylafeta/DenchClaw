@@ -12,6 +12,7 @@ let fieldRows: Array<{
   relationship_type?: string | null;
 }>;
 let canonicalEntryExists = true;
+let linkedCompanyRecordCounts: { people: number; interactions: number; opportunities: number } | null;
 
 vi.mock("../postgres", () => ({
   withPgTransaction,
@@ -29,6 +30,10 @@ function makeClient() {
       sql.includes("where object_id = $1")
     ) {
       return { rows: fieldRows };
+    }
+
+    if (sql.includes("from crm_people where company_id = any($1::text[])") && sql.includes("crm_commercial_opportunities")) {
+      return { rows: linkedCompanyRecordCounts ? [linkedCompanyRecordCounts] : [{ people: 0, interactions: 0, opportunities: 0 }] };
     }
 
     if (
@@ -112,6 +117,7 @@ describe("crm-postgres entry mutations", () => {
       },
     ];
     canonicalEntryExists = true;
+    linkedCompanyRecordCounts = null;
     sqlLog = [];
     withPgTransaction.mockReset();
     withPgTransaction.mockImplementation(async (fn) => fn(makeClient()));
@@ -235,6 +241,28 @@ describe("crm-postgres entry mutations", () => {
           sql.includes("id = any($1::text[])"),
       ),
     ).toBe(true);
+  });
+
+  it("blocks single company delete and reports linked CRM record counts", async () => {
+    objectRow = { id: "obj_company", name: "company", entity_table: "crm_companies" };
+    linkedCompanyRecordCounts = { people: 1, interactions: 0, opportunities: 0 };
+    const { deletePostgresEntry } = await import("./entry-mutations");
+
+    await expect(deletePostgresEntry("company", "company-1")).rejects.toThrow(
+      "Cannot delete companies with linked CRM records: 1 person.",
+    );
+    expect(sqlLog.some((sql) => sql.includes("delete from \"crm_companies\""))).toBe(false);
+  });
+
+  it("blocks company bulk delete and reports linked CRM record counts", async () => {
+    objectRow = { id: "obj_company", name: "company", entity_table: "crm_companies" };
+    linkedCompanyRecordCounts = { people: 2, interactions: 1, opportunities: 3 };
+    const { bulkDeletePostgresEntries } = await import("./entry-mutations");
+
+    await expect(bulkDeletePostgresEntries("company", ["company-1"])).rejects.toThrow(
+      "Cannot delete companies with linked CRM records: 2 people, 1 interaction, 3 opportunities.",
+    );
+    expect(sqlLog.some((sql) => sql.includes("delete from \"crm_companies\""))).toBe(false);
   });
 
   it("uses inferred canonical table when entity_table is null for people", async () => {
