@@ -64,9 +64,11 @@ export async function POST(
 				? 403
 				: /not found/i.test(message)
 					? 404
-					: /invalid|must|required/i.test(message)
-						? 400
-						: 500;
+					: /linked CRM records|foreign key|referenced|depend/i.test(message)
+						? 409
+						: /invalid|must|required/i.test(message)
+							? 400
+							: 500;
 			return Response.json({ error: message }, { status });
 		}
 	}

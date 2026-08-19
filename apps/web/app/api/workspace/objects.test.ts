@@ -781,6 +781,27 @@ describe("Workspace Objects API", () => {
       expect(duckdbExecOnFile).not.toHaveBeenCalled();
     });
 
+    it("returns a conflict when linked CRM records block a postgres bulk delete", async () => {
+      vi.clearAllMocks();
+      process.env.CRM_DB_BACKEND = "postgres";
+      bulkDeletePostgresEntries.mockRejectedValue(
+        new Error("Cannot delete companies with linked CRM records: 2 people, 1 opportunity."),
+      );
+      const { POST } = await import("./objects/[name]/entries/bulk-delete/route.js");
+      const req = new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: ["company-1"] }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ name: "company" }) });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toEqual({
+        error: "Cannot delete companies with linked CRM records: 2 people, 1 opportunity.",
+      });
+    });
+
     it("returns 400 for invalid json in postgres bulk delete before helper", async () => {
       vi.clearAllMocks();
       process.env.CRM_DB_BACKEND = "postgres";
