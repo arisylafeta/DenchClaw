@@ -81,7 +81,7 @@ describe("ListingsClient", () => {
     expect(screen.getByRole("button", { name: "View link copied" })).toBeInTheDocument();
   });
 
-  it("loads secondary fields into a protected details dialog", async () => {
+  it("loads secondary fields into an animated protected details drawer", async () => {
     getListingDetails.mockResolvedValue({
       ...initialPage.rows[0],
       description: "Detailed pack context",
@@ -118,6 +118,8 @@ describe("ListingsClient", () => {
     fireEvent.click(screen.getByRole("row", { name: /Open details for Tesla module stock/i }));
 
     await waitFor(() => expect(screen.getByText("Detailed pack context")).toBeInTheDocument());
+    expect(document.querySelector('[data-slot="sheet-content"]')).toHaveClass("platform-admin-sheet-content");
+    expect(document.querySelector('[data-slot="sheet-content"]')).toHaveAttribute("data-sheet-side", "right");
     expect(screen.getByText("Tesla")).toBeInTheDocument();
     expect(screen.getByText("Model 3")).toBeInTheDocument();
     expect(screen.getByText("Protected, read-only listing context with provenance and outbound targeting signals.")).toBeInTheDocument();

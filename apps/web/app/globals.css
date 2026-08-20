@@ -2097,6 +2097,118 @@ label {
   animation: drawer-slide-right 200ms ease-out;
 }
 
+/* Platform admin sheets keep their exit state mounted long enough for a full
+   slide-out instead of relying on optional animation utility plugins. */
+@keyframes platform-admin-sheet-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes platform-admin-sheet-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes platform-admin-sheet-content-in-right {
+  from { opacity: 0; transform: translate3d(100%, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes platform-admin-sheet-content-out-right {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(100%, 0, 0); }
+}
+
+@keyframes platform-admin-sheet-content-in-left {
+  from { opacity: 0; transform: translate3d(-100%, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes platform-admin-sheet-content-out-left {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(-100%, 0, 0); }
+}
+
+@keyframes platform-admin-sheet-content-in-top {
+  from { opacity: 0; transform: translate3d(0, -100%, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes platform-admin-sheet-content-out-top {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(0, -100%, 0); }
+}
+
+@keyframes platform-admin-sheet-content-in-bottom {
+  from { opacity: 0; transform: translate3d(0, 100%, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes platform-admin-sheet-content-out-bottom {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(0, 100%, 0); }
+}
+
+.platform-admin-sheet-overlay,
+.platform-admin-sheet-content {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+  will-change: opacity, transform;
+}
+
+.platform-admin-sheet-overlay[data-state="open"] {
+  animation-name: platform-admin-sheet-overlay-in;
+}
+
+.platform-admin-sheet-overlay[data-state="closed"] {
+  animation-name: platform-admin-sheet-overlay-out;
+  animation-timing-function: ease-in;
+}
+
+.platform-admin-sheet-content[data-sheet-side="right"][data-state="open"] {
+  animation-name: platform-admin-sheet-content-in-right;
+}
+
+.platform-admin-sheet-content[data-sheet-side="right"][data-state="closed"] {
+  animation-name: platform-admin-sheet-content-out-right;
+  animation-timing-function: ease-in;
+}
+
+.platform-admin-sheet-content[data-sheet-side="left"][data-state="open"] {
+  animation-name: platform-admin-sheet-content-in-left;
+}
+
+.platform-admin-sheet-content[data-sheet-side="left"][data-state="closed"] {
+  animation-name: platform-admin-sheet-content-out-left;
+  animation-timing-function: ease-in;
+}
+
+.platform-admin-sheet-content[data-sheet-side="top"][data-state="open"] {
+  animation-name: platform-admin-sheet-content-in-top;
+}
+
+.platform-admin-sheet-content[data-sheet-side="top"][data-state="closed"] {
+  animation-name: platform-admin-sheet-content-out-top;
+  animation-timing-function: ease-in;
+}
+
+.platform-admin-sheet-content[data-sheet-side="bottom"][data-state="open"] {
+  animation-name: platform-admin-sheet-content-in-bottom;
+}
+
+.platform-admin-sheet-content[data-sheet-side="bottom"][data-state="closed"] {
+  animation-name: platform-admin-sheet-content-out-bottom;
+  animation-timing-function: ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .platform-admin-sheet-overlay,
+  .platform-admin-sheet-content {
+    animation-duration: 1ms;
+  }
+}
+
 /* Prevent horizontal overflow on mobile */
 html,
 body {
