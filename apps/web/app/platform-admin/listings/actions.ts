@@ -7,9 +7,15 @@ import { getSupabaseAdminClient } from "@/lib/platform-admin/supabase";
 import {
   normalizeListingFilters,
   type ListingDetail,
+  type ListingConversationActivity,
+  type ListingEvidence,
+  type ListingOfferActivity,
+  type ListingOpportunityLink,
   type ListingListRow,
+  type ListingOutboundContext,
   type ListingPage,
   type ListingPageInput,
+  type ListingProvenance,
   type ListingSort,
 } from "./contract";
 
@@ -29,6 +35,7 @@ type ListingRow = Pick<
   | "reference"
   | "seo_slug"
   | "supplier_account_id"
+  | "created_by_user_id"
   | "channel_mode"
   | "listing_status"
   | "visibility"
@@ -37,11 +44,29 @@ type ListingRow = Pick<
   | "updated_at"
 >;
 type ListingSpecsRow = Database["public"]["Tables"]["listing_specs"]["Row"];
-type AccountRow = Pick<Database["public"]["Tables"]["accounts"]["Row"], "id" | "name">;
+type AccountRow = Pick<Database["public"]["Tables"]["accounts"]["Row"], "id" | "name" | "role" | "sector">;
+type ActivityCountRow = { listing_id: string; enquiry_count: number | null; deal_count: number | null };
+type ConversationActivityRow = Pick<
+  Database["public"]["Tables"]["conversations"]["Row"],
+  "id" | "status" | "last_message_at" | "last_message_preview"
+>;
+type PurchaseOfferActivityRow = Pick<
+  Database["public"]["Tables"]["purchase_offers"]["Row"],
+  "id" | "status" | "buyer_account_id" | "quantity_requested" | "submitted_at"
+>;
+type RecyclingOfferActivityRow = Pick<
+  Database["public"]["Tables"]["recycling_offers"]["Row"],
+  "id" | "status" | "recycler_account_id" | "submitted_at"
+>;
+type OpportunityLinkRow = Pick<
+  Database["public"]["Tables"]["recycler_opportunity_links"]["Row"],
+  "id" | "link_type" | "state" | "recycler_account_id" | "created_at" | "updated_at" | "expires_at"
+>;
 
 type ReadResult = {
   data: unknown;
   error: { message: string } | null;
+  count?: number | null;
 };
 
 const LISTING_COLUMNS = [
@@ -100,6 +125,26 @@ async function readOne<T>(result: PromiseLike<ReadResult>): Promise<T | null> {
   const response = await result;
   if (response.error) { throwReadError(); }
   return response.data ? response.data as T : null;
+}
+
+async function readOptionalRows<T>(factory: () => PromiseLike<ReadResult>): Promise<T[]> {
+  try {
+    return await readRows<T>(factory());
+  } catch {
+    return [];
+  }
+}
+
+async function readOptionalCount(factory: () => PromiseLike<ReadResult>): Promise<number> {
+  try {
+    const response = await factory();
+    if (response.error) { return 0; }
+    return typeof response.count === "number"
+      ? response.count
+      : Array.isArray(response.data) ? response.data.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function uniqueIds(rows: Array<{ id?: string | null; listing_id?: string | null }>): string[] {
@@ -182,6 +227,145 @@ function parseLocation(address: Json | null | undefined, fallbackCountry: string
   };
 }
 
+function hasEvidence(value: unknown): boolean {
+  if (typeof value === "number") { return Number.isFinite(value); }
+  if (typeof value === "string") { return value.trim().length > 0; }
+  if (Array.isArray(value)) { return value.length > 0; }
+  return Boolean(value && typeof value === "object");
+}
+
+function buildEvidence(
+  listing: ListingRow,
+  specs: ListingSpecsRow | null,
+  location: LocationFields,
+): ListingEvidence {
+  const fields: Array<[string, unknown]> = [
+    ["Title", listing.title],
+    ["Manufacturer", specs?.manufacturer],
+    ["Model", specs?.model],
+    ["Chemistry", specs?.chemistry],
+    ["Pack capacity", specs?.pack_kwh],
+    ["Pack weight", specs?.pack_weight_kg],
+    ["Quantity", specs?.quantity],
+    ["Location", [location.city, location.region, location.country].filter(Boolean).join(", ")],
+    ["Description", listing.description],
+  ];
+  const missing = fields.filter(([, value]) => !hasEvidence(value)).map(([label]) => label);
+  return { present: fields.length - missing.length, total: fields.length, missing };
+}
+
+function metadataString(metadata: Json, keys: string[]): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) { return null; }
+  const record = metadata as Record<string, Json | undefined>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) { return value.trim().slice(0, 500); }
+  }
+  return null;
+}
+
+function buildProvenance(listing: ListingRow, specs: ListingSpecsRow | null): ListingProvenance {
+  const metadata = specs?.metadata_json ?? {};
+  return {
+    createdByUserId: listing.created_by_user_id ?? null,
+    sourceLabel: metadataString(metadata, ["source", "source_name", "source_type", "origin", "generated_by", "generator"]),
+    sourceUrl: metadataString(metadata, ["source_url", "sourceUrl", "url", "listing_url"]),
+    metadata,
+  };
+}
+
+function accountSegment(account: AccountRow | undefined): string | null {
+  if (!account) { return null; }
+  const parts = [account.role, account.sector].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ").replaceAll("_", " ") : null;
+}
+
+function buildOutboundContext(
+  listing: ListingRow,
+  activity: ActivityCountRow | undefined,
+  purchaseOffers: PurchaseOfferActivityRow[],
+  recyclingOffers: RecyclingOfferActivityRow[],
+  purchaseOfferCount: number,
+  recyclingOfferCount: number,
+  opportunityLinks: OpportunityLinkRow[],
+  opportunityCount: number,
+  conversations: ConversationActivityRow[],
+  conversationCount: number,
+  accountsById: Map<string, AccountRow>,
+): ListingOutboundContext {
+  const recentOffers: ListingOfferActivity[] = [
+    ...purchaseOffers.map((offer) => {
+      const account = accountsById.get(offer.buyer_account_id);
+      return {
+        id: offer.id,
+        kind: "purchase" as const,
+        status: offer.status,
+        counterpartName: account?.name ?? null,
+        counterpartRole: account?.role ?? null,
+        counterpartSector: account?.sector ?? null,
+        quantityRequested: offer.quantity_requested,
+        submittedAt: offer.submitted_at,
+      };
+    }),
+    ...recyclingOffers.map((offer) => {
+      const account = accountsById.get(offer.recycler_account_id);
+      return {
+        id: offer.id,
+        kind: "recycling" as const,
+        status: offer.status,
+        counterpartName: account?.name ?? null,
+        counterpartRole: account?.role ?? null,
+        counterpartSector: account?.sector ?? null,
+        quantityRequested: null,
+        submittedAt: offer.submitted_at,
+      };
+    }),
+  ].toSorted((left, right) => (right.submittedAt ?? "").localeCompare(left.submittedAt ?? ""));
+
+  const links: ListingOpportunityLink[] = opportunityLinks.map((link) => {
+    const account = accountsById.get(link.recycler_account_id);
+    return {
+      id: link.id,
+      linkType: link.link_type,
+      state: link.state,
+      accountName: account?.name ?? null,
+      accountRole: account?.role ?? null,
+      accountSector: account?.sector ?? null,
+      createdAt: link.created_at,
+      updatedAt: link.updated_at,
+      expiresAt: link.expires_at,
+    };
+  });
+
+  const buyerSegments = [...new Set([
+    ...purchaseOffers.map((offer) => accountSegment(accountsById.get(offer.buyer_account_id))),
+    ...recyclingOffers.map((offer) => accountSegment(accountsById.get(offer.recycler_account_id))),
+    ...opportunityLinks.map((link) => accountSegment(accountsById.get(link.recycler_account_id))),
+  ].filter((segment): segment is string => Boolean(segment)))];
+
+  return {
+    targetStatus: null,
+    currentAvailability: listing.listing_status,
+    buyerSegments,
+    enquiryCount: Number(activity?.enquiry_count ?? 0),
+    dealCount: Number(activity?.deal_count ?? 0),
+    offerCount: purchaseOfferCount + recyclingOfferCount,
+    opportunityCount,
+    conversationCount,
+    lastMarketplaceContactAt: conversations[0]?.last_message_at ?? null,
+    recentOffers: recentOffers.slice(0, MAX_ACTIVITY_ITEMS),
+    opportunityLinks: links.slice(0, MAX_ACTIVITY_ITEMS),
+    conversations: conversations.slice(0, MAX_ACTIVITY_ITEMS).map((conversation) => ({
+      id: conversation.id,
+      status: conversation.status,
+      lastMessageAt: conversation.last_message_at,
+      lastMessagePreview: conversation.last_message_preview,
+    } satisfies ListingConversationActivity)),
+  };
+}
+
+const MAX_ACTIVITY_ITEMS = 5;
+
 function mapListRow(
   row: MarketplaceRuntimeRow,
   referenceById: Map<string, { reference: string | null; seo_slug: string | null }>,
@@ -214,6 +398,7 @@ function mapListRow(
 export async function getListingPage(input: ListingPageInput = {}): Promise<ListingPage> {
   noStore();
   const filters = normalizeListingFilters(input);
+  const snapshotAt = new Date().toISOString();
   const page = safePage(input.page);
   const supabase = getSupabaseAdminClient();
   const searchIds = filters.search
@@ -221,7 +406,7 @@ export async function getListingPage(input: ListingPageInput = {}): Promise<List
     : null;
 
   if (filters.search && searchIds?.length === 0) {
-    return { rows: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1, filters };
+    return { rows: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE, totalPages: 1, filters, snapshotAt };
   }
 
   const sort = SORT_COLUMNS[filters.sort];
@@ -264,6 +449,7 @@ export async function getListingPage(input: ListingPageInput = {}): Promise<List
     pageSize: PAGE_SIZE,
     totalPages,
     filters,
+    snapshotAt,
   };
 }
 
@@ -276,7 +462,7 @@ export async function getListingDetails(listingId: string): Promise<ListingDetai
   const listing = await readOne<ListingRow>(
     supabase
       .from("listings")
-      .select("id, title, reference, seo_slug, supplier_account_id, channel_mode, listing_status, visibility, description, created_at, updated_at")
+      .select("id, title, reference, seo_slug, supplier_account_id, created_by_user_id, channel_mode, listing_status, visibility, description, created_at, updated_at")
       .eq("id", id)
       .maybeSingle(),
   );
@@ -287,10 +473,67 @@ export async function getListingDetails(listingId: string): Promise<ListingDetai
       supabase.from("listing_specs").select("*").eq("listing_id", id).maybeSingle(),
     ),
     readOne<AccountRow>(
-      supabase.from("accounts").select("id, name").eq("id", listing.supplier_account_id).maybeSingle(),
+      supabase.from("accounts").select("id, name, role, sector").eq("id", listing.supplier_account_id).maybeSingle(),
     ),
   ]);
   const location = parseLocation(specs?.location_address);
+
+  const [activityRows, purchaseOffers, recyclingOffers, opportunityLinks, conversations, purchaseOfferCount, recyclingOfferCount, opportunityCount, conversationCount] = await Promise.all([
+    readOptionalRows<ActivityCountRow>(() => supabase.rpc("get_listing_activity_counts", { listing_ids: [id] })),
+    readOptionalRows<PurchaseOfferActivityRow>(() => supabase
+      .from("purchase_offers")
+      .select("id, status, buyer_account_id, quantity_requested, submitted_at")
+      .eq("listing_id", id)
+      .order("submitted_at", { ascending: false })
+      .limit(MAX_ACTIVITY_ITEMS)),
+    readOptionalRows<RecyclingOfferActivityRow>(() => supabase
+      .from("recycling_offers")
+      .select("id, status, recycler_account_id, submitted_at")
+      .eq("listing_id", id)
+      .order("submitted_at", { ascending: false })
+      .limit(MAX_ACTIVITY_ITEMS)),
+    readOptionalRows<OpportunityLinkRow>(() => supabase
+      .from("recycler_opportunity_links")
+      .select("id, link_type, state, recycler_account_id, created_at, updated_at, expires_at")
+      .eq("listing_id", id)
+      .order("updated_at", { ascending: false })
+      .limit(MAX_ACTIVITY_ITEMS)),
+    readOptionalRows<ConversationActivityRow>(() => supabase
+      .from("conversations")
+      .select("id, status, last_message_at, last_message_preview")
+      .eq("listing_id", id)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(MAX_ACTIVITY_ITEMS)),
+    readOptionalCount(() => supabase.from("purchase_offers").select("id", { count: "exact", head: true }).eq("listing_id", id)),
+    readOptionalCount(() => supabase.from("recycling_offers").select("id", { count: "exact", head: true }).eq("listing_id", id)),
+    readOptionalCount(() => supabase.from("recycler_opportunity_links").select("id", { count: "exact", head: true }).eq("listing_id", id)),
+    readOptionalCount(() => supabase.from("conversations").select("id", { count: "exact", head: true }).eq("listing_id", id)),
+  ]);
+
+  const relatedAccountIds = [...new Set([
+    ...purchaseOffers.map((offer) => offer.buyer_account_id),
+    ...recyclingOffers.map((offer) => offer.recycler_account_id),
+    ...opportunityLinks.map((link) => link.recycler_account_id),
+  ])];
+  const relatedAccounts = relatedAccountIds.length > 0
+    ? await readOptionalRows<AccountRow>(() => supabase.from("accounts").select("id, name, role, sector").in("id", relatedAccountIds))
+    : [];
+  const accountsById = new Map(relatedAccounts.map((account) => [account.id, account]));
+  const evidence = buildEvidence(listing, specs, location);
+  const provenance = buildProvenance(listing, specs);
+  const outbound = buildOutboundContext(
+    listing,
+    activityRows[0],
+    purchaseOffers,
+    recyclingOffers,
+    purchaseOfferCount,
+    recyclingOfferCount,
+    opportunityLinks,
+    opportunityCount,
+    conversations,
+    conversationCount,
+    accountsById,
+  );
 
   return {
     id: listing.id,
@@ -322,5 +565,8 @@ export async function getListingDetails(listingId: string): Promise<ListingDetai
     yearManufacture: specs?.year_manufacture ?? null,
     voltageNominal: specs?.voltage_nominal ?? null,
     soh: specs?.soh ?? null,
+    evidence,
+    provenance,
+    outbound,
   };
 }

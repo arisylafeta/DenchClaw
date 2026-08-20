@@ -37,6 +37,7 @@ const initialPage: ListingPage = {
   page: 1,
   pageSize: 25,
   totalPages: 1,
+  snapshotAt: "2026-08-19T00:00:00.000Z",
   filters: {
     search: "",
     minKwh: "",
@@ -64,7 +65,20 @@ describe("ListingsClient", () => {
     expect(screen.getByLabelText("Maximum capacity in kWh")).toBeInTheDocument();
     expect(screen.getByLabelText("Minimum weight in kilograms")).toBeInTheDocument();
     expect(screen.getByLabelText("Maximum weight in kilograms")).toBeInTheDocument();
+    expect(screen.getByLabelText("Repeatable target view")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy view link" })).toBeInTheDocument();
     expect(screen.queryByText("Description")).toBeNull();
+  });
+
+  it("copies the exact URL filter definition for a repeatable view", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    render(<ListingsClient initialPage={initialPage} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy view link" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("http://localhost:3000/platform-admin/listings"));
+    expect(screen.getByRole("button", { name: "View link copied" })).toBeInTheDocument();
   });
 
   it("loads secondary fields into a protected details dialog", async () => {
@@ -81,6 +95,22 @@ describe("ListingsClient", () => {
       yearManufacture: 2020,
       voltageNominal: 400,
       soh: 88,
+      evidence: { present: 9, total: 9, missing: [] },
+      provenance: { createdByUserId: null, sourceLabel: "supplier_upload", sourceUrl: null, metadata: {} },
+      outbound: {
+        targetStatus: null,
+        currentAvailability: "published",
+        buyerSegments: [],
+        enquiryCount: 0,
+        dealCount: 0,
+        offerCount: 0,
+        opportunityCount: 0,
+        conversationCount: 0,
+        lastMarketplaceContactAt: null,
+        recentOffers: [],
+        opportunityLinks: [],
+        conversations: [],
+      },
     });
 
     render(<ListingsClient initialPage={initialPage} />);
@@ -90,7 +120,7 @@ describe("ListingsClient", () => {
     await waitFor(() => expect(screen.getByText("Detailed pack context")).toBeInTheDocument());
     expect(screen.getByText("Tesla")).toBeInTheDocument();
     expect(screen.getByText("Model 3")).toBeInTheDocument();
-    expect(screen.getByText("Protected, read-only listing context.")).toBeInTheDocument();
+    expect(screen.getByText("Protected, read-only listing context with provenance and outbound targeting signals.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open authoritative listing/i })).toHaveAttribute("href", "/marketplace/tesla-module-stock");
   });
 });

@@ -59,6 +59,67 @@ export type ListingDetail = ListingListRow & {
   yearManufacture: number | null;
   voltageNominal: number | null;
   soh: number | null;
+  evidence: ListingEvidence;
+  provenance: ListingProvenance;
+  outbound: ListingOutboundContext;
+};
+
+export type ListingEvidence = {
+  present: number;
+  total: number;
+  missing: string[];
+};
+
+export type ListingProvenance = {
+  createdByUserId: string | null;
+  sourceLabel: string | null;
+  sourceUrl: string | null;
+  metadata: Json;
+};
+
+export type ListingOfferActivity = {
+  id: string;
+  kind: "purchase" | "recycling";
+  status: string | null;
+  counterpartName: string | null;
+  counterpartRole: string | null;
+  counterpartSector: string | null;
+  quantityRequested: number | null;
+  submittedAt: string | null;
+};
+
+export type ListingOpportunityLink = {
+  id: string;
+  linkType: string | null;
+  state: string | null;
+  accountName: string | null;
+  accountRole: string | null;
+  accountSector: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  expiresAt: string | null;
+};
+
+export type ListingConversationActivity = {
+  id: string;
+  status: string | null;
+  lastMessageAt: string | null;
+  lastMessagePreview: string | null;
+};
+
+export type ListingOutboundContext = {
+  targetStatus: string | null;
+  currentAvailability: string | null;
+  buyerSegments: string[];
+  enquiryCount: number;
+  dealCount: number;
+  offerCount: number;
+  opportunityCount: number;
+  conversationCount: number;
+  lastMarketplaceContactAt: string | null;
+  recentOffers: ListingOfferActivity[];
+  opportunityLinks: ListingOpportunityLink[];
+  conversations: ListingConversationActivity[];
 };
 
 export type ListingPage = {
@@ -68,6 +129,7 @@ export type ListingPage = {
   pageSize: number;
   totalPages: number;
   filters: ListingFilters;
+  snapshotAt: string;
 };
 
 export type ListingPageInput = Partial<Omit<ListingFilters, "sort">> & {

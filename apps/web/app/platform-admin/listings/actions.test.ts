@@ -6,8 +6,8 @@ const getSupabaseAdminClient = vi.fn();
 vi.mock("next/cache", () => ({ unstable_noStore: noStore }));
 vi.mock("@/lib/platform-admin/supabase", () => ({ getSupabaseAdminClient }));
 
-function makeBuilder(data: unknown[], count?: number) {
-  const result = { data, error: null, ...(count === undefined ? {} : { count }) };
+function makeBuilder(data: unknown[], count?: number, error: { message: string } | null = null) {
+  const result = { data, error, ...(count === undefined ? {} : { count }) };
   const builder = Object.assign(Promise.resolve(result), {
     select: vi.fn(),
     order: vi.fn(),
@@ -160,5 +160,107 @@ describe("marketplace listings reads", () => {
     await getListingPage({ search: "battery" });
 
     expect(String(specs.or.mock.calls[0]?.[0])).not.toContain("chemistry.ilike");
+  });
+
+  it("hydrates provenance and bounded outbound context from canonical relations", async () => {
+    const listing = makeBuilder([{
+      id: "listing-1",
+      title: "Pack stock",
+      reference: "REF-1",
+      seo_slug: "pack-stock",
+      supplier_account_id: "supplier-1",
+      created_by_user_id: "creator-1",
+      channel_mode: "sale",
+      listing_status: "published",
+      visibility: "public",
+      description: "Pack description",
+      created_at: "2026-08-18T00:00:00.000Z",
+      updated_at: "2026-08-19T00:00:00.000Z",
+    }]);
+    const specs = makeBuilder([{
+      listing_id: "listing-1",
+      quantity: 12,
+      pack_kwh: 42,
+      pack_weight_kg: 320,
+      chemistry: "NMC",
+      manufacturer: "Samsung SDI",
+      model: "E-Z-Go",
+      location_address: { city: "London", countryCode: "GB" },
+      metadata_json: {
+        source: "supplier_upload",
+        source_url: "https://supplier.example/listing/1",
+        generated_by: "catalogue-normalizer",
+      },
+      condition_json: { state: "used" },
+    }]);
+    const accounts = makeBuilder([
+      { id: "supplier-1", name: "Supplier One", role: "supplier", sector: "battery_assembler" },
+      { id: "buyer-1", name: "Buyer One", role: "buyer", sector: "energy_storage_oem" },
+      { id: "recycler-1", name: "Recycler One", role: "recycler", sector: "battery_recycler" },
+    ]);
+    const purchaseOffers = makeBuilder([{ id: "offer-1", status: "submitted", buyer_account_id: "buyer-1", quantity_requested: 4, submitted_at: "2026-08-19T10:00:00.000Z" }], 2);
+    const recyclingOffers = makeBuilder([{ id: "offer-2", status: "accepted", recycler_account_id: "recycler-1", submitted_at: "2026-08-18T10:00:00.000Z" }], 1);
+    const links = makeBuilder([{ id: "link-1", link_type: "invited", state: "active", recycler_account_id: "recycler-1", created_at: "2026-08-18T10:00:00.000Z", updated_at: "2026-08-19T10:00:00.000Z", expires_at: "2026-09-01T00:00:00.000Z" }], 1);
+    const conversations = makeBuilder([{ id: "conversation-1", status: "open", last_message_at: "2026-08-19T11:00:00.000Z", last_message_preview: "Can you share the pack details?" }], 1);
+    const rpc = vi.fn().mockResolvedValue({ data: [{ listing_id: "listing-1", enquiry_count: 3, deal_count: 1 }], error: null });
+    getSupabaseAdminClient.mockReturnValue({
+      rpc,
+      from: vi.fn((table: string) => ({
+        listings: listing,
+        listing_specs: specs,
+        accounts,
+        purchase_offers: purchaseOffers,
+        recycling_offers: recyclingOffers,
+        recycler_opportunity_links: links,
+        conversations,
+      }[table] ?? makeBuilder([]))),
+    });
+
+    const { getListingDetails } = await import("./actions");
+    const result = await getListingDetails("listing-1");
+
+    expect(result?.provenance).toMatchObject({ createdByUserId: "creator-1", sourceLabel: "supplier_upload", sourceUrl: "https://supplier.example/listing/1" });
+    expect(result?.evidence).toMatchObject({ present: 9, total: 9, missing: [] });
+    expect(result?.outbound).toMatchObject({ enquiryCount: 3, dealCount: 1, offerCount: 3, opportunityCount: 1, conversationCount: 1, lastMarketplaceContactAt: "2026-08-19T11:00:00.000Z" });
+    expect(result?.outbound.recentOffers[0]).toMatchObject({ id: "offer-1", counterpartName: "Buyer One", kind: "purchase" });
+    expect(result?.outbound.opportunityLinks[0]).toMatchObject({ id: "link-1", accountName: "Recycler One", state: "active" });
+    expect(purchaseOffers.limit).toHaveBeenCalledWith(5);
+    expect(conversations.limit).toHaveBeenCalledWith(5);
+    expect(rpc).toHaveBeenCalledWith("get_listing_activity_counts", { listing_ids: ["listing-1"] });
+  });
+
+  it("keeps primary listing details available when ancillary activity reads fail", async () => {
+    const listing = makeBuilder([{
+      id: "listing-1",
+      title: "Pack stock",
+      reference: "REF-1",
+      seo_slug: "pack-stock",
+      supplier_account_id: "supplier-1",
+      created_by_user_id: null,
+      channel_mode: "sale",
+      listing_status: "published",
+      visibility: "public",
+      description: null,
+      created_at: "2026-08-18T00:00:00.000Z",
+      updated_at: "2026-08-19T00:00:00.000Z",
+    }]);
+    const specs = makeBuilder([{ listing_id: "listing-1", metadata_json: {}, condition_json: {} }]);
+    const accounts = makeBuilder([{ id: "supplier-1", name: "Supplier One", role: "supplier", sector: null }]);
+    const failing = () => makeBuilder([], undefined, { message: "relation unavailable" });
+    getSupabaseAdminClient.mockReturnValue({
+      rpc: vi.fn().mockRejectedValue(new Error("rpc unavailable")),
+      from: vi.fn((table: string) => {
+        if (table === "listings") return listing;
+        if (table === "listing_specs") return specs;
+        if (table === "accounts") return accounts;
+        return failing();
+      }),
+    });
+
+    const { getListingDetails } = await import("./actions");
+    const result = await getListingDetails("listing-1");
+
+    expect(result?.title).toBe("Pack stock");
+    expect(result?.outbound).toMatchObject({ enquiryCount: 0, dealCount: 0, offerCount: 0, opportunityCount: 0, conversationCount: 0 });
   });
 });
