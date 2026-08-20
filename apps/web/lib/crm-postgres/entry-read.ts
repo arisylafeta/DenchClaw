@@ -1,6 +1,7 @@
 import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
 import { getTableColumns } from "./table-columns";
+import { buildWorkTaskReadScope } from "./work-task-read-scope";
 
 type ObjectRow = {
   id: string;
@@ -174,7 +175,7 @@ export async function getReverseRelationsForEntry(
       left join projects on o.name = 'project' and projects.id = l.source_entry_id
       left join automation_loop_runs on o.name = 'automation_loop_run' and automation_loop_runs.id = l.source_entry_id
      where l.target_entry_id = $1
-       and (o.name <> 'work_task' or work_tasks.assignee_id = $2::uuid)
+       and (o.name <> 'work_task' or ${buildWorkTaskReadScope("work_tasks.assignee_id", "$2")})
        and (o.name <> 'email_message' or email_messages.mailbox_owner_id = $2::uuid)
        and (o.name <> 'email_thread' or email_threads.mailbox_owner_id = $2::uuid)
        and (o.name <> 'interaction' or interactions.email_message_id is null or exists (
@@ -329,7 +330,7 @@ export async function getPostgresEntryData(
         await queryPg<Record<string, unknown>>(
           `select ${buildEntrySelect(fields, existingColumns)} from ${tableName}
             where id = $1
-              ${object.name === "work_task" ? "and assignee_id = $2::uuid" : ""}
+              ${object.name === "work_task" ? `and ${buildWorkTaskReadScope("assignee_id", "$2")}` : ""}
               ${object.name === "email_thread" || object.name === "email_message" ? "and mailbox_owner_id = $2::uuid" : ""}
               ${object.name === "interaction" ? "and (email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $2::uuid))" : ""}
             limit 1`,

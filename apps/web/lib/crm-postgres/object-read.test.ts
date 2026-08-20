@@ -552,6 +552,7 @@ describe("postgres object read adapter", () => {
     const data = await getPostgresObjectData(
       "work_task",
       new URL("http://localhost?pageSize=10"),
+      "11111111-1111-4111-8111-111111111111",
     );
 
     expect(data.object.default_view).toBe("kanban");
@@ -577,6 +578,9 @@ describe("postgres object read adapter", () => {
     expect(String(taskListCall?.[0])).toContain("regexp_replace");
     expect(String(taskListCall?.[0])).toContain('as "Preview"');
     expect(String(taskListCall?.[0])).not.toContain('as "Task Details"');
+    expect(String(taskListCall?.[0])).toContain("work_task_viewer.email");
+    expect(String(taskListCall?.[0])).toContain("ari@rebattery.io");
+    expect(String(taskListCall?.[0])).toContain("alex@rebattery.io");
     expect(data.relationLabels.Project).toEqual({
       p2: "Safe change delivery",
       p1: "Supplier inventory lifecycle",

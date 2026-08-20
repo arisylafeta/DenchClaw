@@ -16,6 +16,43 @@ const projectLabels = {
 };
 
 describe("Work Task project accordions", () => {
+  it("shows the resolved assignee on Work Task cards", async () => {
+    render(
+      <ObjectKanban
+        objectName="work_task"
+        fields={[
+          { id: "title", name: "Title", type: "text" },
+          { id: "preview", name: "Preview", type: "text" },
+          { id: "status", name: "Status", type: "enum", enum_values: ["Planned", "In Progress"] },
+          { id: "priority", name: "Priority", type: "enum", enum_values: ["P0", "P1"] },
+          { id: "project", name: "Project", type: "relation", related_object_name: "project" },
+          { id: "repository", name: "Repository", type: "text" },
+          { id: "assignee", name: "Assignee", type: "relation", related_object_name: "crm_user" },
+        ]}
+        entries={[{
+          entry_id: "t1",
+          Title: "Buyer demand context",
+          Preview: "Rank buyer demand using current CRM evidence.",
+          Status: "Planned",
+          Priority: "P1",
+          Project: "p1",
+          Repository: "runtime-only",
+          Assignee: "alex-user-id",
+        }]}
+        statuses={[]}
+        relationLabels={{
+          Project: { p1: "Backlog" },
+          Assignee: { "alex-user-id": "alex@rebattery.io" },
+        }}
+        accordionGroupFieldName="Project"
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Buyer demand context")).toBeTruthy());
+    expect(screen.getByText("Assignee:")).toBeTruthy();
+    expect(screen.getByText("alex@rebattery.io")).toBeTruthy();
+  });
+
   it("builds generic sections for projects represented by the supplied tasks", () => {
     expect(buildKanbanAccordionSections(entries.slice(0, 2), "Project", projectLabels)).toEqual([
       { key: "p1", label: "Supplier inventory lifecycle", entries: [entries[0]] },

@@ -215,7 +215,7 @@ describe("postgres entry read", () => {
             },
           ];
         }
-        if (sql.includes("from crm_users")) {
+        if (sql.includes("select id::text, email from crm_users")) {
           expect(params?.[0]).toEqual(["11111111-1111-4111-8111-111111111111"]);
           return [
             { id: "11111111-1111-4111-8111-111111111111", email: "ari@rebattery.io" },
@@ -226,10 +226,20 @@ describe("postgres entry read", () => {
       });
 
       const { getPostgresEntryData } = await import("./entry-read");
-      const data = await getPostgresEntryData("work_task", "task-1");
+      const data = await getPostgresEntryData(
+        "work_task",
+        "task-1",
+        "11111111-1111-4111-8111-111111111111",
+      );
       expect(data.relationLabels.Assignee).toEqual({
         "11111111-1111-4111-8111-111111111111": "ari@rebattery.io",
       });
+      const entryCall = queryPg.mock.calls.find(([sql]) =>
+        String(sql).includes("from work_tasks") && String(sql).includes("where id = $1")
+      );
+      expect(String(entryCall?.[0])).toContain("work_task_viewer.email");
+      expect(String(entryCall?.[0])).toContain("ari@rebattery.io");
+      expect(String(entryCall?.[0])).toContain("alex@rebattery.io");
     });
 
     it("does not filter fields when the object has no backing table", async () => {

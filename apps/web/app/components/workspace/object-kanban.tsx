@@ -290,22 +290,31 @@ function CardContent({
 
   const actionFields = fields.filter((f) => f.type === "action");
   const dataFields = fields.filter((f) => f.type !== "action");
-
-  const displayFields = dataFields
-    .filter(
-      (f) =>
-        f.type !== "richtext" &&
-        entry[f.name] !== null &&
-        entry[f.name] !== undefined &&
-        entry[f.name] !== "",
-    )
-    .slice(0, 4);
-
   const titleField = fields.find(
     (f) =>
       f.name.toLowerCase().includes("name") ||
       f.name.toLowerCase().includes("title"),
   );
+  const populatedMetadataFields = dataFields.filter(
+    (f) =>
+      f !== titleField &&
+      f.type !== "richtext" &&
+      entry[f.name] !== null &&
+      entry[f.name] !== undefined &&
+      entry[f.name] !== "",
+  );
+  const assigneeField =
+    objectName === "work_task"
+      ? populatedMetadataFields.find(
+          (field) => field.name.toLowerCase() === "assignee",
+        )
+      : undefined;
+  const displayFields = assigneeField
+    ? [
+        assigneeField,
+        ...populatedMetadataFields.filter((field) => field !== assigneeField),
+      ].slice(0, 3)
+    : populatedMetadataFields.slice(0, 3);
 
   return (
     <>
@@ -324,10 +333,7 @@ function CardContent({
         </div>
       </div>
       <div className="space-y-1">
-        {displayFields
-          .filter((f) => f !== titleField)
-          .slice(0, 3)
-          .map((field) => {
+        {displayFields.map((field) => {
             const val = entry[field.name];
             if (!val) {return null;}
 

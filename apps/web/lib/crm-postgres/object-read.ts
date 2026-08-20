@@ -10,6 +10,7 @@ import { deserializeFilters } from "../object-filters";
 import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
 import { getColumnFillRates, getTableColumns } from "./table-columns";
+import { buildWorkTaskReadScope } from "./work-task-read-scope";
 
 type ObjectRow = {
   id: string;
@@ -571,7 +572,8 @@ export async function getPostgresObjectData(
   const search = url.searchParams.get("search");
   const rowScope =
     object.name === "work_task"
-      ? (params.push(userId), `e.assignee_id = $${params.length}::uuid`)
+      ? (params.push(userId),
+        buildWorkTaskReadScope("e.assignee_id", `$${params.length}`))
       : object.name === "email_thread" || object.name === "email_message"
         ? (params.push(userId), `e.mailbox_owner_id = $${params.length}::uuid`)
         : object.name === "interaction"
