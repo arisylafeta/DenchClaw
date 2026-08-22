@@ -77,7 +77,7 @@ describe("POST /api/auth/login", () => {
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: 28_800,
+      maxAge: 2_592_000,
     });
     const response = await POST(
       loginRequest({ email: "ari@rebattery.io", password: "shared password" }),

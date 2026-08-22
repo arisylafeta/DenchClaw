@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { validateSessionTokenMock } = vi.hoisted(() => ({
-  validateSessionTokenMock: vi.fn(),
+const { refreshSessionTokenMock } = vi.hoisted(() => ({
+  refreshSessionTokenMock: vi.fn(),
 }));
-vi.mock("@/lib/auth", () => ({
-  validateSessionToken: validateSessionTokenMock,
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  refreshSessionToken: refreshSessionTokenMock,
 }));
 
 import { middleware } from "../middleware";
@@ -39,12 +40,13 @@ function request(
 }
 
 describe("CRM auth middleware", () => {
-  beforeEach(() => validateSessionTokenMock.mockReset());
+  beforeEach(() => {
+    refreshSessionTokenMock.mockReset();
+  });
 
   it.each([
     "/login",
     "/api/auth/login",
-    "/api/auth/me",
     "/api/settings/mcp/connect/callback",
     "/api/apps/webhooks/example",
     "/rebattery-favicon.svg",
@@ -53,7 +55,7 @@ describe("CRM auth middleware", () => {
   ])("allows the explicit public path %s", async (path) => {
     const response = await middleware(request(path));
     expect(response.status).toBe(200);
-    expect(validateSessionTokenMock).not.toHaveBeenCalled();
+    expect(refreshSessionTokenMock).not.toHaveBeenCalled();
   });
 
   it("does not broaden webhook or login exceptions to lookalike paths", async () => {
@@ -86,7 +88,7 @@ describe("CRM auth middleware", () => {
   });
 
   it("returns 401 for missing, forged, malformed, expired, or revoked API sessions", async () => {
-    validateSessionTokenMock.mockResolvedValue(null);
+    refreshSessionTokenMock.mockResolvedValue(null);
     for (const token of [
       undefined,
       "malformed",
@@ -101,21 +103,22 @@ describe("CRM auth middleware", () => {
     }
   });
 
-  it("allows a protected request only after authoritative session validation", async () => {
-    validateSessionTokenMock.mockResolvedValue({
+  it("renews a valid session for 30 days at the authenticated request boundary", async () => {
+    refreshSessionTokenMock.mockResolvedValue({
       id: "user-1",
       email: "ari@rebattery.io",
       displayName: "Ari",
     });
     const response = await middleware(
-      request("/api/workspace/tree", { token: "x".repeat(43) }),
+      request("/api/auth/me", { token: "x".repeat(43) }),
     );
     expect(response.status).toBe(200);
-    expect(validateSessionTokenMock).toHaveBeenCalledWith("x".repeat(43));
+    expect(refreshSessionTokenMock).toHaveBeenCalledWith("x".repeat(43));
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=2592000");
   });
 
   it("rejects protected mutations with a missing or cross-origin Origin", async () => {
-    validateSessionTokenMock.mockResolvedValue({ id: "user-1" });
+    refreshSessionTokenMock.mockResolvedValue({ id: "user-1" });
     const missing = await middleware(
       request("/api/workspace/file", { method: "POST", token: "x".repeat(43) }),
     );
@@ -128,10 +131,30 @@ describe("CRM auth middleware", () => {
     );
     expect(missing.status).toBe(403);
     expect(crossOrigin.status).toBe(403);
+    expect(refreshSessionTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("lets same-origin logout clear missing or stale cookies without renewal", async () => {
+    const missing = await middleware(
+      request("/api/auth/logout", {
+        method: "POST",
+        origin: "https://crm.rebattery.io",
+      }),
+    );
+    const stale = await middleware(
+      request("/api/auth/logout", {
+        method: "POST",
+        origin: "https://crm.rebattery.io",
+        token: "expired-token",
+      }),
+    );
+    expect(missing.status).toBe(200);
+    expect(stale.status).toBe(200);
+    expect(refreshSessionTokenMock).not.toHaveBeenCalled();
   });
 
   it("allows same-origin protected mutations and protects logout", async () => {
-    validateSessionTokenMock.mockResolvedValue({ id: "user-1" });
+    refreshSessionTokenMock.mockResolvedValue({ id: "user-1" });
     const mutation = await middleware(
       request("/api/workspace/file", {
         method: "POST",
@@ -148,5 +171,7 @@ describe("CRM auth middleware", () => {
     );
     expect(mutation.status).toBe(200);
     expect(logout.status).toBe(200);
+    expect(logout.headers.get("set-cookie")).toBeNull();
+    expect(refreshSessionTokenMock).toHaveBeenCalledTimes(1);
   });
 });

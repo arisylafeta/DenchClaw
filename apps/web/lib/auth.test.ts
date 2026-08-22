@@ -13,6 +13,7 @@ import {
   currentUser,
   hashPassword,
   login,
+  refreshSessionToken,
   revokeSession,
   sessionCookie,
   validateSessionToken,
@@ -121,7 +122,7 @@ describe("CRM authentication", () => {
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: 28_800,
+      maxAge: 2_592_000,
     });
     vi.stubEnv("NODE_ENV", previous ?? "test");
   });
@@ -140,6 +141,36 @@ describe("CRM authentication", () => {
     expect(queryPgMock.mock.calls[0][0]).toContain("s.revoked_at is null");
     expect(queryPgMock.mock.calls[0][0]).toContain("s.expires_at > now()");
     expect(queryPgMock.mock.calls[0][0]).toContain("u.is_active");
+  });
+
+  it("renews a valid active session for 30 days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T12:00:00.000Z"));
+    queryPgMock.mockResolvedValueOnce([
+      { id: "user-1", email: "ari@rebattery.io", display_name: "Ari" },
+    ]);
+
+    await expect(refreshSessionToken("x".repeat(43))).resolves.toEqual({
+      id: "user-1",
+      email: "ari@rebattery.io",
+      displayName: "Ari",
+    });
+    expect(queryPgMock.mock.calls[0][0]).toContain("update crm_sessions");
+    expect(queryPgMock.mock.calls[0][0]).toContain("s.expires_at > now()");
+    expect(queryPgMock.mock.calls[0][0]).toContain("u.is_active");
+    expect(queryPgMock.mock.calls[0][1][1]).toEqual(
+      new Date("2026-09-21T12:00:00.000Z"),
+    );
+    vi.useRealTimers();
+  });
+
+  it("does not renew malformed sessions or sessions rejected by database policy", async () => {
+    await expect(refreshSessionToken("short")).resolves.toBeNull();
+    expect(queryPgMock).not.toHaveBeenCalled();
+
+    queryPgMock.mockResolvedValueOnce([]);
+    await expect(refreshSessionToken("x".repeat(43))).resolves.toBeNull();
+    expect(queryPgMock).toHaveBeenCalledOnce();
   });
 
   it("reads, refreshes, and revokes the current cookie session", async () => {

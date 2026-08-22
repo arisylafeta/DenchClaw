@@ -15,7 +15,7 @@ export const ALLOWED_EMAILS = new Set([
   "alex@rebattery.io",
 ]);
 export const SESSION_COOKIE = "denchclaw_session";
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PASSWORD_LENGTH = 1024;
 
 export type AuthenticatedUser = {
@@ -136,6 +136,33 @@ export async function validateSessionToken(
         and s.expires_at > now()
         and u.is_active`,
     [hashToken(token)],
+  );
+  const user = rows[0];
+  return user
+    ? { id: user.id, email: user.email, displayName: user.display_name }
+    : null;
+}
+
+export async function refreshSessionToken(
+  token: string,
+): Promise<AuthenticatedUser | null> {
+  if (!token || token.length < 40 || token.length > 128) return null;
+  const rows = await queryPg<{
+    id: string;
+    email: string;
+    display_name: string;
+  }>(
+    `update crm_sessions s
+        set expires_at = $2,
+            last_seen_at = now()
+       from crm_users u
+      where s.token_hash = $1
+        and s.user_id = u.id
+        and s.revoked_at is null
+        and s.expires_at > now()
+        and u.is_active
+      returning u.id, u.email, u.display_name`,
+    [hashToken(token), new Date(Date.now() + SESSION_TTL_MS)],
   );
   const user = rows[0];
   return user
