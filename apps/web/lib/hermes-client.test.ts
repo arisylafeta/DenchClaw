@@ -236,6 +236,42 @@ describe("createHermesChatStream", () => {
     expect(events[0].status).toBe(401);
   });
 
+  it("preserves the root Hermes error when an accepted run later fails", async () => {
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/v1/runs") && init?.method === "POST") {
+        return new Response(JSON.stringify({ run_id: "run_limited", status: "started" }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/v1/runs/run_limited/events")) {
+        return new Response(
+          sseBody({
+            event: "run.failed",
+            error: "HTTP 429: The usage limit has been reached",
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+
+    const stream = await createHermesChatStream({
+      sessionKey: "sess_limited",
+      message: "Continue",
+      userId: "crm-user-123",
+      config,
+    });
+
+    const events = await readSseEvents(stream);
+    expect(events).toEqual([
+      {
+        type: "error",
+        errorText: "HTTP 429: The usage limit has been reached",
+      },
+    ]);
+  });
+
   it("returns an SSE stream with an error event when no apiKey is provided", async () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy as typeof fetch;
