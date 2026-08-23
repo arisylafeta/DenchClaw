@@ -30,7 +30,7 @@ type HermesSseEvent = {
   tool?: string;
   preview?: string;
   duration?: number;
-  error?: boolean;
+  error?: boolean | string;
   output?: string;
   usage?: Record<string, unknown>;
 };
@@ -229,6 +229,25 @@ export async function createHermesChatStream(
                     finished = true;
                     emit({ type: "finish" });
                   }
+                  break;
+                }
+
+                case "run.failed": {
+                  // Hermes redacts provider errors before publishing this event.
+                  if (textId) {
+                    emit({ type: "text-end", id: textId });
+                    textId = null;
+                  }
+                  if (reasoningId) {
+                    emit({ type: "reasoning-end", id: reasoningId });
+                    reasoningId = null;
+                  }
+                  const errorText =
+                    typeof event.error === "string" && event.error.trim()
+                      ? event.error
+                      : "Hermes run failed";
+                  finished = true;
+                  emit({ type: "error", errorText });
                   break;
                 }
               }
