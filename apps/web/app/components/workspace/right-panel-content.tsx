@@ -17,7 +17,7 @@
  * the active tab.
  */
 
-import { useCallback, useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -161,6 +161,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
     cronJobs,
     onDuckDBMissing,
   });
+  const entryTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     onRefreshActiveChange?.(refreshActive);
@@ -224,6 +225,25 @@ export function RightPanelContent(props: RightPanelContentProps) {
         <SheetContent
           side="right"
           showCloseButton={false}
+          onEscapeKeyDown={(event) => {
+            // EntryDetailPanel owns Escape because it knows whether a field or
+            // the add-property form is active. Prevent Radix from dismissing
+            // first and bypassing that unsaved-edit guard.
+            event.preventDefault();
+          }}
+          onOpenAutoFocus={() => {
+            const activeElement = document.activeElement;
+            entryTriggerRef.current =
+              activeElement instanceof HTMLElement ? activeElement : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = entryTriggerRef.current;
+            entryTriggerRef.current = null;
+            if (trigger?.isConnected) {
+              trigger.focus();
+            }
+          }}
           className="w-full max-w-none gap-0 p-0 sm:w-[42rem] sm:max-w-[42rem] lg:w-[56rem] lg:max-w-[56rem] xl:w-[64rem] xl:max-w-[64rem]"
         >
           <SheetTitle className="sr-only">

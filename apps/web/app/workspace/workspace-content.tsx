@@ -2789,7 +2789,7 @@ function WorkspacePageInner() {
       )}
 
       {/* Mobile right panel drawer */}
-      {isMobile && mobileRightPanelOpen && (
+      {isMobile && (mobileRightPanelOpen || entryModal !== null) && (
         <div className="drawer-backdrop" onClick={() => setMobileRightPanelOpen(false)}>
           {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
           <div onClick={(e) => e.stopPropagation()} className="fixed inset-y-0 right-0 z-50 drawer-right" style={{ width: "min(90vw, 400px)", background: "var(--color-bg)" }}>
