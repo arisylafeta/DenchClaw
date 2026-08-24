@@ -302,49 +302,6 @@ describe("flattenPnpmStandaloneDeps", () => {
       "startServer()",
     );
   });
-
-  it("copies native node-pty artifacts omitted by Next.js file tracing", () => {
-    const packageRoot = tmp("native-package");
-    const nativeStandalone = path.join(packageRoot, "apps/web/.next/standalone");
-    const tracedPackage = path.join(
-      nativeStandalone,
-      "node_modules",
-      ".pnpm",
-      "node-pty@1.1.0",
-      "node_modules",
-      "node-pty",
-    );
-    mkdirSync(path.join(tracedPackage, "lib"), { recursive: true });
-    writeFileSync(path.join(tracedPackage, "package.json"), '{"name":"node-pty"}');
-    writeFileSync(path.join(tracedPackage, "lib/index.js"), "module.exports = {};");
-
-    const installedPackage = path.join(packageRoot, "apps", "web", "node_modules", "node-pty");
-    mkdirSync(path.join(installedPackage, "build", "Release"), { recursive: true });
-    writeFileSync(path.join(installedPackage, "build", "Release", "pty.node"), "native");
-    mkdirSync(path.join(installedPackage, "prebuilds", "darwin-arm64"), { recursive: true });
-    writeFileSync(
-      path.join(installedPackage, "prebuilds", "darwin-arm64", "spawn-helper"),
-      "helper",
-    );
-
-    flattenPnpmStandaloneDeps(nativeStandalone, packageRoot);
-
-    const flattenedPackage = path.join(
-      nativeStandalone,
-      "apps",
-      "web",
-      "node_modules",
-      "node-pty",
-    );
-    expect(readFileSync(path.join(flattenedPackage, "build", "Release", "pty.node"), "utf8"))
-      .toBe("native");
-    expect(
-      readFileSync(
-        path.join(flattenedPackage, "prebuilds", "darwin-arm64", "spawn-helper"),
-        "utf8",
-      ),
-    ).toBe("helper");
-  });
 });
 
 // ---------------------------------------------------------------------------

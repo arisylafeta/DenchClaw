@@ -10,10 +10,6 @@ import {
 } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import {
-  buildTerminalAccessProtocol,
-  buildTerminalWebSocketUrl,
-} from "@/lib/terminal-connection";
 import "@xterm/xterm/css/xterm.css";
 
 const MIN_DRAWER_HEIGHT = 180;
@@ -182,30 +178,23 @@ function TerminalViewport({
       const cols = terminal.cols > 0 ? terminal.cols : 80;
       const rows = terminal.rows > 0 ? terminal.rows : 24;
 
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
       let useProxy = false;
       let wsPort = DEFAULT_WS_PORT;
-      let accessToken = "";
       try {
         const res = await fetch("/api/terminal/port");
-        if (!res.ok) throw new Error(`Terminal authorization failed (${res.status})`);
         const json = await res.json();
         if (json.port) wsPort = json.port;
         if (json.proxy) useProxy = true;
-        if (typeof json.accessToken === "string") accessToken = json.accessToken;
-      } catch {
-        terminal.write("\r\n\x1b[31m[terminal] authorization failed\x1b[0m\r\n");
-        return;
-      }
-
-      if (!accessToken) {
-        terminal.write("\r\n\x1b[31m[terminal] authorization failed\x1b[0m\r\n");
-        return;
-      }
+      } catch {}
 
       if (disposed) return;
 
-      const wsUrl = buildTerminalWebSocketUrl(window.location, wsPort, useProxy);
-      const ws = new WebSocket(wsUrl, buildTerminalAccessProtocol(accessToken));
+      const wsUrl = useProxy
+        ? `${protocol}//${window.location.host}/terminal-ws/`
+        : `${protocol}//127.0.0.1:${wsPort}`;
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -222,13 +211,7 @@ function TerminalViewport({
 
       ws.onmessage = (ev) => {
         if (disposed) return;
-        let msg: {
-          type: string;
-          data?: string;
-          error?: string;
-          exitCode?: number;
-          signal?: number;
-        };
+        let msg: { type: string; data?: string; exitCode?: number; signal?: number };
         try {
           msg = JSON.parse(ev.data as string);
         } catch {
@@ -236,8 +219,6 @@ function TerminalViewport({
         }
         if (msg.type === "output" && msg.data) {
           terminal.write(msg.data);
-        } else if (msg.type === "error" && msg.error) {
-          terminal.write(`\r\n\x1b[31m[terminal] ${msg.error}\x1b[0m\r\n`);
         } else if (msg.type === "exit") {
           terminal.write(`\r\n[process exited]\r\n`);
           onExitedRef.current();
