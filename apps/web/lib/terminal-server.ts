@@ -3,6 +3,12 @@ import type { IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { chmodSync, existsSync } from "node:fs";
+import {
+  authorizeTerminalProtocolHeader,
+  canStartTerminalSession,
+  clearTerminalAccessTokens,
+  selectTerminalAccessProtocol,
+} from "./terminal-access";
 
 interface TerminalSession {
   pty: import("node-pty").IPty;
@@ -122,6 +128,13 @@ function handleMessage(ws: WebSocket, raw: string) {
 
   switch (msg.type) {
     case "spawn": {
+      if (!canStartTerminalSession(sessions.size, Boolean(session))) {
+        ws.send(JSON.stringify({
+          type: "error",
+          error: "Terminal session limit reached",
+        }));
+        break;
+      }
       if (session) {
         session.pty.kill();
         sessions.delete(ws);
@@ -169,7 +182,13 @@ function handleConnection(ws: WebSocket, _req: IncomingMessage) {
 export function startTerminalServer(port: number) {
   if (wss) return;
 
-  wss = new WebSocketServer({ port, host: "127.0.0.1" });
+  wss = new WebSocketServer({
+    port,
+    host: "127.0.0.1",
+    verifyClient: ({ req }: { req: IncomingMessage }) =>
+      authorizeTerminalProtocolHeader(req.headers["sec-websocket-protocol"]),
+    handleProtocols: (protocols) => selectTerminalAccessProtocol(protocols),
+  });
   _g.__terminalWss = wss;
   wss.on("connection", handleConnection);
   wss.on("listening", () => {
@@ -195,6 +214,7 @@ export function stopTerminalServer() {
     session.pty.kill();
   }
   sessions.clear();
+  clearTerminalAccessTokens();
   wss.close();
   wss = null;
   _g.__terminalWss = undefined;
