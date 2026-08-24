@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { chmodSync, existsSync } from "node:fs";
 import {
   authorizeTerminalProtocolHeader,
+  canStartTerminalSession,
   clearTerminalAccessTokens,
   selectTerminalAccessProtocol,
 } from "./terminal-access";
@@ -127,6 +128,13 @@ function handleMessage(ws: WebSocket, raw: string) {
 
   switch (msg.type) {
     case "spawn": {
+      if (!canStartTerminalSession(sessions.size, Boolean(session))) {
+        ws.send(JSON.stringify({
+          type: "error",
+          error: "Terminal session limit reached",
+        }));
+        break;
+      }
       if (session) {
         session.pty.kill();
         sessions.delete(ws);

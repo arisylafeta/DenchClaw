@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { TERMINAL_ACCESS_PROTOCOL_PREFIX } from "./terminal-connection";
 
 const TERMINAL_ACCESS_TTL_MS = 30_000;
+const MAX_TERMINAL_ACCESS_TOKENS = 32;
+export const MAX_TERMINAL_SESSIONS = 8;
 
 const globalState = globalThis as unknown as {
   __terminalAccessTokens?: Map<string, number>;
@@ -18,9 +20,21 @@ function discardExpiredTokens(now: number): void {
 
 export function issueTerminalAccessToken(now = Date.now()): string {
   discardExpiredTokens(now);
+  while (accessTokens.size >= MAX_TERMINAL_ACCESS_TOKENS) {
+    const oldest = accessTokens.keys().next().value;
+    if (typeof oldest !== "string") break;
+    accessTokens.delete(oldest);
+  }
   const token = randomBytes(32).toString("base64url");
   accessTokens.set(token, now + TERMINAL_ACCESS_TTL_MS);
   return token;
+}
+
+export function canStartTerminalSession(
+  activeSessionCount: number,
+  hasSessionForConnection: boolean,
+): boolean {
+  return hasSessionForConnection || activeSessionCount < MAX_TERMINAL_SESSIONS;
 }
 
 export function authorizeTerminalProtocolHeader(

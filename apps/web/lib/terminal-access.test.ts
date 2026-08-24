@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   authorizeTerminalProtocolHeader,
+  canStartTerminalSession,
   clearTerminalAccessTokens,
   issueTerminalAccessToken,
   selectTerminalAccessProtocol,
@@ -33,5 +34,21 @@ describe("terminal WebSocket access", () => {
       selectTerminalAccessProtocol(new Set(["other", "dench-terminal.token"])),
     ).toBe("dench-terminal.token");
     expect(selectTerminalAccessProtocol(new Set(["other"]))).toBe(false);
+  });
+
+  it("bounds outstanding access tokens and active terminal sessions", () => {
+    const tokens = Array.from({ length: 33 }, (_, index) =>
+      issueTerminalAccessToken(1_000 + index)
+    );
+    expect(
+      authorizeTerminalProtocolHeader(buildTerminalAccessProtocol(tokens[0]), 2_000),
+    ).toBe(false);
+    expect(
+      authorizeTerminalProtocolHeader(buildTerminalAccessProtocol(tokens[32]), 2_000),
+    ).toBe(true);
+
+    expect(canStartTerminalSession(7, false)).toBe(true);
+    expect(canStartTerminalSession(8, false)).toBe(false);
+    expect(canStartTerminalSession(8, true)).toBe(true);
   });
 });

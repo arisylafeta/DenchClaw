@@ -222,7 +222,13 @@ function TerminalViewport({
 
       ws.onmessage = (ev) => {
         if (disposed) return;
-        let msg: { type: string; data?: string; exitCode?: number; signal?: number };
+        let msg: {
+          type: string;
+          data?: string;
+          error?: string;
+          exitCode?: number;
+          signal?: number;
+        };
         try {
           msg = JSON.parse(ev.data as string);
         } catch {
@@ -230,6 +236,8 @@ function TerminalViewport({
         }
         if (msg.type === "output" && msg.data) {
           terminal.write(msg.data);
+        } else if (msg.type === "error" && msg.error) {
+          terminal.write(`\r\n\x1b[31m[terminal] ${msg.error}\x1b[0m\r\n`);
         } else if (msg.type === "exit") {
           terminal.write(`\r\n[process exited]\r\n`);
           onExitedRef.current();
