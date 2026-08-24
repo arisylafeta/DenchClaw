@@ -75,7 +75,6 @@ import { displayObjectName, displayObjectNameSingular } from "@/lib/object-displ
 import { isSeedPeopleObjectId, isSeedCompanyObjectId } from "@/lib/seed-object-ids";
 import { CronDashboard } from "../components/cron/cron-dashboard";
 import { SkillStorePanel } from "../components/skill-store/skill-store-panel";
-import { SkillTemplateGalleryPanel } from "../components/templates/skill-template-gallery-panel";
 import { CloudSettingsPanel } from "../components/settings/cloud-settings-panel";
 import { CronJobDetail } from "../components/cron/cron-job-detail";
 import { CronSessionView } from "../components/cron/cron-session-view";
@@ -130,8 +129,6 @@ import {
   isVirtualPath,
 } from "@/lib/workspace-paths";
 import dynamic from "next/dynamic";
-import { startSkillTemplateChatFromDashboard } from "@/lib/skill-template-chat-start";
-import type { SkillTemplateId } from "@/lib/skill-templates";
 
 const TerminalDrawer = dynamic(
   () => import("../components/terminal/terminal-drawer"),
@@ -580,7 +577,6 @@ function WorkspacePageInner() {
 
   // Terminal drawer state
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
   const [tableSelectionContext, setTableSelectionContext] = useState<TableSelectionContext | null>(null);
 
   useEffect(() => {
@@ -820,18 +816,6 @@ function WorkspacePageInner() {
       });
     });
   }, []);
-
-  const handleStartDashboardTemplate = useCallback(
-    (templateId: SkillTemplateId) => {
-      setTemplatesPanelOpen(false);
-      startSkillTemplateChatFromDashboard({
-        templateId,
-        openChatTab: openPermanentBlankChatTab,
-        sendMessageInChatTab,
-      });
-    },
-    [openPermanentBlankChatTab, sendMessageInChatTab],
-  );
 
   // Navigate to a subagent panel when its card is clicked in the chat.
   // The identifier may be a childSessionKey (preferred) or a task label (legacy fallback).
@@ -2387,7 +2371,8 @@ function WorkspacePageInner() {
     onNewChatSession: () => {
       openPermanentBlankChatTab();
     },
-    onOpenTemplates: () => setTemplatesPanelOpen(true),
+    onToggleTerminal: () => setTerminalOpen((open) => !open),
+    terminalOpen,
     onSelectHistorySubagent: handleSelectSubagent,
     onSelectHistoryGatewaySession: (sessionKey: string, sessionId: string) => {
       const gs = gatewaySessions.find((s) => s.sessionKey === sessionKey);
@@ -2716,12 +2701,6 @@ function WorkspacePageInner() {
             );
           })}
         </div>
-
-        <SkillTemplateGalleryPanel
-          open={templatesPanelOpen}
-          onOpenChange={setTemplatesPanelOpen}
-          onStartTemplate={handleStartDashboardTemplate}
-        />
 
         {terminalOpen && (
           <TerminalDrawer onClose={() => setTerminalOpen(false)} cwd={workspaceRoot ?? undefined} />

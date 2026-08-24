@@ -810,29 +810,33 @@ export type SubagentSpawnInfo = {
 	status?: "running" | "completed" | "error";
 };
 
-export function ChatPanelTemplatesButton({
-	onOpenTemplates,
+export function ChatPanelTerminalButton({
+	onToggleTerminal,
+	open,
 }: {
-	onOpenTemplates: () => void;
+	onToggleTerminal: () => void;
+	open: boolean;
 }) {
 	return (
 		<button
 			type="button"
-			onClick={onOpenTemplates}
-			className="p-1.5 rounded-lg cursor-pointer transition-colors"
-			style={{ color: "var(--color-text-muted)" }}
-			title="Templates"
-			aria-label="Templates"
+			onClick={onToggleTerminal}
+			className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors"
+			style={{
+				color: open ? "var(--color-text)" : "var(--color-text-muted)",
+				background: open ? "var(--color-surface-hover)" : "transparent",
+			}}
+			title={open ? "Close terminal (Cmd/Ctrl+J)" : "Open terminal (Cmd/Ctrl+J)"}
+			aria-label={open ? "Close terminal" : "Open terminal"}
+			aria-pressed={open}
 			onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-			onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+			onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = open ? "var(--color-surface-hover)" : "transparent"; }}
 		>
 			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-				<rect x="3" y="3" width="7" height="7" rx="1.5" />
-				<rect x="14" y="3" width="7" height="7" rx="1.5" />
-				<rect x="3" y="14" width="7" height="7" rx="1.5" />
-				<path d="M14 17.5h7" />
-				<path d="M17.5 14v7" />
+				<polyline points="4 17 10 11 4 5" />
+				<line x1="12" y1="19" x2="20" y2="19" />
 			</svg>
+			<span className="text-xs font-medium">Terminal</span>
 		</button>
 	);
 }
@@ -912,8 +916,10 @@ type ChatPanelProps = {
 	onSelectHistorySession?: (sessionId: string) => void;
 	/** Start a brand new (blank) chat tab. */
 	onNewChatSession?: () => void;
-	/** Open the skill template gallery for a template-backed chat start. */
-	onOpenTemplates?: () => void;
+	/** Toggle the workspace terminal drawer from the persistent chat header. */
+	onToggleTerminal?: () => void;
+	/** Whether the workspace terminal drawer is currently open. */
+	terminalOpen?: boolean;
 	/** Open a subagent (child) session by its session key. */
 	onSelectHistorySubagent?: (sessionKey: string) => void;
 	/** Open a gateway/channel session by its key + id. */
@@ -958,7 +964,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			visible,
 			searchFn,
 			onNewChatSession,
-			onOpenTemplates,
+			onToggleTerminal,
+			terminalOpen = false,
 		},
 		ref,
 	) {
@@ -2661,9 +2668,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					</div>
 					{!hideHeaderActions && (
 					<div className="flex items-center gap-1 shrink-0">
-						{onOpenTemplates && (
-							<ChatPanelTemplatesButton onOpenTemplates={onOpenTemplates} />
-						)}
 						{onNewChatSession && (
 							<button
 								type="button"
@@ -2719,6 +2723,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					</div>
 					)}
 					</>
+				)}
+				{!hideHeaderActions && onToggleTerminal && (
+					<ChatPanelTerminalButton
+						onToggleTerminal={onToggleTerminal}
+						open={terminalOpen}
+					/>
 				)}
 				{headerRightSlot && <div className="flex items-center shrink-0">{headerRightSlot}</div>}
 				</header>
