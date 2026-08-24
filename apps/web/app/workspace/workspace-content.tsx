@@ -2760,6 +2760,7 @@ function WorkspacePageInner() {
                 workspaceRoot={workspaceRoot}
                 fileSearchFn={searchIndex}
                 entryModal={entryModal}
+                onCloseEntryDetail={handleCloseEntry}
                 tree={tree}
                 cronJobs={cronJobs}
                 onTreeNodeSelect={handleNodeSelect}
@@ -2805,6 +2806,7 @@ function WorkspacePageInner() {
                   workspaceRoot={workspaceRoot}
                   fileSearchFn={searchIndex}
                   entryModal={entryModal}
+                  onCloseEntryDetail={handleCloseEntry}
                   tree={tree}
                   cronJobs={cronJobs}
                   onTreeNodeSelect={handleNodeSelect}

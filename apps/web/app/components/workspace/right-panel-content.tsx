@@ -28,6 +28,12 @@ import {
 import { FileManagerTree, type TreeNode } from "./file-manager-tree";
 import { FileSearch, type SuggestItem } from "./workspace-sidebar";
 import { TabIcon } from "./content-tab-icon";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "../platform-admin/ui/sheet";
 import type { SearchIndexItem } from "@/lib/search-index";
 import type { CronJob } from "../../types/cron";
 import type {
@@ -107,6 +113,8 @@ export type RightPanelContentProps = {
    * as `renderContent` for the same reason.
    */
   renderEntryDetail: (entry: EntryModalState) => ReactNode;
+  /** Close the entry-detail sheet via its overlay or Escape key. */
+  onCloseEntryDetail: () => void;
 
   /** Empty-state rendering when no tab is active and no entry modal. */
   renderPlaceholder: () => ReactNode;
@@ -144,6 +152,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
     onRefreshActiveChange,
     renderContent,
     renderEntryDetail,
+    onCloseEntryDetail,
     renderPlaceholder,
   } = props;
 
@@ -195,9 +204,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
           onCloseAll={onCloseAllContent}
         />
 
-        {entryModal ? (
-          <div className="flex-1 min-h-0 overflow-hidden">{renderEntryDetail(entryModal)}</div>
-        ) : activeContentTab && content.kind !== "none" ? (
+        {activeContentTab && content.kind !== "none" ? (
           <div className="flex-1 overflow-y-auto">
             {renderContent(content, activeContentTab)}
           </div>
@@ -207,6 +214,27 @@ export function RightPanelContent(props: RightPanelContentProps) {
           </div>
         )}
       </div>
+
+      <Sheet
+        open={Boolean(entryModal)}
+        onOpenChange={(open) => {
+          if (!open) {onCloseEntryDetail();}
+        }}
+      >
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="w-full max-w-none gap-0 p-0 sm:w-[42rem] sm:max-w-[42rem] lg:w-[56rem] lg:max-w-[56rem] xl:w-[64rem] xl:max-w-[64rem]"
+        >
+          <SheetTitle className="sr-only">
+            {entryModal ? `${entryModal.objectName} details` : "Entry details"}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            View and edit the selected entry without leaving the current table.
+          </SheetDescription>
+          {entryModal ? renderEntryDetail(entryModal) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
