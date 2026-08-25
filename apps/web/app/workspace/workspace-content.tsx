@@ -2703,7 +2703,10 @@ function WorkspacePageInner() {
         </div>
 
         {terminalOpen && (
-          <TerminalDrawer onClose={() => setTerminalOpen(false)} cwd={workspaceRoot ?? undefined} />
+          <TerminalDrawer
+            onClose={() => setTerminalOpen(false)}
+            cwd={openclawDir ?? workspaceRoot ?? undefined}
+          />
         )}
       </main>
 
