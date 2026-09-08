@@ -318,6 +318,7 @@ function resolveDerivedContent(
         section === "stock" ||
         section === "accounts" ||
         section === "battery-review" ||
+        section === "battery-requests" ||
         section === "messages" ||
         section === "payout-reviews"
       ) {

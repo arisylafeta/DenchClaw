@@ -1314,6 +1314,7 @@ function WorkspacePageInner() {
         | "platform-stock"
         | "platform-accounts"
         | "platform-battery-review"
+        | "platform-battery-requests"
         | "platform-messages"
         | "platform-payout-reviews",
     ) => {
@@ -1348,6 +1349,7 @@ function WorkspacePageInner() {
         "platform-stock": { path: "~platform-admin/stock", name: "Stock" },
         "platform-accounts": { path: "~platform-admin/accounts", name: "Accounts" },
         "platform-battery-review": { path: "~platform-admin/battery-review", name: "Battery review" },
+        "platform-battery-requests": { path: "~platform-admin/battery-requests", name: "Battery requests" },
         "platform-messages": { path: "~platform-admin/messages", name: "Message monitoring" },
         "platform-payout-reviews": { path: "~platform-admin/payout-reviews", name: "Payout reviews" },
       }[target];

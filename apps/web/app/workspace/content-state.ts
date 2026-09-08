@@ -88,6 +88,7 @@ export type PlatformAdminSection =
   | "stock"
   | "accounts"
   | "battery-review"
+  | "battery-requests"
   | "messages"
   | "payout-reviews";
 

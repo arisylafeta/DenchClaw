@@ -34,6 +34,58 @@ export type Database = {
   }
   public: {
     Tables: {
+      battery_requests: {
+        Row: {
+          contact_email: string
+          created_at: string
+          eve_call_id: string
+          eve_session_id: string
+          eve_turn_id: string
+          id: string
+          idempotency_key: string
+          intent: string
+          prompt_version: string
+          request_json: Json
+          runtime_version: string
+          schema_version: string
+          session_id: string
+          trace_id: string | null
+        }
+        Insert: {
+          contact_email: string
+          created_at?: string
+          eve_call_id: string
+          eve_session_id: string
+          eve_turn_id: string
+          id?: string
+          idempotency_key: string
+          intent: string
+          prompt_version: string
+          request_json: Json
+          runtime_version: string
+          schema_version: string
+          session_id: string
+          trace_id?: string | null
+        }
+        Update: {
+          contact_email?: string
+          created_at?: string
+          eve_call_id?: string
+          eve_session_id?: string
+          eve_turn_id?: string
+          id?: string
+          idempotency_key?: string
+          intent?: string
+          prompt_version?: string
+          request_json?: Json
+          runtime_version?: string
+          schema_version?: string
+          session_id?: string
+          trace_id?: string | null
+        }
+        Relationships: []
+      }
+
       account_memberships: {
         Row: {
           account_id: string

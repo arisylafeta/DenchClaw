@@ -363,6 +363,9 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~platform-admin/stock") return "Stock";
   if (path === "~platform-admin/accounts") return "Accounts";
   if (path === "~platform-admin/battery-review") return "Battery review";
+  if (path === "~platform-admin/battery-requests") {
+    return "Battery requests";
+  }
   if (path === "~platform-admin/messages") return "Message monitoring";
   if (path === "~platform-admin/payout-reviews") return "Payout reviews";
   if (path === "~crm/inbox") return "Inbox";

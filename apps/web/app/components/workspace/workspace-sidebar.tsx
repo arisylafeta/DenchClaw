@@ -128,6 +128,7 @@ type WorkspaceSidebarProps = {
       | "platform-stock"
       | "platform-accounts"
       | "platform-battery-review"
+      | "platform-battery-requests"
       | "platform-messages"
       | "platform-payout-reviews",
   ) => void;
@@ -439,6 +440,12 @@ export function WorkspaceSidebar({
 			label: "Battery review",
 			target: "battery-review" as const,
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4" /><path d="m7 10 3 2-3 2" /></svg>,
+		},
+		{
+			id: "platform-battery-requests" as const,
+			label: "Battery requests",
+			target: "battery-requests" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4M7 12h8M11 8v8" /></svg>,
 		},
 		{
 			id: "platform-messages" as const,

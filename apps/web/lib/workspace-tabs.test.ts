@@ -57,6 +57,7 @@ describe("platform operations tabs", () => {
     expect(inferContentTabTitle("~platform-admin/stock")).toBe("Stock");
     expect(inferContentTabTitle("~platform-admin/accounts")).toBe("Accounts");
     expect(inferContentTabTitle("~platform-admin/battery-review")).toBe("Battery review");
+    expect(inferContentTabTitle("~platform-admin/battery-requests")).toBe("Battery requests");
     expect(inferContentTabTitle("~platform-admin/messages")).toBe("Message monitoring");
     expect(inferContentTabTitle("~platform-admin/payout-reviews")).toBe("Payout reviews");
   });

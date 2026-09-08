@@ -25,6 +25,13 @@ describe("workspace sidebar navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
     expect(onNavigate).toHaveBeenCalledWith("crm-campaigns");
+  it("opens battery requests from the Admin sidebar", () => {
+    const onNavigate = vi.fn();
+    render(<WorkspaceSidebar onNavigate={onNavigate} activePlatformTarget="battery-requests" />);
+    const button = screen.getByRole("button", { name: "Battery requests" });
+    expect(document.getElementById("sidebar-admin-tree")).toContainElement(button);
+    fireEvent.click(button);
+    expect(onNavigate).toHaveBeenCalledWith("platform-battery-requests");
   });
 
   it("categorizes workspace objects without changing their order", () => {
