@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { hashCrmBootstrapUsers, readCrmBootstrapUsers } from "./crm-bootstrap";
 
-const validEnv = {
+const validEnv: NodeJS.ProcessEnv = {
+  NODE_ENV: "test",
   CRM_BOOTSTRAP_PASSWORD_ARI: "ari-password-1234",
   CRM_BOOTSTRAP_PASSWORD_ALEX: "alex-password-5678",
 };
@@ -10,11 +11,13 @@ describe("CRM bootstrap credentials", () => {
   it("requires separate runtime secrets for Ari and Alex", () => {
     expect(() =>
       readCrmBootstrapUsers({
+        NODE_ENV: "test",
         CRM_BOOTSTRAP_PASSWORD_ARI: validEnv.CRM_BOOTSTRAP_PASSWORD_ARI,
       }),
     ).toThrow("CRM_BOOTSTRAP_PASSWORD_ALEX");
     expect(() =>
       readCrmBootstrapUsers({
+        NODE_ENV: "test",
         CRM_BOOTSTRAP_PASSWORD_ALEX: validEnv.CRM_BOOTSTRAP_PASSWORD_ALEX,
       }),
     ).toThrow("CRM_BOOTSTRAP_PASSWORD_ARI");
@@ -54,6 +57,7 @@ describe("CRM bootstrap credentials", () => {
   it("rejects a shared password", () => {
     expect(() =>
       readCrmBootstrapUsers({
+        NODE_ENV: "test",
         CRM_BOOTSTRAP_PASSWORD_ARI: "shared-password-1234",
         CRM_BOOTSTRAP_PASSWORD_ALEX: "shared-password-1234",
       }),

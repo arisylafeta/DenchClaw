@@ -239,7 +239,7 @@ describe("ObjectTable bulk delete failures", () => {
 		await screen.findByText("selected");
 		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 		await screen.findByText("Delete 1 entry?");
-		fireEvent.click(screen.getAllByRole("button", { name: "Delete", exact: true }).at(-1)!);
+		fireEvent.click(screen.getAllByRole("button", { name: "Delete" }).at(-1)!);
 
 		await screen.findByText("Cannot delete companies with linked CRM records: 2 people.");
 		expect(screen.getAllByRole("checkbox")[1]).toBeChecked();
