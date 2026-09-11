@@ -7,7 +7,7 @@ import type { Database } from "@/lib/platform-admin/database.types";
 
 export type BatteryRequest = Pick<
   Database["public"]["Tables"]["battery_requests"]["Row"],
-  "id" | "contact_email" | "intent" | "request_json" | "created_at"
+  "id" | "session_id" | "contact_email" | "intent" | "request_json" | "created_at"
 >;
 
 export type BatteryRequestPage = {
@@ -20,7 +20,7 @@ export type BatteryRequestPage = {
 
 const PAGE_SIZE = 25;
 // Runtime, tracing and idempotency metadata stay on the server.
-const COLUMNS = "id, contact_email, intent, request_json, created_at";
+const COLUMNS = "id, session_id, contact_email, intent, request_json, created_at";
 
 export async function getBatteryRequests(
   input: { page?: string; email?: string } = {},
@@ -56,7 +56,7 @@ export async function getBatteryRequests(
     response = await read(page);
   }
   if (response.error) {
-    throw new Error("Unable to load battery requests");
+    throw new Error("Unable to load battery inquiries");
   }
   const totalCount = response.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -64,7 +64,7 @@ export async function getBatteryRequests(
     page = totalPages;
     response = await read(page);
     if (response.error) {
-      throw new Error("Unable to load battery requests");
+      throw new Error("Unable to load battery inquiries");
     }
   }
   return { rows: response.data ?? [], page, totalPages, totalCount, email };

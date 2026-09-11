@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const { getBatteryInquiryChat } = vi.hoisted(() => ({
+  getBatteryInquiryChat: vi.fn(),
+}));
+vi.mock("./actions", () => ({ getBatteryInquiryChat }));
 import { BatteryRequestsView } from "./requests-view";
 import BatteryRequestsError from "./error";
 import BatteryRequestsLoading from "./loading";
@@ -13,6 +17,7 @@ const data: BatteryRequestPage = {
   rows: [
     {
       id: "synthetic-request",
+      session_id: "synthetic-session",
       contact_email: "battery@example.test",
       intent: "sell",
       created_at: "2026-09-08T12:03:00Z",
@@ -29,7 +34,31 @@ const data: BatteryRequestPage = {
     },
   ],
 };
-describe("battery requests page", () => {
+describe("battery inquiries page", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getBatteryInquiryChat.mockResolvedValue({
+      inquiryId: "synthetic-request",
+      contactEmail: "battery@example.test",
+      createdAt: "2026-09-08T12:03:00Z",
+      messages: [
+        {
+          id: "message-1",
+          sequence: 1,
+          role: "user",
+          body: "I have an EV battery to sell.",
+          createdAt: "2026-09-08T12:00:00Z",
+        },
+        {
+          id: "message-2",
+          sequence: 2,
+          role: "assistant",
+          body: "What details can you share?",
+          createdAt: "2026-09-08T12:01:00Z",
+        },
+      ],
+    });
+  });
   it("renders saved facts, uncertainty, nested fields and UTC dates", () => {
     const { container } = render(<BatteryRequestsView data={data} />);
     expect(screen.getByRole("heading", { name: "Battery requests" })).toBeInTheDocument();
@@ -61,6 +90,21 @@ describe("battery requests page", () => {
     expect(screen.getByText("Battery details not provided")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText('<img src=x onerror="alert(1)">')).toBeInTheDocument();
+  });
+  it("loads the attached Joules chat into a side sheet", async () => {
+    render(<BatteryRequestsView data={data} />);
+    fireEvent.click(screen.getByRole("button", { name: "View chat with battery@example.test" }));
+    const sheet = screen.getByRole("dialog", { name: "Chat with battery@example.test" });
+    expect(sheet).toHaveTextContent("Loading chat");
+    expect(getBatteryInquiryChat).toHaveBeenCalledExactlyOnceWith("synthetic-request");
+    expect(await screen.findByText("I have an EV battery to sell.")).toBeInTheDocument();
+    expect(sheet).toHaveTextContent("2 messages");
+    expect(sheet).toHaveTextContent("Visitor");
+    expect(sheet).toHaveTextContent("I have an EV battery to sell.");
+    expect(sheet).toHaveTextContent("Joules");
+    expect(sheet).toHaveTextContent("What details can you share?");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
   it("preserves email search in pagination and submits via GET", () => {
     render(

@@ -10,7 +10,9 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/platform-admin/supabase", () => ({ getSupabaseAdminClient }));
 import { getBatteryRequests } from "./reads";
-function client(results: Array<{ data: unknown[] | null; count: number | null; error: unknown }>) {
+type Result = { data: unknown[] | null; count: number | null; error: unknown };
+
+function queryBuilder(results: Result[]) {
   let index = 0;
   const query = {
     select: vi.fn(),
@@ -25,6 +27,11 @@ function client(results: Array<{ data: unknown[] | null; count: number | null; e
   for (const method of ["select", "order", "range", "ilike"] as const) {
     query[method].mockReturnValue(query);
   }
+  return query;
+}
+
+function client(requestResults: Result[]) {
+  const query = queryBuilder(requestResults);
   const from = vi.fn(() => query);
   getSupabaseAdminClient.mockReturnValue({ from });
   return { query, from };
@@ -33,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   currentUser.mockResolvedValue({ email: "ari@rebattery.io" });
 });
-describe("battery request reads", () => {
+describe("battery inquiry reads", () => {
   it.each([null, { email: "someone@example.test" }])(
     "denies unauthorized access: %j",
     async (user) => {
@@ -44,13 +51,22 @@ describe("battery request reads", () => {
   );
   it("selects only request fields with bounded deterministic pagination", async () => {
     currentUser.mockResolvedValue({ email: "alex@rebattery.io" });
-    const { query, from } = client([{ data: [{ id: "synthetic" }], count: 51, error: null }]);
-    expect(
-      await getBatteryRequests({ page: "2", email: " test_100%@example.test " }),
-    ).toMatchObject({ page: 2, totalPages: 3, totalCount: 51 });
+    const { query, from } = client([
+      { data: [{ id: "synthetic", session_id: "session-1" }], count: 51, error: null },
+    ]);
+    const result = await getBatteryRequests({
+      page: "2",
+      email: " test_100%@example.test ",
+    });
+    expect(result).toMatchObject({
+      page: 2,
+      totalPages: 3,
+      totalCount: 51,
+      rows: [{ id: "synthetic", session_id: "session-1" }],
+    });
     expect(from).toHaveBeenCalledExactlyOnceWith("battery_requests");
     expect(query.select).toHaveBeenCalledWith(
-      "id, contact_email, intent, request_json, created_at",
+      "id, session_id, contact_email, intent, request_json, created_at",
       { count: "exact" },
     );
     expect(query.order.mock.calls).toEqual([
@@ -105,6 +121,6 @@ describe("battery request reads", () => {
 
   it("does not expose database diagnostics", async () => {
     client([{ data: null, count: null, error: { message: "private@example.test secret" } }]);
-    await expect(getBatteryRequests()).rejects.toThrow(/^Unable to load battery requests$/);
+    await expect(getBatteryRequests()).rejects.toThrow(/^Unable to load battery inquiries$/);
   });
 });

@@ -1,6 +1,17 @@
+"use client";
+
+import { useState } from "react";
 import type { Json } from "@/lib/platform-admin/database.types";
 import { CrmEmptyState, CrmListShell } from "@/app/components/crm/crm-list-shell";
-import type { BatteryRequestPage } from "./reads";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/app/components/platform-admin/ui/sheet";
+import { getBatteryInquiryChat, type BatteryInquiryChat } from "./actions";
+import type { BatteryRequest, BatteryRequestPage } from "./reads";
 
 const PATH = "/platform-admin/battery-requests";
 const actionClass =
@@ -94,6 +105,30 @@ function pageHref(page: number, email: string): string {
 }
 
 export function BatteryRequestsView({ data }: { data: BatteryRequestPage }) {
+  const [selectedInquiry, setSelectedInquiry] = useState<BatteryRequest | null>(null);
+  const [chat, setChat] = useState<BatteryInquiryChat | null>(null);
+  const [chatPending, setChatPending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const openChat = async (inquiry: BatteryRequest) => {
+    setSelectedInquiry(inquiry);
+    setChat(null);
+    setChatError(null);
+    setChatPending(true);
+    try {
+      const loadedChat = await getBatteryInquiryChat(inquiry.id);
+      if (loadedChat) {
+        setChat(loadedChat);
+      } else {
+        setChatError("This inquiry is no longer available.");
+      }
+    } catch {
+      setChatError("The inquiry chat could not be loaded.");
+    } finally {
+      setChatPending(false);
+    }
+  };
+
   return (
     <CrmListShell
       title="Battery requests"
@@ -141,38 +176,50 @@ export function BatteryRequestsView({ data }: { data: BatteryRequestPage }) {
         ) : (
           <div className="space-y-3">
             {data.rows.map((request) => (
-              <details
+              <div
                 key={request.id}
-                className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]"
+                className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]"
               >
-                <summary className="cursor-pointer rounded-xl p-4 focus-visible:outline-2 focus-visible:outline-offset-2">
-                  <span className="ml-1 font-medium break-all">
-                    {request.contact_email || "Email not provided"}
-                  </span>
-                  <span className="ml-3 rounded border border-[var(--color-border)] px-2 py-0.5 text-xs">
-                    {label(request.intent) || "Intent not provided"}
-                  </span>
-                  <p className="mt-2 line-clamp-2 text-sm text-[var(--color-text-muted)]">
-                    {description(request.request_json)}
-                  </p>
-                  <time
-                    dateTime={request.created_at}
-                    className="mt-2 block text-xs text-[var(--color-text-muted)]"
+                <details className="group">
+                  <summary className="cursor-pointer rounded-xl p-4 focus-visible:outline-2 focus-visible:outline-offset-2">
+                    <span className="ml-1 font-medium break-all">
+                      {request.contact_email || "Email not provided"}
+                    </span>
+                    <span className="ml-3 rounded border border-[var(--color-border)] px-2 py-0.5 text-xs">
+                      {label(request.intent) || "Intent not provided"}
+                    </span>
+                    <p className="mt-2 line-clamp-2 text-sm text-[var(--color-text-muted)]">
+                      {description(request.request_json)}
+                    </p>
+                    <time
+                      dateTime={request.created_at}
+                      className="mt-2 block text-xs text-[var(--color-text-muted)]"
+                    >
+                      {date(request.created_at)}
+                    </time>
+                    <span className="mt-2 block text-xs font-medium group-open:hidden">
+                      View inquiry
+                    </span>
+                  </summary>
+                  <div className="space-y-4 border-t border-[var(--color-border)] p-4">
+                    <h2 className="font-medium">Submitted details</h2>
+                    <SavedValue value={request.request_json} />
+                    <p className="break-all text-xs text-[var(--color-text-muted)]">
+                      Inquiry reference: {request.id}
+                    </p>
+                  </div>
+                </details>
+                <div className="border-t border-[var(--color-border)] p-3">
+                  <button
+                    type="button"
+                    className={actionClass}
+                    aria-label={`View chat with ${request.contact_email || "visitor"}`}
+                    onClick={() => void openChat(request)}
                   >
-                    {date(request.created_at)}
-                  </time>
-                  <span className="mt-2 block text-xs font-medium group-open:hidden">
-                    View request
-                  </span>
-                </summary>
-                <div className="space-y-4 border-t border-[var(--color-border)] p-4">
-                  <h2 className="font-medium">Submitted details</h2>
-                  <SavedValue value={request.request_json} />
-                  <p className="break-all text-xs text-[var(--color-text-muted)]">
-                    Request reference: {request.id}
-                  </p>
+                    View chat
+                  </button>
                 </div>
-              </details>
+              </div>
             ))}
           </div>
         )}
@@ -193,6 +240,82 @@ export function BatteryRequestsView({ data }: { data: BatteryRequestPage }) {
             )}
           </div>
         </nav>
+        <Sheet
+          open={Boolean(selectedInquiry)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedInquiry(null);
+              setChat(null);
+              setChatError(null);
+            }
+          }}
+        >
+          <SheetContent className="w-full gap-0 p-0 sm:max-w-xl">
+            <SheetHeader className="border-b border-[var(--color-border)] pr-14">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                Joules inquiry chat
+              </p>
+              <SheetTitle>
+                Chat with {selectedInquiry?.contact_email || "visitor"}
+              </SheetTitle>
+              <SheetDescription>
+                {chat
+                  ? `${chat.messages.length} ${chat.messages.length === 1 ? "message" : "messages"} · submitted ${date(chat.createdAt)}`
+                  : selectedInquiry
+                    ? `Submitted ${date(selectedInquiry.created_at)}`
+                    : "Saved Joules conversation"}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+              {chatPending ? (
+                <p role="status" className="text-sm text-[var(--color-text-muted)]">
+                  Loading chat…
+                </p>
+              ) : chatError ? (
+                <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                  {chatError}
+                </p>
+              ) : chat?.messages.length ? (
+                <ol aria-label="Joules chat transcript" className="space-y-4">
+                  {chat.messages.map((message) => {
+                    const isVisitor = message.role === "user";
+                    return (
+                      <li
+                        key={message.id}
+                        className={`flex flex-col ${isVisitor ? "items-end" : "items-start"}`}
+                      >
+                        <span className="mb-1 text-xs font-medium text-[var(--color-text-muted)]">
+                          {isVisitor ? "Visitor" : "Joules"}
+                        </span>
+                        <div
+                          className={`max-w-[88%] rounded-2xl px-4 py-3 ${
+                            isVisitor
+                              ? "rounded-br-md bg-[var(--color-accent-fill)] text-[var(--color-accent-foreground)]"
+                              : "rounded-bl-md bg-[var(--color-surface-hover)] text-[var(--color-text)]"
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            {message.body}
+                          </p>
+                        </div>
+                        <time
+                          dateTime={message.createdAt}
+                          className="mt-1 text-[11px] text-[var(--color-text-muted)]"
+                        >
+                          {date(message.createdAt)}
+                        </time>
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : (
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  No chat messages were saved for this inquiry.
+                </p>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
       </main>
     </CrmListShell>
   );

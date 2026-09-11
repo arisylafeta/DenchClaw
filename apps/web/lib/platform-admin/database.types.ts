@@ -86,6 +86,40 @@ export type Database = {
         Relationships: []
       }
 
+      jules_messages: {
+        Row: {
+          body: string
+          client_turn_id: string | null
+          created_at: string
+          generation_status: string
+          id: string
+          role: string
+          sequence: number
+          session_id: string
+        }
+        Insert: {
+          body: string
+          client_turn_id?: string | null
+          created_at?: string
+          generation_status?: string
+          id?: string
+          role: string
+          sequence: number
+          session_id: string
+        }
+        Update: {
+          body?: string
+          client_turn_id?: string | null
+          created_at?: string
+          generation_status?: string
+          id?: string
+          role?: string
+          sequence?: number
+          session_id?: string
+        }
+        Relationships: []
+      }
+
       account_memberships: {
         Row: {
           account_id: string
