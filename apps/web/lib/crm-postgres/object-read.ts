@@ -23,6 +23,7 @@ type ObjectRow = {
   sort_order?: number | null;
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
+  entity_table?: string | null;
 };
 
 type FieldRow = {
@@ -100,6 +101,19 @@ const supportedTables: Record<string, string> = {
   automation_loop: "automation_loops",
   automation_loop_run: "automation_loop_runs",
 };
+
+const SQL_IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/i;
+
+function resolveObjectTable(object: ObjectRow): string | null {
+  const registeredTable = object.entity_table?.trim();
+  if (registeredTable) {
+    if (!SQL_IDENTIFIER_RE.test(registeredTable)) {
+      throw new Error(`Invalid registered entity table: ${registeredTable}`);
+    }
+    return registeredTable;
+  }
+  return supportedTables[object.name] ?? null;
+}
 
 const FILL_RATE_OBJECTS = new Set(["people", "company", "companies"]);
 const textLikeTypes = new Set(["text", "richtext", "email", "url", "phone"]);
@@ -398,7 +412,7 @@ async function loadEntries(
   orderBy: string,
   _search: string | null,
 ): Promise<Record<string, unknown>[]> {
-  const tableName = supportedTables[object.name];
+  const tableName = resolveObjectTable(object);
   if (!tableName)
     return loadCustomOnlyEntries(object, pageSize, offset, _search);
 
@@ -549,7 +563,7 @@ export async function getPostgresObjectData(
   const pageSize = Math.min(5000, Math.max(1, Number(pageSizeParam) || 100));
   const offset = (page - 1) * pageSize;
 
-  const tableName = supportedTables[object.name];
+  const tableName = resolveObjectTable(object);
   const existingColumns = tableName
     ? await getTableColumns(tableName)
     : new Set<string>();
