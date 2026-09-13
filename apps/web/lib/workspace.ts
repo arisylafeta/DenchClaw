@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 
 import { access, readdir as readdirAsync } from "node:fs/promises";
 import { execSync, execFile, execFileSync, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { join, resolve, normalize, relative, isAbsolute as isNodeAbsolute } from "node:path";
+import { join, resolve, normalize, relative } from "node:path";
 import { homedir } from "node:os";
 import YAML from "yaml";
 import { normalizeFilterGroup, type SavedView, type ViewTypeSettings } from "./object-filters";
@@ -111,19 +111,30 @@ function isInternalWorkspaceNameForDiscovery(name: string): boolean {
 }
 
 function stateDirPath(): string {
-  // When running Hermes backend, check for an active profile override first.
+  // Hermes keeps the default profile at the root and named profiles below profiles/.
   if (process.env.DENCH_AGENT_BACKEND === "hermes") {
+    const denchHome = process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes");
     const activeProfile = readActiveProfileName();
-    if (activeProfile) {
-      const denchHome = process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes");
-      const profileDir = join(denchHome, "profiles", activeProfile);
-      if (existsSync(profileDir)) return profileDir;
+    if (activeProfile === DEFAULT_PROFILE) {
+      return denchHome;
     }
+    if (activeProfile) {
+      const profileDir = join(denchHome, "profiles", activeProfile);
+      if (existsSync(profileDir)) {
+        return profileDir;
+      }
+    }
+    const explicitStateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+    return explicitStateDir || denchHome;
   }
   const explicitStateDir = process.env.OPENCLAW_STATE_DIR?.trim();
-  if (explicitStateDir) return explicitStateDir;
+  if (explicitStateDir) {
+    return explicitStateDir;
+  }
   const denchHome = process.env.DENCH_HOME?.trim();
-  if (denchHome) return join(denchHome, "profiles", DEFAULT_PROFILE);
+  if (denchHome) {
+    return join(denchHome, "profiles", DEFAULT_PROFILE);
+  }
   return join(resolveOpenClawHomeDir(), FIXED_STATE_DIRNAME);
 }
 
@@ -189,13 +200,15 @@ function scanWorkspaceNames(stateDir: string): string[] {
     try {
       const entries = readdirSync(profilesRoot, { withFileTypes: true });
       const names = entries
-        .filter((e) => e.isDirectory() && existsSync(join(profilesRoot, e.name, "config.yaml")))
+        .filter(
+          (e) =>
+            e.name !== DEFAULT_PROFILE &&
+            e.isDirectory() &&
+            existsSync(join(profilesRoot, e.name, "config.yaml")),
+        )
         .map((e) => e.name)
-        .sort();
-      if (!names.includes("default") && existsSync(join(profilesRoot, "default"))) {
-        names.unshift("default");
-      }
-      return names;
+        .toSorted();
+      return [DEFAULT_PROFILE, ...names];
     } catch {
       return ["default"];
     }
@@ -276,7 +289,8 @@ export function discoverWorkspaces(): DiscoveredWorkspace[] {
     const hermesRoot = process.env.DENCH_HOME?.trim() || join(homedir(), ".hermes");
     const profilesRoot = join(hermesRoot, "profiles");
     for (const workspaceName of scanWorkspaceNames(stateDir)) {
-      const profileDir = join(profilesRoot, workspaceName);
+      const profileDir =
+        workspaceName === DEFAULT_PROFILE ? hermesRoot : join(profilesRoot, workspaceName);
       const profileWorkspaceDir = join(profileDir, "workspace");
       discovered.push({
         name: workspaceName,
