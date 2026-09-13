@@ -9,6 +9,8 @@ type ObjectRow = {
   description?: string | null;
   default_view?: string | null;
   display_field?: string | null;
+  immutable?: boolean | null;
+  entity_table?: string | null;
 };
 
 type FieldRow = {
@@ -70,6 +72,19 @@ const supportedTables: Record<string, string> = {
   automation_loop: "automation_loops",
   automation_loop_run: "automation_loop_runs",
 };
+
+const SQL_IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/i;
+
+function resolveObjectTable(object: ObjectRow): string | null {
+  const registeredTable = object.entity_table?.trim();
+  if (registeredTable) {
+    if (!SQL_IDENTIFIER_RE.test(registeredTable)) {
+      throw new Error(`Invalid registered entity table: ${registeredTable}`);
+    }
+    return registeredTable;
+  }
+  return supportedTables[object.name] ?? null;
+}
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
@@ -315,7 +330,7 @@ export async function getPostgresEntryData(
     [object.id],
   );
 
-  const tableName = supportedTables[object.name];
+  const tableName = resolveObjectTable(object);
   const existingColumns = tableName
     ? await getTableColumns(tableName)
     : new Set<string>();
