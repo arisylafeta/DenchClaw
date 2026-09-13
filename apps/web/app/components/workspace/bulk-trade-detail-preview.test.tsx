@@ -18,7 +18,7 @@ describe("Bulk Trade detail preview", () => {
       onNavigateEntry={navigate}
     />);
 
-    expect(screen.getByText("Evidence workspace preview")).toBeTruthy();
+    expect(screen.getByText("Evidence workspace preview").style.color).toBe("var(--color-text)");
     expect(screen.getByText("Battery Buyer")).toBeTruthy();
     expect(screen.getByText("Can collect next week.")).toBeTruthy();
     expect(screen.getByText("Please send the address.")).toBeTruthy();

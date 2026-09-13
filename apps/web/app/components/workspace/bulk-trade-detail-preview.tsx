@@ -28,7 +28,7 @@ function sourceBadge(source: string) {
   const colors: Record<string, { background: string; color: string }> = {
     WhatsApp: { background: "rgba(34, 197, 94, 0.12)", color: "#16a34a" },
     Gmail: { background: "rgba(239, 68, 68, 0.1)", color: "#dc2626" },
-    CRM: { background: "var(--color-accent-light)", color: "var(--color-accent-fill)" },
+    CRM: { background: "var(--color-surface-hover)", color: "var(--color-text)" },
   };
   return (
     <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={colors[source]}>
@@ -51,14 +51,14 @@ export function BulkTradeDetailPreview({ detail, onNavigateEntry }: Props) {
       <div className="rounded-xl p-4" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--color-accent-fill)" }}>
+            <div className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--color-text)" }}>
               Evidence workspace preview
             </div>
             <p className="mt-1 text-xs leading-5" style={{ color: "var(--color-text-muted)" }}>
               Read-only evidence. Marketplace offers and deals remain authoritative.
             </p>
           </div>
-          <span className="rounded-full px-2 py-1 text-[11px] font-medium" style={{ background: "var(--color-accent-light)", color: "var(--color-accent-fill)" }}>
+          <span className="rounded-full px-2 py-1 text-[11px] font-medium" style={{ background: "var(--color-surface-hover)", color: "var(--color-text)" }}>
             {evidenceCount} sources
           </span>
         </div>
