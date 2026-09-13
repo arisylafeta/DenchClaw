@@ -15,6 +15,8 @@ import { UrlFavicon } from "./url-favicon";
 import { LinkOpenButton } from "./link-open-button";
 import { RelationLink } from "./relation-link";
 import { LinkPreviewWrapper } from "./workspace-link";
+import { RegisteredEntryDetailPreview } from "./registered-entry-detail-preview";
+import type { RegisteredEntryDetail } from "@/lib/crm-postgres/registered-entry-detail";
 
 function safeString(val: unknown): string {
   if (val == null) return "";
@@ -50,7 +52,7 @@ type ReverseRelation = {
 };
 
 type EntryDetailData = {
-  object: { id: string; name: string; description?: string; icon?: string };
+  object: { id: string; name: string; description?: string; icon?: string; immutable?: boolean };
   fields: Field[];
   entry: Record<string, unknown>;
   relationLabels?: Record<string, Record<string, string>>;
@@ -60,6 +62,7 @@ type EntryDetailData = {
   relationFaviconUrls?: Record<string, Record<string, string>>;
   reverseRelations?: ReverseRelation[];
   effectiveDisplayField?: string;
+  registeredDetail?: RegisteredEntryDetail;
 };
 
 export type EntryDetailPanelProps = {
@@ -603,6 +606,7 @@ export function EntryDetailPanel({
 
   const dataFieldsList = useMemo(() => data?.fields.filter((f) => f.type !== "action") ?? [], [data?.fields]);
   const actionFieldsList = useMemo(() => data?.fields.filter((f) => f.type === "action") ?? [], [data?.fields]);
+  const immutable = Boolean(data?.object.immutable);
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden" style={{ background: "var(--color-bg)" }}>
@@ -624,13 +628,15 @@ export function EntryDetailPanel({
           </h2>
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
-          <button type="button" onClick={() => void handleDelete()} disabled={deleting}
-            className="p-1 rounded-md flex-shrink-0 hover:opacity-80" style={{ color: "var(--color-error)" }} title="Delete entry"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-            </svg>
-          </button>
+          {!immutable && (
+            <button type="button" onClick={() => void handleDelete()} disabled={deleting}
+              className="p-1 rounded-md flex-shrink-0 hover:opacity-80" style={{ color: "var(--color-error)" }} title="Delete entry"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+            </button>
+          )}
           <button type="button" onClick={onClose} className="p-1 rounded-md flex-shrink-0 hover:opacity-80" style={{ color: "var(--color-text-muted)" }} title="Close (Esc)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" /><path d="m6 6 12 12" />
@@ -722,11 +728,11 @@ export function EntryDetailPanel({
                             )
                           ) : (
                             <div
-                              className={`py-0.5 px-1.5 -mx-1.5 rounded-md transition-colors ${!["user"].includes(field.type) ? "cursor-pointer hover:bg-[var(--color-surface-hover)]" : ""}`}
+                              className={`py-0.5 px-1.5 -mx-1.5 rounded-md transition-colors ${!immutable && !["user"].includes(field.type) ? "cursor-pointer hover:bg-[var(--color-surface-hover)]" : ""}`}
                               onClick={() => {
-                                if (!["user"].includes(field.type)) { setEditingField(field.name); setEditValue(safeString(value)); }
+                                if (!immutable && !["user"].includes(field.type)) { setEditingField(field.name); setEditValue(safeString(value)); }
                               }}
-                              title={!["user"].includes(field.type) ? "Click to edit" : undefined}
+                              title={!immutable && !["user"].includes(field.type) ? "Click to edit" : undefined}
                             >
                               <FieldValue value={value} field={field} members={members} relationLabels={data.relationLabels} relationFaviconUrls={data.relationFaviconUrls} onNavigateEntry={onNavigateEntry} />
                             </div>
@@ -737,7 +743,7 @@ export function EntryDetailPanel({
                   })}
 
                   {/* Add property */}
-                  {showAddProperty ? (
+                  {!immutable && (showAddProperty ? (
                     <AddPropertyForm objectName={objectName} onCreated={handlePropertyCreated} onCancel={() => setShowAddProperty(false)} />
                   ) : (
                     <button type="button" onClick={() => setShowAddProperty(true)}
@@ -747,7 +753,7 @@ export function EntryDetailPanel({
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
                       Add a property
                     </button>
-                  )}
+                  ))}
 
                   {/* Action buttons */}
                   {actionFieldsList.length > 0 && (
@@ -806,8 +812,12 @@ export function EntryDetailPanel({
           )}
         </div>
 
+        {!loading && !error && data?.registeredDetail && (
+          <RegisteredEntryDetailPreview detail={data.registeredDetail} onNavigateEntry={onNavigateEntry} />
+        )}
+
         {/* Editor section — occupies remaining space */}
-        {!loading && !error && (
+        {!loading && !error && !immutable && (
           <div className="entry-detail-editor">
             {mdLoading ? (
               <div className="px-5 py-6">

@@ -2,6 +2,10 @@ import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
 import { getTableColumns } from "./table-columns";
 import { buildWorkTaskReadScope } from "./work-task-read-scope";
+import {
+  getRegisteredEntryDetail,
+  type RegisteredEntryDetail,
+} from "./registered-entry-detail";
 
 type ObjectRow = {
   id: string;
@@ -54,6 +58,7 @@ export type PostgresEntryData = {
   relationFaviconUrls: Record<string, Record<string, string>>;
   reverseRelations: PostgresReverseRelation[];
   effectiveDisplayField: string;
+  registeredDetail?: RegisteredEntryDetail;
 };
 
 const supportedTables: Record<string, string> = {
@@ -376,6 +381,7 @@ export async function getPostgresEntryData(
       userId,
     ),
     effectiveDisplayField: resolveDisplayField(object, fields),
+    registeredDetail: await getRegisteredEntryDetail(object.name, entryId, userId),
   };
 }
 
