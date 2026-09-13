@@ -34,6 +34,7 @@ export type BulkTradeGmailEvidence = {
   relationship: string;
   evidence_note?: string | null;
   accessible: boolean;
+  mailbox_owner_email?: string | null;
   subject?: string | null;
   last_message_at?: string | Date | null;
   message_count?: number | null;
@@ -86,8 +87,11 @@ async function readBulkTradeDetail(entryId: string, userId: string): Promise<Reg
 
   const gmailThreads = await queryPg<BulkTradeGmailEvidence>(
     `select link.evidence_id as id, link.relationship, link.note as evidence_note,
-            (thread.id is not null) as accessible,
-            thread.subject, thread.last_message_at, thread.message_count,
+            (viewer.id is not null) as accessible,
+            owner.email as mailbox_owner_email,
+            case when viewer.id is not null then thread.subject end as subject,
+            case when viewer.id is not null then thread.last_message_at end as last_message_at,
+            case when viewer.id is not null then thread.message_count end as message_count,
             coalesce(
               jsonb_agg(jsonb_build_object(
                 'id', message.id,
@@ -99,12 +103,15 @@ async function readBulkTradeDetail(entryId: string, userId: string): Promise<Reg
               '[]'::jsonb
             ) as messages
        from crm_bulk_trade_evidence_links link
-       left join crm_email_threads thread
-         on thread.id = link.evidence_id and thread.mailbox_owner_id = $2::uuid
+       join crm_email_threads thread on thread.id = link.evidence_id
+       left join crm_users owner on owner.id = thread.mailbox_owner_id
+       left join crm_users viewer
+         on viewer.id = $2::uuid
+        and lower(viewer.email) in ('ari@rebattery.io', 'alex@rebattery.io')
        left join crm_email_messages message
-         on message.thread_id = thread.id and message.mailbox_owner_id = $2::uuid
+         on message.thread_id = thread.id and viewer.id is not null
       where link.lot_id = $1 and link.evidence_kind = 'gmail_thread'
-      group by link.evidence_id, link.relationship, link.note, thread.id
+      group by link.evidence_id, link.relationship, link.note, thread.id, owner.email, viewer.id
       order by thread.last_message_at desc nulls last, link.evidence_id`,
     [entryId, userId],
   );

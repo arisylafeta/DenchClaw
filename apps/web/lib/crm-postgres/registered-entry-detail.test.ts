@@ -43,8 +43,8 @@ describe("registered entry details", () => {
       "bulk-panasonic-oklahoma",
       "11111111-1111-4111-8111-111111111111",
     ]);
-    expect(String(gmailCall?.[0])).toContain("thread.mailbox_owner_id = $2::uuid");
-    expect(String(gmailCall?.[0])).toContain("message.mailbox_owner_id = $2::uuid");
+    expect(String(gmailCall?.[0])).toContain("lower(viewer.email) in ('ari@rebattery.io', 'alex@rebattery.io')");
+    expect(String(gmailCall?.[0])).toContain("message.thread_id = thread.id and viewer.id is not null");
   });
 
   it("does not attach a detail payload to unregistered objects", async () => {

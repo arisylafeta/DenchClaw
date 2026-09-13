@@ -12,7 +12,7 @@ describe("Bulk Trade detail preview", () => {
         kind: "bulk_trade",
         parties: [{ id: "buyer-1", role: "buyer", display_name: "Battery Buyer", company_id: "company-1", channel: "WhatsApp" }],
         whatsappMessages: [{ id: "wa-1", relationship: "supports", conversation: "Trade chat", sender: "Buyer", body: "Can collect next week." }],
-        gmailThreads: [{ id: "thread-1", relationship: "supports", accessible: true, subject: "Collection plan", message_count: 1, messages: [{ id: "email-1", from_email: "buyer@example.com", body_preview: "Please send the address." }] }],
+        gmailThreads: [{ id: "thread-1", relationship: "supports", accessible: true, mailbox_owner_email: "alex@rebattery.io", subject: "Collection plan", message_count: 1, messages: [{ id: "email-1", from_email: "buyer@example.com", body_preview: "Please send the address." }] }],
         opportunities: [{ id: "opp-1", relationship: "conflicts_with_quantity", title: "Legacy lot", quantity: 10 }],
       }}
       onNavigateEntry={navigate}
@@ -22,6 +22,7 @@ describe("Bulk Trade detail preview", () => {
     expect(screen.getByText("Battery Buyer")).toBeTruthy();
     expect(screen.getByText("Can collect next week.")).toBeTruthy();
     expect(screen.getByText("Please send the address.")).toBeTruthy();
+    expect(screen.getByText("alex@rebattery.io")).toBeTruthy();
     expect(screen.getByText("conflicts with quantity")).toBeTruthy();
     expect(screen.queryByText(/offer status/i)).toBeNull();
 

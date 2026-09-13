@@ -143,13 +143,13 @@ export function BulkTradeDetailPreview({ detail, onNavigateEntry }: Props) {
           {detail.gmailThreads.map((thread) => (
             <article key={`gmail-${thread.id}`} className="rounded-xl p-3" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">{sourceBadge("Gmail")}<span className="truncate text-xs font-medium" style={{ color: "var(--color-text)" }}>{thread.subject || "Email thread"}</span></div>
+                <div className="flex min-w-0 items-center gap-2">{sourceBadge("Gmail")}<span className="truncate text-xs font-medium" style={{ color: "var(--color-text)" }}>{thread.subject || "Email thread"}</span>{thread.mailbox_owner_email && <span className="flex-shrink-0 text-[10px]" style={{ color: "var(--color-text-muted)" }}>{thread.mailbox_owner_email}</span>}</div>
                 <span className="flex-shrink-0 text-[10px]" style={{ color: "var(--color-text-muted)" }}>{shortDate(thread.last_message_at)}</span>
               </div>
               <div className="mt-2 space-y-2">
                 {!thread.accessible && (
                   <div className="rounded-lg px-3 py-2 text-xs leading-5" style={{ background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-                    Linked email is not assigned to this mailbox yet.
+                    Linked email is not available to this viewer.
                   </div>
                 )}
                 {thread.messages.map((message) => (
