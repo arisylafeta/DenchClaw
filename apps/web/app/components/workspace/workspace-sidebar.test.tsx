@@ -27,7 +27,7 @@ describe("workspace sidebar navigation", () => {
     });
   });
 
-	it("renders categorized automation links beside Cron", () => {
+	it("keeps secondary sections collapsed until they are needed", () => {
     render(
       <WorkspaceSidebar
         onNavigate={vi.fn()}
@@ -37,8 +37,13 @@ describe("workspace sidebar navigation", () => {
     );
 
     expect(screen.getByRole("button", { name: "CRM" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Admin" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Admin" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Work Tasks" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     expect(screen.getByRole("group", { name: "Workspace" })).toContainElement(screen.getByRole("button", { name: "Work Tasks" }));
     expect(screen.queryByText("work")).toBeNull();
     expect(screen.queryByText("automations")).toBeNull();
@@ -68,13 +73,15 @@ describe("workspace sidebar navigation", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
-    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Accounts" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "CRM" }));
     expect(screen.queryByRole("button", { name: "People" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Work Tasks" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Work Tasks" })).toBeNull();
 
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.getByRole("button", { name: "Work Tasks" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     expect(screen.queryByRole("button", { name: "Work Tasks" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Loops" })).toBeNull();
@@ -114,10 +121,11 @@ describe("workspace sidebar navigation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
     expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
     expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
 
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.getByRole("button", { name: "Work Tasks" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     expect(screen.queryByRole("button", { name: "Work Tasks" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cron" })).toBeNull();

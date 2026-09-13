@@ -324,8 +324,8 @@ export function WorkspaceSidebar({
 	// swaps the body with a chat history list provided by the host.
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
 	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
-	const [adminTreeOpen, setAdminTreeOpen] = useState(true);
-	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(true);
+	const [adminTreeOpen, setAdminTreeOpen] = useState(false);
+	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(false);
   const [authUser, setAuthUser] = useState<NavUserData | null>(null);
   useEffect(() => {
     let active = true;
