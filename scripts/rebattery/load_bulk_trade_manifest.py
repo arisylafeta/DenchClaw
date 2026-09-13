@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 LOT_KINDS = {"supply", "demand"}
+KANBAN_STAGES = {"Sourced", "In Campaign", "In Conversation", "Completed"}
 CONFIDENCE_LEVELS = {"confirmed", "probable", "uncertain"}
 PARTY_ROLES = {"supplier", "buyer", "intermediary", "advisor"}
 EVIDENCE_KINDS = {
@@ -28,6 +29,11 @@ def validate_manifest(manifest: dict) -> None:
     for lot in lots:
         if lot.get("lot_kind") not in LOT_KINDS:
             raise ValueError(f"invalid lot kind for {lot.get('id')}")
+        if lot.get("stage") not in KANBAN_STAGES:
+            raise ValueError(f"invalid stage for {lot.get('id')}")
+        people_sent_count = lot.get("people_sent_count", 0)
+        if not isinstance(people_sent_count, int) or people_sent_count < 0:
+            raise ValueError(f"invalid people sent count for {lot.get('id')}")
         if lot.get("confidence") not in CONFIDENCE_LEVELS:
             raise ValueError(f"invalid confidence for {lot.get('id')}")
         if not lot.get("title") or not lot.get("summary") or not lot.get("observed_outcome"):
@@ -77,14 +83,16 @@ def load_manifest(path: Path) -> dict[str, int]:
                     execute_values(
                         cursor,
                         """INSERT INTO crm_bulk_trade_lots
-                           (id, title, lot_kind, summary, observed_quantity, quantity_unit,
-                            observed_outcome, latest_activity_at, needs_attention, confidence,
-                            reconciliation_note, source_manifest)
+                           (id, title, lot_kind, summary, stage, people_sent_count,
+                            observed_quantity, quantity_unit, observed_outcome, latest_activity_at,
+                            needs_attention, confidence, reconciliation_note, source_manifest)
                            VALUES %s
                            ON CONFLICT (id) DO UPDATE SET
                              title = excluded.title,
                              lot_kind = excluded.lot_kind,
                              summary = excluded.summary,
+                             stage = excluded.stage,
+                             people_sent_count = excluded.people_sent_count,
                              observed_quantity = excluded.observed_quantity,
                              quantity_unit = excluded.quantity_unit,
                              observed_outcome = excluded.observed_outcome,
@@ -96,6 +104,7 @@ def load_manifest(path: Path) -> dict[str, int]:
                              updated_at = now()""",
                         [(
                             lot["id"], lot["title"], lot["lot_kind"], lot["summary"],
+                            lot["stage"], lot.get("people_sent_count", 0),
                             lot.get("observed_quantity"), lot.get("quantity_unit"),
                             lot["observed_outcome"], lot.get("latest_activity_at"),
                             lot.get("needs_attention", False), lot["confidence"],

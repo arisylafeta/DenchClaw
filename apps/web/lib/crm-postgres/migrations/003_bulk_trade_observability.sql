@@ -80,6 +80,9 @@ create table if not exists crm_bulk_trade_lots (
   title text not null,
   lot_kind text not null check (lot_kind in ('supply', 'demand')),
   summary text not null,
+  stage text not null default 'Sourced'
+    check (stage in ('Sourced', 'In Campaign', 'In Conversation', 'Completed')),
+  people_sent_count integer not null default 0 check (people_sent_count >= 0),
   observed_quantity numeric,
   quantity_unit text,
   observed_outcome text not null,
@@ -91,6 +94,29 @@ create table if not exists crm_bulk_trade_lots (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table crm_bulk_trade_lots
+  add column if not exists stage text not null default 'Sourced',
+  add column if not exists people_sent_count integer not null default 0;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'crm_bulk_trade_lots'::regclass
+      and conname = 'crm_bulk_trade_lots_stage_check'
+  ) then
+    alter table crm_bulk_trade_lots add constraint crm_bulk_trade_lots_stage_check
+      check (stage in ('Sourced', 'In Campaign', 'In Conversation', 'Completed'));
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'crm_bulk_trade_lots'::regclass
+      and conname = 'crm_bulk_trade_lots_people_sent_count_check'
+  ) then
+    alter table crm_bulk_trade_lots add constraint crm_bulk_trade_lots_people_sent_count_check
+      check (people_sent_count >= 0);
+  end if;
+end;
+$$;
 
 create table if not exists crm_bulk_trade_parties (
   id text primary key,
@@ -148,6 +174,8 @@ select
   lot.title,
   lot.lot_kind,
   lot.summary,
+  lot.stage,
+  lot.people_sent_count,
   lot.observed_quantity,
   lot.quantity_unit,
   lot.observed_outcome,
@@ -168,7 +196,7 @@ insert into crm_objects
 values
   ('reb_bulk_trade_object', 'bulk_trade', 'crm_bulk_trade_overview',
    'Read-only evidence view of bulk supply, demand, buyer interactions, and authoritative marketplace links',
-   'table', 'reb_bulk_trade_title', true, false, 2)
+   'kanban', 'reb_bulk_trade_title', true, false, 2)
 on conflict (name) do update set
   entity_table = excluded.entity_table,
   description = excluded.description,
@@ -185,25 +213,30 @@ insert into crm_fields
   (id, object_id, name, type, canonical_column, required, sort_order)
 values
   ('reb_bulk_trade_title', 'reb_bulk_trade_object', 'Title', 'text', 'title', true, 0),
-  ('reb_bulk_trade_kind', 'reb_bulk_trade_object', 'Type', 'enum', 'lot_kind', true, 1),
-  ('reb_bulk_trade_summary', 'reb_bulk_trade_object', 'Summary', 'richtext', 'summary', true, 2),
-  ('reb_bulk_trade_quantity', 'reb_bulk_trade_object', 'Observed Quantity', 'number', 'observed_quantity', false, 3),
-  ('reb_bulk_trade_unit', 'reb_bulk_trade_object', 'Quantity Unit', 'text', 'quantity_unit', false, 4),
-  ('reb_bulk_trade_outcome', 'reb_bulk_trade_object', 'Observed Outcome', 'text', 'observed_outcome', true, 5),
-  ('reb_bulk_trade_buyers', 'reb_bulk_trade_object', 'Buyer Interactions', 'number', 'buyer_interactions', true, 6),
-  ('reb_bulk_trade_latest', 'reb_bulk_trade_object', 'Latest Evidence At', 'date', 'latest_evidence_at', false, 7),
-  ('reb_bulk_trade_attention', 'reb_bulk_trade_object', 'Needs Attention', 'boolean', 'needs_attention', true, 8),
-  ('reb_bulk_trade_confidence', 'reb_bulk_trade_object', 'Confidence', 'enum', 'confidence', true, 9),
-  ('reb_bulk_trade_evidence_count', 'reb_bulk_trade_object', 'Evidence Count', 'number', 'evidence_count', true, 10),
-  ('reb_bulk_trade_sources', 'reb_bulk_trade_object', 'Source Systems', 'text', 'source_systems', false, 11),
-  ('reb_bulk_trade_marketplace', 'reb_bulk_trade_object', 'Marketplace Links', 'number', 'marketplace_links', true, 12),
-  ('reb_bulk_trade_reconciliation', 'reb_bulk_trade_object', 'Reconciliation Note', 'richtext', 'reconciliation_note', false, 13)
+  ('reb_bulk_trade_stage', 'reb_bulk_trade_object', 'Stage', 'enum', 'stage', true, 1),
+  ('reb_bulk_trade_kind', 'reb_bulk_trade_object', 'Type', 'enum', 'lot_kind', true, 2),
+  ('reb_bulk_trade_sent_to', 'reb_bulk_trade_object', 'Sent To', 'number', 'people_sent_count', true, 3),
+  ('reb_bulk_trade_summary', 'reb_bulk_trade_object', 'Summary', 'richtext', 'summary', true, 4),
+  ('reb_bulk_trade_quantity', 'reb_bulk_trade_object', 'Observed Quantity', 'number', 'observed_quantity', false, 5),
+  ('reb_bulk_trade_unit', 'reb_bulk_trade_object', 'Quantity Unit', 'text', 'quantity_unit', false, 6),
+  ('reb_bulk_trade_outcome', 'reb_bulk_trade_object', 'Observed Outcome', 'text', 'observed_outcome', true, 7),
+  ('reb_bulk_trade_buyers', 'reb_bulk_trade_object', 'Buyer Interactions', 'number', 'buyer_interactions', true, 8),
+  ('reb_bulk_trade_latest', 'reb_bulk_trade_object', 'Latest Evidence At', 'date', 'latest_evidence_at', false, 9),
+  ('reb_bulk_trade_attention', 'reb_bulk_trade_object', 'Needs Attention', 'boolean', 'needs_attention', true, 10),
+  ('reb_bulk_trade_confidence', 'reb_bulk_trade_object', 'Confidence', 'enum', 'confidence', true, 11),
+  ('reb_bulk_trade_evidence_count', 'reb_bulk_trade_object', 'Evidence Count', 'number', 'evidence_count', true, 12),
+  ('reb_bulk_trade_sources', 'reb_bulk_trade_object', 'Source Systems', 'text', 'source_systems', false, 13),
+  ('reb_bulk_trade_marketplace', 'reb_bulk_trade_object', 'Marketplace Links', 'number', 'marketplace_links', true, 14),
+  ('reb_bulk_trade_reconciliation', 'reb_bulk_trade_object', 'Reconciliation Note', 'richtext', 'reconciliation_note', false, 15)
 on conflict (object_id, name) do update set
   type = excluded.type,
   canonical_column = excluded.canonical_column,
   required = excluded.required,
   sort_order = excluded.sort_order;
 
+update crm_fields set
+  enum_values = '["Sourced", "In Campaign", "In Conversation", "Completed"]'::jsonb
+where object_id = 'reb_bulk_trade_object' and name = 'Stage';
 update crm_fields set
   enum_values = '["supply", "demand"]'::jsonb
 where object_id = 'reb_bulk_trade_object' and name = 'Type';

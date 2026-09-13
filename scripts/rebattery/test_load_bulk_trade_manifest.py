@@ -14,7 +14,8 @@ class BulkTradeManifestTest(unittest.TestCase):
         return {
             "lots": [{
                 "id": "lot-1", "title": "Lot", "lot_kind": "supply",
-                "summary": "Observed supply", "observed_outcome": "available",
+                "summary": "Observed supply", "stage": "Sourced",
+                "people_sent_count": 0, "observed_outcome": "available",
                 "confidence": "confirmed",
             }],
             "parties": [{
@@ -35,6 +36,12 @@ class BulkTradeManifestTest(unittest.TestCase):
         manifest = self.valid_manifest()
         manifest["evidence_links"][0]["lot_id"] = "missing"
         with self.assertRaisesRegex(ValueError, "unknown lot"):
+            MODULE.validate_manifest(manifest)
+
+    def test_rejects_unknown_kanban_stages(self):
+        manifest = self.valid_manifest()
+        manifest["lots"][0]["stage"] = "Negotiating"
+        with self.assertRaisesRegex(ValueError, "invalid stage"):
             MODULE.validate_manifest(manifest)
 
     def test_rejects_transaction_state_as_a_lot_outcome(self):
