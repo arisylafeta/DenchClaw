@@ -145,3 +145,33 @@ describe("Work Task project accordions", () => {
   });
 
 });
+
+describe("Kanban column visibility", () => {
+  it("keeps terminal values available while hiding configured columns", () => {
+    render(
+      <ObjectKanban
+        objectName="bulk_trade"
+        fields={[
+          { id: "title", name: "Title", type: "text" },
+          {
+            id: "stage",
+            name: "Stage",
+            type: "enum",
+            enum_values: ["Sourced", "In Campaign", "In Conversation", "In Payment", "In Collection", "Completed"],
+          },
+        ]}
+        entries={[
+          { entry_id: "trade-1", Title: "Active lot", Stage: "Sourced" },
+        ]}
+        statuses={[]}
+        groupFieldName="Stage"
+        hiddenColumns={["Completed"]}
+      />,
+    );
+
+    expect(screen.getByText("Sourced")).toBeTruthy();
+    expect(screen.getByText("In Payment")).toBeTruthy();
+    expect(screen.getByText("In Collection")).toBeTruthy();
+    expect(screen.queryByText("Completed")).toBeNull();
+  });
+});

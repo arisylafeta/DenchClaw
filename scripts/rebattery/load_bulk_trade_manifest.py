@@ -8,7 +8,9 @@ import json
 from pathlib import Path
 
 LOT_KINDS = {"supply", "demand"}
-KANBAN_STAGES = {"Sourced", "In Campaign", "In Conversation", "Completed"}
+KANBAN_STAGES = {
+    "Sourced", "In Campaign", "In Conversation", "In Payment", "In Collection", "Completed"
+}
 CONFIDENCE_LEVELS = {"confirmed", "probable", "uncertain"}
 PARTY_ROLES = {"supplier", "buyer", "intermediary", "advisor"}
 EVIDENCE_KINDS = {

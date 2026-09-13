@@ -81,7 +81,7 @@ create table if not exists crm_bulk_trade_lots (
   lot_kind text not null check (lot_kind in ('supply', 'demand')),
   summary text not null,
   stage text not null default 'Sourced'
-    check (stage in ('Sourced', 'In Campaign', 'In Conversation', 'Completed')),
+    check (stage in ('Sourced', 'In Campaign', 'In Conversation', 'In Payment', 'In Collection', 'Completed')),
   people_sent_count integer not null default 0 check (people_sent_count >= 0),
   observed_quantity numeric,
   quantity_unit text,
@@ -99,14 +99,9 @@ alter table crm_bulk_trade_lots
   add column if not exists people_sent_count integer not null default 0;
 do $$
 begin
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid = 'crm_bulk_trade_lots'::regclass
-      and conname = 'crm_bulk_trade_lots_stage_check'
-  ) then
-    alter table crm_bulk_trade_lots add constraint crm_bulk_trade_lots_stage_check
-      check (stage in ('Sourced', 'In Campaign', 'In Conversation', 'Completed'));
-  end if;
+  alter table crm_bulk_trade_lots drop constraint if exists crm_bulk_trade_lots_stage_check;
+  alter table crm_bulk_trade_lots add constraint crm_bulk_trade_lots_stage_check
+    check (stage in ('Sourced', 'In Campaign', 'In Conversation', 'In Payment', 'In Collection', 'Completed'));
   if not exists (
     select 1 from pg_constraint
     where conrelid = 'crm_bulk_trade_lots'::regclass
@@ -235,7 +230,7 @@ on conflict (object_id, name) do update set
   sort_order = excluded.sort_order;
 
 update crm_fields set
-  enum_values = '["Sourced", "In Campaign", "In Conversation", "Completed"]'::jsonb
+  enum_values = '["Sourced", "In Campaign", "In Conversation", "In Payment", "In Collection", "Completed"]'::jsonb
 where object_id = 'reb_bulk_trade_object' and name = 'Stage';
 update crm_fields set
   enum_values = '["supply", "demand"]'::jsonb

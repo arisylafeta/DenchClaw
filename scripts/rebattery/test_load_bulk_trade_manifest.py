@@ -38,6 +38,12 @@ class BulkTradeManifestTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown lot"):
             MODULE.validate_manifest(manifest)
 
+    def test_accepts_payment_and_collection_stages(self):
+        for stage in ("In Payment", "In Collection"):
+            manifest = self.valid_manifest()
+            manifest["lots"][0]["stage"] = stage
+            MODULE.validate_manifest(manifest)
+
     def test_rejects_unknown_kanban_stages(self):
         manifest = self.valid_manifest()
         manifest["lots"][0]["stage"] = "Negotiating"

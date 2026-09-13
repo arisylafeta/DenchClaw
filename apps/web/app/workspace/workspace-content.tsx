@@ -4000,6 +4000,8 @@ function ObjectView({
               statuses={data.statuses}
               members={members}
               relationLabels={data.relationLabels}
+              groupFieldName={effectiveSettings.kanbanField}
+              hiddenColumns={effectiveSettings.kanbanHiddenColumns}
               accordionGroupFieldName={data.object.name === "work_task" ? "Project" : undefined}
               onEntryClick={handleEntryClickProp}
               onRefresh={handleRefresh}
