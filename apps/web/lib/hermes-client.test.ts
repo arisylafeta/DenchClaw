@@ -1,345 +1,377 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HermesConfig } from "./agent-backend";
-import { createHermesChatStream } from "./hermes-client";
+import { createHermesChatStream, type HermesChatStreamParams } from "./hermes-client";
+import { readActiveProfileName } from "./workspace";
+
+vi.mock("./workspace", () => ({ readActiveProfileName: vi.fn(() => null) }));
 
 const config: HermesConfig = {
   baseUrl: "https://hermes.example.com",
-  apiKey: "sk-test-key",
+  apiKey: "test-key",
   model: "hermes-agent",
 };
+const sessionKey = "agent:main:web:abc";
+const sessionsUrl = `${config.baseUrl}/api/sessions`;
+const chatUrl = `${sessionsUrl}/${encodeURIComponent(sessionKey)}/chat/stream`;
 
-function sseBody(...events: Array<Record<string, unknown>>): string {
-  return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+// Mirrors api_server.py _sse_frame: native event names are NOT inside JSON.
+function frame(name: string, payload: Record<string, unknown> = {}): string {
+  return `event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
-
-async function readSseEvents(stream: ReadableStream<Uint8Array>) {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  const events: Record<string, unknown>[] = [];
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {break;}
-    const text = decoder.decode(value, { stream: true });
-    for (const line of text.split("\n")) {
-      if (line.startsWith("data: ")) {
-        const json = line.slice(6).trim();
-        if (json && json !== "[DONE]") {
-          events.push(JSON.parse(json));
-        }
-      }
-    }
-  }
-
-  return events;
+function success(text = "Hello"): string {
+  return (
+    frame("assistant.delta", { delta: text }) +
+    frame("assistant.completed", { content: text }) +
+    frame("run.completed", { completed: true }) +
+    frame("done")
+  );
+}
+function created(): Response {
+  return Response.json({ object: "hermes.session", session: { id: sessionKey } }, { status: 201 });
+}
+function exists(): Response {
+  return Response.json(
+    { error: { message: `Session already exists: ${sessionKey}`, code: "session_exists" } },
+    { status: 409 },
+  );
+}
+function mockStream(body: BodyInit | null, creation = created()) {
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(creation)
+    .mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": "text/event-stream" } }),
+    );
+}
+async function chat(overrides: Partial<HermesChatStreamParams> = {}) {
+  const stream = await createHermesChatStream({
+    sessionKey,
+    message: "Hi",
+    userId: "test-user",
+    config,
+    ...overrides,
+  });
+  const text = await new Response(stream).text();
+  return text
+    .split("\n")
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
+}
+function answer(events: Record<string, unknown>[]): string {
+  return events
+    .filter((event) => event.type === "text-delta")
+    .map((event) => event.delta)
+    .join("");
 }
 
 beforeEach(() => {
-  vi.restoreAllMocks();
+  vi.mocked(readActiveProfileName).mockReset().mockReturnValue(null);
 });
+afterEach(() => vi.restoreAllMocks());
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-describe("createHermesChatStream", () => {
-  it("posts to Hermes runs API with bearer auth and session key", async () => {
-    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/v1/runs") && init?.method === "POST") {
-        return new Response(
-          JSON.stringify({ run_id: "run_123", status: "started" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+describe("createHermesChatStream persisted sessions", () => {
+  it.each([null, "default", "sales profile"])(
+    "routes create and chat to the same profile %s with auth",
+    async (profile) => {
+      vi.mocked(readActiveProfileName).mockReturnValue(profile);
+      const fetchSpy = mockStream(success());
+      const events = await chat({ config: { ...config, baseUrl: `${config.baseUrl}/` } });
+      const prefix = `${config.baseUrl}${profile ? `/p/${encodeURIComponent(profile)}` : ""}/api/sessions`;
+      expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual([
+        prefix,
+        `${prefix}/${encodeURIComponent(sessionKey)}/chat/stream`,
+      ]);
+      expect(readActiveProfileName).toHaveBeenCalledTimes(1);
+      for (const [, init] of fetchSpy.mock.calls) {
+        expect(init?.method).toBe("POST");
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer test-key");
+        expect(headers.get("content-type")).toBe("application/json");
+        expect(headers.get("x-hermes-session-key")).toBe(sessionKey);
       }
-      if (url.includes("/v1/runs/run_123/events")) {
-        return new Response(
-          sseBody(
-            { event: "message.delta", delta: "done" },
-            { event: "run.completed", output: "done" },
-          ),
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
-      }
-      return new Response("", { status: 404 });
-    });
-    globalThis.fetch = fetchSpy as typeof fetch;
+      expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+        id: sessionKey,
+        model: config.model,
+      });
+      expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toEqual({
+        message: "Hi",
+        model: config.model,
+      });
+      expect(events.at(-1)).toEqual({ type: "finish" });
+    },
+  );
 
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_abc",
-      message: "Hello Hermes",
-      userId: "11111111-1111-4111-8111-111111111111",
-      config,
-    });
-
-    await readSseEvents(stream);
-
-    const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe("https://hermes.example.com/v1/runs");
-    expect(init?.method).toBe("POST");
-
-    const headers = new Headers(init?.headers as HeadersInit);
-    expect(headers.get("authorization")).toBe("Bearer sk-test-key");
-    expect(headers.get("content-type")).toBe("application/json");
-    expect(headers.get("x-hermes-session-key")).toBe("sess_abc");
-
-    const body = JSON.parse(String(init?.body));
-    expect(body).toMatchObject({
-      input: "Hello Hermes",
-      session_id: "sess_abc",
-      user_id: "11111111-1111-4111-8111-111111111111",
-      model: "hermes-agent",
-    });
+  it("resumes an existing session without resetting or replacing its history", async () => {
+    const fetchSpy = mockStream(success("Resumed"), exists());
+    expect(answer(await chat())).toBe("Resumed");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1][0]).toBe(chatUrl);
   });
 
-  it("streams text deltas from Hermes SSE events", async () => {
-    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/v1/runs") && init?.method === "POST") {
-        return new Response(
-          JSON.stringify({ run_id: "run_456", status: "started" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+  it("loads persisted user, assistant and tool history on a second turn, but isolates a new session", async () => {
+    // Contract-level fake of the native DB/history boundary, not a provider call.
+    // Only native chat hydrates history. The original /v1/runs path must fail.
+    type Message = { role: string; content: string };
+    const sessions = new Map<string, Message[]>();
+    const histories: Message[][] = [];
+    const firstTurn: Message[] = [
+      { role: "user", content: "Remember violet-otter" },
+      { role: "assistant", content: "Looking up the note" },
+      { role: "tool", content: "Saved violet-otter" },
+      { role: "assistant", content: "Remembered" },
+    ];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body));
+      if (url === sessionsUrl && init?.method === "POST") {
+        if (sessions.has(body.id)) {
+          return exists();
+        }
+        sessions.set(body.id, []);
+        return created();
       }
-      if (url.includes("/v1/runs/run_456/events")) {
-        return new Response(
-          sseBody(
-            { event: "message.delta", delta: "Hello" },
-            { event: "message.delta", delta: " world" },
-            { event: "run.completed", output: "Hello world" },
-          ),
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
+      const match = new URL(url).pathname.match(/^\/api\/sessions\/([^/]+)\/chat\/stream$/);
+      if (!match || init?.method !== "POST") {
+        return new Response("Stateless endpoint forbidden", { status: 400 });
       }
-      return new Response("", { status: 404 });
-    }) as typeof fetch;
-
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_xyz",
-      message: "Hi",
-      userId: "crm-user-123",
-      config,
+      const id = decodeURIComponent(match[1]);
+      const history = sessions.get(id);
+      if (!history) {
+        return new Response("Session not found", { status: 404 });
+      }
+      histories.push([...history]);
+      const response =
+        body.message === "Remember violet-otter"
+          ? "Remembered"
+          : history.some((m) => m.content.includes("violet-otter"))
+            ? "violet-otter"
+            : "No context";
+      sessions.set(
+        id,
+        body.message === "Remember violet-otter"
+          ? [...firstTurn]
+          : [
+              ...history,
+              { role: "user", content: body.message },
+              { role: "assistant", content: response },
+            ],
+      );
+      return new Response(success(response));
     });
 
-    const events = await readSseEvents(stream);
-    expect(events).toEqual([
-      { type: "text-start", id: expect.any(String) },
-      { type: "text-delta", id: expect.any(String), delta: "Hello" },
-      { type: "text-delta", id: expect.any(String), delta: " world" },
-      { type: "text-end", id: expect.any(String) },
-      { type: "finish" },
-    ]);
-    // All text events share the same id
-    const textId = events[0].id;
-    expect(events[1].id).toBe(textId);
-    expect(events[2].id).toBe(textId);
-    expect(events[3].id).toBe(textId);
-  });
-
-  it("streams tool calls from Hermes SSE events", async () => {
-    globalThis.fetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/v1/runs")) {
-        return new Response(
-          JSON.stringify({ run_id: "run_tools", status: "started" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (url.includes("/v1/runs/run_tools/events")) {
-        return new Response(
-          sseBody(
-            { event: "tool.started", tool: "exa_search", preview: "test query" },
-            { event: "tool.completed", tool: "exa_search", duration: 0.5, error: false },
-            { event: "message.delta", delta: "Found results" },
-            { event: "run.completed", output: "Found results" },
-          ),
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
-      }
-      return new Response("", { status: 404 });
-    }) as typeof fetch;
-
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_tools",
-      message: "search for test",
-      userId: "crm-user-123",
-      config,
-    });
-
-    const events = await readSseEvents(stream);
-    expect(events).toEqual([
-      { type: "tool-input-start", toolCallId: expect.any(String), toolName: "exa_search" },
-      { type: "tool-input-available", toolCallId: expect.any(String), toolName: "exa_search", input: "test query" },
-      { type: "tool-output-available", toolCallId: expect.any(String), output: "exa_search" },
-      { type: "text-start", id: expect.any(String) },
-      { type: "text-delta", id: expect.any(String), delta: "Found results" },
-      { type: "text-end", id: expect.any(String) },
-      { type: "finish" },
-    ]);
-  });
-
-  it("streams reasoning from Hermes SSE events", async () => {
-    globalThis.fetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/v1/runs")) {
-        return new Response(
-          JSON.stringify({ run_id: "run_think", status: "started" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (url.includes("/v1/runs/run_think/events")) {
-        return new Response(
-          sseBody(
-            { event: "reasoning.available", text: "Let me think..." },
-            { event: "message.delta", delta: "Here is my answer" },
-            { event: "run.completed", output: "Here is my answer" },
-          ),
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
-      }
-      return new Response("", { status: 404 });
-    }) as typeof fetch;
-
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_think",
-      message: "think about this",
-      userId: "crm-user-123",
-      config,
-    });
-
-    const events = await readSseEvents(stream);
-    expect(events).toEqual([
-      { type: "reasoning-start", id: expect.any(String) },
-      { type: "reasoning-delta", id: expect.any(String), delta: "Let me think..." },
-      { type: "reasoning-end", id: expect.any(String) },
-      { type: "text-start", id: expect.any(String) },
-      { type: "text-delta", id: expect.any(String), delta: "Here is my answer" },
-      { type: "text-end", id: expect.any(String) },
-      { type: "finish" },
-    ]);
-  });
-
-  it("returns an SSE stream with an error event when Hermes rejects the run", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: "Invalid API key" }),
-        { status: 401, headers: { "content-type": "application/json" } },
+    expect(answer(await chat({ message: "Remember violet-otter" }))).toBe("Remembered");
+    expect(answer(await chat({ message: "What did I ask you to remember?" }))).toBe("violet-otter");
+    expect(
+      answer(
+        await chat({ sessionKey: "fresh-session", message: "What did I ask you to remember?" }),
       ),
-    );
-
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_xyz",
-      message: "Hi",
-      userId: "crm-user-123",
-      config,
-    });
-
-    const events = await readSseEvents(stream);
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("error");
-    expect(events[0].status).toBe(401);
+    ).toBe("No context");
+    expect(histories).toEqual([[], firstTurn, []]);
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/v1/"))).toBe(false);
   });
 
-  it("preserves the root Hermes error when an accepted run later fails", async () => {
-    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/v1/runs") && init?.method === "POST") {
-        return new Response(JSON.stringify({ run_id: "run_limited", status: "started" }), {
-          status: 202,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/v1/runs/run_limited/events")) {
-        return new Response(
-          sseBody({
-            event: "run.failed",
-            error: "HTTP 429: The usage limit has been reached",
-          }),
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
-      }
-      return new Response("", { status: 404 });
-    }) as typeof fetch;
+  it.each([
+    [401, '{"error":"Unauthorized"}'],
+    [404, '{"error":"Unknown or unconfigured profile"}'],
+    [503, '{"error":{"code":"session_db_unavailable"}}'],
+    [409, '{"error":{"code":"other_conflict"}}'],
+    [409, "not JSON"],
+  ])("fails closed on session creation %s without any stateless fallback", async (status, body) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(body, { status }));
+    expect(await chat()).toEqual([{ type: "error", errorText: body, status }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_limited",
-      message: "Continue",
-      userId: "crm-user-123",
-      config,
-    });
+  it.each([400, 404, 429, 503])(
+    "surfaces native chat HTTP %s without retrying statelessly",
+    async (status) => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(exists())
+        .mockResolvedValueOnce(new Response("Chat rejected", { status }));
+      expect(await chat()).toEqual([
+        { type: "error", errorText: "Events stream failed: Chat rejected", status },
+      ]);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[1][0]).toBe(chatUrl);
+    },
+  );
+});
 
-    const events = await readSseEvents(stream);
+describe("native SSE translation", () => {
+  it("preserves UI text ids and does not duplicate assistant.completed or finish on done", async () => {
+    mockStream(
+      frame("run.started") +
+        frame("message.started") +
+        frame("assistant.delta", { delta: "Hello" }) +
+        frame("assistant.delta", { delta: " world" }) +
+        frame("assistant.completed", { content: "Hello world" }) +
+        frame("run.completed") +
+        frame("done"),
+    );
+    const events = await chat();
+    const id = events[0].id;
     expect(events).toEqual([
-      {
-        type: "error",
-        errorText: "HTTP 429: The usage limit has been reached",
+      { type: "text-start", id },
+      { type: "text-delta", id, delta: "Hello" },
+      { type: "text-delta", id, delta: " world" },
+      { type: "text-end", id },
+      { type: "finish" },
+    ]);
+    expect(id).toEqual(expect.any(String));
+  });
+
+  it("renders a final-only response", async () => {
+    mockStream(
+      frame("assistant.completed", { content: "Final only" }) +
+        frame("run.completed") +
+        frame("done"),
+    );
+    expect(answer(await chat())).toBe("Final only");
+  });
+
+  it("parses byte-split UTF-8, event/data lines, CRLF, comments and multiline data", async () => {
+    const bytes = new TextEncoder().encode(
+      ': keepalive\r\n\r\nevent: assistant.delta\r\ndata: {\r\ndata: "delta":"héllo 🦦"}\r\n\r\n' +
+        frame("run.completed") +
+        frame("done"),
+    );
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) {
+          controller.enqueue(new Uint8Array([byte]));
+        }
+        controller.close();
       },
+    });
+    mockStream(body);
+    const events = await chat();
+    expect(answer(events)).toBe("héllo 🦦");
+    expect(events.at(-1)).toEqual({ type: "finish" });
+  });
+
+  it("maps native reasoning and tool payloads while closing UI blocks", async () => {
+    mockStream(
+      frame("tool.progress", { tool_name: "_thinking", delta: "Thinking" }) +
+        frame("tool.started", { tool_name: "search", preview: "query", args: { q: "test" } }) +
+        frame("tool.completed", { tool_name: "search" }) +
+        frame("assistant.delta", { delta: "Found" }) +
+        frame("tool.started", { tool_name: "read", preview: "file" }) +
+        frame("tool.failed", { tool_name: "read", preview: "Permission denied" }) +
+        frame("tool.progress", { tool_name: "_thinking", delta: "Reconsidering" }) +
+        frame("assistant.delta", { delta: "Answer" }) +
+        frame("run.completed") +
+        frame("done"),
+    );
+    const events = await chat();
+    expect(events.map((e) => e.type)).toEqual([
+      "reasoning-start",
+      "reasoning-delta",
+      "reasoning-end",
+      "tool-input-start",
+      "tool-input-available",
+      "tool-output-available",
+      "text-start",
+      "text-delta",
+      "text-end",
+      "tool-input-start",
+      "tool-input-available",
+      "tool-output-error",
+      "reasoning-start",
+      "reasoning-delta",
+      "reasoning-end",
+      "text-start",
+      "text-delta",
+      "text-end",
+      "finish",
+    ]);
+    expect(events[1]).toMatchObject({ id: events[0].id, delta: "Thinking" });
+    expect(events[2].id).toBe(events[0].id);
+    expect(events[4]).toMatchObject({
+      toolCallId: events[3].toolCallId,
+      toolName: "search",
+      input: { q: "test" },
+    });
+    expect(events[5]).toMatchObject({ toolCallId: events[3].toolCallId, output: "Done: query" });
+    expect(events[10]).toMatchObject({ toolCallId: events[9].toolCallId, input: "file" });
+    expect(events[11]).toMatchObject({
+      toolCallId: events[9].toolCallId,
+      errorText: "Permission denied",
+    });
+  });
+
+  it("closes reasoning on completion even without text", async () => {
+    mockStream(
+      frame("tool.progress", { tool_name: "_thinking", delta: "Thinking" }) +
+        frame("run.completed") +
+        frame("done"),
+    );
+    expect((await chat()).map((e) => e.type)).toEqual([
+      "reasoning-start",
+      "reasoning-delta",
+      "reasoning-end",
+      "finish",
     ]);
   });
 
-  it("returns an SSE stream with an error event when no apiKey is provided", async () => {
-    const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as typeof fetch;
-
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_xyz",
-      message: "Hi",
-      userId: "crm-user-123",
-      config: { ...config, apiKey: null },
+  it("preserves the native root error, closes blocks and does not finish on done", async () => {
+    mockStream(
+      frame("assistant.delta", { delta: "Partial" }) +
+        frame("error", { message: "HTTP 429: The usage limit has been reached" }) +
+        frame("done"),
+    );
+    const events = await chat();
+    expect(events.map((e) => e.type)).toEqual(["text-start", "text-delta", "text-end", "error"]);
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      errorText: "HTTP 429: The usage limit has been reached",
     });
+  });
 
-    const events = await readSseEvents(stream);
+  it.each([
+    "",
+    frame("done"),
+    frame("assistant.delta", { delta: "Partial" }),
+    "event: run.completed\ndata: {}",
+  ])("does not report successful finish on a truncated stream %#", async (body) => {
+    mockStream(body);
+    const events = await chat();
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      errorText: "Hermes stream ended before run.completed",
+    });
+    expect(events.some((event) => event.type === "finish")).toBe(false);
+  });
+
+  it("surfaces malformed event JSON rather than silently losing content", async () => {
+    mockStream("event: assistant.delta\ndata: invalid\n\n" + frame("run.completed"));
+    const events = await chat();
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe("error");
+  });
+
+  it("reports a missing response body", async () => {
+    mockStream(null);
+    expect(await chat()).toEqual([{ type: "error", errorText: "No response body" }]);
+  });
+
+  it("does not fetch without an API key", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    expect(await chat({ config: { ...config, apiKey: null } })).toEqual([
+      { type: "error", errorText: "Missing Hermes API key" },
+    ]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns an SSE stream with an error event on fetch failure", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(
-      new Error("Network error"),
-    );
-
-    const stream = await createHermesChatStream({
-      sessionKey: "sess_xyz",
-      message: "Hi",
-      userId: "crm-user-123",
-      config,
-    });
-
-    const events = await readSseEvents(stream);
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("error");
-  });
-
-  it("calls the events endpoint for streaming", async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/v1/runs") && init?.method === "POST") {
-        return new Response(JSON.stringify({ run_id: "run_1", status: "started" }), { status: 202 });
-      }
-      if (url.includes("/v1/runs/run_1/events")) {
-        return new Response(
-          sseBody(
-            { event: "message.delta", delta: "Hello world!" },
-            { event: "run.completed", output: "Hello world!" },
-          ),
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
-      }
-      return new Response("", { status: 404 });
-    });
-    globalThis.fetch = fetchMock as typeof fetch;
-
-    const stream = await createHermesChatStream({
-      sessionKey: "agent:main:web:abc",
-      message: "hello",
-      userId: "crm-user-123",
-      config: { baseUrl: "http://127.0.0.1:8642", apiKey: "secret", model: "hermes-agent" },
-    });
-    const events = await readSseEvents(stream);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8642/v1/runs/run_1/events",
-      expect.objectContaining({ method: "GET" }),
-    );
-    expect(events).toEqual([
-      { type: "text-start", id: expect.any(String) },
-      { type: "text-delta", id: expect.any(String), delta: "Hello world!" },
-      { type: "text-end", id: expect.any(String) },
-      { type: "finish" },
-    ]);
+  it.each(["create", "chat"])("surfaces a network failure during %s", async (step) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    if (step === "chat") {
+      fetchSpy.mockResolvedValueOnce(created());
+    }
+    fetchSpy.mockRejectedValueOnce(new Error("Network error"));
+    expect(await chat()).toEqual([{ type: "error", errorText: "Network error" }]);
   });
 });
