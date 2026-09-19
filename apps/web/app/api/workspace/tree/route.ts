@@ -91,6 +91,17 @@ const ROOT_ONLY_HIDDEN_SYNC_OBJECTS = new Set([
   "interaction",
 ]);
 
+/** Generated directories that must never be expanded into the sidebar tree. */
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".next",
+  ".Trash",
+  "__pycache__",
+  ".cache",
+  "dist",
+]);
+
 async function loadDbObjects(): Promise<Map<string, DbObject>> {
   const objects = new Map<string, DbObject>();
   const rows = await duckdbQueryAllAsync<DbObject & { name: string }>(
@@ -167,6 +178,7 @@ async function buildTree(
   }
 
   const filtered = entries.filter((e) => {
+    if (SKIP_DIRS.has(e.name)) {return false;}
     // .object.yaml is always needed for metadata; also shown as a node when showHidden is on
     if (e.name === ".object.yaml") {return true;}
     if (e.name.startsWith(".")) {return showHidden;}

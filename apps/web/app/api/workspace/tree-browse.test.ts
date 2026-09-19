@@ -169,6 +169,43 @@ describe("Workspace Tree & Browse API", () => {
       expect(json.workspace).toBe("default");
     });
 
+    it("excludes generated directories from the workspace tree", async () => {
+      const { resolveWorkspaceRoot } = await import("@/lib/workspace");
+      vi.mocked(resolveWorkspaceRoot).mockReturnValue("/ws");
+      const { readdir: mockReaddir } = await import("node:fs/promises");
+      vi.mocked(mockReaddir).mockImplementation((dir) => {
+        if (String(dir) === "/ws") {
+          return Promise.resolve([
+            makeDirent("project", true),
+            makeDirent("notes.md", false),
+          ] as unknown as never[]);
+        }
+        if (String(dir) === "/ws/project") {
+          return Promise.resolve([
+            makeDirent("node_modules", true),
+            makeDirent("dist", true),
+            makeDirent("src", true),
+          ] as unknown as never[]);
+        }
+        if (String(dir) === "/ws/project/src") {
+          return Promise.resolve([makeDirent("index.ts", false)] as unknown as never[]);
+        }
+        throw new Error(`generated directory was traversed: ${String(dir)}`);
+      });
+
+      const { GET } = await import("./tree/route.js");
+      const res = await GET(new Request("http://localhost/api/workspace/tree?showHidden=1"));
+      const json = await res.json();
+      const project = (json.tree as Array<{
+        path: string;
+        children?: Array<{ path: string }>;
+      }>).find((node) => node.path === "project");
+
+      expect(project?.children?.map((node) => node.path)).toEqual(["project/src"]);
+      expect(mockReaddir).not.toHaveBeenCalledWith("/ws/project/node_modules", expect.anything());
+      expect(mockReaddir).not.toHaveBeenCalledWith("/ws/project/dist", expect.anything());
+    });
+
     it("includes workspaceRoot in response", async () => {
       const { resolveWorkspaceRoot } = await import("@/lib/workspace");
       vi.mocked(resolveWorkspaceRoot).mockReturnValue("/ws");
