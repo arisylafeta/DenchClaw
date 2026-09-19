@@ -178,6 +178,7 @@ describe("Workspace Tree & Browse API", () => {
           return Promise.resolve([
             makeDirent("project", true),
             makeDirent("notes.md", false),
+            makeDirent("dist", false),
           ] as unknown as never[]);
         }
         if (String(dir) === "/ws/project") {
@@ -202,6 +203,7 @@ describe("Workspace Tree & Browse API", () => {
       }>).find((node) => node.path === "project");
 
       expect(project?.children?.map((node) => node.path)).toEqual(["project/src"]);
+      expect((json.tree as Array<{ path: string }>).some((node) => node.path === "dist")).toBe(true);
       expect(mockReaddir).not.toHaveBeenCalledWith("/ws/project/node_modules", expect.anything());
       expect(mockReaddir).not.toHaveBeenCalledWith("/ws/project/dist", expect.anything());
     });
@@ -227,6 +229,7 @@ describe("Workspace Tree & Browse API", () => {
       let renderedDepth = 0;
       while (node) {
         renderedDepth += 1;
+        if (!node.children?.[0]) {expect(node.truncated).toBe(true);}
         node = node.children?.[0];
       }
       expect(renderedDepth).toBe(4);

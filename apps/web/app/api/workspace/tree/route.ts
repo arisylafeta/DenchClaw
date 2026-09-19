@@ -29,6 +29,8 @@ export type TreeNode = {
   virtual?: boolean;
   /** True when the entry is a symbolic link. */
   symlink?: boolean;
+  /** True when deeper children must be loaded through the browse API. */
+  truncated?: boolean;
   /** App manifest metadata (only for type: "app"). */
   appManifest?: {
     name: string;
@@ -182,7 +184,6 @@ async function buildTree(
   }
 
   const filtered = entries.filter((e) => {
-    if (SKIP_DIRS.has(e.name)) {return false;}
     // .object.yaml is always needed for metadata; also shown as a node when showHidden is on
     if (e.name === ".object.yaml") {return true;}
     if (e.name.startsWith(".")) {return showHidden;}
@@ -199,13 +200,18 @@ async function buildTree(
     return { entry, absPath, effectiveType };
   }));
 
-  const sorted = typedEntries.toSorted((a, b) => {
-    const dirA = a.effectiveType === "directory";
-    const dirB = b.effectiveType === "directory";
-    if (dirA && !dirB) {return -1;}
-    if (!dirA && dirB) {return 1;}
-    return a.entry.name.localeCompare(b.entry.name);
-  });
+  const sorted = typedEntries
+    .filter(
+      ({ entry, effectiveType }) =>
+        effectiveType !== "directory" || !SKIP_DIRS.has(entry.name),
+    )
+    .toSorted((a, b) => {
+      const dirA = a.effectiveType === "directory";
+      const dirB = b.effectiveType === "directory";
+      if (dirA && !dirB) {return -1;}
+      if (!dirA && dirB) {return 1;}
+      return a.entry.name.localeCompare(b.entry.name);
+    });
 
   for (const { entry, absPath, effectiveType } of sorted) {
     // .object.yaml is consumed for metadata; only show it as a visible node when revealing hidden files
@@ -245,6 +251,7 @@ async function buildTree(
       const children = depth < MAX_TREE_DEPTH
         ? await buildTree(absPath, relPath, dbObjects, showHidden, depth + 1)
         : [];
+      const truncated = depth >= MAX_TREE_DEPTH;
 
       if (objectMeta || dbObject) {
         nodes.push({
@@ -257,6 +264,7 @@ async function buildTree(
               | "table"
               | "kanban") ?? "table",
           children: children.length > 0 ? children : undefined,
+          ...(truncated && { truncated: true }),
           ...(isSymlink && { symlink: true }),
         });
       } else {
@@ -265,6 +273,7 @@ async function buildTree(
           path: relPath,
           type: "folder",
           children: children.length > 0 ? children : undefined,
+          ...(truncated && { truncated: true }),
           ...(isSymlink && { symlink: true }),
         });
       }

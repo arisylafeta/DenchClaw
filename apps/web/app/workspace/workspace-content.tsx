@@ -1415,6 +1415,22 @@ function WorkspacePageInner() {
       // Workspace-mode folders are expanded/collapsed inline in the sidebar
       // tree — don't open them in the main content panel.
       if (node.type === "folder") {
+        if (node.truncated && workspaceRoot) {
+          const absolutePath = `${workspaceRoot.replace(/\/$/, "")}/${node.path}`;
+          setBrowseDir(absolutePath);
+          dispatch({
+            type: "openContent",
+            tab: {
+              id: contentTabIdFor("browse", absolutePath, { browsePath: absolutePath }),
+              kind: "browse",
+              path: absolutePath,
+              title: node.name,
+              meta: { browsePath: absolutePath },
+              preview: true,
+            },
+          });
+          closeEntryModalIfOpen();
+        }
         return;
       }
       if (!isMobile && node.type === "object" && (node.name === "project" || node.name === "work_task")) {
