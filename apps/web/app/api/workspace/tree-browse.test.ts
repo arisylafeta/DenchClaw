@@ -206,6 +206,32 @@ describe("Workspace Tree & Browse API", () => {
       expect(mockReaddir).not.toHaveBeenCalledWith("/ws/project/dist", expect.anything());
     });
 
+    it("bounds eager workspace tree recursion", async () => {
+      const { resolveWorkspaceRoot } = await import("@/lib/workspace");
+      vi.mocked(resolveWorkspaceRoot).mockReturnValue("/ws");
+      const { readdir: mockReaddir } = await import("node:fs/promises");
+      vi.mocked(mockReaddir).mockImplementation((dir) => {
+        const path = String(dir);
+        const depth = path === "/ws" ? 0 : path.split("/").length - 2;
+        if (depth <= 3) {
+          return Promise.resolve([makeDirent(`level-${depth + 1}`, true)] as unknown as never[]);
+        }
+        throw new Error(`tree traversed beyond its depth bound: ${path}`);
+      });
+
+      const { GET } = await import("./tree/route.js");
+      const res = await GET(new Request("http://localhost/api/workspace/tree"));
+      const json = await res.json();
+
+      let node = json.tree[0];
+      let renderedDepth = 0;
+      while (node) {
+        renderedDepth += 1;
+        node = node.children?.[0];
+      }
+      expect(renderedDepth).toBe(4);
+    });
+
     it("includes workspaceRoot in response", async () => {
       const { resolveWorkspaceRoot } = await import("@/lib/workspace");
       vi.mocked(resolveWorkspaceRoot).mockReturnValue("/ws");

@@ -102,6 +102,9 @@ const SKIP_DIRS = new Set([
   "dist",
 ]);
 
+/** Keep the eager sidebar payload bounded; deeper paths use the browse API. */
+const MAX_TREE_DEPTH = 3;
+
 async function loadDbObjects(): Promise<Map<string, DbObject>> {
   const objects = new Map<string, DbObject>();
   const rows = await duckdbQueryAllAsync<DbObject & { name: string }>(
@@ -167,6 +170,7 @@ async function buildTree(
   relativeBase: string,
   dbObjects: Map<string, DbObject>,
   showHidden = false,
+  depth = 0,
 ): Promise<TreeNode[]> {
   const nodes: TreeNode[] = [];
 
@@ -217,7 +221,9 @@ async function buildTree(
       if (entry.name.endsWith(".dench.app")) {
         const manifest = await readAppManifest(absPath);
         const displayName = manifest?.name || entry.name.replace(/\.dench\.app$/, "");
-        const children = showHidden ? await buildTree(absPath, relPath, dbObjects, showHidden) : undefined;
+        const children = showHidden && depth < MAX_TREE_DEPTH
+          ? await buildTree(absPath, relPath, dbObjects, showHidden, depth + 1)
+          : undefined;
         nodes.push({
           name: displayName,
           path: relPath,
@@ -236,7 +242,9 @@ async function buildTree(
       // alone, or ordinary folders like `marketing/influencers` duplicate the
       // `influencers` table in CRM navigation.
       const dbObject = relativeBase === "" ? dbObjects.get(entry.name) : undefined;
-      const children = await buildTree(absPath, relPath, dbObjects, showHidden);
+      const children = depth < MAX_TREE_DEPTH
+        ? await buildTree(absPath, relPath, dbObjects, showHidden, depth + 1)
+        : [];
 
       if (objectMeta || dbObject) {
         nodes.push({
