@@ -79,4 +79,33 @@ describe("getProposalData", () => {
     expect(insert).not.toHaveBeenCalled();
     expect(sendRecyclerOpportunityInvitationEmail).not.toHaveBeenCalled();
   });
+
+  it("loads invitation location from the consolidated listing address", async () => {
+    const listingResult = {
+      data: { id: "listing-1", title: "Battery lot", seo_slug: "battery-lot", listing_specs: null },
+      error: null,
+    };
+    const listing = {
+      select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => listingResult),
+    };
+    listing.select.mockReturnValue(listing);
+    listing.eq.mockReturnValue(listing);
+
+    const eligible = query([{ id: "recycler-1" }]);
+    const existing = query([{ id: "link-1", recycler_account_id: "recycler-1", state: "claimed" }]);
+    getSupabaseAdminClient.mockReturnValue({
+      from: vi.fn((table: string) => ({
+        listings: listing,
+        accounts: eligible,
+        recycler_opportunity_links: existing,
+      })[table]),
+    });
+
+    const { createInvitations } = await import("./actions");
+    await createInvitations("listing-1", ["recycler-1"]);
+
+    const selectedColumns = listing.select.mock.calls[0]?.[0] as string;
+    expect(selectedColumns).toContain("location_address");
+    expect(selectedColumns).not.toContain("location_country");
+  });
 });
