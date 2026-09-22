@@ -85,6 +85,7 @@ export type DenchAppManifest = {
 export type PlatformAdminSection =
   | "proposals"
   | "listings"
+  | "stock"
   | "accounts"
   | "battery-review"
   | "messages"

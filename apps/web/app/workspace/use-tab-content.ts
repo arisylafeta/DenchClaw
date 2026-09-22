@@ -315,6 +315,7 @@ function resolveDerivedContent(
       if (
         section === "proposals" ||
         section === "listings" ||
+        section === "stock" ||
         section === "accounts" ||
         section === "battery-review" ||
         section === "messages" ||

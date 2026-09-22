@@ -1311,6 +1311,7 @@ function WorkspacePageInner() {
         | "crm-calendar"
         | "platform-proposals"
         | "platform-listings"
+        | "platform-stock"
         | "platform-accounts"
         | "platform-battery-review"
         | "platform-messages"
@@ -1344,6 +1345,7 @@ function WorkspacePageInner() {
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-listings": { path: "~platform-admin/listings", name: "Listings" },
+        "platform-stock": { path: "~platform-admin/stock", name: "Stock" },
         "platform-accounts": { path: "~platform-admin/accounts", name: "Accounts" },
         "platform-battery-review": { path: "~platform-admin/battery-review", name: "Battery review" },
         "platform-messages": { path: "~platform-admin/messages", name: "Message monitoring" },
@@ -2343,7 +2345,7 @@ function WorkspacePageInner() {
               : null
     ),
     activePlatformTarget: activeContentTab?.kind === "platform-admin"
-      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "listings" | "accounts" | "battery-review" | "messages" | "payout-reviews"
+      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "listings" | "stock" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews"
       : null,
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
