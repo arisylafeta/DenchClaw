@@ -711,6 +711,22 @@ create table if not exists crm_stock_items (
   in_august boolean not null default false,
   in_september_aged boolean not null default false,
   listing_id text,
+  stock_status text not null default 'unverified',
+  chemistry text,
+  capacity_kwh numeric,
+  voltage_v numeric,
+  weight_kg numeric,
+  scope text,
+  part_number_status text,
+  condition_detail text,
+  soh_percent numeric,
+  tested boolean,
+  completeness text,
+  photo_urls text[] not null default '{}',
+  evidence jsonb not null default '{}',
+  supplier_confirmed boolean not null default false,
+  supplier_confirmed_at timestamptz,
+  commercial_bucket text,
   enrich_status text not null default 'pending',
   enrich_attempts integer not null default 0,
   enriched_at timestamptz,
@@ -718,6 +734,14 @@ create table if not exists crm_stock_items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint crm_stock_items_supplier_stock_uidx unique (supplier, stock_id),
+  constraint crm_stock_items_stock_status_check check (
+    stock_status in (
+      'unverified', 'available', 'listed', 'contacted',
+      'in_deal', 'sold', 'unavailable'
+    )
+  ),
+  constraint crm_stock_items_soh_percent_check
+    check (soh_percent is null or (soh_percent >= 0 and soh_percent <= 100)),
   constraint crm_stock_items_enrich_status_check
     check (enrich_status in ('pending', 'enriched', 'failed'))
 );
@@ -728,6 +752,12 @@ create index if not exists crm_stock_items_make_model_idx
   on crm_stock_items(make, model);
 create index if not exists crm_stock_items_part_number_idx
   on crm_stock_items(part_number);
+create index if not exists crm_stock_items_stock_status_idx
+  on crm_stock_items(stock_status);
+create index if not exists crm_stock_items_chemistry_idx
+  on crm_stock_items(chemistry);
+create index if not exists crm_stock_items_commercial_bucket_idx
+  on crm_stock_items(commercial_bucket);
 
 create table if not exists crm_stock_enrich_queue (
   stock_item_id text primary key references crm_stock_items(id) on delete cascade,
