@@ -23,4 +23,14 @@ describe("crm postgres schema", () => {
     expect(sql).toContain("automation_loop_runs.loop_id");
     expect(sql).not.toContain("strength_score");
   });
+
+  it("applies the stock object and enrichment trigger migrations", () => {
+    const runner = readFileSync(
+      join(process.cwd(), "scripts/apply-postgres-schema.ts"),
+      "utf-8",
+    );
+    expect(runner).toContain('"003_stock_items.sql"');
+    expect(runner).toContain('"004_stock_commercial_fields.sql"');
+    expect(runner).toContain('"005_stock_enrichment_state.sql"');
+  });
 });

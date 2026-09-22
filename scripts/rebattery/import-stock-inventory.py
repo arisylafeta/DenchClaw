@@ -42,10 +42,20 @@ on conflict (supplier, stock_id) do update set
   aged_12m = crm_stock_items.aged_12m or excluded.aged_12m,
   in_august = crm_stock_items.in_august or excluded.in_august,
   in_september_aged = crm_stock_items.in_september_aged or excluded.in_september_aged,
-  chemistry = coalesce(crm_stock_items.chemistry, excluded.chemistry),
-  scope = coalesce(crm_stock_items.scope, excluded.scope),
-  commercial_bucket = coalesce(crm_stock_items.commercial_bucket, excluded.commercial_bucket),
-  evidence = coalesce(crm_stock_items.evidence, '{}'::jsonb) || excluded.evidence,
+  chemistry = case when crm_stock_items.enrich_status = 'enriched'
+    then crm_stock_items.chemistry else coalesce(excluded.chemistry, crm_stock_items.chemistry) end,
+  scope = case when crm_stock_items.enrich_status = 'enriched'
+    then crm_stock_items.scope else coalesce(excluded.scope, crm_stock_items.scope) end,
+  commercial_bucket = case when crm_stock_items.enrich_status = 'enriched'
+    then crm_stock_items.commercial_bucket else coalesce(excluded.commercial_bucket, crm_stock_items.commercial_bucket) end,
+  evidence = jsonb_set(
+    coalesce(crm_stock_items.evidence, '{}'::jsonb) - array[
+      'commercial_action', 'scope_decision', 'match_basis',
+      'prior_nmc_screen', 'lfp_screen', 'chemistry_basis',
+      'next_discriminator', 'source_row'
+    ],
+    '{reb330_import}', excluded.evidence->'reb330_import', true
+  ),
   attributes = coalesce(crm_stock_items.attributes, '{}'::jsonb) || excluded.attributes,
   updated_at = now()
 """
@@ -80,7 +90,7 @@ def row_values(row: dict[str, str]) -> tuple[object, ...]:
     stock_id = text(row.get("stock_id"))
     if not supplier or not stock_id:
         raise ValueError("Every row requires supplier and stock_id")
-    evidence = {
+    import_evidence = {
         key: value
         for key in (
             "commercial_action", "scope_decision", "match_basis",
@@ -89,12 +99,14 @@ def row_values(row: dict[str, str]) -> tuple[object, ...]:
         )
         if (value := text(row.get(key))) is not None
     }
+    evidence = {"reb330_import": import_evidence}
     attributes = {"import_source": "REB-330 commercial handoff"}
+    quantity = number(row.get("quantity"))
     return (
         stable_id(supplier, stock_id), supplier, stock_id, "unverified",
         text(row.get("make")), text(row.get("model")), text(row.get("model_detail")),
         text(row.get("year")), text(row.get("powertrain")), text(row.get("part_number")),
-        text(row.get("description")), number(row.get("quantity")) or Decimal(1),
+        text(row.get("description")), Decimal(1) if quantity is None else quantity,
         number(row.get("price")), text(row.get("location")), text(row.get("condition")),
         text(row.get("comments")), truth(row.get("aged_12m")), truth(row.get("in_august")),
         truth(row.get("in_september_aged")), text(row.get("chemistry_labels")),

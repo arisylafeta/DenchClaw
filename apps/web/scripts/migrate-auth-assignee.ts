@@ -8,6 +8,7 @@ async function main() {
     "002_user_data_isolation.sql",
     "003_stock_items.sql",
     "004_stock_commercial_fields.sql",
+    "005_stock_enrichment_state.sql",
   ]) {
     const sql = readFileSync(
       join(import.meta.dirname, "../lib/crm-postgres/migrations", migration),
@@ -65,9 +66,3 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.message : "migration failed");
   process.exit(1);
 });
-@@
-     "001_auth_assignee.sql",
-     "002_user_data_isolation.sql",
-     "003_stock_items.sql",
-+    "004_stock_commercial_fields.sql",
-   ]) {
