@@ -6,6 +6,7 @@ async function main() {
   for (const migration of [
     "001_auth_assignee.sql",
     "002_user_data_isolation.sql",
+    "003_stock_items.sql",
   ]) {
     const sql = readFileSync(
       join(import.meta.dirname, "../lib/crm-postgres/migrations", migration),
