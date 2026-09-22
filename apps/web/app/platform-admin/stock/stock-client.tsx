@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUpDown, ChevronRight, Loader2, Search } from "lucide-react";
 
@@ -147,6 +147,7 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailPending, setDetailPending] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const detailRequestRef = useRef(0);
 
   useEffect(() => setFilters(initialPage.filters), [initialPage.filters]);
 
@@ -158,18 +159,21 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
   };
 
   const openDetails = async (id: string) => {
+    const request = ++detailRequestRef.current;
     setSelectedId(id);
     setDetail(null);
     setDetailError(null);
     setDetailPending(true);
     try {
       const result = await getStockDetails(id);
+      if (request !== detailRequestRef.current) {return;}
       if (!result) {setDetailError("This stock item is no longer available.");}
       else {setDetail(result);}
     } catch {
+      if (request !== detailRequestRef.current) {return;}
       setDetailError("The protected stock details could not be loaded.");
     } finally {
-      setDetailPending(false);
+      if (request === detailRequestRef.current) {setDetailPending(false);}
     }
   };
 
@@ -261,11 +265,11 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
               </Table>
             </div>
           )}
-          <div className="border-t border-[var(--color-border)] px-4 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="stock item" onPageChange={(page) => navigate(filters, page)} /></div>
+          <div className="border-t border-[var(--color-border)] px-4 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="stock item" onPageChange={(page) => navigate(initialPage.filters, page)} /></div>
         </section>
       </div>
 
-      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => { if (!open) { setSelectedId(null); setDetail(null); } }}>
+      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => { if (!open) { detailRequestRef.current += 1; setSelectedId(null); setDetail(null); setDetailPending(false); } }}>
         <SheetContent side="right" className="w-full max-w-none gap-0 p-0 sm:w-[42rem] sm:max-w-[42rem] lg:w-[56rem] lg:max-w-[56rem]">
           <SheetHeader className="border-b border-[var(--color-border)] pr-14">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Protected detail</p>

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StockClient } from "./stock-client";
@@ -101,5 +101,70 @@ describe("StockClient", () => {
     expect(document.querySelector('[data-slot="sheet-content"]')).toHaveClass("platform-admin-sheet-content");
     expect(document.querySelector('[data-slot="sheet-content"]')).toHaveAttribute("data-sheet-side", "right");
     expect(screen.getAllByText("22 Sept 2026, 17:32")).toHaveLength(2);
+  });
+
+  it("paginates with applied filters instead of unsaved filter edits", async () => {
+    render(
+      <StockClient
+        initialPage={{ ...initialPage, totalCount: 100, allCount: 100, totalPages: 2 }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Search stock"), {
+      target: { value: "unsaved search" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith("/platform-admin/stock?page=2"),
+    );
+  });
+
+  it("ignores a stale detail response after another row is selected", async () => {
+    let resolveFirst: (value: unknown) => void = () => undefined;
+    const firstRequest = new Promise((resolve) => { resolveFirst = resolve; });
+    const secondRow = {
+      ...initialPage.rows[0],
+      id: "stock-abcdef1234567890abcdef12",
+      stockId: "synetiq:456",
+    };
+    const detail = (row: typeof initialPage.rows[number], description: string) => ({
+      ...row,
+      modelDetail: null,
+      powertrain: null,
+      description,
+      price: null,
+      condition: null,
+      comments: null,
+      voltageV: null,
+      weightKg: null,
+      partNumberStatus: null,
+      conditionDetail: null,
+      sohPercent: null,
+      tested: null,
+      completeness: null,
+      photoUrls: [],
+      evidence: {},
+      attributes: {},
+      supplierConfirmed: false,
+      supplierConfirmedAt: null,
+      aged12m: false,
+      inAugust: true,
+      inSeptemberAged: false,
+      listingId: null,
+      enrichedAt: null,
+    });
+    getStockDetails.mockImplementation((id: string) =>
+      id === initialPage.rows[0].id
+        ? firstRequest
+        : Promise.resolve(detail(secondRow, "Second row detail")),
+    );
+
+    render(<StockClient initialPage={{ ...initialPage, rows: [initialPage.rows[0], secondRow] }} />);
+    fireEvent.click(screen.getByRole("row", { name: /synetiq:123/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("row", { name: /synetiq:456/i }));
+    await waitFor(() => expect(screen.getByText("Second row detail")).toBeInTheDocument());
+    await act(async () => resolveFirst(detail(initialPage.rows[0], "Stale first detail")));
+    expect(screen.queryByText("Stale first detail")).toBeNull();
+    expect(screen.getByText("Second row detail")).toBeInTheDocument();
   });
 });

@@ -116,7 +116,7 @@ async function distinctValues(column: string): Promise<string[]> {
 export async function getStockPage(input: StockPageInput = {}): Promise<StockPage> {
   noStore();
   const filters = normalizeStockFilters(input);
-  const page = safePage(input.page);
+  const requestedPage = safePage(input.page);
   const clauses = ["true"];
   const params: unknown[] = [];
   const add = (sql: string, value: unknown) => {
@@ -141,19 +141,8 @@ export async function getStockPage(input: StockPageInput = {}): Promise<StockPag
   }
 
   const where = clauses.join(" and ");
-  const offset = (page - 1) * PAGE_SIZE;
-  const rowParams = [...params, PAGE_SIZE, offset];
-  const [rows, countRows, allRows, suppliers, chemistries, scopes, buckets] =
+  const [countRows, allRows, suppliers, chemistries, scopes, buckets] =
     await Promise.all([
-      queryPg<StockDbRow>(
-        `select id, stock_id, supplier, make, model, year, part_number, quantity,
-          location, chemistry, capacity_kwh, scope, stock_status,
-          commercial_bucket, enrich_status, created_at, updated_at
-         from crm_stock_items where ${where}
-         order by ${SORT_SQL[filters.sort]}
-         limit $${params.length + 1} offset $${params.length + 2}`,
-        rowParams,
-      ),
       queryPg<{ count: number }>(
         `select count(*)::int as count from crm_stock_items where ${where}`,
         params,
@@ -168,6 +157,18 @@ export async function getStockPage(input: StockPageInput = {}): Promise<StockPag
     ]);
 
   const totalCount = Number(countRows[0]?.count ?? 0);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * PAGE_SIZE;
+  const rows = await queryPg<StockDbRow>(
+    `select id, stock_id, supplier, make, model, year, part_number, quantity,
+      location, chemistry, capacity_kwh, scope, stock_status,
+      commercial_bucket, enrich_status, created_at, updated_at
+     from crm_stock_items where ${where}
+     order by ${SORT_SQL[filters.sort]}
+     limit $${params.length + 1} offset $${params.length + 2}`,
+    [...params, PAGE_SIZE, offset],
+  );
   const options: StockFilterOptions = {
     suppliers,
     chemistries,
@@ -180,7 +181,7 @@ export async function getStockPage(input: StockPageInput = {}): Promise<StockPag
     allCount: Number(allRows[0]?.count ?? 0),
     page,
     pageSize: PAGE_SIZE,
-    totalPages: Math.max(1, Math.ceil(totalCount / PAGE_SIZE)),
+    totalPages,
     filters,
     options,
     snapshotAt: new Date().toISOString(),

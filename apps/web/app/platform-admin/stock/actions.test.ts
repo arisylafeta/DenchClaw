@@ -52,9 +52,10 @@ describe("stock reads", () => {
       scope: "complete_pack_candidate",
       commercialBucket: "LFP_confirmation_required",
       sort: "uploaded_desc",
+      page: 999,
     });
 
-    expect(page).toMatchObject({ totalCount: 1, allCount: 1028, pageSize: 50 });
+    expect(page).toMatchObject({ totalCount: 1, allCount: 1028, pageSize: 50, page: 1 });
     expect(page.rows[0]).toMatchObject({
       stockId: "synetiq:123",
       supplier: "Synetiq",
