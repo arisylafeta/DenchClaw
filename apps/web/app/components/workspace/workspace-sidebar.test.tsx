@@ -19,6 +19,14 @@ const objects = [
 ];
 
 describe("workspace sidebar navigation", () => {
+  it("opens Campaigns from the fixed CRM navigation even when hidden objects are absent", () => {
+    const onNavigate = vi.fn();
+    render(<WorkspaceSidebar onNavigate={onNavigate} customCrmObjects={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
+    expect(onNavigate).toHaveBeenCalledWith("crm-campaigns");
+  });
+
   it("categorizes workspace objects without changing their order", () => {
     expect(categorizeSidebarObjects(objects)).toEqual({
       crm: [objects[3]],

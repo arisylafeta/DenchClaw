@@ -120,6 +120,7 @@ type WorkspaceSidebarProps = {
       | "cron"
       | "crm-people"
       | "crm-companies"
+      | "crm-campaigns"
       | "crm-inbox"
       | "crm-calendar"
       | "platform-proposals"
@@ -130,7 +131,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "people" | "companies" | "inbox" | "calendar" | null;
+  activeCrmTarget?: "people" | "companies" | "campaigns" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -384,6 +385,17 @@ export function WorkspaceSidebar({
 			),
 		},
 		{
+			id: "crm-campaigns" as const,
+			label: "Campaigns",
+			target: "campaigns" as const,
+			icon: (
+				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+					<path d="m3 11 13-5v12L3 13z" />
+					<path d="M7 14v5h3l1-4M19 9a4 4 0 0 1 0 6" />
+				</svg>
+			),
+		},
+		{
 			id: "crm-inbox" as const,
 			label: "Inbox",
 			target: "inbox" as const,
@@ -429,7 +441,7 @@ export function WorkspaceSidebar({
 		},
 	];
 
-	const objectGroups = categorizeSidebarObjects(customCrmObjects);
+	const objectGroups = categorizeSidebarObjects(customCrmObjects?.filter((object) => object.name !== "campaign"));
 
 	const renderCompactObject = (object: CustomCrmObject) => {
 		const active = activeCrmObjectName === object.name;
