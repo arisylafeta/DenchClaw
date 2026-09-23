@@ -602,7 +602,7 @@ create index if not exists idx_crm_commercial_opportunities_deadline on crm_comm
 create table if not exists campaigns (
   id text primary key,
   campaign_name text not null,
-  auction_slug text not null unique,
+  auction_slug text,
   type text not null default 'auction_invite',
   channel text not null default 'email-postmark',
   audience text,
@@ -613,8 +613,8 @@ create table if not exists campaigns (
   audience_size integer not null default 0,
   invites_sent integer not null default 0,
   emails_delivered integer not null default 0,
-  emails_opened integer not null default 0,
-  emails_clicked integer not null default 0,
+  emails_opened integer default 0,
+  emails_clicked integer default 0,
   emails_bounced integer not null default 0,
   opted_out integer not null default 0,
   invitees_viewed integer not null default 0,
@@ -625,6 +625,17 @@ create table if not exists campaigns (
   crm_person_coverage integer not null default 0,
   metrics_refreshed_at timestamptz not null default now(),
   notes text,
+  objective text,
+  success_measure text,
+  message_version text,
+  stock_snapshot_ref text,
+  sender_identity text,
+  reply_owner text,
+  reply_mailbox text,
+  approved_manifest_sha256 text,
+  approved_by text,
+  approved_at timestamptz,
+  reviewed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -637,3 +648,29 @@ create trigger trg_campaigns_set_updated_at
 
 create index if not exists campaigns_status_idx on campaigns (status);
 create index if not exists campaigns_launched_at_idx on campaigns (launched_at desc nulls last);
+create index if not exists campaigns_auction_slug_idx on campaigns (auction_slug) where auction_slug is not null;
+
+-- Campaign send ledger: one frozen address per person per campaign.
+create table if not exists crm_campaign_sends (
+  id text primary key,
+  campaign_id text not null references campaigns(id) on delete restrict,
+  person_id text not null references crm_people(id) on delete restrict,
+  company_id text references crm_companies(id) on delete set null,
+  listing_id text not null,
+  auction_url text not null,
+  recipient_email text not null,
+  provider_message_id text unique,
+  state text not null default 'frozen' check (state in ('frozen', 'sending', 'unknown', 'accepted', 'failed')),
+  claimed_at timestamptz,
+  accepted_at timestamptz,
+  delivered_at timestamptz,
+  bounced_at timestamptz,
+  provider_opened_at timestamptz,
+  provider_link_clicked_at timestamptz,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (campaign_id, person_id),
+  unique (campaign_id, recipient_email)
+);
+create index if not exists crm_campaign_sends_person_listing_idx
+  on crm_campaign_sends (person_id, listing_id, accepted_at desc);

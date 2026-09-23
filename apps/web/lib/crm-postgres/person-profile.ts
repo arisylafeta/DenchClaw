@@ -52,6 +52,20 @@ type InteractionSummaryRow = {
   last_inbound_at: string | Date | null;
 };
 
+type CampaignSendRow = {
+  campaign_id: string;
+  campaign_name: string;
+  listing_id: string;
+  recipient_email: string;
+  state: string;
+  accepted_at: string | Date | null;
+  delivered_at: string | Date | null;
+  bounced_at: string | Date | null;
+  provider_opened_at: string | Date | null;
+  provider_link_clicked_at: string | Date | null;
+  pitch_count: number | string;
+};
+
 export type PostgresPersonProfile = {
   person: {
     id: string;
@@ -71,6 +85,14 @@ export type PostgresPersonProfile = {
   derived_website: string | null;
   threads: ThreadRow[];
   events: EventRow[];
+  campaigns: Array<Omit<CampaignSendRow, "pitch_count" | "accepted_at" | "delivered_at" | "bounced_at" | "provider_opened_at" | "provider_link_clicked_at"> & {
+    pitch_count: number;
+    accepted_at: string | null;
+    delivered_at: string | null;
+    bounced_at: string | null;
+    provider_opened_at: string | null;
+    provider_link_clicked_at: string | null;
+  }>;
   interactions_summary: {
     email_count: number;
     meeting_count: number;
@@ -219,6 +241,19 @@ export async function getPostgresPersonProfile(
   `, [person.id]);
   const summary = summaryRows[0];
 
+  const campaignTable = await queryPg<{ available: boolean }>(
+    "select to_regclass('crm_campaign_sends') is not null as available",
+  );
+  const campaignRows = campaignTable[0]?.available ? await queryPg<CampaignSendRow>(`
+    select s.campaign_id, c.campaign_name, s.listing_id, s.recipient_email,
+           s.state, s.accepted_at, s.delivered_at, s.bounced_at,
+           s.provider_opened_at, s.provider_link_clicked_at,
+           count(*) filter (where s.accepted_at is not null) over (partition by s.person_id, s.listing_id) as pitch_count
+      from crm_campaign_sends s join campaigns c on c.id = s.campaign_id
+     where s.person_id = $1
+     order by s.created_at desc limit 100
+  `, [person.id]) : [];
+
   return {
     person,
     company: company
@@ -233,6 +268,15 @@ export async function getPostgresPersonProfile(
       ...row,
       start_at: iso(row.start_at),
       end_at: iso(row.end_at),
+    })),
+    campaigns: campaignRows.map((row) => ({
+      ...row,
+      pitch_count: Number(row.pitch_count),
+      accepted_at: iso(row.accepted_at),
+      delivered_at: iso(row.delivered_at),
+      bounced_at: iso(row.bounced_at),
+      provider_opened_at: iso(row.provider_opened_at),
+      provider_link_clicked_at: iso(row.provider_link_clicked_at),
     })),
     interactions_summary: {
       email_count: summary?.email_count ? Number(summary.email_count) : 0,
