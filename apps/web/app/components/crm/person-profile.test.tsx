@@ -129,4 +129,23 @@ describe("PersonProfile tab reset on entry change", () => {
     });
     expect(getActiveTabLabel()).toBe("Emails");
   });
+
+  it("shows the per-listing pitch count without treating email clicks as site visits", async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      ...buildPersonResponse("alice", "Person alice"),
+      campaigns: [{
+        campaign_id: "campaign-1", campaign_name: "Auction pilot", listing_id: "listing-1",
+        recipient_email: "alice@example.com", state: "accepted", pitch_count: 2,
+        accepted_at: "2026-09-23T10:00:00Z", delivered_at: "2026-09-23T10:00:10Z",
+        bounced_at: null, provider_opened_at: null,
+        provider_link_clicked_at: "2026-09-23T10:02:00Z",
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const user = userEvent.setup();
+    render(<PersonProfile personId="alice" />);
+    await screen.findByText("Person alice");
+    await user.click(screen.getByRole("button", { name: /Campaigns/ }));
+    expect(screen.getByText("Listing listing-1 · 2 recorded pitches")).toBeInTheDocument();
+    expect(screen.getByText("Email link clicked (site visit unverified)")).toBeInTheDocument();
+  });
 });

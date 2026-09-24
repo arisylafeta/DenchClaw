@@ -71,24 +71,38 @@ type PersonResponse = {
     last_outbound_at: string | null;
     last_inbound_at: string | null;
   };
+  campaigns?: Array<{
+    campaign_id: string;
+    campaign_name: string;
+    listing_id: string;
+    recipient_email: string;
+    state: string;
+    pitch_count: number;
+    accepted_at: string | null;
+    delivered_at: string | null;
+    bounced_at: string | null;
+    provider_opened_at: string | null;
+    provider_link_clicked_at: string | null;
+  }>;
 };
 
 // ---------------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------------
 
-export type PersonProfileTab = "overview" | "emails" | "calendar" | "activity" | "notes";
+export type PersonProfileTab = "overview" | "emails" | "calendar" | "activity" | "campaigns" | "notes";
 
 const TABS: ReadonlyArray<{ id: PersonProfileTab; label: string; getCount?: (data: PersonResponse) => number | null }> = [
   { id: "overview", label: "Overview" },
   { id: "emails", label: "Emails", getCount: (d) => d.threads.length },
   { id: "calendar", label: "Meetings", getCount: (d) => d.events.length },
   { id: "activity", label: "Activity", getCount: (d) => d.interactions_summary.total },
+  { id: "campaigns", label: "Campaigns", getCount: (d) => d.campaigns?.length ?? 0 },
   { id: "notes", label: "Notes" },
 ];
 
 function isPersonProfileTab(value: string | undefined): value is PersonProfileTab {
-  return value === "overview" || value === "emails" || value === "calendar" || value === "activity" || value === "notes";
+  return value === "overview" || value === "emails" || value === "calendar" || value === "activity" || value === "campaigns" || value === "notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +297,21 @@ export function PersonProfile({
               onOpenPerson={onOpenPerson}
               onOpenCompany={onOpenCompany}
             />
+          )}
+          {tab === "campaigns" && (
+            <section aria-label="Campaign pitches" className="space-y-3">
+              {(data.campaigns ?? []).length === 0 ? <p>No campaign pitches recorded.</p> :
+                data.campaigns!.map((send) => (
+                  <div key={send.campaign_id} className="rounded-lg border p-4" style={{ borderColor: "var(--color-border)" }}>
+                    <div className="font-medium">{send.campaign_name}</div>
+                    <div className="text-sm">Listing {send.listing_id} · {send.pitch_count} recorded pitch{send.pitch_count === 1 ? "" : "es"}</div>
+                    <div className="text-sm">{send.accepted_at ? `Postmark accepted ${send.accepted_at}` : send.state}</div>
+                    <div className="text-sm">{send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : "Delivery unconfirmed"}</div>
+                    {send.provider_opened_at && <div className="text-sm">Provider open recorded</div>}
+                    {send.provider_link_clicked_at && <div className="text-sm">Email link clicked (site visit unverified)</div>}
+                  </div>
+                ))}
+            </section>
           )}
           {tab === "notes" && <NotesTab data={data} onSave={handleSaveNotes} />}
         </div>
