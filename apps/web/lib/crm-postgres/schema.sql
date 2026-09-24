@@ -594,11 +594,8 @@ create index if not exists idx_crm_commercial_opportunities_type_status on crm_c
 create index if not exists idx_crm_commercial_opportunities_source on crm_commercial_opportunities (source_system, source_id) where source_id is not null;
 create index if not exists idx_crm_commercial_opportunities_deadline on crm_commercial_opportunities (deadline_at) where status = 'open' and deadline_at is not null;
 
--- Campaign metrics snapshot (one row per auction/campaign).
--- Aggregate metrics filled from the rebattery-platform `auction.invites` /
--- `auction.emails` / `auction.questions` tables after each campaign.
--- Read-only CRM object: registered as crm_objects(name='campaign') + crm_fields
--- in the live database (decorated here for versioning).
+-- Campaign metrics snapshot. The send and link ledgers below record frozen
+-- recipients and per-CTA Postmark observations for supply updates.
 create table if not exists campaigns (
   id text primary key,
   campaign_name text not null,
@@ -674,3 +671,16 @@ create table if not exists crm_campaign_sends (
 );
 create index if not exists crm_campaign_sends_person_listing_idx
   on crm_campaign_sends (person_id, listing_id, accepted_at desc);
+
+create table if not exists crm_campaign_send_links (
+  id text primary key,
+  send_id text not null references crm_campaign_sends(id) on delete restrict,
+  cta_key text not null,
+  destination_url text not null,
+  listing_id text,
+  first_clicked_at timestamptz,
+  unique (send_id, cta_key),
+  unique (send_id, destination_url)
+);
+create index if not exists crm_campaign_send_links_listing_idx
+  on crm_campaign_send_links (listing_id, send_id) where listing_id is not null;

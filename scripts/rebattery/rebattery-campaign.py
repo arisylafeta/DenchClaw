@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -41,6 +42,31 @@ def load_manifest(path):
         raise ValueError("auction_url must be a public HTTPS auction detail URL")
     if manifest["auction_url"] not in manifest["html"] or manifest["auction_url"] not in manifest["text"]:
         raise ValueError("The approved HTML and text must both link to this auction")
+    links = manifest.get("links")
+    if not isinstance(links, list) or not links:
+        raise ValueError("Provide the campaign's tracked CTA links")
+    keys, urls = set(), set()
+    for link in links:
+        if not isinstance(link, dict) or not isinstance(link.get("key"), str) or not re.fullmatch(r"[a-z0-9_-]{1,40}", link["key"]):
+            raise ValueError("Each CTA requires a stable lowercase key")
+        target = link.get("url")
+        url = urllib.parse.urlparse(target) if isinstance(target, str) else None
+        if not url or url.scheme != "https" or url.hostname not in ("www.rebattery.io", "form.typeform.com"):
+            raise ValueError("CTA URLs must use an approved HTTPS destination")
+        if link.get("listing_id") is not None and (not isinstance(link["listing_id"], str) or not link["listing_id"].strip()):
+            raise ValueError("CTA listing_id must be a nonempty string when provided")
+        if link["key"] in keys or target in urls or target not in manifest["html"] or target not in manifest["text"]:
+            raise ValueError("CTA keys and URLs must be unique and present in HTML and text")
+        keys.add(link["key"])
+        urls.add(target)
+    if manifest["auction_url"] not in urls:
+        raise ValueError("Primary auction URL must be a tracked CTA")
+    html_urls = set(re.findall(r'''href=["'](https://[^"']+)''', manifest["html"]))
+    text_urls = set(re.findall(r"https://[^\s<>]+", manifest["text"]))
+    if html_urls != urls or text_urls != urls:
+        raise ValueError("Every HTML and text CTA URL must have exactly one tracking entry")
+    if "{{{ pm:unsubscribe }}}" not in manifest["html"] or "{{{ pm:unsubscribe }}}" not in manifest["text"]:
+        raise ValueError("Broadcast HTML and text must include Postmark's unsubscribe placeholder")
     if not manifest.get("person_ids") and not manifest.get("cohort_sql"):
         raise ValueError("Provide person_ids or cohort_sql (path to a read-only SELECT returning person_id)")
     if manifest.get("person_ids") and manifest.get("cohort_sql"):
@@ -91,6 +117,7 @@ def digest(manifest, rows):
     contents = {key: manifest[key] for key in ("id", "name", "objective", "success_measure", "listing_id", "auction_url",
         "stock_snapshot_ref", "message_version", "sender", "reply_to", "reply_owner", "subject", "html", "text", "stream")}
     contents["auction_slug"] = manifest.get("auction_slug")
+    contents["links"] = manifest["links"]
     contents["cohort"] = rows
     contents["track_opens"] = True
     contents["track_links"] = "HtmlAndText"
@@ -132,12 +159,17 @@ def provider_preflight(manifest, rows):
 def preview(manifest):
     with connection(read_only=True) as db:
         rows = cohort(db, manifest)
+        listing_ids = sorted({link["listing_id"] for link in manifest["links"] if link.get("listing_id")})
         with db.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""select person_id, count(*)::int as prior_pitches from crm_campaign_sends
-                           where listing_id = %s and state in ('accepted', 'sending', 'unknown')
-                             and person_id = any(%s::text[]) group by person_id""",
-                        (manifest["listing_id"], [r["person_id"] for r in rows]))
-            counts = {r["person_id"]: r["prior_pitches"] for r in cur.fetchall()}
+            cur.execute("""select s.person_id, l.listing_id, count(distinct s.id)::int as prior_pitches
+                           from crm_campaign_sends s join crm_campaign_send_links l on l.send_id=s.id
+                           where l.listing_id = any(%s::text[]) and s.state in ('accepted', 'sending', 'unknown')
+                             and s.person_id = any(%s::text[])
+                           group by s.person_id, l.listing_id""",
+                        (listing_ids, [r["person_id"] for r in rows]))
+            counts = {}
+            for pitch in cur.fetchall():
+                counts.setdefault(pitch["person_id"], {})[pitch["listing_id"]] = pitch["prior_pitches"]
     return rows, counts
 
 
@@ -161,8 +193,14 @@ def freeze(manifest, rows, sha):
             cur.execute("""insert into crm_campaign_sends
                            (id, campaign_id, person_id, company_id, listing_id, auction_url, recipient_email)
                            values (%s,%s,%s,%s,%s,%s,%s)""",
-                        (send_id, manifest["id"], row["person_id"], row["company_id"],
-                         manifest["listing_id"], manifest["auction_url"], row["email"]))
+                         (send_id, manifest["id"], row["person_id"], row["company_id"],
+                          manifest["listing_id"], manifest["auction_url"], row["email"]))
+            for link in manifest["links"]:
+                link_id = hashlib.sha256(f"{send_id}\0{link['key']}".encode()).hexdigest()[:32]
+                cur.execute("""insert into crm_campaign_send_links
+                               (id, send_id, cta_key, destination_url, listing_id)
+                               values (%s,%s,%s,%s,%s)""",
+                            (link_id, send_id, link["key"], link["url"], link.get("listing_id")))
     return sha
 
 
@@ -233,17 +271,27 @@ def launch(manifest, sha):
     return results
 
 
-def first_auction_click(events, auction_url):
-    return min((event["ReceivedAt"] for event in events
-                if event.get("Type") == "LinkClicked" and event.get("ReceivedAt")
-                and event.get("Details", {}).get("Link") == auction_url), default=None)
+def observed_clicks(events, links):
+    """Attribute each provider event only to a frozen destination for this send."""
+    destinations = {link["destination_url"]: link["cta_key"] for link in links}
+    clicks = {}
+    for event in events:
+        key = destinations.get(event.get("Details", {}).get("Link"))
+        if event.get("Type") == "LinkClicked" and event.get("ReceivedAt") and key:
+            clicks[key] = min(clicks.get(key, event["ReceivedAt"]), event["ReceivedAt"])
+    return clicks
 
 
 def sync(campaign_id, apply):
     with connection(read_only=True) as db, db.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("""select id, provider_message_id, auction_url from crm_campaign_sends where campaign_id=%s
+        cur.execute("""select id, provider_message_id from crm_campaign_sends where campaign_id=%s
                        and provider_message_id is not null""", (campaign_id,))
         sends = cur.fetchall()
+        cur.execute("""select l.send_id, l.cta_key, l.destination_url from crm_campaign_send_links l
+                       join crm_campaign_sends s on s.id=l.send_id where s.campaign_id=%s""", (campaign_id,))
+        links_by_send = {}
+        for link in cur.fetchall():
+            links_by_send.setdefault(link["send_id"], []).append(link)
     results = []
     for send in sends:
         details = postmark("/messages/outbound/" + urllib.parse.quote(send["provider_message_id"]) + "/details")
@@ -251,9 +299,10 @@ def sync(campaign_id, apply):
         def first(kind):
             return min((event["ReceivedAt"] for event in events
                         if event.get("Type") == kind and event.get("ReceivedAt")), default=None)
-        clicked = first_auction_click(events, send["auction_url"])
+        clicks = observed_clicks(events, links_by_send.get(send["id"], []))
+        clicked = min(clicks.values(), default=None)
         status = {"delivered": first("Delivered"), "bounced": first("Bounced"),
-                  "opened": first("Opened"), "clicked": clicked}
+                  "opened": first("Opened"), "clicked": clicked, "cta_clicks": clicks}
         results.append({"message_id": send["provider_message_id"], **status})
         if apply:
             with connection() as db, db.cursor() as cur:
@@ -261,7 +310,10 @@ def sync(campaign_id, apply):
                                bounced_at=coalesce(bounced_at,%s), provider_opened_at=coalesce(provider_opened_at,%s),
                                provider_link_clicked_at=coalesce(provider_link_clicked_at,%s), last_synced_at=now()
                                where id=%s""", (status["delivered"], status["bounced"], status["opened"],
-                                               status["clicked"], send["id"]))
+                                                status["clicked"], send["id"]))
+                for key, clicked_at in clicks.items():
+                    cur.execute("""update crm_campaign_send_links set first_clicked_at=coalesce(first_clicked_at,%s)
+                                   where send_id=%s and cta_key=%s""", (clicked_at, send["id"], key))
     return results
 
 
@@ -324,7 +376,7 @@ def main():
             else:
                 rows, counts = preview(manifest)
                 sha = digest(manifest, rows)
-                output = {"sha256": sha, "cohort": [{**row, "prior_pitches": counts.get(row["person_id"], 0)} for row in rows]}
+                output = {"sha256": sha, "cohort": [{**row, "prior_pitches_by_listing": counts.get(row["person_id"], {})} for row in rows]}
                 if args.command == "freeze" and args.apply:
                     freeze(manifest, rows, sha)
                 elif args.command == "freeze":
