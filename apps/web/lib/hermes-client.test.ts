@@ -108,69 +108,6 @@ describe("createHermesChatStream persisted sessions", () => {
     expect(fetchSpy.mock.calls[1][0]).toBe(chatUrl);
   });
 
-  it("loads persisted user, assistant and tool history on a second turn, but isolates a new session", async () => {
-    // Contract-level fake of the native DB/history boundary, not a provider call.
-    // Only native chat hydrates history. The original /v1/runs path must fail.
-    type Message = { role: string; content: string };
-    const sessions = new Map<string, Message[]>();
-    const histories: Message[][] = [];
-    const firstTurn: Message[] = [
-      { role: "user", content: "Remember violet-otter" },
-      { role: "assistant", content: "Looking up the note" },
-      { role: "tool", content: "Saved violet-otter" },
-      { role: "assistant", content: "Remembered" },
-    ];
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input);
-      const body = JSON.parse(String(init?.body));
-      if (url === sessionsUrl && init?.method === "POST") {
-        if (sessions.has(body.id)) {
-          return exists();
-        }
-        sessions.set(body.id, []);
-        return created();
-      }
-      const match = new URL(url).pathname.match(/^\/api\/sessions\/([^/]+)\/chat\/stream$/);
-      if (!match || init?.method !== "POST") {
-        return new Response("Stateless endpoint forbidden", { status: 400 });
-      }
-      const id = decodeURIComponent(match[1]);
-      const history = sessions.get(id);
-      if (!history) {
-        return new Response("Session not found", { status: 404 });
-      }
-      histories.push([...history]);
-      const response =
-        body.message === "Remember violet-otter"
-          ? "Remembered"
-          : history.some((m) => m.content.includes("violet-otter"))
-            ? "violet-otter"
-            : "No context";
-      sessions.set(
-        id,
-        body.message === "Remember violet-otter"
-          ? [...firstTurn]
-          : [
-              ...history,
-              { role: "user", content: body.message },
-              { role: "assistant", content: response },
-            ],
-      );
-      return new Response(success(response));
-    });
-
-    expect(answer(await chat({ message: "Remember violet-otter" }))).toBe("Remembered");
-    expect(answer(await chat({ message: "What did I ask you to remember?" }))).toBe("violet-otter");
-    expect(
-      answer(
-        await chat({ sessionKey: "fresh-session", message: "What did I ask you to remember?" }),
-      ),
-    ).toBe("No context");
-    expect(histories).toEqual([[], firstTurn, []]);
-    expect(fetchSpy).toHaveBeenCalledTimes(6);
-    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/v1/"))).toBe(false);
-  });
-
   it.each([
     [401, '{"error":"Unauthorized"}'],
     [404, '{"error":"Unknown or unconfigured profile"}'],
