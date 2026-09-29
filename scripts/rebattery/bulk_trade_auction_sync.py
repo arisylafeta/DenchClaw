@@ -130,6 +130,10 @@ def candidates(cur, auction):
     return [row["id"] for row in cur.fetchall() if model in squash(row["title"]) or model in squash(row["model"])]
 
 
+def plural(count, unit):
+    return f"{count} {unit}{'' if count == 1 else 's'}" if count else None
+
+
 def listing_fields(auction):
     """Template fields a new trade can take from its marketplace listing."""
     specs, kind = auction["specs"], trade_kind(auction)
@@ -139,7 +143,7 @@ def listing_fields(auction):
         "model": " ".join(x for x in (specs.get("manufacturer"), specs.get("model")) if x),
         "chemistry": specs.get("chemistry"),
         "capacity" if kind != "systems" else "energy": f"{specs['pack_kwh']:g} kWh per {unit}" if specs.get("pack_kwh") else None,
-        "quantity": f"{specs['quantity_available'] or specs.get('quantity')} {unit}s" if specs.get("quantity_available") or specs.get("quantity") else None,
+        "quantity": plural(specs.get("quantity_available") or specs.get("quantity"), unit),
         "manufacture_date" if kind != "systems" else "commissioned": str(specs["year_manufacture"]) if specs.get("year_manufacture") else None,
         "soh": f"{specs['soh']:g}%" if specs.get("soh") else None,
         "location": ", ".join(x for x in (location.get("city"), location.get("country")) if x),
@@ -314,11 +318,14 @@ def already_proposed(cur, lot_id, source_id):
     return cur.fetchone() is not None
 
 
-def find_buyer(cur, lot_id, email, person_id):
+def find_buyer(cur, lot_id, email, person_id, company=None):
+    """The trade's buyer row for this person, else (a colleague already added) for their company."""
     cur.execute(
         """select id, status from crm_bulk_trade_buyers
-           where lot_id = %s and ((%s::text is not null and person_id = %s) or lower(coalesce(contact, '')) like '%%' || %s || '%%')
-           order by created_at limit 1""", (lot_id, person_id, person_id, email))
+           where lot_id = %s and ((%s::text is not null and person_id = %s) or lower(coalesce(contact, '')) like '%%' || %s || '%%'
+                                  or lower(name) = lower(%s))
+           order by (lower(coalesce(contact, '')) like '%%' || %s || '%%') desc, created_at limit 1""",
+        (lot_id, person_id, person_id, email, company or "", email))
     return cur.fetchone()
 
 
@@ -331,14 +338,15 @@ def sync_people(cur, run_id, lot_id, auction, people, ctx, report, dry_run):
             del people[p["email"]]  # someone at ReBattery testing from a personal address
             continue
         person_id = crm["id"] if crm else None
-        buyer = find_buyer(cur, lot_id, p["email"], person_id)
+        company = (crm and crm["company"]) or p["email"].split("@")[1].split(".")[0].title()
+        buyer = find_buyer(cur, lot_id, p["email"], person_id, company)
         latest = last_activity(p)
         offers = sorted(p["offers"], key=lambda o: o["at"])
         if engaged(p):
             findings = []
             buyer_source = f"buyer:{auction['id']}:{p['email']}"
             if not buyer and not already_proposed(cur, lot_id, buyer_source):  # once only, so an undo sticks
-                name = (crm and crm["company"]) or p["email"].split("@")[1].split(".")[0].title()
+                name = company
                 contact = f"{crm['full_name']} ({p['email']})" if crm and crm["full_name"] else p["email"]
                 what = offer_text(offers[-1], unit) if offers else "Viewed the auction" if p["view_count"] else \
                     "Messaged about the auction" if p["messages"] else "Clicked the auction invite"
@@ -367,7 +375,8 @@ def sync_people(cur, run_id, lot_id, auction, people, ctx, report, dry_run):
                     outcome = "applied" if dry_run else check.settle(cur, run_id, lot_id, f, None, ctx)
                     if outcome:
                         report["applied"].append({"lot_id": lot_id, "kind": "new_buyer", "summary": f["summary"]})
-                    buyer = find_buyer(cur, lot_id, p["email"], person_id) if not dry_run else {"id": None, "status": f["proposed"]["status"]}
+                    buyer = find_buyer(cur, lot_id, p["email"], person_id, f["proposed"]["name"]) if not dry_run \
+                        else {"id": None, "status": f["proposed"]["status"]}
                     if not buyer and (ctx.get("undo") or {}).get("id"):
                         buyer = {"id": ctx["undo"]["id"], "status": f["proposed"]["status"]}
                     continue
