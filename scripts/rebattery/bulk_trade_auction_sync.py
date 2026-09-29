@@ -380,7 +380,7 @@ def sync_people(cur, run_id, lot_id, auction, people, ctx, report, dry_run):
                 bid = {"kind": "bid", "target": buyer["id"],
                        "proposed": {"amount": amount, "unit": bid_unit, "currency": o["currency"], "firmness": "indicative",
                                     "delivery_terms": terms},
-                       "summary": f"Auction {text.lower() if o['kind'] == 'offer' else text}.",
+                       "summary": f"{text} on the auction.",
                        "quote": text, "source": auction_source(auction, f"submission:{o['id']}", o["at"], text)}
                 if dry_run:
                     report["applied"].append({"lot_id": lot_id, "kind": "bid", "summary": bid["summary"]})
