@@ -8,6 +8,7 @@ import type {
 } from "../object-filters";
 import { deserializeFilters } from "../object-filters";
 import { queryPg } from "../postgres";
+import { projectCampaignMetrics } from "./campaign-metrics";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
 import { getColumnFillRates, getTableColumns } from "./table-columns";
 import { buildWorkTaskReadScope } from "./work-task-read-scope";
@@ -627,7 +628,7 @@ export async function getPostgresObjectData(
   const totalCount = tableName
     ? Number(totalCountRows[0]?.count ?? 0)
     : await countCustomOnlyEntries(object, search);
-  const entries = await loadEntries(
+  const loadedEntries = await loadEntries(
     object,
     fields,
     existingColumns,
@@ -638,6 +639,9 @@ export async function getPostgresObjectData(
     orderBy,
     search,
   );
+  const entries = object.name === "campaign" || object.name === "campaigns"
+    ? await projectCampaignMetrics(loadedEntries)
+    : loadedEntries;
   const resolvedRelations = await resolveRelationLabels(fields, entries);
 
   const savedViews = savedViewRows.map(toSavedView);

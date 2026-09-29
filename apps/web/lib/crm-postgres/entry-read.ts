@@ -1,5 +1,6 @@
 import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
+import { projectCampaignMetrics } from "./campaign-metrics";
 import { getTableColumns } from "./table-columns";
 import { buildWorkTaskReadScope } from "./work-task-read-scope";
 import {
@@ -366,13 +367,16 @@ export async function getPostgresEntryData(
   if (!entry) {
     throw new Error("Entry not found");
   }
+  const projectedEntry = object.name === "campaign" || object.name === "campaigns"
+    ? (await projectCampaignMetrics([entry]))[0]
+    : entry;
 
-  const resolvedRelations = await resolveRelationLabels(fields, entry);
+  const resolvedRelations = await resolveRelationLabels(fields, projectedEntry);
 
   return {
     object,
     fields,
-    entry,
+    entry: projectedEntry,
     relationLabels: resolvedRelations.labels,
     relationFaviconUrls: resolvedRelations.faviconUrls,
     reverseRelations: await getReverseRelationsForEntry(
