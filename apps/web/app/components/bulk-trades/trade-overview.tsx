@@ -5,7 +5,6 @@ import { TRADE_KINDS, dueLabel, type BulkTrade, type TradePatch } from "@/lib/bu
 import {
   missingItems,
   shortDate,
-  whatsappNumber,
   type Buyer,
   type Contact,
   type TradeDetail,
@@ -36,13 +35,9 @@ type Props = {
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0];
 
-function whatsappLink(contact: Contact | undefined, text: string) {
-  const number = whatsappNumber(contact?.phone ?? null);
-  return `https://wa.me/${number ?? ""}?text=${encodeURIComponent(text)}`;
-}
-
-function mailLink(contact: Contact | undefined, subject: string, body: string) {
-  return `mailto:${encodeURIComponent(contact?.email ?? "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+/** First contact with an email address, else the first contact. */
+function emailContact(contacts: Contact[]) {
+  return contacts.find((contact) => contact.email) ?? contacts[0];
 }
 
 function addDays(date: string, days: number) {
@@ -55,7 +50,7 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   const { trade, contacts } = detail;
   return (
     <div className="flex flex-col gap-6">
-      <NextStepBar trade={trade} contact={contacts[0]} today={today} onTradePatch={onTradePatch} />
+      <NextStepBar trade={trade} contact={emailContact(contacts)} today={today} onTradePatch={onTradePatch} />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <BuyersTable trade={trade} buyers={detail.buyers} fields={detail.fields} today={today} onBuyer={onBuyer} />
         <div className="flex flex-col gap-4 self-start">
@@ -76,8 +71,8 @@ function NextStepBar({ trade, contact, today, onTradePatch }: {
 }) {
   const [setting, setSetting] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const greeting = contact ? `Hi ${firstName(contact.name)}, ` : "Hi, ";
   const barButton = "inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium";
   const barButtonStyle = { borderColor: "var(--bt-bar-border)", color: "var(--bt-on-bar)" };
 
@@ -106,17 +101,14 @@ function NextStepBar({ trade, contact, today, onTradePatch }: {
         </div>
         <ErrorText error={error} />
       </div>
-      <a
-        href={whatsappLink(contact, greeting)}
-        target="_blank"
-        rel="noreferrer"
+      <button
+        type="button"
+        onClick={() => setEmailing(true)}
         className="inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
         style={{ background: "var(--bt-accent)", color: "var(--bt-on-accent)" }}
-        title={contact?.phone ? `WhatsApp ${contact.name}` : "Opens WhatsApp; pick the chat there"}
       >
-        WhatsApp
-      </a>
-      <a href={mailLink(contact, trade.title, greeting)} className={barButton} style={barButtonStyle}>Email</a>
+        Email
+      </button>
       <button type="button" onClick={() => setSetting(true)} className={`${barButton} text-[13px]`} style={barButtonStyle}>
         {trade.next_step ? "Done, set next" : "Set next step"}
       </button>
@@ -145,6 +137,14 @@ function NextStepBar({ trade, contact, today, onTradePatch }: {
           </div>
         )}
       </div>
+      {emailing && (
+        <EmailDialog
+          trade={trade}
+          contact={contact}
+          body={`${contact ? `Hi ${firstName(contact.name)},` : "Hi,"}\n\n`}
+          onClose={() => setEmailing(false)}
+        />
+      )}
       {setting && (
         <SetNextDialog trade={trade} today={today} onClose={() => setSetting(false)} onTradePatch={onTradePatch} />
       )}
@@ -212,7 +212,8 @@ function SetNextDialog({ trade, today, onClose, onTradePatch }: {
 
 function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePatch: Props["onTradePatch"] }) {
   const { trade, fields, files, contacts } = detail;
-  const contact = contacts[0];
+  const contact = emailContact(contacts);
+  const [asking, setAsking] = useState(false);
   const items = trade.trade_kind ? missingItems(trade.trade_kind, fields, files) : [];
   const ask = [
     contact ? `Hi ${firstName(contact.name)},` : "Hi,",
@@ -222,9 +223,6 @@ function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePat
     "",
     "Thanks",
   ].join("\n");
-  const askHref = whatsappNumber(contact?.phone ?? null)
-    ? whatsappLink(contact, ask)
-    : contact?.email ? mailLink(contact, trade.title, ask) : null;
 
   return (
     <Card label="Missing" className="flex flex-col gap-1 px-5 py-[18px]">
@@ -249,13 +247,10 @@ function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePat
               <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{item.neededFor}</span>
             </div>
           ))}
-          {askHref ? (
-            <a href={askHref} target="_blank" rel="noreferrer" className={`${buttonClass} mt-2`} style={buttonStyle}>
-              Ask {firstName(contact!.name)} for all {items.length}
-            </a>
-          ) : (
-            <p className="mt-2 text-[13px]" style={{ color: "var(--bt-muted)" }}>Add a contact with a phone or email to ask for these.</p>
-          )}
+          <button type="button" onClick={() => setAsking(true)} className={`${buttonClass} mt-2`} style={buttonStyle}>
+            {contact ? `Ask ${firstName(contact.name)} for all ${items.length}` : `Ask for all ${items.length}`}
+          </button>
+          {asking && <EmailDialog trade={trade} contact={contact} body={ask} onClose={() => setAsking(false)} />}
         </>
       ) : (
         <p className="text-sm" style={{ color: "var(--bt-muted)" }}>Nothing missing.</p>
@@ -372,9 +367,73 @@ function ContactDialog({ trade, contact, onClose, onSaved }: {
       <FormField label="Name"><input required value={draft.name} onChange={set("name")} className={inputClass} style={inputStyle} /></FormField>
       <FormField label="Company"><input value={draft.company} onChange={set("company")} className={inputClass} style={inputStyle} /></FormField>
       <div className="grid grid-cols-2 gap-3">
-        <FormField label="Phone (for WhatsApp)"><input type="tel" value={draft.phone} onChange={set("phone")} placeholder="+39 347 …" className={inputClass} style={inputStyle} /></FormField>
+        <FormField label="Phone"><input type="tel" value={draft.phone} onChange={set("phone")} placeholder="+39 347 …" className={inputClass} style={inputStyle} /></FormField>
         <FormField label="Email"><input type="email" value={draft.email} onChange={set("email")} className={inputClass} style={inputStyle} /></FormField>
       </div>
+      <ErrorText error={error} />
+    </Modal>
+  );
+}
+
+/** Makes a Gmail draft in the signed-in user's account. Nothing is sent from DenchClaw. */
+function EmailDialog({ trade, contact, body, onClose }: {
+  trade: BulkTrade;
+  contact: Contact | undefined;
+  body: string;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState({ to: contact?.email ?? "", subject: trade.title, body });
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [draftUrl, setDraftUrl] = useState<string | null>(null);
+  const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setDraft((current) => ({ ...current, [key]: event.target.value }));
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const { url } = await request<{ url: string }>(tradeUrl(trade.id, "/email-draft"), { method: "POST", body: JSON.stringify(draft) });
+      setDraftUrl(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the draft.");
+      setSaving(false);
+    }
+  }
+
+  if (draftUrl) {
+    return (
+      <Modal
+        title="Draft ready in Gmail"
+        onClose={onClose}
+        footer={(
+          <>
+            <button type="button" className={buttonClass} style={buttonStyle} onClick={onClose}>Close</button>
+            <a href={draftUrl} target="_blank" rel="noreferrer" className={darkButtonClass} style={darkButtonStyle}>Open in Gmail</a>
+          </>
+        )}
+      >
+        <p className="text-sm">The draft is in your Gmail drafts. Check it and send it from there.</p>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal
+      wide
+      title="Email draft"
+      onClose={onClose}
+      onSubmit={save}
+      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{saving ? "Creating draft" : "Create Gmail draft"}</button>}
+    >
+      <FormField label="To"><input value={draft.to} onChange={set("to")} placeholder="name@company.com" className={inputClass} style={inputStyle} /></FormField>
+      <FormField label="Subject"><input required value={draft.subject} onChange={set("subject")} className={inputClass} style={inputStyle} /></FormField>
+      <FormField label="Message">
+        <textarea required autoFocus rows={10} value={draft.body} onChange={set("body")}
+          className="w-full rounded-lg border px-3 py-2 text-sm leading-relaxed" style={inputStyle} />
+      </FormField>
+      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Saved as a draft in your Gmail. Nothing is sent from here.</p>
       <ErrorText error={error} />
     </Modal>
   );

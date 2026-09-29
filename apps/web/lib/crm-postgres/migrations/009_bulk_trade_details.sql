@@ -1,6 +1,7 @@
 -- Bulk Trades v3, PR 2: the trade page. Buyers, structured bids, contacts, per-field data with
 -- sources and buyer visibility, and uploaded files. Every buyer, bid, field and file change is
--- appended to crm_bulk_trade_events. Adds tables only; existing rows are untouched.
+-- appended to crm_bulk_trade_events, as is each Gmail draft made from the trade page.
+-- Adds tables only; existing rows are untouched.
 -- Apply only after a current backup and explicit schema approval.
 begin;
 
@@ -92,7 +93,8 @@ alter table crm_bulk_trade_events add constraint crm_bulk_trade_events_kind_chec
   'trade_created', 'trade_updated',
   'buyer_added', 'buyer_updated', 'bid_added',
   'contact_added', 'contact_updated', 'contact_removed',
-  'field_updated', 'file_added', 'file_updated'
+  'field_updated', 'file_added', 'file_updated',
+  'email_drafted'
 ));
 
 commit;

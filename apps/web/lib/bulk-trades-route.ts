@@ -1,6 +1,6 @@
 import { currentUser } from "@/lib/auth";
 
-type Guarded = { userId: string } | { response: Response };
+type Guarded = { userId: string; email: string } | { response: Response };
 
 /** Shared checks for Bulk Trades routes: Postgres backend and a signed-in user. */
 export async function guardBulkTrades(): Promise<Guarded> {
@@ -9,7 +9,7 @@ export async function guardBulkTrades(): Promise<Guarded> {
   }
   const user = await currentUser();
   if (!user) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
-  return { userId: user.id };
+  return { userId: user.id, email: user.email };
 }
 
 export async function readJson(req: Request): Promise<unknown> {

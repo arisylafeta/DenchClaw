@@ -340,3 +340,14 @@ export async function getFileForDownload(lotId: string, fileId: string) {
   );
   return row ?? null;
 }
+
+export async function logEmailDraft(
+  lotId: string,
+  draft: { to: string[]; subject: string; draft_id: string | null },
+  userId: string,
+): Promise<void> {
+  await queryPg(
+    `insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, 'email_drafted', $2, $3)`,
+    [lotId, JSON.stringify(draft), userId],
+  );
+}

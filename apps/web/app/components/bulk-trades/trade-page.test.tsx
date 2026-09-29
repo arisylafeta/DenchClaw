@@ -28,7 +28,7 @@ const field = (field_key: string, value: string, visibility: TradeField["visibil
 const DETAIL: TradeDetail = {
   trade: TRADE,
   buyers: [BUYER],
-  contacts: [{ id: "btc_1", name: "Sam Supplier", company: "Synthetic Co", email: null, phone: "+44 7700 900123" }],
+  contacts: [{ id: "btc_1", name: "Sam Supplier", company: "Synthetic Co", email: "sam@example.test", phone: null }],
   fields: [field("model", "FPT eBS37"), field("chemistry", "NMC"), field("seller_price", "€20/kWh", "never"), field("location", "Turin", "after_loi")],
   files: [],
 };
@@ -37,6 +37,9 @@ function mockFetch() {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "PATCH" && url.includes("/buyers/")) {
       return new Response(JSON.stringify({ buyer: { ...BUYER, ...JSON.parse(String(init.body)), last_touch_on: today } }));
+    }
+    if (init?.method === "POST" && url.endsWith("/email-draft")) {
+      return new Response(JSON.stringify({ url: "https://mail.google.com/mail/u/#drafts" }), { status: 201 });
     }
     if (init?.method === "POST" && url.endsWith("/bids")) {
       return new Response(JSON.stringify({
@@ -54,17 +57,31 @@ function renderPage() {
 describe("TradePage overview", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows the next step, missing data by step and a WhatsApp link to the first contact", async () => {
+  it("shows the next step and what is missing for each step", async () => {
     vi.stubGlobal("fetch", mockFetch());
     renderPage();
 
     const bar = await screen.findByRole("region", { name: "Next step" });
     expect(bar).toHaveTextContent("Follow up supplier");
-    expect(within(bar).getByRole("link", { name: "WhatsApp" }).getAttribute("href")).toMatch(/^https:\/\/wa\.me\/447700900123\?text=Hi%20Sam/);
+    expect(within(bar).queryByText("WhatsApp")).not.toBeInTheDocument();
 
     const missing = screen.getByRole("region", { name: "Missing" });
     expect(within(missing).getByText("Manufacture date").nextSibling).toHaveTextContent("Teaser");
-    expect(within(missing).getByRole("link", { name: /Ask Sam for all/ })).toBeInTheDocument();
+  });
+
+  it("asks the supplier for missing items through a Gmail draft", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ask Sam for all/ }));
+    expect(screen.getByLabelText("To")).toHaveValue("sam@example.test");
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toMatch(/Hi Sam,[\s\S]*- Manufacture date/);
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Gmail draft" }));
+    expect(await screen.findByRole("link", { name: "Open in Gmail" })).toHaveAttribute("href", "https://mail.google.com/mail/u/#drafts");
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/bulk-trades/bt_1/email-draft")!;
+    expect(JSON.parse(String(init!.body))).toMatchObject({ to: "sam@example.test", subject: "Synthetic eBS37" });
   });
 
   it("saves a buyer status change straight away", async () => {

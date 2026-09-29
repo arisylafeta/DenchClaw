@@ -10,9 +10,13 @@ const details = {
   resolveConflict: vi.fn(),
   getFileForDownload: vi.fn(),
   updateFile: vi.fn(),
+  logEmailDraft: vi.fn(),
 };
 vi.mock("@/lib/crm-postgres/bulk-trade-details", () => details);
-vi.mock("@/lib/crm-postgres/bulk-trades", () => ({ updateBulkTrade: vi.fn() }));
+const getBulkTrade = vi.fn(async (id: string) => (id === "bt_1" ? { id } : null));
+vi.mock("@/lib/crm-postgres/bulk-trades", () => ({ updateBulkTrade: vi.fn(), getBulkTrade }));
+const createGmailDraft = vi.fn(async () => ({ draftId: "r1", messageId: "m1" }));
+vi.mock("@/lib/gmail-drafts", async (original) => ({ ...(await original<typeof import("@/lib/gmail-drafts")>()), createGmailDraft }));
 const readTradeFile = vi.fn();
 vi.mock("@/lib/bulk-trade-files", () => ({ readTradeFile }));
 
@@ -64,5 +68,18 @@ describe("trade detail routes", () => {
     const res = await GET(new Request("http://localhost/x"), params({ id: "bt_1", fileId: "btf_1" }));
     expect(res.headers.get("content-type")).toBe("application/octet-stream");
     expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="stock _list_.xlsx"/);
+  });
+
+  it("makes the Gmail draft in the signed-in user's own account and logs it", async () => {
+    const { POST } = await import("./email-draft/route");
+    const res = await POST(post({ to: "sam@example.test", subject: "Synthetic eBS37", body: "Hi Sam" }), params({ id: "bt_1" }));
+    expect(res.status).toBe(201);
+    expect(createGmailDraft).toHaveBeenCalledWith(USER.email, { to: ["sam@example.test"], subject: "Synthetic eBS37", body: "Hi Sam" });
+    expect((await res.json()).url).toContain("compose=m1");
+    expect(details.logEmailDraft).toHaveBeenCalledWith("bt_1", { to: ["sam@example.test"], subject: "Synthetic eBS37", draft_id: "r1" }, USER.id);
+
+    const bad = await POST(post({ to: "not an email", subject: "x", body: "y" }), params({ id: "bt_1" }));
+    expect(bad.status).toBe(400);
+    expect((await POST(post({ subject: "x", body: "y" }), params({ id: "bt_9" }))).status).toBe(404);
   });
 });

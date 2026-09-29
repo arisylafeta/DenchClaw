@@ -359,9 +359,3 @@ export function bidLabel(bid: Bid): string {
   const amount = Number(bid.amount).toLocaleString("en-GB", { maximumFractionDigits: 2 });
   return `${CURRENCY_SYMBOL[bid.currency]}${amount}/${bid.unit}${bid.firmness === "indicative" ? " ind." : ""}`;
 }
-
-/** Digits-only phone number for a wa.me link, or null when there is none. */
-export function whatsappNumber(phone: string | null): string | null {
-  const digits = phone?.replace(/\D/g, "") ?? "";
-  return digits.length >= 7 ? digits : null;
-}

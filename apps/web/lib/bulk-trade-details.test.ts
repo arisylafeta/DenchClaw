@@ -7,7 +7,6 @@ import {
   parseBuyerInput,
   parseFieldInput,
   teaserText,
-  whatsappNumber,
   type TradeField,
   type TradeFile,
 } from "./bulk-trade-details";
@@ -90,10 +89,8 @@ describe("validation", () => {
 });
 
 describe("labels", () => {
-  it("formats bids and WhatsApp numbers", () => {
+  it("formats bids", () => {
     expect(bidLabel({ amount: "22.50", unit: "kWh", currency: "EUR", firmness: "indicative" } as never)).toBe("€22.5/kWh ind.");
     expect(bidLabel({ amount: "1200", unit: "pack", currency: "USD", firmness: "firm" } as never)).toBe("$1,200/pack");
-    expect(whatsappNumber("+39 347 123 4567")).toBe("393471234567");
-    expect(whatsappNumber(null)).toBeNull();
   });
 });
