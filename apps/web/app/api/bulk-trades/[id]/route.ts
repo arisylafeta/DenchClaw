@@ -1,22 +1,25 @@
-import { currentUser } from "@/lib/auth";
 import { parseTradePatch } from "@/lib/bulk-trades";
 import { updateBulkTrade } from "@/lib/crm-postgres/bulk-trades";
+import { getTradeDetail } from "@/lib/crm-postgres/bulk-trade-details";
+import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (process.env.CRM_DB_BACKEND !== "postgres") {
-    return Response.json({ error: "Bulk Trades requires the Postgres backend" }, { status: 503 });
-  }
-  const user = await currentUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+type Params = { params: Promise<{ id: string }> };
 
-  const { id } = await params;
-  const parsed = parseTradePatch(await req.json().catch(() => null));
-  if ("error" in parsed) return Response.json({ error: parsed.error }, { status: 400 });
+export async function GET(_req: Request, { params }: Params) {
+  const guard = await guardBulkTrades();
+  if ("response" in guard) return guard.response;
+  const detail = await getTradeDetail((await params).id);
+  return detail ? Response.json(detail) : notFound("Trade");
+}
 
-  const trade = await updateBulkTrade(id, parsed.patch, user.id);
-  if (!trade) return Response.json({ error: "Trade not found" }, { status: 404 });
-  return Response.json({ trade });
+export async function PATCH(req: Request, { params }: Params) {
+  const guard = await guardBulkTrades();
+  if ("response" in guard) return guard.response;
+  const parsed = parseTradePatch(await readJson(req));
+  if ("error" in parsed) return badRequest(parsed.error);
+  const trade = await updateBulkTrade((await params).id, parsed.patch, guard.userId);
+  return trade ? Response.json({ trade }) : notFound("Trade");
 }

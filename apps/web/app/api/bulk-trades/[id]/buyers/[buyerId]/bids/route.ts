@@ -1,0 +1,16 @@
+import { parseBidInput } from "@/lib/bulk-trade-details";
+import { addBid } from "@/lib/crm-postgres/bulk-trade-details";
+import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function POST(req: Request, { params }: { params: Promise<{ id: string; buyerId: string }> }) {
+  const guard = await guardBulkTrades();
+  if ("response" in guard) return guard.response;
+  const parsed = parseBidInput(await readJson(req));
+  if ("error" in parsed) return badRequest(parsed.error);
+  const { id, buyerId } = await params;
+  const buyer = await addBid(id, buyerId, parsed.value, guard.userId);
+  return buyer ? Response.json({ buyer }, { status: 201 }) : notFound("Buyer");
+}

@@ -24,6 +24,11 @@ export async function listBulkTrades(): Promise<{ trades: BulkTrade[]; owners: T
   return { trades, owners };
 }
 
+export async function getBulkTrade(id: string): Promise<BulkTrade | null> {
+  const [trade] = await queryPg<BulkTrade>(`select ${TRADE_COLUMNS} from ${TRADE_FROM} where lot.id = $1`, [id]);
+  return trade ?? null;
+}
+
 // Column names come only from validated TradePatch keys.
 function assignments(patch: Record<string, unknown>, firstParam: number) {
   const keys = Object.keys(patch);
