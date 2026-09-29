@@ -46,3 +46,14 @@ describe.skipIf(process.env.GOG_SAFETY_TEST !== "1")("gog restriction (real CLI,
   });
 });
 
+describe("createGmailDraft output", () => {
+  it("reads draft and message ids in either shape gog returns", async () => {
+    execFile.mockImplementation((_bin: string, _args: string[], _opts: unknown, done: (e: null, out: string) => void) => {
+      setTimeout(() => done(null, JSON.stringify({ draftId: "r2", messageId: "m2" })));
+      return { stdin: { end: () => {} } };
+    });
+    const { createGmailDraft } = await import("./gmail-drafts");
+    expect(await createGmailDraft("a@b.co", { to: [], subject: "s", body: "b" })).toEqual({ draftId: "r2", messageId: "m2" });
+  });
+});
+

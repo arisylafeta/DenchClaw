@@ -55,11 +55,10 @@ export function createGmailDraft(account: string, draft: EmailDraft): Promise<Cr
       if (error) return reject(new Error("Gmail did not accept the draft. Check that this account is connected to gog."));
       try {
         const parsed = JSON.parse(stdout) as Record<string, unknown>;
-        const result = (parsed.draft ?? parsed) as { id?: unknown; message?: { id?: unknown } };
-        resolve({
-          draftId: typeof result.id === "string" ? result.id : null,
-          messageId: typeof result.message?.id === "string" ? result.message.id : null,
-        });
+        // gog has returned both {id, message: {id}} and {draftId, messageId}; accept either.
+        const result = (parsed.draft ?? parsed) as { id?: unknown; draftId?: unknown; messageId?: unknown; message?: { id?: unknown } };
+        const text = (...values: unknown[]) => (values.find((value) => typeof value === "string") as string | undefined) ?? null;
+        resolve({ draftId: text(result.id, result.draftId), messageId: text(result.message?.id, result.messageId) });
       } catch {
         resolve({ draftId: null, messageId: null });
       }
