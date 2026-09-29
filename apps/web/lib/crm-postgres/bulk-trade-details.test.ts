@@ -105,4 +105,26 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     const other = await trades.createBulkTrade({ title: "Different listing", listing_id: "lst_other" }, userId);
     expect((await db.addBuyer(other.id, { name: "Tess Buyer", person_id: person.id }, userId))!.email_tracking).toBeNull();
   });
+
+  it("records contacts, files and email drafts in the log, and finds CRM people", async () => {
+    const contact = await db.addContact(lotId, { name: "Sam Supplier", email: "sam@example.test" }, userId);
+    await db.updateContact(lotId, contact!.id, { phone: "+44 7700 900123" }, userId);
+    expect(await db.removeContact(lotId, contact!.id, userId)).toBe(true);
+
+    const file = await db.recordFile(
+      lotId,
+      { id: `btf_${crypto.randomUUID()}`, file_name: "stock.xlsx", file_type: "Stock list", content_type: null, byte_size: 10, storage_key: "k" },
+      { file_type: "Stock list", visibility: "never" },
+      userId,
+    );
+    expect(file).toMatchObject({ visibility: "never", byte_size: 10 });
+    expect(await db.updateFile(lotId, file!.id, { visibility: "teaser" }, userId)).toMatchObject({ visibility: "teaser" });
+    await db.logEmailDraft(lotId, { to: ["sam@example.test"], subject: "eBS37", draft_id: "r1" }, userId);
+
+    const kinds = (await events()).map((event) => event.kind);
+    expect(kinds).toEqual(expect.arrayContaining(["contact_added", "contact_updated", "contact_removed", "file_added", "file_updated", "email_drafted"]));
+    expect((await db.searchPeople("Tess"))[0]).toMatchObject({ name: "Tess Buyer", opted_out: false });
+    await expect(pg.queryPg("delete from crm_bulk_trade_events where lot_id = $1", [lotId])).rejects.toThrow(/append-only/);
+  });
 });
+
