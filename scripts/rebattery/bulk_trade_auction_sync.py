@@ -49,6 +49,7 @@ KIND_BY_FORMAT = {"pack": "packs", "cell": "cells", "module": "packs", "system":
 UNIT_BY_KIND = {"packs": "pack", "cells": "cell", "systems": "system"}
 CURRENCY_SIGN = {"EUR": "€", "USD": "$", "GBP": "£"}
 INTERNAL = re.compile(r"@rebattery\.io$|@example\.|\.test$", re.I)
+INTERNAL_COMPANY = re.compile(r"rebattery\b", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +325,11 @@ def find_buyer(cur, lot_id, email, person_id):
 def sync_people(cur, run_id, lot_id, auction, people, ctx, report, dry_run):
     kind = check.load_trades(cur, [lot_id])[lot_id]["trade_kind"] or "packs"
     unit = UNIT_BY_KIND.get(kind, "pack")
-    for p in people.values():
+    for p in list(people.values()):
         crm = crm_person(cur, p["email"])
+        if crm and INTERNAL_COMPANY.match(crm["company"] or ""):
+            del people[p["email"]]  # someone at ReBattery testing from a personal address
+            continue
         person_id = crm["id"] if crm else None
         buyer = find_buyer(cur, lot_id, p["email"], person_id)
         latest = last_activity(p)

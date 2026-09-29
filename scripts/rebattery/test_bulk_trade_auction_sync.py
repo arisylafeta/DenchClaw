@@ -63,6 +63,9 @@ class SyncRun(unittest.TestCase):
                        ('bt_auc_k1', 'supply', 'Kokam KCL-SYNC1 cells A', '', '', 'confirmed', 'With buyers', 'cells'),
                        ('bt_auc_k2', 'supply', 'Kokam KCL-SYNC1 cells B', '', '', 'confirmed', 'Needs info', 'cells')
                 on conflict do nothing;
+              insert into crm_companies (id, name) values ('co_rb_sync', 'ReBattery') on conflict do nothing;
+              insert into crm_people (id, full_name, email, company_id) values ('p_rb_sync', 'Staff', 'staff.personal@gmail.example', 'co_rb_sync')
+                on conflict do nothing;
               insert into crm_bulk_trade_buyers (id, lot_id, name, contact, status)
                 values ('btb_auc_known', 'bt_auc_69', 'Known Buyer', 'tess@known.test.example', 'Teaser sent') on conflict do nothing;
             """)
@@ -83,6 +86,9 @@ class SyncRun(unittest.TestCase):
              "amount_per_unit": "1", "quantity_requested": 1, "currency": "EUR", "incoterm": "EXW", "site_visit_requested": False,
              "message": None, "created_at": "2026-09-28T12:00:00+00:00"},
         ]
+        submissions.append({"id": "s4", "auction_id": "a69", "submission_kind": "buy_now", "email": "staff.personal@gmail.example",
+                            "price_per_kwh": None, "amount_per_unit": "1107", "quantity_requested": 41, "currency": "EUR", "incoterm": None,
+                            "site_visit_requested": None, "message": None, "created_at": "2026-09-28T13:00:00+00:00"})
         views = [{"auction_id": "a69", "first_viewed_at": "2026-09-27T09:00:00+00:00", "last_viewed_at": "2026-09-29T09:00:00+00:00",
                   "view_count": 3, "email": "looker@viewco.example"}]
         platform = FakePlatform(auctions, submissions, views)
