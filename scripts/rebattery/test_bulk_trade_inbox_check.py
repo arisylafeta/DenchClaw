@@ -52,6 +52,21 @@ class Helpers(unittest.TestCase):
         self.assertEqual(check.guess_type("inventory.xlsx"), "Stock list")
 
 
+class Schedule(unittest.TestCase):
+    def test_due_only_just_after_uk_check_times(self):
+        london = check.ZoneInfo("Europe/London")
+        at = lambda h, m: dt.datetime(2026, 9, 29, h, m, tzinfo=london)
+        times = ["08:00", "10:30"]
+        self.assertTrue(check.due_now(times, at(8, 0)))
+        self.assertTrue(check.due_now(times, at(10, 44)))
+        self.assertFalse(check.due_now(times, at(10, 45)))
+        self.assertFalse(check.due_now(times, at(7, 59)))
+        self.assertFalse(check.due_now(times, at(9, 0)))
+        # In winter 08:00 UK is 08:00 UTC; in summer it is 07:00 UTC. Either way the UK time decides.
+        self.assertTrue(check.due_now(["08:00"], dt.datetime(2026, 12, 1, 8, 0, tzinfo=dt.timezone.utc).astimezone(london)))
+        self.assertTrue(check.due_now(["08:00"], dt.datetime(2026, 7, 1, 7, 0, tzinfo=dt.timezone.utc).astimezone(london)))
+
+
 class Validate(unittest.TestCase):
     def run_validate(self, proposals):
         return check.validate({"proposals": proposals}, TRADE, {"m1": SOURCE})

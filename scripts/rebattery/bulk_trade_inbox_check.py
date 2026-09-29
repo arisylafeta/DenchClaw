@@ -5,6 +5,10 @@ store proposals for Alex to accept or ignore in the app. It never changes a trad
   bulk_trade_inbox_check.py                  # one run: collect, match, propose, record the run
   bulk_trade_inbox_check.py --dry-run        # print proposals, write nothing
   bulk_trade_inbox_check.py --summary        # the 08:00 list of overdue and due-today steps
+  ... --only-at 08:00,10:30                  # act only within 15 minutes after these UK times
+
+Hermes cron runs on UTC, so the jobs fire every half hour and --only-at keeps them on UK time
+across daylight-saving changes. Outside those times the script exits silently.
 
 Sources:
   Gmail   crm_email_messages for Alex's mailbox, synced hourly by gog_crm_sync.py.
@@ -587,6 +591,17 @@ def summary(conn):
     return 0
 
 
+def due_now(times, now=None):
+    """True within 15 minutes after any of the given UK times (HH:MM)."""
+    now = now or dt.datetime.now(ZoneInfo("Europe/London"))
+    for value in times:
+        hour, minute = map(int, value.split(":"))
+        start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if dt.timedelta(0) <= now - start < dt.timedelta(minutes=15):
+            return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dsn", default="host=/var/run/postgresql dbname=denchclaw")
@@ -594,7 +609,10 @@ def main():
     parser.add_argument("--since", help="override the cursor (ISO time), e.g. for a backfill")
     parser.add_argument("--dry-run", action="store_true", help="print proposals and write nothing")
     parser.add_argument("--summary", action="store_true", help="print the overdue and due-today list")
+    parser.add_argument("--only-at", help="comma-separated UK times; do nothing outside them")
     args = parser.parse_args()
+    if args.only_at and not due_now([t.strip() for t in args.only_at.split(",") if t.strip()]):
+        return 0
     conn = psycopg2.connect(args.dsn)
     try:
         return summary(conn) if args.summary else run(conn, args)
