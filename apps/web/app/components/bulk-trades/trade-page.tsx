@@ -84,7 +84,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         </nav>
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-[26px] font-semibold tracking-[-0.01em]">{trade.title}</h1>
-          <span className="rounded-md px-[9px] py-[3px] text-xs font-semibold" style={{ background: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
+          <span className="rounded-none px-[9px] py-[3px] text-xs font-semibold" style={{ background: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
             {trade.trade_stage}
           </span>
           <span className="flex-1" />

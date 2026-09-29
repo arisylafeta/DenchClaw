@@ -45,10 +45,10 @@ const STATUS_LABEL: Record<FieldStatus, string> = {
   confirmed: "Confirmed", unverified: "Unverified", conflict: "Conflict", missing: "Missing",
 };
 const STATUS_STYLE: Record<FieldStatus, React.CSSProperties> = {
-  confirmed: { background: "var(--bt-green-bg)", color: "var(--bt-green)" },
-  unverified: { background: "var(--bt-divider)", color: "var(--bt-text-2)" },
-  conflict: { background: "var(--bt-amber-bg)", color: "var(--bt-amber)" },
-  missing: { background: "var(--bt-red-bg)", color: "var(--bt-red)" },
+  confirmed: { background: "var(--bt-green-bg)", color: "var(--bt-green)", border: "1px solid var(--bt-green-border)" },
+  unverified: { background: "var(--bt-divider)", color: "var(--bt-text-2)", border: "1px solid var(--bt-grey-border)" },
+  conflict: { background: "var(--bt-amber-bg)", color: "var(--bt-amber)", border: "1px solid var(--bt-amber-border)" },
+  missing: { background: "var(--bt-red-bg)", color: "var(--bt-red)", border: "1px solid var(--bt-red-border)" },
 };
 
 type Props = {
@@ -59,7 +59,7 @@ type Props = {
   onTradePatch: (patch: TradePatch) => Promise<void>;
 };
 
-const tableHead = { color: "var(--bt-muted)", background: "var(--bt-table-head)", borderColor: "var(--bt-column)" };
+const tableHead = { background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" };
 
 function sourceText(source: Pick<FieldSource, "source_label" | "source_date">) {
   return [source.source_label, source.source_date && shortDate(source.source_date)].filter(Boolean).join(" · ");
@@ -134,7 +134,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
       </header>
       <div className="overflow-x-auto">
         <div className="min-w-[860px]">
-          <div className={`grid ${FIELD_COLUMNS} gap-4 border-b px-5 py-2.5 text-xs font-semibold`} style={tableHead}>
+          <div className={`grid ${FIELD_COLUMNS} gap-4 border-b px-5 py-2.5 bt-label`} style={tableHead}>
             <span>Field</span><span>Value</span><span>Source</span><span>Status</span><span>Buyers see at</span>
           </div>
           {templates.map((template) => {
@@ -157,7 +157,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
                 <span className="flex flex-col text-[13px] leading-[1.4]">
                   {claims.length ? claims.map((claim, index) => <Source key={index} source={claim} />) : <Source source={{ value: "", source_label: null, source_url: null, source_date: null }} />}
                 </span>
-                <span><span className="rounded-[5px] px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span>
+                <span><span className="rounded-none px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span>
                 <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span>
               </button>
               {proposals.filter((proposal) => proposal.target === template.key).map((proposal) => (
@@ -172,7 +172,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
       </div>
       {conflicts.map(({ template, row }) => (
         <div key={template.key} className="flex flex-wrap items-center gap-2.5 border-t px-5 py-3" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
-          <span className="rounded-[5px] px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={STATUS_STYLE.conflict}>Conflict</span>
+          <span className="rounded-none px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={STATUS_STYLE.conflict}>Conflict</span>
           <span className="min-w-[240px] flex-1 text-sm">
             {template.label}: {[row!, ...row!.alternatives].map((claim) => `${claim.value}${sourceText(claim) ? ` (${sourceText(claim)})` : ""}`).join(" or ")}?
           </span>
@@ -283,7 +283,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
       </header>
       <div className="overflow-x-auto">
         <div className="min-w-[760px]">
-          <div className={`grid ${FILE_COLUMNS} gap-4 border-b px-5 py-2.5 text-xs font-semibold`} style={tableHead}>
+          <div className={`grid ${FILE_COLUMNS} gap-4 border-b px-5 py-2.5 bt-label`} style={tableHead}>
             <span>File</span><span>Type</span><span>Source</span><span>Buyers see at</span>
           </div>
           {files.map((file) => (
@@ -303,7 +303,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
                 aria-label={`Who sees ${file.file_name}`}
                 value={file.visibility}
                 onChange={(event) => changeVisibility(file, event.target.value as Visibility)}
-                className="h-[34px] rounded-lg border px-1.5 text-[13px]"
+                className="h-[34px] rounded-none border px-1.5 text-[13px]"
                 style={inputStyle}
               >
                 {VISIBILITIES.map((visibility) => <option key={visibility} value={visibility}>{VISIBILITY_LABEL[visibility]}</option>)}

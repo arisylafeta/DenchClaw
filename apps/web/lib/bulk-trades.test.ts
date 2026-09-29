@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dueLabel,
   groupTrades,
+  dueText,
   parseTradePatch,
   stageTotal,
   todayInLondon,
@@ -121,4 +122,26 @@ describe("stageTotal", () => {
     expect(stageTotal([withValue("€100k"), withValue("$200k")])).toBe("");
     expect(stageTotal([])).toBe("");
   });
+
+describe("next step", () => {
+  it("says when it is due in words", () => {
+    expect(dueText(trade({ next_step_due: "2026-09-25" }), TODAY)).toEqual({ text: "3 days late", tone: "red" });
+    expect(dueText(trade({ next_step_due: "2026-09-27" }), TODAY)).toEqual({ text: "1 day late", tone: "red" });
+    expect(dueText(trade({ next_step_due: TODAY }), TODAY)).toEqual({ text: "Due today", tone: "amber" });
+    expect(dueText(trade({ next_step_due: "2026-09-29" }), TODAY)).toEqual({ text: "Due tomorrow", tone: "grey" });
+    expect(dueText(trade({ next_step_due: "2026-10-02" }), TODAY)).toEqual({ text: "Due 2 Oct", tone: "grey" });
+    expect(dueText(trade({ next_step_due: null }), TODAY)).toEqual({ text: "No due date", tone: "amber" });
+    expect(dueText(trade({ waiting_on: "them", waiting_since: "2026-09-22", next_step_due: null }), TODAY).text)
+      .toBe("Waiting on them since 22 Sep");
+  });
+
+  it("accepts one person per step, by id prefix", () => {
+    const contact = "btc_11111111-1111-4111-8111-111111111111";
+    const buyer = "btb_11111111-1111-4111-8111-111111111111";
+    expect(parseTradePatch({ next_step_contact_id: contact })).toEqual({ patch: { next_step_contact_id: contact } });
+    expect(parseTradePatch({ next_step_buyer_id: "" })).toEqual({ patch: { next_step_buyer_id: null } });
+    expect(parseTradePatch({ next_step_contact_id: buyer })).toHaveProperty("error");
+    expect(parseTradePatch({ next_step_contact_id: contact, next_step_buyer_id: buyer })).toHaveProperty("error");
+  });
+});
 });

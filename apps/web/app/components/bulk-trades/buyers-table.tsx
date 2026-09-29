@@ -24,10 +24,22 @@ import {
   buttonStyle,
   darkButtonClass,
   darkButtonStyle,
-  inputStyle,
   request,
   tradeUrl,
 } from "./trade-ui";
+
+/** Status colour: grey before contact, blue while in play, green once a bid lands, red when declined. */
+function statusStyle(status: BuyerStatus): React.CSSProperties {
+  const tone = status.startsWith("Declined") ? "red"
+    : ["Bid in", "LOI or deposit", "Won"].includes(status) ? "green"
+    : ["Teaser sent", "NDA, specs sent"].includes(status) ? "blue" : "grey";
+  return {
+    red: { background: "var(--bt-red-bg)", color: "var(--bt-red)", borderColor: "var(--bt-red-border)" },
+    green: { background: "var(--bt-green-bg)", color: "var(--bt-green)", borderColor: "var(--bt-green-border)" },
+    blue: { background: "var(--bt-blue-bg)", color: "var(--bt-blue)", borderColor: "var(--bt-blue-border)" },
+    grey: { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" },
+  }[tone];
+}
 
 const COLUMNS = "grid-cols-[24px_minmax(180px,1.3fr)_minmax(140px,1fr)_170px_120px_100px_130px]";
 
@@ -85,9 +97,10 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
         <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setEditing("new")}>Add buyer</button>
         <button
           type="button"
-          className={darkButtonClass}
-          style={darkButtonStyle}
+          className={selected.size ? darkButtonClass : buttonClass}
+          style={selected.size ? darkButtonStyle : buttonStyle}
           disabled={!selected.size}
+          title={selected.size ? undefined : "Tick buyers first"}
           onClick={() => setTeaser(true)}
         >
           Send teaser to selected
@@ -97,13 +110,13 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
       <div className="overflow-x-auto">
         <div className="min-w-[990px]">
           <div
-            className={`grid ${COLUMNS} gap-3.5 border-b px-5 py-2.5 text-xs font-semibold`}
+            className={`bt-label grid ${COLUMNS} gap-3.5 border-b px-5 py-2.5`}
             style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)", borderColor: "var(--bt-column)" }}
           >
             <span /><span>Buyer</span><span>Wants</span><span>Status</span><span>Last touch</span><span>Chase on</span><span>Bid</span>
           </div>
           {buyers.map((buyer) => (
-            <div key={buyer.id} className={`grid ${COLUMNS} items-center gap-3.5 border-b px-5 py-3.5 text-sm`} style={{ borderColor: "var(--bt-column)" }}>
+            <div key={buyer.id} className={`group grid ${COLUMNS} items-center gap-3.5 border-b px-5 py-3 text-sm hover:bg-[var(--bt-row-hover)]`} style={{ borderColor: "var(--bt-divider)" }}>
               <input
                 type="checkbox"
                 aria-label={`Select ${buyer.name}`}
@@ -116,45 +129,52 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 {buyer.contact && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{buyer.contact}</div>}
                 <TrackingLine buyer={buyer} />
               </button>
-              <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{buyer.wants ?? "—"}</span>
-              <select
-                aria-label={`Status for ${buyer.name}`}
-                value={buyer.status}
-                onChange={(event) => changeStatus(buyer, event.target.value as BuyerStatus)}
-                className="h-[34px] rounded-lg border px-1.5 text-[13px]"
-                style={inputStyle}
-              >
-                {BUYER_STATUSES.map((status) => <option key={status}>{status}</option>)}
-              </select>
+              <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span>
+              <div className="flex flex-col items-start gap-1">
+                <select
+                  aria-label={`Status for ${buyer.name}`}
+                  value={buyer.status}
+                  onChange={(event) => changeStatus(buyer, event.target.value as BuyerStatus)}
+                  className="max-w-full cursor-pointer appearance-none rounded-none border px-2 py-0.5 text-xs font-medium"
+                  style={statusStyle(buyer.status)}
+                >
+                  {BUYER_STATUSES.map((status) => <option key={status}>{status}</option>)}
+                </select>
+                {buyer.status === "To contact" && buyer.email_tracking?.sent_at && (
+                  <button type="button" onClick={() => changeStatus(buyer, "Teaser sent")} className="text-xs underline" style={{ color: "var(--bt-link)" }}>
+                    Mark as Teaser sent?
+                  </button>
+                )}
+              </div>
               <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>
                 {buyer.last_touch_on
                   ? [buyer.last_touch_via, shortDate(buyer.last_touch_on)].filter(Boolean).join(" · ")
-                  : "—"}
+                  : ""}
               </span>
               <span
                 className="text-[13px]"
                 style={{ color: buyer.chase_on && buyer.chase_on <= today ? "var(--bt-red)" : "var(--bt-muted)" }}
               >
-                {buyer.chase_on ? shortDate(buyer.chase_on) : "—"}
+                {buyer.chase_on ? shortDate(buyer.chase_on) : ""}
               </span>
               {buyer.latest_bid ? (
                 <button
                   type="button"
                   onClick={() => setBidFor(buyer)}
                   title="Add a newer bid"
-                  className="bt-mono h-[34px] truncate rounded-lg border px-2 text-[13px] font-medium"
-                  style={{ borderColor: "var(--bt-border)" }}
+                  className="bt-mono h-7 justify-self-start truncate text-left text-[13px] font-medium hover:underline"
                 >
                   {bidLabel(buyer.latest_bid)}
                 </button>
               ) : (
                 <button
                   type="button"
+                  aria-label="Add bid"
                   onClick={() => setBidFor(buyer)}
-                  className="h-[34px] rounded-lg border border-dashed text-[13px]"
-                  style={{ borderColor: "var(--bt-dashed)", color: "var(--bt-muted)", background: "var(--bt-surface)" }}
+                  className="h-7 justify-self-start px-2 text-xs font-medium opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  style={{ color: "var(--bt-muted)" }}
                 >
-                  Add bid
+                  + Bid
                 </button>
               )}
             </div>

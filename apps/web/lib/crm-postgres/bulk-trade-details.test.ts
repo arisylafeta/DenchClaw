@@ -161,5 +161,16 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     ]);
     expect(results.every((result) => result && typeof result === "object")).toBe(true);
   });
-});
 
+  it("keeps the next step's person on this trade and on one side only", async () => {
+    const contact = await db.addContact(lotId, { name: "Sam Side" }, userId);
+    const buyer = await db.addBuyer(lotId, { name: "Buyer Side" }, userId);
+    await trades.updateBulkTrade(lotId, { next_step_contact_id: contact!.id }, userId);
+    const switched = await trades.updateBulkTrade(lotId, { next_step_buyer_id: buyer!.id }, userId);
+    expect(switched).toMatchObject({ next_step_buyer_id: buyer!.id, next_step_contact_id: null });
+
+    const other = await trades.createBulkTrade({ title: "Elsewhere" }, userId);
+    const stranger = await db.addBuyer(other.id, { name: "Stranger" }, userId);
+    await expect(trades.updateBulkTrade(lotId, { next_step_buyer_id: stranger!.id }, userId)).rejects.toMatchObject({ code: "23503" });
+  });
+});

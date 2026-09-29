@@ -2459,76 +2459,101 @@ td:has(> div > :empty) {
 }
 
 /* ============================================================
-   Bulk Trades: palette and type from the Bulk Trades design canvas
+   Bulk Trades: ReBattery platform palette and type (rebattery-platform app/globals.css:
+   --rb-gray-*, --status-*, --brand-accent). Square corners like the platform's app surfaces.
    ============================================================ */
 
 .bulk-trades {
-  --bt-bg: #f7f7f5;
+  --bt-bg: #fafafa;
   --bt-surface: #ffffff;
-  --bt-row-hover: #fafaf8;
-  --bt-border: #e7e6e2;
-  --bt-border-strong: #cfcdc6;
-  --bt-column: #efeeea;
-  --bt-column-over: #e5e4de;
-  --bt-divider: #f2f2f0;
-  --bt-segment: #f2f2f0;
-  --bt-text: #1c1c1a;
-  --bt-text-2: #3f3f3a;
-  --bt-muted: #6b6a65;
-  --bt-accent: #e2f24a;
-  --bt-accent-hover: #d4e436;
-  --bt-on-accent: #1c1c1a;
-  --bt-red: #b42318;
-  --bt-red-bg: #fdecea;
-  --bt-amber: #b54708;
-  --bt-amber-bg: #fef4e6;
-  --bt-badge: #1c1c1a;
+  --bt-row-hover: #fafafa;
+  --bt-border: #e0e0e0;
+  --bt-border-strong: #b0b0b0;
+  --bt-divider: #f0f0f0;
+  --bt-segment: #f0f0f0;
+  --bt-column: #f2f2f2;
+  --bt-column-over: #e0e0e0;
+  --bt-table-head: #fafafa;
+  --bt-dashed: #d4d4d4;
+  --bt-text: #1a1a1a;
+  --bt-text-2: #525252;
+  --bt-muted: #5c5c5c;
+  --bt-accent: #e7f346;
+  --bt-accent-hover: #d4e030;
+  --bt-on-accent: #0a0a0a;
+  --bt-badge: #0a0a0a;
   --bt-on-badge: #ffffff;
-  --bt-ok: #17b26a;
-  --bt-table-head: #fafaf8;
-  --bt-dashed: #d0cfc9;
-  --bt-link: #3538cd;
-  --bt-bar: #1c1c1a;
-  --bt-on-bar: #ffffff;
-  --bt-bar-border: #4a4a45;
-  --bt-bar-muted: #c9c8c2;
-  --bt-green: #067647;
-  --bt-green-bg: #ecfdf3;
+  --bt-ok: #22c55e;
+  --bt-link: #1e40af;
+  --bt-red: #b91c1c;
+  --bt-red-bg: #fef2f2;
+  --bt-red-border: #ef444455;
+  --bt-amber: #c2410c;
+  --bt-amber-bg: #fff7ed;
+  --bt-amber-border: #fb923c33;
   --bt-amber-tint: #fffbf5;
+  --bt-green: #0f8a4b;
+  --bt-green-bg: #eafbf1;
+  --bt-green-border: #22c55e33;
+  --bt-blue: #1e40af;
+  --bt-blue-bg: #e8f0ff;
+  --bt-blue-border: #3b82f655;
+  --bt-grey-border: #8a8a8a33;
+  --bt-bar: #0a0a0a;
+  --bt-on-bar: #ffffff;
+  --bt-bar-border: #3d3d3d;
+  --bt-bar-muted: #b0b0b0;
   background: var(--bt-bg);
   color: var(--bt-text);
-  font-family: "Geist", "Inter", system-ui, sans-serif;
+  font-family: "Inter", system-ui, sans-serif;
 }
 
 .dark .bulk-trades {
-  --bt-bg: #1b1b1a;
-  --bt-surface: #242423;
-  --bt-row-hover: #2a2a28;
-  --bt-border: #363532;
-  --bt-border-strong: #4a4945;
-  --bt-column: #222221;
-  --bt-column-over: #2c2c2a;
-  --bt-divider: #2e2e2c;
-  --bt-segment: #2e2e2c;
-  --bt-text: #ededea;
-  --bt-text-2: #c9c8c3;
-  --bt-muted: #9a9993;
-  --bt-red: #f97066;
-  --bt-red-bg: rgba(240, 68, 56, 0.16);
-  --bt-amber: #fdb022;
-  --bt-amber-bg: rgba(247, 144, 9, 0.16);
-  --bt-badge: #ededea;
-  --bt-on-badge: #1c1c1a;
-  --bt-table-head: #20201f;
-  --bt-dashed: #4a4945;
-  --bt-link: #a4a7ff;
-  --bt-bar: #2e2e2b;
-  --bt-bar-border: #55544f;
-  --bt-green: #47cd89;
-  --bt-green-bg: rgba(23, 178, 106, 0.16);
-  --bt-amber-tint: rgba(247, 144, 9, 0.06);
+  --bt-bg: #0b0c10;
+  --bt-surface: #1a1a1a;
+  --bt-row-hover: #222222;
+  --bt-border: #3d3d3d;
+  --bt-border-strong: #5c5c5c;
+  --bt-divider: #2e2e2e;
+  --bt-segment: #2e2e2e;
+  --bt-column: #141414;
+  --bt-column-over: #2e2e2e;
+  --bt-table-head: #141414;
+  --bt-dashed: #525252;
+  --bt-text: #f4f4f2;
+  --bt-text-2: #d4d4d4;
+  --bt-muted: #a3a3a3;
+  --bt-badge: #f4f4f2;
+  --bt-on-badge: #0a0a0a;
+  --bt-link: #a4b8ff;
+  --bt-red: #f87171;
+  --bt-red-bg: rgba(239, 68, 68, 0.14);
+  --bt-red-border: rgba(239, 68, 68, 0.4);
+  --bt-amber: #fb923c;
+  --bt-amber-bg: rgba(251, 146, 60, 0.14);
+  --bt-amber-border: rgba(251, 146, 60, 0.35);
+  --bt-amber-tint: rgba(251, 146, 60, 0.06);
+  --bt-green: #4ade80;
+  --bt-green-bg: rgba(34, 197, 94, 0.14);
+  --bt-green-border: rgba(34, 197, 94, 0.35);
+  --bt-blue: #93b4ff;
+  --bt-blue-bg: rgba(59, 130, 246, 0.16);
+  --bt-blue-border: rgba(59, 130, 246, 0.4);
+  --bt-grey-border: rgba(163, 163, 163, 0.3);
+  --bt-bar: #222222;
+  --bt-bar-border: #525252;
 }
 
 .bulk-trades .bt-mono {
   font-family: "Geist Mono", ui-monospace, "SF Mono", monospace;
+}
+
+/* Column headers and small labels, as the platform's .micro-label. */
+.bulk-trades .bt-label {
+  font-family: "Geist Mono", ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bt-muted);
 }

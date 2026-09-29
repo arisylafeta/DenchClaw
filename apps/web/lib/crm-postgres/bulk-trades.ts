@@ -10,7 +10,7 @@ const TRADE_COLUMNS = `
   to_char(lot.last_touched, 'YYYY-MM-DD') as last_touched,
   to_char(lot.clear_by, 'YYYY-MM-DD') as clear_by,
   to_char(lot.ship_by, 'YYYY-MM-DD') as ship_by,
-  lot.transport_class, lot.tfs_needed, lot.listing_id, lot.updated_at,
+  lot.transport_class, lot.tfs_needed, lot.listing_id, lot.next_step_contact_id, lot.next_step_buyer_id, lot.updated_at,
   (select count(*)::int from crm_bulk_trade_proposals proposal
     where proposal.status = 'new' and (proposal.lot_id = lot.id
       or (proposal.kind = 'needs_triage' and proposal.proposed->'lot_ids' ? lot.id))) as new_count`;
@@ -80,6 +80,16 @@ export async function updateBulkTrade(
     );
     const before = current.rows[0] as BulkTrade | undefined;
     if (!before) return null;
+    // The next step's person must belong to this trade.
+    for (const [key, table] of [["next_step_contact_id", "crm_bulk_trade_contacts"], ["next_step_buyer_id", "crm_bulk_trade_buyers"]] as const) {
+      const value = patch[key];
+      if (!value) continue;
+      const { rows } = await client.query(`select 1 from ${table} where id = $1 and lot_id = $2`, [value, id]);
+      if (!rows.length) throw Object.assign(new Error("That person is not on this trade."), { code: "23503" });
+    }
+    // Picking one side clears the other, so a step is never for two people.
+    if (patch.next_step_contact_id) patch = { ...patch, next_step_buyer_id: null };
+    if (patch.next_step_buyer_id) patch = { ...patch, next_step_contact_id: null };
 
     const changes: Record<string, [unknown, unknown]> = {};
     const fields: Record<string, unknown> = {};

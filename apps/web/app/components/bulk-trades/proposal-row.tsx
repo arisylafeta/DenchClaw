@@ -50,7 +50,7 @@ export function ProposalRow({ proposal, onDecided, compact }: Props) {
       className={`flex flex-wrap items-start gap-2.5 ${compact ? "py-2" : "px-5 py-3"}`}
       style={compact ? undefined : { background: "var(--bt-table-head)" }}
     >
-      <span className="mt-0.5 rounded-[5px] px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
+      <span className="mt-0.5 rounded-none px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
         New
       </span>
       <div className="min-w-[220px] flex-1">

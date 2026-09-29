@@ -80,7 +80,7 @@ export function BuyerDialog({ trade, buyer, onClose, onSaved, onEmail }: {
       <FormField label="Contact">{text("contact")}</FormField>
       {person && (
         <FormField label="Linked CRM person (for email tracking)">
-          <div className="flex h-9 items-center gap-2 rounded-lg border px-2.5 text-sm" style={inputStyle}>
+          <div className="flex h-9 items-center gap-2 rounded-none border px-2.5 text-sm" style={inputStyle}>
             <span className="flex-1 truncate">{person.label}</span>
             <button type="button" onClick={() => setPerson(null)} className="text-xs" style={{ color: "var(--bt-muted)" }}>Unlink</button>
           </div>
@@ -216,7 +216,7 @@ export function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onM
         Nothing is sent from here: send it yourself, then mark the buyers.
       </p>
       <textarea aria-label="Teaser text" value={text} onChange={(event) => setText(event.target.value)} rows={12}
-        className="w-full rounded-lg border px-3 py-2 text-sm leading-relaxed" style={inputStyle} />
+        className="w-full rounded-none border px-3 py-2 text-sm leading-relaxed" style={inputStyle} />
       {!!without.length && (
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
           No email for {without.map((buyer) => buyer.name).join(", ")}. Link them to a CRM person to draft for them.
@@ -262,7 +262,7 @@ function CrmSearch({ onCompany, onPerson }: {
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people or companies"
         className={inputClass} style={inputStyle} />
       {!empty && (
-        <div role="listbox" aria-label="CRM matches" className="max-h-60 overflow-y-auto rounded-lg border pb-1" style={{ borderColor: "var(--bt-border)" }}>
+        <div role="listbox" aria-label="CRM matches" className="max-h-60 overflow-y-auto rounded-none border pb-1" style={{ borderColor: "var(--bt-border)" }}>
           {!!results.companies.length && <div className={group} style={{ color: "var(--bt-muted)" }}>Companies</div>}
           {results.companies.map((company) => (
             <button key={company.id} type="button" role="option" aria-selected="false" onClick={() => pick(() => onCompany(company))} className={option}>

@@ -14,17 +14,17 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const tradeUrl = (id: string, path = "") => `/api/bulk-trades/${encodeURIComponent(id)}${path}`;
 
 export const inputClass =
-  "h-9 w-full rounded-lg border px-2.5 text-sm outline-none focus:border-[var(--bt-text-2)]";
+  "h-9 w-full rounded-none border px-2.5 text-sm outline-none focus:border-[var(--bt-text-2)]";
 export const inputStyle = { background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
 /** Secondary button: white with a border. */
 export const buttonClass =
-  "inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-[13px] font-medium hover:bg-[var(--bt-row-hover)] disabled:opacity-50";
+  "inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-none border px-3 text-[13px] font-medium hover:bg-[var(--bt-row-hover)] disabled:opacity-50";
 export const buttonStyle = { background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
 /** Primary button: near-black. */
 export const darkButtonClass =
-  "inline-flex h-9 items-center justify-center whitespace-nowrap rounded-lg px-3 text-[13px] font-medium hover:opacity-90 disabled:opacity-40";
+  "inline-flex h-9 items-center justify-center whitespace-nowrap rounded-none px-3 text-[13px] font-medium hover:opacity-90 disabled:opacity-40";
 export const darkButtonStyle = { background: "var(--bt-badge)", color: "var(--bt-on-badge)" };
 
 export function FormField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -40,7 +40,7 @@ export function Card({ children, className = "", label }: { children: React.Reac
   return (
     <section
       aria-label={label}
-      className={`rounded-[14px] border ${className}`}
+      className={`rounded-none border ${className}`}
       style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}
     >
       {children}
@@ -75,7 +75,7 @@ export function Modal({ title, onClose, onSubmit, children, footer, wide }: Moda
         aria-labelledby={titleId}
         onSubmit={onSubmit}
         onClick={(event: React.MouseEvent) => event.stopPropagation()}
-        className={`flex w-full flex-col rounded-[14px] border shadow-xl ${wide ? "max-w-[640px]" : "max-w-[440px]"}`}
+        className={`flex w-full flex-col rounded-none border shadow-xl ${wide ? "max-w-[640px]" : "max-w-[440px]"}`}
         style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}
       >
         <div className="flex items-center justify-between border-b px-5 py-4" style={{ borderColor: "var(--bt-divider)" }}>
@@ -130,7 +130,7 @@ export function useForm<T extends Record<string, string>>(initial: T, save: (dra
     </select>
   );
   const textarea = (key: keyof T, props: React.TextareaHTMLAttributes<HTMLTextAreaElement> = {}) => (
-    <textarea value={draft[key]} onChange={set(key)} className="w-full rounded-lg border px-2.5 py-2 text-sm leading-relaxed" style={inputStyle} {...props} />
+    <textarea value={draft[key]} onChange={set(key)} className="w-full rounded-none border px-2.5 py-2 text-sm leading-relaxed" style={inputStyle} {...props} />
   );
 
   return { draft, setDraft, set, saving, error, submit, run, input, select, textarea };

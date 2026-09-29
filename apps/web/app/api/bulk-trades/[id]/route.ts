@@ -2,7 +2,7 @@ import { parseTradePatch } from "@/lib/bulk-trades";
 import { updateBulkTrade } from "@/lib/crm-postgres/bulk-trades";
 import { getTradeDetail } from "@/lib/crm-postgres/bulk-trade-details";
 import { tradeProposals } from "@/lib/crm-postgres/bulk-trade-proposals";
-import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
+import { badRequest, guardBulkTrades, linkedWrite, notFound, readJson } from "@/lib/bulk-trades-route";
 import { trackedLinkBase } from "@/lib/tracked-links";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if ("response" in guard) return guard.response;
   const parsed = parseTradePatch(await readJson(req));
   if ("error" in parsed) return badRequest(parsed.error);
-  const trade = await updateBulkTrade((await params).id, parsed.patch, guard.userId);
-  return trade ? Response.json({ trade }) : notFound("Trade");
+  const { id } = await params;
+  return linkedWrite(async () => {
+    const trade = await updateBulkTrade(id, parsed.patch, guard.userId);
+    return trade ? Response.json({ trade }) : notFound("Trade");
+  });
 }

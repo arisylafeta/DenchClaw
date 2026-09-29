@@ -20,7 +20,7 @@ export function TradesList({ trades, today, onOpen }: Props) {
 
   return (
     <div className="flex min-w-[860px] flex-col gap-5">
-      <div className={`grid ${COLUMNS} gap-4 px-4 text-xs font-semibold`} style={{ color: "var(--bt-muted)" }}>
+      <div className={`bt-label grid ${COLUMNS} gap-4 px-4`}>
         <span>Trade</span><span>Stage</span><span>Value</span><span>Next step</span><span>Due</span><span>Touched</span>
       </div>
       {groups.map((group) => (
@@ -32,7 +32,7 @@ export function TradesList({ trades, today, onOpen }: Props) {
             {group.name}
             <span className="font-medium" style={{ color: "var(--bt-muted)" }}>{group.trades.length}</span>
           </h2>
-          <div className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          <div className="overflow-hidden rounded-none border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             {group.trades.map((trade) => (
               <button
                 key={trade.id}
@@ -45,7 +45,7 @@ export function TradesList({ trades, today, onOpen }: Props) {
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-semibold">{trade.title}</span>
                     {!!trade.new_count && (
-                    <span className="shrink-0 rounded-[10px] px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
+                    <span className="shrink-0 rounded-none px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
                       {trade.new_count} new
                     </span>
                   )}

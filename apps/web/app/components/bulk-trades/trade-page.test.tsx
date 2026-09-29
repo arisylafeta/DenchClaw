@@ -310,5 +310,53 @@ describe("TradePage overview", () => {
     expect(within(card).getByRole("link", { name: /stock.xlsx/ })).toHaveAttribute("href", "/api/bulk-trades/bt_1/files/f3");
     expect(card.querySelector("img")).toHaveAttribute("src", "/api/bulk-trades/bt_1/files/f1?view=1");
   });
-});
 
+  it("shows the next step as one line with who it is for, and emails that person", async () => {
+    const withWho = {
+      ...DETAIL,
+      trade: { ...TRADE, next_step: "Send the BMS answers", next_step_buyer_id: "btb_1" },
+      buyers: [{ ...BUYER, contact: "Tess Buyer", person_email: "tess@example.test" }],
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/email-draft")) return new Response(JSON.stringify({ url: "https://mail.google.com/", tracked_links: 0 }), { status: 201 });
+      if (init?.method === "PATCH") return new Response(JSON.stringify({ trade: { ...withWho.trade, ...JSON.parse(String(init.body)) } }));
+      return new Response(JSON.stringify(withWho));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const strip = await screen.findByRole("region", { name: "Next step" });
+    expect(strip).toHaveTextContent("Due today");
+    expect(strip).toHaveTextContent("For Tess Buyer · Synthetic Storage (buyer)");
+    await userEvent.click(within(strip).getByRole("button", { name: "Email Tess" }));
+    expect(screen.getByLabelText("To")).toHaveValue("tess@example.test");
+    expect(screen.getByLabelText("Subject")).toHaveValue("Battery batch available");
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await userEvent.click(within(strip).getByRole("button", { name: "Done, set next" }));
+    await userEvent.type(screen.getByLabelText("Next step (one action)"), "Chase Sam for the address");
+    await userEvent.selectOptions(screen.getByLabelText("For"), "contact:btc_1");
+    await userEvent.click(screen.getByRole("button", { name: "Save next step" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+      expect(JSON.parse(String(call![1]!.body))).toMatchObject({
+        next_step: "Chase Sam for the address", next_step_contact_id: "btc_1", next_step_buyer_id: null,
+      });
+    });
+  });
+
+  it("offers to mark a buyer as Teaser sent when a teaser email went out", async () => {
+    const tracked = { ...BUYER, email_tracking: { campaign: "eBS37", sent_at: "2026-09-24T09:00:00Z", delivered_at: "2026-09-24T09:01:00Z", bounced_at: null, opened_at: null, clicked_at: null } };
+    const fetchMock = mockFetch();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") return new Response(JSON.stringify({ buyer: { ...tracked, ...JSON.parse(String(init.body)) } }));
+      return new Response(JSON.stringify({ ...DETAIL, buyers: [tracked] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Mark as Teaser sent?" }));
+    await waitFor(() => expect(screen.getByLabelText("Status for Synthetic Storage")).toHaveValue("Teaser sent"));
+    expect(screen.queryByRole("button", { name: "Mark as Teaser sent?" })).not.toBeInTheDocument();
+  });
+});

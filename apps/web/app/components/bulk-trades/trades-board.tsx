@@ -55,7 +55,7 @@ function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: Trade
     <section
       aria-label={stage}
       {...handlers}
-      className="flex min-h-0 min-w-[280px] flex-1 flex-col gap-2.5 overflow-y-auto rounded-[14px] p-3"
+      className="flex min-h-0 min-w-[280px] flex-1 flex-col gap-2.5 overflow-y-auto rounded-none p-3"
       style={{ background: over ? "var(--bt-column-over)" : "var(--bt-column)" }}
     >
       <header className="flex items-center gap-2 px-1 pb-1 pt-0.5">
@@ -71,13 +71,13 @@ function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: Trade
           draggable
           onDragStart={(event) => event.dataTransfer.setData("text/plain", trade.id)}
           onClick={() => onOpen(trade)}
-          className="flex shrink-0 cursor-grab flex-col gap-1.5 rounded-[10px] border px-3.5 py-3 text-left hover:border-[var(--bt-border-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--bt-text)] active:cursor-grabbing"
+          className="flex shrink-0 cursor-grab flex-col gap-1.5 rounded-none border px-3.5 py-3 text-left hover:border-[var(--bt-border-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--bt-text)] active:cursor-grabbing"
           style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}
         >
           <div className="flex items-baseline gap-2">
             <span className="flex-1 text-sm font-semibold">{trade.title}</span>
             {!!trade.new_count && (
-              <span className="shrink-0 rounded-[10px] px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
+              <span className="shrink-0 rounded-none px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
                 {trade.new_count} new
               </span>
             )}
@@ -100,7 +100,7 @@ function ClosedZone({ stage, trades, onMove }: Pick<Props, "trades" | "onMove"> 
   return (
     <div
       {...handlers}
-      className="flex h-12 min-w-[160px] items-center justify-center gap-2 rounded-[10px] border border-dashed text-[13px] font-semibold"
+      className="flex h-12 min-w-[160px] items-center justify-center gap-2 rounded-none border border-dashed text-[13px] font-semibold"
       style={{
         borderColor: "var(--bt-border-strong)",
         background: over ? "var(--bt-column-over)" : "transparent",

@@ -116,7 +116,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       type="button"
       aria-pressed={mode === value}
       onClick={() => switchMode(value)}
-      className="flex h-[30px] items-center rounded-[7px] px-3 text-[13px]"
+      className="flex h-[30px] items-center rounded-none px-3 text-[13px]"
       style={mode === value
         ? { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" }
         : { color: "var(--bt-text-2)", fontWeight: 500 }}
@@ -129,7 +129,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
     <div className="bulk-trades flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-4 border-b px-8 py-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
-        <nav aria-label="View" className="ml-2 flex rounded-[9px] p-[3px]" style={{ background: "var(--bt-segment)" }}>
+        <nav aria-label="View" className="ml-2 flex rounded-none p-[3px]" style={{ background: "var(--bt-segment)" }}>
           {tab("list", "List")}
           {tab("board", "Board")}
         </nav>
@@ -141,7 +141,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="flex h-9 items-center gap-1.5 rounded-lg bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
+          className="flex h-9 items-center gap-1.5 rounded-none bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
           style={{ color: "var(--bt-on-accent)" }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
@@ -155,10 +155,10 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         <ErrorText error={loadError} />
         <ErrorText error={actionError} />
         {!!possible.length && (
-          <section aria-label="Possible new trades" className="mb-5 overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          <section aria-label="Possible new trades" className="mb-5 overflow-hidden rounded-none border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             <button type="button" aria-expanded={showPossible} onClick={() => setShowPossible((open) => !open)}
               className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold">
-              <span className="rounded-[10px] px-[7px] py-px text-[11px]" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>{possible.length}</span>
+              <span className="rounded-none px-[7px] py-px text-[11px]" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>{possible.length}</span>
               Possible new {possible.length === 1 ? "trade" : "trades"} from your inbox
               <span className="flex-1" />
               <span className="text-[13px] font-medium" style={{ color: "var(--bt-muted)" }}>{showPossible ? "Hide" : "Review"}</span>

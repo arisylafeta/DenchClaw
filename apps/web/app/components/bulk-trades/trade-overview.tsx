@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { dueLabel, type BulkTrade, type TradePatch } from "@/lib/bulk-trades";
+import { dueText, type BulkTrade, type TradePatch } from "@/lib/bulk-trades";
 import {
+  BUYER_SUBJECT,
   firstName,
   greeting,
   isImage,
@@ -58,7 +59,7 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   const { trade, contacts } = detail;
   return (
     <div className="flex flex-col gap-6">
-      <NextStepBar trade={trade} contact={emailContact(contacts)} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
+      <NextStepStrip detail={detail} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
       <BuyersTable
         trade={trade}
         buyers={detail.buyers}
@@ -81,19 +82,42 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   );
 }
 
-function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
-  trade: BulkTrade;
-  contact: Contact | undefined;
+type Who =
+  | { kind: "contact"; name: string; detail: string | null; email: string | null }
+  | { kind: "buyer"; name: string; detail: string | null; email: string | null };
+
+/** The person the next step is for, from the trade's contacts or buyers. */
+function nextStepWho(detail: TradeDetail): Who | null {
+  const { trade } = detail;
+  const contact = detail.contacts.find((candidate) => candidate.id === trade.next_step_contact_id);
+  if (contact) return { kind: "contact", name: contact.name, detail: contact.company, email: contact.email };
+  const buyer = detail.buyers.find((candidate) => candidate.id === trade.next_step_buyer_id);
+  if (buyer) return { kind: "buyer", name: buyer.contact ?? buyer.name, detail: buyer.contact ? buyer.name : null, email: buyer.person_email };
+  return null;
+}
+
+const TONE_STYLE = {
+  red: { background: "var(--bt-red-bg)", color: "var(--bt-red)", borderColor: "var(--bt-red-border)" },
+  amber: { background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" },
+  grey: { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" },
+} as const;
+
+/** One quiet line: when, what, for whom, and the actions. Colour only when it is due or late. */
+function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
+  detail: TradeDetail;
   today: string;
   linkTracking: boolean;
   onTradePatch: Props["onTradePatch"];
 }) {
+  const { trade } = detail;
   const [setting, setSetting] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
   const [emailing, setEmailing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const snoozeMenu = useRef<HTMLDivElement>(null);
-  const barButton = "inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium";
+  const who = nextStepWho(detail);
+  const fallback = emailContact(detail.contacts);
+  const due = dueText(trade, today);
 
   useEffect(() => {
     if (!snoozing) return;
@@ -109,7 +133,6 @@ function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
       document.removeEventListener("keydown", close);
     };
   }, [snoozing]);
-  const barButtonStyle = { borderColor: "var(--bt-bar-border)", color: "var(--bt-on-bar)" };
 
   async function snooze(days: number) {
     setSnoozing(false);
@@ -121,82 +144,94 @@ function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
     }
   }
 
+  const emailName = who ? firstName(who.name) : null;
+  const small = "inline-flex h-8 items-center whitespace-nowrap rounded-none border px-3 text-[13px] font-medium";
   return (
     <section
       aria-label="Next step"
-      className="flex flex-wrap items-center gap-4 rounded-[14px] px-5 py-[18px]"
-      style={{ background: "var(--bt-bar)", color: "var(--bt-on-bar)" }}
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 border px-4 py-3"
+      style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}
     >
-      <div className="min-w-[240px] flex-1">
-        <div className="text-xs font-semibold uppercase tracking-[0.04em]" style={{ color: "var(--bt-accent)" }}>
-          Next step · {dueLabel(trade, today)}
+      <span className="shrink-0 whitespace-nowrap border px-2 py-0.5 text-xs font-medium" style={TONE_STYLE[due.tone]}>
+        {trade.next_step ? due.text : "No next step"}
+      </span>
+      <div className="min-w-[220px] flex-1">
+        <div className="text-[15px] font-medium leading-snug">
+          {trade.next_step ?? "Set one so this trade comes back at the right time."}
         </div>
-        <div className="mt-1 text-[17px] font-semibold">
-          {trade.next_step ?? "No next step. Set one so this trade comes back at the right time."}
-        </div>
-        <ErrorText error={error} />
-      </div>
-      <button
-        type="button"
-        onClick={() => setEmailing(true)}
-        className="inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
-        style={{ background: "var(--bt-accent)", color: "var(--bt-on-accent)" }}
-      >
-        Email
-      </button>
-      <button type="button" onClick={() => setSetting(true)} className={`${barButton} text-[13px]`} style={barButtonStyle}>
-        {trade.next_step ? "Done, set next" : "Set next step"}
-      </button>
-      <div ref={snoozeMenu} className="relative">
-        <button
-          type="button"
-          aria-expanded={snoozing}
-          onClick={() => setSnoozing((open) => !open)}
-          className="h-10 px-3 text-[13px] font-medium"
-          style={{ color: "var(--bt-bar-muted)" }}
-        >
-          Snooze
-        </button>
-        {snoozing && (
-          <div
-            role="menu"
-            className="absolute right-0 top-11 z-10 flex w-40 flex-col rounded-lg border py-1 shadow-lg"
-            style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }}
-          >
-            {[["Tomorrow", 1], ["In 3 days", 3], ["Next week", 7]].map(([label, days]) => (
-              <button key={label} type="button" role="menuitem" onClick={() => snooze(days as number)}
-                className="px-3 py-2 text-left text-sm hover:bg-[var(--bt-row-hover)]">
-                {label}
-              </button>
-            ))}
+        {who && (
+          <div className="mt-0.5 text-[13px]" style={{ color: "var(--bt-muted)" }}>
+            For {who.name}{who.detail ? ` · ${who.detail}` : ""}{who.kind === "buyer" ? " (buyer)" : ""}
           </div>
         )}
+        <ErrorText error={error} />
       </div>
+      {trade.next_step && (
+        <button type="button" onClick={() => setEmailing(true)} className={`${small} hover:bg-[var(--bt-accent-hover)]`}
+          style={{ background: "var(--bt-accent)", color: "var(--bt-on-accent)", borderColor: "var(--bt-accent)" }}>
+          {emailName ? `Email ${emailName}` : "Email"}
+        </button>
+      )}
+      <button type="button" onClick={() => setSetting(true)} className={small}
+        style={trade.next_step ? buttonStyle : darkButtonStyle}>
+        {trade.next_step ? "Done, set next" : "Set next step"}
+      </button>
+      {trade.next_step && (
+        <div ref={snoozeMenu} className="relative">
+          <button type="button" aria-expanded={snoozing} onClick={() => setSnoozing((open) => !open)}
+            className="h-8 px-2 text-[13px] font-medium" style={{ color: "var(--bt-muted)" }}>
+            Snooze
+          </button>
+          {snoozing && (
+            <div role="menu" className="absolute right-0 top-9 z-10 flex w-40 flex-col border py-1 shadow-lg"
+              style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
+              {[["Tomorrow", 1], ["In 3 days", 3], ["Next week", 7]].map(([label, days]) => (
+                <button key={label} type="button" role="menuitem" onClick={() => snooze(days as number)}
+                  className="px-3 py-2 text-left text-sm hover:bg-[var(--bt-row-hover)]">
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {emailing && (
         <EmailDialog
           trade={trade}
-          to={contact?.email ?? ""}
-          subject={trade.title}
-          body={`${greeting(contact?.name)}\n\n`}
+          to={who ? who.email ?? "" : fallback?.email ?? ""}
+          subject={who?.kind === "buyer" ? BUYER_SUBJECT : trade.title}
+          body={`${greeting(who?.name ?? fallback?.name)}\n\n`}
+          buyerId={who?.kind === "buyer" ? trade.next_step_buyer_id ?? undefined : undefined}
           linkTracking={linkTracking}
           onClose={() => setEmailing(false)}
         />
       )}
-      {setting && (
-        <SetNextDialog trade={trade} today={today} onClose={() => setSetting(false)} onTradePatch={onTradePatch} />
-      )}
+      {setting && <SetNextDialog detail={detail} today={today} onClose={() => setSetting(false)} onTradePatch={onTradePatch} />}
     </section>
   );
 }
 
-function SetNextDialog({ trade, today, onClose, onTradePatch }: {
-  trade: BulkTrade;
+function SetNextDialog({ detail, today, onClose, onTradePatch }: {
+  detail: TradeDetail;
   today: string;
   onClose: () => void;
   onTradePatch: Props["onTradePatch"];
 }) {
-  const form = useForm({ next_step: "", next_step_due: addDays(today, 1), waiting_on: "us" }, async (draft) => {
-    await onTradePatch({ ...draft, waiting_on: draft.waiting_on as "us" | "them", last_touched: today });
+  const { trade } = detail;
+  const people = [
+    ...detail.contacts.map((contact) => [`contact:${contact.id}`, `${contact.name}${contact.company ? `, ${contact.company}` : ""}`]),
+    ...detail.buyers.map((buyer) => [`buyer:${buyer.id}`, `${buyer.name}${buyer.contact ? ` (${buyer.contact})` : ""} · buyer`]),
+  ];
+  const form = useForm({ next_step: "", next_step_due: addDays(today, 1), waiting_on: "us", who: "" }, async (draft) => {
+    const [kind, id] = draft.who.split(":");
+    await onTradePatch({
+      next_step: draft.next_step,
+      next_step_due: draft.next_step_due,
+      waiting_on: draft.waiting_on as "us" | "them",
+      last_touched: today,
+      next_step_contact_id: kind === "contact" ? id : null,
+      next_step_buyer_id: kind === "buyer" ? id : null,
+    });
     onClose();
   });
 
@@ -208,7 +243,10 @@ function SetNextDialog({ trade, today, onClose, onTradePatch }: {
       footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Save next step</button>}
     >
       {trade.next_step && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Done: {trade.next_step}</p>}
-      <FormField label="Next step">{form.textarea("next_step", { required: true, autoFocus: true, rows: 2 })}</FormField>
+      <FormField label="Next step (one action)">{form.textarea("next_step", { required: true, autoFocus: true, rows: 2 })}</FormField>
+      <FormField label="For">
+        {form.select("who", ["", ...people.map(([value]) => value)], Object.fromEntries([["", "No one in particular"], ...people]))}
+      </FormField>
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Due">{form.input("next_step_due", { type: "date" })}</FormField>
         <FormField label="Waiting on">{form.select("waiting_on", ["us", "them"], { us: "Us", them: "Them" })}</FormField>
@@ -372,7 +410,7 @@ function FilesCard({ trade, files }: { trade: BulkTrade; files: TradeFile[] }) {
       {!!photos.length && (
         <div className="flex flex-wrap gap-2">
           {photos.map((file) => (
-            <FileLink key={file.id} trade={trade} file={file} className="rounded-lg hover:opacity-80">
+            <FileLink key={file.id} trade={trade} file={file} className="rounded-none hover:opacity-80">
               <FileThumb trade={trade} file={file} size={64} />
               <span className="sr-only">{file.file_name}</span>
             </FileLink>

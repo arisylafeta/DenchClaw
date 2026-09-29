@@ -28,6 +28,9 @@ export type BulkTrade = {
   transport_class: string | null;
   tfs_needed: "yes" | "no" | "unknown";
   listing_id: string | null;
+  /** Who the next step is for: a trade contact or a trade buyer (at most one). */
+  next_step_contact_id: string | null;
+  next_step_buyer_id: string | null;
   updated_at: string;
   /** Open inbox-check proposals for this trade. */
   new_count?: number;
@@ -38,7 +41,7 @@ export type TradeOwner = { id: string; name: string };
 export type TradePatch = Partial<Pick<BulkTrade,
   | "title" | "trade_stage" | "trade_kind" | "fact_line" | "next_step" | "next_step_due"
   | "waiting_on" | "owner_user_id" | "value" | "last_touched" | "clear_by" | "ship_by"
-  | "transport_class" | "tfs_needed" | "listing_id"
+  | "transport_class" | "tfs_needed" | "listing_id" | "next_step_contact_id" | "next_step_buyer_id"
 >>;
 
 const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class", "listing_id"] as const;
@@ -85,6 +88,11 @@ export function parseTradePatch(body: unknown): { patch: TradePatch } | { error:
     } else if (key === "tfs_needed") {
       if (!oneOf(TFS_NEEDED, value)) return { error: "tfs_needed must be yes, no or unknown." };
       patch[key] = value;
+    } else if (key === "next_step_contact_id" || key === "next_step_buyer_id") {
+      const prefix = key === "next_step_contact_id" ? "btc_" : "btb_";
+      if (value === null || value === "") patch[key] = null;
+      else if (typeof value === "string" && value.startsWith(prefix) && /^bt[cb]_[0-9a-f-]{36}$/.test(value)) patch[key] = value;
+      else return { error: `${key} must be a ${prefix === "btc_" ? "contact" : "buyer"} on this trade.` };
     } else if (key === "owner_user_id") {
       if (value === null || value === "") patch[key] = null;
       else if (typeof value === "string" && UUID.test(value)) patch[key] = value;
@@ -93,7 +101,23 @@ export function parseTradePatch(body: unknown): { patch: TradePatch } | { error:
       return { error: `Unknown field: ${key}` };
     }
   }
+  if (patch.next_step_contact_id && patch.next_step_buyer_id) return { error: "A next step is for one person." };
   return { patch: patch as TradePatch };
+}
+
+/** "3 days late", "Due today", "Due tomorrow", "Due 2 Oct", "Waiting on them since 22 Sep" or "No due date". */
+export function dueText(trade: BulkTrade, today: string): { text: string; tone: "red" | "amber" | "grey" } {
+  const due = trade.next_step_due;
+  if (due && due < today) {
+    const days = daysBetween(due, today);
+    return { text: `${days} ${days === 1 ? "day" : "days"} late`, tone: "red" };
+  }
+  if (trade.waiting_on === "them") {
+    return { text: trade.waiting_since ? `Waiting on them since ${dayMonth(trade.waiting_since)}` : "Waiting on them", tone: "grey" };
+  }
+  if (!due) return { text: "No due date", tone: trade.next_step ? "amber" : "grey" };
+  if (due === today) return { text: "Due today", tone: "amber" };
+  return { text: daysBetween(today, due) === 1 ? "Due tomorrow" : `Due ${dayMonth(due)}`, tone: "grey" };
 }
 
 /** Today's date in the UK, as YYYY-MM-DD. */

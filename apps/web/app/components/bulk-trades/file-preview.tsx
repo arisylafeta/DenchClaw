@@ -18,11 +18,11 @@ export function FileThumb({ trade, file, size = 36 }: { trade: BulkTrade; file: 
   if (isImage(file.file_name)) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- private, auth-gated file; no image optimisation
-      <img src={fileUrl(trade, file, true)} alt="" loading="lazy" className="shrink-0 rounded-lg object-cover" style={style} />
+      <img src={fileUrl(trade, file, true)} alt="" loading="lazy" className="shrink-0 rounded-none object-cover" style={style} />
     );
   }
   return (
-    <span aria-hidden="true" className="flex shrink-0 items-center justify-center rounded-lg text-[11px] font-bold" style={style}>
+    <span aria-hidden="true" className="flex shrink-0 items-center justify-center rounded-none text-[11px] font-bold" style={style}>
       {extension(file.file_name)}
     </span>
   );
