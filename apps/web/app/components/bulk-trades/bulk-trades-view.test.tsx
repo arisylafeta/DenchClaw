@@ -27,6 +27,8 @@ const TRADES = [
 function mockFetch(patchResponse: (body: Record<string, unknown>) => Response) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "PATCH") return patchResponse(JSON.parse(String(init.body)));
+    const one = TRADES.find((candidate) => url === `/api/bulk-trades/${candidate.id}`);
+    if (one) return new Response(JSON.stringify({ trade: one, buyers: [], contacts: [], fields: [], files: [] }));
     return new Response(JSON.stringify({ trades: TRADES, owners: [] }));
   });
 }
@@ -84,12 +86,25 @@ describe("BulkTradesView", () => {
     expect(within(screen.getByRole("region", { name: "With buyers" })).getByText("Synthetic eBS37")).toBeInTheDocument();
   });
 
+  it("opens a trade page and goes back to the list", async () => {
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
+    expect(await screen.findByRole("region", { name: "Due today" })).toBeInTheDocument();
+  });
+
   it("sends only the changed fields when a trade is edited", async () => {
     const fetchMock = mockFetch((body) => new Response(JSON.stringify({ trade: { ...TRADES[0], ...body } })));
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
 
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit trade" }));
     await userEvent.selectOptions(screen.getByLabelText("Waiting on"), "them");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 

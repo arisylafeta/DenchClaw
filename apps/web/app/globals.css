@@ -2485,6 +2485,16 @@ td:has(> div > :empty) {
   --bt-badge: #1c1c1a;
   --bt-on-badge: #ffffff;
   --bt-ok: #17b26a;
+  --bt-table-head: #fafaf8;
+  --bt-dashed: #d0cfc9;
+  --bt-link: #3538cd;
+  --bt-bar: #1c1c1a;
+  --bt-on-bar: #ffffff;
+  --bt-bar-border: #4a4a45;
+  --bt-bar-muted: #c9c8c2;
+  --bt-green: #067647;
+  --bt-green-bg: #ecfdf3;
+  --bt-amber-tint: #fffbf5;
   background: var(--bt-bg);
   color: var(--bt-text);
   font-family: "Geist", "Inter", system-ui, sans-serif;
@@ -2509,6 +2519,14 @@ td:has(> div > :empty) {
   --bt-amber-bg: rgba(247, 144, 9, 0.16);
   --bt-badge: #ededea;
   --bt-on-badge: #1c1c1a;
+  --bt-table-head: #20201f;
+  --bt-dashed: #4a4945;
+  --bt-link: #a4a7ff;
+  --bt-bar: #2e2e2b;
+  --bt-bar-border: #55544f;
+  --bt-green: #47cd89;
+  --bt-green-bg: rgba(23, 178, 106, 0.16);
+  --bt-amber-tint: rgba(247, 144, 9, 0.06);
 }
 
 .bulk-trades .bt-mono {

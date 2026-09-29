@@ -10,6 +10,8 @@ import {
   type TradeStage,
 } from "@/lib/bulk-trades";
 import { TradeEditor } from "./trade-editor";
+import { TradePage } from "./trade-page";
+import { request } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
 import { TradesList } from "./trades-list";
 
@@ -24,13 +26,6 @@ function storedMode(): Mode {
   }
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...init, headers: { "content-type": "application/json" } });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
-  return body as T;
-}
-
 type Props = {
   onOpenEntry?: (objectName: string, entryId: string) => void;
 };
@@ -42,6 +37,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState<BulkTrade | "new" | null>(null);
+  const [openTradeId, setOpenTradeId] = useState<string | null>(null);
   const today = todayInLondon();
 
   useEffect(() => setMode(storedMode()), []);
@@ -64,8 +60,8 @@ export function BulkTradesView({ onOpenEntry }: Props) {
     try { window.localStorage.setItem(MODE_KEY, next); } catch { /* per-viewer convenience only */ }
   }
 
-  const replace = (trade: BulkTrade) =>
-    setTrades((current) => current.map((candidate) => (candidate.id === trade.id ? trade : candidate)));
+  const replace = useCallback((trade: BulkTrade) =>
+    setTrades((current) => current.map((candidate) => (candidate.id === trade.id ? trade : candidate))), []);
 
   async function save(patch: TradePatch) {
     if (editing === "new") {
@@ -96,6 +92,23 @@ export function BulkTradesView({ onOpenEntry }: Props) {
     }
   }
 
+  if (openTradeId) {
+    return (
+      <div className="bulk-trades h-full">
+        <TradePage
+          key={openTradeId}
+          tradeId={openTradeId}
+          owners={owners}
+          today={today}
+          onBack={() => setOpenTradeId(null)}
+          onTradeSaved={replace}
+          onOpenEvidence={onOpenEntry ? () => onOpenEntry("bulk_trade", openTradeId) : undefined}
+        />
+      </div>
+    );
+  }
+
+  const open = (trade: BulkTrade) => setOpenTradeId(trade.id);
   const liveCount = trades.filter((trade) => (LIVE_STAGES as readonly string[]).includes(trade.trade_stage)).length;
   const tab = (value: Mode, label: string) => (
     <button
@@ -140,8 +153,8 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         {loadError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{loadError}</p>}
         {actionError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{actionError}</p>}
         {mode === "list"
-          ? <TradesList trades={trades} today={today} onOpen={setEditing} />
-          : <TradesBoard trades={trades} today={today} onOpen={setEditing} onMove={move} />}
+          ? <TradesList trades={trades} today={today} onOpen={open} />
+          : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
 
       {editing && (
