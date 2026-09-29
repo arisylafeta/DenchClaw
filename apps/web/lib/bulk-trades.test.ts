@@ -30,6 +30,7 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
     ship_by: null,
     transport_class: null,
     tfs_needed: "unknown",
+    listing_id: null,
     updated_at: "2026-09-28T09:00:00Z",
     ...overrides,
   };

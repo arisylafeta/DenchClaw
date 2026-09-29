@@ -27,6 +27,7 @@ export type BulkTrade = {
   ship_by: string | null;
   transport_class: string | null;
   tfs_needed: "yes" | "no" | "unknown";
+  listing_id: string | null;
   updated_at: string;
 };
 
@@ -35,10 +36,10 @@ export type TradeOwner = { id: string; name: string };
 export type TradePatch = Partial<Pick<BulkTrade,
   | "title" | "trade_stage" | "trade_kind" | "fact_line" | "next_step" | "next_step_due"
   | "waiting_on" | "owner_user_id" | "value" | "last_touched" | "clear_by" | "ship_by"
-  | "transport_class" | "tfs_needed"
+  | "transport_class" | "tfs_needed" | "listing_id"
 >>;
 
-const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class"] as const;
+const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class", "listing_id"] as const;
 const DATE_FIELDS = ["next_step_due", "last_touched", "clear_by", "ship_by"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

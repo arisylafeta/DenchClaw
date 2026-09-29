@@ -5,6 +5,9 @@
 -- Apply only after a current backup and explicit schema approval.
 begin;
 
+-- The marketplace listing a trade is sold through; campaign sends for it show on the buyer rows.
+alter table crm_bulk_trade_lots add column if not exists listing_id text;
+
 create table if not exists crm_bulk_trade_contacts (
   id text primary key,
   lot_id text not null references crm_bulk_trade_lots(id) on delete restrict,
@@ -21,6 +24,8 @@ create table if not exists crm_bulk_trade_buyers (
   id text primary key,
   lot_id text not null references crm_bulk_trade_lots(id) on delete restrict,
   name text not null,
+  -- Optional CRM person, so campaign emails to them can be matched to this trade.
+  person_id text references crm_people(id) on delete set null,
   contact text,
   wants text,
   status text not null default 'To contact' check (status in (

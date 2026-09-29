@@ -44,9 +44,22 @@ export type Bid = {
   created_at: string;
 };
 
+/** Latest campaign email to the buyer's CRM person for the trade's listing. Opens are noisy. */
+export type EmailTracking = {
+  campaign: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  bounced_at: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+};
+
 export type Buyer = {
   id: string;
   name: string;
+  person_id: string | null;
+  person_email: string | null;
+  email_tracking: EmailTracking | null;
   contact: string | null;
   wants: string | null;
   status: BuyerStatus;
@@ -279,9 +292,9 @@ function parseShape(body: unknown, rules: Record<string, Rule>, required: string
   return { value: out };
 }
 
-export type BuyerInput = Partial<Pick<Buyer, "name" | "contact" | "wants" | "status" | "last_touch_on" | "last_touch_via" | "chase_on">>;
+export type BuyerInput = Partial<Pick<Buyer, "name" | "person_id" | "contact" | "wants" | "status" | "last_touch_on" | "last_touch_via" | "chase_on">>;
 const BUYER_RULES: Record<string, Rule> = {
-  name: "text", contact: "text", wants: "text", status: BUYER_STATUSES,
+  name: "text", person_id: "text", contact: "text", wants: "text", status: BUYER_STATUSES,
   last_touch_on: "date", last_touch_via: "text", chase_on: "date",
 };
 
@@ -358,4 +371,22 @@ export function shortDate(date: string): string {
 export function bidLabel(bid: Bid): string {
   const amount = Number(bid.amount).toLocaleString("en-GB", { maximumFractionDigits: 2 });
   return `${CURRENCY_SYMBOL[bid.currency]}${amount}/${bid.unit}${bid.firmness === "indicative" ? " ind." : ""}`;
+}
+
+export type PersonMatch = { id: string; name: string; company: string | null; email: string | null; opted_out: boolean };
+
+/** Strongest signal first: "Bounced 24 Sep", "Clicked 25 Sep", "Opened …", "Delivered …", "Sent …". */
+export function trackingLabel(tracking: EmailTracking): { label: string; tone: "red" | "green" | "grey" } | null {
+  const pick = (
+    [
+      ["Bounced", tracking.bounced_at, "red"],
+      ["Clicked", tracking.clicked_at, "green"],
+      ["Opened", tracking.opened_at, "grey"],
+      ["Delivered", tracking.delivered_at, "grey"],
+      ["Sent", tracking.sent_at, "grey"],
+    ] as const
+  ).find(([, at]) => at);
+  if (!pick) return null;
+  const [label, at, tone] = pick;
+  return { label: `${label} ${shortDate(at!.slice(0, 10))}`, tone };
 }

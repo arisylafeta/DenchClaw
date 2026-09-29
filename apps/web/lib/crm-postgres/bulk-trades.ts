@@ -10,7 +10,7 @@ const TRADE_COLUMNS = `
   to_char(lot.last_touched, 'YYYY-MM-DD') as last_touched,
   to_char(lot.clear_by, 'YYYY-MM-DD') as clear_by,
   to_char(lot.ship_by, 'YYYY-MM-DD') as ship_by,
-  lot.transport_class, lot.tfs_needed, lot.updated_at`;
+  lot.transport_class, lot.tfs_needed, lot.listing_id, lot.updated_at`;
 
 const TRADE_FROM = `crm_bulk_trade_lots lot left join crm_users owner on owner.id = lot.owner_user_id`;
 

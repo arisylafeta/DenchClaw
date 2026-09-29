@@ -7,6 +7,7 @@ import {
   parseBuyerInput,
   parseFieldInput,
   teaserText,
+  trackingLabel,
   type TradeField,
   type TradeFile,
 } from "./bulk-trade-details";
@@ -94,3 +95,16 @@ describe("labels", () => {
     expect(bidLabel({ amount: "1200", unit: "pack", currency: "USD", firmness: "firm" } as never)).toBe("$1,200/pack");
   });
 });
+
+describe("trackingLabel", () => {
+  const base = { campaign: "eBS37 teaser", sent_at: "2026-09-24T09:00:00Z", delivered_at: "2026-09-24T09:01:00Z", bounced_at: null, opened_at: null, clicked_at: null };
+
+  it("shows the strongest signal", () => {
+    expect(trackingLabel(base)).toEqual({ label: "Delivered 24 Sep", tone: "grey" });
+    expect(trackingLabel({ ...base, opened_at: "2026-09-25T08:00:00Z", clicked_at: "2026-09-25T08:02:00Z" }))
+      .toEqual({ label: "Clicked 25 Sep", tone: "green" });
+    expect(trackingLabel({ ...base, bounced_at: "2026-09-24T09:02:00Z" })).toEqual({ label: "Bounced 24 Sep", tone: "red" });
+    expect(trackingLabel({ ...base, sent_at: null, delivered_at: null })).toBeNull();
+  });
+});
+

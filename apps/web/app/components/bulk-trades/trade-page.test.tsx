@@ -13,11 +13,11 @@ const TRADE: BulkTrade = {
   id: "bt_1", title: "Synthetic eBS37", trade_stage: "With buyers", trade_kind: "packs",
   fact_line: "161 packs · NMC", next_step: "Follow up supplier", next_step_due: today, waiting_on: "us",
   waiting_since: null, owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
-  ship_by: null, transport_class: null, tfs_needed: "unknown", updated_at: "2026-09-28T09:00:00Z",
+  ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: "lst_1", updated_at: "2026-09-28T09:00:00Z",
 };
 
 const BUYER: Buyer = {
-  id: "btb_1", name: "Synthetic Storage", contact: "Test Person", wants: "36-pack pilot", status: "To contact",
+  id: "btb_1", name: "Synthetic Storage", person_id: null, person_email: null, email_tracking: null, contact: "Test Person", wants: "36-pack pilot", status: "To contact",
   last_touch_on: null, last_touch_via: null, chase_on: null, latest_bid: null,
 };
 
@@ -37,6 +37,9 @@ function mockFetch() {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "PATCH" && url.includes("/buyers/")) {
       return new Response(JSON.stringify({ buyer: { ...BUYER, ...JSON.parse(String(init.body)), last_touch_on: today } }));
+    }
+    if (url.startsWith("/api/bulk-trades/people")) {
+      return new Response(JSON.stringify({ people: [{ id: "p_1", name: "Tess Buyer", company: "Synthetic Storage", email: "tess@example.test", opted_out: false }] }));
     }
     if (init?.method === "POST" && url.endsWith("/email-draft")) {
       return new Response(JSON.stringify({ url: "https://mail.google.com/mail/u/#drafts" }), { status: 201 });
@@ -149,5 +152,31 @@ describe("TradePage overview", () => {
       body: JSON.stringify({ choice: -1 }),
     })));
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit Quantity" })).toHaveTextContent("Confirmed"));
+  });
+
+  it("shows campaign email tracking on a linked buyer", async () => {
+    const tracked = {
+      ...BUYER, person_id: "p_1", person_email: "tess@example.test",
+      email_tracking: { campaign: "eBS37 teaser", sent_at: "2026-09-24T09:00:00Z", delivered_at: "2026-09-24T09:01:00Z", bounced_at: null, opened_at: "2026-09-25T08:00:00Z", clicked_at: "2026-09-25T08:02:00Z" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ...DETAIL, buyers: [tracked] }))));
+    renderPage();
+    expect(await screen.findByText("Teaser email: Clicked 25 Sep")).toBeInTheDocument();
+  });
+
+  it("links a buyer to a CRM person", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: /Synthetic Storage/ }));
+    await userEvent.type(screen.getByPlaceholderText("Search name, email or company"), "tess");
+    await userEvent.click(await screen.findByRole("option", { name: /Tess Buyer/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) => url === "/api/bulk-trades/bt_1/buyers/btb_1" && init?.method === "PATCH");
+      expect(JSON.parse(String(call![1]!.body))).toMatchObject({ person_id: "p_1" });
+    });
   });
 });

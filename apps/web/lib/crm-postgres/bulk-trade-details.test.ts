@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { todayInLondon } from "../bulk-trades";
 
-// Runs only against a disposable database with migrations 003, 008 and 009 applied, e.g.
+// Runs only against a disposable database with schema.sql and migrations 003 and 006-009 applied, e.g.
 // BULK_TRADES_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/denchclaw
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
@@ -77,5 +77,32 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     expect(settled).toMatchObject({ value: "161 + 9 incomplete", status: "confirmed", alternatives: [] });
     const last = (await events()).at(-1)!;
     expect(JSON.stringify(last.changes)).toContain("about 200");
+  });
+
+  it("shows the latest campaign email for this trade's listing on a linked buyer", async () => {
+    const suffix = Date.now().toString(36);
+    const [person] = await pg.queryPg<{ id: string }>(
+      `insert into crm_people (id, full_name, email) values ('p_test_' || $1, 'Tess Buyer', 'tess-' || $1 || '@example.test') returning id`,
+      [suffix],
+    );
+    await pg.queryPg(`insert into campaigns (id, campaign_name) values ('c_test_' || $1, 'Synthetic teaser')`, [suffix]);
+    await pg.queryPg(
+      `insert into crm_campaign_sends (id, campaign_id, person_id, listing_id, auction_url, recipient_email, state,
+         accepted_at, delivered_at, provider_opened_at)
+       values ('s_test_' || $1, 'c_test_' || $1, $2, 'lst_' || $1, 'https://example.test/a', 'tess-' || $1 || '@example.test',
+         'accepted', '2026-09-24T09:00:00Z', '2026-09-24T09:01:00Z', '2026-09-25T08:00:00Z')`,
+      [suffix, person.id],
+    );
+    const lot = await trades.createBulkTrade({ title: "Tracked synthetic", listing_id: `lst_${suffix}` }, userId);
+    const buyer = await db.addBuyer(lot.id, { name: "Tess Buyer", person_id: person.id }, userId);
+
+    expect(buyer).toMatchObject({
+      person_email: `tess-${suffix}@example.test`,
+      email_tracking: { campaign: "Synthetic teaser", clicked_at: null },
+    });
+    expect(buyer!.email_tracking!.opened_at).toBeTruthy();
+
+    const other = await trades.createBulkTrade({ title: "Different listing", listing_id: "lst_other" }, userId);
+    expect((await db.addBuyer(other.id, { name: "Tess Buyer", person_id: person.id }, userId))!.email_tracking).toBeNull();
   });
 });

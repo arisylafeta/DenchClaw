@@ -11,6 +11,7 @@ import {
   type FieldInput,
   type FileMetaInput,
   type FileType,
+  type PersonMatch,
   type TradeDetail,
   type TradeField,
   type TradeFile,
@@ -21,15 +22,35 @@ const BID_COLUMNS = `bid.id::text as id, bid.buyer_id, bid.amount::text as amoun
   bid.firmness, bid.delivery_terms, bid.payment_terms,
   to_char(bid.expires_on, 'YYYY-MM-DD') as expires_on, bid.created_at`;
 
+// The latest accepted campaign send to the buyer's CRM person for this trade's listing, matched on
+// the send's listing or any of its CTA links. Read-only; the campaign CLI owns these rows.
+const TRACKING = `
+    (select row_to_json(latest) from (
+       select campaign.campaign_name as campaign, send.accepted_at as sent_at, send.delivered_at, send.bounced_at,
+         send.provider_opened_at as opened_at,
+         coalesce(send.provider_link_clicked_at,
+           (select min(link.first_clicked_at) from crm_campaign_send_links link where link.send_id = send.id)) as clicked_at
+       from crm_campaign_sends send
+       join campaigns campaign on campaign.id = send.campaign_id
+       join crm_bulk_trade_lots lot on lot.id = buyer.lot_id
+       where send.person_id = buyer.person_id and send.state = 'accepted' and lot.listing_id is not null
+         and (send.listing_id = lot.listing_id or exists (
+           select 1 from crm_campaign_send_links link where link.send_id = send.id and link.listing_id = lot.listing_id))
+       order by send.accepted_at desc limit 1
+     ) latest) as email_tracking`;
+
 const BUYER_SELECT = `
-  select buyer.id, buyer.name, buyer.contact, buyer.wants, buyer.status,
+  select buyer.id, buyer.name, buyer.person_id, person.email as person_email,
+    buyer.contact, buyer.wants, buyer.status,
     to_char(buyer.last_touch_on, 'YYYY-MM-DD') as last_touch_on, buyer.last_touch_via,
     to_char(buyer.chase_on, 'YYYY-MM-DD') as chase_on,
     (select row_to_json(latest) from (
        select ${BID_COLUMNS} from crm_bulk_trade_bids bid
        where bid.buyer_id = buyer.id order by bid.created_at desc, bid.id desc limit 1
-     ) latest) as latest_bid
-  from crm_bulk_trade_buyers buyer`;
+     ) latest) as latest_bid,
+    ${TRACKING}
+  from crm_bulk_trade_buyers buyer
+  left join crm_people person on person.id = buyer.person_id`;
 
 const CONTACT_SELECT = `select id, name, company, email, phone from crm_bulk_trade_contacts`;
 
@@ -349,5 +370,20 @@ export async function logEmailDraft(
   await queryPg(
     `insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, 'email_drafted', $2, $3)`,
     [lotId, JSON.stringify(draft), userId],
+  );
+}
+
+/** Up to 8 CRM people whose name, email or company matches. */
+export async function searchPeople(query: string): Promise<PersonMatch[]> {
+  const pattern = `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+  return queryPg<PersonMatch>(
+    `select p.id, coalesce(nullif(p.full_name, ''), concat_ws(' ', p.first_name, p.last_name), p.email) as name,
+       c.name as company, p.email, coalesce(p.email_opted_out, false) as opted_out
+     from crm_people p left join crm_companies c on c.id = p.company_id
+     where p.full_name ilike $1 or p.email ilike $1 or c.name ilike $1
+       or concat_ws(' ', p.first_name, p.last_name) ilike $1
+     order by p.last_interaction_at desc nulls last, p.id
+     limit 8`,
+    [pattern],
   );
 }

@@ -15,7 +15,7 @@ type Draft = Record<keyof TradePatch, string>;
 const EMPTY: Draft = {
   title: "", trade_stage: "Needs info", trade_kind: "", fact_line: "", next_step: "", next_step_due: "",
   waiting_on: "us", owner_user_id: "", value: "", last_touched: "", clear_by: "", ship_by: "",
-  transport_class: "", tfs_needed: "unknown",
+  transport_class: "", tfs_needed: "unknown", listing_id: "",
 };
 
 function draftFrom(trade: BulkTrade | null): Draft {
@@ -111,6 +111,7 @@ export function TradeEditor({ trade, owners, today, onClose, onSave, onOpenEvide
               <Field label="Stage">{select("trade_stage", TRADE_STAGES)}</Field>
               <Field label="Kind">{select("trade_kind", ["", ...TRADE_KINDS], { "": "Not set" })}</Field>
               <Field label="Value">{input("value")}</Field>
+              <Field label="Marketplace listing ID">{input("listing_id")}</Field>
               <Field label="Owner">
                 {select("owner_user_id", ["", ...owners.map((owner) => owner.id)],
                   Object.fromEntries([["", "No owner"], ...owners.map((owner) => [owner.id, owner.name])]))}

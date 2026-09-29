@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { BulkTrade } from "@/lib/bulk-trades";
 import {
   BID_UNITS,
@@ -9,7 +9,9 @@ import {
   bidLabel,
   shortDate,
   teaserText,
+  trackingLabel,
   type Buyer,
+  type PersonMatch,
   type BuyerStatus,
   type TradeField,
 } from "@/lib/bulk-trade-details";
@@ -109,6 +111,7 @@ export function BuyersTable({ trade, buyers, fields, today, onBuyer }: Props) {
               <button type="button" className="min-w-0 text-left" onClick={() => setEditing(buyer)}>
                 <div className="truncate font-semibold hover:underline">{buyer.name}</div>
                 {buyer.contact && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{buyer.contact}</div>}
+                <TrackingLine buyer={buyer} />
               </button>
               <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{buyer.wants ?? "—"}</span>
               <select
@@ -190,6 +193,9 @@ function BuyerDialog({ trade, buyer, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (buyer: Buyer) => void;
 }) {
+  const [person, setPerson] = useState<{ id: string; label: string } | null>(
+    buyer?.person_id ? { id: buyer.person_id, label: buyer.person_email ?? "Linked CRM person" } : null,
+  );
   const [draft, setDraft] = useState({
     name: buyer?.name ?? "", contact: buyer?.contact ?? "", wants: buyer?.wants ?? "",
     last_touch_on: buyer?.last_touch_on ?? "", last_touch_via: buyer?.last_touch_via ?? "", chase_on: buyer?.chase_on ?? "",
@@ -203,10 +209,11 @@ function BuyerDialog({ trade, buyer, onClose, onSaved }: {
     event.preventDefault();
     setSaving(true);
     setError(null);
+    const body = JSON.stringify({ ...draft, person_id: person?.id ?? null });
     try {
       const saved = buyer
-        ? await request<{ buyer: Buyer }>(tradeUrl(trade.id, `/buyers/${buyer.id}`), { method: "PATCH", body: JSON.stringify(draft) })
-        : await request<{ buyer: Buyer }>(tradeUrl(trade.id, "/buyers"), { method: "POST", body: JSON.stringify(draft) });
+        ? await request<{ buyer: Buyer }>(tradeUrl(trade.id, `/buyers/${buyer.id}`), { method: "PATCH", body })
+        : await request<{ buyer: Buyer }>(tradeUrl(trade.id, "/buyers"), { method: "POST", body });
       onSaved(saved.buyer);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save.");
@@ -223,6 +230,13 @@ function BuyerDialog({ trade, buyer, onClose, onSaved }: {
     >
       <FormField label="Buyer"><input required value={draft.name} onChange={set("name")} className={inputClass} style={inputStyle} /></FormField>
       <FormField label="Contact"><input value={draft.contact} onChange={set("contact")} className={inputClass} style={inputStyle} /></FormField>
+      <PersonPicker
+        person={person}
+        onPick={(match) => {
+          setPerson(match && { id: match.id, label: [match.name, match.email].filter(Boolean).join(" · ") });
+          if (match && !draft.contact) setDraft((current) => ({ ...current, contact: match.name }));
+        }}
+      />
       <FormField label="Wants"><input value={draft.wants} onChange={set("wants")} placeholder="36-pack pilot" className={inputClass} style={inputStyle} /></FormField>
       <div className="grid grid-cols-3 gap-3">
         <FormField label="Last touch"><input type="date" value={draft.last_touch_on} onChange={set("last_touch_on")} className={inputClass} style={inputStyle} /></FormField>
@@ -364,5 +378,73 @@ function TeaserDialog({ trade, fields, buyers, onClose, onMarked }: {
       />
       <ErrorText error={error} />
     </Modal>
+  );
+}
+
+const TRACKING_TONE = {
+  red: "var(--bt-red)",
+  green: "var(--bt-green)",
+  grey: "var(--bt-muted)",
+} as const;
+
+function TrackingLine({ buyer }: { buyer: Buyer }) {
+  const tracking = buyer.email_tracking;
+  const label = tracking && trackingLabel(tracking);
+  if (!label) return null;
+  return (
+    <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE[label.tone] }} title={tracking!.campaign ?? undefined}>
+      Teaser email: {label.label}
+    </div>
+  );
+}
+
+/** Links a buyer to a CRM person so campaign emails to them show on this trade. */
+function PersonPicker({ person, onPick }: {
+  person: { id: string; label: string } | null;
+  onPick: (match: PersonMatch | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<PersonMatch[]>([]);
+
+  useEffect(() => {
+    if (query.trim().length < 2) return setMatches([]);
+    const timer = setTimeout(() => {
+      request<{ people: PersonMatch[] }>(`/api/bulk-trades/people?q=${encodeURIComponent(query.trim())}`)
+        .then((result) => setMatches(result.people))
+        .catch(() => setMatches([]));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  if (person) {
+    return (
+      <FormField label="CRM person (for email tracking)">
+        <div className="flex h-9 items-center gap-2 rounded-lg border px-2.5 text-sm" style={inputStyle}>
+          <span className="flex-1 truncate">{person.label}</span>
+          <button type="button" onClick={() => onPick(null)} className="text-xs" style={{ color: "var(--bt-muted)" }}>Unlink</button>
+        </div>
+      </FormField>
+    );
+  }
+  return (
+    <FormField label="CRM person (for email tracking)">
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email or company"
+        className={inputClass} style={inputStyle} />
+      {!!matches.length && (
+        <ul role="listbox" aria-label="Matching people" className="max-h-48 overflow-y-auto rounded-lg border" style={{ borderColor: "var(--bt-border)" }}>
+          {matches.map((match) => (
+            <li key={match.id}>
+              <button type="button" role="option" aria-selected="false" onClick={() => onPick(match)}
+                className="flex w-full flex-col px-2.5 py-1.5 text-left hover:bg-[var(--bt-row-hover)]">
+                <span className="text-sm" style={{ color: "var(--bt-text)" }}>{match.name}{match.company ? `, ${match.company}` : ""}</span>
+                <span className="text-xs" style={{ color: "var(--bt-muted)" }}>
+                  {match.email ?? "No email"}{match.opted_out ? " · opted out" : ""}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </FormField>
   );
 }
