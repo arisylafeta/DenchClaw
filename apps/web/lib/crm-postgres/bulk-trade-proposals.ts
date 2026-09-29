@@ -88,7 +88,7 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
     case "field": {
       const status = proposed.status === "confirmed" ? "confirmed" : "unverified";
       const result = await setField(lotId!, p.target!, {
-        value: text(proposed.value), status,
+        value: text(proposed.value) ?? undefined, status,
         source_label: p.source_label, source_url: p.source_url, source_date: p.source_date,
       }, user.id);
       if (!result || result === "unknown_field") throw new Error("That field no longer applies to this trade.");
