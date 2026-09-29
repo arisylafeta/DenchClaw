@@ -752,8 +752,12 @@ def apply_new_buyer(cur, lot_id, p, trade, ctx):
     if cur.fetchone():
         return None
     buyer_id = f"btb_{uuid.uuid4()}"
-    cur.execute("insert into crm_bulk_trade_buyers (id, lot_id, name, contact, wants) values (%s, %s, %s, %s, %s)",
-                (buyer_id, lot_id, proposed["name"], proposed.get("contact"), proposed.get("wants")))
+    # Status and CRM person come only from platform records (the auction sync), never from email reading.
+    cur.execute(
+        """insert into crm_bulk_trade_buyers (id, lot_id, name, contact, wants, person_id, status, last_touch_on, last_touch_via)
+           values (%s, %s, %s, %s, %s, %s, coalesce(%s, 'To contact'), %s, %s)""",
+        (buyer_id, lot_id, proposed["name"], proposed.get("contact"), proposed.get("wants"), proposed.get("person_id"),
+         proposed.get("status"), proposed.get("last_touch_on"), proposed.get("last_touch_via")))
     log_event(cur, lot_id, "buyer_added", {**proposed, "proposal_id": ctx["proposal_id"]}, buyer_id)
     return {"id": buyer_id}
 
@@ -852,6 +856,7 @@ def settle(cur, run_id, lot_id, p, trade, ctx):
         cur.execute("rollback to savepoint finding")
         return None
     cur.execute("update crm_bulk_trade_proposals set undo = %s where id = %s", (json.dumps(undo, default=str), ctx["proposal_id"]))
+    ctx["undo"] = undo
     cur.execute("release savepoint finding")
     return "applied"
 
@@ -1188,7 +1193,7 @@ def history(conn, args):
 
 
 def summary(conn):
-    """The 08:00 list: overdue and due-today next steps, plus new proposals waiting."""
+    """The 08:00 list: overdue and due-today next steps, new auction offers, auctions closing soon, and cards waiting."""
     today = dt.datetime.now(ZoneInfo("Europe/London")).date()
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
@@ -1200,6 +1205,17 @@ def summary(conn):
         rows = cur.fetchall()
         cur.execute("select count(*) as n from crm_bulk_trade_proposals where lot_id is null and status = 'new'")
         possible = cur.fetchone()["n"]
+        cur.execute(
+            """select l.title, count(*) as n, string_agg(p.quote, '; ' order by p.applied_at) as offers
+               from crm_bulk_trade_proposals p join crm_bulk_trade_lots l on l.id = p.lot_id
+               where p.source_kind = 'auction' and p.kind = 'bid' and p.status = 'applied' and p.applied_at > now() - interval '24 hours'
+               group by l.title order by l.title""")
+        offers = cur.fetchall()
+        cur.execute(
+            """select title, auction_closes_at from crm_bulk_trade_lots
+               where auction_status = 'published' and auction_closes_at between now() and now() + interval '2 days'
+               order by auction_closes_at""")
+        closing = cur.fetchall()
     lines = [f"Bulk Trades, {today:%a %d %b}"]
     for row in rows:
         days = (today - row["next_step_due"]).days
@@ -1208,6 +1224,10 @@ def summary(conn):
         lines.append(f"- {row['title']}: {row['next_step'] or 'set a next step'} [{when}]{extra}")
     if not rows:
         lines.append("Nothing overdue or due today.")
+    for row in offers:
+        lines.append(f"- {row['title']}: {row['n']} new auction offer{'s' if row['n'] != 1 else ''} ({row['offers']})")
+    for row in closing:
+        lines.append(f"- {row['title']}: auction closes {row['auction_closes_at'].astimezone(ZoneInfo('Europe/London')):%a %d %b %H:%M}")
     if possible:
         lines.append(f"{possible} possible new trade{'s' if possible != 1 else ''} to review.")
     lines.append("https://crm.rebattery.io/?path=bulk_trade")

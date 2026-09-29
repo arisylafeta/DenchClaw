@@ -196,6 +196,19 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       return lotId; // Acknowledged; Alex handles the thread by hand.
     case "bid":
       throw new Error("Bids from email are added automatically.");
+    case "link_auction": {
+      // The auction sync fills in its people on its next run.
+      const linked = await queryPg(
+        `update crm_bulk_trade_lots set auction_id = $2, auction_slug = $3, auction_closes_at = $4, auction_status = 'published',
+           listing_id = coalesce(listing_id, $5), updated_at = now()
+         where id = $1 and auction_id is null
+           and not exists (select 1 from crm_bulk_trade_lots other where other.auction_id = $2)
+         returning id`,
+        [lotId, text(proposed.auction_id), text(proposed.slug), text(proposed.closes_at), text(proposed.listing_id)],
+      );
+      if (!linked.length) throw new Error("That auction or this trade is already linked.");
+      return lotId;
+    }
   }
 }
 

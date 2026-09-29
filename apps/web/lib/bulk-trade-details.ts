@@ -88,6 +88,38 @@ export type Buyer = {
   last_touch_via: string | null;
   chase_on: string | null;
   latest_bid: Bid | null;
+  /** What this buyer did on the trade's marketplace auction, when they came from it or engaged with it. */
+  auction: AuctionActivity | null;
+};
+
+/** One person's activity on a marketplace auction, from the auction sync. */
+export type AuctionActivity = {
+  email: string;
+  buyer_id: string | null;
+  invited_at: string | null;
+  clicked_at: string | null;
+  last_viewed_at: string | null;
+  view_count: number;
+  offer_count: number;
+  last_offer: {
+    kind: "offer" | "buy_now";
+    price_per_kwh: number | null;
+    amount_per_unit: number | null;
+    currency: string;
+    quantity: number;
+    incoterm: string | null;
+  } | null;
+  message_count: number;
+  last_activity_at: string | null;
+};
+
+/** The trade's marketplace auction: its page and everyone invited or engaged. */
+export type TradeAuction = {
+  slug: string;
+  url: string;
+  status: "published" | "withdrawn";
+  closes_at: string;
+  people: AuctionActivity[];
 };
 
 export type Contact = {
@@ -125,7 +157,7 @@ export type TradeFile = {
 
 export type ProposalKind =
   | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade"
-  | "trade_kind" | "bid";
+  | "trade_kind" | "bid" | "link_auction";
 
 /**
  * Something the inbox check found in Gmail or Granola. Most findings are applied straight away
@@ -164,6 +196,7 @@ export const CHANGE_NOUN: Record<ProposalKind, [string, string]> = {
   bid: ["bid", "bids"],
   next_step: ["next step", "next steps"],
   trade_kind: ["trade kind", "trade kinds"],
+  link_auction: ["auction", "auctions"],
   needs_triage: ["thread", "threads"],
   possible_trade: ["trade", "trades"],
 };
@@ -217,6 +250,8 @@ export type TradeDetail = {
   proposals?: Proposal[];
   /** Changes the inbox check applied, newest first. */
   applied?: AppliedChange[];
+  /** The marketplace auction, when the trade is sold through one. */
+  auction?: TradeAuction | null;
   /** Latest history pass over this trade's past emails and calls. */
   history?: HistoryStatus;
 };
@@ -440,6 +475,29 @@ export type PersonMatch = { id: string; name: string; company: string | null; em
 export type CompanyMatch = { id: string; name: string; people: number };
 
 /** Strongest signal first: "Bounced 24 Sep", "Clicked 25 Sep", "Opened …", "Delivered …", "Sent …". */
+const CURRENCY_SIGN: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
+
+/** "€31.5/kWh EXW" or "Buy now 2 × $1,200". */
+export function auctionOfferLabel(offer: NonNullable<AuctionActivity["last_offer"]>): string {
+  const sign = CURRENCY_SIGN[offer.currency] ?? `${offer.currency} `;
+  const amount = (value: number | null) => `${sign}${(value ?? 0).toLocaleString("en-GB", { maximumFractionDigits: 2 })}`;
+  return offer.kind === "offer"
+    ? `${amount(offer.price_per_kwh)}/kWh ${offer.incoterm ?? ""}`.trim()
+    : `Buy now ${offer.quantity} × ${amount(offer.amount_per_unit)}`;
+}
+
+/** The strongest thing a person did on the auction, for a buyer row: offer, then views, messages, click. */
+export function auctionLabel(activity: AuctionActivity): { label: string; tone: "green" | "grey" } | null {
+  const views = activity.view_count ? `Viewed ${activity.view_count}×` : null;
+  if (activity.last_offer) {
+    return { label: [`Auction offer ${auctionOfferLabel(activity.last_offer)}`, views].filter(Boolean).join(" · "), tone: "green" };
+  }
+  if (views) return { label: `${views} on auction, last ${shortDate(activity.last_viewed_at!.slice(0, 10))}, no offer`, tone: "grey" };
+  if (activity.message_count) return { label: "Messaged on auction, no offer", tone: "grey" };
+  if (activity.clicked_at) return { label: `Clicked auction invite ${shortDate(activity.clicked_at.slice(0, 10))}, no offer`, tone: "grey" };
+  return null;
+}
+
 export function trackingLabel(tracking: EmailTracking): { label: string; tone: "red" | "green" | "grey" } | null {
   const pick = (
     [

@@ -14,6 +14,7 @@ import {
   type TradeDetail,
   type TradeFile,
 } from "@/lib/bulk-trade-details";
+import { AuctionCard } from "./auction-card";
 import { BuyersTable } from "./buyers-table";
 import { EmailDialog } from "./email-dialog";
 import { FileLink, FileThumb } from "./file-preview";
@@ -43,7 +44,7 @@ type Props = {
 };
 
 /** Waiting findings shown on the Overview; field and file ones live on Data and files. */
-const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage", "link_contact", "trade_kind"]);
+const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage", "link_contact", "trade_kind", "link_auction"]);
 
 /** First contact with an email address, else the first contact. */
 function emailContact(contacts: Contact[]) {
@@ -72,6 +73,7 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
         onProposalDecided={onProposalDecided}
         onBuyer={onBuyer}
       />
+      {detail.auction && <AuctionCard tradeId={trade.id} auction={detail.auction} today={today} onChanged={onProposalDecided} />}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         <MissingCard detail={detail} onTradePatch={onTradePatch} />
         <ShippingCard trade={trade} />

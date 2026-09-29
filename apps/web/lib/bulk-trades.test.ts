@@ -32,6 +32,9 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
     transport_class: null,
     tfs_needed: "unknown",
     listing_id: null,
+    auction_slug: null,
+    auction_status: null,
+    auction_closes_at: null,
     updated_at: "2026-09-28T09:00:00Z",
     ...overrides,
   };

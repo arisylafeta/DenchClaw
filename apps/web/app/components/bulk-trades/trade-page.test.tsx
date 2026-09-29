@@ -13,7 +13,7 @@ const TRADE: BulkTrade = {
   id: "bt_1", title: "Synthetic eBS37", trade_stage: "With buyers", trade_kind: "packs",
   fact_line: "161 packs · NMC", next_step: "Follow up supplier", next_step_due: today, waiting_on: "us",
   waiting_since: null, owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
-  ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: "lst_1", updated_at: "2026-09-28T09:00:00Z",
+  ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: "lst_1", auction_slug: null, auction_status: null, auction_closes_at: null, updated_at: "2026-09-28T09:00:00Z",
 };
 
 const BUYER: Buyer = {
@@ -374,7 +374,7 @@ describe("TradePage overview", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    expect(await screen.findByText("Read 28 Sep · 12 found")).toBeInTheDocument();
+    expect(await screen.findByText("Read 28 Sep · 12 updates")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Find data in emails" }));
     expect(await screen.findByRole("button", { name: "Reading emails…" })).toBeDisabled();
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1/history", expect.objectContaining({ method: "POST" }));

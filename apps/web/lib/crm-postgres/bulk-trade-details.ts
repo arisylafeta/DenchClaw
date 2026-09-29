@@ -3,6 +3,7 @@ import { queryPg, withPgTransaction, type PgTransaction } from "../postgres";
 import { todayInLondon, type BulkTrade } from "../bulk-trades";
 import {
   templateField,
+  type AuctionActivity,
   type BidInput,
   type Buyer,
   type BuyerInput,
@@ -13,6 +14,7 @@ import {
   type FileType,
   type CompanyMatch,
   type PersonMatch,
+  type TradeAuction,
   type TradeDetail,
   type TradeField,
   type TradeFile,
@@ -41,6 +43,9 @@ const TRACKING = `
        order by send.accepted_at desc limit 1
      ) latest) as email_tracking`;
 
+const AUCTION_COLUMNS = `ap.email, ap.buyer_id, ap.invited_at, ap.clicked_at, ap.last_viewed_at, ap.view_count, ap.offer_count,
+  ap.last_offer, ap.message_count, ap.last_activity_at`;
+
 const BUYER_SELECT = `
   select buyer.id, buyer.name, buyer.person_id, person.email as person_email,
     buyer.contact, buyer.wants, buyer.status,
@@ -51,6 +56,10 @@ const BUYER_SELECT = `
        where bid.buyer_id = buyer.id order by bid.created_at desc, bid.id desc limit 1
      ) latest) as latest_bid,
     (select max(link.last_clicked_at) from crm_bulk_trade_links link where link.buyer_id = buyer.id) as link_clicked_at,
+    (select row_to_json(ap) from (
+       select ${AUCTION_COLUMNS} from crm_bulk_trade_auction_people ap
+       where ap.buyer_id = buyer.id order by ap.last_activity_at desc nulls last limit 1
+     ) ap) as auction,
     ${TRACKING}
   from crm_bulk_trade_buyers buyer
   left join crm_people person on person.id = buyer.person_id`;
@@ -76,7 +85,26 @@ export async function getTradeDetail(lotId: string): Promise<TradeDetail | null>
     queryPg<TradeField>(`${FIELD_SELECT} where lot_id = $1`, [lotId]),
     queryPg<TradeFile>(`${FILE_SELECT} where lot_id = $1 order by created_at`, [lotId]),
   ]);
-  return { trade, buyers, contacts, fields, files };
+  return { trade, buyers, contacts, fields, files, auction: await tradeAuction(trade) };
+}
+
+/** Marketplace site the auction pages live on. */
+const PLATFORM_SITE = (process.env.REBATTERY_SITE_URL ?? "https://rebattery.io").replace(/\/$/, "");
+
+async function tradeAuction(trade: BulkTrade): Promise<TradeAuction | null> {
+  if (!trade.auction_slug || !trade.auction_status || !trade.auction_closes_at) return null;
+  const people = await queryPg<AuctionActivity>(
+    `select ${AUCTION_COLUMNS} from crm_bulk_trade_auction_people ap where ap.lot_id = $1
+     order by ap.offer_count desc, ap.view_count desc, ap.last_activity_at desc nulls last, ap.email`,
+    [trade.id],
+  );
+  return {
+    slug: trade.auction_slug,
+    url: `${PLATFORM_SITE}/marketplace/auctions/${trade.auction_slug}`,
+    status: trade.auction_status,
+    closes_at: trade.auction_closes_at,
+    people,
+  };
 }
 
 async function logEvent(

@@ -28,6 +28,10 @@ export type BulkTrade = {
   transport_class: string | null;
   tfs_needed: "yes" | "no" | "unknown";
   listing_id: string | null;
+  /** The marketplace auction this trade is sold through, kept in step by the auction sync. */
+  auction_slug: string | null;
+  auction_status: "published" | "withdrawn" | null;
+  auction_closes_at: string | null;
   /** Who the next step is for: a trade contact or a trade buyer (at most one). */
   next_step_contact_id: string | null;
   next_step_buyer_id: string | null;

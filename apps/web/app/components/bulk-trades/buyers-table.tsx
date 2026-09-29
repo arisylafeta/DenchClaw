@@ -5,6 +5,7 @@ import type { BulkTrade } from "@/lib/bulk-trades";
 import {
   BUYER_STATUSES,
   BUYER_SUBJECT,
+  auctionLabel,
   bidLabel,
   greeting,
   shortDate,
@@ -128,6 +129,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 <div className="truncate font-semibold hover:underline">{buyer.name}</div>
                 {buyer.contact && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{buyer.contact}</div>}
                 <TrackingLine buyer={buyer} />
+                <AuctionLine buyer={buyer} />
               </button>
               <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span>
               <div className="flex flex-col items-start gap-1">
@@ -233,6 +235,16 @@ const TRACKING_TONE = {
   green: "var(--bt-green)",
   grey: "var(--bt-muted)",
 } as const;
+
+function AuctionLine({ buyer }: { buyer: Buyer }) {
+  const label = buyer.auction && auctionLabel(buyer.auction);
+  if (!label) return null;
+  return (
+    <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE[label.tone] }} title={buyer.auction!.email}>
+      {label.label}
+    </div>
+  );
+}
 
 function TrackingLine({ buyer }: { buyer: Buyer }) {
   const tracking = buyer.email_tracking;

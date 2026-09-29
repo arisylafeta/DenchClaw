@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BulkTrade } from "./bulk-trades";
 import {
+  auctionLabel,
   bidLabel,
   changeCounts,
   missingItems,
@@ -113,5 +114,20 @@ describe("changeCounts", () => {
   it("counts changes in plain words, in a fixed order", () => {
     const kinds = ["file", "field", "field", "link_contact", "next_step"] as const;
     expect(changeCounts(kinds.map((kind) => ({ kind })))).toBe("2 details, 1 file, 1 contact, 1 next step");
+  });
+});
+
+describe("auctionLabel", () => {
+  const base = {
+    email: "tess@buyer.example", buyer_id: "btb_1", invited_at: "2026-09-20T09:00:00Z", clicked_at: null, last_viewed_at: null,
+    view_count: 0, offer_count: 0, last_offer: null, message_count: 0, last_activity_at: null,
+  };
+  it("leads with an offer, then views, messages and clicks", () => {
+    expect(auctionLabel({ ...base, view_count: 2, last_viewed_at: "2026-09-28T10:00:00Z",
+      last_offer: { kind: "offer", price_per_kwh: 31.5, amount_per_unit: 2183, currency: "EUR", quantity: 36, incoterm: "EXW" } }))
+      .toEqual({ label: "Auction offer €31.5/kWh EXW · Viewed 2×", tone: "green" });
+    expect(auctionLabel({ ...base, view_count: 3, last_viewed_at: "2026-09-28T10:00:00Z" })?.label).toBe("Viewed 3× on auction, last 28 Sep, no offer");
+    expect(auctionLabel({ ...base, clicked_at: "2026-09-21T10:00:00Z" })?.label).toBe("Clicked auction invite 21 Sep, no offer");
+    expect(auctionLabel(base)).toBeNull();
   });
 });
