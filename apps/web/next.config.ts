@@ -48,6 +48,12 @@ const nextConfig: NextConfig = {
   // Transpile ESM-only packages so webpack can bundle them
   transpilePackages: ["react-markdown", "remark-gfm"],
 
+  experimental: {
+    // Requests pass through middleware, which buffers bodies up to 10 MB by default. Bulk Trades
+    // uploads allow 25 MB (MAX_TRADE_FILE_BYTES) plus multipart overhead.
+    middlewareClientMaxBodySize: "26mb",
+  },
+
   // Turbopack equivalent of the webpack `resolve.fallback` below — html-to-docx
   // imports Node built-ins at the top of its ESM bundle that should be no-ops
   // in browser bundles. Scoped to `browser` so server bundles still get the

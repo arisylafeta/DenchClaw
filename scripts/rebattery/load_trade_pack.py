@@ -7,7 +7,7 @@ adds rows that are not there yet (contacts and buyers by name, files by file nam
 in the app survive a re-run. Every write gets its crm_bulk_trade_events row, as the app does.
 
   load_trade_pack.py pack.json                      # dry run
-  load_trade_pack.py pack.json --apply --files-dir "$BULK_TRADE_FILES_DIR"
+  load_trade_pack.py pack.json --apply
 
 Run --apply only after the dry-run output is approved. Packs hold production data: keep them
 outside git.
@@ -15,7 +15,6 @@ outside git.
 
 import argparse
 import json
-import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -26,6 +25,7 @@ import psycopg2.extras
 TRADE_TEXT = ["title", "trade_stage", "trade_kind", "fact_line", "next_step", "value", "transport_class", "listing_id"]
 TRADE_DATES = ["next_step_due", "clear_by", "ship_by"]
 TRADE_KEEP_IF_SET = TRADE_TEXT + TRADE_DATES + ["tfs_needed", "waiting_on"]
+MAX_FILE_BYTES = 25 * 1024 * 1024  # MAX_TRADE_FILE_BYTES in lib/bulk-trade-details.ts
 FIELD_KEYS = ["value", "status", "visibility", "source_label", "source_url", "source_date", "alternatives"]
 
 
@@ -80,11 +80,13 @@ def plan(cur, pack):
         path = Path(f["path"])
         if not path.is_file():
             raise SystemExit(f"Missing file {path}")
+        if path.stat().st_size > MAX_FILE_BYTES:
+            raise SystemExit(f"{path.name} is over 25 MB")
         out["files"].append({**f, "byte_size": path.stat().st_size})
     return out
 
 
-def apply(cur, out, actor, files_dir):
+def apply(cur, out, actor):
     lot_id = out["lot_id"]
     if out["trade"]:
         sets = ", ".join(f"{column} = %s" for column in out["trade"])
@@ -129,14 +131,13 @@ def apply(cur, out, actor, files_dir):
 
     for f in out["files"]:
         file_id = f"btf_{uuid.uuid4()}"
-        target = Path(files_dir) / file_id
-        shutil.copyfile(f["path"], target)
-        target.chmod(0o600)
+        content = Path(f["path"]).read_bytes()
         cur.execute("insert into crm_bulk_trade_files (id, lot_id, file_name, file_type, content_type, byte_size, "
-                    "storage_key, source_label, source_date, visibility, uploaded_by) "
+                    "content, source_label, source_date, visibility, uploaded_by) "
                     "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (file_id, lot_id, f["file_name"], f["file_type"], f.get("content_type"), f["byte_size"], file_id,
-                     f.get("source_label"), f.get("source_date"), f.get("visibility", "never"), actor))
+                    (file_id, lot_id, f["file_name"], f["file_type"], f.get("content_type"), len(content),
+                     psycopg2.Binary(content), f.get("source_label"), f.get("source_date"),
+                     f.get("visibility", "never"), actor))
         log(cur, lot_id, "file_added", {"id": file_id, "file_name": f["file_name"], "file_type": f["file_type"],
                                         "byte_size": f["byte_size"], "visibility": f.get("visibility", "never"),
                                         "source_label": f.get("source_label"), "source_date": f.get("source_date")}, actor)
@@ -148,7 +149,6 @@ def main():
     parser.add_argument("--apply", action="store_true", help="write the changes (default is a dry run)")
     parser.add_argument("--dsn", default="host=/var/run/postgresql dbname=denchclaw")
     parser.add_argument("--actor-email", default="alex@rebattery.io", help="CRM user recorded in the change log")
-    parser.add_argument("--files-dir", help="BULK_TRADE_FILES_DIR of the running app; required to add files")
     args = parser.parse_args()
 
     pack = json.loads(Path(args.pack).read_text())
@@ -162,9 +162,7 @@ def main():
             cur.execute("select id from crm_bulk_trade_lots where id = %s for update", (pack["lot_id"],))
             out = plan(cur, pack)
             if args.apply:
-                if out["files"] and not (args.files_dir and Path(args.files_dir).is_dir()):
-                    raise SystemExit("--files-dir must be an existing folder to add files")
-                apply(cur, out, actor["id"], args.files_dir)
+                apply(cur, out, actor["id"])
             else:
                 connection.rollback()
     finally:

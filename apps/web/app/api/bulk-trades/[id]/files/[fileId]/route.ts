@@ -1,5 +1,4 @@
 import { parseFileMeta } from "@/lib/bulk-trade-details";
-import { readTradeFile } from "@/lib/bulk-trade-files";
 import { getFileForDownload, updateFile } from "@/lib/crm-postgres/bulk-trade-details";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
@@ -15,11 +14,9 @@ export async function GET(_req: Request, { params }: Params) {
   const { id, fileId } = await params;
   const row = await getFileForDownload(id, fileId);
   if (!row) return notFound("File");
-  const bytes = await readTradeFile(row.storage_key).catch(() => null);
-  if (!bytes) return notFound("File");
   // Header values must be ASCII; the full name travels in filename*.
   const safeName = row.file_name.replace(/[^\x20-\x7e]|["\\]/g, "_");
-  return new Response(new Uint8Array(bytes), {
+  return new Response(new Uint8Array(row.content), {
     headers: {
       "content-type": "application/octet-stream",
       "content-disposition": `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(row.file_name)}`,

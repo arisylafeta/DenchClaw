@@ -329,28 +329,29 @@ export async function resolveConflict(lotId: string, key: string, choice: number
 }
 
 // ---------------------------------------------------------------------------
-// Files (the bytes live on disk; see app/api/bulk-trades/[id]/files)
+// Files (bytes stored in the row; see app/api/bulk-trades/[id]/files)
 // ---------------------------------------------------------------------------
 
 export type NewFile = {
-  id: string;
   file_name: string;
   file_type: FileType;
   content_type: string | null;
-  byte_size: number;
-  storage_key: string;
+  content: Buffer;
 };
 
 export async function recordFile(lotId: string, file: NewFile, meta: FileMetaInput, userId: string): Promise<TradeFile | null> {
   return withPgTransaction(async (client) => {
     if (!(await tradeExists(client, lotId))) return null;
-    const insert = insertSql("crm_bulk_trade_files", { lot_id: lotId, uploaded_by: userId, ...file, ...meta });
+    const id = `btf_${randomUUID()}`;
+    const insert = insertSql("crm_bulk_trade_files", {
+      id, lot_id: lotId, uploaded_by: userId, ...file, byte_size: file.content.length, ...meta,
+    });
     await client.query(insert.sql, insert.values);
     await logEvent(client, lotId, "file_added", {
-      id: file.id, file_name: file.file_name, byte_size: file.byte_size, file_type: meta.file_type ?? file.file_type,
+      id, file_name: file.file_name, byte_size: file.content.length, file_type: meta.file_type ?? file.file_type,
       visibility: meta.visibility ?? "never", source_label: meta.source_label ?? null, source_date: meta.source_date ?? null,
     }, userId);
-    const { rows } = await client.query(`${FILE_SELECT} where id = $1`, [file.id]);
+    const { rows } = await client.query(`${FILE_SELECT} where id = $1`, [id]);
     return rows[0] as TradeFile;
   });
 }
@@ -369,8 +370,8 @@ export async function updateFile(lotId: string, fileId: string, meta: FileMetaIn
 }
 
 export async function getFileForDownload(lotId: string, fileId: string) {
-  const [row] = await queryPg<{ file_name: string; content_type: string | null; storage_key: string }>(
-    "select file_name, content_type, storage_key from crm_bulk_trade_files where id = $1 and lot_id = $2",
+  const [row] = await queryPg<{ file_name: string; content: Buffer }>(
+    "select file_name, content from crm_bulk_trade_files where id = $1 and lot_id = $2",
     [fileId, lotId],
   );
   return row ?? null;

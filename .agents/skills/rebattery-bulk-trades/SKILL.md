@@ -19,7 +19,7 @@ migrations `008` and `009`.
 | `crm_bulk_trade_buyers` | Buyers for a trade: `status`, `wants`, `last_touch_on/via`, `chase_on`, optional `person_id` (CRM person, used for email tracking). |
 | `crm_bulk_trade_bids` | Structured bids, never edited: amount, unit (kWh, pack, cell), currency, firm or indicative, terms, expiry. The latest per buyer is current. |
 | `crm_bulk_trade_fields` | Per-field trade data keyed by `field_key` from the kind's template in `FIELD_TEMPLATES`: value, `status` (confirmed, unverified, conflict, missing), `visibility` ("buyers see at": teaser, after_nda, after_loi, never), source label, link and date, `alternatives` for conflicts. |
-| `crm_bulk_trade_files` | Uploaded files: type, source, visibility (default never). Bytes are on server disk, never public. |
+| `crm_bulk_trade_files` | Uploaded files (up to 25 MB): type, source, visibility (default never). Bytes are in the row, so the nightly database backup covers them; never public. |
 | `crm_bulk_trade_contacts` | Supplier-side contacts. |
 | `crm_bulk_trade_links` | Tracked links from Gmail drafts, with click counts. |
 | `crm_bulk_trade_events` | Append-only log of every change (a trigger rejects update and delete). This is the history the matching learns from. |
@@ -78,7 +78,7 @@ commit;
 
 To load a whole trade from its sources (fields with sources, contacts, buyers and bids, files), write
 a JSON pack outside git and run `scripts/rebattery/load_trade_pack.py pack.json` for a dry run; add
-`--apply --files-dir "$BULK_TRADE_FILES_DIR"` once the dry run is approved. It only fills what is
+`--apply` once the dry run is approved. It only fills what is
 empty, skips rows that exist, and logs every write.
 
 Log `changes` as `{"field": [before, after]}`. Use `buyer_id` on buyer, bid and link events. Do not

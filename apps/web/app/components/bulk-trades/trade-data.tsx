@@ -326,7 +326,7 @@ function UploadDialog({ trade, onClose, onSaved }: { trade: BulkTrade; onClose: 
       onSubmit={form.submit}
       footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>{form.saving ? "Uploading" : "Upload"}</button>}
     >
-      <FormField label="File (up to 50 MB)"><input ref={picker} type="file" required className="text-sm" /></FormField>
+      <FormField label="File (up to 25 MB)"><input ref={picker} type="file" required className="text-sm" /></FormField>
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Type">{form.select("file_type", FILE_TYPES)}</FormField>
         <FormField label="Source">{form.input("source_label", { placeholder: "Gmail · Fabio Papa" })}</FormField>

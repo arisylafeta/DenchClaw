@@ -22,6 +22,9 @@ export type FieldStatus = (typeof FIELD_STATUSES)[number];
 export type Visibility = (typeof VISIBILITIES)[number];
 export type FileType = (typeof FILE_TYPES)[number];
 
+/** Uploads are stored in the database, so keep them small enough for nightly backups. */
+export const MAX_TRADE_FILE_BYTES = 25 * 1024 * 1024;
+
 export const VISIBILITY_LABEL: Record<Visibility, string> = {
   teaser: "Teaser",
   after_nda: "After NDA",

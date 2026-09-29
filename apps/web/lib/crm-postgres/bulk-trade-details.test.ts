@@ -119,7 +119,7 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
 
     const file = await db.recordFile(
       lotId,
-      { id: `btf_${crypto.randomUUID()}`, file_name: "stock.xlsx", file_type: "Stock list", content_type: null, byte_size: 10, storage_key: "k" },
+      { file_name: "stock.xlsx", file_type: "Stock list", content_type: null, content: Buffer.from("0123456789") },
       { file_type: "Stock list", visibility: "never" },
       userId,
     );
@@ -129,6 +129,7 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
 
     const added = (await events()).find((event) => event.kind === "file_added")!;
     expect(added.changes).toMatchObject({ visibility: "never", source_label: null, byte_size: 10 });
+    expect((await db.getFileForDownload(lotId, file!.id))!.content.toString()).toBe("0123456789");
     const kinds = (await events()).map((event) => event.kind);
     expect(kinds).toEqual(expect.arrayContaining(["contact_added", "contact_updated", "contact_removed", "file_added", "file_updated", "email_drafted"]));
     expect((await db.searchPeople("Tess"))[0]).toMatchObject({ name: "Tess Buyer", opted_out: false });

@@ -1,5 +1,5 @@
 -- Bulk Trades v3, PR 2: the trade page. Buyers, structured bids, contacts, per-field data with
--- sources and buyer visibility, and uploaded files. Every buyer, bid, field and file change is
+-- sources and buyer visibility, and uploaded files (stored in the database). Every buyer, bid, field and file change is
 -- appended to crm_bulk_trade_events, as is each Gmail draft made from the trade page.
 -- Adds tables only; existing rows are untouched.
 -- Apply only after a current backup and explicit schema approval.
@@ -82,7 +82,8 @@ create table if not exists crm_bulk_trade_files (
   file_type text not null,
   content_type text,
   byte_size bigint not null check (byte_size >= 0),
-  storage_key text not null,
+  -- The bytes live in the row, so the nightly database backup covers them. Never served publicly.
+  content bytea not null,
   source_label text,
   source_date date,
   visibility text not null default 'never'

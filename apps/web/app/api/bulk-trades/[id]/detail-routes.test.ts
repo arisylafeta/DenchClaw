@@ -21,8 +21,6 @@ const getBulkTrade = vi.fn(async (id: string) => (id === "bt_1" ? { id } : null)
 vi.mock("@/lib/crm-postgres/bulk-trades", () => ({ updateBulkTrade: vi.fn(), getBulkTrade }));
 const createGmailDraft = vi.fn(async () => ({ draftId: "r1", messageId: "m1" }));
 vi.mock("@/lib/gmail-drafts", async (original) => ({ ...(await original<typeof import("@/lib/gmail-drafts")>()), createGmailDraft }));
-const readTradeFile = vi.fn();
-vi.mock("@/lib/bulk-trade-files", () => ({ readTradeFile }));
 
 const USER = { id: "11111111-1111-4111-8111-111111111111", email: "alex@rebattery.io", displayName: "Alex" };
 const post = (body: unknown) => new Request("http://localhost/x", { method: "POST", body: JSON.stringify(body) });
@@ -67,14 +65,12 @@ describe("trade detail routes", () => {
 
   it("downloads files as attachments only", async () => {
     const { GET } = await import("./files/[fileId]/route");
-    details.getFileForDownload.mockResolvedValueOnce({ file_name: 'stock "list".xlsx', content_type: "text/html", storage_key: "k" });
-    readTradeFile.mockResolvedValueOnce(Buffer.from("x"));
+    details.getFileForDownload.mockResolvedValueOnce({ file_name: 'stock "list".xlsx', content: Buffer.from("x") });
     const res = await GET(new Request("http://localhost/x"), params({ id: "bt_1", fileId: "btf_1" }));
     expect(res.headers.get("content-type")).toBe("application/octet-stream");
     expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="stock _list_.xlsx"/);
 
-    details.getFileForDownload.mockResolvedValueOnce({ file_name: "电池报告.pdf", content_type: null, storage_key: "k" });
-    readTradeFile.mockResolvedValueOnce(Buffer.from("x"));
+    details.getFileForDownload.mockResolvedValueOnce({ file_name: "电池报告.pdf", content: Buffer.from("x") });
     const unicode = await GET(new Request("http://localhost/x"), params({ id: "bt_1", fileId: "btf_2" }));
     expect(unicode.status).toBe(200);
     expect(unicode.headers.get("content-disposition")).toContain(`filename*=UTF-8''${encodeURIComponent("电池报告.pdf")}`);
