@@ -10,6 +10,7 @@ import {
   greeting,
   teaserText,
   type Buyer,
+  type CompanyMatch,
   type PersonMatch,
   type TradeField,
 } from "@/lib/bulk-trade-details";
@@ -64,15 +65,27 @@ export function BuyerDialog({ trade, buyer, onClose, onSaved, onEmail }: {
         </>
       )}
     >
-      <FormField label="Buyer">{text("name", { required: true })}</FormField>
-      <FormField label="Contact">{text("contact")}</FormField>
-      <PersonPicker
-        person={person}
-        onPick={(match) => {
-          setPerson(match && { id: match.id, label: [match.name, match.email].filter(Boolean).join(" · ") });
-          if (match && !form.draft.contact) form.setDraft((current) => ({ ...current, contact: match.name }));
+      <CrmSearch
+        onCompany={(company) => form.setDraft((current) => ({ ...current, name: company.name }))}
+        onPerson={(match) => {
+          setPerson({ id: match.id, label: [match.name, match.email].filter(Boolean).join(" · ") });
+          form.setDraft((current) => ({
+            ...current,
+            name: buyer ? current.name : match.company ?? match.name,
+            contact: match.name,
+          }));
         }}
       />
+      <FormField label="Buyer">{text("name", { required: true })}</FormField>
+      <FormField label="Contact">{text("contact")}</FormField>
+      {person && (
+        <FormField label="Linked CRM person (for email tracking)">
+          <div className="flex h-9 items-center gap-2 rounded-lg border px-2.5 text-sm" style={inputStyle}>
+            <span className="flex-1 truncate">{person.label}</span>
+            <button type="button" onClick={() => setPerson(null)} className="text-xs" style={{ color: "var(--bt-muted)" }}>Unlink</button>
+          </div>
+        </FormField>
+      )}
       <FormField label="Wants">{text("wants", { placeholder: "36-pack pilot" })}</FormField>
       <div className="grid grid-cols-3 gap-3">
         <FormField label="Last touch">{text("last_touch_on", { type: "date" })}</FormField>
@@ -215,55 +228,58 @@ export function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onM
   );
 }
 
-/** Links a buyer to a CRM person so emails to them can be tracked on this trade. */
-function PersonPicker({ person, onPick }: {
-  person: { id: string; label: string } | null;
-  onPick: (match: PersonMatch | null) => void;
+/**
+ * Search CRM people and companies. A company fills the buyer name; a person also fills the contact
+ * and links them, so emails to them are tracked on this trade.
+ */
+function CrmSearch({ onCompany, onPerson }: {
+  onCompany: (company: CompanyMatch) => void;
+  onPerson: (person: PersonMatch) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<PersonMatch[]>([]);
+  const [results, setResults] = useState<{ people: PersonMatch[]; companies: CompanyMatch[] }>({ people: [], companies: [] });
 
   useEffect(() => {
     if (query.trim().length < 2) {
-      setMatches([]);
+      setResults({ people: [], companies: [] });
       return;
     }
     const timer = setTimeout(() => {
-      request<{ people: PersonMatch[] }>(`/api/bulk-trades/people?q=${encodeURIComponent(query.trim())}`)
-        .then((result) => setMatches(result.people))
-        .catch(() => setMatches([]));
+      request<{ people: PersonMatch[]; companies: CompanyMatch[] }>(`/api/bulk-trades/people?q=${encodeURIComponent(query.trim())}`)
+        .then(setResults)
+        .catch(() => setResults({ people: [], companies: [] }));
     }, 250);
     return () => clearTimeout(timer);
   }, [query]);
 
-  if (person) {
-    return (
-      <FormField label="CRM person (for email tracking)">
-        <div className="flex h-9 items-center gap-2 rounded-lg border px-2.5 text-sm" style={inputStyle}>
-          <span className="flex-1 truncate">{person.label}</span>
-          <button type="button" onClick={() => onPick(null)} className="text-xs" style={{ color: "var(--bt-muted)" }}>Unlink</button>
-        </div>
-      </FormField>
-    );
-  }
+  const pick = (action: () => void) => { action(); setQuery(""); };
+  const option = "flex w-full flex-col px-2.5 py-1.5 text-left hover:bg-[var(--bt-row-hover)]";
+  const group = "px-2.5 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.04em]";
+  const empty = !results.people.length && !results.companies.length;
+
   return (
-    <FormField label="CRM person (for email tracking)">
-      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email or company"
+    <FormField label="Find in CRM">
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people or companies"
         className={inputClass} style={inputStyle} />
-      {!!matches.length && (
-        <ul role="listbox" aria-label="Matching people" className="max-h-48 overflow-y-auto rounded-lg border" style={{ borderColor: "var(--bt-border)" }}>
-          {matches.map((match) => (
-            <li key={match.id}>
-              <button type="button" role="option" aria-selected="false" onClick={() => onPick(match)}
-                className="flex w-full flex-col px-2.5 py-1.5 text-left hover:bg-[var(--bt-row-hover)]">
-                <span className="text-sm" style={{ color: "var(--bt-text)" }}>{match.name}{match.company ? `, ${match.company}` : ""}</span>
-                <span className="text-xs" style={{ color: "var(--bt-muted)" }}>
-                  {match.email ?? "No email"}{match.opted_out ? " · opted out" : ""}
-                </span>
-              </button>
-            </li>
+      {!empty && (
+        <div role="listbox" aria-label="CRM matches" className="max-h-60 overflow-y-auto rounded-lg border pb-1" style={{ borderColor: "var(--bt-border)" }}>
+          {!!results.companies.length && <div className={group} style={{ color: "var(--bt-muted)" }}>Companies</div>}
+          {results.companies.map((company) => (
+            <button key={company.id} type="button" role="option" aria-selected="false" onClick={() => pick(() => onCompany(company))} className={option}>
+              <span className="text-sm" style={{ color: "var(--bt-text)" }}>{company.name}</span>
+              <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{company.people} {company.people === 1 ? "person" : "people"} in CRM</span>
+            </button>
           ))}
-        </ul>
+          {!!results.people.length && <div className={group} style={{ color: "var(--bt-muted)" }}>People</div>}
+          {results.people.map((match) => (
+            <button key={match.id} type="button" role="option" aria-selected="false" onClick={() => pick(() => onPerson(match))} className={option}>
+              <span className="text-sm" style={{ color: "var(--bt-text)" }}>{match.name}{match.company ? `, ${match.company}` : ""}</span>
+              <span className="text-xs" style={{ color: "var(--bt-muted)" }}>
+                {match.email ?? "No email"}{match.opted_out ? " · opted out" : ""}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </FormField>
   );

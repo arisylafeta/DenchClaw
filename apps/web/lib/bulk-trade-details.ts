@@ -23,6 +23,21 @@ export type FieldStatus = (typeof FIELD_STATUSES)[number];
 export type Visibility = (typeof VISIBILITIES)[number];
 export type FileType = (typeof FILE_TYPES)[number];
 
+/**
+ * Files a browser can show safely in a tab: PDFs and raster images. Decided by the file name,
+ * never by the uploader's content type. SVG, HTML and everything else only download.
+ */
+const PREVIEW_TYPES: Record<string, string> = {
+  pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+};
+
+export function previewType(fileName: string): string | null {
+  const extension = fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  return extension ? PREVIEW_TYPES[extension] ?? null : null;
+}
+
+export const isImage = (fileName: string) => previewType(fileName)?.startsWith("image/") ?? false;
+
 /** Uploads are stored in the database, so keep them small enough for nightly backups. */
 export const MAX_TRADE_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -372,6 +387,7 @@ export function bidLabel(bid: Bid): string {
 }
 
 export type PersonMatch = { id: string; name: string; company: string | null; email: string | null; opted_out: boolean };
+export type CompanyMatch = { id: string; name: string; people: number };
 
 /** Strongest signal first: "Bounced 24 Sep", "Clicked 25 Sep", "Opened …", "Delivered …", "Sent …". */
 export function trackingLabel(tracking: EmailTracking): { label: string; tone: "red" | "green" | "grey" } | null {

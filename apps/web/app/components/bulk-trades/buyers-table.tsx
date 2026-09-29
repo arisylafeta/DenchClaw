@@ -29,7 +29,7 @@ import {
   tradeUrl,
 } from "./trade-ui";
 
-const COLUMNS = "grid-cols-[24px_minmax(0,1fr)_110px_150px_100px_90px_110px]";
+const COLUMNS = "grid-cols-[24px_minmax(180px,1.3fr)_minmax(140px,1fr)_170px_120px_100px_130px]";
 
 type Props = {
   trade: BulkTrade;
@@ -95,7 +95,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
       </header>
 
       <div className="overflow-x-auto">
-        <div className="min-w-[760px]">
+        <div className="min-w-[990px]">
           <div
             className={`grid ${COLUMNS} gap-3.5 border-b px-5 py-2.5 text-xs font-semibold`}
             style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)", borderColor: "var(--bt-column)" }}

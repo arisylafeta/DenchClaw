@@ -76,6 +76,21 @@ describe("trade detail routes", () => {
     const unicode = await GET(new Request("http://localhost/x"), params({ id: "bt_1", fileId: "btf_2" }));
     expect(unicode.status).toBe(200);
     expect(unicode.headers.get("content-disposition")).toContain(`filename*=UTF-8''${encodeURIComponent("电池报告.pdf")}`);
+
+    // ?view=1 shows PDFs and images inline, locked down; anything else still downloads.
+    const view = (name: string) => {
+      details.getFileForDownload.mockResolvedValueOnce({ file_name: name, content: Buffer.from("x") });
+      return GET(new Request("http://localhost/x?view=1"), params({ id: "bt_1", fileId: "btf_3" }));
+    };
+    const pdf = await view("Datasheet.pdf");
+    expect(pdf.headers.get("content-type")).toBe("application/pdf");
+    expect(pdf.headers.get("content-disposition")).toMatch(/^inline;/);
+    expect(pdf.headers.get("content-security-policy")).toContain("default-src 'none'");
+    for (const risky of ["logo.svg", "page.html", "notes.htm", "stock.xlsx"]) {
+      const res = await view(risky);
+      expect(res.headers.get("content-type")).toBe("application/octet-stream");
+      expect(res.headers.get("content-disposition")).toMatch(/^attachment;/);
+    }
   });
 
   it("makes the Gmail draft in the signed-in user's own account and logs it", async () => {

@@ -11,6 +11,7 @@ import {
   type FieldInput,
   type FileMetaInput,
   type FileType,
+  type CompanyMatch,
   type PersonMatch,
   type TradeDetail,
   type TradeField,
@@ -391,6 +392,18 @@ export async function logEmailDraft(
 export async function buyerOnTrade(lotId: string, buyerId: string): Promise<boolean> {
   const rows = await queryPg("select 1 from crm_bulk_trade_buyers where id = $1 and lot_id = $2", [buyerId, lotId]);
   return rows.length > 0;
+}
+
+/** Up to 6 CRM companies whose name matches, with how many people each has. */
+export async function searchCompanies(query: string): Promise<CompanyMatch[]> {
+  const pattern = `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+  return queryPg<CompanyMatch>(
+    `select c.id, c.name, (select count(*)::int from crm_people p where p.company_id = c.id) as people
+     from crm_companies c where c.name ilike $1
+     order by (lower(c.name) = lower($2)) desc, people desc, c.name
+     limit 6`,
+    [pattern, query],
+  );
 }
 
 /** Up to 8 CRM people whose name, email or company matches. */

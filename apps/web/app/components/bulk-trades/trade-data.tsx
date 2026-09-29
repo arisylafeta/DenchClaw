@@ -9,10 +9,10 @@ import {
   REQUIRED_FILES,
   VISIBILITIES,
   VISIBILITY_LABEL,
+  previewType,
   shortDate,
   type FieldSource,
   type FieldStatus,
-  type FileType,
   type Proposal,
   type TemplateField,
   type TradeDetail,
@@ -30,13 +30,13 @@ import {
   buttonStyle,
   darkButtonClass,
   darkButtonStyle,
-  inputClass,
   inputStyle,
   request,
   tradeUrl,
   useForm,
 } from "./trade-ui";
 import { ProposalRow } from "./proposal-row";
+import { FileLink, FileThumb, fileUrl } from "./file-preview";
 
 const FIELD_COLUMNS = "grid-cols-[200px_minmax(0,1fr)_250px_110px_110px]";
 const FILE_COLUMNS = "grid-cols-[minmax(0,1fr)_130px_250px_170px]";
@@ -246,11 +246,6 @@ function FieldDialog({ trade, template, field, onClose, onSaved }: {
   );
 }
 
-function extension(name: string) {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1, dot + 5).toUpperCase() : "FILE";
-}
-
 function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
   trade: BulkTrade;
   files: TradeFile[];
@@ -294,11 +289,13 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
           {files.map((file) => (
             <div key={file.id} className={`grid ${FILE_COLUMNS} items-center gap-4 border-b px-5 py-3`} style={{ borderColor: "var(--bt-divider)" }}>
               <div className="flex min-w-0 items-center gap-3">
-                <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold"
-                  style={{ background: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
-                  {extension(file.file_name)}
-                </span>
-                <a href={tradeUrl(trade.id, `/files/${file.id}`)} className="truncate text-sm font-semibold hover:underline">{file.file_name}</a>
+                <FileLink trade={trade} file={file} className="flex min-w-0 items-center gap-3 hover:underline">
+                  <FileThumb trade={trade} file={file} />
+                  <span className="truncate text-sm font-semibold">{file.file_name}</span>
+                </FileLink>
+                {previewType(file.file_name) && (
+                  <a href={fileUrl(trade, file)} className="shrink-0 text-xs" style={{ color: "var(--bt-muted)" }}>Download</a>
+                )}
               </div>
               <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{file.file_type}</span>
               <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{sourceText(file) || "Uploaded"}</span>

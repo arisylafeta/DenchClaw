@@ -5,14 +5,17 @@ import { dueLabel, type BulkTrade, type TradePatch } from "@/lib/bulk-trades";
 import {
   firstName,
   greeting,
+  isImage,
   missingItems,
   shortDate,
   type Buyer,
   type Contact,
   type TradeDetail,
+  type TradeFile,
 } from "@/lib/bulk-trade-details";
 import { BuyersTable } from "./buyers-table";
 import { EmailDialog } from "./email-dialog";
+import { FileLink, FileThumb } from "./file-preview";
 import {
   Card,
   ErrorText,
@@ -56,22 +59,23 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   return (
     <div className="flex flex-col gap-6">
       <NextStepBar trade={trade} contact={emailContact(contacts)} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <BuyersTable
-          trade={trade}
-          buyers={detail.buyers}
-          fields={detail.fields}
-          today={today}
-          linkTracking={!!detail.link_tracking}
-          proposals={(detail.proposals ?? []).filter((proposal) => OVERVIEW_KINDS.has(proposal.kind))}
-          onProposalDecided={onProposalDecided}
-          onBuyer={onBuyer}
-        />
-        <div className="flex flex-col gap-4 self-start">
-          <MissingCard detail={detail} onTradePatch={onTradePatch} />
-          <ShippingCard trade={trade} />
-          <ContactsCard trade={trade} contacts={contacts} onContacts={onContacts} />
-        </div>
+      <BuyersTable
+        trade={trade}
+        buyers={detail.buyers}
+        fields={detail.fields}
+        today={today}
+        linkTracking={!!detail.link_tracking}
+        proposals={(detail.proposals ?? []).filter((proposal) => OVERVIEW_KINDS.has(proposal.kind))}
+        onProposalDecided={onProposalDecided}
+        onBuyer={onBuyer}
+      />
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+        <MissingCard detail={detail} onTradePatch={onTradePatch} />
+        <ShippingCard trade={trade} />
+      </div>
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+        <ContactsCard trade={trade} contacts={contacts} onContacts={onContacts} />
+        <FilesCard trade={trade} files={detail.files} />
       </div>
     </div>
   );
@@ -352,5 +356,37 @@ function ContactDialog({ trade, contact, onClose, onSaved }: {
       </div>
       <ErrorText error={form.error} />
     </Modal>
+  );
+}
+
+/** Files at a glance: photos as thumbnails, documents as badges. PDFs and images open in a new tab. */
+function FilesCard({ trade, files }: { trade: BulkTrade; files: TradeFile[] }) {
+  const photos = files.filter((file) => isImage(file.file_name));
+  const documents = files.filter((file) => !isImage(file.file_name));
+  return (
+    <Card label="Files" className="flex flex-col gap-3 px-5 py-[18px]">
+      <div className="flex items-center">
+        <h2 className="flex-1 text-base font-semibold">Files</h2>
+        <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{files.length} · manage in Data and files</span>
+      </div>
+      {!!photos.length && (
+        <div className="flex flex-wrap gap-2">
+          {photos.map((file) => (
+            <FileLink key={file.id} trade={trade} file={file} className="rounded-lg hover:opacity-80">
+              <FileThumb trade={trade} file={file} size={64} />
+              <span className="sr-only">{file.file_name}</span>
+            </FileLink>
+          ))}
+        </div>
+      )}
+      {documents.map((file) => (
+        <FileLink key={file.id} trade={trade} file={file} className="flex min-w-0 items-center gap-2.5 text-sm hover:underline">
+          <FileThumb trade={trade} file={file} size={28} />
+          <span className="flex-1 truncate">{file.file_name}</span>
+          <span className="shrink-0 text-xs" style={{ color: "var(--bt-muted)" }}>{file.file_type}</span>
+        </FileLink>
+      ))}
+      {!files.length && <p className="text-sm" style={{ color: "var(--bt-muted)" }}>No files yet.</p>}
+    </Card>
   );
 }

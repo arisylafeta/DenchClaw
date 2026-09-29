@@ -133,6 +133,9 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     const kinds = (await events()).map((event) => event.kind);
     expect(kinds).toEqual(expect.arrayContaining(["contact_added", "contact_updated", "contact_removed", "file_added", "file_updated", "email_drafted"]));
     expect((await db.searchPeople("Tess"))[0]).toMatchObject({ name: "Tess Buyer", opted_out: false });
+    await pg.queryPg("insert into crm_companies (id, name) values ('c_search_test', 'Searchable Storage GmbH') on conflict do nothing");
+    expect((await db.searchCompanies("searchable"))[0]).toMatchObject({ name: "Searchable Storage GmbH", people: 0 });
+    expect(await db.searchCompanies("100%_")).toEqual([]);
     await expect(pg.queryPg("delete from crm_bulk_trade_events where lot_id = $1", [lotId])).rejects.toThrow(/append-only/);
   });
 

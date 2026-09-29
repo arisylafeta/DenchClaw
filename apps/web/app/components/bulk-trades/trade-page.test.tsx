@@ -39,7 +39,10 @@ function mockFetch() {
       return new Response(JSON.stringify({ buyer: { ...BUYER, ...JSON.parse(String(init.body)), last_touch_on: today } }));
     }
     if (url.startsWith("/api/bulk-trades/people")) {
-      return new Response(JSON.stringify({ people: [{ id: "p_1", name: "Tess Buyer", company: "Synthetic Storage", email: "tess@example.test", opted_out: false }] }));
+      return new Response(JSON.stringify({
+        people: [{ id: "p_1", name: "Tess Buyer", company: "Synthetic Storage", email: "tess@example.test", opted_out: false }],
+        companies: [{ id: "c_1", name: "Fresh Storage GmbH", people: 3 }],
+      }));
     }
     if (init?.method === "POST" && url.endsWith("/email-draft")) {
       return new Response(JSON.stringify({ url: "https://mail.google.com/mail/u/#drafts" }), { status: 201 });
@@ -170,7 +173,7 @@ describe("TradePage overview", () => {
     renderPage();
 
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic Storage/ }));
-    await userEvent.type(screen.getByPlaceholderText("Search name, email or company"), "tess");
+    await userEvent.type(screen.getByPlaceholderText("Search people or companies"), "tess");
     await userEvent.click(await screen.findByRole("option", { name: /Tess Buyer/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -273,6 +276,39 @@ describe("TradePage overview", () => {
     await userEvent.click(within(row).getByRole("button", { name: "Update buyer" }));
     await waitFor(() => expect(screen.queryByRole("group", { name: /New:/ })).not.toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/41", expect.objectContaining({ body: JSON.stringify({ action: "accept" }) }));
+  });
+
+  it("adds a buyer by picking a CRM company or person", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add buyer" }));
+    await userEvent.type(screen.getByPlaceholderText("Search people or companies"), "fresh");
+    await userEvent.click(await screen.findByRole("option", { name: /Fresh Storage GmbH/ }));
+    expect(screen.getByLabelText("Buyer")).toHaveValue("Fresh Storage GmbH");
+
+    await userEvent.type(screen.getByPlaceholderText("Search people or companies"), "tess");
+    await userEvent.click(await screen.findByRole("option", { name: /Tess Buyer/ }));
+    expect(screen.getByLabelText("Contact")).toHaveValue("Tess Buyer");
+    expect(screen.getByText("Tess Buyer · tess@example.test")).toBeInTheDocument();
+  });
+
+  it("opens PDFs and photos in a new tab and shows photos as thumbnails", async () => {
+    const files = [
+      { id: "f1", file_name: "pack.jpg", file_type: "Photos", byte_size: 1, source_label: null, source_date: null, visibility: "never", created_at: "" },
+      { id: "f2", file_name: "Datasheet.pdf", file_type: "Datasheet", byte_size: 1, source_label: null, source_date: null, visibility: "teaser", created_at: "" },
+      { id: "f3", file_name: "stock.xlsx", file_type: "Stock list", byte_size: 1, source_label: null, source_date: null, visibility: "never", created_at: "" },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ...DETAIL, files }))));
+    renderPage();
+
+    const card = await screen.findByRole("region", { name: "Files" });
+    const pdf = within(card).getByRole("link", { name: /Datasheet.pdf/ });
+    expect(pdf).toHaveAttribute("href", "/api/bulk-trades/bt_1/files/f2?view=1");
+    expect(pdf).toHaveAttribute("target", "_blank");
+    expect(within(card).getByRole("link", { name: /stock.xlsx/ })).toHaveAttribute("href", "/api/bulk-trades/bt_1/files/f3");
+    expect(card.querySelector("img")).toHaveAttribute("src", "/api/bulk-trades/bt_1/files/f1?view=1");
   });
 });
 
