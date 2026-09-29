@@ -15,7 +15,7 @@ migrations `008` and `009`.
 
 | Table | Holds |
 | --- | --- |
-| `crm_bulk_trade_lots` | One trade. v3 columns: `trade_stage` (Needs info, With buyers, Closing, Done, Lost), `trade_kind` (packs, cells, systems, recycling), `fact_line`, `next_step`, `next_step_due`, `waiting_on`, `value` (text), `clear_by`, `ship_by`, `transport_class`, `tfs_needed`, `listing_id`. Older Hermes columns (`stage`, `confidence`, `summary`, …) stay but are not shown. |
+| `crm_bulk_trade_lots` | One trade. v3 columns: `trade_stage` (Needs info, With buyers, Closing, Done, Lost), `trade_kind` (packs, cells, systems, recycling), `fact_line`, `next_step`, `next_step_due`, `waiting_on`, `value` (text), `clear_by`, `ship_by`, `transport_class`, `tfs_needed`, `listing_id`, and who the next step is for: `next_step_contact_id` or `next_step_buyer_id` (one at most, on the same trade). Keep a next step to one action. Older Hermes columns (`stage`, `confidence`, `summary`, …) stay but are not shown. |
 | `crm_bulk_trade_buyers` | Buyers for a trade: `status`, `wants`, `last_touch_on/via`, `chase_on`, optional `person_id` (CRM person, used for email tracking). |
 | `crm_bulk_trade_bids` | Structured bids, never edited: amount, unit (kWh, pack, cell), currency, firm or indicative, terms, expiry. The latest per buyer is current. |
 | `crm_bulk_trade_fields` | Per-field trade data keyed by `field_key` from the kind's template in `FIELD_TEMPLATES`: value, `status` (confirmed, unverified, conflict, missing), `visibility` ("buyers see at": teaser, after_nda, after_loi, never), source label, link and date, `alternatives` for conflicts. |
