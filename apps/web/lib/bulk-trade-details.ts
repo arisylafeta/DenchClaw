@@ -125,9 +125,12 @@ export type TradeFile = {
 
 export type ProposalKind =
   | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade"
-  | "trade_kind";
+  | "trade_kind" | "bid";
 
-/** A change the inbox check found in Gmail or Granola. Nothing happens until Alex accepts it. */
+/**
+ * Something the inbox check found in Gmail or Granola. Most findings are applied straight away
+ * (see AppliedChange); buyer status changes, unclear threads and possible new trades wait for Alex.
+ */
 export type Proposal = {
   id: string;
   lot_id: string | null;
@@ -142,6 +145,38 @@ export type Proposal = {
   source_at: string | null;
   created_at: string;
 };
+
+/** A finding the inbox check wrote to the trade itself. Undo reverses it while nobody has changed it since. */
+export type AppliedChange = Proposal & {
+  run_id: string | null;
+  applied_at: string;
+  /** True when the value went in as a conflict beside Alex's own value, rather than replacing it. */
+  conflict: boolean;
+};
+
+/** Plain-words group for a change, for the "Updated from your inbox" line. */
+export const CHANGE_NOUN: Record<ProposalKind, [string, string]> = {
+  field: ["detail", "details"],
+  file: ["file", "files"],
+  link_contact: ["contact", "contacts"],
+  new_buyer: ["buyer", "buyers"],
+  buyer_update: ["buyer update", "buyer updates"],
+  bid: ["bid", "bids"],
+  next_step: ["next step", "next steps"],
+  trade_kind: ["trade kind", "trade kinds"],
+  needs_triage: ["thread", "threads"],
+  possible_trade: ["trade", "trades"],
+};
+
+/** "8 details, 2 contacts, 1 file" in a fixed order. */
+export function changeCounts(changes: Pick<Proposal, "kind">[]): string {
+  const counts = new Map<ProposalKind, number>();
+  for (const change of changes) counts.set(change.kind, (counts.get(change.kind) ?? 0) + 1);
+  return (Object.keys(CHANGE_NOUN) as ProposalKind[])
+    .filter((kind) => counts.has(kind))
+    .map((kind) => `${counts.get(kind)} ${CHANGE_NOUN[kind][counts.get(kind) === 1 ? 0 : 1]}`)
+    .join(", ");
+}
 
 /** Latest history pass for one trade. */
 export type HistoryStatus = {
@@ -178,8 +213,10 @@ export type TradeDetail = {
   files: TradeFile[];
   /** True when Gmail drafts get tracked links (a public link address is configured). */
   link_tracking?: boolean;
-  /** Open proposals from the inbox check for this trade. */
+  /** Findings from the inbox check waiting for Alex. */
   proposals?: Proposal[];
+  /** Changes the inbox check applied, newest first. */
+  applied?: AppliedChange[];
   /** Latest history pass over this trade's past emails and calls. */
   history?: HistoryStatus;
 };

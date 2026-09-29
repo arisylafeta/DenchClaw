@@ -13,6 +13,7 @@ const ACCEPT_LABEL: Record<Proposal["kind"], string> = {
   needs_triage: "Got it",
   link_contact: "Add contact",
   trade_kind: "Set kind",
+  bid: "Add bid",
   possible_trade: "Create trade",
 };
 
@@ -23,7 +24,7 @@ type Props = {
   compact?: boolean;
 };
 
-/** One inbox-check finding with its quote and source. Nothing changes until Accept. */
+/** One inbox-check finding waiting for Alex, with its quote and source. Nothing changes until Accept. */
 export function ProposalRow({ proposal, onDecided, compact }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

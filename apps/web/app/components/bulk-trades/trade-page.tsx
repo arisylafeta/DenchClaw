@@ -137,7 +137,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
 }
 
 /**
- * Reads the trade's past emails and calls once, as proposals. While a pass runs, the page
+ * Reads the trade's past emails and calls once and applies what belongs to it. While a pass runs, the page
  * refreshes itself so the findings appear when it is done.
  */
 function HistoryButton({ tradeId, history, onRefresh }: {
@@ -171,7 +171,7 @@ function HistoryButton({ tradeId, history, onRefresh }: {
     : history?.status === "failed"
       ? "Last read failed"
       : history?.finished_at
-        ? `Read ${shortDate(history.finished_at.slice(0, 10))} · ${history.proposals_made} found`
+        ? `Read ${shortDate(history.finished_at.slice(0, 10))} · ${history.proposals_made} ${history.proposals_made === 1 ? "update" : "updates"}`
         : null;
   return (
     <div className="flex items-center gap-2">

@@ -17,6 +17,7 @@ import {
 import { BuyersTable } from "./buyers-table";
 import { EmailDialog } from "./email-dialog";
 import { FileLink, FileThumb } from "./file-preview";
+import { InboxUpdates } from "./inbox-updates";
 import {
   Card,
   ErrorText,
@@ -41,7 +42,7 @@ type Props = {
   onProposalDecided: () => void;
 };
 
-/** Proposals shown on the Overview; field and file proposals live on Data and files. */
+/** Waiting findings shown on the Overview; field and file ones live on Data and files. */
 const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage", "link_contact", "trade_kind"]);
 
 /** First contact with an email address, else the first contact. */
@@ -60,6 +61,7 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   return (
     <div className="flex flex-col gap-6">
       <NextStepStrip detail={detail} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
+      <InboxUpdates tradeId={trade.id} applied={detail.applied ?? []} onChanged={onProposalDecided} />
       <BuyersTable
         trade={trade}
         buyers={detail.buyers}

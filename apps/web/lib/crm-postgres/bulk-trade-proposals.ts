@@ -1,5 +1,5 @@
-import { queryPg, withPgTransaction } from "../postgres";
-import type { CheckStatus, FileType, HistoryStatus, Proposal } from "../bulk-trade-details";
+import { queryPg, withPgTransaction, type PgTransaction } from "../postgres";
+import type { AppliedChange, CheckStatus, FileType, HistoryStatus, Proposal } from "../bulk-trade-details";
 import { startHistoryPass } from "../history-pass";
 import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
@@ -17,6 +17,17 @@ export async function tradeProposals(lotId: string): Promise<Proposal[]> {
     `${PROPOSAL_SELECT}
      where status = 'new' and (lot_id = $1 or (kind = 'needs_triage' and proposed->'lot_ids' ? $1))
      order by created_at, id`,
+    [lotId],
+  );
+}
+
+/** What the inbox check applied to one trade, newest first. */
+export async function appliedChanges(lotId: string): Promise<AppliedChange[]> {
+  return queryPg<AppliedChange>(
+    `select id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url, source_label,
+       source_at, created_at, run_id::text as run_id, applied_at, coalesce((undo->>'conflict')::boolean, false) as conflict
+     from crm_bulk_trade_proposals where lot_id = $1 and status = 'applied'
+     order by applied_at desc, id desc limit 100`,
     [lotId],
   );
 }
@@ -183,5 +194,166 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
     }
     case "needs_triage":
       return lotId; // Acknowledged; Alex handles the thread by hand.
+    case "bid":
+      throw new Error("Bids from email are added automatically.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Undo
+// ---------------------------------------------------------------------------
+
+class Changed extends Error {}
+
+type Undo = {
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | string | null;
+  value?: string;
+  id?: string;
+  conflict?: boolean;
+};
+
+type AppliedRow = Proposal & { undo: Undo | null };
+
+const same = (a: unknown, b: unknown) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+
+/**
+ * Reverses one change the inbox check applied, as the signed-in user. It refuses when the thing
+ * has been changed since, so an undo never throws away later work.
+ */
+export async function undoChange(id: string, userId: string): Promise<Decision> {
+  try {
+    const lotId = await withPgTransaction(async (client) => {
+      const { rows } = await client.query(
+        `select id::text as id, lot_id, kind, target, proposed, summary, undo from crm_bulk_trade_proposals
+         where id = $1 and status = 'applied' for update`,
+        [id],
+      );
+      const change = rows[0] as AppliedRow | undefined;
+      if (!change?.lot_id || !change.undo) return null;
+      await reverse(client, change.lot_id, change, change.undo);
+      await client.query(
+        "update crm_bulk_trade_proposals set status = 'undone', decided_at = now(), decided_by = $2 where id = $1",
+        [id, userId],
+      );
+      await client.query(
+        "insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, 'auto_undone', $2, $3)",
+        [change.lot_id, JSON.stringify({ proposal_id: change.id, kind: change.kind, summary: change.summary, undo: change.undo }), userId],
+      );
+      return change.lot_id;
+    });
+    return lotId ? { ok: true, lot_id: lotId } : { ok: false, status: 404, error: "Already undone or not found." };
+  } catch (err) {
+    if (err instanceof Changed) return { ok: false, status: 409, error: err.message };
+    throw err;
+  }
+}
+
+/** Undoes every change from one run on one trade. Returns how many were undone and what was refused. */
+export async function undoRun(lotId: string, runId: string, userId: string) {
+  const rows = await queryPg<{ id: string; summary: string }>(
+    `select id::text as id, summary from crm_bulk_trade_proposals
+     where lot_id = $1 and run_id = $2 and status = 'applied' order by id desc`,
+    [lotId, runId],
+  );
+  let undone = 0;
+  const refused: { summary: string; error: string }[] = [];
+  for (const row of rows) {
+    const result = await undoChange(row.id, userId);
+    if (result.ok) undone += 1;
+    else refused.push({ summary: row.summary, error: result.error });
+  }
+  return { undone, refused };
+}
+
+async function reverse(client: PgTransaction, lotId: string, change: AppliedRow, undo: Undo) {
+  const one = async (sql: string, values: unknown[]) => (await client.query(sql, values)).rows[0] as Record<string, unknown> | undefined;
+  switch (change.kind) {
+    case "field": {
+      const key = change.target!;
+      const value = change.proposed.value;
+      const current = await one(
+        "select value, status, alternatives from crm_bulk_trade_fields where lot_id = $1 and field_key = $2 for update",
+        [lotId, key],
+      );
+      if (!current) throw new Changed("That detail has been removed since.");
+      if (undo.conflict) {
+        const alternatives = (current.alternatives as { value: unknown }[]).filter((claim) => !same(claim.value, value));
+        const status = alternatives.length || current.status !== "conflict" ? current.status : (undo.before?.status ?? "unverified");
+        await client.query(
+          "update crm_bulk_trade_fields set alternatives = $3, status = $4, updated_at = now() where lot_id = $1 and field_key = $2",
+          [lotId, key, JSON.stringify(alternatives), status],
+        );
+        break;
+      }
+      if (!same(current.value, value)) throw new Changed("That detail has been changed since; edit it by hand.");
+      if (!undo.before) {
+        await client.query("delete from crm_bulk_trade_fields where lot_id = $1 and field_key = $2", [lotId, key]);
+      } else {
+        const b = undo.before;
+        await client.query(
+          `update crm_bulk_trade_fields set value = $3, status = $4, source_label = $5, source_url = $6, source_date = $7,
+             updated_at = now() where lot_id = $1 and field_key = $2`,
+          [lotId, key, b.value, b.status, b.source_label, b.source_url, b.source_date],
+        );
+      }
+      break;
+    }
+    case "next_step": {
+      const after = undo.after as Record<string, unknown>;
+      const current = await one("select next_step from crm_bulk_trade_lots where id = $1 for update", [lotId]);
+      if (!same(current?.next_step, after.next_step)) throw new Changed("The next step has been changed since.");
+      const b = undo.before!;
+      await client.query(
+        `update crm_bulk_trade_lots set next_step = $2, next_step_due = $3, waiting_on = $4, waiting_since = $5,
+           next_step_contact_id = $6, next_step_buyer_id = $7, updated_at = now() where id = $1`,
+        [lotId, b.next_step, b.next_step_due, b.waiting_on, b.waiting_since, b.next_step_contact_id, b.next_step_buyer_id],
+      );
+      break;
+    }
+    case "trade_kind": {
+      const current = await one("select trade_kind from crm_bulk_trade_lots where id = $1 for update", [lotId]);
+      if (current?.trade_kind !== undo.after) throw new Changed("The trade kind has been changed since.");
+      await client.query("update crm_bulk_trade_lots set trade_kind = null, updated_at = now() where id = $1", [lotId]);
+      break;
+    }
+    case "link_contact":
+      await client.query("delete from crm_bulk_trade_contacts where id = $1 and lot_id = $2", [undo.id, lotId]);
+      break;
+    case "new_buyer": {
+      const used = await one(
+        `select exists (select 1 from crm_bulk_trade_bids where buyer_id = $1)
+           or exists (select 1 from crm_bulk_trade_links where buyer_id = $1) as used`,
+        [undo.id],
+      );
+      if (used?.used) throw new Changed("That buyer has bids or emails now; remove them by hand.");
+      await client.query("update crm_bulk_trade_lots set next_step_buyer_id = null where id = $1 and next_step_buyer_id = $2", [lotId, undo.id]);
+      await client.query("delete from crm_bulk_trade_buyers where id = $1 and lot_id = $2", [undo.id, lotId]);
+      break;
+    }
+    case "buyer_update": {
+      const after = undo.after as Record<string, unknown>;
+      const keys = Object.keys(after).filter((key) => ["last_touch_on", "last_touch_via", "chase_on"].includes(key));
+      const current = await one(
+        `select to_char(last_touch_on, 'YYYY-MM-DD') as last_touch_on, last_touch_via, to_char(chase_on, 'YYYY-MM-DD') as chase_on
+         from crm_bulk_trade_buyers where id = $1 and lot_id = $2 for update`,
+        [change.target, lotId],
+      );
+      if (!current || keys.some((key) => current[key] !== after[key])) throw new Changed("That buyer has been updated since.");
+      await client.query(
+        `update crm_bulk_trade_buyers set ${keys.map((key, i) => `${key} = $${i + 3}`).join(", ")}, updated_at = now()
+         where id = $1 and lot_id = $2`,
+        [change.target, lotId, ...keys.map((key) => undo.before?.[key] ?? null)],
+      );
+      break;
+    }
+    case "bid":
+      await client.query("delete from crm_bulk_trade_bids where id = $1 and lot_id = $2", [undo.id, lotId]);
+      break;
+    case "file":
+      await client.query("delete from crm_bulk_trade_files where id = $1 and lot_id = $2", [undo.id, lotId]);
+      break;
+    default:
+      throw new Changed("This change cannot be undone.");
   }
 }

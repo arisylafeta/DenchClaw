@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Bulk Trades inbox check: read Alex's new Gmail and Granola notes, match them to trades, and
-store proposals for Alex to accept or ignore in the app. It never changes a trade itself.
+"""Bulk Trades inbox check: read Alex's new Gmail and Granola notes, place each thread on the trade
+it is about, and update those trades with what it finds.
 
-  bulk_trade_inbox_check.py                  # one run: collect, match, propose, record the run
-  bulk_trade_inbox_check.py --dry-run        # print proposals, write nothing
+  bulk_trade_inbox_check.py                  # one run: collect, place, extract, apply, record the run
+  bulk_trade_inbox_check.py --dry-run        # print what it would do, write nothing
   bulk_trade_inbox_check.py --summary        # the 08:00 list of overdue and due-today steps
   bulk_trade_inbox_check.py --history LOT_ID # one-off pass over a trade's whole email and call history
   ... --only-at 08:00,10:30                  # act only within 15 minutes after these UK times
@@ -15,22 +15,32 @@ Sources:
   Gmail   crm_email_messages for Alex's mailbox, synced hourly by gog_crm_sync.py.
   Granola raw notes saved by granola-ingestion, refreshed at the start of each run.
 
-Matching is deterministic: a message or meeting belongs to a trade when a participant is one of
-its contacts or linked buyers, or the Gmail thread is already tied to it. A thread that touches
-several trades becomes one "needs triage" item instead of a guess. Only then does a language model
-read the matched material and propose changes, and every proposal must quote its source verbatim
-or it is dropped. Unmatched inbound mail that looks like a battery deal becomes a "possible new
-trade". Every run is recorded in crm_bulk_trade_check_runs, including failures.
+1. Candidates. A thread or call is a candidate for a trade when a participant is one of its
+   contacts or linked buyers, or the thread is linked to it.
+2. Placing. The same people often work on several deals, so people alone do not decide. A language
+   model reads each new thread's subject, dates, people and opening lines against every live trade
+   and places it on one trade, on none (another or finished deal), or marks it unclear. The verdict
+   is kept per thread in crm_bulk_trade_threads, so later replies follow it without another call.
+3. Extracting. Only threads placed on a trade are read in full, oldest first, and every finding must
+   quote its source verbatim or it is dropped.
+4. Applying. Findings are written straight to the trade and kept as "applied" proposals with what
+   they replaced, so each can be undone in the app. A value Alex entered or accepted is never
+   overwritten: a different value from email becomes a conflict for him to settle. Buyer status
+   changes, unclear threads and possible new trades stay as cards for Alex.
+Every run is recorded in crm_bulk_trade_check_runs, including failures.
 """
 
 import argparse
 import datetime as dt
 import json
+import mimetypes
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
+import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -57,6 +67,8 @@ MAX_SOURCE_CHARS = 8000
 MAX_SCREENED_EMAILS = 25  # possible-new-trade screen, per run
 MIN_QUOTE_CHARS = 8
 FIRST_RUN_LOOKBACK = dt.timedelta(days=3)
+MAX_FILE_BYTES = 25 * 1024 * 1024
+HISTORY_LOG_DIR = Path("/root/.hermes/workspace/logs/bulk-trades")
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +119,8 @@ def load_trades(cur, lot_ids=None):
     """Live trades, or the given trades at any stage."""
     cur.execute(
         """select id, title, trade_kind, trade_stage, fact_line, next_step,
-                  to_char(next_step_due, 'YYYY-MM-DD') as next_step_due, waiting_on
+                  to_char(next_step_due, 'YYYY-MM-DD') as next_step_due, waiting_on,
+                  to_char(created_at, 'YYYY-MM-DD') as created_on
            from crm_bulk_trade_lots
            where (%s::text[] is null and trade_stage = any(%s)) or id = any(%s::text[])""",
         (lot_ids, list(LIVE_STAGES), lot_ids or []),
@@ -139,17 +152,14 @@ def load_trades(cur, lot_ids=None):
     cur.execute("select lot_id, field_key, value, status from crm_bulk_trade_fields where lot_id = any(%s)", (ids,))
     for row in cur.fetchall():
         trades[row["lot_id"]]["fields"][row["field_key"]] = {"value": row["value"], "status": row["status"]}
-    # Threads already tied to a trade: evidence links (Gmail or CRM thread ids) and earlier proposals.
+    # Threads linked to a trade by hand (Gmail or CRM thread ids). These are always read for it.
     cur.execute(
         """select link.lot_id, coalesce(thread.gmail_thread_id, link.evidence_id) as thread
            from crm_bulk_trade_evidence_links link
            left join crm_email_threads thread on thread.id = link.evidence_id
-           where link.evidence_kind = 'gmail_thread' and link.lot_id = any(%s)
-           union
-           select lot_id, source_thread from crm_bulk_trade_proposals
-           where source_thread is not null and lot_id = any(%s)""", (ids, ids))
+           where link.evidence_kind = 'gmail_thread' and link.lot_id = any(%s)""", (ids,))
     for row in cur.fetchall():
-        trades[row["lot_id"]]["threads"].add(row["thread"])
+        trades[row["lot_id"]]["threads"].add(f"gmail:{row['thread']}")
     for trade in trades.values():
         trade["emails"] = external(trade["emails"])
     return trades
@@ -197,6 +207,7 @@ def email_sources(rows, mailbox):
         out.append({
             "kind": "gmail",
             "id": row["gmail_message_id"] or row["id"],
+            "key": f"gmail:{row['gmail_thread_id']}" if row["gmail_thread_id"] else f"gmail-message:{row['gmail_message_id'] or row['id']}",
             "thread": row["gmail_thread_id"],
             "at": parse_time(row["sent_at"] or row["created_at"]),
             "synced_at": parse_time(row["created_at"]),
@@ -238,6 +249,7 @@ def load_granola(since):
         notes.append({
             "kind": "granola",
             "id": note["id"],
+            "key": f"granola:{note['id']}",
             "thread": None,
             "at": parse_time(note.get("created_at")),
             "synced_at": updated,
@@ -254,10 +266,116 @@ def load_granola(since):
 
 
 def match(source, trades):
-    lots = {lot for lot, t in trades.items() if source["participants"] & t["emails"]}
-    if source["thread"]:
-        lots |= {lot for lot, t in trades.items() if source["thread"] in t["threads"]}
-    return lots
+    """Candidate trades for a source: shared people or a hand-linked thread."""
+    return {lot for lot, t in trades.items() if source["participants"] & t["emails"] or source["key"] in t["threads"]}
+
+
+def by_thread(sources):
+    """Sources grouped by thread key, each group oldest first, groups in order of first message."""
+    groups = {}
+    for source in sorted(sources, key=lambda s: s["at"] or EPOCH):
+        groups.setdefault(source["key"], []).append(source)
+    return groups
+
+
+# ---------------------------------------------------------------------------
+# Placing threads on trades
+# ---------------------------------------------------------------------------
+
+THREAD_SYSTEM = """You sort email threads and call notes into ReBattery's bulk battery trades.
+Reply with ONLY a JSON object: {"threads": [{"key", "verdict", "trade_id", "reason"}]}, one entry per thread.
+For each thread decide which ONE trade in TRADES it is about. Judge by the batch being discussed (model,
+chemistry, capacity, quantity, location, buyers), the dates against when each trade started, the subject and
+what is said. The same people often work on several deals, so shared people alone are never enough:
+- verdict "trade" with trade_id: the thread is about that trade's batch.
+- verdict "none": about a different batch, an older or finished deal, or not about a deal at all.
+- verdict "unclear": it really discusses two or more trades in TRADES, or you cannot tell.
+"reason": a few words, for example "Serbian packs for Ecovip, March, not this batch"."""
+
+THREAD_BATCH_CHARS = 30000
+
+
+def trade_card(trade):
+    """What the placing model needs to recognise a trade."""
+    return {
+        "trade_id": trade["id"], "title": trade["title"], "kind": trade["trade_kind"], "stage": trade["trade_stage"],
+        "started": trade.get("created_on"), "facts": trade["fact_line"],
+        "fields": {k: str(v["value"])[:120] for k, v in trade["fields"].items() if v.get("value")},
+        "contacts": sorted(trade["contact_emails"])[:10], "buyers": [b["name"] for b in trade["buyers"]][:15],
+    }
+
+
+def thread_digest(key, sources):
+    first, last = sources[0], sources[-1]
+    digest = {
+        "key": key, "type": first["kind"], "subject": first["title"], "messages": len(sources),
+        "first_date": first["at"].date().isoformat() if first["at"] else None,
+        "last_date": last["at"].date().isoformat() if last["at"] else None,
+        "people": sorted(set().union(*(s["participants"] for s in sources)))[:12],
+        "start": first["text"][:1500],
+    }
+    if len(sources) > 1:
+        digest["latest"] = last["text"][:1000]
+    return digest
+
+
+def place_threads(groups, trades, key, report):
+    """Asks the model which trade each thread belongs to. Returns {thread key: {verdict, lot_id, reason}};
+    threads the model skips or a failed call leaves out get no verdict and are not read this time."""
+    verdicts, chunk, size = {}, [], 0
+    digests = [thread_digest(k, sources) for k, sources in groups.items()]
+    chunks = []
+    for digest in digests:
+        length = len(json.dumps(digest, ensure_ascii=False, default=str))
+        if chunk and size + length > THREAD_BATCH_CHARS:
+            chunks.append(chunk)
+            chunk, size = [], 0
+        chunk.append(digest)
+        size += length
+    if chunk:
+        chunks.append(chunk)
+    cards = [trade_card(t) for t in trades.values()]
+    for chunk in chunks:
+        try:
+            raw = call_model(THREAD_SYSTEM, json.dumps({"TRADES": cards, "THREADS": chunk}, ensure_ascii=False, default=str), key)
+        except Exception as err:
+            report["warnings"].append(f"placing threads failed ({type(err).__name__})")
+            continue
+        report["model_calls"] = report.get("model_calls", 0) + 1
+        keys = {d["key"] for d in chunk}
+        for item in raw.get("threads") or []:
+            if not isinstance(item, dict) or item.get("key") not in keys:
+                continue
+            verdict, lot_id = item.get("verdict"), item.get("trade_id")
+            if verdict == "trade" and lot_id not in trades:
+                continue
+            if verdict not in ("trade", "none", "unclear"):
+                continue
+            verdicts[item["key"]] = {"verdict": verdict, "lot_id": lot_id if verdict == "trade" else None,
+                                     "reason": str(item.get("reason") or "").strip()[:200] or None}
+    return verdicts
+
+
+def load_verdicts(cur, keys):
+    cur.execute("select thread_key, lot_id, verdict from crm_bulk_trade_threads where thread_key = any(%s)", (list(keys),))
+    return {row["thread_key"]: row for row in cur.fetchall()}
+
+
+def save_verdicts(cur, run_id, verdicts):
+    for thread, v in verdicts.items():
+        cur.execute(
+            """insert into crm_bulk_trade_threads (thread_key, lot_id, verdict, reason, run_id) values (%s, %s, %s, %s, %s)
+               on conflict (thread_key) do update set lot_id = excluded.lot_id, verdict = excluded.verdict,
+                 reason = excluded.reason, run_id = excluded.run_id, decided_at = now()""",
+            (thread, v["lot_id"], v["verdict"], v["reason"], run_id))
+
+
+def triage_card(sources, lots):
+    first = sources[0]
+    summary = (f"Couldn't tell whether “{first['title']}” is about this trade." if len(lots) == 1
+               else f"“{first['title']}” involves {len(lots)} trades. Check which it belongs to.")
+    return {"kind": "needs_triage", "target": None, "proposed": {"lot_ids": sorted(lots)},
+            "summary": summary, "quote": first["title"], "source": first}
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +398,8 @@ def call_model(system, user, key):
     return json.loads(match_json.group(0))
 
 
-TRADE_SYSTEM = """You extract proposed updates for one bulk battery trade from new emails and meeting notes.
+TRADE_SYSTEM = """You extract updates for one bulk battery trade from emails and meeting notes that have already been
+judged to be about this trade's batch. Still skip any detail that is clearly about a different batch or deal.
 Reply with ONLY a JSON object: {"proposals": [ ... ]}. No prose, no tools.
 Each proposal: {"kind", "target", "proposed", "summary", "quote", "source_id"}.
 - kind "field": target = one field key from FIELDS; proposed = {"value": "...", "status": "confirmed" | "unverified"}.
@@ -290,6 +409,9 @@ Each proposal: {"kind", "target", "proposed", "summary", "quote", "source_id"}.
 - kind "next_step": proposed = {"next_step": "...", "next_step_due": "YYYY-MM-DD" or null, "waiting_on": "us" | "them"}.
   Only when the source makes a concrete next action clear.
 - kind "new_buyer": proposed = {"name": "...", "contact": "...", "wants": "..."} for a buyer not in BUYERS.
+- kind "bid": target = a buyer id from BUYERS; proposed = {"amount": number, "unit": "kWh" | "pack" | "cell",
+  "currency": "EUR" | "USD" | "GBP", "firmness": "firm" | "indicative", "delivery_terms"?, "payment_terms"?}.
+  Only a price a buyer actually offers for this batch.
 - kind "trade_kind": proposed = {"trade_kind": "packs" | "cells" | "systems" | "recycling"}, only when TRADE has none.
 - kind "link_contact": proposed = {"name": "...", "email": "..."} for a supplier-side person on this trade who
   appears in the source (the email address must be in the source) and is not in CONTACTS.
@@ -336,6 +458,7 @@ def validate(raw, trade, sources_by_id):
     """Keep only proposals that are well-formed, point at real targets, quote their source and
     change something that is not already recorded."""
     kind_fields = {f["key"] for f in TEMPLATES["fields"][trade["trade_kind"] or "packs"]}
+    early = ("To contact", "Teaser sent", "No reply", "NDA, specs sent")
     buyers = {b["id"]: b for b in trade["buyers"]}
     files_seen = set(trade["files"])
     kept = []
@@ -379,6 +502,22 @@ def validate(raw, trade, sources_by_id):
                         "next_step_due": due if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(due or "")) else None,
                         "waiting_on": proposed.get("waiting_on") if proposed.get("waiting_on") in ("us", "them") else "us"}
             target = None
+        elif kind == "bid":
+            if not target or target not in buyers:
+                continue
+            try:
+                amount = float(str(proposed.get("amount")).replace(",", ""))
+            except ValueError:
+                continue
+            if amount <= 0 or proposed.get("unit") not in ("kWh", "pack", "cell") or proposed.get("currency") not in ("EUR", "USD", "GBP"):
+                continue
+            proposed = {"amount": amount, "unit": proposed["unit"], "currency": proposed["currency"],
+                        "firmness": proposed.get("firmness") if proposed.get("firmness") in ("firm", "indicative") else "indicative",
+                        **{k: str(proposed[k]).strip()[:200] for k in ("delivery_terms", "payment_terms") if str(proposed.get(k) or "").strip()}}
+            if buyers[target].get("status") in early:  # moving the buyer on is Alex's call
+                kept.append({"kind": "buyer_update", "target": target, "proposed": {"status": "Bid in"},
+                             "summary": f"{buyers[target]['name']} made a bid. Move them to Bid in?",
+                             "quote": str(p["quote"]).strip()[:300], "source": source})
         elif kind == "new_buyer":
             name = str(proposed.get("name") or "").strip()
             if not name or name.lower() in {b["name"].lower() for b in trade["buyers"]}:
@@ -420,13 +559,10 @@ def add_attachments(source):
     source.setdefault("attachments", [])
     if source["kind"] != "gmail" or not source["has_attachments"]:
         return
-    env = dict(os.environ)
-    if KEYRING_FILE.exists() and "GOG_KEYRING_PASSWORD" not in env:
-        env["GOG_KEYRING_PASSWORD"] = KEYRING_FILE.read_text().strip()
     try:
         result = subprocess.run(
             ["gog", "--account", "alex@rebattery.io", "--readonly", "--no-input", "--json", "gmail", "get", source["id"]],
-            capture_output=True, text=True, timeout=120, env=env, check=True)
+            capture_output=True, text=True, timeout=120, env=gog_env(), check=True)
         payload = (json.loads(result.stdout).get("message") or {}).get("payload") or {}
     except (OSError, subprocess.SubprocessError, ValueError):
         return
@@ -458,17 +594,288 @@ def guess_type(name):
     return "Other"
 
 
-def insert_proposal(cur, run_id, lot_id, p):
+def insert_proposal(cur, run_id, lot_id, p, status="new"):
+    """Records a finding once per source. Returns its id, or None when this source already gave it
+    (including when Alex ignored or undid it)."""
     s = p["source"]
     cur.execute(
         """insert into crm_bulk_trade_proposals
              (lot_id, run_id, kind, target, proposed, summary, quote, source_kind, source_id, source_thread,
-              source_url, source_label, source_at)
-           values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+              source_url, source_label, source_at, status, applied_at)
+           values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, case when %s = 'applied' then now() end)
            on conflict do nothing returning id""",
         (lot_id, run_id, p["kind"], p["target"], json.dumps(p["proposed"], sort_keys=True), p["summary"], p["quote"],
-         s["kind"], s["id"], s["thread"], s["url"], s["label"], s["at"]))
-    return cur.fetchone() is not None
+         s["kind"], s["id"], s["thread"], s["url"], s["label"], s["at"], status, status))
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Applying findings
+# ---------------------------------------------------------------------------
+
+# Applied in this order, so the trade kind is set before fields and buyers exist before updates.
+APPLY_ORDER = ["trade_kind", "link_contact", "new_buyer", "field", "file", "buyer_update", "bid", "next_step"]
+CARD_KINDS = {"needs_triage", "possible_trade"}
+
+
+def is_card(p):
+    return p["kind"] in CARD_KINDS or (p["kind"] == "buyer_update" and "status" in p["proposed"])
+
+
+def split_status(p):
+    """A buyer update that changes status becomes a card for the status and an applied change for the rest."""
+    if p["kind"] != "buyer_update" or "status" not in p["proposed"] or len(p["proposed"]) == 1:
+        return [p]
+    rest = {k: v for k, v in p["proposed"].items() if k != "status"}
+    return [{**p, "proposed": {"status": p["proposed"]["status"]}}, {**p, "proposed": rest}]
+
+
+def log_event(cur, lot_id, kind, changes, buyer_id=None):
+    """Inbox-check writes are logged with no actor, which is how later runs tell them from Alex's."""
+    cur.execute("insert into crm_bulk_trade_events (lot_id, kind, changes, buyer_id) values (%s, %s, %s, %s)",
+                (lot_id, kind, json.dumps(changes, default=str), buyer_id))
+
+
+def source_date(p):
+    return p["source"]["at"].date().isoformat() if p["source"]["at"] else None
+
+
+def field_owned_by_alex(cur, lot_id, key):
+    """True when the field's current value was typed, accepted or settled by a person. Only the
+    latest event that set the value counts; a conflict the check added does not change the value."""
+    cur.execute(
+        """select actor_user_id is not null as by_hand from crm_bulk_trade_events
+           where lot_id = %s and kind = 'field_updated' and changes->>'field' = %s
+             and (changes ? 'value' or changes ? 'resolved')
+           order by occurred_at desc, id desc limit 1""", (lot_id, key))
+    row = cur.fetchone()
+    return True if row is None else row["by_hand"]
+
+
+def apply_field(cur, lot_id, p, trade, ctx):
+    key, value, status = p["target"], p["proposed"]["value"], p["proposed"]["status"]
+    claim = {"value": value, "source_label": p["source"]["label"], "source_url": p["source"]["url"], "source_date": source_date(p)}
+    cur.execute(
+        """select value, status, visibility, source_label, source_url, to_char(source_date, 'YYYY-MM-DD') as source_date,
+                  alternatives from crm_bulk_trade_fields where lot_id = %s and field_key = %s for update""", (lot_id, key))
+    before = cur.fetchone()
+    change = {"field": key, "proposal_id": ctx["proposal_id"]}
+    if before is None:
+        template = next((f for f in TEMPLATES["fields"][trade["trade_kind"] or "packs"] if f["key"] == key), None)
+        if not template:
+            return None
+        cur.execute(
+            """insert into crm_bulk_trade_fields (lot_id, field_key, value, status, visibility, source_label, source_url, source_date)
+               values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (lot_id, key, value, status, template["visibility"], claim["source_label"], claim["source_url"], claim["source_date"]))
+        log_event(cur, lot_id, "field_updated", {**change, "value": [None, value], "status": [None, status]})
+        return {"before": None, "value": value}
+    if norm(before["value"]) == norm(value):
+        return None
+    before = dict(before)
+    if before["value"] and field_owned_by_alex(cur, lot_id, key):
+        alternatives = list(before["alternatives"] or [])
+        if any(norm(a.get("value")) == norm(value) for a in alternatives):
+            return None
+        cur.execute(
+            """update crm_bulk_trade_fields set alternatives = %s, status = 'conflict', updated_at = now()
+               where lot_id = %s and field_key = %s""", (json.dumps(alternatives + [claim]), lot_id, key))
+        log_event(cur, lot_id, "field_updated", {**change, "alternatives": [before["alternatives"], alternatives + [claim]]})
+        return {"before": before, "conflict": True}
+    if before["source_date"] and claim["source_date"] and claim["source_date"] < before["source_date"]:
+        return None  # an older email never replaces a newer one
+    cur.execute(
+        """update crm_bulk_trade_fields set value = %s, status = %s, source_label = %s, source_url = %s, source_date = %s,
+             updated_at = now() where lot_id = %s and field_key = %s""",
+        (value, status, claim["source_label"], claim["source_url"], claim["source_date"], lot_id, key))
+    log_event(cur, lot_id, "field_updated", {**change, "value": [before["value"], value], "status": [before["status"], status]})
+    return {"before": before, "value": value}
+
+
+def apply_next_step(cur, lot_id, p, trade, ctx):
+    proposed = p["proposed"]
+    cur.execute(
+        """select next_step, to_char(next_step_due, 'YYYY-MM-DD') as next_step_due, waiting_on,
+                  to_char(waiting_since, 'YYYY-MM-DD') as waiting_since, next_step_contact_id, next_step_buyer_id
+           from crm_bulk_trade_lots where id = %s for update""", (lot_id,))
+    before = dict(cur.fetchone())
+    if norm(before["next_step"]) == norm(proposed["next_step"]):
+        return None
+    # Alex's own next step stands until something newer than it arrives.
+    cur.execute(
+        """select max(occurred_at) as at from crm_bulk_trade_events
+           where lot_id = %s and kind = 'trade_updated' and changes ? 'next_step' and actor_user_id is not null""", (lot_id,))
+    by_hand = cur.fetchone()["at"]
+    if by_hand and (not p["source"]["at"] or p["source"]["at"] <= by_hand):
+        return None
+    after = {"next_step": proposed["next_step"], "next_step_due": proposed["next_step_due"], "waiting_on": proposed["waiting_on"],
+             "waiting_since": source_date(p) if proposed["waiting_on"] == "them" else None,
+             "next_step_contact_id": None, "next_step_buyer_id": None}
+    cur.execute(
+        """update crm_bulk_trade_lots set next_step = %(next_step)s, next_step_due = %(next_step_due)s,
+             waiting_on = %(waiting_on)s, waiting_since = %(waiting_since)s, next_step_contact_id = null,
+             next_step_buyer_id = null, updated_at = now() where id = %(id)s""", {**after, "id": lot_id})
+    log_event(cur, lot_id, "trade_updated", {"proposal_id": ctx["proposal_id"],
+                                             **{k: [before[k], v] for k, v in after.items() if before[k] != v}})
+    return {"before": before, "after": after}
+
+
+def apply_trade_kind(cur, lot_id, p, trade, ctx):
+    cur.execute("update crm_bulk_trade_lots set trade_kind = %s, updated_at = now() where id = %s and trade_kind is null returning id",
+                (p["proposed"]["trade_kind"], lot_id))
+    if not cur.fetchone():
+        return None
+    log_event(cur, lot_id, "trade_updated", {"proposal_id": ctx["proposal_id"], "trade_kind": [None, p["proposed"]["trade_kind"]]})
+    return {"before": None, "after": p["proposed"]["trade_kind"]}
+
+
+def apply_contact(cur, lot_id, p, trade, ctx):
+    email = p["proposed"]["email"]
+    cur.execute("select 1 from crm_bulk_trade_contacts where lot_id = %s and lower(email) = %s", (lot_id, email))
+    if cur.fetchone():
+        return None
+    contact_id = f"btc_{uuid.uuid4()}"
+    cur.execute(
+        """insert into crm_bulk_trade_contacts (id, lot_id, name, email, sort_order)
+           select %s, %s, %s, %s, coalesce(max(sort_order), -1) + 1 from crm_bulk_trade_contacts where lot_id = %s""",
+        (contact_id, lot_id, p["proposed"]["name"], email, lot_id))
+    log_event(cur, lot_id, "contact_added", {"id": contact_id, "name": p["proposed"]["name"], "email": email,
+                                             "proposal_id": ctx["proposal_id"]})
+    ctx["new_contacts"].add(lot_id)
+    return {"id": contact_id}
+
+
+def apply_new_buyer(cur, lot_id, p, trade, ctx):
+    proposed = p["proposed"]
+    cur.execute("select 1 from crm_bulk_trade_buyers where lot_id = %s and lower(name) = lower(%s)", (lot_id, proposed["name"]))
+    if cur.fetchone():
+        return None
+    buyer_id = f"btb_{uuid.uuid4()}"
+    cur.execute("insert into crm_bulk_trade_buyers (id, lot_id, name, contact, wants) values (%s, %s, %s, %s, %s)",
+                (buyer_id, lot_id, proposed["name"], proposed.get("contact"), proposed.get("wants")))
+    log_event(cur, lot_id, "buyer_added", {**proposed, "proposal_id": ctx["proposal_id"]}, buyer_id)
+    return {"id": buyer_id}
+
+
+def apply_buyer_update(cur, lot_id, p, trade, ctx):
+    cur.execute(
+        """select to_char(last_touch_on, 'YYYY-MM-DD') as last_touch_on, last_touch_via, to_char(chase_on, 'YYYY-MM-DD') as chase_on
+           from crm_bulk_trade_buyers where id = %s and lot_id = %s for update""", (p["target"], lot_id))
+    row = cur.fetchone()
+    if not row:
+        return None
+    patch = {k: v for k, v in p["proposed"].items() if k in row and row[k] != v}
+    if row["last_touch_on"] and patch.get("last_touch_on", "9999") < row["last_touch_on"]:
+        patch.pop("last_touch_on", None)  # never move the last touch backwards
+        patch.pop("last_touch_via", None)
+    if not patch:
+        return None
+    cur.execute(f"update crm_bulk_trade_buyers set {', '.join(f'{k} = %s' for k in patch)}, updated_at = now() where id = %s",
+                (*patch.values(), p["target"]))
+    log_event(cur, lot_id, "buyer_updated", {"proposal_id": ctx["proposal_id"], **{k: [row[k], v] for k, v in patch.items()}}, p["target"])
+    return {"before": {k: row[k] for k in patch}, "after": patch}
+
+
+def apply_bid(cur, lot_id, p, trade, ctx):
+    bid = p["proposed"]
+    cur.execute(
+        """select 1 from crm_bulk_trade_bids where buyer_id = %s and lot_id = %s and amount = %s and unit = %s and currency = %s""",
+        (p["target"], lot_id, bid["amount"], bid["unit"], bid["currency"]))
+    if cur.fetchone():
+        return None
+    cur.execute(
+        """insert into crm_bulk_trade_bids (lot_id, buyer_id, amount, unit, currency, firmness, delivery_terms, payment_terms)
+           values (%s, %s, %s, %s, %s, %s, %s, %s) returning id""",
+        (lot_id, p["target"], bid["amount"], bid["unit"], bid["currency"], bid["firmness"],
+         bid.get("delivery_terms"), bid.get("payment_terms")))
+    bid_id = cur.fetchone()["id"]
+    log_event(cur, lot_id, "bid_added", {**bid, "proposal_id": ctx["proposal_id"]}, p["target"])
+    return {"id": str(bid_id)}
+
+
+def gog_env():
+    env = dict(os.environ)
+    if KEYRING_FILE.exists() and "GOG_KEYRING_PASSWORD" not in env:
+        env["GOG_KEYRING_PASSWORD"] = KEYRING_FILE.read_text().strip()
+    return env
+
+
+def download_attachment(mailbox, message_id, attachment_id):
+    with tempfile.TemporaryDirectory(prefix="bt-attachment-") as folder:
+        out = Path(folder) / "file"
+        subprocess.run(["gog", "--account", mailbox, "--readonly", "--no-input", "gmail", "attachment", message_id,
+                        attachment_id, "--out", str(out)], capture_output=True, timeout=300, env=gog_env(), check=True)
+        return out.read_bytes()
+
+
+def apply_file(cur, lot_id, p, trade, ctx):
+    proposed = p["proposed"]
+    cur.execute("select 1 from crm_bulk_trade_files where lot_id = %s and lower(file_name) = lower(%s)", (lot_id, proposed["file_name"]))
+    if cur.fetchone() or not proposed.get("attachment_id"):
+        return None
+    content = ctx["download"](ctx["mailbox"], proposed["gmail_message_id"], proposed["attachment_id"])
+    if not content or len(content) > MAX_FILE_BYTES:
+        return None
+    file_id = f"btf_{uuid.uuid4()}"
+    cur.execute(
+        """insert into crm_bulk_trade_files (id, lot_id, file_name, file_type, content_type, byte_size, content,
+             source_label, source_date, visibility) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'never')""",
+        (file_id, lot_id, proposed["file_name"], proposed["file_type"], mimetypes.guess_type(proposed["file_name"])[0],
+         len(content), psycopg2.Binary(content), p["source"]["label"], source_date(p)))
+    log_event(cur, lot_id, "file_added", {"id": file_id, "file_name": proposed["file_name"], "byte_size": len(content),
+                                          "file_type": proposed["file_type"], "proposal_id": ctx["proposal_id"]})
+    return {"id": file_id}
+
+
+APPLY = {"field": apply_field, "next_step": apply_next_step, "trade_kind": apply_trade_kind, "link_contact": apply_contact,
+         "new_buyer": apply_new_buyer, "buyer_update": apply_buyer_update, "bid": apply_bid, "file": apply_file}
+
+
+def settle(cur, run_id, lot_id, p, trade, ctx):
+    """Writes one finding: a card for Alex, or the change itself with its undo record. Returns
+    "card", "applied" or None (already known, or nothing left to change)."""
+    if is_card(p):
+        return "card" if insert_proposal(cur, run_id, lot_id, p) else None
+    cur.execute("savepoint finding")
+    ctx["proposal_id"] = insert_proposal(cur, run_id, lot_id, p, status="applied")
+    if not ctx["proposal_id"]:
+        cur.execute("release savepoint finding")
+        return None
+    try:
+        undo = APPLY[p["kind"]](cur, lot_id, p, trade, ctx)
+    except Exception as err:  # one bad finding must not lose the rest; it is tried again next run
+        cur.execute("rollback to savepoint finding")
+        ctx["warnings"].append(f"{p['kind']} {p['target'] or ''}: not applied ({type(err).__name__})".replace("  ", " "))
+        return None
+    if undo is None:
+        cur.execute("rollback to savepoint finding")
+        return None
+    cur.execute("update crm_bulk_trade_proposals set undo = %s where id = %s", (json.dumps(undo, default=str), ctx["proposal_id"]))
+    cur.execute("release savepoint finding")
+    return "applied"
+
+
+def settle_all(cur, run_id, lot_id, findings, trade, ctx, report, dry_run):
+    """Settles one trade's findings in APPLY_ORDER and adds them to the report."""
+    items = [q for p in findings for q in split_status(p)]
+    items.sort(key=lambda p: (is_card(p), APPLY_ORDER.index(p["kind"]) if p["kind"] in APPLY_ORDER else 99))
+    for p in items:
+        outcome = ("card" if is_card(p) else "apply") if dry_run else settle(cur, run_id, lot_id, p, trade, ctx)
+        if outcome:
+            report["cards" if outcome == "card" else "applied"].append(
+                {"lot_id": lot_id, "kind": p["kind"], "target": p["target"], "proposed": p["proposed"],
+                 "summary": p["summary"], "quote": p["quote"], "source": p["source"]["label"]})
+
+
+def start_history(lot_id, args):
+    """Reads a trade's past emails after the check links a new person to it. Detached; logs to a file."""
+    HISTORY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log = HISTORY_LOG_DIR / f"history-{lot_id}.log"
+    with open(log, "ab") as out:
+        os.chmod(log, 0o600)
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--history", lot_id, "--dsn", args.dsn,
+                          "--mailbox", args.mailbox], stdout=out, stderr=out, start_new_session=True)
 
 
 # ---------------------------------------------------------------------------
@@ -481,25 +888,76 @@ def last_cursor(cur):
     return row["cursor"] if row else {}
 
 
+def new_run(conn, args, kind="check", lot_id=None):
+    if args.dry_run:
+        return None
+    with conn.cursor() as cur:
+        cur.execute("insert into crm_bulk_trade_check_runs (kind, lot_id) values (%s, %s) returning id", (kind, lot_id))
+        run_id = cur.fetchone()[0]
+    conn.commit()
+    return run_id
+
+
+def fail_run(conn, run_id, err):
+    conn.rollback()
+    if run_id:
+        with conn.cursor() as cur:
+            cur.execute("update crm_bulk_trade_check_runs set status = 'failed', finished_at = now(), error = %s where id = %s",
+                        (f"{type(err).__name__}: {str(err)[:300]}", run_id))
+        conn.commit()
+
+
+def extract(trade, sources, key, report):
+    """Reads a trade's placed sources in date-ordered batches. Returns the latest finding per thing
+    it changes; each batch sees the picture left by the ones before."""
+    latest = {}
+    for batch in batches(sources, HISTORY_BATCH_CHARS):
+        for source in batch:
+            add_attachments(source)
+        try:
+            raw = call_model(TRADE_SYSTEM, trade_prompt(trade, batch), key)
+        except Exception as err:  # one batch failing must not lose the rest
+            report["warnings"].append(f"{trade['title']}: reading failed ({type(err).__name__})")
+            continue
+        report["model_calls"] = report.get("model_calls", 0) + 1
+        fold(trade, validate(raw, trade, {s["id"]: s for s in batch}), latest)
+    return list(latest.values())
+
+
+def gateway_key():
+    return os.environ.get("HERMES_API_KEY") or read_env_value(HERMES_ENV, "API_SERVER_KEY")
+
+
+def new_report(**extra):
+    return {**extra, "emails_read": 0, "notes_read": 0, "threads": {}, "model_calls": 0,
+            "applied": [], "cards": [], "warnings": []}
+
+
+def finish_run(cur, run_id, report, cursor=None):
+    made = len(report["applied"]) + len(report["cards"])
+    cur.execute(
+        """update crm_bulk_trade_check_runs set status = 'ok', finished_at = now(), emails_read = %s, notes_read = %s,
+             proposals_made = %s, cursor = coalesce(%s, cursor), error = %s where id = %s""",
+        (report["emails_read"], report["notes_read"], made, json.dumps(cursor) if cursor else None,
+         "; ".join(report["warnings"]) or None, run_id))
+
+
 def run(conn, args):
     now = dt.datetime.now(dt.timezone.utc)
-    key = os.environ.get("HERMES_API_KEY") or read_env_value(HERMES_ENV, "API_SERVER_KEY")
+    key = gateway_key()
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("select pg_try_advisory_lock(hashtext('bulk_trade_inbox_check')) as locked")
         if not cur.fetchone()["locked"]:
             print("Another inbox check is running; skipped.")
             return 0
         cursor = last_cursor(cur)
-        default_since = now - FIRST_RUN_LOOKBACK
-        gmail_since = parse_time(args.since or cursor.get("gmail_since")) or default_since
-        granola_since = parse_time(args.since or cursor.get("granola_since")) or default_since
-        run_id = None
-        if not args.dry_run:
-            cur.execute("insert into crm_bulk_trade_check_runs default values returning id")
-            run_id = cur.fetchone()["id"]
-            conn.commit()
+    default_since = now - FIRST_RUN_LOOKBACK
+    gmail_since = parse_time(args.since or cursor.get("gmail_since")) or default_since
+    granola_since = parse_time(args.since or cursor.get("granola_since")) or default_since
+    run_id = new_run(conn, args)
 
-    report = {"run_id": run_id, "emails_read": 0, "notes_read": 0, "proposals": [], "warnings": []}
+    report = new_report(run_id=run_id)
+    ctx = {"mailbox": args.mailbox, "download": download_attachment, "new_contacts": set(), "warnings": report["warnings"]}
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             warning = refresh_granola()
@@ -510,97 +968,95 @@ def run(conn, args):
             notes = load_granola(granola_since)
             report["emails_read"], report["notes_read"] = len(emails), len(notes)
 
-            by_trade, triage, unmatched = {}, [], []
-            for source in emails + notes:
-                lots = match(source, trades)
-                if len(lots) == 1:
-                    by_trade.setdefault(lots.pop(), []).append(source)
-                elif len(lots) > 1:
-                    triage.append((source, sorted(lots)))
-                elif source["kind"] == "gmail" and source["inbound"] and DEAL_WORDS.search(source["text"][:3000]):
-                    unmatched.append(source)
-
-            proposals = []  # (lot_id, proposal)
-            for lot_id, sources in by_trade.items():
-                trade = trades[lot_id]
-                for source in sources:
-                    add_attachments(source)
-                if key:
-                    try:
-                        raw = call_model(TRADE_SYSTEM, trade_prompt(trade, sources), key)
-                        proposals += [(lot_id, p) for p in validate(raw, trade, {s["id"]: s for s in sources})]
-                    except Exception as err:  # one trade's failure must not stop the others
-                        report["warnings"].append(f"{trade['title']}: model failed ({type(err).__name__})")
+            groups = by_thread(emails + notes)
+            verdicts = load_verdicts(cur, groups)
+            by_trade, to_place, candidates, unmatched = {}, {}, {}, []
+            for thread, sources in groups.items():
+                known = verdicts.get(thread)
+                if known:  # placed before: later messages follow the thread
+                    if known["verdict"] == "trade" and known["lot_id"] in trades:
+                        by_trade.setdefault(known["lot_id"], []).extend(sources)
+                    continue
+                lots = set().union(*(match(s, trades) for s in sources))
+                if lots:
+                    to_place[thread], candidates[thread] = sources, lots
                 else:
-                    report["warnings"].append("no gateway key; proposals from content skipped")
+                    unmatched += [s for s in sources
+                                  if s["kind"] == "gmail" and s["inbound"] and DEAL_WORDS.search(s["text"][:3000])]
 
-            for source, lots in triage:
-                proposals.append((lots[0], {
-                    "kind": "needs_triage", "target": None, "proposed": {"lot_ids": lots},
-                    "summary": f"“{source['title']}” involves {len(lots)} trades. Check which it belongs to.",
-                    "quote": source["title"], "source": source}))
+            findings = {}  # lot_id or None -> [finding]
+            if to_place and key:
+                placed = place_threads(to_place, trades, key, report)
+                if not args.dry_run:
+                    save_verdicts(cur, run_id, placed)
+                for thread, v in placed.items():
+                    report["threads"][v["verdict"]] = report["threads"].get(v["verdict"], 0) + 1
+                    if v["verdict"] == "trade":
+                        by_trade.setdefault(v["lot_id"], []).extend(to_place[thread])
+                    elif v["verdict"] == "unclear":
+                        lots = sorted(candidates[thread])
+                        findings.setdefault(lots[0], []).append(triage_card(to_place[thread], lots))
+            elif to_place:
+                report["warnings"].append("no gateway key; new threads not read")
+
+            for lot_id, sources in by_trade.items():
+                findings.setdefault(lot_id, []).extend(extract(trades[lot_id], sorted(sources, key=lambda s: s["at"] or EPOCH), key, report))
 
             if unmatched and key:
-                try:
-                    cur.execute("select id, title from crm_bulk_trade_lots where trade_stage <> 'Lost' order by title")
-                    existing = {row["id"]: row["title"] for row in cur.fetchall()}
-                    raw = call_model(POSSIBLE_SYSTEM, json.dumps({
-                        "EXISTING": [{"id": k, "title": v} for k, v in existing.items()],
-                        "EMAILS": [{"source_id": s["id"], "text": s["text"][:3000]} for s in unmatched[-MAX_SCREENED_EMAILS:]],
-                    }, ensure_ascii=False), key)
-                    by_id = {s["id"]: s for s in unmatched}
-                    for t in raw.get("trades") or []:
-                        source = by_id.get(str(t.get("source_id")))
-                        if not source or not quote_ok(t.get("quote"), source["text"]) or not str(t.get("title") or "").strip():
-                            continue
-                        existing_id = t.get("existing_trade_id")
-                        if existing_id in existing and source.get("from"):
-                            proposals.append((existing_id, {
-                                "kind": "link_contact", "target": None,
-                                "proposed": {"name": source["from"], "email": source["from"]},
-                                "summary": f"Looks like {existing[existing_id]}. Add {source['from']} as a contact so their emails match.",
-                                "quote": str(t["quote"]).strip()[:300], "source": source}))
-                            continue
-                        kind = t.get("trade_kind") if t.get("trade_kind") in TEMPLATES["fields"] else None
-                        proposals.append((None, {
-                            "kind": "possible_trade", "target": None,
-                            "proposed": {"title": str(t["title"]).strip()[:120], "trade_kind": kind, "email": source.get("from")},
-                            "summary": str(t.get("summary") or "").strip()[:300] or "Possible new trade",
-                            "quote": str(t["quote"]).strip()[:300], "source": source}))
-                except Exception as err:
-                    report["warnings"].append(f"possible-trade screen failed ({type(err).__name__})")
+                for item in screen_possible(cur, unmatched, key, report):
+                    findings.setdefault(item.pop("lot_id", None), []).append(item)
 
-            made = 0
-            for lot_id, p in proposals:
-                report["proposals"].append({"lot_id": lot_id, "kind": p["kind"], "target": p["target"],
-                                            "proposed": p["proposed"], "summary": p["summary"], "quote": p["quote"],
-                                            "source": p["source"]["label"]})
-                if not args.dry_run:
-                    made += insert_proposal(cur, run_id, lot_id, p)
+            for lot_id, items in findings.items():
+                settle_all(cur, run_id, lot_id, items, trades.get(lot_id), ctx, report, args.dry_run)
 
             if not args.dry_run:
                 latest = lambda items, fallback: max([s["synced_at"] for s in items if s["synced_at"]] + [fallback])
-                cur.execute(
-                    """update crm_bulk_trade_check_runs set status = 'ok', finished_at = now(), emails_read = %s,
-                         notes_read = %s, proposals_made = %s, cursor = %s,
-                         error = %s where id = %s""",
-                    (len(emails), len(notes), made,
-                     json.dumps({"gmail_since": latest(emails, gmail_since).isoformat(),
-                                 "granola_since": latest(notes, granola_since).isoformat()}),
-                     "; ".join(report["warnings"]) or None, run_id))
-                report["proposals_made"] = made
+                finish_run(cur, run_id, report, {"gmail_since": latest(emails, gmail_since).isoformat(),
+                                                 "granola_since": latest(notes, granola_since).isoformat()})
             conn.commit()
     except Exception as err:
-        conn.rollback()
-        if run_id:
-            with conn.cursor() as cur:
-                cur.execute("update crm_bulk_trade_check_runs set status = 'failed', finished_at = now(), error = %s where id = %s",
-                            (f"{type(err).__name__}: {str(err)[:300]}", run_id))
-            conn.commit()
+        fail_run(conn, run_id, err)
         raise
+    for lot_id in ctx["new_contacts"]:  # someone new on a trade: read their past emails for it
+        start_history(lot_id, args)
     json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
     print()
     return 0
+
+
+def screen_possible(cur, unmatched, key, report):
+    """Inbound deal-like mail from unknown people: a possible new trade, or a new person on an existing one."""
+    out = []
+    try:
+        cur.execute("select id, title from crm_bulk_trade_lots where trade_stage <> 'Lost' order by title")
+        existing = {row["id"]: row["title"] for row in cur.fetchall()}
+        raw = call_model(POSSIBLE_SYSTEM, json.dumps({
+            "EXISTING": [{"id": k, "title": v} for k, v in existing.items()],
+            "EMAILS": [{"source_id": s["id"], "text": s["text"][:3000]} for s in unmatched[-MAX_SCREENED_EMAILS:]],
+        }, ensure_ascii=False), key)
+        report["model_calls"] += 1
+    except Exception as err:
+        report["warnings"].append(f"possible-trade screen failed ({type(err).__name__})")
+        return out
+    by_id = {s["id"]: s for s in unmatched}
+    for t in raw.get("trades") or []:
+        source = by_id.get(str(t.get("source_id")))
+        if not source or not quote_ok(t.get("quote"), source["text"]) or not str(t.get("title") or "").strip():
+            continue
+        existing_id = t.get("existing_trade_id")
+        if existing_id in existing and source.get("from"):
+            # Settled against its own trade below; the contact makes the rest of their mail match.
+            out.append({"kind": "link_contact", "target": None, "lot_id": existing_id,
+                        "proposed": {"name": source["from"], "email": source["from"]},
+                        "summary": f"{source['from']} wrote about {existing[existing_id]}; added as a contact.",
+                        "quote": str(t["quote"]).strip()[:300], "source": source})
+            continue
+        kind = t.get("trade_kind") if t.get("trade_kind") in TEMPLATES["fields"] else None
+        out.append({"kind": "possible_trade", "target": None,
+                    "proposed": {"title": str(t["title"]).strip()[:120], "trade_kind": kind, "email": source.get("from")},
+                    "summary": str(t.get("summary") or "").strip()[:300] or "Possible new trade",
+                    "quote": str(t["quote"]).strip()[:300], "source": source})
+    return out
 
 
 EPOCH = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
@@ -651,15 +1107,19 @@ def fold(trade, kept, latest):
             key = ("link_contact", proposed["email"])
         elif kind == "file":
             key = ("file", proposed["file_name"].lower())
+        elif kind == "bid":
+            key = ("bid", p["target"], proposed["amount"], proposed["unit"], proposed["currency"])
         else:
             continue
         latest[key] = p
 
 
 def history(conn, args):
-    """One-off pass over a trade's whole email and call history, oldest first. Proposals only."""
+    """One-off pass over a trade's whole email and call history. Threads not yet placed on a trade
+    (or placed on none, since the trades may have changed) are placed first; only this trade's
+    threads are then read, oldest first, and what they say is applied."""
     lot_id = args.history
-    key = os.environ.get("HERMES_API_KEY") or read_env_value(HERMES_ENV, "API_SERVER_KEY")
+    key = gateway_key()
     if not key:
         raise SystemExit("no gateway key")
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -667,61 +1127,60 @@ def history(conn, args):
         if not cur.fetchone()["locked"]:
             print("A history pass for this trade is already running; skipped.")
             return 0
-        trades = load_trades(cur, [lot_id])
+        trades = load_trades(cur)  # every live trade, so a thread can be placed on the right one
+        trades.update(load_trades(cur, [lot_id]))
         if lot_id not in trades:
             raise SystemExit(f"No trade {lot_id}")
-        run_id = None
-        if not args.dry_run:
-            cur.execute("insert into crm_bulk_trade_check_runs (kind, lot_id) values ('history', %s) returning id", (lot_id,))
-            run_id = cur.fetchone()["id"]
-            conn.commit()
+    run_id = new_run(conn, args, "history", lot_id)
 
-    report = {"run_id": run_id, "lot_id": lot_id, "emails_read": 0, "notes_read": 0, "batches": 0, "proposals": [], "warnings": []}
+    report = new_report(run_id=run_id, lot_id=lot_id)
+    ctx = {"mailbox": args.mailbox, "download": download_attachment, "new_contacts": set(), "warnings": report["warnings"]}
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             trade = trades[lot_id]
-            if not trade["emails"] and not trade["threads"]:
+            cur.execute("select thread_key from crm_bulk_trade_threads where lot_id = %s", (lot_id,))
+            placed_here = {row["thread_key"] for row in cur.fetchall()} | trade["threads"]
+            if not trade["emails"] and not placed_here:
                 report["warnings"].append("no contacts, linked buyers or linked threads: nothing to match")
             warning = refresh_granola()
             if warning:
                 report["warnings"].append(warning)
-            emails = load_trade_emails(cur, args.mailbox, trade["emails"], trade["threads"])
-            notes = [n for n in load_granola(EPOCH) if n["participants"] & trade["emails"]]
-            sources = sorted(emails + notes, key=lambda s: s["at"] or EPOCH)
+            gmail_threads = {k.split(":", 1)[1] for k in placed_here if k.startswith("gmail:")}
+            emails = load_trade_emails(cur, args.mailbox, trade["emails"], gmail_threads)
+            notes = [n for n in load_granola(EPOCH) if n["participants"] & trade["emails"] or n["key"] in placed_here]
             report["emails_read"], report["notes_read"] = len(emails), len(notes)
 
-            latest = {}
-            for batch in batches(sources, HISTORY_BATCH_CHARS):
-                report["batches"] += 1
-                for source in batch:
-                    add_attachments(source)
-                try:
-                    raw = call_model(TRADE_SYSTEM, trade_prompt(trade, batch), key)
-                except Exception as err:  # one batch failing must not lose the rest
-                    report["warnings"].append(f"batch {report['batches']}: model failed ({type(err).__name__})")
-                    continue
-                fold(trade, validate(raw, trade, {s["id"]: s for s in batch}), latest)
-
-            made = 0
-            for p in latest.values():
-                report["proposals"].append({"kind": p["kind"], "target": p["target"], "proposed": p["proposed"],
-                                            "summary": p["summary"], "quote": p["quote"], "source": p["source"]["label"]})
+            groups = by_thread(emails + notes)
+            verdicts = load_verdicts(cur, groups)
+            relevant, to_place = [], {}
+            for thread, sources in groups.items():
+                known = verdicts.get(thread)
+                if thread in placed_here:
+                    relevant += sources
+                elif known and known["verdict"] == "trade":
+                    continue  # another trade's thread
+                else:
+                    to_place[thread] = sources
+            findings = []
+            if to_place:
+                placed = place_threads(to_place, trades, key, report)
                 if not args.dry_run:
-                    made += insert_proposal(cur, run_id, lot_id, p)
+                    save_verdicts(cur, run_id, placed)
+                for thread, v in placed.items():
+                    report["threads"][v["verdict"]] = report["threads"].get(v["verdict"], 0) + 1
+                    if v["verdict"] == "trade" and v["lot_id"] == lot_id:
+                        relevant += to_place[thread]
+                    elif v["verdict"] == "unclear":
+                        findings.append(triage_card(to_place[thread], [lot_id]))
+            report["threads"]["read"] = len({s["key"] for s in relevant})
+
+            findings += extract(trade, sorted(relevant, key=lambda s: s["at"] or EPOCH), key, report)
+            settle_all(cur, run_id, lot_id, findings, trade, ctx, report, args.dry_run)
             if not args.dry_run:
-                cur.execute(
-                    """update crm_bulk_trade_check_runs set status = 'ok', finished_at = now(), emails_read = %s,
-                         notes_read = %s, proposals_made = %s, error = %s where id = %s""",
-                    (len(emails), len(notes), made, "; ".join(report["warnings"]) or None, run_id))
-                report["proposals_made"] = made
+                finish_run(cur, run_id, report)
             conn.commit()
     except Exception as err:
-        conn.rollback()
-        if run_id:
-            with conn.cursor() as cur:
-                cur.execute("update crm_bulk_trade_check_runs set status = 'failed', finished_at = now(), error = %s where id = %s",
-                            (f"{type(err).__name__}: {str(err)[:300]}", run_id))
-            conn.commit()
+        fail_run(conn, run_id, err)
         raise
     json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
     print()

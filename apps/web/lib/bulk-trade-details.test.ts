@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BulkTrade } from "./bulk-trades";
 import {
   bidLabel,
+  changeCounts,
   missingItems,
   parseBidInput,
   parseBuyerInput,
@@ -108,3 +109,9 @@ describe("trackingLabel", () => {
   });
 });
 
+describe("changeCounts", () => {
+  it("counts changes in plain words, in a fixed order", () => {
+    const kinds = ["file", "field", "field", "link_contact", "next_step"] as const;
+    expect(changeCounts(kinds.map((kind) => ({ kind })))).toBe("2 details, 1 file, 1 contact, 1 next step");
+  });
+});

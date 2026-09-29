@@ -116,4 +116,87 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(startHistoryPass).not.toHaveBeenCalled();
     expect(await proposals.historyStatus(lotId)).toMatchObject({ status: "running" });
   });
+
+  describe("undoing what the inbox check applied", () => {
+    let undoLot: string;
+    let runId: string;
+
+    beforeAll(async () => {
+      undoLot = (await trades.createBulkTrade({ title: "Undo trade", trade_kind: "packs", next_step: "Alex's step" }, user.id)).id;
+      [{ id: runId }] = await pg.queryPg<{ id: string }>("insert into crm_bulk_trade_check_runs (kind, lot_id) values ('history', $1) returning id::text as id", [undoLot]);
+    });
+
+    async function applied(kind: string, target: string | null, proposed: object, undo: object) {
+      const [row] = await pg.queryPg<{ id: string }>(
+        `insert into crm_bulk_trade_proposals (lot_id, run_id, kind, target, proposed, summary, quote, source_kind, source_id,
+           source_label, source_at, status, applied_at, undo)
+         values ($1, $2, $3, $4, $5, $3 || ' change', 'A quoted line', 'gmail', gen_random_uuid()::text, 'Gmail · nic@oem.test',
+           '2026-09-24', 'applied', now(), $6) returning id::text as id`,
+        [undoLot, runId, kind, target, JSON.stringify(proposed), JSON.stringify(undo)],
+      );
+      return row.id;
+    }
+
+    const field = async (key: string) => (await details.getTradeDetail(undoLot))!.fields.find((f) => f.field_key === key);
+
+    it("lists applied changes and removes a detail the check added", async () => {
+      await pg.queryPg("insert into crm_bulk_trade_fields (lot_id, field_key, value, status) values ($1, 'quantity', '600 packs', 'unverified')", [undoLot]);
+      const id = await applied("field", "quantity", { value: "600 packs", status: "unverified" }, { before: null, value: "600 packs" });
+      expect((await proposals.appliedChanges(undoLot)).map((change) => [change.id, change.conflict])).toContainEqual([id, false]);
+
+      expect(await proposals.undoChange(id, user.id)).toEqual({ ok: true, lot_id: undoLot });
+      expect(await field("quantity")).toBeUndefined();
+      expect((await proposals.appliedChanges(undoLot)).map((change) => change.id)).not.toContain(id);
+      expect(await proposals.undoChange(id, user.id)).toMatchObject({ ok: false, status: 404 });
+      const [event] = await pg.queryPg<{ kind: string; actor_user_id: string }>(
+        "select kind, actor_user_id from crm_bulk_trade_events where lot_id = $1 order by id desc limit 1", [undoLot]);
+      expect(event).toEqual({ kind: "auto_undone", actor_user_id: user.id });
+    });
+
+    it("refuses to undo a detail changed since, and restores the old value otherwise", async () => {
+      await pg.queryPg(
+        `insert into crm_bulk_trade_fields (lot_id, field_key, value, status, source_label) values ($1, 'location', 'Turin', 'unverified', 'Gmail · new')`,
+        [undoLot]);
+      const id = await applied("field", "location", { value: "Turin", status: "unverified" },
+        { before: { value: "Italy", status: "unverified", source_label: "Gmail · old", source_url: null, source_date: "2026-05-01" }, value: "Turin" });
+      await details.setField(undoLot, "location", { value: "Milan" }, user.id);
+      expect(await proposals.undoChange(id, user.id)).toMatchObject({ ok: false, status: 409 });
+
+      await details.setField(undoLot, "location", { value: "Turin" }, user.id);
+      expect(await proposals.undoChange(id, user.id)).toMatchObject({ ok: true });
+      expect(await field("location")).toMatchObject({ value: "Italy", source_label: "Gmail · old", source_date: "2026-05-01" });
+    });
+
+    it("takes a conflicting claim back off Alex's value", async () => {
+      await pg.queryPg(
+        `insert into crm_bulk_trade_fields (lot_id, field_key, value, status, alternatives)
+         values ($1, 'chemistry', 'NMC', 'conflict', '[{"value": "LFP", "source_label": "Gmail · nic@oem.test"}]')`, [undoLot]);
+      const id = await applied("field", "chemistry", { value: "LFP", status: "unverified" },
+        { before: { value: "NMC", status: "confirmed", alternatives: [] }, conflict: true });
+      expect((await proposals.appliedChanges(undoLot)).find((change) => change.id === id)?.conflict).toBe(true);
+      await proposals.undoChange(id, user.id);
+      expect(await field("chemistry")).toMatchObject({ value: "NMC", status: "confirmed", alternatives: [] });
+    });
+
+    it("undoes a whole run, reporting what changed since", async () => {
+      const contact = (await details.addContact(undoLot, { name: "Matteo", email: "matteo@oem.test" }, user.id))!;
+      await applied("link_contact", null, { name: "Matteo", email: "matteo@oem.test" }, { id: contact.id });
+      await pg.queryPg("update crm_bulk_trade_lots set next_step = 'Ask Nicola for pack photos', next_step_due = '2026-10-01' where id = $1", [undoLot]);
+      await applied("next_step", null, { next_step: "Ask Nicola for pack photos" }, {
+        before: { next_step: "Alex's step", next_step_due: null, waiting_on: "us", waiting_since: null, next_step_contact_id: null, next_step_buyer_id: null },
+        after: { next_step: "Ask Nicola for pack photos" },
+      });
+      await pg.queryPg("insert into crm_bulk_trade_fields (lot_id, field_key, value) values ($1, 'capacity', '23.8 kWh')", [undoLot]);
+      await applied("field", "capacity", { value: "23.8 kWh" }, { before: null, value: "23.8 kWh" });
+      await details.setField(undoLot, "capacity", { value: "24 kWh" }, user.id);
+
+      const result = await proposals.undoRun(undoLot, runId, user.id);
+      expect(result.undone).toBe(2);
+      expect(result.refused).toMatchObject([{ summary: "field change" }]);
+      const detail = (await details.getTradeDetail(undoLot))!;
+      expect(detail.contacts).toEqual([]);
+      expect(detail.trade).toMatchObject({ next_step: "Alex's step", next_step_due: null });
+      expect(detail.fields.find((f) => f.field_key === "capacity")?.value).toBe("24 kWh");
+    });
+  });
 });

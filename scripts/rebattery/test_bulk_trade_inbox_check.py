@@ -17,14 +17,14 @@ NOW = dt.datetime(2026, 9, 29, 12, tzinfo=dt.timezone.utc)
 TRADE = {
     "id": "bt_1", "title": "Synthetic eBS37", "trade_kind": "packs", "trade_stage": "With buyers", "fact_line": None,
     "next_step": "Chase supplier", "next_step_due": "2026-09-29", "waiting_on": "us",
-    "emails": {"sam@supplier.test"}, "threads": {"thr-1"},
+    "emails": {"sam@supplier.test"}, "threads": {"gmail:thr-1"},
     "buyers": [{"id": "btb_1", "name": "Synthetic Storage", "contact": "Tess", "status": "To contact",
                 "last_touch_on": "2026-09-28", "last_touch_via": "Email", "chase_on": None}],
     "fields": {"chemistry": {"value": "NMC", "status": "confirmed"}},
     "files": {"datasheet.pdf"},
     "contact_emails": {"sam@supplier.test"},
 }
-SOURCE = {"kind": "gmail", "id": "m1", "thread": "thr-9", "at": NOW, "synced_at": NOW, "label": "Gmail · sam@supplier.test",
+SOURCE = {"kind": "gmail", "id": "m1", "key": "gmail:thr-9", "thread": "thr-9", "at": NOW, "synced_at": NOW, "label": "Gmail · sam@supplier.test",
           "url": None, "inbound": True, "participants": {"sam@supplier.test"}, "title": "Stock",
           "text": "Subject: Stock\n\nManufacturing dates:  2021 to 2025. Packs are in Turin.\n\nAttachments: LC draft.docx, Datasheet.pdf, Uggc0GlP04b4Jqe4.png",
           "has_attachments": True, "from": "sam@supplier.test",
@@ -42,7 +42,7 @@ class Helpers(unittest.TestCase):
     def test_matches_by_participant_or_known_thread_and_ignores_own_domain(self):
         trades = {"bt_1": TRADE, "bt_2": {**TRADE, "id": "bt_2", "emails": {"other@x.test"}, "threads": set()}}
         self.assertEqual(check.match(SOURCE, trades), {"bt_1"})
-        self.assertEqual(check.match({**SOURCE, "participants": set(), "thread": "thr-1"}, trades), {"bt_1"})
+        self.assertEqual(check.match({**SOURCE, "participants": set(), "key": "gmail:thr-1"}, trades), {"bt_1"})
         self.assertEqual(check.match({**SOURCE, "participants": {"other@x.test", "sam@supplier.test"}}, trades), {"bt_1", "bt_2"})
         self.assertEqual(check.external({"alex@rebattery.io", "sam@supplier.test"}), {"sam@supplier.test"})
 
@@ -117,6 +117,46 @@ class Validate(unittest.TestCase):
         ])
         self.assertEqual(kept, [])
 
+    def test_a_bid_is_kept_and_moving_the_buyer_on_becomes_a_card(self):
+        kept = self.run_validate([
+            {"kind": "bid", "target": "btb_1", "proposed": {"amount": "31", "unit": "kWh", "currency": "EUR"},
+             "summary": "Bid", "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "bid", "target": "btb_1", "proposed": {"amount": 0, "unit": "kWh", "currency": "EUR"},
+             "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "bid", "target": "btb_1", "proposed": {"amount": 30, "unit": "tonne", "currency": "EUR"},
+             "quote": "Packs are in Turin", "source_id": "m1"},
+        ])
+        self.assertEqual([p["kind"] for p in kept], ["buyer_update", "bid"])
+        self.assertEqual(kept[0]["proposed"], {"status": "Bid in"})
+        self.assertEqual(kept[1]["proposed"], {"amount": 31.0, "unit": "kWh", "currency": "EUR", "firmness": "indicative"})
+
+
+class Settling(unittest.TestCase):
+    def test_buyer_status_waits_for_alex_and_the_rest_is_applied(self):
+        update = {"kind": "buyer_update", "target": "btb_1", "proposed": {"status": "Teaser sent", "chase_on": "2026-10-02"},
+                  "summary": "", "quote": "", "source": SOURCE}
+        status, rest = check.split_status(update)
+        self.assertEqual((status["proposed"], check.is_card(status)), ({"status": "Teaser sent"}, True))
+        self.assertEqual((rest["proposed"], check.is_card(rest)), ({"chase_on": "2026-10-02"}, False))
+        self.assertTrue(check.is_card({"kind": "possible_trade", "proposed": {}}))
+        self.assertFalse(check.is_card({"kind": "field", "proposed": {}}))
+
+    def test_placing_keeps_only_valid_verdicts_for_threads_it_was_shown(self):
+        groups = {"gmail:a": [SOURCE], "gmail:b": [{**SOURCE, "key": "gmail:b"}], "gmail:c": [{**SOURCE, "key": "gmail:c"}]}
+        reply = {"threads": [
+            {"key": "gmail:a", "verdict": "trade", "trade_id": "bt_1", "reason": "same batch"},
+            {"key": "gmail:b", "verdict": "none", "trade_id": "bt_1", "reason": "Serbian packs, older deal"},
+            {"key": "gmail:c", "verdict": "trade", "trade_id": "bt_404"},
+            {"key": "gmail:zzz", "verdict": "trade", "trade_id": "bt_1"},
+        ]}
+        report = {"warnings": []}
+        with patch.object(check, "call_model", lambda system, user, key: reply):
+            verdicts = check.place_threads(groups, {"bt_1": TRADE}, "k", report)
+        self.assertEqual(verdicts, {
+            "gmail:a": {"verdict": "trade", "lot_id": "bt_1", "reason": "same batch"},
+            "gmail:b": {"verdict": "none", "lot_id": None, "reason": "Serbian packs, older deal"},
+        })
+
 
 class Granola(unittest.TestCase):
     def test_reads_notes_updated_after_the_cursor(self):
@@ -178,7 +218,7 @@ TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
 class FullRun(unittest.TestCase):
-    """End to end against a throwaway database with migrations up to 010, the model mocked."""
+    """End to end against a throwaway database with every migration, the model mocked."""
 
     def setUp(self):
         import psycopg2
@@ -205,6 +245,8 @@ class FullRun(unittest.TestCase):
         self.conn.close()
 
     def fake_model(self, system, user, key):
+        if system is check.THREAD_SYSTEM:
+            return {"threads": [{"key": t["key"], "verdict": "trade", "trade_id": "bt_run"} for t in json.loads(user)["THREADS"]]}
         if system is check.POSSIBLE_SYSTEM:
             existing = [t["id"] for t in json.loads(user)["EXISTING"]]
             assert "bt_run" in existing
@@ -217,12 +259,26 @@ class FullRun(unittest.TestCase):
             {"kind": "field", "target": "manufacture_date", "proposed": {"value": "2021 to 2025"},
              "summary": "Manufacture date", "quote": "Manufacturing dates: 2021 to 2025", "source_id": "g-msg-run"},
             {"kind": "field", "target": "location", "proposed": {"value": "Milan"},
-             "summary": "Invented", "quote": "Packs are in Milan", "source_id": "g-msg-run"}]}
+             "summary": "Invented", "quote": "Packs are in Milan", "source_id": "g-msg-run"},
+            {"kind": "field", "target": "chemistry", "proposed": {"value": "LFP"},
+             "summary": "Chemistry", "quote": "Packs in Turin", "source_id": "g-msg-run"},
+            {"kind": "buyer_update", "target": "btb_run", "proposed": {"status": "Teaser sent", "chase_on": "2026-10-02"},
+             "summary": "Teaser went out", "quote": "Packs in Turin", "source_id": "g-msg-run"}]}
 
-    def test_run_records_quoted_proposals_once_and_advances_the_cursor(self):
-        args = type("Args", (), {"mailbox": "alex@rebattery.io", "since": "2026-01-01T00:00:00Z", "dry_run": False})
+    def test_run_applies_quoted_findings_once_keeps_alexs_values_and_leaves_status_as_a_card(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""
+              insert into crm_bulk_trade_buyers (id, lot_id, name) values ('btb_run', 'bt_run', 'Buyer') on conflict do nothing;
+              insert into crm_bulk_trade_fields (lot_id, field_key, value, status) values ('bt_run', 'chemistry', 'NMC', 'confirmed')
+                on conflict do nothing;
+              insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id)
+                select 'bt_run', 'field_updated', '{"field": "chemistry", "value": [null, "NMC"]}', id from crm_users where email = 'alex@rebattery.io';
+            """)
+        args = type("Args", (), {"mailbox": "alex@rebattery.io", "since": "2026-01-01T00:00:00Z", "dry_run": False, "dsn": ""})
+        started = []
         with patch.object(check, "call_model", self.fake_model), patch.object(check, "refresh_granola", lambda: None), \
-             patch.object(check, "load_granola", lambda since: []), patch.dict(os.environ, {"HERMES_API_KEY": "test"}):
+             patch.object(check, "load_granola", lambda since: []), patch.dict(os.environ, {"HERMES_API_KEY": "test"}), \
+             patch.object(check, "start_history", lambda lot_id, args: started.append(lot_id)):
             with redirect_stdout(io.StringIO()):
                 check.run(self.conn, args)
                 check.run(self.conn, args)  # same sources again: nothing new
@@ -230,13 +286,30 @@ class FullRun(unittest.TestCase):
             cur.execute("""select lot_id, kind, target, proposed->>'value', status from crm_bulk_trade_proposals
                            where source_id in ('g-msg-run', 'g-msg-new', 'g-msg-known') order by id""")
             rows = cur.fetchall()
+            cur.execute("select field_key, value, status, alternatives->0->>'value' from crm_bulk_trade_fields where lot_id = 'bt_run' order by field_key")
+            fields = cur.fetchall()
+            cur.execute("select status, to_char(chase_on, 'YYYY-MM-DD') from crm_bulk_trade_buyers where id = 'btb_run'")
+            buyer = cur.fetchone()
+            cur.execute("select email from crm_bulk_trade_contacts where lot_id = 'bt_run' order by email")
+            contacts = [r[0] for r in cur.fetchall()]
+            cur.execute("select verdict, lot_id from crm_bulk_trade_threads where thread_key = 'gmail:g-thr-run'")
+            verdict = cur.fetchone()
+            cur.execute("select count(*) from crm_bulk_trade_events where lot_id = 'bt_run' and actor_user_id is null and kind = 'field_updated'")
+            auto_events = cur.fetchone()[0]
             cur.execute("select status, emails_read, proposals_made from crm_bulk_trade_check_runs where kind = 'check' order by id")
             runs = cur.fetchall()
-        self.assertIn(("bt_run", "field", "manufacture_date", "2021 to 2025", "new"), rows)
+        self.assertIn(("bt_run", "field", "manufacture_date", "2021 to 2025", "applied"), rows)
         self.assertNotIn("Milan", [r[3] for r in rows])  # the unquoted claim was dropped
+        self.assertIn(("bt_run", "buyer_update", "btb_run", None, "new"), rows)  # the status waits for Alex
         self.assertIn((None, "possible_trade", None, None, "new"), rows)
-        self.assertIn(("bt_run", "link_contact", None, None, "new"), rows)
-        self.assertEqual(len(rows), 3)
+        self.assertIn(("bt_run", "link_contact", None, None, "applied"), rows)
+        self.assertIn(("manufacture_date", "2021 to 2025", "unverified", None), fields)
+        self.assertIn(("chemistry", "NMC", "conflict", "LFP"), fields)  # Alex's value stands; email's is a conflict
+        self.assertEqual(buyer, ("To contact", "2026-10-02"))
+        self.assertEqual(contacts, ["new.person@supplier.test", "sam-fullrun@supplier.test"])
+        self.assertEqual(verdict, ("trade", "bt_run"))
+        self.assertEqual(auto_events, 2)
+        self.assertEqual(started, ["bt_run"])  # the new contact's past mail gets read
         self.assertEqual([r[0] for r in runs[-2:]], ["ok", "ok"])
         self.assertEqual(runs[-1][2], 0)
 
@@ -261,10 +334,19 @@ class HistoryRun(unittest.TestCase):
               insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
                 select 'h-other', 'Other', now(), now(), 'Unrelated 999 packs', 'g-other', 'someone@else.test', id
                 from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
+                select 'h-serbia', 'Serbian packs for Ecovip', '2026-03-26', now(), 'Customer is Ecovip. 300 Serbian packs.', 'g-serbia',
+                       'nic@oem.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
-        seen = []
+        seen, placed = [], []
 
         def fake_model(system, user, key):
+            if system is check.THREAD_SYSTEM:
+                threads = json.loads(user)["THREADS"]
+                placed.extend(t["key"] for t in threads)
+                return {"threads": [{"key": t["key"], "verdict": "none" if "Serbian" in t["subject"] else "trade",
+                                     "trade_id": "bt_hist", "reason": "older Ecovip deal" if "Serbian" in t["subject"] else "this batch"}
+                                    for t in threads]}
             batch = json.loads(user)["SOURCES"]
             seen.append([s["source_id"] for s in batch])
             if batch[0]["source_id"] == "g-h1":
@@ -281,14 +363,23 @@ class HistoryRun(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 check.history(conn, args)
         with conn.cursor() as cur:
-            cur.execute("select kind, proposed->>'value', proposed->>'trade_kind' from crm_bulk_trade_proposals where lot_id = 'bt_hist' order by id")
+            cur.execute("select kind, status from crm_bulk_trade_proposals where lot_id = 'bt_hist' order by id")
             rows = cur.fetchall()
+            cur.execute("select value from crm_bulk_trade_fields where lot_id = 'bt_hist' and field_key = 'quantity'")
+            quantity = cur.fetchone()[0]
+            cur.execute("select trade_kind from crm_bulk_trade_lots where id = 'bt_hist'")
+            kind = cur.fetchone()[0]
+            cur.execute("select thread_key, verdict from crm_bulk_trade_threads where thread_key like 'gmail-message:g-%%' order by 1")
+            verdicts = dict(cur.fetchall())
             cur.execute("select kind, status, emails_read from crm_bulk_trade_check_runs where lot_id = 'bt_hist'")
             run = cur.fetchone()
         conn.close()
-        self.assertEqual(seen, [["g-h1"], ["g-h2"]])  # oldest first; a small budget forces one email per batch
-        self.assertEqual(sorted(rows), [("field", "580 packs", None), ("trade_kind", None, "packs")])
-        self.assertEqual(run, ("history", "ok", 2))
+        self.assertEqual(sorted(placed), ["gmail-message:g-h1", "gmail-message:g-h2", "gmail-message:g-serbia"])
+        self.assertEqual(seen, [["g-h1"], ["g-h2"]])  # the older Ecovip deal is never read; oldest first
+        self.assertEqual(verdicts["gmail-message:g-serbia"], "none")
+        self.assertEqual(sorted(rows), [("field", "applied"), ("trade_kind", "applied")])
+        self.assertEqual((quantity, kind), ("580 packs", "packs"))
+        self.assertEqual(run, ("history", "ok", 3))
 
 
 if __name__ == "__main__":
