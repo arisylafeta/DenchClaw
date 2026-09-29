@@ -18,3 +18,13 @@ export async function readJson(req: Request): Promise<unknown> {
 
 export const badRequest = (error: string) => Response.json({ error }, { status: 400 });
 export const notFound = (what: string) => Response.json({ error: `${what} not found` }, { status: 404 });
+
+/** Runs a write and turns a missing linked record (Postgres foreign key error) into a 400. */
+export async function linkedWrite(write: () => Promise<Response>): Promise<Response> {
+  try {
+    return await write();
+  } catch (err) {
+    if ((err as { code?: string }).code === "23503") return badRequest("A linked record no longer exists. Refresh and try again.");
+    throw err;
+  }
+}

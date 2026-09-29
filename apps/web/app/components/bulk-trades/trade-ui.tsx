@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId } from "react";
+import { useEffect, useId, useState } from "react";
+import { TRADE_KINDS, type TradeKind } from "@/lib/bulk-trades";
 
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = init?.body instanceof FormData ? undefined : { "content-type": "application/json" };
@@ -90,4 +91,60 @@ export function Modal({ title, onClose, onSubmit, children, footer, wide }: Moda
 
 export function ErrorText({ error }: { error: string | null }) {
   return error ? <p role="alert" className="text-sm" style={{ color: "var(--bt-red)" }}>{error}</p> : null;
+}
+
+/**
+ * Form state for the trade dialogs: the draft values, a change handler per key, and a submit that
+ * shows the save error in place and re-enables the form on failure.
+ */
+export function useForm<T extends Record<string, string>>(initial: T, save: (draft: T) => Promise<void>) {
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const set = (key: keyof T) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setDraft((current) => ({ ...current, [key]: event.target.value }));
+
+  async function run(action: () => Promise<void>) {
+    setSaving(true);
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save.");
+    }
+    setSaving(false);
+  }
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void run(() => save(draft));
+  };
+
+  const input = (key: keyof T, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <input value={draft[key]} onChange={set(key)} className={inputClass} style={inputStyle} {...props} />
+  );
+  const select = (key: keyof T, options: readonly string[], labels: Record<string, string> = {}) => (
+    <select value={draft[key]} onChange={set(key)} className={inputClass} style={inputStyle}>
+      {options.map((option) => <option key={option} value={option}>{labels[option] ?? option}</option>)}
+    </select>
+  );
+  const textarea = (key: keyof T, props: React.TextareaHTMLAttributes<HTMLTextAreaElement> = {}) => (
+    <textarea value={draft[key]} onChange={set(key)} className="w-full rounded-lg border px-2.5 py-2 text-sm leading-relaxed" style={inputStyle} {...props} />
+  );
+
+  return { draft, setDraft, set, saving, error, submit, run, input, select, textarea };
+}
+
+/** Shown until a trade has a kind; the kind decides which data fields it needs. */
+export function KindPicker({ label, onPick }: { label: string; onPick: (kind: TradeKind) => void }) {
+  return (
+    <FormField label={label}>
+      <select defaultValue="" onChange={(event) => { if (event.target.value) onPick(event.target.value as TradeKind); }}
+        className={inputClass} style={inputStyle}>
+        <option value="" disabled>Choose…</option>
+        {TRADE_KINDS.map((kind) => <option key={kind} value={kind}>{kind[0].toUpperCase() + kind.slice(1)}</option>)}
+      </select>
+    </FormField>
+  );
 }

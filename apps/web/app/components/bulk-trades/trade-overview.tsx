@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { TRADE_KINDS, dueLabel, type BulkTrade, type TradePatch } from "@/lib/bulk-trades";
+import { useEffect, useRef, useState } from "react";
+import { dueLabel, type BulkTrade, type TradePatch } from "@/lib/bulk-trades";
 import {
+  firstName,
+  greeting,
   missingItems,
   shortDate,
   type Buyer,
@@ -15,15 +17,15 @@ import {
   Card,
   ErrorText,
   FormField,
+  KindPicker,
   Modal,
   buttonClass,
   buttonStyle,
   darkButtonClass,
   darkButtonStyle,
-  inputClass,
-  inputStyle,
   request,
   tradeUrl,
+  useForm,
 } from "./trade-ui";
 
 type Props = {
@@ -33,8 +35,6 @@ type Props = {
   onBuyer: (buyer: Buyer) => void;
   onContacts: (contacts: Contact[]) => void;
 };
-
-const firstName = (name: string) => name.trim().split(/\s+/)[0];
 
 /** First contact with an email address, else the first contact. */
 function emailContact(contacts: Contact[]) {
@@ -75,7 +75,23 @@ function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
   const [snoozing, setSnoozing] = useState(false);
   const [emailing, setEmailing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const snoozeMenu = useRef<HTMLDivElement>(null);
   const barButton = "inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium";
+
+  useEffect(() => {
+    if (!snoozing) return;
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !snoozeMenu.current?.contains(event.target as Node)) {
+        setSnoozing(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [snoozing]);
   const barButtonStyle = { borderColor: "var(--bt-bar-border)", color: "var(--bt-on-bar)" };
 
   async function snooze(days: number) {
@@ -114,7 +130,7 @@ function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
       <button type="button" onClick={() => setSetting(true)} className={`${barButton} text-[13px]`} style={barButtonStyle}>
         {trade.next_step ? "Done, set next" : "Set next step"}
       </button>
-      <div className="relative">
+      <div ref={snoozeMenu} className="relative">
         <button
           type="button"
           aria-expanded={snoozing}
@@ -144,7 +160,7 @@ function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
           trade={trade}
           to={contact?.email ?? ""}
           subject={trade.title}
-          body={`${contact ? `Hi ${firstName(contact.name)},` : "Hi,"}\n\n`}
+          body={`${greeting(contact?.name)}\n\n`}
           linkTracking={linkTracking}
           onClose={() => setEmailing(false)}
         />
@@ -162,54 +178,25 @@ function SetNextDialog({ trade, today, onClose, onTradePatch }: {
   onClose: () => void;
   onTradePatch: Props["onTradePatch"];
 }) {
-  const [draft, setDraft] = useState({ next_step: "", next_step_due: addDays(today, 1), waiting_on: "us" as "us" | "them" });
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      await onTradePatch({ ...draft, last_touched: today });
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-      setSaving(false);
-    }
-  }
+  const form = useForm({ next_step: "", next_step_due: addDays(today, 1), waiting_on: "us" }, async (draft) => {
+    await onTradePatch({ ...draft, waiting_on: draft.waiting_on as "us" | "them", last_touched: today });
+    onClose();
+  });
 
   return (
     <Modal
       title={trade.next_step ? "Done. What's next?" : "Set next step"}
       onClose={onClose}
-      onSubmit={save}
-      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>Save next step</button>}
+      onSubmit={form.submit}
+      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Save next step</button>}
     >
-      {trade.next_step && (
-        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Done: {trade.next_step}</p>
-      )}
-      <FormField label="Next step">
-        <textarea required autoFocus rows={2} value={draft.next_step}
-          onChange={(event) => setDraft((current) => ({ ...current, next_step: event.target.value }))}
-          className="w-full rounded-lg border px-2.5 py-2 text-sm" style={inputStyle} />
-      </FormField>
+      {trade.next_step && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Done: {trade.next_step}</p>}
+      <FormField label="Next step">{form.textarea("next_step", { required: true, autoFocus: true, rows: 2 })}</FormField>
       <div className="grid grid-cols-2 gap-3">
-        <FormField label="Due">
-          <input type="date" value={draft.next_step_due}
-            onChange={(event) => setDraft((current) => ({ ...current, next_step_due: event.target.value }))}
-            className={inputClass} style={inputStyle} />
-        </FormField>
-        <FormField label="Waiting on">
-          <select value={draft.waiting_on}
-            onChange={(event) => setDraft((current) => ({ ...current, waiting_on: event.target.value as "us" | "them" }))}
-            className={inputClass} style={inputStyle}>
-            <option value="us">Us</option>
-            <option value="them">Them</option>
-          </select>
-        </FormField>
+        <FormField label="Due">{form.input("next_step_due", { type: "date" })}</FormField>
+        <FormField label="Waiting on">{form.select("waiting_on", ["us", "them"], { us: "Us", them: "Them" })}</FormField>
       </div>
-      <ErrorText error={error} />
+      <ErrorText error={form.error} />
     </Modal>
   );
 }
@@ -220,7 +207,7 @@ function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePat
   const [asking, setAsking] = useState(false);
   const items = trade.trade_kind ? missingItems(trade.trade_kind, fields, files) : [];
   const ask = [
-    contact ? `Hi ${firstName(contact.name)},` : "Hi,",
+    greeting(contact?.name),
     "",
     `For the ${trade.title} batch, could you send:`,
     ...items.map((item) => `- ${item.label}`),
@@ -235,13 +222,7 @@ function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePat
         {!!items.length && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>needed for</span>}
       </div>
       {!trade.trade_kind ? (
-        <FormField label="Pick the trade kind to see what data it needs">
-          <select defaultValue="" onChange={(event) => { if (event.target.value) void onTradePatch({ trade_kind: event.target.value as BulkTrade["trade_kind"] }); }}
-            className={inputClass} style={inputStyle}>
-            <option value="" disabled>Choose…</option>
-            {TRADE_KINDS.map((kind) => <option key={kind} value={kind}>{kind[0].toUpperCase() + kind.slice(1)}</option>)}
-          </select>
-        </FormField>
+        <KindPicker label="Pick the trade kind to see what data it needs" onPick={(kind) => void onTradePatch({ trade_kind: kind })} />
       ) : items.length ? (
         <>
           {items.map((item) => (
@@ -252,7 +233,7 @@ function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePat
             </div>
           ))}
           <button type="button" onClick={() => setAsking(true)} className={`${buttonClass} mt-2`} style={buttonStyle}>
-            {contact ? `Ask ${firstName(contact.name)} for all ${items.length}` : `Ask for all ${items.length}`}
+            {firstName(contact?.name) ? `Ask ${firstName(contact?.name)}` : "Ask"} for all {items.length}
           </button>
           {asking && (
             <EmailDialog trade={trade} to={contact?.email ?? ""} subject={trade.title} body={ask}
@@ -327,58 +308,36 @@ function ContactDialog({ trade, contact, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (contact: Contact | null) => void;
 }) {
-  const [draft, setDraft] = useState({
+  const url = tradeUrl(trade.id, contact ? `/contacts/${contact.id}` : "/contacts");
+  const form = useForm({
     name: contact?.name ?? "", company: contact?.company ?? "", email: contact?.email ?? "", phone: contact?.phone ?? "",
+  }, async (draft) => {
+    onSaved((await request<{ contact: Contact }>(url, { method: contact ? "PATCH" : "POST", body: JSON.stringify(draft) })).contact);
   });
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement>) =>
-    setDraft((current) => ({ ...current, [key]: event.target.value }));
-
-  async function run(action: () => Promise<Contact | null>) {
-    setSaving(true);
-    setError(null);
-    try {
-      onSaved(await action());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-      setSaving(false);
-    }
-  }
-
-  const save = (event: React.FormEvent) => {
-    event.preventDefault();
-    void run(async () => (contact
-      ? (await request<{ contact: Contact }>(tradeUrl(trade.id, `/contacts/${contact.id}`), { method: "PATCH", body: JSON.stringify(draft) })).contact
-      : (await request<{ contact: Contact }>(tradeUrl(trade.id, "/contacts"), { method: "POST", body: JSON.stringify(draft) })).contact));
-  };
-
-  const remove = () => run(async () => {
-    const response = await fetch(tradeUrl(trade.id, `/contacts/${contact!.id}`), { method: "DELETE" });
-    if (!response.ok) throw new Error(`Could not remove (${response.status})`);
-    return null;
+  const remove = () => form.run(async () => {
+    await request(url, { method: "DELETE" });
+    onSaved(null);
   });
 
   return (
     <Modal
       title={contact ? contact.name : "Add contact"}
       onClose={onClose}
-      onSubmit={save}
+      onSubmit={form.submit}
       footer={(
         <>
-          {contact && <button type="button" disabled={saving} onClick={remove} className={buttonClass} style={{ ...buttonStyle, color: "var(--bt-red)" }}>Remove</button>}
-          <button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{contact ? "Save" : "Add contact"}</button>
+          {contact && <button type="button" disabled={form.saving} onClick={remove} className={buttonClass} style={{ ...buttonStyle, color: "var(--bt-red)" }}>Remove</button>}
+          <button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>{contact ? "Save" : "Add contact"}</button>
         </>
       )}
     >
-      <FormField label="Name"><input required value={draft.name} onChange={set("name")} className={inputClass} style={inputStyle} /></FormField>
-      <FormField label="Company"><input value={draft.company} onChange={set("company")} className={inputClass} style={inputStyle} /></FormField>
+      <FormField label="Name">{form.input("name", { required: true })}</FormField>
+      <FormField label="Company">{form.input("company")}</FormField>
       <div className="grid grid-cols-2 gap-3">
-        <FormField label="Phone"><input type="tel" value={draft.phone} onChange={set("phone")} placeholder="+39 347 …" className={inputClass} style={inputStyle} /></FormField>
-        <FormField label="Email"><input type="email" value={draft.email} onChange={set("email")} className={inputClass} style={inputStyle} /></FormField>
+        <FormField label="Phone">{form.input("phone", { type: "tel", placeholder: "+39 347 …" })}</FormField>
+        <FormField label="Email">{form.input("email", { type: "email" })}</FormField>
       </div>
-      <ErrorText error={error} />
+      <ErrorText error={form.error} />
     </Modal>
   );
 }
-

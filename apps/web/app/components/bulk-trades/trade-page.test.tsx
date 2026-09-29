@@ -242,5 +242,14 @@ describe("TradePage overview", () => {
     const ids = fetchMock.mock.calls.filter(([url]) => url.endsWith("/email-draft")).map(([, init]) => JSON.parse(String(init!.body)).buyer_id);
     expect(ids).toEqual(["btb_1", "btb_2", "btb_2"]);
   });
+
+  it("closes the snooze menu with Escape", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Snooze" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
 });
 

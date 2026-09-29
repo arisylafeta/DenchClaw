@@ -11,7 +11,7 @@ import {
 } from "@/lib/bulk-trades";
 import { TradeEditor } from "./trade-editor";
 import { TradePage } from "./trade-page";
-import { request } from "./trade-ui";
+import { ErrorText, request } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
 import { TradesList } from "./trades-list";
 
@@ -36,7 +36,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [owners, setOwners] = useState<TradeOwner[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<BulkTrade | "new" | null>(null);
+  const [creating, setCreating] = useState(false);
   const [openTradeId, setOpenTradeId] = useState<string | null>(null);
   const today = todayInLondon();
 
@@ -63,18 +63,12 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const replace = useCallback((trade: BulkTrade) =>
     setTrades((current) => current.map((candidate) => (candidate.id === trade.id ? trade : candidate))), []);
 
-  async function save(patch: TradePatch) {
-    if (editing === "new") {
-      const { trade } = await request<{ trade: BulkTrade }>("/api/bulk-trades", { method: "POST", body: JSON.stringify(patch) });
-      setTrades((current) => [...current, trade]);
-    } else if (editing) {
-      const { trade } = await request<{ trade: BulkTrade }>(`/api/bulk-trades/${encodeURIComponent(editing.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-      replace(trade);
-    }
-    setEditing(null);
+  /** Creates a trade and opens its page. */
+  async function create(patch: TradePatch) {
+    const { trade } = await request<{ trade: BulkTrade }>("/api/bulk-trades", { method: "POST", body: JSON.stringify(patch) });
+    setTrades((current) => [...current, trade]);
+    setCreating(false);
+    setOpenTradeId(trade.id);
   }
 
   async function move(trade: BulkTrade, stage: TradeStage) {
@@ -138,7 +132,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => setEditing("new")}
+          onClick={() => setCreating(true)}
           className="flex h-9 items-center gap-1.5 rounded-lg bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
           style={{ color: "var(--bt-on-accent)" }}
         >
@@ -150,25 +144,15 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       </header>
 
       <main className={`flex-1 overflow-auto px-8 pb-8 ${mode === "list" ? "pt-5" : "pt-6"}`}>
-        {loadError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{loadError}</p>}
-        {actionError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{actionError}</p>}
+        <ErrorText error={loadError} />
+        <ErrorText error={actionError} />
         {mode === "list"
           ? <TradesList trades={trades} today={today} onOpen={open} />
           : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
 
-      {editing && (
-        <TradeEditor
-          key={editing === "new" ? "new" : editing.id}
-          trade={editing === "new" ? null : editing}
-          owners={owners}
-          today={today}
-          onClose={() => setEditing(null)}
-          onSave={save}
-          onOpenEvidence={editing !== "new" && onOpenEntry
-            ? () => { onOpenEntry("bulk_trade", editing.id); setEditing(null); }
-            : undefined}
-        />
+      {creating && (
+        <TradeEditor trade={null} owners={owners} today={today} onClose={() => setCreating(false)} onSave={create} />
       )}
     </div>
   );

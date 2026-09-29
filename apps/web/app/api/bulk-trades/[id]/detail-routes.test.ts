@@ -5,6 +5,7 @@ vi.mock("@/lib/auth", () => ({ currentUser }));
 
 const details = {
   getTradeDetail: vi.fn(),
+  updateBuyer: vi.fn(),
   addBid: vi.fn(async () => ({ id: "btb_1", status: "Bid in" })),
   setField: vi.fn(),
   resolveConflict: vi.fn(),
@@ -109,6 +110,14 @@ describe("trade detail routes", () => {
     } finally {
       delete process.env.BULK_TRADES_LINK_BASE;
     }
+  });
+
+  it("turns a missing linked CRM person into a clear 400", async () => {
+    const { PATCH } = await import("./buyers/[buyerId]/route");
+    details.updateBuyer.mockRejectedValueOnce(Object.assign(new Error("fk"), { code: "23503" }));
+    const res = await PATCH(post({ person_id: "p_gone" }), params({ id: "bt_1", buyerId: "btb_1" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("no longer exists");
   });
 });
 

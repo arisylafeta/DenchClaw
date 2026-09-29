@@ -10,14 +10,10 @@ import {
   buttonStyle,
   darkButtonClass,
   darkButtonStyle,
-  inputClass,
-  inputStyle,
   request,
   tradeUrl,
+  useForm,
 } from "./trade-ui";
-
-/** Neutral subject for buyers: a trade title can name the seller. */
-export const BUYER_SUBJECT = "Battery batch available";
 
 type Props = {
   trade: BulkTrade;
@@ -31,28 +27,14 @@ type Props = {
 
 /** Makes a Gmail draft in the signed-in user's account. Nothing is sent from DenchClaw. */
 export function EmailDialog({ trade, to, subject, body, buyerId, linkTracking, onClose }: Props) {
-  const [draft, setDraft] = useState({ to, subject, body });
   const [track, setTrack] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ url: string; tracked_links: number } | null>(null);
-  const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setDraft((current) => ({ ...current, [key]: event.target.value }));
-
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      setResult(await request<{ url: string; tracked_links: number }>(tradeUrl(trade.id, "/email-draft"), {
-        method: "POST",
-        body: JSON.stringify({ ...draft, buyer_id: buyerId, track_links: linkTracking && track }),
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the draft.");
-      setSaving(false);
-    }
-  }
+  const form = useForm({ to, subject, body }, async (draft) => {
+    setResult(await request<{ url: string; tracked_links: number }>(tradeUrl(trade.id, "/email-draft"), {
+      method: "POST",
+      body: JSON.stringify({ ...draft, buyer_id: buyerId, track_links: linkTracking && track }),
+    }));
+  });
 
   if (result) {
     return (
@@ -81,15 +63,12 @@ export function EmailDialog({ trade, to, subject, body, buyerId, linkTracking, o
       wide
       title="Email draft"
       onClose={onClose}
-      onSubmit={save}
-      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{saving ? "Creating draft" : "Create Gmail draft"}</button>}
+      onSubmit={form.submit}
+      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>{form.saving ? "Creating draft" : "Create Gmail draft"}</button>}
     >
-      <FormField label="To"><input value={draft.to} onChange={set("to")} placeholder="name@company.com" className={inputClass} style={inputStyle} /></FormField>
-      <FormField label="Subject"><input required value={draft.subject} onChange={set("subject")} className={inputClass} style={inputStyle} /></FormField>
-      <FormField label="Message">
-        <textarea required autoFocus rows={10} value={draft.body} onChange={set("body")}
-          className="w-full rounded-lg border px-3 py-2 text-sm leading-relaxed" style={inputStyle} />
-      </FormField>
+      <FormField label="To">{form.input("to", { placeholder: "name@company.com" })}</FormField>
+      <FormField label="Subject">{form.input("subject", { required: true })}</FormField>
+      <FormField label="Message">{form.textarea("body", { required: true, autoFocus: true, rows: 10 })}</FormField>
       {linkTracking && (
         <label className="flex items-center gap-2 text-[13px]">
           <input type="checkbox" checked={track} onChange={(event) => setTrack(event.target.checked)} className="accent-[var(--bt-text)]" />
@@ -97,7 +76,7 @@ export function EmailDialog({ trade, to, subject, body, buyerId, linkTracking, o
         </label>
       )}
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Saved as a draft in your Gmail. Nothing is sent from here.</p>
-      <ErrorText error={error} />
+      <ErrorText error={form.error} />
     </Modal>
   );
 }

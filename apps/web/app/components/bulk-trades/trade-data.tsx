@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { TRADE_KINDS, type BulkTrade, type TradePatch } from "@/lib/bulk-trades";
+import type { BulkTrade, TradePatch } from "@/lib/bulk-trades";
 import {
   FIELD_STATUSES,
   FIELD_TEMPLATES,
@@ -23,6 +23,7 @@ import {
   Card,
   ErrorText,
   FormField,
+  KindPicker,
   Modal,
   buttonClass,
   buttonStyle,
@@ -32,6 +33,7 @@ import {
   inputStyle,
   request,
   tradeUrl,
+  useForm,
 } from "./trade-ui";
 
 const FIELD_COLUMNS = "grid-cols-[200px_minmax(0,1fr)_250px_110px_110px]";
@@ -75,13 +77,7 @@ export function TradeData({ detail, onField, onFile, onTradePatch }: Props) {
   if (!trade.trade_kind) {
     return (
       <Card label="Data" className="max-w-[480px] px-5 py-5">
-        <FormField label="Pick the trade kind. Each kind has its own fixed list of fields.">
-          <select defaultValue="" onChange={(event) => { if (event.target.value) void onTradePatch({ trade_kind: event.target.value as BulkTrade["trade_kind"] }); }}
-            className={inputClass} style={inputStyle}>
-            <option value="" disabled>Choose…</option>
-            {TRADE_KINDS.map((kind) => <option key={kind} value={kind}>{kind[0].toUpperCase() + kind.slice(1)}</option>)}
-          </select>
-        </FormField>
+        <KindPicker label="Pick the trade kind. Each kind has its own fixed list of fields." onPick={(kind) => void onTradePatch({ trade_kind: kind })} />
       </Card>
     );
   }
@@ -197,64 +193,41 @@ function FieldDialog({ trade, template, field, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (field: TradeField) => void;
 }) {
-  const [draft, setDraft] = useState({
+  const form = useForm({
     value: field?.value ?? "",
-    status: (field?.status ?? "unverified") as FieldStatus,
-    visibility: (field?.visibility ?? template.visibility) as Visibility,
+    status: field?.status ?? "unverified",
+    visibility: field?.visibility ?? template.visibility,
     source_label: field?.source_label ?? "",
     source_url: field?.source_url ?? "",
     source_date: field?.source_date ?? "",
+  }, async (draft) => {
+    onSaved((await request<{ field: TradeField }>(tradeUrl(trade.id, `/fields/${template.key}`), {
+      method: "PUT",
+      body: JSON.stringify(draft),
+    })).field);
   });
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setDraft((current) => ({ ...current, [key]: event.target.value }));
-
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const saved = await request<{ field: TradeField }>(tradeUrl(trade.id, `/fields/${template.key}`), {
-        method: "PUT",
-        body: JSON.stringify(draft),
-      });
-      onSaved(saved.field);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-      setSaving(false);
-    }
-  }
 
   return (
     <Modal
       title={template.label}
       onClose={onClose}
-      onSubmit={save}
-      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>Save</button>}
+      onSubmit={form.submit}
+      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Save</button>}
     >
-      <FormField label="Value"><input autoFocus value={draft.value} onChange={set("value")} className={inputClass} style={inputStyle} /></FormField>
+      <FormField label="Value">{form.input("value", { autoFocus: true })}</FormField>
       <div className="grid grid-cols-2 gap-3">
-        <FormField label="Status">
-          <select value={draft.status} onChange={set("status")} className={inputClass} style={inputStyle}>
-            {FIELD_STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}
-          </select>
-        </FormField>
-        <FormField label="Buyers see at">
-          <select value={draft.visibility} onChange={set("visibility")} className={inputClass} style={inputStyle}>
-            {VISIBILITIES.map((visibility) => <option key={visibility} value={visibility}>{VISIBILITY_LABEL[visibility]}</option>)}
-          </select>
-        </FormField>
+        <FormField label="Status">{form.select("status", FIELD_STATUSES, STATUS_LABEL)}</FormField>
+        <FormField label="Buyers see at">{form.select("visibility", VISIBILITIES, VISIBILITY_LABEL)}</FormField>
       </div>
       <div className="grid grid-cols-[1fr_150px] gap-3">
-        <FormField label="Source"><input value={draft.source_label} onChange={set("source_label")} placeholder="Gmail · Fabio Papa" className={inputClass} style={inputStyle} /></FormField>
-        <FormField label="Source date"><input type="date" value={draft.source_date} onChange={set("source_date")} className={inputClass} style={inputStyle} /></FormField>
+        <FormField label="Source">{form.input("source_label", { placeholder: "Gmail · Fabio Papa" })}</FormField>
+        <FormField label="Source date">{form.input("source_date", { type: "date" })}</FormField>
       </div>
-      <FormField label="Source link"><input type="url" value={draft.source_url} onChange={set("source_url")} placeholder="https://mail.google.com/…" className={inputClass} style={inputStyle} /></FormField>
-      {template.key === "seller_price" && draft.visibility !== "never" && (
+      <FormField label="Source link">{form.input("source_url", { type: "url", placeholder: "https://mail.google.com/…" })}</FormField>
+      {template.key === "seller_price" && form.draft.visibility !== "never" && (
         <p className="text-[13px]" style={{ color: "var(--bt-amber)" }}>Seller price is normally Never. Teasers leave it out either way.</p>
       )}
-      <ErrorText error={error} />
+      <ErrorText error={form.error} />
     </Modal>
   );
 }
@@ -335,49 +308,31 @@ function FilesCard({ trade, files, onFile }: { trade: BulkTrade; files: TradeFil
 }
 
 function UploadDialog({ trade, onClose, onSaved }: { trade: BulkTrade; onClose: () => void; onSaved: (file: TradeFile) => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [fileType, setFileType] = useState<FileType>("Photos");
-  const [source, setSource] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    const file = input.current?.files?.[0];
-    if (!file) return setError("Choose a file.");
-    const form = new FormData();
-    form.set("file", file);
-    form.set("file_type", fileType);
-    if (source.trim()) form.set("source_label", source.trim());
-    setSaving(true);
-    setError(null);
-    try {
-      const saved = await request<{ file: TradeFile }>(tradeUrl(trade.id, "/files"), { method: "POST", body: form });
-      onSaved(saved.file);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload.");
-      setSaving(false);
-    }
-  }
+  const picker = useRef<HTMLInputElement>(null);
+  const form = useForm({ file_type: "Photos", source_label: "" }, async (draft) => {
+    const file = picker.current?.files?.[0];
+    if (!file) throw new Error("Choose a file.");
+    const body = new FormData();
+    body.set("file", file);
+    body.set("file_type", draft.file_type);
+    if (draft.source_label.trim()) body.set("source_label", draft.source_label.trim());
+    onSaved((await request<{ file: TradeFile }>(tradeUrl(trade.id, "/files"), { method: "POST", body })).file);
+  });
 
   return (
     <Modal
       title="Upload a file"
       onClose={onClose}
-      onSubmit={save}
-      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{saving ? "Uploading" : "Upload"}</button>}
+      onSubmit={form.submit}
+      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>{form.saving ? "Uploading" : "Upload"}</button>}
     >
-      <FormField label="File (up to 50 MB)"><input ref={input} type="file" required className="text-sm" /></FormField>
+      <FormField label="File (up to 50 MB)"><input ref={picker} type="file" required className="text-sm" /></FormField>
       <div className="grid grid-cols-2 gap-3">
-        <FormField label="Type">
-          <select value={fileType} onChange={(event) => setFileType(event.target.value as FileType)} className={inputClass} style={inputStyle}>
-            {FILE_TYPES.map((type) => <option key={type}>{type}</option>)}
-          </select>
-        </FormField>
-        <FormField label="Source"><input value={source} onChange={(event) => setSource(event.target.value)} placeholder="Gmail · Fabio Papa" className={inputClass} style={inputStyle} /></FormField>
+        <FormField label="Type">{form.select("file_type", FILE_TYPES)}</FormField>
+        <FormField label="Source">{form.input("source_label", { placeholder: "Gmail · Fabio Papa" })}</FormField>
       </div>
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Buyers see it at Never until you change it.</p>
-      <ErrorText error={error} />
+      <ErrorText error={form.error} />
     </Modal>
   );
 }

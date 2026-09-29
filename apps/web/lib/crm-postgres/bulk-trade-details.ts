@@ -112,13 +112,28 @@ function insertSql(table: string, fields: Record<string, unknown>) {
   };
 }
 
-function updateSql(table: string, fields: Record<string, unknown>, where: string, whereValues: unknown[], touch = "") {
-  const keys = Object.keys(fields);
-  const offset = whereValues.length;
-  return {
-    sql: `update ${table} set ${keys.map((key, i) => `${key} = $${offset + i + 1}`).join(", ")}${touch} where ${where}`,
-    values: [...whereValues, ...keys.map((key) => fields[key])],
-  };
+/**
+ * Writes only the keys whose value differs from `before`. Returns the before/after pairs for the
+ * event log, or null when nothing changed.
+ */
+async function updateChanged(
+  client: PgTransaction,
+  table: string,
+  where: { sql: string; values: unknown[] },
+  before: object,
+  patch: Record<string, unknown>,
+  touch = false,
+) {
+  const changes = diff(before as Record<string, unknown>, patch);
+  const keys = Object.keys(changes);
+  if (!keys.length) return null;
+  const offset = where.values.length;
+  await client.query(
+    `update ${table} set ${keys.map((key, i) => `${key} = $${offset + i + 1}`).join(", ")}${touch ? ", updated_at = now()" : ""}
+     where ${where.sql}`,
+    [...where.values, ...keys.map((key) => patch[key])],
+  );
+  return changes;
 }
 
 async function tradeExists(client: PgTransaction, lotId: string) {
@@ -156,12 +171,8 @@ export async function updateBuyer(lotId: string, buyerId: string, input: BuyerIn
     if (patch.status && patch.status !== before.status && !("last_touch_on" in patch)) {
       patch.last_touch_on = todayInLondon();
     }
-    const changes = diff(before, patch);
-    if (!Object.keys(changes).length) return before;
-
-    const fields = Object.fromEntries(Object.keys(changes).map((key) => [key, patch[key]]));
-    const update = updateSql("crm_bulk_trade_buyers", fields, "id = $1", [buyerId], ", updated_at = now()");
-    await client.query(update.sql, update.values);
+    const changes = await updateChanged(client, "crm_bulk_trade_buyers", { sql: "id = $1", values: [buyerId] }, before, patch, true);
+    if (!changes) return before;
     await logEvent(client, lotId, "buyer_updated", changes, userId, buyerId);
     const { rows } = await client.query(`${BUYER_SELECT} where buyer.id = $1`, [buyerId]);
     return rows[0] as Buyer;
@@ -225,11 +236,8 @@ export async function updateContact(lotId: string, contactId: string, input: Con
     const current = await client.query(`${CONTACT_SELECT} where id = $1 and lot_id = $2 for update`, [contactId, lotId]);
     const before = current.rows[0] as Contact | undefined;
     if (!before) return null;
-    const changes = diff(before, input);
-    if (!Object.keys(changes).length) return before;
-    const fields = Object.fromEntries(Object.keys(changes).map((key) => [key, input[key as keyof ContactInput]]));
-    const update = updateSql("crm_bulk_trade_contacts", fields, "id = $1", [contactId]);
-    await client.query(update.sql, update.values);
+    const changes = await updateChanged(client, "crm_bulk_trade_contacts", { sql: "id = $1", values: [contactId] }, before, input);
+    if (!changes) return before;
     await logEvent(client, lotId, "contact_updated", { id: contactId, ...changes }, userId);
     const { rows } = await client.query(`${CONTACT_SELECT} where id = $1`, [contactId]);
     return rows[0] as Contact;
@@ -284,11 +292,9 @@ export async function setField(
       await client.query(insert.sql, insert.values);
       await logEvent(client, lotId, "field_updated", { field: key, ...diff({}, row) }, userId);
     } else {
-      const changes = diff(before, patch);
-      if (!Object.keys(changes).length) return before;
-      const fields = Object.fromEntries(Object.keys(changes).map((name) => [name, patch[name]]));
-      const update = updateSql("crm_bulk_trade_fields", fields, "lot_id = $1 and field_key = $2", [lotId, key], ", updated_at = now()");
-      await client.query(update.sql, update.values);
+      const where = { sql: "lot_id = $1 and field_key = $2", values: [lotId, key] };
+      const changes = await updateChanged(client, "crm_bulk_trade_fields", where, before, patch, true);
+      if (!changes) return before;
       await logEvent(client, lotId, "field_updated", { field: key, ...changes }, userId);
     }
     const { rows } = await client.query(`${FIELD_SELECT} where lot_id = $1 and field_key = $2`, [lotId, key]);
@@ -354,11 +360,8 @@ export async function updateFile(lotId: string, fileId: string, meta: FileMetaIn
     const current = await client.query(`${FILE_SELECT} where id = $1 and lot_id = $2 for update`, [fileId, lotId]);
     const before = current.rows[0] as TradeFile | undefined;
     if (!before) return null;
-    const changes = diff(before, meta);
-    if (!Object.keys(changes).length) return before;
-    const fields = Object.fromEntries(Object.keys(changes).map((key) => [key, meta[key as keyof FileMetaInput]]));
-    const update = updateSql("crm_bulk_trade_files", fields, "id = $1", [fileId]);
-    await client.query(update.sql, update.values);
+    const changes = await updateChanged(client, "crm_bulk_trade_files", { sql: "id = $1", values: [fileId] }, before, meta);
+    if (!changes) return before;
     await logEvent(client, lotId, "file_updated", { id: fileId, ...changes }, userId);
     const { rows } = await client.query(`${FILE_SELECT} where id = $1`, [fileId]);
     return rows[0] as TradeFile;

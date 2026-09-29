@@ -228,7 +228,20 @@ export function missingItems(kind: TradeKind, fields: TradeField[], files: Trade
 /** Never in a teaser, whatever the field's "buyers see at" says. */
 const NEVER_IN_TEASER = new Set(["seller_price", "location", "local_recycler"]);
 
-export function teaserText(trade: BulkTrade, fields: TradeField[]): string {
+/** Neutral subject for anything sent to buyers: a trade title can name the seller. */
+export const BUYER_SUBJECT = "Battery batch available";
+
+export function firstName(name?: string | null): string | null {
+  return name?.trim().split(/\s+/)[0] || null;
+}
+
+/** "Hi Sam," from a person's name, or "Hi," without one. */
+export function greeting(name?: string | null): string {
+  const first = firstName(name);
+  return first ? `Hi ${first},` : "Hi,";
+}
+
+export function teaserText(trade: BulkTrade, fields: TradeField[], recipient?: string | null): string {
   const kind = trade.trade_kind ?? "packs";
   const byKey = new Map(fields.map((field) => [field.field_key, field]));
   const lines = FIELD_TEMPLATES[kind]
@@ -238,7 +251,7 @@ export function teaserText(trade: BulkTrade, fields: TradeField[]): string {
       && (row.status === "confirmed" || row.status === "unverified"))
     .map(({ template, row }) => `${template.label}: ${row!.value.trim()}`);
   return [
-    "Hi,",
+    greeting(recipient),
     "",
     "We have a batch available that may fit what you buy:",
     "",
