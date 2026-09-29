@@ -45,6 +45,10 @@ type ObjectKanbanProps = {
   statuses: Status[];
   members?: Array<{ id: string; name: string }>;
   relationLabels?: Record<string, Record<string, string>>;
+  /** Enum field used for Kanban columns. Falls back to status-like fields. */
+  groupFieldName?: string;
+  /** Enum values retained in data but omitted from this board. */
+  hiddenColumns?: string[];
   /** Optional outer grouping rendered as independently expandable Kanban accordions. */
   accordionGroupFieldName?: string;
   onEntryClick?: (entryId: string) => void;
@@ -661,6 +665,8 @@ export function ObjectKanban({
   statuses,
   members,
   relationLabels,
+  groupFieldName,
+  hiddenColumns = [],
   accordionGroupFieldName,
   onEntryClick,
   onRefresh,
@@ -685,6 +691,10 @@ export function ObjectKanban({
 
   // Find the grouping field
   const groupField = useMemo(() => {
+    const configuredField = groupFieldName
+      ? fields.find((field) => field.type === "enum" && field.name === groupFieldName)
+      : undefined;
+    if (configuredField) {return configuredField;}
     const statusField = fields.find(
       (f) =>
         f.type === "enum" &&
@@ -692,7 +702,7 @@ export function ObjectKanban({
     );
     if (statusField) {return statusField;}
     return fields.find((f) => f.type === "enum") ?? null;
-  }, [fields]);
+  }, [fields, groupFieldName]);
 
   const accordionField = useMemo(
     () => accordionGroupFieldName
@@ -759,10 +769,12 @@ export function ObjectKanban({
       }
       availableColumns = Array.from(unique).map((v) => ({ name: v, color: "#94a3b8" }));
     }
-    return isWorkTaskAccordion
+    const objectColumns = isWorkTaskAccordion
       ? availableColumns.filter((column) => ACTIONABLE_WORK_TASK_STATUSES.has(column.name.trim().toLowerCase()))
       : availableColumns;
-  }, [statuses, groupField, isWorkTaskAccordion, localEntries]);
+    const hidden = new Set(hiddenColumns);
+    return objectColumns.filter((column) => !hidden.has(column.name));
+  }, [statuses, groupField, isWorkTaskAccordion, localEntries, hiddenColumns]);
 
   const groupEntriesByColumn = useCallback((sectionEntries: Record<string, unknown>[]) => {
     const groups: Record<string, Record<string, unknown>[]> = {};

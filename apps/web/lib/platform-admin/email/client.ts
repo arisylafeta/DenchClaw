@@ -15,7 +15,7 @@ export function getPostmarkClient(): postmark.ServerClient {
     _client = new postmark.ServerClient(
       env.postmarkServerToken,
       // Postmark's SDK timeout is expressed in seconds.
-      new postmark.Models.ClientOptions.Configuration(true, undefined, 15),
+      new postmark.Models.ClientOptions.Configuration(true, "api.postmarkapp.com", 15),
     );
   }
   return _client;

@@ -186,6 +186,22 @@ function parseAddressLocation(addressesJson: unknown): {
   };
 }
 
+function getListingCountry(locationAddress: unknown): string | null {
+  if (!locationAddress || typeof locationAddress !== "object" || Array.isArray(locationAddress)) {
+    return null;
+  }
+
+  const address = locationAddress as Record<string, unknown>;
+  for (const key of ["country", "countryCode"] as const) {
+    const value = address[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
 /**
  * Resolve an account's recipient email via membership -> users -> auth.users.
  */
@@ -574,7 +590,7 @@ export async function createInvitations(
   const { data: listing, error: listingError } = await supabase
     .from("listings")
     .select(
-      "id, title, seo_slug, listing_status, channel_mode, listing_specs(manufacturer, model, format, chemistry, pack_weight_kg, quantity, original_application, location_country)"
+      "id, title, seo_slug, listing_status, channel_mode, listing_specs(manufacturer, model, format, chemistry, pack_weight_kg, quantity, original_application, location_address)"
     )
     .eq("id", listingId)
     .eq("listing_status", "published")
@@ -738,7 +754,7 @@ export async function createInvitations(
             pack_weight_kg: number | null;
             quantity: number | null;
             original_application: string | null;
-            location_country: string | null;
+            location_address: Json | null;
           }[];
         }).listing_specs[0] ?? null)
       : ((listing as typeof listing & {
@@ -750,7 +766,7 @@ export async function createInvitations(
             pack_weight_kg: number | null;
             quantity: number | null;
             original_application: string | null;
-            location_country: string | null;
+            location_address: Json | null;
           } | null;
         }).listing_specs ?? null);
 
@@ -782,7 +798,7 @@ export async function createInvitations(
           chemistry: listingSpec?.chemistry ?? "Unknown",
           total_weight_kg: totalWeightKg,
           application: listingSpec?.original_application ?? "Not specified",
-          country: listingSpec?.location_country ?? "Unknown",
+          country: getListingCountry(listingSpec?.location_address) ?? "Unknown",
           listing_url: listingUrl,
         });
 

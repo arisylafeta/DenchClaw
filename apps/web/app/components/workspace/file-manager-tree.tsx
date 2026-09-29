@@ -54,6 +54,8 @@ export type TreeNode = {
   virtual?: boolean;
   /** True when the entry is a symbolic link / shortcut. */
   symlink?: boolean;
+  /** True when deeper children must be loaded through the browse API. */
+  truncated?: boolean;
   /** App manifest metadata (only for type: "app"). */
   appManifest?: {
     name: string;

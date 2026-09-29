@@ -87,6 +87,7 @@ export type TimelineZoom = "day" | "week" | "month" | "quarter";
 
 export type ViewTypeSettings = {
 	kanbanField?: string;
+	kanbanHiddenColumns?: string[];
 	calendarDateField?: string;
 	calendarEndDateField?: string;
 	calendarMode?: CalendarMode;

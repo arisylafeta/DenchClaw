@@ -2,6 +2,10 @@ import { queryPg } from "../postgres";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
 import { getTableColumns } from "./table-columns";
 import { buildWorkTaskReadScope } from "./work-task-read-scope";
+import {
+  getRegisteredEntryDetail,
+  type RegisteredEntryDetail,
+} from "./registered-entry-detail";
 
 type ObjectRow = {
   id: string;
@@ -9,6 +13,8 @@ type ObjectRow = {
   description?: string | null;
   default_view?: string | null;
   display_field?: string | null;
+  immutable?: boolean | null;
+  entity_table?: string | null;
 };
 
 type FieldRow = {
@@ -52,6 +58,7 @@ export type PostgresEntryData = {
   relationFaviconUrls: Record<string, Record<string, string>>;
   reverseRelations: PostgresReverseRelation[];
   effectiveDisplayField: string;
+  registeredDetail?: RegisteredEntryDetail;
 };
 
 const supportedTables: Record<string, string> = {
@@ -70,6 +77,19 @@ const supportedTables: Record<string, string> = {
   automation_loop: "automation_loops",
   automation_loop_run: "automation_loop_runs",
 };
+
+const SQL_IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/i;
+
+function resolveObjectTable(object: ObjectRow): string | null {
+  const registeredTable = object.entity_table?.trim();
+  if (registeredTable) {
+    if (!SQL_IDENTIFIER_RE.test(registeredTable)) {
+      throw new Error(`Invalid registered entity table: ${registeredTable}`);
+    }
+    return registeredTable;
+  }
+  return supportedTables[object.name] ?? null;
+}
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
@@ -315,7 +335,7 @@ export async function getPostgresEntryData(
     [object.id],
   );
 
-  const tableName = supportedTables[object.name];
+  const tableName = resolveObjectTable(object);
   const existingColumns = tableName
     ? await getTableColumns(tableName)
     : new Set<string>();
@@ -361,6 +381,7 @@ export async function getPostgresEntryData(
       userId,
     ),
     effectiveDisplayField: resolveDisplayField(object, fields),
+    registeredDetail: await getRegisteredEntryDetail(object.name, entryId, userId),
   };
 }
 

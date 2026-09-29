@@ -11,6 +11,8 @@ export type TreeNode = {
   children?: TreeNode[];
   /** True when the entry is a symbolic link. */
   symlink?: boolean;
+  /** True when deeper children must be loaded through the browse API. */
+  truncated?: boolean;
 };
 
 /**

@@ -115,6 +115,24 @@ describe("postgres object read adapter", () => {
               default_view: "table",
             },
           ];
+        if (objectName === "bulk_trade")
+          return [
+            {
+              id: "obj_bulk_trade",
+              name: "bulk_trade",
+              entity_table: "crm_bulk_trade_overview",
+              default_view: "table",
+              display_field: "Title",
+            },
+          ];
+        if (objectName === "unsafe_object")
+          return [
+            {
+              id: "obj_unsafe",
+              name: "unsafe_object",
+              entity_table: "crm_people; drop table crm_people",
+            },
+          ];
         return [
           {
             id: "seed_obj_people_00000000000000",
@@ -143,6 +161,13 @@ describe("postgres object read adapter", () => {
             { column_name: "title" },
             { column_name: "status" },
             { column_name: "price_amount" },
+          ];
+        }
+        if (table === "crm_bulk_trade_overview") {
+          return [
+            { column_name: "id" },
+            { column_name: "title" },
+            { column_name: "summary" },
           ];
         }
         if (table === "crm_interactions") {
@@ -219,6 +244,12 @@ describe("postgres object read adapter", () => {
         if (params?.[0] === "obj_opportunity") {
           return mockOpportunityFieldRows;
         }
+        if (params?.[0] === "obj_bulk_trade") {
+          return [
+            { id: "bt_title", name: "Title", type: "text", canonical_column: "title", sort_order: 0 },
+            { id: "bt_summary", name: "Summary", type: "richtext", canonical_column: "summary", sort_order: 1 },
+          ];
+        }
         if (params?.[0] === "obj_work_task") {
           return [
             {
@@ -276,6 +307,8 @@ describe("postgres object read adapter", () => {
         return mockFieldRows;
       }
       if (sql.includes("count(*)")) return [{ count: "1" }];
+      if (sql.includes("from crm_bulk_trade_overview"))
+        return [{ id: "lot-1", title: "Battery lot", summary: "Observed supply" }];
       if (sql.includes("from crm_people"))
         return [
           {
@@ -339,6 +372,30 @@ describe("postgres object read adapter", () => {
     expect(data.savedViews).toEqual([]);
     expect(data.activeView).toBeUndefined();
     expect(data.statuses).toEqual([]);
+  });
+
+  it("reads a registered entity table without adding a core object switch", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+    const data = await getPostgresObjectData(
+      "bulk_trade",
+      new URL("http://localhost"),
+    );
+
+    expect(data.entries).toEqual([
+      { id: "lot-1", title: "Battery lot", summary: "Observed supply" },
+    ]);
+    expect(queryPg).toHaveBeenCalledWith(
+      expect.stringContaining("from crm_bulk_trade_overview e"),
+      expect.any(Array),
+    );
+  });
+
+  it("rejects unsafe registered entity table names", async () => {
+    const { getPostgresObjectData } = await import("./object-read");
+
+    await expect(
+      getPostgresObjectData("unsafe_object", new URL("http://localhost")),
+    ).rejects.toThrow("Invalid registered entity table");
   });
 
   it("removes stale fields whose canonical_column does not exist on the backing table", async () => {

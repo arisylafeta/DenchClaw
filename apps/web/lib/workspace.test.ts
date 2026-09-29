@@ -205,6 +205,57 @@ describe("workspace utilities", () => {
     });
   });
 
+  // ─── Hermes workspace discovery ───────────────────────────────────
+
+  describe("Hermes workspace discovery", () => {
+    it("discovers the root Hermes profile as default alongside named profiles", async () => {
+      process.env.DENCH_AGENT_BACKEND = "hermes";
+      process.env.DENCH_HOME = "/home/testuser/.hermes";
+      delete process.env.OPENCLAW_WORKSPACE;
+
+      const { discoverWorkspaces, mockExists, mockReadFile, mockReaddir } = await importWorkspace();
+      const hermesRoot = "/home/testuser/.hermes";
+      const profilesRoot = join(hermesRoot, "profiles");
+      const enricherRoot = join(profilesRoot, "the-enricher");
+
+      mockReadFile.mockImplementation((p) => {
+        if (String(p).endsWith(".dench-active-profile.json")) {
+          return JSON.stringify({ activeProfile: "default" });
+        }
+        throw new Error("ENOENT");
+      });
+      mockReaddir.mockImplementation((dir) => {
+        if (String(dir) === profilesRoot) {
+          return [makeDirent("the-enricher", true)] as unknown as never[];
+        }
+        return [] as unknown as never[];
+      });
+      mockExists.mockImplementation((p) => [
+        join(hermesRoot, "config.yaml"),
+        join(hermesRoot, "workspace"),
+        join(enricherRoot, "config.yaml"),
+        join(enricherRoot, "workspace"),
+      ].includes(String(p)));
+
+      expect(discoverWorkspaces()).toEqual([
+        {
+          name: "default",
+          stateDir: hermesRoot,
+          workspaceDir: join(hermesRoot, "workspace"),
+          isActive: true,
+          hasConfig: true,
+        },
+        {
+          name: "the-enricher",
+          stateDir: enricherRoot,
+          workspaceDir: join(enricherRoot, "workspace"),
+          isActive: false,
+          hasConfig: true,
+        },
+      ]);
+    });
+  });
+
   // ─── resolveWebChatDir ────────────────────────────────────────────
 
   describe("resolveWebChatDir", () => {

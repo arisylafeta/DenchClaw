@@ -38,6 +38,7 @@ import { PersonProfile } from "../components/crm/person-profile";
 import { CompanyProfile } from "../components/crm/company-profile";
 import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../components/chat-panel";
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
+import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
@@ -294,13 +295,13 @@ function findCrmObjectNode(nodes: TreeNode[], objectName: string): TreeNode | nu
 }
 
 /**
- * Resolve the `people` or `company` workspace object node, falling back to a
+ * Resolve a dedicated CRM workspace object node, falling back to a
  * synthetic `{ name, path, type: "object" }` node when the tree fetch hasn't
  * surfaced it yet (or when the user is hitting the URL before the workspace
  * is fully populated). The synthetic path matches the seed schema's raw
  * object name so `loadContent` resolves it via `/api/workspace/objects/<name>`.
  */
-function resolveCrmObjectNode(tree: TreeNode[], objectName: "people" | "company"): TreeNode {
+function resolveCrmObjectNode(tree: TreeNode[], objectName: "people" | "company" | "campaign"): TreeNode {
   return (
     findCrmObjectNode(tree, objectName) ?? {
       name: objectName,
@@ -312,8 +313,8 @@ function resolveCrmObjectNode(tree: TreeNode[], objectName: "people" | "company"
 
 /**
  * Walk the workspace tree and collect every object node that should appear in
- * the sidebar's CRM section. Excludes `people` / `company` / `companies` since
- * those already have dedicated rows in the hard-coded CRM nav. Hidden CRM-only
+ * the sidebar's CRM section. Excludes objects with dedicated rows in the
+ * hard-coded CRM nav. Hidden CRM-only
  * objects (`email_thread` / `email_message` / `calendar_event` / `interaction`)
  * are filtered out upstream by the tree API and never appear here.
  */
@@ -321,6 +322,7 @@ const CRM_NAV_EXCLUDED_OBJECT_NAMES: ReadonlySet<string> = new Set([
   "people",
   "company",
   "companies",
+  "campaign",
 ]);
 
 /**
@@ -1304,6 +1306,7 @@ function WorkspacePageInner() {
         | "cron"
         | "crm-people"
         | "crm-companies"
+        | "crm-campaigns"
         | "crm-inbox"
         | "crm-calendar"
         | "platform-proposals"
@@ -1318,11 +1321,11 @@ function WorkspacePageInner() {
       // The active route applies any full-view policy after the tab changes.
       ensureRightPanelOpenWide();
 
-      // People / Companies render through the standard ObjectView pipeline
+      // People / Companies / Campaigns render through the standard ObjectView pipeline
       // (same path as `?path=<custom-object>`), so the toolbar, table, saved
       // views, and column controls match every other CRM object.
-      if (target === "crm-people" || target === "crm-companies") {
-        const objectName = target === "crm-people" ? "people" : "company";
+      if (target === "crm-people" || target === "crm-companies" || target === "crm-campaigns") {
+        const objectName = target === "crm-people" ? "people" : target === "crm-companies" ? "company" : "campaign";
         const node = resolveCrmObjectNode(tree, objectName);
         // preview: false → each left-sidebar click opens a NEW persistent
         // tab instead of replacing the existing preview tab. If the tab is
@@ -1415,6 +1418,22 @@ function WorkspacePageInner() {
       // Workspace-mode folders are expanded/collapsed inline in the sidebar
       // tree — don't open them in the main content panel.
       if (node.type === "folder") {
+        if (node.truncated && workspaceRoot) {
+          const absolutePath = `${workspaceRoot.replace(/\/$/, "")}/${node.path}`;
+          setBrowseDir(absolutePath);
+          dispatch({
+            type: "openContent",
+            tab: {
+              id: contentTabIdFor("browse", absolutePath, { browsePath: absolutePath }),
+              kind: "browse",
+              path: absolutePath,
+              title: node.name,
+              meta: { browsePath: absolutePath },
+              preview: true,
+            },
+          });
+          closeEntryModalIfOpen();
+        }
         return;
       }
       if (!isMobile && node.type === "object" && (node.name === "project" || node.name === "work_task")) {
@@ -1572,6 +1591,7 @@ function WorkspacePageInner() {
     "people",
     "company",
     "companies",
+    "campaign",
     "email_thread",
     "email_message",
     "calendar_event",
@@ -2314,6 +2334,8 @@ function WorkspacePageInner() {
           (activeContentTab?.kind === "object" &&
             (activeContentTab.path === "company" || activeContentTab.path === "companies"))
           ? "companies" as const
+          : activeContentTab?.kind === "object" && activeContentTab.path === "campaign"
+            ? "campaigns" as const
           : activeContentTab?.kind === "crm-inbox"
             ? "inbox" as const
             : activeContentTab?.kind === "crm-calendar"
@@ -2904,6 +2926,9 @@ function ContentRenderer({
       );
 
     case "object":
+      if (content.data.object.name === "bulk_trade") {
+        return <BulkTradesView onOpenEntry={onOpenEntry} />;
+      }
       return (
         <ObjectView
           key={content.data.object.name}
@@ -4000,6 +4025,8 @@ function ObjectView({
               statuses={data.statuses}
               members={members}
               relationLabels={data.relationLabels}
+              groupFieldName={effectiveSettings.kanbanField}
+              hiddenColumns={effectiveSettings.kanbanHiddenColumns}
               accordionGroupFieldName={data.object.name === "work_task" ? "Project" : undefined}
               onEntryClick={handleEntryClickProp}
               onRefresh={handleRefresh}

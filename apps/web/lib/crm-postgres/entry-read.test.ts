@@ -242,6 +242,59 @@ describe("postgres entry read", () => {
       expect(String(entryCall?.[0])).toContain("alex@rebattery.io");
     });
 
+    it("loads entries from a registered read-only entity table", async () => {
+      queryPg.mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (sql.includes("from crm_objects") && sql.includes("where name = $1")) {
+          expect(params).toEqual(["bulk_trade"]);
+          return [{
+            id: "reb_bulk_trade_object",
+            name: "bulk_trade",
+            display_field: "Title",
+            entity_table: "crm_bulk_trade_overview",
+            immutable: true,
+          }];
+        }
+        if (sql.includes("from information_schema.columns")) {
+          return [
+            { column_name: "id" },
+            { column_name: "created_at" },
+            { column_name: "updated_at" },
+            { column_name: "title" },
+            { column_name: "stage" },
+          ];
+        }
+        if (sql.includes("from crm_fields") && sql.includes("left join crm_objects")) {
+          return [
+            { id: "title", name: "Title", type: "text", canonical_column: "title", sort_order: 1 },
+            { id: "stage", name: "Stage", type: "enum", canonical_column: "stage", sort_order: 2 },
+          ];
+        }
+        if (sql.includes("from crm_bulk_trade_overview")) {
+          return [{
+            entry_id: "bulk-panasonic-oklahoma",
+            created_at: "2026-01-01",
+            updated_at: "2026-01-02",
+            Title: "Oklahoma Panasonic NCR2170M-4 cells",
+            Stage: "In Conversation",
+          }];
+        }
+        if (sql.includes("from crm_relation_links")) return [];
+        return [];
+      });
+
+      const { getPostgresEntryData } = await import("./entry-read");
+      const data = await getPostgresEntryData("bulk_trade", "bulk-panasonic-oklahoma");
+
+      expect(data.entry).toMatchObject({
+        entry_id: "bulk-panasonic-oklahoma",
+        Title: "Oklahoma Panasonic NCR2170M-4 cells",
+        Stage: "In Conversation",
+      });
+      expect(queryPg.mock.calls.some(([sql]) =>
+        String(sql).includes("from crm_bulk_trade_overview") && String(sql).includes("where id = $1")
+      )).toBe(true);
+    });
+
     it("does not filter fields when the object has no backing table", async () => {
       // The task object has no supported Postgres table, so we cannot validate
       // canonical columns and must leave fields untouched.

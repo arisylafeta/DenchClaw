@@ -29,6 +29,8 @@ export type TreeNode = {
   virtual?: boolean;
   /** True when the entry is a symbolic link. */
   symlink?: boolean;
+  /** True when deeper children must be loaded through the browse API. */
+  truncated?: boolean;
   /** App manifest metadata (only for type: "app"). */
   appManifest?: {
     name: string;
@@ -90,6 +92,20 @@ const ROOT_ONLY_HIDDEN_SYNC_OBJECTS = new Set([
   "email_thread",
   "interaction",
 ]);
+
+/** Generated directories that must never be expanded into the sidebar tree. */
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".next",
+  ".Trash",
+  "__pycache__",
+  ".cache",
+  "dist",
+]);
+
+/** Keep the eager sidebar payload bounded; deeper paths use the browse API. */
+const MAX_TREE_DEPTH = 3;
 
 async function loadDbObjects(): Promise<Map<string, DbObject>> {
   const objects = new Map<string, DbObject>();
@@ -156,6 +172,7 @@ async function buildTree(
   relativeBase: string,
   dbObjects: Map<string, DbObject>,
   showHidden = false,
+  depth = 0,
 ): Promise<TreeNode[]> {
   const nodes: TreeNode[] = [];
 
@@ -183,13 +200,18 @@ async function buildTree(
     return { entry, absPath, effectiveType };
   }));
 
-  const sorted = typedEntries.toSorted((a, b) => {
-    const dirA = a.effectiveType === "directory";
-    const dirB = b.effectiveType === "directory";
-    if (dirA && !dirB) {return -1;}
-    if (!dirA && dirB) {return 1;}
-    return a.entry.name.localeCompare(b.entry.name);
-  });
+  const sorted = typedEntries
+    .filter(
+      ({ entry, effectiveType }) =>
+        effectiveType !== "directory" || !SKIP_DIRS.has(entry.name),
+    )
+    .toSorted((a, b) => {
+      const dirA = a.effectiveType === "directory";
+      const dirB = b.effectiveType === "directory";
+      if (dirA && !dirB) {return -1;}
+      if (!dirA && dirB) {return 1;}
+      return a.entry.name.localeCompare(b.entry.name);
+    });
 
   for (const { entry, absPath, effectiveType } of sorted) {
     // .object.yaml is consumed for metadata; only show it as a visible node when revealing hidden files
@@ -205,7 +227,9 @@ async function buildTree(
       if (entry.name.endsWith(".dench.app")) {
         const manifest = await readAppManifest(absPath);
         const displayName = manifest?.name || entry.name.replace(/\.dench\.app$/, "");
-        const children = showHidden ? await buildTree(absPath, relPath, dbObjects, showHidden) : undefined;
+        const children = showHidden && depth < MAX_TREE_DEPTH
+          ? await buildTree(absPath, relPath, dbObjects, showHidden, depth + 1)
+          : undefined;
         nodes.push({
           name: displayName,
           path: relPath,
@@ -224,7 +248,10 @@ async function buildTree(
       // alone, or ordinary folders like `marketing/influencers` duplicate the
       // `influencers` table in CRM navigation.
       const dbObject = relativeBase === "" ? dbObjects.get(entry.name) : undefined;
-      const children = await buildTree(absPath, relPath, dbObjects, showHidden);
+      const children = depth < MAX_TREE_DEPTH
+        ? await buildTree(absPath, relPath, dbObjects, showHidden, depth + 1)
+        : [];
+      const truncated = depth >= MAX_TREE_DEPTH;
 
       if (objectMeta || dbObject) {
         nodes.push({
@@ -237,6 +264,7 @@ async function buildTree(
               | "table"
               | "kanban") ?? "table",
           children: children.length > 0 ? children : undefined,
+          ...(truncated && { truncated: true }),
           ...(isSymlink && { symlink: true }),
         });
       } else {
@@ -245,6 +273,7 @@ async function buildTree(
           path: relPath,
           type: "folder",
           children: children.length > 0 ? children : undefined,
+          ...(truncated && { truncated: true }),
           ...(isSymlink && { symlink: true }),
         });
       }

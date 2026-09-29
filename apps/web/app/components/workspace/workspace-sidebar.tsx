@@ -120,6 +120,7 @@ type WorkspaceSidebarProps = {
       | "cron"
       | "crm-people"
       | "crm-companies"
+      | "crm-campaigns"
       | "crm-inbox"
       | "crm-calendar"
       | "platform-proposals"
@@ -130,7 +131,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "people" | "companies" | "inbox" | "calendar" | null;
+  activeCrmTarget?: "people" | "companies" | "campaigns" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -324,8 +325,8 @@ export function WorkspaceSidebar({
 	// swaps the body with a chat history list provided by the host.
 	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
 	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
-	const [adminTreeOpen, setAdminTreeOpen] = useState(true);
-	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(true);
+	const [adminTreeOpen, setAdminTreeOpen] = useState(false);
+	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(false);
   const [authUser, setAuthUser] = useState<NavUserData | null>(null);
   useEffect(() => {
     let active = true;
@@ -384,6 +385,17 @@ export function WorkspaceSidebar({
 			),
 		},
 		{
+			id: "crm-campaigns" as const,
+			label: "Campaigns",
+			target: "campaigns" as const,
+			icon: (
+				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+					<path d="m3 11 13-5v12L3 13z" />
+					<path d="M7 14v5h3l1-4M19 9a4 4 0 0 1 0 6" />
+				</svg>
+			),
+		},
+		{
 			id: "crm-inbox" as const,
 			label: "Inbox",
 			target: "inbox" as const,
@@ -391,19 +403,6 @@ export function WorkspaceSidebar({
 				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
 					<polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
 					<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z" />
-				</svg>
-			),
-		},
-		{
-			id: "crm-calendar" as const,
-			label: "Calendar",
-			target: "calendar" as const,
-			icon: (
-				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-					<rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-					<line x1="16" y1="2" x2="16" y2="6" />
-					<line x1="8" y1="2" x2="8" y2="6" />
-					<line x1="3" y1="10" x2="21" y2="10" />
 				</svg>
 			),
 		},
@@ -421,12 +420,6 @@ export function WorkspaceSidebar({
 			label: "Listings",
 			target: "listings" as const,
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /></svg>,
-		},
-		{
-			id: "platform-accounts" as const,
-			label: "Accounts",
-			target: "accounts" as const,
-			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="m19 8 2 2 3-3" /></svg>,
 		},
 		{
 			id: "platform-battery-review" as const,
@@ -448,17 +441,7 @@ export function WorkspaceSidebar({
 		},
 	];
 
-	const cronNavItem = {
-		id: "cron" as const,
-		label: "Cron",
-		icon: (
-			<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-				<circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-			</svg>
-		),
-	};
-
-	const objectGroups = categorizeSidebarObjects(customCrmObjects);
+	const objectGroups = categorizeSidebarObjects(customCrmObjects?.filter((object) => object.name !== "campaign"));
 
 	const renderCompactObject = (object: CustomCrmObject) => {
 		const active = activeCrmObjectName === object.name;
@@ -623,16 +606,6 @@ export function WorkspaceSidebar({
 					<div role="group" aria-label="Workspace" className="flex flex-col items-center gap-0.5">
 						{objectGroups.work.map(renderCompactObject)}
 						{objectGroups.automations.map(renderCompactObject)}
-						<button
-							type="button"
-							onClick={() => onNavigate(cronNavItem.id)}
-							className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors"
-							style={{ color: "var(--color-text)" }}
-							title={cronNavItem.label}
-							aria-label={cronNavItem.label}
-						>
-							{cronNavItem.icon}
-						</button>
 					</div>
 					</>)}
 				</div>
@@ -849,15 +822,6 @@ export function WorkspaceSidebar({
 					{workspaceTreeOpen && <div id="sidebar-workspace-tree" role="group" aria-label="Workspace" className="ml-2 space-y-0.5 border-l pl-2" style={{ borderColor: "var(--color-border)" }}>
 						{objectGroups.work.map(renderExpandedObject)}
 						{objectGroups.automations.map(renderExpandedObject)}
-						<button
-							type="button"
-							onClick={() => onNavigate(cronNavItem.id)}
-							className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
-							style={{ color: "var(--color-text)" }}
-						>
-							<span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{cronNavItem.icon}</span>
-							{cronNavItem.label}
-						</button>
 					</div>}
 				</>)}
 			</div>
