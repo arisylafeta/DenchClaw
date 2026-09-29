@@ -1,6 +1,7 @@
 // Bulk Trades v3, trade page: buyers, bids, contacts, field data and files. Safe for client and server.
 
 import type { BulkTrade, TradeKind } from "./bulk-trades";
+import templates from "./bulk-trade-templates.json";
 
 export const BUYER_STATUSES = [
   "To contact", "Teaser sent", "No reply", "NDA, specs sent", "Bid in", "LOI or deposit", "Won",
@@ -132,72 +133,11 @@ export type TemplateField = {
   visibility: Visibility;
 };
 
-const f = (key: string, label: string, neededFor: NeededFor, visibility: Visibility): TemplateField =>
-  ({ key, label, neededFor, visibility });
-
-const SHARED_TAIL = [
-  f("seller_price", "Seller price", "Closing", "never"),
-  f("sale_route", "Sale route", "Bids", "teaser"),
-  f("clear_by", "Clear warehouse by", "Shipping", "after_nda"),
-  f("location", "Location", "Bids", "after_loi"),
-  f("transport_class", "Transport class", "Shipping", "after_nda"),
-];
-
-export const FIELD_TEMPLATES: Record<TradeKind, TemplateField[]> = {
-  packs: [
-    f("model", "Pack model", "Teaser", "teaser"),
-    f("chemistry", "Chemistry", "Teaser", "teaser"),
-    f("capacity", "Capacity per pack", "Teaser", "teaser"),
-    f("quantity", "Quantity", "Teaser", "teaser"),
-    f("soh", "State of health", "Bids", "after_nda"),
-    f("test_data", "BMS or test data", "Bids", "after_loi"),
-    f("manufacture_date", "Manufacture date", "Teaser", "teaser"),
-    ...SHARED_TAIL,
-  ],
-  cells: [
-    f("model", "Cell model", "Teaser", "teaser"),
-    f("format", "Format", "Teaser", "teaser"),
-    f("chemistry", "Chemistry", "Teaser", "teaser"),
-    f("capacity", "Capacity per cell", "Teaser", "teaser"),
-    f("quantity", "Quantity", "Teaser", "teaser"),
-    f("soh", "State of health", "Bids", "after_nda"),
-    f("test_data", "Test data", "Bids", "after_loi"),
-    f("manufacture_date", "Manufacture date", "Teaser", "teaser"),
-    ...SHARED_TAIL,
-  ],
-  systems: [
-    f("model", "System model", "Teaser", "teaser"),
-    f("chemistry", "Chemistry", "Teaser", "teaser"),
-    f("energy", "Energy", "Teaser", "teaser"),
-    f("power", "Power", "Teaser", "teaser"),
-    f("quantity", "Units", "Teaser", "teaser"),
-    f("commissioned", "Commissioned", "Teaser", "teaser"),
-    f("soh", "State of health", "Bids", "after_nda"),
-    f("test_data", "Operating data", "Bids", "after_loi"),
-    ...SHARED_TAIL,
-  ],
-  recycling: [
-    f("model", "Battery type", "Teaser", "teaser"),
-    f("chemistry", "Chemistry", "Teaser", "teaser"),
-    f("quantity", "Quantity", "Teaser", "teaser"),
-    f("weight", "Weight (tonnes)", "Teaser", "teaser"),
-    f("condition", "Condition", "Bids", "after_nda"),
-    f("countries", "Countries crossed", "Shipping", "after_nda"),
-    f("local_recycler", "Local recycler", "Shipping", "never"),
-    f("seller_price", "Recycling fee", "Closing", "never"),
-    f("clear_by", "Collect by", "Shipping", "after_nda"),
-    f("location", "Location", "Bids", "after_loi"),
-    f("transport_class", "Transport class", "Shipping", "after_nda"),
-  ],
-};
+// The templates live in bulk-trade-templates.json so the Python inbox check reads the same list.
+export const FIELD_TEMPLATES = templates.fields as Record<TradeKind, TemplateField[]>;
 
 /** Files every trade needs, and the step each one unlocks. */
-export const REQUIRED_FILES: { type: FileType; label: string; neededFor: NeededFor }[] = [
-  { type: "Photos", label: "Photos", neededFor: "Teaser" },
-  { type: "Test report", label: "BMS or test report", neededFor: "Bids" },
-  { type: "Datasheet", label: "Datasheet", neededFor: "Bids" },
-  { type: "Transport documents", label: "Transport documents", neededFor: "Shipping" },
-];
+export const REQUIRED_FILES = templates.requiredFiles as { type: FileType; label: string; neededFor: NeededFor }[];
 
 export function templateField(kind: TradeKind, key: string): TemplateField | undefined {
   return FIELD_TEMPLATES[kind].find((field) => field.key === key);
