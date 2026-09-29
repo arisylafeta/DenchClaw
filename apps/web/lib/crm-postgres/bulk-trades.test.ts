@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// Runs only against a disposable database with migrations 003 and 008 applied, e.g.
-// BULK_TRADES_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/denchclaw
+// Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
 describe.skipIf(!TEST_URL)("bulk trade writes", () => {

@@ -1,0 +1,6 @@
+[
+  { "within": "nav[aria-label=View]", "view": "$text" },
+  { "within": "nav[aria-label=Breadcrumb]", "view": "list" },
+  { "role": "tab", "view": { "Overview": "overview", "Data and files": "data" } },
+  { "text": "Iveco FPT eBS37", "view": "overview" }
+]
