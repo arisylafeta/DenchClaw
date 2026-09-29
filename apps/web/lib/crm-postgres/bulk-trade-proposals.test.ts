@@ -49,6 +49,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     await proposals.decideProposal(await propose("next_step", null, { next_step: "Ask for the address", next_step_due: "2026-10-01" }), "accept", user);
     await proposals.decideProposal(await propose("new_buyer", null, { name: "New Buyer Co", wants: "36 packs" }), "accept", user);
     await proposals.decideProposal(await propose("file", null, { file_name: "spec.pdf", gmail_message_id: "g1", file_type: "Datasheet" }), "accept", user);
+    await proposals.decideProposal(await propose("link_contact", null, { name: "sam@supplier.test", email: "sam@supplier.test" }), "accept", user);
 
     const detail = (await details.getTradeDetail(lotId))!;
     expect(detail.fields.find((field) => field.field_key === "manufacture_date")).toMatchObject({
@@ -57,9 +58,10 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(detail.buyers.map((buyer) => [buyer.name, buyer.status])).toEqual([["Synthetic Buyer", "Teaser sent"], ["New Buyer Co", "To contact"]]);
     expect(detail.trade).toMatchObject({ next_step: "Ask for the address", next_step_due: "2026-10-01" });
     expect(detail.files).toMatchObject([{ file_name: "spec.pdf", file_type: "Datasheet", visibility: "never" }]);
+    expect(detail.contacts).toMatchObject([{ email: "sam@supplier.test" }]);
     expect(await proposals.tradeProposals(lotId)).toEqual([]);
     const events = await pg.queryPg<{ kind: string }>("select kind from crm_bulk_trade_events where lot_id = $1", [lotId]);
-    expect(events.filter((event) => event.kind === "proposal_accepted")).toHaveLength(5);
+    expect(events.filter((event) => event.kind === "proposal_accepted")).toHaveLength(6);
   });
 
   it("applies a proposal once however often it is clicked, and ignores without changing anything", async () => {

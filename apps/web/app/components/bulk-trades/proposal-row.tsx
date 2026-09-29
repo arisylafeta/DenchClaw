@@ -11,6 +11,7 @@ const ACCEPT_LABEL: Record<Proposal["kind"], string> = {
   new_buyer: "Add buyer",
   file: "Add file",
   needs_triage: "Got it",
+  link_contact: "Add contact",
   possible_trade: "Create trade",
 };
 

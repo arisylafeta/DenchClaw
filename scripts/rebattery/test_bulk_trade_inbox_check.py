@@ -18,12 +18,16 @@ TRADE = {
     "id": "bt_1", "title": "Synthetic eBS37", "trade_kind": "packs", "trade_stage": "With buyers", "fact_line": None,
     "next_step": "Chase supplier", "next_step_due": "2026-09-29", "waiting_on": "us",
     "emails": {"sam@supplier.test"}, "threads": {"thr-1"},
-    "buyers": [{"id": "btb_1", "name": "Synthetic Storage", "contact": "Tess", "status": "To contact"}],
+    "buyers": [{"id": "btb_1", "name": "Synthetic Storage", "contact": "Tess", "status": "To contact",
+                "last_touch_on": "2026-09-28", "last_touch_via": "Email", "chase_on": None}],
     "fields": {"chemistry": {"value": "NMC", "status": "confirmed"}},
+    "files": {"datasheet.pdf"},
 }
 SOURCE = {"kind": "gmail", "id": "m1", "thread": "thr-9", "at": NOW, "synced_at": NOW, "label": "Gmail · sam@supplier.test",
           "url": None, "inbound": True, "participants": {"sam@supplier.test"}, "title": "Stock",
-          "text": "Subject: Stock\n\nManufacturing dates:  2021 to 2025. Packs are in Turin.", "has_attachments": False}
+          "text": "Subject: Stock\n\nManufacturing dates:  2021 to 2025. Packs are in Turin.\n\nAttachments: LC draft.docx, Datasheet.pdf, Uggc0GlP04b4Jqe4.png",
+          "has_attachments": True, "from": "sam@supplier.test",
+          "attachments": [{"name": "LC draft.docx", "id": "a1"}, {"name": "Datasheet.pdf", "id": "a2"}, {"name": "Uggc0GlP04b4Jqe4.png", "id": "a3"}]}
 
 
 class Helpers(unittest.TestCase):
@@ -62,8 +66,28 @@ class Validate(unittest.TestCase):
              "summary": "Next", "quote": "Packs are in Turin", "source_id": "m1"},
         ])
         self.assertEqual([p["kind"] for p in kept], ["field", "buyer_update", "next_step"])
-        self.assertEqual(kept[1]["proposed"], {"status": "Teaser sent", "last_touch_via": "Email"})
+        self.assertEqual(kept[1]["proposed"], {"status": "Teaser sent"})  # via Email is already recorded
         self.assertIsNone(kept[2]["proposed"]["next_step_due"])
+
+    def test_drops_what_is_already_recorded(self):
+        kept = self.run_validate([
+            {"kind": "field", "target": "chemistry", "proposed": {"value": "nmc"}, "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "buyer_update", "target": "btb_1", "proposed": {"last_touch_on": "2026-09-28", "last_touch_via": "Email"},
+             "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "next_step", "proposed": {"next_step": "chase supplier"}, "quote": "Packs are in Turin", "source_id": "m1"},
+        ])
+        self.assertEqual(kept, [])
+
+    def test_files_only_named_attachments_not_on_the_trade_and_not_inline_images(self):
+        kept = self.run_validate([
+            {"kind": "file", "target": "LC draft.docx", "proposed": {}, "quote": "LC draft.docx", "source_id": "m1"},
+            {"kind": "file", "target": "LC draft.docx", "proposed": {}, "quote": "LC draft.docx", "source_id": "m1"},
+            {"kind": "file", "target": "Datasheet.pdf", "proposed": {}, "quote": "Datasheet.pdf", "source_id": "m1"},
+            {"kind": "file", "target": "Uggc0GlP04b4Jqe4.png", "proposed": {}, "quote": "Uggc0GlP04b4Jqe4.png", "source_id": "m1"},
+            {"kind": "file", "target": "Invented.pdf", "proposed": {}, "quote": "Packs are in Turin", "source_id": "m1"},
+        ])
+        self.assertEqual([p["proposed"]["file_name"] for p in kept], ["LC draft.docx"])
+        self.assertEqual(kept[0]["proposed"], {"file_name": "LC draft.docx", "gmail_message_id": "m1", "attachment_id": "a1", "file_type": "Other"})
 
     def test_drops_unquoted_unknown_targets_and_bad_values(self):
         kept = self.run_validate([
@@ -119,6 +143,9 @@ class FullRun(unittest.TestCase):
               insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
                 select 'msg_new', 'Offer: 400 Leaf packs in Leeds', now(), '400 Nissan Leaf battery packs available in Leeds, 40 kWh.',
                        'g-msg-new', 'seller@unknown.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
+                select 'msg_known', 'Batch update', now(), 'More packs for the run trade batch are ready.',
+                       'g-msg-known', 'new.person@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
 
     def tearDown(self):
@@ -126,8 +153,13 @@ class FullRun(unittest.TestCase):
 
     def fake_model(self, system, user, key):
         if system is check.POSSIBLE_SYSTEM:
-            return {"trades": [{"source_id": "g-msg-new", "title": "Leaf packs, Leeds", "trade_kind": "packs",
-                                "summary": "400 Leaf packs offered", "quote": "400 Nissan Leaf battery packs available in Leeds"}]}
+            existing = [t["id"] for t in json.loads(user)["EXISTING"]]
+            assert "bt_run" in existing
+            return {"trades": [
+                {"source_id": "g-msg-new", "title": "Leaf packs, Leeds", "trade_kind": "packs",
+                 "summary": "400 Leaf packs offered", "quote": "400 Nissan Leaf battery packs available in Leeds"},
+                {"source_id": "g-msg-known", "title": "Run trade", "existing_trade_id": "bt_run",
+                 "summary": "About the run trade", "quote": "More packs for the run trade batch"}]}
         return {"proposals": [
             {"kind": "field", "target": "manufacture_date", "proposed": {"value": "2021 to 2025"},
              "summary": "Manufacture date", "quote": "Manufacturing dates: 2021 to 2025", "source_id": "g-msg-run"},
@@ -149,7 +181,8 @@ class FullRun(unittest.TestCase):
         self.assertIn(("bt_run", "field", "manufacture_date", "2021 to 2025", "new"), rows)
         self.assertNotIn("Milan", [r[3] for r in rows])  # the unquoted claim was dropped
         self.assertIn((None, "possible_trade", None, None, "new"), rows)
-        self.assertEqual(len(rows), 2)
+        self.assertIn(("bt_run", "link_contact", None, None, "new"), rows)
+        self.assertEqual(len(rows), 3)
         self.assertEqual([r[0] for r in runs[-2:]], ["ok", "ok"])
         self.assertEqual(runs[-1][2], 0)
 

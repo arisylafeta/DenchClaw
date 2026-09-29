@@ -108,7 +108,8 @@ export type TradeFile = {
   created_at: string;
 };
 
-export type ProposalKind = "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "possible_trade";
+export type ProposalKind =
+  | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade";
 
 /** A change the inbox check found in Gmail or Granola. Nothing happens until Alex accepts it. */
 export type Proposal = {

@@ -105,7 +105,8 @@ def load_trades(cur):
            from crm_bulk_trade_lots where trade_stage = any(%s)""",
         (list(LIVE_STAGES),),
     )
-    trades = {row["id"]: {**row, "emails": set(), "threads": set(), "buyers": [], "fields": {}} for row in cur.fetchall()}
+    trades = {row["id"]: {**row, "emails": set(), "threads": set(), "buyers": [], "fields": {}, "files": set()}
+              for row in cur.fetchall()}
     if not trades:
         return trades
     ids = list(trades)
@@ -114,12 +115,18 @@ def load_trades(cur):
     for row in cur.fetchall():
         trades[row["lot_id"]]["emails"] |= emails_in([row["email"]])
     cur.execute(
-        """select b.lot_id, b.id, b.name, b.contact, b.status, p.email
+        """select b.lot_id, b.id, b.name, b.contact, b.status, p.email,
+                  to_char(b.last_touch_on, 'YYYY-MM-DD') as last_touch_on, b.last_touch_via,
+                  to_char(b.chase_on, 'YYYY-MM-DD') as chase_on
            from crm_bulk_trade_buyers b left join crm_people p on p.id = b.person_id
            where b.lot_id = any(%s) order by b.created_at""", (ids,))
     for row in cur.fetchall():
-        trades[row["lot_id"]]["buyers"].append({k: row[k] for k in ("id", "name", "contact", "status")})
+        trades[row["lot_id"]]["buyers"].append(
+            {k: row[k] for k in ("id", "name", "contact", "status", "last_touch_on", "last_touch_via", "chase_on")})
         trades[row["lot_id"]]["emails"] |= emails_in([row["email"]])
+    cur.execute("select lot_id, lower(file_name) as name from crm_bulk_trade_files where lot_id = any(%s)", (ids,))
+    for row in cur.fetchall():
+        trades[row["lot_id"]]["files"].add(row["name"])
     cur.execute("select lot_id, field_key, value, status from crm_bulk_trade_fields where lot_id = any(%s)", (ids,))
     for row in cur.fetchall():
         trades[row["lot_id"]]["fields"][row["field_key"]] = {"value": row["value"], "status": row["status"]}
@@ -169,6 +176,7 @@ def load_emails(cur, mailbox, since):
             "label": f"Gmail · {row['from_email'] or 'unknown'}",
             "url": f"https://mail.google.com/mail/u/?authuser={mailbox}#all/{row['gmail_thread_id']}" if row["gmail_thread_id"] else None,
             "inbound": not sender.endswith("@" + OWN_DOMAIN),
+            "from": sender,
             "participants": external(emails_in([sender, *row["recipients"]])),
             "title": row["subject"] or "(no subject)",
             "text": f"Subject: {row['subject'] or ''}\nFrom: {row['from_email'] or ''}\n\n{row['body']}",
@@ -209,6 +217,7 @@ def load_granola(since):
             "label": f"Call · {note.get('title') or 'Granola note'}",
             "url": note.get("web_url"),
             "inbound": True,
+            "from": None,
             "participants": external(emails_in(people)),
             "title": note.get("title") or "Call",
             "text": f"Meeting: {note.get('title') or ''}\n\nSummary:\n{note.get('summary_markdown') or note.get('summary_text') or ''}\n\nTranscript:\n{transcript}",
@@ -254,10 +263,14 @@ Each proposal: {"kind", "target", "proposed", "summary", "quote", "source_id"}.
 - kind "next_step": proposed = {"next_step": "...", "next_step_due": "YYYY-MM-DD" or null, "waiting_on": "us" | "them"}.
   Only when the source makes a concrete next action clear.
 - kind "new_buyer": proposed = {"name": "...", "contact": "...", "wants": "..."} for a buyer not in BUYERS.
+- kind "file": target = one attachment name from the source's "Attachments:" line, proposed = {}. Only files about
+  THIS trade (spec sheets, test reports, photos, stock lists, contracts, LCs, proposals for this batch). Skip logos,
+  signatures and files about other batches. Use the file name itself as the quote.
 - "summary": one short plain sentence for Alex.
 - "quote": copied EXACTLY, word for word, from the source text (8-300 characters). A proposal without an exact quote is discarded.
 - "source_id": the id of the source the quote comes from.
-Propose nothing that is already recorded, speculative, or only implied. An empty list is a good answer."""
+Propose nothing that is already recorded (compare with TRADE, FIELDS and BUYERS), speculative, or only implied.
+An empty list is a good answer."""
 
 
 def trade_prompt(trade, sources):
@@ -277,31 +290,41 @@ def trade_prompt(trade, sources):
 
 POSSIBLE_SYSTEM = """You screen inbound emails for possible new bulk battery trades for ReBattery, which brokers
 second-life and surplus EV batteries, cells, BESS and recycling lots. Reply with ONLY JSON:
-{"trades": [{"source_id", "title", "trade_kind": "packs" | "cells" | "systems" | "recycling", "summary", "quote"}]}.
+{"trades": [{"source_id", "title", "trade_kind": "packs" | "cells" | "systems" | "recycling", "summary", "quote",
+             "existing_trade_id": null or the id from EXISTING when the email is about that trade}]}.
 Include an email only if someone offers or seeks a specific batch (quantity, model or location). Skip newsletters,
-events, invoices, marketing and anything already vague. "quote" must be copied exactly from the email (8-300 characters)."""
+events, invoices, marketing and anything already vague. "quote" must be copied exactly from the email (8-300 characters).
+The input is {"EXISTING": [{"id", "title"}], "EMAILS": [...]}. Set existing_trade_id only for a clear match."""
+
+
+HASH_IMAGE = re.compile(r"^(image\d+|[A-Za-z0-9_-]{12,})\.(png|gif|jpe?g)$", re.I)
 
 
 def validate(raw, trade, sources_by_id):
-    """Keep only proposals that are well-formed, point at real targets and quote their source."""
+    """Keep only proposals that are well-formed, point at real targets, quote their source and
+    change something that is not already recorded."""
     kind_fields = {f["key"] for f in TEMPLATES["fields"][trade["trade_kind"] or "packs"]}
-    buyer_ids = {b["id"] for b in trade["buyers"]}
+    buyers = {b["id"]: b for b in trade["buyers"]}
+    files_seen = set(trade["files"])
     kept = []
     for p in raw.get("proposals") or []:
         if not isinstance(p, dict):
             continue
         source = sources_by_id.get(str(p.get("source_id")))
         proposed = p.get("proposed") if isinstance(p.get("proposed"), dict) else None
-        if not source or not proposed or not quote_ok(p.get("quote"), source["text"]):
+        if not source or proposed is None or not quote_ok(p.get("quote"), source["text"]):
             continue
         kind, target = p.get("kind"), p.get("target")
         if kind == "field":
             if target not in kind_fields or not str(proposed.get("value") or "").strip():
                 continue
+            current = (trade["fields"].get(target) or {}).get("value")
+            if current and norm(current) == norm(str(proposed["value"])):
+                continue
             proposed = {"value": str(proposed["value"]).strip(),
                         "status": proposed.get("status") if proposed.get("status") in ("confirmed", "unverified") else "unverified"}
         elif kind == "buyer_update":
-            if target not in buyer_ids:
+            if target not in buyers:
                 continue
             clean = {}
             if proposed.get("status") in BUYER_STATUSES:
@@ -311,12 +334,13 @@ def validate(raw, trade, sources_by_id):
                     clean[key] = proposed[key]
             if proposed.get("last_touch_via") in ("Email", "Call", "Meeting"):
                 clean["last_touch_via"] = proposed["last_touch_via"]
+            clean = {k: v for k, v in clean.items() if buyers[target].get(k) != v}
             if not clean:
                 continue
             proposed = clean
         elif kind == "next_step":
             step = str(proposed.get("next_step") or "").strip()
-            if not step:
+            if not step or norm(step) == norm(trade.get("next_step")):
                 continue
             due = proposed.get("next_step_due")
             proposed = {"next_step": step[:300],
@@ -329,6 +353,15 @@ def validate(raw, trade, sources_by_id):
                 continue
             proposed = {k: str(proposed.get(k) or "").strip() or None for k in ("name", "contact", "wants")}
             target = None
+        elif kind == "file":
+            attachment = next((a for a in source.get("attachments", []) if a["name"] == target), None)
+            if not attachment or HASH_IMAGE.match(target) or target.lower() in files_seen:
+                continue
+            files_seen.add(target.lower())
+            proposed = {"file_name": target, "gmail_message_id": source["id"],
+                        "attachment_id": attachment["id"], "file_type": guess_type(target)}
+            p = {**p, "summary": p.get("summary") or f"Attachment: {target}"}
+            target = None
         else:
             continue
         kept.append({"kind": kind, "target": target, "proposed": proposed,
@@ -337,38 +370,31 @@ def validate(raw, trade, sources_by_id):
     return kept
 
 
-def attachment_proposals(source, lot_id):
-    """One file proposal per Gmail attachment on a matched message. Filenames come from Gmail."""
+def add_attachments(source):
+    """Lists a Gmail message's attachments in the source text, so the model can pick the ones that
+    belong to the trade and quote their names. Read-only."""
+    source.setdefault("attachments", [])
     if source["kind"] != "gmail" or not source["has_attachments"]:
-        return []
+        return
     env = dict(os.environ)
     if KEYRING_FILE.exists() and "GOG_KEYRING_PASSWORD" not in env:
         env["GOG_KEYRING_PASSWORD"] = KEYRING_FILE.read_text().strip()
     try:
         result = subprocess.run(
-            ["gog", "--account", "alex@rebattery.io", "--readonly", "--no-input", "--json",
-             "gmail", "thread", "get", source["thread"]],
+            ["gog", "--account", "alex@rebattery.io", "--readonly", "--no-input", "--json", "gmail", "get", source["id"]],
             capture_output=True, text=True, timeout=120, env=env, check=True)
-        thread = json.loads(result.stdout)
+        payload = (json.loads(result.stdout).get("message") or {}).get("payload") or {}
     except (OSError, subprocess.SubprocessError, ValueError):
-        return []
-    out = []
-    for message in (thread.get("thread") or thread).get("messages", []):
-        if message.get("id") != source["id"]:
-            continue
+        return
 
-        def walk(part):
-            name = part.get("filename") or ""
-            if name and not re.match(r"image\d+\.(gif|png|jpg)$", name, re.I):
-                out.append({
-                    "kind": "file", "target": None,
-                    "proposed": {"file_name": name, "gmail_message_id": source["id"],
-                                 "attachment_id": (part.get("body") or {}).get("attachmentId"), "file_type": guess_type(name)},
-                    "summary": f"Attachment: {name}", "quote": name, "source": source})
-            for child in part.get("parts") or []:
-                walk(child)
-        walk(message.get("payload") or {})
-    return out
+    def walk(part):
+        if part.get("filename"):
+            source["attachments"].append({"name": part["filename"], "id": (part.get("body") or {}).get("attachmentId")})
+        for child in part.get("parts") or []:
+            walk(child)
+    walk(payload)
+    if source["attachments"]:
+        source["text"] += "\n\nAttachments: " + ", ".join(a["name"] for a in source["attachments"])
 
 
 def guess_type(name):
@@ -453,6 +479,8 @@ def run(conn, args):
             proposals = []  # (lot_id, proposal)
             for lot_id, sources in by_trade.items():
                 trade = trades[lot_id]
+                for source in sources:
+                    add_attachments(source)
                 if key:
                     try:
                         raw = call_model(TRADE_SYSTEM, trade_prompt(trade, sources), key)
@@ -461,8 +489,6 @@ def run(conn, args):
                         report["warnings"].append(f"{trade['title']}: model failed ({type(err).__name__})")
                 else:
                     report["warnings"].append("no gateway key; proposals from content skipped")
-                for source in sources:
-                    proposals += [(lot_id, p) for p in attachment_proposals(source, lot_id)]
 
             for source, lots in triage:
                 proposals.append((lots[0], {
@@ -472,13 +498,24 @@ def run(conn, args):
 
             if unmatched and key:
                 try:
-                    raw = call_model(POSSIBLE_SYSTEM, json.dumps([
-                        {"source_id": s["id"], "text": s["text"][:3000]} for s in unmatched[-MAX_SCREENED_EMAILS:]],
-                        ensure_ascii=False), key)
+                    cur.execute("select id, title from crm_bulk_trade_lots where trade_stage <> 'Lost' order by title")
+                    existing = {row["id"]: row["title"] for row in cur.fetchall()}
+                    raw = call_model(POSSIBLE_SYSTEM, json.dumps({
+                        "EXISTING": [{"id": k, "title": v} for k, v in existing.items()],
+                        "EMAILS": [{"source_id": s["id"], "text": s["text"][:3000]} for s in unmatched[-MAX_SCREENED_EMAILS:]],
+                    }, ensure_ascii=False), key)
                     by_id = {s["id"]: s for s in unmatched}
                     for t in raw.get("trades") or []:
                         source = by_id.get(str(t.get("source_id")))
                         if not source or not quote_ok(t.get("quote"), source["text"]) or not str(t.get("title") or "").strip():
+                            continue
+                        existing_id = t.get("existing_trade_id")
+                        if existing_id in existing and source.get("from"):
+                            proposals.append((existing_id, {
+                                "kind": "link_contact", "target": None,
+                                "proposed": {"name": source["from"], "email": source["from"]},
+                                "summary": f"Looks like {existing[existing_id]}. Add {source['from']} as a contact so their emails match.",
+                                "quote": str(t["quote"]).strip()[:300], "source": source}))
                             continue
                         kind = t.get("trade_kind") if t.get("trade_kind") in TEMPLATES["fields"] else None
                         proposals.append((None, {

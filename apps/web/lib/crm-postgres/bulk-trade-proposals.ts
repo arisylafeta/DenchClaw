@@ -3,7 +3,7 @@ import type { CheckStatus, FileType, Proposal } from "../bulk-trade-details";
 import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
 import { createBulkTrade, updateBulkTrade } from "./bulk-trades";
-import { addBuyer, recordFile, setField, updateBuyer } from "./bulk-trade-details";
+import { addBuyer, addContact, recordFile, setField, updateBuyer } from "./bulk-trade-details";
 
 const PROPOSAL_SELECT = `
   select id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url, source_label,
@@ -137,6 +137,12 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
         next_step: "Qualify this lead",
       }, user.id);
       return trade.id;
+    }
+    case "link_contact": {
+      const email = text(proposed.email);
+      if (!email) throw new Error("The proposed contact has no email.");
+      await addContact(lotId!, { name: text(proposed.name) ?? email, email }, user.id);
+      return lotId;
     }
     case "needs_triage":
       return lotId; // Acknowledged; Alex handles the thread by hand.

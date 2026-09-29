@@ -25,13 +25,14 @@ create index if not exists crm_bulk_trade_check_runs_started_idx on crm_bulk_tra
 --   new_buyer      proposed = {name, contact?, wants?}
 --   file           proposed = {file_name, gmail_message_id, attachment_id?, file_type}
 --   needs_triage   proposed = {lot_ids} (one thread touches several trades)
+--   link_contact   proposed = {name, email} (an unmatched email that belongs to this trade)
 --   possible_trade proposed = {title, trade_kind?}
 create table if not exists crm_bulk_trade_proposals (
   id bigserial primary key,
   lot_id text references crm_bulk_trade_lots(id) on delete restrict,
   run_id bigint references crm_bulk_trade_check_runs(id) on delete set null,
   kind text not null check (kind in (
-    'field', 'buyer_update', 'next_step', 'new_buyer', 'file', 'needs_triage', 'possible_trade'
+    'field', 'buyer_update', 'next_step', 'new_buyer', 'file', 'needs_triage', 'link_contact', 'possible_trade'
   )),
   target text,
   proposed jsonb not null,
