@@ -11,10 +11,12 @@ import {
   trackingLabel,
   type Buyer,
   type BuyerStatus,
+  type Proposal,
   type TradeField,
 } from "@/lib/bulk-trade-details";
 import { BidDialog, BuyerDialog, TeaserDialog } from "./buyer-dialogs";
 import { EmailDialog } from "./email-dialog";
+import { ProposalRow } from "./proposal-row";
 import {
   Card,
   ErrorText,
@@ -35,10 +37,12 @@ type Props = {
   fields: TradeField[];
   today: string;
   linkTracking: boolean;
+  proposals: Proposal[];
+  onProposalDecided: () => void;
   onBuyer: (buyer: Buyer) => void;
 };
 
-export function BuyersTable({ trade, buyers, fields, today, linkTracking, onBuyer }: Props) {
+export function BuyersTable({ trade, buyers, fields, today, linkTracking, proposals, onProposalDecided, onBuyer }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Buyer | "new" | null>(null);
   const [bidFor, setBidFor] = useState<Buyer | null>(null);
@@ -160,6 +164,11 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, onBuye
           )}
         </div>
       </div>
+      {proposals.map((proposal) => (
+        <div key={proposal.id} className="border-b" style={{ borderColor: "var(--bt-column)" }}>
+          <ProposalRow proposal={proposal} onDecided={onProposalDecided} />
+        </div>
+      ))}
       <div className="px-5 py-2"><ErrorText error={error} /></div>
 
       {editing && (

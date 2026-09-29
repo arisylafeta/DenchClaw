@@ -19,7 +19,7 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
 }
 
 const TRADES = [
-  trade({ id: "bt_1", title: "Synthetic eBS37", fact_line: "161 packs", value: "€119–149k" }),
+  trade({ id: "bt_1", title: "Synthetic eBS37", fact_line: "161 packs", value: "€119–149k", new_count: 2 }),
   trade({ id: "bt_2", title: "Synthetic cells", trade_stage: "Needs info", next_step: null, next_step_due: null }),
   trade({ id: "bt_3", title: "Old lot", trade_stage: "Done" }),
 ];
@@ -112,4 +112,23 @@ describe("BulkTradesView", () => {
       body: JSON.stringify({ waiting_on: "them" }),
     })));
   });
+
+  it("shows new-item counts, the inbox check status and possible new trades", async () => {
+    const possible = {
+      id: "7", lot_id: null, kind: "possible_trade", target: null, proposed: { title: "Leaf packs, Leeds" },
+      summary: "400 Leaf packs offered", quote: "400 Nissan Leaf battery packs available", source_kind: "gmail",
+      source_url: null, source_label: "Gmail · seller@unknown.test", source_at: null, created_at: "2026-09-29T12:00:00Z",
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url === "/api/bulk-trades"
+      ? { trades: TRADES, owners: [], check: { last_run_at: "2026-09-29T12:00:00Z", status: "failed", error: "boom" }, possible: [possible] }
+      : { trade: TRADES[0], buyers: [], contacts: [], fields: [], files: [] }))));
+    render(<BulkTradesView />);
+
+    expect(await screen.findByText("2 new")).toBeInTheDocument();
+    expect(screen.getByText(/Gmail and Granola check failed 13:00/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Possible new trade from your inbox/ }));
+    expect(screen.getByText("Leaf packs, Leeds")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create trade" })).toBeInTheDocument();
+  });
 });
+

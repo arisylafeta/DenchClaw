@@ -76,6 +76,11 @@ function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: Trade
         >
           <div className="flex items-baseline gap-2">
             <span className="flex-1 text-sm font-semibold">{trade.title}</span>
+            {!!trade.new_count && (
+              <span className="shrink-0 rounded-[10px] px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
+                {trade.new_count} new
+              </span>
+            )}
             {trade.value && <span className="bt-mono shrink-0 text-[13px] font-medium">{trade.value}</span>}
           </div>
           {trade.fact_line && <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{trade.fact_line}</span>}

@@ -251,5 +251,28 @@ describe("TradePage overview", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("shows an inbox-check finding under the buyers and applies it only on accept", async () => {
+    const proposal = {
+      id: "41", lot_id: "bt_1", kind: "buyer_update", target: "btb_1", proposed: { status: "Bid in" },
+      summary: "Synthetic Storage sent a bid", quote: "We can offer 22 per kWh", source_kind: "gmail",
+      source_url: "https://mail.google.com/x", source_label: "Gmail · tess@example.test", source_at: "2026-09-29T09:00:00Z",
+      created_at: "2026-09-29T12:00:00Z",
+    };
+    let decided = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/bulk-trades/proposals/41") { decided = true; return new Response(JSON.stringify({ lot_id: "bt_1" })); }
+      return new Response(JSON.stringify({ ...DETAIL, proposals: decided ? [] : [proposal] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const row = await screen.findByRole("group", { name: "New: Synthetic Storage sent a bid" });
+    expect(row).toHaveTextContent("“We can offer 22 per kWh”");
+    expect(within(row).getByRole("link", { name: /Gmail · tess@example.test/ })).toHaveAttribute("href", "https://mail.google.com/x");
+    await userEvent.click(within(row).getByRole("button", { name: "Update buyer" }));
+    await waitFor(() => expect(screen.queryByRole("group", { name: /New:/ })).not.toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/41", expect.objectContaining({ body: JSON.stringify({ action: "accept" }) }));
+  });
 });
 

@@ -108,6 +108,41 @@ export type TradeFile = {
   created_at: string;
 };
 
+export type ProposalKind = "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "possible_trade";
+
+/** A change the inbox check found in Gmail or Granola. Nothing happens until Alex accepts it. */
+export type Proposal = {
+  id: string;
+  lot_id: string | null;
+  kind: ProposalKind;
+  target: string | null;
+  proposed: Record<string, unknown>;
+  summary: string;
+  quote: string;
+  source_kind: "gmail" | "granola";
+  source_url: string | null;
+  source_label: string;
+  source_at: string | null;
+  created_at: string;
+};
+
+/** Latest inbox check, for the header. */
+export type CheckStatus = { last_run_at: string; status: "running" | "ok" | "failed"; error: string | null } | null;
+
+/** UK times the inbox check runs. */
+export const CHECK_TIMES = ["08:00", "10:30", "13:00", "15:30", "18:30"] as const;
+
+/** Next check time as "15:30", or "08:00" (tomorrow) after the last one. */
+export function nextCheckTime(now: Date = new Date()): string {
+  const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+  return CHECK_TIMES.find((time) => time > hhmm) ?? CHECK_TIMES[0];
+}
+
+/** "13:00" in UK time for a timestamp. */
+export function ukTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+}
+
 export type TradeDetail = {
   trade: BulkTrade;
   buyers: Buyer[];
@@ -116,6 +151,8 @@ export type TradeDetail = {
   files: TradeFile[];
   /** True when Gmail drafts get tracked links (a public link address is configured). */
   link_tracking?: boolean;
+  /** Open proposals from the inbox check for this trade. */
+  proposals?: Proposal[];
 };
 
 // ---------------------------------------------------------------------------

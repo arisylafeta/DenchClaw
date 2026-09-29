@@ -102,6 +102,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           <TradeOverview
             detail={detail}
             today={today}
+            onProposalDecided={() => void load()}
             onTradePatch={patchTrade}
             onBuyer={(buyer: Buyer) => update((current) => ({ ...current, buyers: upsert(current.buyers, buyer) }))}
             onContacts={(contacts: Contact[]) => update((current) => ({ ...current, contacts }))}
@@ -109,6 +110,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         ) : (
           <TradeData
             detail={detail}
+            onProposalDecided={() => void load()}
             onField={(field: TradeField) => update((current) => ({
               ...current,
               fields: [...current.fields.filter((candidate) => candidate.field_key !== field.field_key), field],

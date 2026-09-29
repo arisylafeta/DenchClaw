@@ -29,6 +29,8 @@ export type BulkTrade = {
   tfs_needed: "yes" | "no" | "unknown";
   listing_id: string | null;
   updated_at: string;
+  /** Open inbox-check proposals for this trade. */
+  new_count?: number;
 };
 
 export type TradeOwner = { id: string; name: string };

@@ -34,7 +34,11 @@ type Props = {
   onTradePatch: (patch: TradePatch) => Promise<void>;
   onBuyer: (buyer: Buyer) => void;
   onContacts: (contacts: Contact[]) => void;
+  onProposalDecided: () => void;
 };
+
+/** Proposals shown on the Overview; field and file proposals live on Data and files. */
+const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage"]);
 
 /** First contact with an email address, else the first contact. */
 function emailContact(contacts: Contact[]) {
@@ -47,13 +51,22 @@ function addDays(date: string, days: number) {
   return next.toISOString().slice(0, 10);
 }
 
-export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts }: Props) {
+export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts, onProposalDecided }: Props) {
   const { trade, contacts } = detail;
   return (
     <div className="flex flex-col gap-6">
       <NextStepBar trade={trade} contact={emailContact(contacts)} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <BuyersTable trade={trade} buyers={detail.buyers} fields={detail.fields} today={today} linkTracking={!!detail.link_tracking} onBuyer={onBuyer} />
+        <BuyersTable
+          trade={trade}
+          buyers={detail.buyers}
+          fields={detail.fields}
+          today={today}
+          linkTracking={!!detail.link_tracking}
+          proposals={(detail.proposals ?? []).filter((proposal) => OVERVIEW_KINDS.has(proposal.kind))}
+          onProposalDecided={onProposalDecided}
+          onBuyer={onBuyer}
+        />
         <div className="flex flex-col gap-4 self-start">
           <MissingCard detail={detail} onTradePatch={onTradePatch} />
           <ShippingCard trade={trade} />

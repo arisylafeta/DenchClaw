@@ -17,6 +17,8 @@ const details = {
     new Map(urls.map((url, index) => [url, `tok${index}`]))),
 };
 vi.mock("@/lib/crm-postgres/bulk-trade-details", () => details);
+const decideProposal = vi.fn();
+vi.mock("@/lib/crm-postgres/bulk-trade-proposals", () => ({ decideProposal, tradeProposals: vi.fn(async () => []) }));
 const getBulkTrade = vi.fn(async (id: string) => (id === "bt_1" ? { id } : null));
 vi.mock("@/lib/crm-postgres/bulk-trades", () => ({ updateBulkTrade: vi.fn(), getBulkTrade }));
 const createGmailDraft = vi.fn(async () => ({ draftId: "r1", messageId: "m1" }));
@@ -114,6 +116,19 @@ describe("trade detail routes", () => {
     const res = await PATCH(post({ person_id: "p_gone" }), params({ id: "bt_1", buyerId: "btb_1" }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain("no longer exists");
+  });
+
+  it("accepts or ignores a proposal as the signed-in user", async () => {
+    const { POST } = await import("../proposals/[proposalId]/route");
+    decideProposal.mockResolvedValueOnce({ ok: true, lot_id: "bt_1" });
+    const res = await POST(post({ action: "accept" }), params({ proposalId: "12" }));
+    expect(await res.json()).toEqual({ lot_id: "bt_1" });
+    expect(decideProposal).toHaveBeenCalledWith("12", "accept", { id: USER.id, email: USER.email });
+
+    expect((await POST(post({ action: "delete" }), params({ proposalId: "12" }))).status).toBe(400);
+    expect((await POST(post({ action: "accept" }), params({ proposalId: "1; drop" }))).status).toBe(400);
+    decideProposal.mockResolvedValueOnce({ ok: false, status: 404, error: "Already handled or not found." });
+    expect((await POST(post({ action: "ignore" }), params({ proposalId: "12" }))).status).toBe(404);
   });
 });
 

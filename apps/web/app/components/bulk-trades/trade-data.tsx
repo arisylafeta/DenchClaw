@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { BulkTrade, TradePatch } from "@/lib/bulk-trades";
 import {
   FIELD_STATUSES,
@@ -13,6 +13,7 @@ import {
   type FieldSource,
   type FieldStatus,
   type FileType,
+  type Proposal,
   type TemplateField,
   type TradeDetail,
   type TradeField,
@@ -35,6 +36,7 @@ import {
   tradeUrl,
   useForm,
 } from "./trade-ui";
+import { ProposalRow } from "./proposal-row";
 
 const FIELD_COLUMNS = "grid-cols-[200px_minmax(0,1fr)_250px_110px_110px]";
 const FILE_COLUMNS = "grid-cols-[minmax(0,1fr)_130px_250px_170px]";
@@ -51,6 +53,7 @@ const STATUS_STYLE: Record<FieldStatus, React.CSSProperties> = {
 
 type Props = {
   detail: TradeDetail;
+  onProposalDecided: () => void;
   onField: (field: TradeField) => void;
   onFile: (file: TradeFile) => void;
   onTradePatch: (patch: TradePatch) => Promise<void>;
@@ -72,7 +75,8 @@ function Source({ source }: { source: FieldSource }) {
 
 const clip = (text: string, length = 28) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);
 
-export function TradeData({ detail, onField, onFile, onTradePatch }: Props) {
+export function TradeData({ detail, onField, onFile, onTradePatch, onProposalDecided }: Props) {
+  const proposals = detail.proposals ?? [];
   const { trade } = detail;
   if (!trade.trade_kind) {
     return (
@@ -83,17 +87,21 @@ export function TradeData({ detail, onField, onFile, onTradePatch }: Props) {
   }
   return (
     <div className="flex flex-col gap-6">
-      <FieldsCard trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField} />
-      <FilesCard trade={trade} files={detail.files} onFile={onFile} />
+      <FieldsCard trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField}
+        proposals={proposals.filter((proposal) => proposal.kind === "field")} onProposalDecided={onProposalDecided} />
+      <FilesCard trade={trade} files={detail.files} onFile={onFile}
+        proposals={proposals.filter((proposal) => proposal.kind === "file")} onProposalDecided={onProposalDecided} />
     </div>
   );
 }
 
-function FieldsCard({ trade, kind, fields, onField }: {
+function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided }: {
   trade: BulkTrade;
   kind: NonNullable<BulkTrade["trade_kind"]>;
   fields: TradeField[];
   onField: (field: TradeField) => void;
+  proposals: Proposal[];
+  onProposalDecided: () => void;
 }) {
   const [editing, setEditing] = useState<TemplateField | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,8 +142,8 @@ function FieldsCard({ trade, kind, fields, onField }: {
             const status: FieldStatus = row && row.value?.trim() ? row.status : row?.status === "conflict" ? "conflict" : "missing";
             const claims: FieldSource[] = row ? [row, ...row.alternatives] : [];
             return (
+              <Fragment key={template.key}>
               <button
-                key={template.key}
                 type="button"
                 onClick={() => setEditing(template)}
                 aria-label={`Edit ${template.label}`}
@@ -152,6 +160,12 @@ function FieldsCard({ trade, kind, fields, onField }: {
                 <span><span className="rounded-[5px] px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span>
                 <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span>
               </button>
+              {proposals.filter((proposal) => proposal.target === template.key).map((proposal) => (
+                <div key={proposal.id} className="border-b" style={{ borderColor: "var(--bt-divider)" }}>
+                  <ProposalRow proposal={{ ...proposal, summary: `${template.label}: ${String(proposal.proposed.value)}` }} onDecided={onProposalDecided} />
+                </div>
+              ))}
+              </Fragment>
             );
           })}
         </div>
@@ -237,7 +251,13 @@ function extension(name: string) {
   return dot > 0 ? name.slice(dot + 1, dot + 5).toUpperCase() : "FILE";
 }
 
-function FilesCard({ trade, files, onFile }: { trade: BulkTrade; files: TradeFile[]; onFile: (file: TradeFile) => void }) {
+function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
+  trade: BulkTrade;
+  files: TradeFile[];
+  onFile: (file: TradeFile) => void;
+  proposals: Proposal[];
+  onProposalDecided: () => void;
+}) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uploaded = new Set(files.map((file) => file.file_type));
@@ -293,7 +313,12 @@ function FilesCard({ trade, files, onFile }: { trade: BulkTrade; files: TradeFil
               </select>
             </div>
           ))}
-          {!files.length && <p className="px-5 py-5 text-sm" style={{ color: "var(--bt-muted)" }}>No files yet.</p>}
+          {proposals.map((proposal) => (
+            <div key={proposal.id} className="border-b" style={{ borderColor: "var(--bt-divider)" }}>
+              <ProposalRow proposal={proposal} onDecided={onProposalDecided} />
+            </div>
+          ))}
+          {!files.length && !proposals.length && <p className="px-5 py-5 text-sm" style={{ color: "var(--bt-muted)" }}>No files yet.</p>}
         </div>
       </div>
       <div className="px-5 py-3 text-[13px]" style={{ color: "var(--bt-muted)" }}>

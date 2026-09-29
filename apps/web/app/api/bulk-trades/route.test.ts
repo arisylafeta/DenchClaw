@@ -11,6 +11,11 @@ vi.mock("@/lib/crm-postgres/bulk-trades", () => ({
   updateBulkTrade,
 }));
 
+vi.mock("@/lib/crm-postgres/bulk-trade-proposals", () => ({
+  checkStatus: vi.fn(async () => null),
+  possibleTrades: vi.fn(async () => []),
+}));
+
 const USER = { id: "11111111-1111-4111-8111-111111111111", email: "alex@rebattery.io", displayName: "Alex" };
 
 function jsonRequest(method: string, body: unknown) {

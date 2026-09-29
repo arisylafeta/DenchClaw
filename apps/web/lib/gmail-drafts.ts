@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export type EmailDraft = { to: string[]; subject: string; body: string };
 export type CreatedDraft = { draftId: string | null; messageId: string | null };
@@ -71,4 +73,45 @@ export function createGmailDraft(account: string, draft: EmailDraft): Promise<Cr
 export function gmailDraftUrl(account: string, messageId: string | null): string {
   const base = `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(account)}#drafts`;
   return messageId ? `${base}?compose=${encodeURIComponent(messageId)}` : base;
+}
+
+function gog(args: string[], stdin?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(process.env.GOG_BIN || "gog", args, { env: gogEnv(), timeout: 60_000, maxBuffer: 32 * 1024 * 1024 }, (error, stdout) => {
+      if (error) reject(new Error("Gmail did not answer. Check that this account is connected to gog."));
+      else resolve(stdout);
+    });
+    child.stdin?.end(stdin ?? "");
+  });
+}
+
+type Part = { filename?: string; body?: { attachmentId?: string }; parts?: Part[] };
+
+function findAttachment(part: Part | undefined, fileName: string): string | null {
+  if (!part) return null;
+  if (part.filename === fileName && part.body?.attachmentId) return part.body.attachmentId;
+  for (const child of part.parts ?? []) {
+    const found = findAttachment(child, fileName);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Downloads one attachment, read-only. Gmail attachment ids change between reads, so the message
+ * is read again and the attachment found by file name.
+ */
+export async function fetchGmailAttachment(account: string, messageId: string, fileName: string, _staleId: string | null): Promise<Buffer> {
+  const base = ["--account", account, "--readonly", "--no-input"];
+  const message = JSON.parse(await gog([...base, "--json", "gmail", "get", messageId])) as { message?: { payload?: Part }; payload?: Part };
+  const attachmentId = findAttachment(message.message?.payload ?? message.payload, fileName);
+  if (!attachmentId) throw new Error(`${fileName} is no longer on that email.`);
+  const dir = mkdtempSync(join(tmpdir(), "bt-attachment-"));
+  try {
+    const out = join(dir, "file");
+    await gog([...base, "gmail", "attachment", messageId, attachmentId, "--out", out]);
+    return readFileSync(out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

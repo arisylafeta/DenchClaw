@@ -10,7 +10,10 @@ const TRADE_COLUMNS = `
   to_char(lot.last_touched, 'YYYY-MM-DD') as last_touched,
   to_char(lot.clear_by, 'YYYY-MM-DD') as clear_by,
   to_char(lot.ship_by, 'YYYY-MM-DD') as ship_by,
-  lot.transport_class, lot.tfs_needed, lot.listing_id, lot.updated_at`;
+  lot.transport_class, lot.tfs_needed, lot.listing_id, lot.updated_at,
+  (select count(*)::int from crm_bulk_trade_proposals proposal
+    where proposal.status = 'new' and (proposal.lot_id = lot.id
+      or (proposal.kind = 'needs_triage' and proposal.proposed->'lot_ids' ? lot.id))) as new_count`;
 
 const TRADE_FROM = `crm_bulk_trade_lots lot left join crm_users owner on owner.id = lot.owner_user_id`;
 

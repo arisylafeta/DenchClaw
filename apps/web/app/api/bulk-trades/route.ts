@@ -1,6 +1,7 @@
 import { currentUser } from "@/lib/auth";
 import { parseTradePatch } from "@/lib/bulk-trades";
 import { createBulkTrade, listBulkTrades } from "@/lib/crm-postgres/bulk-trades";
+import { checkStatus, possibleTrades } from "@/lib/crm-postgres/bulk-trade-proposals";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,7 +16,8 @@ export async function GET() {
   const unavailable = postgresOnly();
   if (unavailable) return unavailable;
   if (!(await currentUser())) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  return Response.json(await listBulkTrades());
+  const [list, check, possible] = await Promise.all([listBulkTrades(), checkStatus(), possibleTrades()]);
+  return Response.json({ ...list, check, possible });
 }
 
 export async function POST(req: Request) {

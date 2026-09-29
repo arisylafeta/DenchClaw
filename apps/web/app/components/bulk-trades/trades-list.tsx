@@ -42,7 +42,14 @@ export function TradesList({ trades, today, onOpen }: Props) {
                 style={{ borderColor: "var(--bt-divider)" }}
               >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{trade.title}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-semibold">{trade.title}</span>
+                    {!!trade.new_count && (
+                    <span className="shrink-0 rounded-[10px] px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
+                      {trade.new_count} new
+                    </span>
+                  )}
+                  </div>
                   {trade.fact_line && (
                     <div className="mt-0.5 truncate text-[13px]" style={{ color: "var(--bt-muted)" }}>{trade.fact_line}</div>
                   )}
