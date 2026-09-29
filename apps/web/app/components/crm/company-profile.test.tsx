@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CompanyProfile } from "./company-profile";
 
-function buildCompanyResponse(id: string, name: string) {
+function buildCompanyResponse(
+  id: string,
+  name: string,
+  overrides: { sectors?: string[]; platform_role?: string; roles?: string[] } = {},
+) {
   return {
     company: {
       id,
@@ -25,6 +29,7 @@ function buildCompanyResponse(id: string, name: string) {
       notes: null,
       created_at: null,
       updated_at: null,
+      ...overrides,
     },
     people: [],
     threads: [],
@@ -252,10 +257,11 @@ describe("CompanyProfile tab reset on entry change", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const match = url.match(/\/api\/crm\/companies\/([^/?]+)/);
       const id = match ? decodeURIComponent(match[1]) : "unknown";
-      const response = buildCompanyResponse(id, `Company ${id}`);
-      response.company.sectors = ["automotive", "energy_storage"];
-      response.company.platform_role = "BUYER";
-      response.company.roles = ["buyer", "supplier"];
+      const response = buildCompanyResponse(id, `Company ${id}`, {
+        sectors: ["automotive", "energy_storage"],
+        platform_role: "BUYER",
+        roles: ["buyer", "supplier"],
+      });
       return Promise.resolve(
         new Response(JSON.stringify(response), {
           status: 200,

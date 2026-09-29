@@ -5,9 +5,21 @@ import { queryPg } from "../lib/postgres";
 
 async function main() {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(join(moduleDir, "..", "lib", "crm-postgres", "schema.sql"), "utf-8");
+  const postgresDir = join(moduleDir, "..", "lib", "crm-postgres");
+  const sql = readFileSync(join(postgresDir, "schema.sql"), "utf-8");
   await queryPg(sql);
-  console.log("Applied CRM Postgres schema");
+  for (const migration of [
+    "001_auth_assignee.sql",
+    "002_user_data_isolation.sql",
+    "003_stock_items.sql",
+    "004_stock_commercial_fields.sql",
+    "005_stock_enrichment_state.sql",
+  ]) {
+    await queryPg(
+      readFileSync(join(postgresDir, "migrations", migration), "utf-8"),
+    );
+  }
+  console.log("Applied CRM Postgres schema and migrations");
 }
 
 main().catch((err) => {

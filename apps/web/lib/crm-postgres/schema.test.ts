@@ -13,7 +13,24 @@ describe("crm postgres schema", () => {
     expect(sql).toContain("create index if not exists crm_people_company_idx");
     expect(sql).toContain("create table if not exists automation_loops");
     expect(sql).toContain("create table if not exists automation_loop_runs");
+    expect(sql).toContain("create table if not exists crm_stock_items");
+    expect(sql).toContain("create table if not exists crm_stock_enrich_queue");
+    expect(sql).toContain("crm_stock_items_supplier_stock_uidx");
+    expect(sql).toContain("stock_status text not null default 'unverified'");
+    expect(sql).toContain("chemistry text");
+    expect(sql).toContain("capacity_kwh numeric");
+    expect(sql).toContain("evidence jsonb");
     expect(sql).toContain("automation_loop_runs.loop_id");
     expect(sql).not.toContain("strength_score");
+  });
+
+  it("applies the stock object and enrichment trigger migrations", () => {
+    const runner = readFileSync(
+      join(process.cwd(), "scripts/apply-postgres-schema.ts"),
+      "utf-8",
+    );
+    expect(runner).toContain('"003_stock_items.sql"');
+    expect(runner).toContain('"004_stock_commercial_fields.sql"');
+    expect(runner).toContain('"005_stock_enrichment_state.sql"');
   });
 });

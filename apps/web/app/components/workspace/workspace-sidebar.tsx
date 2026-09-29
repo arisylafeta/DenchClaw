@@ -125,15 +125,17 @@ type WorkspaceSidebarProps = {
       | "crm-calendar"
       | "platform-proposals"
       | "platform-listings"
+      | "platform-stock"
       | "platform-accounts"
       | "platform-battery-review"
+      | "platform-battery-requests"
       | "platform-messages"
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
   activeCrmTarget?: "people" | "companies" | "campaigns" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
-  activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "messages" | "payout-reviews" | null;
+  activePlatformTarget?: "proposals" | "listings" | "stock" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
   customCrmObjects?: CustomCrmObject[];
   /** Currently-active custom CRM object name, used to highlight the row. */
@@ -422,10 +424,28 @@ export function WorkspaceSidebar({
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /></svg>,
 		},
 		{
+			id: "platform-stock" as const,
+			label: "Stock",
+			target: "stock" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 9h10M7 13h7" /><path d="M21 10h1v4h-1" /></svg>,
+		},
+		{
+			id: "platform-accounts" as const,
+			label: "Accounts",
+			target: "accounts" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="m19 8 2 2 3-3" /></svg>,
+		},
+		{
 			id: "platform-battery-review" as const,
 			label: "Battery review",
 			target: "battery-review" as const,
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4" /><path d="m7 10 3 2-3 2" /></svg>,
+		},
+		{
+			id: "platform-battery-requests" as const,
+			label: "Battery requests",
+			target: "battery-requests" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="2" y="6" width="18" height="12" rx="2" /><path d="M22 10v4M7 12h8M11 8v8" /></svg>,
 		},
 		{
 			id: "platform-messages" as const,

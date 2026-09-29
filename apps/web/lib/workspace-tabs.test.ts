@@ -54,8 +54,10 @@ describe("platform operations tabs", () => {
     expect(inferContentTabKindFromPath("~platform-admin/proposals")).toBe("platform-admin");
     expect(inferContentTabTitle("~platform-admin/proposals")).toBe("Recycler selection");
     expect(inferContentTabTitle("~platform-admin/listings")).toBe("Listings");
+    expect(inferContentTabTitle("~platform-admin/stock")).toBe("Stock");
     expect(inferContentTabTitle("~platform-admin/accounts")).toBe("Accounts");
     expect(inferContentTabTitle("~platform-admin/battery-review")).toBe("Battery review");
+    expect(inferContentTabTitle("~platform-admin/battery-requests")).toBe("Battery requests");
     expect(inferContentTabTitle("~platform-admin/messages")).toBe("Message monitoring");
     expect(inferContentTabTitle("~platform-admin/payout-reviews")).toBe("Payout reviews");
   });

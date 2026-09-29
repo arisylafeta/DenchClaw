@@ -684,3 +684,91 @@ create table if not exists crm_campaign_send_links (
 );
 create index if not exists crm_campaign_send_links_listing_idx
   on crm_campaign_send_links (listing_id, send_id) where listing_id is not null;
+
+-- REB-346 stock inventory (one row per supplier stock item).
+-- Common scalar columns plus free-form `attributes` JSONB for variable fields.
+-- Object registration: crm_objects(name='stock', entity_table='crm_stock_items').
+-- Enrichment queue: crm_stock_enrich_queue, one row per item, maintained by
+-- crm_stock_items_queue_enrichment() trigger. Full definition lives in
+-- migrations/003_stock_items.sql; mirrored here for versioning.
+create table if not exists crm_stock_items (
+  id text primary key,
+  supplier text not null,
+  stock_id text not null,
+  make text,
+  model text,
+  model_detail text,
+  year text,
+  powertrain text,
+  part_number text,
+  description text,
+  quantity numeric not null default 1,
+  price numeric,
+  location text,
+  condition text,
+  comments text,
+  aged_12m boolean not null default false,
+  in_august boolean not null default false,
+  in_september_aged boolean not null default false,
+  listing_id text,
+  stock_status text not null default 'unverified',
+  chemistry text,
+  capacity_kwh numeric,
+  voltage_v numeric,
+  weight_kg numeric,
+  scope text,
+  part_number_status text,
+  condition_detail text,
+  soh_percent numeric,
+  tested boolean,
+  completeness text,
+  photo_urls text[] not null default '{}',
+  evidence jsonb not null default '{}',
+  supplier_confirmed boolean not null default false,
+  supplier_confirmed_at timestamptz,
+  commercial_bucket text,
+  enrich_status text not null default 'pending',
+  enrich_attempts integer not null default 0,
+  enriched_at timestamptz,
+  attributes jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint crm_stock_items_supplier_stock_uidx unique (supplier, stock_id),
+  constraint crm_stock_items_stock_status_check check (
+    stock_status in (
+      'unverified', 'available', 'listed', 'contacted',
+      'in_deal', 'sold', 'unavailable'
+    )
+  ),
+  constraint crm_stock_items_soh_percent_check
+    check (soh_percent is null or (soh_percent >= 0 and soh_percent <= 100)),
+  constraint crm_stock_items_enrich_status_check
+    check (enrich_status in ('pending', 'enriched', 'failed'))
+);
+
+create index if not exists crm_stock_items_enrich_status_idx
+  on crm_stock_items(enrich_status);
+create index if not exists crm_stock_items_make_model_idx
+  on crm_stock_items(make, model);
+create index if not exists crm_stock_items_part_number_idx
+  on crm_stock_items(part_number);
+create index if not exists crm_stock_items_stock_status_idx
+  on crm_stock_items(stock_status);
+create index if not exists crm_stock_items_chemistry_idx
+  on crm_stock_items(chemistry);
+create index if not exists crm_stock_items_commercial_bucket_idx
+  on crm_stock_items(commercial_bucket);
+
+create table if not exists crm_stock_enrich_queue (
+  stock_item_id text primary key references crm_stock_items(id) on delete cascade,
+  status text not null default 'pending',
+  attempts integer not null default 0,
+  next_attempt_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint crm_stock_enrich_queue_status_check
+    check (status in ('pending', 'claimed', 'done', 'failed'))
+);
+
+create index if not exists crm_stock_enrich_queue_status_next_idx
+  on crm_stock_enrich_queue(status, next_attempt_at);

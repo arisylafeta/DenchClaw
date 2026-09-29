@@ -34,6 +34,92 @@ export type Database = {
   }
   public: {
     Tables: {
+      battery_requests: {
+        Row: {
+          contact_email: string
+          created_at: string
+          eve_call_id: string
+          eve_session_id: string
+          eve_turn_id: string
+          id: string
+          idempotency_key: string
+          intent: string
+          prompt_version: string
+          request_json: Json
+          runtime_version: string
+          schema_version: string
+          session_id: string
+          trace_id: string | null
+        }
+        Insert: {
+          contact_email: string
+          created_at?: string
+          eve_call_id: string
+          eve_session_id: string
+          eve_turn_id: string
+          id?: string
+          idempotency_key: string
+          intent: string
+          prompt_version: string
+          request_json: Json
+          runtime_version: string
+          schema_version: string
+          session_id: string
+          trace_id?: string | null
+        }
+        Update: {
+          contact_email?: string
+          created_at?: string
+          eve_call_id?: string
+          eve_session_id?: string
+          eve_turn_id?: string
+          id?: string
+          idempotency_key?: string
+          intent?: string
+          prompt_version?: string
+          request_json?: Json
+          runtime_version?: string
+          schema_version?: string
+          session_id?: string
+          trace_id?: string | null
+        }
+        Relationships: []
+      }
+
+      jules_messages: {
+        Row: {
+          body: string
+          client_turn_id: string | null
+          created_at: string
+          generation_status: string
+          id: string
+          role: string
+          sequence: number
+          session_id: string
+        }
+        Insert: {
+          body: string
+          client_turn_id?: string | null
+          created_at?: string
+          generation_status?: string
+          id?: string
+          role: string
+          sequence: number
+          session_id: string
+        }
+        Update: {
+          body?: string
+          client_turn_id?: string | null
+          created_at?: string
+          generation_status?: string
+          id?: string
+          role?: string
+          sequence?: number
+          session_id?: string
+        }
+        Relationships: []
+      }
+
       account_memberships: {
         Row: {
           account_id: string

@@ -65,6 +65,15 @@ describe("CRM auth middleware", () => {
     expect(login.status).toBe(307);
   });
 
+  it("protects battery requests and does not cache authenticated responses", async () => {
+    const path = "/platform-admin/battery-requests";
+    expect((await middleware(request(path))).status).toBe(307);
+    refreshSessionTokenMock.mockResolvedValue({ email: "ari@rebattery.io" });
+    const response = await middleware(request(path, { token: "synthetic-session" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
   it("redirects an unauthenticated UI request and preserves only its pathname", async () => {
     const response = await middleware(request("/workspace?secret=value"));
     expect(response.status).toBe(307);

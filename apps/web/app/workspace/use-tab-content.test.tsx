@@ -62,11 +62,11 @@ function makeObjectTab(name: string): ContentTab {
 }
 
 describe("platform operations content", () => {
-  it("resolves a platform tab without fetching", () => {
+  it.each(["proposals", "battery-requests"])("resolves the %s platform tab without fetching", (section) => {
     const tab: ContentTab = {
-      id: "~platform-admin/proposals",
+      id: `~platform-admin/${section}`,
       kind: "platform-admin",
-      path: "~platform-admin/proposals",
+      path: `~platform-admin/${section}`,
       title: "Recycler selection",
       preview: false,
       pinned: false,
@@ -76,7 +76,7 @@ describe("platform operations content", () => {
 
     expect(result.current.content).toEqual({
       kind: "platform-admin",
-      section: "proposals",
+      section,
     });
     expect(global.fetch).not.toHaveBeenCalled();
   });
