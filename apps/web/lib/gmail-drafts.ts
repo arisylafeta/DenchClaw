@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 export type EmailDraft = { to: string[]; subject: string; body: string };
 export type CreatedDraft = { draftId: string | null; messageId: string | null };
@@ -23,6 +24,19 @@ export function parseEmailDraft(body: unknown): { value: EmailDraft } | { error:
  * Creates a Gmail draft in the given account through the gog CLI. The CLI is limited to draft
  * creation and blocked from sending, so this can never send mail.
  */
+/** Root-only file holding gog's keyring password; gog cannot prompt for it in a server process. */
+const KEYRING_PASSWORD_FILE = "/root/.hermes/workspace/.secrets/gog-keyring-password";
+
+function gogEnv(): NodeJS.ProcessEnv {
+  if (process.env.GOG_KEYRING_PASSWORD) return process.env;
+  const file = process.env.GOG_KEYRING_PASSWORD_FILE || KEYRING_PASSWORD_FILE;
+  try {
+    return { ...process.env, GOG_KEYRING_PASSWORD: readFileSync(file, "utf8").trim() };
+  } catch {
+    return process.env;
+  }
+}
+
 export function createGmailDraft(account: string, draft: EmailDraft): Promise<CreatedDraft> {
   const args = [
     "--account", account,
@@ -37,7 +51,7 @@ export function createGmailDraft(account: string, draft: EmailDraft): Promise<Cr
   if (draft.to.length) args.push("--to", draft.to.join(","));
 
   return new Promise((resolve, reject) => {
-    const child = execFile(process.env.GOG_BIN || "gog", args, { timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+    const child = execFile(process.env.GOG_BIN || "gog", args, { env: gogEnv(), timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
       if (error) return reject(new Error("Gmail did not accept the draft. Check that this account is connected to gog."));
       try {
         const parsed = JSON.parse(stdout) as Record<string, unknown>;

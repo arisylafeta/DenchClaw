@@ -21,6 +21,8 @@ describe("createGmailDraft", () => {
     expect(args).not.toContain("send");
     expect(stdin).toBe("Hi Sam");
     expect(created).toEqual({ draftId: "r1", messageId: "m1" });
+    const options = execFile.mock.calls[0][2] as { env: NodeJS.ProcessEnv };
+    expect(options.env).toBeDefined();
   });
 });
 

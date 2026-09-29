@@ -1,5 +1,5 @@
 import { parseFileMeta, type FileType } from "@/lib/bulk-trade-details";
-import { MAX_TRADE_FILE_BYTES, discardTradeFile, storeTradeFile } from "@/lib/bulk-trade-files";
+import { MAX_TRADE_FILE_BYTES, discardTradeFile, storeTradeFile, tradeFilesDir } from "@/lib/bulk-trade-files";
 import { recordFile } from "@/lib/crm-postgres/bulk-trade-details";
 import { badRequest, guardBulkTrades, notFound } from "@/lib/bulk-trades-route";
 
@@ -11,6 +11,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
 
+  if (!tradeFilesDir()) {
+    return Response.json({ error: "File uploads are not set up on this server yet." }, { status: 503 });
+  }
   const form = await req.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File) || !file.name) return badRequest("Attach a file.");
