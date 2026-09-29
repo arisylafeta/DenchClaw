@@ -84,7 +84,7 @@ class SyncRun(unittest.TestCase):
              "message": None, "created_at": "2026-09-28T12:00:00+00:00"},
         ]
         views = [{"auction_id": "a69", "first_viewed_at": "2026-09-27T09:00:00+00:00", "last_viewed_at": "2026-09-29T09:00:00+00:00",
-                  "view_count": 3, "users": {"email": "looker@viewco.example"}}]
+                  "view_count": 3, "email": "looker@viewco.example"}]
         platform = FakePlatform(auctions, submissions, views)
         args = type("Args", (), {"dry_run": False})
         with redirect_stdout(io.StringIO()):

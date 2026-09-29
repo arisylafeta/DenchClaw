@@ -97,7 +97,7 @@ class Platform:
             return []
         try:
             return self.get("auction_views", {
-                "select": "auction_id,first_viewed_at,last_viewed_at,view_count,users(email)",
+                "select": "auction_id,email,first_viewed_at,last_viewed_at,view_count",
                 "auction_id": f"in.({','.join(auction_ids)})"})
         except urllib.error.HTTPError as err:
             if err.code == 404:
@@ -279,7 +279,7 @@ def collect_people(cur, lot_id, listing_id, auction_id, submissions, views):
     for v in views:
         if v["auction_id"] != auction_id:
             continue
-        p = person((v.get("users") or {}).get("email"))
+        p = person(v.get("email"))
         if p:
             p["first_viewed_at"] = check.parse_time(v["first_viewed_at"])
             p["last_viewed_at"] = check.parse_time(v["last_viewed_at"])
