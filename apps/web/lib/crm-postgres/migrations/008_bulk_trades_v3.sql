@@ -81,6 +81,10 @@ update crm_bulk_trade_lots set trade_stage = case stage
     when 'In Conversation' then 'With buyers'
     when 'In Payment' then 'Closing'
     when 'In Collection' then 'Closing'
+    when 'Shortlisted' then 'With buyers'
+    when 'Quoting' then 'With buyers'
+    when 'Signing agreement' then 'Closing'
+    when 'Payment and collection' then 'Closing'
     when 'Completed' then 'Done'
   end
 where trade_stage = 'Needs info' and stage <> 'Sourced'
