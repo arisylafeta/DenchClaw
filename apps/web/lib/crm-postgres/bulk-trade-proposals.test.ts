@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("../gmail-drafts", () => ({ fetchGmailAttachment: vi.fn(async () => Buffer.from("pdf-bytes")) }));
+const startHistoryPass = vi.hoisted(() => vi.fn(() => true));
+vi.mock("../history-pass", () => ({ startHistoryPass }));
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
@@ -89,5 +91,29 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(result.ok && result.lot_id).toBeTruthy();
     const created = await trades.getBulkTrade((result as { lot_id: string }).lot_id);
     expect(created).toMatchObject({ title: "Leaf packs, Leeds", trade_kind: "packs", next_step: "Qualify this lead" });
+  });
+
+  it("reads a new contact's history, and fills a trade created from a possible new trade", async () => {
+    startHistoryPass.mockClear();
+    await proposals.decideProposal(await propose("link_contact", null, { name: "Nic", email: "nic@oem.test" }), "accept", user);
+    expect(startHistoryPass).toHaveBeenCalledWith(lotId);
+
+    const id = await propose("possible_trade", null, { title: "Kona packs, Wales", trade_kind: "packs", email: "seller@kona.test" }, null);
+    const result = await proposals.decideProposal(id, "accept", user) as { ok: true; lot_id: string };
+    const created = (await details.getTradeDetail(result.lot_id))!;
+    expect(created.contacts).toMatchObject([{ email: "seller@kona.test" }]);
+    expect(startHistoryPass).toHaveBeenLastCalledWith(result.lot_id);
+
+    const kindless = (await trades.createBulkTrade({ title: "Kindless" }, user.id)).id;
+    await proposals.decideProposal(await propose("trade_kind", null, { trade_kind: "cells" }, kindless), "accept", user);
+    expect(await trades.getBulkTrade(kindless)).toMatchObject({ trade_kind: "cells" });
+  });
+
+  it("does not start a second history pass while one is running", async () => {
+    startHistoryPass.mockClear();
+    await pg.queryPg("insert into crm_bulk_trade_check_runs (kind, lot_id, status) values ('history', $1, 'running')", [lotId]);
+    expect(await proposals.requestHistoryPass(lotId)).toBe(false);
+    expect(startHistoryPass).not.toHaveBeenCalled();
+    expect(await proposals.historyStatus(lotId)).toMatchObject({ status: "running" });
   });
 });

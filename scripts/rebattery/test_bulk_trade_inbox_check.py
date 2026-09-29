@@ -22,6 +22,7 @@ TRADE = {
                 "last_touch_on": "2026-09-28", "last_touch_via": "Email", "chase_on": None}],
     "fields": {"chemistry": {"value": "NMC", "status": "confirmed"}},
     "files": {"datasheet.pdf"},
+    "contact_emails": {"sam@supplier.test"},
 }
 SOURCE = {"kind": "gmail", "id": "m1", "thread": "thr-9", "at": NOW, "synced_at": NOW, "label": "Gmail · sam@supplier.test",
           "url": None, "inbound": True, "participants": {"sam@supplier.test"}, "title": "Stock",
@@ -135,6 +136,43 @@ class Granola(unittest.TestCase):
         self.assertIn("We can do 22 per kWh", notes[0]["text"])
 
 
+class History(unittest.TestCase):
+    def test_batches_respect_the_size_budget_and_order(self):
+        sources = [{"id": str(i), "text": "x" * 5000} for i in range(7)]
+        groups = list(check.batches(sources, budget=12000))
+        self.assertEqual([[s["id"] for s in g] for g in groups], [["0", "1"], ["2", "3"], ["4", "5"], ["6"]])
+
+    def test_later_sources_win_and_buyer_updates_merge(self):
+        import copy
+        trade = copy.deepcopy(TRADE)
+        latest = {}
+        first = {"kind": "field", "target": "quantity", "proposed": {"value": "600 packs", "status": "unverified"}, "summary": "", "quote": "", "source": SOURCE}
+        later = {**first, "proposed": {"value": "580 packs", "status": "confirmed"}}
+        touch = {"kind": "buyer_update", "target": "btb_1", "proposed": {"status": "Teaser sent"}, "summary": "", "quote": "", "source": SOURCE}
+        touch2 = {**touch, "proposed": {"last_touch_on": "2026-09-29"}}
+        check.fold(trade, [first, touch], latest)
+        check.fold(trade, [later, touch2], latest)
+        self.assertEqual(latest[("field", "quantity")]["proposed"]["value"], "580 packs")
+        self.assertEqual(latest[("buyer_update", "btb_1")]["proposed"], {"status": "Teaser sent", "last_touch_on": "2026-09-29"})
+        self.assertEqual(trade["fields"]["quantity"]["value"], "580 packs")
+
+    def test_trade_kind_and_contacts_are_validated(self):
+        import copy
+        kindless = {**copy.deepcopy(TRADE), "trade_kind": None}
+        kept = check.validate({"proposals": [
+            {"kind": "trade_kind", "proposed": {"trade_kind": "packs"}, "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "trade_kind", "proposed": {"trade_kind": "bikes"}, "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "link_contact", "proposed": {"name": "Sam", "email": "sam@supplier.test"}, "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "link_contact", "proposed": {"name": "Ghost", "email": "ghost@nowhere.test"}, "quote": "Packs are in Turin", "source_id": "m1"},
+            {"kind": "link_contact", "proposed": {"name": "Alex", "email": "alex@rebattery.io"}, "quote": "Packs are in Turin", "source_id": "m1"},
+        ]}, kindless, {"m1": {**SOURCE, "text": SOURCE["text"] + "\nCc: new.person@supplier.test"}})
+        self.assertEqual([p["kind"] for p in kept], ["trade_kind"])
+        kept = check.validate({"proposals": [
+            {"kind": "link_contact", "proposed": {"name": "New Person", "email": "New.Person@supplier.test"}, "quote": "Packs are in Turin", "source_id": "m1"},
+        ]}, TRADE, {"m1": {**SOURCE, "text": SOURCE["text"] + "\nCc: new.person@supplier.test"}})
+        self.assertEqual(kept[0]["proposed"], {"name": "New Person", "email": "new.person@supplier.test"})
+
+
 TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 
@@ -150,11 +188,11 @@ class FullRun(unittest.TestCase):
               insert into crm_users (email, display_name, password_hash) values ('alex@rebattery.io', 'Alex', 'x') on conflict do nothing;
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
                 values ('bt_run', 'supply', 'Run trade', '', '', 'confirmed', 'With buyers', 'packs') on conflict do nothing;
-              insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_run', 'bt_run', 'Sam', 'sam@supplier.test') on conflict do nothing;
+              insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_run', 'bt_run', 'Sam', 'sam-fullrun@supplier.test') on conflict do nothing;
               insert into crm_email_threads (id, subject, gmail_thread_id) values ('thr_run', 'Stock', 'g-thr-run') on conflict do nothing;
               insert into crm_email_messages (id, thread_id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
                 select 'msg_run', 'thr_run', 'Stock', now(), 'Manufacturing dates: 2021 to 2025. Packs in Turin.', 'g-msg-run',
-                       'sam@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+                       'sam-fullrun@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
               insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
                 select 'msg_new', 'Offer: 400 Leaf packs in Leeds', now(), '400 Nissan Leaf battery packs available in Leeds, 40 kWh.',
                        'g-msg-new', 'seller@unknown.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
@@ -189,9 +227,10 @@ class FullRun(unittest.TestCase):
                 check.run(self.conn, args)
                 check.run(self.conn, args)  # same sources again: nothing new
         with self.conn.cursor() as cur:
-            cur.execute("select lot_id, kind, target, proposed->>'value', status from crm_bulk_trade_proposals order by id")
+            cur.execute("""select lot_id, kind, target, proposed->>'value', status from crm_bulk_trade_proposals
+                           where source_id in ('g-msg-run', 'g-msg-new', 'g-msg-known') order by id""")
             rows = cur.fetchall()
-            cur.execute("select status, emails_read, proposals_made from crm_bulk_trade_check_runs order by id")
+            cur.execute("select status, emails_read, proposals_made from crm_bulk_trade_check_runs where kind = 'check' order by id")
             runs = cur.fetchall()
         self.assertIn(("bt_run", "field", "manufacture_date", "2021 to 2025", "new"), rows)
         self.assertNotIn("Milan", [r[3] for r in rows])  # the unquoted claim was dropped
@@ -202,5 +241,56 @@ class FullRun(unittest.TestCase):
         self.assertEqual(runs[-1][2], 0)
 
 
+@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+class HistoryRun(unittest.TestCase):
+    def test_reads_all_of_a_trades_mail_oldest_first_and_keeps_the_latest_value(self):
+        import psycopg2
+        conn = psycopg2.connect(TEST_URL)
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+              insert into crm_users (email, display_name, password_hash) values ('alex@rebattery.io', 'Alex', 'x') on conflict do nothing;
+              insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage)
+                values ('bt_hist', 'supply', 'History trade', '', '', 'confirmed', 'Needs info') on conflict do nothing;
+              insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_hist', 'bt_hist', 'Nic', 'nic@oem.test') on conflict do nothing;
+              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
+                select v.id, 'Batch', v.at::timestamptz, now(), v.body, v.gid, 'nic@oem.test', u.id
+                from crm_users u, (values
+                  ('h1', '2025-05-01', 'We have 600 packs of 23.8 kWh. ' || repeat('Older context. ', 1200), 'g-h1'),
+                  ('h2', '2026-09-20', 'Update: 580 packs remain available.', 'g-h2')) as v(id, at, body, gid)
+                where u.email = 'alex@rebattery.io' on conflict do nothing;
+              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
+                select 'h-other', 'Other', now(), now(), 'Unrelated 999 packs', 'g-other', 'someone@else.test', id
+                from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+            """)
+        seen = []
+
+        def fake_model(system, user, key):
+            batch = json.loads(user)["SOURCES"]
+            seen.append([s["source_id"] for s in batch])
+            if batch[0]["source_id"] == "g-h1":
+                return {"proposals": [
+                    {"kind": "trade_kind", "proposed": {"trade_kind": "packs"}, "summary": "Packs", "quote": "We have 600 packs", "source_id": "g-h1"},
+                    {"kind": "field", "target": "quantity", "proposed": {"value": "600 packs"}, "summary": "Qty", "quote": "We have 600 packs", "source_id": "g-h1"}]}
+            return {"proposals": [
+                {"kind": "field", "target": "quantity", "proposed": {"value": "580 packs"}, "summary": "Qty now", "quote": "580 packs remain available", "source_id": "g-h2"}]}
+
+        args = type("Args", (), {"mailbox": "alex@rebattery.io", "history": "bt_hist", "dry_run": False})
+        with patch.object(check, "call_model", fake_model), patch.object(check, "refresh_granola", lambda: None), \
+             patch.object(check, "load_granola", lambda since: []), patch.dict(os.environ, {"HERMES_API_KEY": "test"}), \
+             patch.object(check, "HISTORY_BATCH_CHARS", 8050):
+            with redirect_stdout(io.StringIO()):
+                check.history(conn, args)
+        with conn.cursor() as cur:
+            cur.execute("select kind, proposed->>'value', proposed->>'trade_kind' from crm_bulk_trade_proposals where lot_id = 'bt_hist' order by id")
+            rows = cur.fetchall()
+            cur.execute("select kind, status, emails_read from crm_bulk_trade_check_runs where lot_id = 'bt_hist'")
+            run = cur.fetchone()
+        conn.close()
+        self.assertEqual(seen, [["g-h1"], ["g-h2"]])  # oldest first; a small budget forces one email per batch
+        self.assertEqual(sorted(rows), [("field", "580 packs", None), ("trade_kind", None, "packs")])
+        self.assertEqual(run, ("history", "ok", 2))
+
+
 if __name__ == "__main__":
     unittest.main()
+

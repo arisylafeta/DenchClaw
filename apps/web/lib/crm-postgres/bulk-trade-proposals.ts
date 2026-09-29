@@ -1,5 +1,6 @@
 import { queryPg, withPgTransaction } from "../postgres";
-import type { CheckStatus, FileType, Proposal } from "../bulk-trade-details";
+import type { CheckStatus, FileType, HistoryStatus, Proposal } from "../bulk-trade-details";
+import { startHistoryPass } from "../history-pass";
 import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
 import { createBulkTrade, updateBulkTrade } from "./bulk-trades";
@@ -28,9 +29,32 @@ export async function possibleTrades(): Promise<Proposal[]> {
 export async function checkStatus(): Promise<CheckStatus> {
   const [row] = await queryPg<{ last_run_at: string; status: "running" | "ok" | "failed"; error: string | null }>(
     `select coalesce(finished_at, started_at) as last_run_at, status, error
-     from crm_bulk_trade_check_runs order by started_at desc limit 1`,
+     from crm_bulk_trade_check_runs where kind = 'check' order by started_at desc limit 1`,
   );
   return row ?? null;
+}
+
+export async function historyStatus(lotId: string): Promise<HistoryStatus> {
+  const [row] = await queryPg<NonNullable<HistoryStatus>>(
+    `select status, started_at, finished_at, emails_read, notes_read, proposals_made
+     from crm_bulk_trade_check_runs where kind = 'history' and lot_id = $1 order by started_at desc limit 1`,
+    [lotId],
+  );
+  return row ?? null;
+}
+
+/**
+ * Starts a history pass unless one for this trade started in the last 30 minutes and is still
+ * running. Returns false when one is already underway.
+ */
+export async function requestHistoryPass(lotId: string): Promise<boolean> {
+  const [running] = await queryPg(
+    `select 1 from crm_bulk_trade_check_runs
+     where kind = 'history' and lot_id = $1 and status = 'running' and started_at > now() - interval '30 minutes'`,
+    [lotId],
+  );
+  if (running) return false;
+  return startHistoryPass(lotId);
 }
 
 export type Decision = { ok: true; lot_id: string | null } | { ok: false; status: number; error: string };
@@ -136,12 +160,25 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
           ? proposed.trade_kind as "packs" : null,
         next_step: "Qualify this lead",
       }, user.id);
+      // The sender becomes a contact, then a history pass reads everything they sent about it.
+      const sender = text(proposed.email) ?? p.source_label.match(/[^\s·]+@[^\s·]+/)?.[0] ?? null;
+      if (sender && !sender.endsWith("@rebattery.io")) {
+        await addContact(trade.id, { name: sender, email: sender }, user.id);
+        await requestHistoryPass(trade.id);
+      }
       return trade.id;
     }
     case "link_contact": {
       const email = text(proposed.email);
       if (!email) throw new Error("The proposed contact has no email.");
       await addContact(lotId!, { name: text(proposed.name) ?? email, email }, user.id);
+      await requestHistoryPass(lotId!); // read this person's past emails for the trade
+      return lotId;
+    }
+    case "trade_kind": {
+      const kind = String(proposed.trade_kind);
+      if (!["packs", "cells", "systems", "recycling"].includes(kind)) throw new Error("Unknown trade kind.");
+      await updateBulkTrade(lotId!, { trade_kind: kind as "packs" }, user.id);
       return lotId;
     }
     case "needs_triage":

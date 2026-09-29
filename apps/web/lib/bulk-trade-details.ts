@@ -124,7 +124,8 @@ export type TradeFile = {
 };
 
 export type ProposalKind =
-  | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade";
+  | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade"
+  | "trade_kind";
 
 /** A change the inbox check found in Gmail or Granola. Nothing happens until Alex accepts it. */
 export type Proposal = {
@@ -141,6 +142,16 @@ export type Proposal = {
   source_at: string | null;
   created_at: string;
 };
+
+/** Latest history pass for one trade. */
+export type HistoryStatus = {
+  status: "running" | "ok" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  emails_read: number;
+  notes_read: number;
+  proposals_made: number;
+} | null;
 
 /** Latest inbox check, for the header. */
 export type CheckStatus = { last_run_at: string; status: "running" | "ok" | "failed"; error: string | null } | null;
@@ -169,6 +180,8 @@ export type TradeDetail = {
   link_tracking?: boolean;
   /** Open proposals from the inbox check for this trade. */
   proposals?: Proposal[];
+  /** Latest history pass over this trade's past emails and calls. */
+  history?: HistoryStatus;
 };
 
 // ---------------------------------------------------------------------------

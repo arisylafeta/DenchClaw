@@ -359,4 +359,24 @@ describe("TradePage overview", () => {
     await waitFor(() => expect(screen.getByLabelText("Status for Synthetic Storage")).toHaveValue("Teaser sent"));
     expect(screen.queryByRole("button", { name: "Mark as Teaser sent?" })).not.toBeInTheDocument();
   });
+
+  it("reads a trade's past emails on request and says when it last did", async () => {
+    let started = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/history") && init?.method === "POST") { started = true; return new Response(JSON.stringify({ started: true }), { status: 202 }); }
+      return new Response(JSON.stringify({
+        ...DETAIL,
+        history: started
+          ? { status: "running", started_at: "2026-09-29T21:00:00Z", finished_at: null, emails_read: 0, notes_read: 0, proposals_made: 0 }
+          : { status: "ok", started_at: "2026-09-28T10:00:00Z", finished_at: "2026-09-28T10:02:00Z", emails_read: 74, notes_read: 1, proposals_made: 12 },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    expect(await screen.findByText("Read 28 Sep · 12 found")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Find data in emails" }));
+    expect(await screen.findByRole("button", { name: "Reading emails…" })).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1/history", expect.objectContaining({ method: "POST" }));
+  });
 });

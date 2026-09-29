@@ -5,6 +5,7 @@ store proposals for Alex to accept or ignore in the app. It never changes a trad
   bulk_trade_inbox_check.py                  # one run: collect, match, propose, record the run
   bulk_trade_inbox_check.py --dry-run        # print proposals, write nothing
   bulk_trade_inbox_check.py --summary        # the 08:00 list of overdue and due-today steps
+  bulk_trade_inbox_check.py --history LOT_ID # one-off pass over a trade's whole email and call history
   ... --only-at 08:00,10:30                  # act only within 15 minutes after these UK times
 
 Hermes cron runs on UTC, so the jobs fire every half hour and --only-at keeps them on UK time
@@ -102,14 +103,17 @@ def read_env_value(path, name):
 # Trades
 # ---------------------------------------------------------------------------
 
-def load_trades(cur):
+def load_trades(cur, lot_ids=None):
+    """Live trades, or the given trades at any stage."""
     cur.execute(
         """select id, title, trade_kind, trade_stage, fact_line, next_step,
                   to_char(next_step_due, 'YYYY-MM-DD') as next_step_due, waiting_on
-           from crm_bulk_trade_lots where trade_stage = any(%s)""",
-        (list(LIVE_STAGES),),
+           from crm_bulk_trade_lots
+           where (%s::text[] is null and trade_stage = any(%s)) or id = any(%s::text[])""",
+        (lot_ids, list(LIVE_STAGES), lot_ids or []),
     )
-    trades = {row["id"]: {**row, "emails": set(), "threads": set(), "buyers": [], "fields": {}, "files": set()}
+    trades = {row["id"]: {**row, "emails": set(), "contact_emails": set(), "threads": set(), "buyers": [], "fields": {},
+                          "files": set()}
               for row in cur.fetchall()}
     if not trades:
         return trades
@@ -118,6 +122,7 @@ def load_trades(cur):
     cur.execute("select lot_id, name, email from crm_bulk_trade_contacts where lot_id = any(%s)", (ids,))
     for row in cur.fetchall():
         trades[row["lot_id"]]["emails"] |= emails_in([row["email"]])
+        trades[row["lot_id"]]["contact_emails"] |= emails_in([row["email"]])
     cur.execute(
         """select b.lot_id, b.id, b.name, b.contact, b.status, p.email,
                   to_char(b.last_touch_on, 'YYYY-MM-DD') as last_touch_on, b.last_touch_via,
@@ -154,22 +159,40 @@ def load_trades(cur):
 # Sources
 # ---------------------------------------------------------------------------
 
+EMAIL_SELECT = """
+    select m.id, m.gmail_message_id, thread.gmail_thread_id, m.subject, m.sent_at, m.created_at,
+           m.from_email, coalesce(m.body, m.body_preview, '') as body, coalesce(m.has_attachments, false) as has_attachments,
+           array_remove(array_agg(distinct p.email), null) as recipients
+    from crm_email_messages m
+    join crm_users owner on owner.id = m.mailbox_owner_id and lower(owner.email) = lower(%(mailbox)s)
+    left join crm_email_threads thread on thread.id = m.thread_id
+    left join crm_email_message_recipients r on r.message_id = m.id
+    left join crm_people p on p.id = r.person_id
+    where {where}
+    group by m.id, thread.gmail_thread_id
+    order by coalesce(m.sent_at, m.created_at)"""
+
+
 def load_emails(cur, mailbox, since):
     """Messages synced since the cursor. Uses the sync time, so late-synced mail is not missed."""
-    cur.execute(
-        """select m.id, m.gmail_message_id, thread.gmail_thread_id, m.subject, m.sent_at, m.created_at,
-                  m.from_email, coalesce(m.body, m.body_preview, '') as body, coalesce(m.has_attachments, false) as has_attachments,
-                  array_remove(array_agg(distinct p.email), null) as recipients
-           from crm_email_messages m
-           join crm_users owner on owner.id = m.mailbox_owner_id and lower(owner.email) = lower(%s)
-           left join crm_email_threads thread on thread.id = m.thread_id
-           left join crm_email_message_recipients r on r.message_id = m.id
-           left join crm_people p on p.id = r.person_id
-           where m.created_at > %s
-           group by m.id, thread.gmail_thread_id
-           order by m.created_at""", (mailbox, since))
+    cur.execute(EMAIL_SELECT.format(where="m.created_at > %(since)s"), {"mailbox": mailbox, "since": since})
+    return email_sources(cur.fetchall(), mailbox)
+
+
+def load_trade_emails(cur, mailbox, emails, threads):
+    """Every synced message from or to the trade's people, or on its threads, oldest first."""
+    cur.execute(EMAIL_SELECT.format(where="""
+        lower(m.from_email) = any(%(emails)s)
+        or thread.gmail_thread_id = any(%(threads)s)
+        or exists (select 1 from crm_email_message_recipients r2 join crm_people p2 on p2.id = r2.person_id
+                   where r2.message_id = m.id and lower(p2.email) = any(%(emails)s))"""),
+        {"mailbox": mailbox, "emails": sorted(emails), "threads": sorted(t for t in threads if t)})
+    return email_sources(cur.fetchall(), mailbox)
+
+
+def email_sources(rows, mailbox):
     out = []
-    for row in cur.fetchall():
+    for row in rows:
         sender = (row["from_email"] or "").lower()
         out.append({
             "kind": "gmail",
@@ -267,12 +290,16 @@ Each proposal: {"kind", "target", "proposed", "summary", "quote", "source_id"}.
 - kind "next_step": proposed = {"next_step": "...", "next_step_due": "YYYY-MM-DD" or null, "waiting_on": "us" | "them"}.
   Only when the source makes a concrete next action clear.
 - kind "new_buyer": proposed = {"name": "...", "contact": "...", "wants": "..."} for a buyer not in BUYERS.
+- kind "trade_kind": proposed = {"trade_kind": "packs" | "cells" | "systems" | "recycling"}, only when TRADE has none.
+- kind "link_contact": proposed = {"name": "...", "email": "..."} for a supplier-side person on this trade who
+  appears in the source (the email address must be in the source) and is not in CONTACTS.
 - kind "file": target = one attachment name from the source's "Attachments:" line, proposed = {}. Only files about
   THIS trade (spec sheets, test reports, photos, stock lists, contracts, LCs, proposals for this batch). Skip logos,
   signatures and files about other batches. Use the file name itself as the quote.
 - "summary": one short plain sentence for Alex.
 - "quote": copied EXACTLY, word for word, from the source text (8-300 characters). A proposal without an exact quote is discarded.
 - "source_id": the id of the source the quote comes from.
+SOURCES are in date order; when two disagree, the later one wins.
 Propose nothing that is already recorded (compare with TRADE, FIELDS and BUYERS), speculative, or only implied.
 An empty list is a good answer."""
 
@@ -282,7 +309,8 @@ def trade_prompt(trade, sources):
     fields = [{"key": f["key"], "label": f["label"], "current": trade["fields"].get(f["key"])}
               for f in TEMPLATES["fields"][kind]]
     context = {
-        "TRADE": {k: trade[k] for k in ("title", "trade_stage", "fact_line", "next_step", "next_step_due", "waiting_on")},
+        "TRADE": {k: trade[k] for k in ("title", "trade_kind", "trade_stage", "fact_line", "next_step", "next_step_due", "waiting_on")},
+        "CONTACTS": sorted(trade["contact_emails"]),
         "FIELDS": fields,
         "BUYERS": trade["buyers"],
         "STATUSES": BUYER_STATUSES,
@@ -328,7 +356,7 @@ def validate(raw, trade, sources_by_id):
             proposed = {"value": str(proposed["value"]).strip(),
                         "status": proposed.get("status") if proposed.get("status") in ("confirmed", "unverified") else "unverified"}
         elif kind == "buyer_update":
-            if target not in buyers:
+            if not target or target not in buyers:
                 continue
             clean = {}
             if proposed.get("status") in BUYER_STATUSES:
@@ -356,6 +384,18 @@ def validate(raw, trade, sources_by_id):
             if not name or name.lower() in {b["name"].lower() for b in trade["buyers"]}:
                 continue
             proposed = {k: str(proposed.get(k) or "").strip() or None for k in ("name", "contact", "wants")}
+            target = None
+        elif kind == "trade_kind":
+            if trade["trade_kind"] or proposed.get("trade_kind") not in TEMPLATES["fields"]:
+                continue
+            proposed = {"trade_kind": proposed["trade_kind"]}
+            target = None
+        elif kind == "link_contact":
+            email = str(proposed.get("email") or "").strip().lower()
+            if (not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) or email.endswith("@" + OWN_DOMAIN)
+                    or email in trade["contact_emails"] or email not in source["text"].lower() + " ".join(source["participants"])):
+                continue
+            proposed = {"name": str(proposed.get("name") or "").strip()[:120] or email, "email": email}
             target = None
         elif kind == "file":
             attachment = next((a for a in source.get("attachments", []) if a["name"] == target), None)
@@ -436,7 +476,7 @@ def insert_proposal(cur, run_id, lot_id, p):
 # ---------------------------------------------------------------------------
 
 def last_cursor(cur):
-    cur.execute("select cursor from crm_bulk_trade_check_runs where status = 'ok' order by started_at desc limit 1")
+    cur.execute("select cursor from crm_bulk_trade_check_runs where status = 'ok' and kind = 'check' order by started_at desc limit 1")
     row = cur.fetchone()
     return row["cursor"] if row else {}
 
@@ -524,7 +564,7 @@ def run(conn, args):
                         kind = t.get("trade_kind") if t.get("trade_kind") in TEMPLATES["fields"] else None
                         proposals.append((None, {
                             "kind": "possible_trade", "target": None,
-                            "proposed": {"title": str(t["title"]).strip()[:120], "trade_kind": kind},
+                            "proposed": {"title": str(t["title"]).strip()[:120], "trade_kind": kind, "email": source.get("from")},
                             "summary": str(t.get("summary") or "").strip()[:300] or "Possible new trade",
                             "quote": str(t["quote"]).strip()[:300], "source": source}))
                 except Exception as err:
@@ -548,6 +588,131 @@ def run(conn, args):
                      json.dumps({"gmail_since": latest(emails, gmail_since).isoformat(),
                                  "granola_since": latest(notes, granola_since).isoformat()}),
                      "; ".join(report["warnings"]) or None, run_id))
+                report["proposals_made"] = made
+            conn.commit()
+    except Exception as err:
+        conn.rollback()
+        if run_id:
+            with conn.cursor() as cur:
+                cur.execute("update crm_bulk_trade_check_runs set status = 'failed', finished_at = now(), error = %s where id = %s",
+                            (f"{type(err).__name__}: {str(err)[:300]}", run_id))
+            conn.commit()
+        raise
+    json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
+    print()
+    return 0
+
+
+EPOCH = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
+HISTORY_BATCH_CHARS = 24000
+
+
+def batches(sources, budget=HISTORY_BATCH_CHARS):
+    """Consecutive groups of sources that fit one model call."""
+    batch, size = [], 0
+    for source in sources:
+        length = min(len(source["text"]), MAX_SOURCE_CHARS)
+        if batch and size + length > budget:
+            yield batch
+            batch, size = [], 0
+        batch.append(source)
+        size += length
+    if batch:
+        yield batch
+
+
+def fold(trade, kept, latest):
+    """Apply one batch's proposals to the working picture of the trade, so the next batch only
+    proposes real changes, and keep the latest proposal per thing it changes."""
+    for p in kept:
+        kind, proposed = p["kind"], p["proposed"]
+        if kind == "field":
+            trade["fields"][p["target"]] = {"value": proposed["value"], "status": proposed["status"]}
+            key = ("field", p["target"])
+        elif kind == "buyer_update":
+            buyer = next(b for b in trade["buyers"] if b["id"] == p["target"])
+            buyer.update(proposed)
+            key = ("buyer_update", p["target"])
+            earlier = latest.get(key)
+            if earlier:  # several updates to one buyer merge; later values win
+                p = {**p, "proposed": {**earlier["proposed"], **proposed}}
+        elif kind == "next_step":
+            trade["next_step"] = proposed["next_step"]
+            key = ("next_step",)
+        elif kind == "new_buyer":
+            # Listed for later batches, without an id, so nothing can target it before it exists.
+            trade["buyers"].append({"id": None, "name": proposed["name"], "contact": proposed.get("contact"), "status": "To contact"})
+            key = ("new_buyer", proposed["name"].lower())
+        elif kind == "trade_kind":
+            trade["trade_kind"] = proposed["trade_kind"]
+            key = ("trade_kind",)
+        elif kind == "link_contact":
+            trade["contact_emails"].add(proposed["email"])
+            key = ("link_contact", proposed["email"])
+        elif kind == "file":
+            key = ("file", proposed["file_name"].lower())
+        else:
+            continue
+        latest[key] = p
+
+
+def history(conn, args):
+    """One-off pass over a trade's whole email and call history, oldest first. Proposals only."""
+    lot_id = args.history
+    key = os.environ.get("HERMES_API_KEY") or read_env_value(HERMES_ENV, "API_SERVER_KEY")
+    if not key:
+        raise SystemExit("no gateway key")
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("select pg_try_advisory_lock(hashtext('bulk_trade_history:' || %s)) as locked", (lot_id,))
+        if not cur.fetchone()["locked"]:
+            print("A history pass for this trade is already running; skipped.")
+            return 0
+        trades = load_trades(cur, [lot_id])
+        if lot_id not in trades:
+            raise SystemExit(f"No trade {lot_id}")
+        run_id = None
+        if not args.dry_run:
+            cur.execute("insert into crm_bulk_trade_check_runs (kind, lot_id) values ('history', %s) returning id", (lot_id,))
+            run_id = cur.fetchone()["id"]
+            conn.commit()
+
+    report = {"run_id": run_id, "lot_id": lot_id, "emails_read": 0, "notes_read": 0, "batches": 0, "proposals": [], "warnings": []}
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            trade = trades[lot_id]
+            if not trade["emails"] and not trade["threads"]:
+                report["warnings"].append("no contacts, linked buyers or linked threads: nothing to match")
+            warning = refresh_granola()
+            if warning:
+                report["warnings"].append(warning)
+            emails = load_trade_emails(cur, args.mailbox, trade["emails"], trade["threads"])
+            notes = [n for n in load_granola(EPOCH) if n["participants"] & trade["emails"]]
+            sources = sorted(emails + notes, key=lambda s: s["at"] or EPOCH)
+            report["emails_read"], report["notes_read"] = len(emails), len(notes)
+
+            latest = {}
+            for batch in batches(sources, HISTORY_BATCH_CHARS):
+                report["batches"] += 1
+                for source in batch:
+                    add_attachments(source)
+                try:
+                    raw = call_model(TRADE_SYSTEM, trade_prompt(trade, batch), key)
+                except Exception as err:  # one batch failing must not lose the rest
+                    report["warnings"].append(f"batch {report['batches']}: model failed ({type(err).__name__})")
+                    continue
+                fold(trade, validate(raw, trade, {s["id"]: s for s in batch}), latest)
+
+            made = 0
+            for p in latest.values():
+                report["proposals"].append({"kind": p["kind"], "target": p["target"], "proposed": p["proposed"],
+                                            "summary": p["summary"], "quote": p["quote"], "source": p["source"]["label"]})
+                if not args.dry_run:
+                    made += insert_proposal(cur, run_id, lot_id, p)
+            if not args.dry_run:
+                cur.execute(
+                    """update crm_bulk_trade_check_runs set status = 'ok', finished_at = now(), emails_read = %s,
+                         notes_read = %s, proposals_made = %s, error = %s where id = %s""",
+                    (len(emails), len(notes), made, "; ".join(report["warnings"]) or None, run_id))
                 report["proposals_made"] = made
             conn.commit()
     except Exception as err:
@@ -610,11 +775,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="print proposals and write nothing")
     parser.add_argument("--summary", action="store_true", help="print the overdue and due-today list")
     parser.add_argument("--only-at", help="comma-separated UK times; do nothing outside them")
+    parser.add_argument("--history", metavar="LOT_ID", help="one-off pass over this trade's whole history")
     args = parser.parse_args()
     if args.only_at and not due_now([t.strip() for t in args.only_at.split(",") if t.strip()]):
         return 0
     conn = psycopg2.connect(args.dsn)
     try:
+        if args.history:
+            return history(conn, args)
         return summary(conn) if args.summary else run(conn, args)
     finally:
         conn.close()

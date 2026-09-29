@@ -18,7 +18,10 @@ const details = {
 };
 vi.mock("@/lib/crm-postgres/bulk-trade-details", () => details);
 const decideProposal = vi.fn();
-vi.mock("@/lib/crm-postgres/bulk-trade-proposals", () => ({ decideProposal, tradeProposals: vi.fn(async () => []) }));
+const requestHistoryPass = vi.fn();
+vi.mock("@/lib/crm-postgres/bulk-trade-proposals", () => ({
+  decideProposal, requestHistoryPass, tradeProposals: vi.fn(async () => []), historyStatus: vi.fn(async () => null),
+}));
 const getBulkTrade = vi.fn(async (id: string) => (id === "bt_1" ? { id } : null));
 vi.mock("@/lib/crm-postgres/bulk-trades", () => ({ updateBulkTrade: vi.fn(), getBulkTrade }));
 const createGmailDraft = vi.fn(async () => ({ draftId: "r1", messageId: "m1" }));
@@ -145,5 +148,13 @@ describe("trade detail routes", () => {
     decideProposal.mockResolvedValueOnce({ ok: false, status: 404, error: "Already handled or not found." });
     expect((await POST(post({ action: "ignore" }), params({ proposalId: "12" }))).status).toBe(404);
   });
-});
 
+  it("starts a history pass once per trade", async () => {
+    const { POST } = await import("./history/route");
+    requestHistoryPass.mockResolvedValueOnce(true);
+    expect((await POST(post({}), params({ id: "bt_1" }))).status).toBe(202);
+    requestHistoryPass.mockResolvedValueOnce(false);
+    expect((await POST(post({}), params({ id: "bt_1" }))).status).toBe(409);
+    expect((await POST(post({}), params({ id: "bt_9" }))).status).toBe(404);
+  });
+});

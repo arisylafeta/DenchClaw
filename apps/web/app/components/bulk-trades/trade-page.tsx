@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { BulkTrade, TradeOwner, TradePatch } from "@/lib/bulk-trades";
-import type { Buyer, Contact, TradeDetail, TradeField, TradeFile } from "@/lib/bulk-trade-details";
+import { shortDate, type Buyer, type Contact, type HistoryStatus, type TradeDetail, type TradeField, type TradeFile } from "@/lib/bulk-trade-details";
 import { TradeData } from "./trade-data";
 import { TradeEditor } from "./trade-editor";
 import { TradeOverview } from "./trade-overview";
@@ -88,6 +88,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             {trade.trade_stage}
           </span>
           <span className="flex-1" />
+          <HistoryButton tradeId={trade.id} history={detail.history ?? null} onRefresh={load} />
           <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setEditing(true)}>Edit trade</button>
         </div>
         {trade.fact_line && <p className="text-sm" style={{ color: "var(--bt-text-2)" }}>{trade.fact_line}</p>}
@@ -134,3 +135,56 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
     </div>
   );
 }
+
+/**
+ * Reads the trade's past emails and calls once, as proposals. While a pass runs, the page
+ * refreshes itself so the findings appear when it is done.
+ */
+function HistoryButton({ tradeId, history, onRefresh }: {
+  tradeId: string;
+  history: HistoryStatus;
+  onRefresh: () => Promise<void>;
+}) {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = history?.status === "running" || starting;
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => { void onRefresh().then(() => setStarting(false)); }, 8000);
+    return () => clearInterval(timer);
+  }, [running, onRefresh]);
+
+  async function start() {
+    setError(null);
+    setStarting(true);
+    try {
+      await request(tradeUrl(tradeId, "/history"), { method: "POST" });
+    } catch (err) {
+      setStarting(false);
+      setError(err instanceof Error ? err.message : "Could not start.");
+    }
+  }
+
+  const note = running
+    ? null
+    : history?.status === "failed"
+      ? "Last read failed"
+      : history?.finished_at
+        ? `Read ${shortDate(history.finished_at.slice(0, 10))} · ${history.proposals_made} found`
+        : null;
+  return (
+    <div className="flex items-center gap-2">
+      {(note || error) && (
+        <span className="text-xs" style={{ color: error || history?.status === "failed" ? "var(--bt-red)" : "var(--bt-muted)" }}>
+          {error ?? note}
+        </span>
+      )}
+      <button type="button" className={buttonClass} style={buttonStyle} disabled={running} onClick={start}
+        title="Read this trade's past emails and calls once, and propose what they contain">
+        {running ? "Reading emails…" : "Find data in emails"}
+      </button>
+    </div>
+  );
+}
+

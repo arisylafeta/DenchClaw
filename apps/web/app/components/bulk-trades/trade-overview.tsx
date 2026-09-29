@@ -42,7 +42,7 @@ type Props = {
 };
 
 /** Proposals shown on the Overview; field and file proposals live on Data and files. */
-const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage", "link_contact"]);
+const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage", "link_contact", "trade_kind"]);
 
 /** First contact with an email address, else the first contact. */
 function emailContact(contacts: Contact[]) {
