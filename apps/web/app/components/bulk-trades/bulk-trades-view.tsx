@@ -136,7 +136,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         </button>
       </header>
 
-      <main className="flex-1 overflow-auto px-8 pb-8 pt-5">
+      <main className={`flex-1 overflow-auto px-8 pb-8 ${mode === "list" ? "pt-5" : "pt-6"}`}>
         {loadError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{loadError}</p>}
         {actionError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{actionError}</p>}
         {mode === "list"

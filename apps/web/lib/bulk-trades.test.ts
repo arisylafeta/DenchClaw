@@ -3,6 +3,7 @@ import {
   dueLabel,
   groupTrades,
   parseTradePatch,
+  stageTotal,
   todayInLondon,
   touchedLabel,
   type BulkTrade,
@@ -97,5 +98,26 @@ describe("parseTradePatch", () => {
     expect(parseTradePatch({ next_step_due: "2026-02-30" })).toEqual({ error: "next_step_due must be a YYYY-MM-DD date." });
     expect(parseTradePatch({ title: "  " })).toEqual({ error: "title is required." });
     expect(parseTradePatch({ owner_user_id: "Alex" })).toEqual({ error: "owner_user_id must be a user id." });
+  });
+});
+
+describe("stageTotal", () => {
+  const withValue = (value: string | null) => trade({ value });
+
+  it("adds ranges and single amounts in one currency", () => {
+    expect(stageTotal([withValue("€119–149k"), withValue("€276–345k")])).toBe("€395–494k");
+    expect(stageTotal([withValue("$500–600k")])).toBe("$500–600k");
+    expect(stageTotal([withValue("€20k"), withValue("€12.5k")])).toBe("€32.5k");
+  });
+
+  it("marks a partial total when some values cannot be added", () => {
+    expect(stageTotal([withValue("€119–149k"), withValue("[fee]"), withValue("€38.50/cell"), withValue(null)]))
+      .toBe("€119–149k+");
+  });
+
+  it("shows nothing when no value adds up or currencies are mixed", () => {
+    expect(stageTotal([withValue("[value]"), withValue("$450k floor")])).toBe("");
+    expect(stageTotal([withValue("€100k"), withValue("$200k")])).toBe("");
+    expect(stageTotal([])).toBe("");
   });
 });

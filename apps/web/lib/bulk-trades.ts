@@ -153,3 +153,35 @@ export function touchedLabel(trade: BulkTrade, today: string): string {
   const days = daysBetween(trade.last_touched, today);
   return days <= 0 ? "Today" : `${days}d`;
 }
+
+const MONEY = /^([€$£])(\d+(?:\.\d+)?)(?:\s*[–-]\s*(\d+(?:\.\d+)?))?k$/;
+
+function formatK(amount: number): string {
+  return String(Math.round(amount * 10) / 10);
+}
+
+/**
+ * Column total for the board, e.g. "€395–494k+". Sums values written as "€119–149k" or "$450k"
+ * in one currency; "+" means some trades have a value that could not be added. Empty when
+ * nothing adds up, or currencies are mixed.
+ */
+export function stageTotal(trades: BulkTrade[]): string {
+  let currency: string | null = null;
+  let low = 0;
+  let high = 0;
+  let skipped = false;
+  for (const trade of trades) {
+    const match = trade.value?.trim().match(MONEY);
+    if (!match) {
+      skipped = true;
+      continue;
+    }
+    if (currency && currency !== match[1]) return "";
+    currency = match[1];
+    low += Number(match[2]);
+    high += Number(match[3] ?? match[2]);
+  }
+  if (!currency) return "";
+  const range = low === high ? formatK(low) : `${formatK(low)}–${formatK(high)}`;
+  return `${currency}${range}k${skipped ? "+" : ""}`;
+}
