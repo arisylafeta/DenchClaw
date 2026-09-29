@@ -76,6 +76,11 @@ values ($1, 'trade_updated', jsonb_build_object('next_step', jsonb_build_array($
 commit;
 ```
 
+To load a whole trade from its sources (fields with sources, contacts, buyers and bids, files), write
+a JSON pack outside git and run `scripts/rebattery/load_trade_pack.py pack.json` for a dry run; add
+`--apply --files-dir "$BULK_TRADE_FILES_DIR"` once the dry run is approved. It only fills what is
+empty, skips rows that exist, and logs every write.
+
 Log `changes` as `{"field": [before, after]}`. Use `buyer_id` on buyer, bid and link events. Do not
 create an active trade from an old email or cache without checking existing trades first.
 
