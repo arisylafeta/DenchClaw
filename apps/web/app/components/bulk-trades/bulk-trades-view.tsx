@@ -104,36 +104,39 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       onClick={() => switchMode(value)}
       className="flex h-[30px] items-center rounded-[7px] px-3 text-[13px]"
       style={mode === value
-        ? { background: "var(--color-surface)", color: "var(--color-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" }
-        : { color: "var(--color-text-secondary)", fontWeight: 500 }}
+        ? { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" }
+        : { color: "var(--bt-text-2)", fontWeight: 500 }}
     >
       {label}
     </button>
   );
 
   return (
-    <div className="flex h-full flex-col" style={{ background: "var(--color-bg)" }}>
-      <header className="flex flex-wrap items-center gap-4 border-b px-6 py-4" style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}>
-        <h1 className="text-xl font-semibold" style={{ color: "var(--color-text)" }}>Bulk Trades</h1>
-        <nav aria-label="View" className="flex rounded-[9px] p-[3px]" style={{ background: "var(--color-surface-hover)" }}>
+    <div className="bulk-trades flex h-full flex-col">
+      <header className="flex flex-wrap items-center gap-4 border-b px-8 py-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+        <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
+        <nav aria-label="View" className="ml-2 flex rounded-[9px] p-[3px]" style={{ background: "var(--bt-segment)" }}>
           {tab("list", "List")}
           {tab("board", "Board")}
         </nav>
-        <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+        <span className="text-sm" style={{ color: "var(--bt-muted)" }}>
           {liveCount} live · {mode === "list" ? "sorted by what needs you first" : "drag to change stage"}
         </span>
         <div className="flex-1" />
         <button
           type="button"
           onClick={() => setEditing("new")}
-          className="flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold"
-          style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
+          className="flex h-9 items-center gap-1.5 rounded-lg bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
+          style={{ color: "var(--bt-on-accent)" }}
         >
-          <span aria-hidden="true">+</span> New trade
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New trade
         </button>
       </header>
 
-      <main className="flex-1 overflow-auto px-6 py-5">
+      <main className="flex-1 overflow-auto px-8 pb-8 pt-5">
         {loadError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{loadError}</p>}
         {actionError && <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-error)" }}>{actionError}</p>}
         {mode === "list"

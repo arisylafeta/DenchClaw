@@ -3,16 +3,16 @@ import type { TradeGroupName } from "@/lib/bulk-trades";
 export type ChipTone = "red" | "amber" | "grey";
 
 const TONES: Record<ChipTone, React.CSSProperties> = {
-  red: { background: "rgba(217, 45, 32, 0.12)", color: "#d92d20" },
-  amber: { background: "rgba(220, 104, 3, 0.12)", color: "#dc6803" },
-  grey: { background: "var(--color-surface-hover)", color: "var(--color-text-secondary)" },
+  red: { background: "var(--bt-red-bg)", color: "var(--bt-red)" },
+  amber: { background: "var(--bt-amber-bg)", color: "var(--bt-amber)" },
+  grey: { background: "var(--bt-divider)", color: "var(--bt-text-2)" },
 };
 
 /** Heading colour for a group of the given tone. */
 export const TONE_HEADING: Record<ChipTone, string> = {
-  red: "#d92d20",
-  amber: "#dc6803",
-  grey: "var(--color-text)",
+  red: "var(--bt-red)",
+  amber: "var(--bt-amber)",
+  grey: "var(--bt-text)",
 };
 
 export const GROUP_TONE: Record<TradeGroupName, ChipTone> = {

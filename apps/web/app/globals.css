@@ -2457,3 +2457,54 @@ td:has(> div > :empty) {
   background: rgba(245, 158, 11, 0.04);
   transition: box-shadow 2s ease-out, background 2s ease-out;
 }
+
+/* ============================================================
+   Bulk Trades: palette and type from the Bulk Trades design canvas
+   ============================================================ */
+
+.bulk-trades {
+  --bt-bg: #f7f7f5;
+  --bt-surface: #ffffff;
+  --bt-row-hover: #fafaf8;
+  --bt-border: #e7e6e2;
+  --bt-divider: #f2f2f0;
+  --bt-segment: #f2f2f0;
+  --bt-text: #1c1c1a;
+  --bt-text-2: #3f3f3a;
+  --bt-muted: #6b6a65;
+  --bt-accent: #e2f24a;
+  --bt-accent-hover: #d4e436;
+  --bt-on-accent: #1c1c1a;
+  --bt-red: #b42318;
+  --bt-red-bg: #fdecea;
+  --bt-amber: #b54708;
+  --bt-amber-bg: #fef4e6;
+  --bt-badge: #1c1c1a;
+  --bt-on-badge: #ffffff;
+  --bt-ok: #17b26a;
+  background: var(--bt-bg);
+  color: var(--bt-text);
+  font-family: "Geist", "Inter", system-ui, sans-serif;
+}
+
+.dark .bulk-trades {
+  --bt-bg: #1b1b1a;
+  --bt-surface: #242423;
+  --bt-row-hover: #2a2a28;
+  --bt-border: #363532;
+  --bt-divider: #2e2e2c;
+  --bt-segment: #2e2e2c;
+  --bt-text: #ededea;
+  --bt-text-2: #c9c8c3;
+  --bt-muted: #9a9993;
+  --bt-red: #f97066;
+  --bt-red-bg: rgba(240, 68, 56, 0.16);
+  --bt-amber: #fdb022;
+  --bt-amber-bg: rgba(247, 144, 9, 0.16);
+  --bt-badge: #ededea;
+  --bt-on-badge: #1c1c1a;
+}
+
+.bulk-trades .bt-mono {
+  font-family: "Geist Mono", ui-monospace, "SF Mono", monospace;
+}
