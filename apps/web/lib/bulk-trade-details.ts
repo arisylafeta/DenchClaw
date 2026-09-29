@@ -60,6 +60,8 @@ export type Buyer = {
   person_id: string | null;
   person_email: string | null;
   email_tracking: EmailTracking | null;
+  /** Last time the buyer clicked a tracked link from a Gmail draft. */
+  link_clicked_at: string | null;
   contact: string | null;
   wants: string | null;
   status: BuyerStatus;
@@ -108,6 +110,8 @@ export type TradeDetail = {
   contacts: Contact[];
   fields: TradeField[];
   files: TradeFile[];
+  /** True when Gmail drafts get tracked links (a public link address is configured). */
+  link_tracking?: boolean;
 };
 
 // ---------------------------------------------------------------------------

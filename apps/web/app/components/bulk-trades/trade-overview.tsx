@@ -10,6 +10,7 @@ import {
   type TradeDetail,
 } from "@/lib/bulk-trade-details";
 import { BuyersTable } from "./buyers-table";
+import { EmailDialog } from "./email-dialog";
 import {
   Card,
   ErrorText,
@@ -50,9 +51,9 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   const { trade, contacts } = detail;
   return (
     <div className="flex flex-col gap-6">
-      <NextStepBar trade={trade} contact={emailContact(contacts)} today={today} onTradePatch={onTradePatch} />
+      <NextStepBar trade={trade} contact={emailContact(contacts)} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <BuyersTable trade={trade} buyers={detail.buyers} fields={detail.fields} today={today} onBuyer={onBuyer} />
+        <BuyersTable trade={trade} buyers={detail.buyers} fields={detail.fields} today={today} linkTracking={!!detail.link_tracking} onBuyer={onBuyer} />
         <div className="flex flex-col gap-4 self-start">
           <MissingCard detail={detail} onTradePatch={onTradePatch} />
           <ShippingCard trade={trade} />
@@ -63,10 +64,11 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
   );
 }
 
-function NextStepBar({ trade, contact, today, onTradePatch }: {
+function NextStepBar({ trade, contact, today, linkTracking, onTradePatch }: {
   trade: BulkTrade;
   contact: Contact | undefined;
   today: string;
+  linkTracking: boolean;
   onTradePatch: Props["onTradePatch"];
 }) {
   const [setting, setSetting] = useState(false);
@@ -140,8 +142,10 @@ function NextStepBar({ trade, contact, today, onTradePatch }: {
       {emailing && (
         <EmailDialog
           trade={trade}
-          contact={contact}
+          to={contact?.email ?? ""}
+          subject={trade.title}
           body={`${contact ? `Hi ${firstName(contact.name)},` : "Hi,"}\n\n`}
+          linkTracking={linkTracking}
           onClose={() => setEmailing(false)}
         />
       )}
@@ -250,7 +254,10 @@ function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePat
           <button type="button" onClick={() => setAsking(true)} className={`${buttonClass} mt-2`} style={buttonStyle}>
             {contact ? `Ask ${firstName(contact.name)} for all ${items.length}` : `Ask for all ${items.length}`}
           </button>
-          {asking && <EmailDialog trade={trade} contact={contact} body={ask} onClose={() => setAsking(false)} />}
+          {asking && (
+            <EmailDialog trade={trade} to={contact?.email ?? ""} subject={trade.title} body={ask}
+              linkTracking={!!detail.link_tracking} onClose={() => setAsking(false)} />
+          )}
         </>
       ) : (
         <p className="text-sm" style={{ color: "var(--bt-muted)" }}>Nothing missing.</p>
@@ -375,66 +382,3 @@ function ContactDialog({ trade, contact, onClose, onSaved }: {
   );
 }
 
-/** Makes a Gmail draft in the signed-in user's account. Nothing is sent from DenchClaw. */
-function EmailDialog({ trade, contact, body, onClose }: {
-  trade: BulkTrade;
-  contact: Contact | undefined;
-  body: string;
-  onClose: () => void;
-}) {
-  const [draft, setDraft] = useState({ to: contact?.email ?? "", subject: trade.title, body });
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [draftUrl, setDraftUrl] = useState<string | null>(null);
-  const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setDraft((current) => ({ ...current, [key]: event.target.value }));
-
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const { url } = await request<{ url: string }>(tradeUrl(trade.id, "/email-draft"), { method: "POST", body: JSON.stringify(draft) });
-      setDraftUrl(url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the draft.");
-      setSaving(false);
-    }
-  }
-
-  if (draftUrl) {
-    return (
-      <Modal
-        title="Draft ready in Gmail"
-        onClose={onClose}
-        footer={(
-          <>
-            <button type="button" className={buttonClass} style={buttonStyle} onClick={onClose}>Close</button>
-            <a href={draftUrl} target="_blank" rel="noreferrer" className={darkButtonClass} style={darkButtonStyle}>Open in Gmail</a>
-          </>
-        )}
-      >
-        <p className="text-sm">The draft is in your Gmail drafts. Check it and send it from there.</p>
-      </Modal>
-    );
-  }
-
-  return (
-    <Modal
-      wide
-      title="Email draft"
-      onClose={onClose}
-      onSubmit={save}
-      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{saving ? "Creating draft" : "Create Gmail draft"}</button>}
-    >
-      <FormField label="To"><input value={draft.to} onChange={set("to")} placeholder="name@company.com" className={inputClass} style={inputStyle} /></FormField>
-      <FormField label="Subject"><input required value={draft.subject} onChange={set("subject")} className={inputClass} style={inputStyle} /></FormField>
-      <FormField label="Message">
-        <textarea required autoFocus rows={10} value={draft.body} onChange={set("body")}
-          className="w-full rounded-lg border px-3 py-2 text-sm leading-relaxed" style={inputStyle} />
-      </FormField>
-      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Saved as a draft in your Gmail. Nothing is sent from here.</p>
-      <ErrorText error={error} />
-    </Modal>
-  );
-}

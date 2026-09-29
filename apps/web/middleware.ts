@@ -12,7 +12,8 @@ const PUBLIC_ROUTES = new Set([
   "/api/auth/login",
   "/api/settings/mcp/connect/callback",
 ]);
-const PUBLIC_PREFIXES = ["/api/apps/webhooks/"];
+// /t/ serves tracked links from trade emails; tokens are random and only forward.
+const PUBLIC_PREFIXES = ["/api/apps/webhooks/", "/t/"];
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function isPublicPath(pathname: string): boolean {

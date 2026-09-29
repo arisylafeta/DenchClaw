@@ -11,6 +11,9 @@ const details = {
   getFileForDownload: vi.fn(),
   updateFile: vi.fn(),
   logEmailDraft: vi.fn(),
+  buyerOnTrade: vi.fn(async () => true),
+  createTrackedLinks: vi.fn(async (_lot: string, _buyer: string | null, _to: string | null, urls: string[]) =>
+    new Map(urls.map((url, index) => [url, `tok${index}`]))),
 };
 vi.mock("@/lib/crm-postgres/bulk-trade-details", () => details);
 const getBulkTrade = vi.fn(async (id: string) => (id === "bt_1" ? { id } : null));
@@ -76,10 +79,30 @@ describe("trade detail routes", () => {
     expect(res.status).toBe(201);
     expect(createGmailDraft).toHaveBeenCalledWith(USER.email, { to: ["sam@example.test"], subject: "Synthetic eBS37", body: "Hi Sam" });
     expect((await res.json()).url).toContain("compose=m1");
-    expect(details.logEmailDraft).toHaveBeenCalledWith("bt_1", { to: ["sam@example.test"], subject: "Synthetic eBS37", draft_id: "r1" }, USER.id);
+    expect(details.logEmailDraft).toHaveBeenCalledWith("bt_1", expect.objectContaining({ to: ["sam@example.test"], draft_id: "r1", tracked_links: 0 }), USER.id);
+    expect(details.createTrackedLinks).not.toHaveBeenCalled();
 
     const bad = await POST(post({ to: "not an email", subject: "x", body: "y" }), params({ id: "bt_1" }));
     expect(bad.status).toBe(400);
     expect((await POST(post({ subject: "x", body: "y" }), params({ id: "bt_9" }))).status).toBe(404);
   });
+
+  it("swaps links for tracked ones when a public link base is set", async () => {
+    process.env.BULK_TRADES_LINK_BASE = "https://crm.example.test";
+    try {
+      const { POST } = await import("./email-draft/route");
+      const res = await POST(post({
+        to: "tess@example.test", subject: "Battery batch available", buyer_id: "btb_1",
+        body: "Auction: https://rebattery.io/a/ebs37 and specs https://rebattery.io/a/ebs37/specs.",
+      }), params({ id: "bt_1" }));
+      expect((await res.json()).tracked_links).toBe(2);
+      expect(details.createTrackedLinks).toHaveBeenCalledWith("bt_1", "btb_1", "tess@example.test",
+        ["https://rebattery.io/a/ebs37", "https://rebattery.io/a/ebs37/specs"], USER.id);
+      const sentBody = createGmailDraft.mock.calls.at(-1)![1].body;
+      expect(sentBody).toBe("Auction: https://crm.example.test/t/tok0 and specs https://crm.example.test/t/tok1.");
+    } finally {
+      delete process.env.BULK_TRADES_LINK_BASE;
+    }
+  });
 });
+

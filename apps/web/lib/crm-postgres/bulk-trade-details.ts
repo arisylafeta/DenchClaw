@@ -17,6 +17,7 @@ import {
   type TradeFile,
 } from "../bulk-trade-details";
 import { getBulkTrade } from "./bulk-trades";
+import { newLinkToken } from "../tracked-links";
 
 const BID_COLUMNS = `bid.id::text as id, bid.buyer_id, bid.amount::text as amount, bid.unit, bid.currency,
   bid.firmness, bid.delivery_terms, bid.payment_terms,
@@ -48,6 +49,7 @@ const BUYER_SELECT = `
        select ${BID_COLUMNS} from crm_bulk_trade_bids bid
        where bid.buyer_id = buyer.id order by bid.created_at desc, bid.id desc limit 1
      ) latest) as latest_bid,
+    (select max(link.last_clicked_at) from crm_bulk_trade_links link where link.buyer_id = buyer.id) as link_clicked_at,
     ${TRACKING}
   from crm_bulk_trade_buyers buyer
   left join crm_people person on person.id = buyer.person_id`;
@@ -364,13 +366,18 @@ export async function getFileForDownload(lotId: string, fileId: string) {
 
 export async function logEmailDraft(
   lotId: string,
-  draft: { to: string[]; subject: string; draft_id: string | null },
+  draft: { to: string[]; subject: string; draft_id: string | null; buyer_id?: string | null; tracked_links?: number },
   userId: string,
 ): Promise<void> {
   await queryPg(
-    `insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, 'email_drafted', $2, $3)`,
-    [lotId, JSON.stringify(draft), userId],
+    `insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id, buyer_id) values ($1, 'email_drafted', $2, $3, $4)`,
+    [lotId, JSON.stringify(draft), userId, draft.buyer_id ?? null],
   );
+}
+
+export async function buyerOnTrade(lotId: string, buyerId: string): Promise<boolean> {
+  const rows = await queryPg("select 1 from crm_bulk_trade_buyers where id = $1 and lot_id = $2", [buyerId, lotId]);
+  return rows.length > 0;
 }
 
 /** Up to 8 CRM people whose name, email or company matches. */
@@ -386,4 +393,61 @@ export async function searchPeople(query: string): Promise<PersonMatch[]> {
      limit 8`,
     [pattern],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Tracked links
+// ---------------------------------------------------------------------------
+
+/** Creates one tracked link per URL for this recipient. Returns URL → token. */
+export async function createTrackedLinks(
+  lotId: string,
+  buyerId: string | null,
+  recipient: string | null,
+  urls: string[],
+  userId: string,
+): Promise<Map<string, string>> {
+  const tokens = new Map<string, string>();
+  if (!urls.length) return tokens;
+  await withPgTransaction(async (client) => {
+    for (const url of urls) {
+      const token = newLinkToken();
+      await client.query(
+        `insert into crm_bulk_trade_links (token, lot_id, buyer_id, recipient, destination_url, created_by)
+         values ($1, $2, $3, $4, $5, $6)`,
+        [token, lotId, buyerId, recipient, url, userId],
+      );
+      tokens.set(url, token);
+    }
+  });
+  return tokens;
+}
+
+/**
+ * Looks up a tracked link and, for a person's click, counts it and logs it on the trade.
+ * Returns the destination, or null for an unknown token.
+ */
+export async function followTrackedLink(token: string, counted: boolean): Promise<string | null> {
+  return withPgTransaction(async (client) => {
+    const { rows } = await client.query(
+      `select lot_id, buyer_id, recipient, destination_url from crm_bulk_trade_links where token = $1 for update`,
+      [token],
+    );
+    const link = rows[0] as { lot_id: string; buyer_id: string | null; recipient: string | null; destination_url: string } | undefined;
+    if (!link) return null;
+    if (counted) {
+      await client.query(
+        `update crm_bulk_trade_links set click_count = click_count + 1,
+           first_clicked_at = coalesce(first_clicked_at, now()), last_clicked_at = now()
+         where token = $1`,
+        [token],
+      );
+      await client.query(
+        `insert into crm_bulk_trade_events (lot_id, kind, changes, buyer_id)
+         values ($1, 'link_clicked', $2, $3)`,
+        [link.lot_id, JSON.stringify({ url: link.destination_url, recipient: link.recipient }), link.buyer_id],
+      );
+    }
+    return link.destination_url;
+  });
 }

@@ -17,7 +17,7 @@ const TRADE: BulkTrade = {
 };
 
 const BUYER: Buyer = {
-  id: "btb_1", name: "Synthetic Storage", person_id: null, person_email: null, email_tracking: null, contact: "Test Person", wants: "36-pack pilot", status: "To contact",
+  id: "btb_1", name: "Synthetic Storage", person_id: null, person_email: null, email_tracking: null, link_clicked_at: null, contact: "Test Person", wants: "36-pack pilot", status: "To contact",
   last_touch_on: null, last_touch_via: null, chase_on: null, latest_bid: null,
 };
 
@@ -179,4 +179,38 @@ describe("TradePage overview", () => {
       expect(JSON.parse(String(call![1]!.body))).toMatchObject({ person_id: "p_1" });
     });
   });
+
+  it("drafts a teaser per emailable buyer with a neutral subject", async () => {
+    const withEmail = { ...BUYER, person_id: "p_1", person_email: "tess@example.test", contact: "Tess Buyer" };
+    const noEmail = { ...BUYER, id: "btb_2", name: "No Email Ltd" };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/email-draft")) return new Response(JSON.stringify({ url: "https://mail.google.com/", tracked_links: 0 }), { status: 201 });
+      return new Response(JSON.stringify({ ...DETAIL, buyers: [withEmail, noEmail] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await userEvent.click(await screen.findByLabelText("Select Synthetic Storage"));
+    await userEvent.click(screen.getByLabelText("Select No Email Ltd"));
+    await userEvent.click(screen.getByRole("button", { name: "Send teaser to selected" }));
+    expect(screen.getByText(/No email for No Email Ltd/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create 1 Gmail draft" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("1 Gmail draft created");
+    const drafts = fetchMock.mock.calls.filter(([url]) => url.endsWith("/email-draft"));
+    expect(drafts).toHaveLength(1);
+    const body = JSON.parse(String(drafts[0][1]!.body));
+    expect(body).toMatchObject({ to: "tess@example.test", subject: "Battery batch available", buyer_id: "btb_1" });
+    expect(body.subject + body.body).not.toMatch(/Synthetic eBS37|€20|Turin/);
+    expect(body.body).toMatch(/^Hi Tess,/);
+  });
+
+  it("shows a click on a tracked email link", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...DETAIL, buyers: [{ ...BUYER, link_clicked_at: "2026-09-26T10:00:00Z" }],
+    }))));
+    renderPage();
+    expect(await screen.findByText("Clicked email link 26 Sep")).toBeInTheDocument();
+  });
 });
+

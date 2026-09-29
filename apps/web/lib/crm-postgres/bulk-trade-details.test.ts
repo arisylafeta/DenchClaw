@@ -126,5 +126,20 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     expect((await db.searchPeople("Tess"))[0]).toMatchObject({ name: "Tess Buyer", opted_out: false });
     await expect(pg.queryPg("delete from crm_bulk_trade_events where lot_id = $1", [lotId])).rejects.toThrow(/append-only/);
   });
+
+  it("counts a person's click on a tracked link against the buyer, not a scanner's", async () => {
+    const buyer = await db.addBuyer(lotId, { name: "Link Buyer" }, userId);
+    const tokens = await db.createTrackedLinks(lotId, buyer!.id, "link@example.test", ["https://example.test/auction"], userId);
+    const token = tokens.get("https://example.test/auction")!;
+
+    expect(await db.followTrackedLink(token, false)).toBe("https://example.test/auction");
+    expect((await db.getTradeDetail(lotId))!.buyers.find((row) => row.id === buyer!.id)!.link_clicked_at).toBeNull();
+
+    await db.followTrackedLink(token, true);
+    const after = (await db.getTradeDetail(lotId))!.buyers.find((row) => row.id === buyer!.id)!;
+    expect(after.link_clicked_at).toBeTruthy();
+    expect((await events(buyer!.id)).map((event) => event.kind)).toContain("link_clicked");
+    expect(await db.followTrackedLink("NoSuchTokenNoSuchToken", true)).toBeNull();
+  });
 });
 

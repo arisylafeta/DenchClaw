@@ -92,6 +92,22 @@ create table if not exists crm_bulk_trade_files (
 );
 create index if not exists crm_bulk_trade_files_lot_idx on crm_bulk_trade_files (lot_id, created_at);
 
+-- One row per link in a Gmail draft made from a trade, unique to its recipient. The public
+-- /t/<token> route counts the click and forwards to destination_url.
+create table if not exists crm_bulk_trade_links (
+  token text primary key,
+  lot_id text not null references crm_bulk_trade_lots(id) on delete restrict,
+  buyer_id text references crm_bulk_trade_buyers(id) on delete restrict,
+  recipient text,
+  destination_url text not null check (destination_url ~* '^https?://'),
+  created_by uuid references crm_users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  click_count integer not null default 0,
+  first_clicked_at timestamptz,
+  last_clicked_at timestamptz
+);
+create index if not exists crm_bulk_trade_links_buyer_idx on crm_bulk_trade_links (buyer_id) where buyer_id is not null;
+
 alter table crm_bulk_trade_events add column if not exists buyer_id text;
 alter table crm_bulk_trade_events drop constraint if exists crm_bulk_trade_events_kind_check;
 alter table crm_bulk_trade_events add constraint crm_bulk_trade_events_kind_check check (kind in (
@@ -99,7 +115,7 @@ alter table crm_bulk_trade_events add constraint crm_bulk_trade_events_kind_chec
   'buyer_added', 'buyer_updated', 'bid_added',
   'contact_added', 'contact_updated', 'contact_removed',
   'field_updated', 'file_added', 'file_updated',
-  'email_drafted'
+  'email_drafted', 'link_clicked'
 ));
 
 commit;

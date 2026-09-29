@@ -29,6 +29,7 @@ import {
   request,
   tradeUrl,
 } from "./trade-ui";
+import { BUYER_SUBJECT, EmailDialog } from "./email-dialog";
 
 const COLUMNS = "grid-cols-[24px_minmax(0,1fr)_110px_150px_100px_90px_110px]";
 
@@ -37,14 +38,16 @@ type Props = {
   buyers: Buyer[];
   fields: TradeField[];
   today: string;
+  linkTracking: boolean;
   onBuyer: (buyer: Buyer) => void;
 };
 
-export function BuyersTable({ trade, buyers, fields, today, onBuyer }: Props) {
+export function BuyersTable({ trade, buyers, fields, today, linkTracking, onBuyer }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Buyer | "new" | null>(null);
   const [bidFor, setBidFor] = useState<Buyer | null>(null);
   const [teaser, setTeaser] = useState(false);
+  const [emailing, setEmailing] = useState<Buyer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bids = buyers.filter((buyer) => buyer.latest_bid).length;
 
@@ -169,6 +172,18 @@ export function BuyersTable({ trade, buyers, fields, today, onBuyer }: Props) {
           buyer={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={(buyer) => { onBuyer(buyer); setEditing(null); }}
+          onEmail={editing !== "new" && editing.person_email ? () => { setEmailing(editing); setEditing(null); } : undefined}
+        />
+      )}
+      {emailing && (
+        <EmailDialog
+          trade={trade}
+          to={emailing.person_email ?? ""}
+          subject={BUYER_SUBJECT}
+          body={`Hi ${(emailing.contact ?? emailing.name).split(/\s+/)[0]},\n\n`}
+          buyerId={emailing.id}
+          linkTracking={linkTracking}
+          onClose={() => setEmailing(null)}
         />
       )}
       {bidFor && (
@@ -179,6 +194,7 @@ export function BuyersTable({ trade, buyers, fields, today, onBuyer }: Props) {
           trade={trade}
           fields={fields}
           buyers={buyers.filter((buyer) => selected.has(buyer.id))}
+          linkTracking={linkTracking}
           onClose={() => setTeaser(false)}
           onMarked={(saved) => { saved.forEach(onBuyer); setSelected(new Set()); setTeaser(false); }}
         />
@@ -187,11 +203,12 @@ export function BuyersTable({ trade, buyers, fields, today, onBuyer }: Props) {
   );
 }
 
-function BuyerDialog({ trade, buyer, onClose, onSaved }: {
+function BuyerDialog({ trade, buyer, onClose, onSaved, onEmail }: {
   trade: BulkTrade;
   buyer: Buyer | null;
   onClose: () => void;
   onSaved: (buyer: Buyer) => void;
+  onEmail?: () => void;
 }) {
   const [person, setPerson] = useState<{ id: string; label: string } | null>(
     buyer?.person_id ? { id: buyer.person_id, label: buyer.person_email ?? "Linked CRM person" } : null,
@@ -226,7 +243,12 @@ function BuyerDialog({ trade, buyer, onClose, onSaved }: {
       title={buyer ? buyer.name : "Add buyer"}
       onClose={onClose}
       onSubmit={save}
-      footer={<button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{buyer ? "Save" : "Add buyer"}</button>}
+      footer={(
+        <>
+          {onEmail && <button type="button" onClick={onEmail} className={buttonClass} style={buttonStyle}>Email buyer</button>}
+          <button type="submit" disabled={saving} className={darkButtonClass} style={darkButtonStyle}>{buyer ? "Save" : "Add buyer"}</button>
+        </>
+      )}
     >
       <FormField label="Buyer"><input required value={draft.name} onChange={set("name")} className={inputClass} style={inputStyle} /></FormField>
       <FormField label="Contact"><input value={draft.contact} onChange={set("contact")} className={inputClass} style={inputStyle} /></FormField>
@@ -313,10 +335,11 @@ function BidDialog({ trade, buyer, onClose, onSaved }: {
 }
 
 /** Shows the teaser draft. Nothing is sent from here; buyers move to "Teaser sent" only on confirm. */
-function TeaserDialog({ trade, fields, buyers, onClose, onMarked }: {
+function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onMarked }: {
   trade: BulkTrade;
   fields: TradeField[];
   buyers: Buyer[];
+  linkTracking: boolean;
   onClose: () => void;
   onMarked: (buyers: Buyer[]) => void;
 }) {
@@ -324,6 +347,30 @@ function TeaserDialog({ trade, fields, buyers, onClose, onMarked }: {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [drafted, setDrafted] = useState<string | null>(null);
+  const emailable = buyers.filter((buyer) => buyer.person_email);
+
+  /** One Gmail draft per buyer with an email, each with its own tracked links. */
+  async function createDrafts() {
+    setSaving(true);
+    setError(null);
+    try {
+      for (const buyer of emailable) {
+        const greeting = `Hi ${(buyer.contact ?? buyer.name).split(/\s+/)[0]},`;
+        await request(tradeUrl(trade.id, "/email-draft"), {
+          method: "POST",
+          body: JSON.stringify({
+            to: buyer.person_email, subject: BUYER_SUBJECT, body: text.replace(/^Hi,/, greeting),
+            buyer_id: buyer.id, track_links: linkTracking,
+          }),
+        });
+      }
+      setDrafted(`${emailable.length} Gmail ${emailable.length === 1 ? "draft" : "drafts"} created. Send them from Gmail, then mark the buyers.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the drafts.");
+    }
+    setSaving(false);
+  }
 
   async function copy() {
     try {
@@ -358,6 +405,11 @@ function TeaserDialog({ trade, fields, buyers, onClose, onMarked }: {
       footer={(
         <>
           <button type="button" className={buttonClass} style={buttonStyle} onClick={copy}>{copied ? "Copied" : "Copy text"}</button>
+          {!!emailable.length && !drafted && (
+            <button type="button" disabled={saving} className={buttonClass} style={buttonStyle} onClick={createDrafts}>
+              Create {emailable.length} Gmail {emailable.length === 1 ? "draft" : "drafts"}
+            </button>
+          )}
           <button type="button" disabled={saving} className={darkButtonClass} style={darkButtonStyle} onClick={markSent}>
             Mark {buyers.length} as Teaser sent
           </button>
@@ -376,6 +428,12 @@ function TeaserDialog({ trade, fields, buyers, onClose, onMarked }: {
         className="w-full rounded-lg border px-3 py-2 text-sm leading-relaxed"
         style={inputStyle}
       />
+      {buyers.length > emailable.length && (
+        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
+          No email for {buyers.filter((buyer) => !buyer.person_email).map((buyer) => buyer.name).join(", ")}. Link them to a CRM person to draft for them.
+        </p>
+      )}
+      {drafted && <p role="status" className="text-sm" style={{ color: "var(--bt-green)" }}>{drafted}</p>}
       <ErrorText error={error} />
     </Modal>
   );
@@ -390,6 +448,14 @@ const TRACKING_TONE = {
 function TrackingLine({ buyer }: { buyer: Buyer }) {
   const tracking = buyer.email_tracking;
   const label = tracking && trackingLabel(tracking);
+  const campaignAt = tracking && (tracking.bounced_at ?? tracking.clicked_at ?? tracking.opened_at ?? tracking.delivered_at ?? tracking.sent_at);
+  if (buyer.link_clicked_at && (!campaignAt || Date.parse(buyer.link_clicked_at) > Date.parse(campaignAt))) {
+    return (
+      <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE.green }}>
+        Clicked email link {shortDate(new Date(buyer.link_clicked_at).toISOString().slice(0, 10))}
+      </div>
+    );
+  }
   if (!label) return null;
   return (
     <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE[label.tone] }} title={tracking!.campaign ?? undefined}>
