@@ -46,6 +46,20 @@ buyer's CRM person for the trade's `listing_id` give sent, delivered, opened, cl
 Tracked links in Gmail drafts give clicks (`crm_bulk_trade_links`, `link_clicked` events). Report
 clicks and replies as the real signal; opens are noisy (Apple Mail and Gmail image proxies).
 
+## Inbox check (Phase 2)
+
+`scripts/rebattery/bulk_trade_inbox_check.py` runs from Hermes cron ("Bulk Trades inbox check") at
+08:00, 10:30, 13:00, 15:30 and 18:30 UK. It reads Alex's synced Gmail (`crm_email_messages`) and
+Granola notes, matches them to trades by contacts, linked buyers and known threads, and stores
+proposals in `crm_bulk_trade_proposals` (kinds: field, buyer_update, next_step, new_buyer, file,
+link_contact, needs_triage, possible_trade). Each has a verbatim quote and its source. Runs are in
+`crm_bulk_trade_check_runs`; the app header shows the latest. "Bulk Trades 08:05 summary for Alex"
+sends him the overdue and due-today list on WhatsApp.
+
+Never accept or ignore a proposal for Alex; that is his decision in the app. To debug a run, use
+`--dry-run` (writes nothing). Adding a contact or linking a buyer to a CRM person is what makes
+future mail match a trade.
+
 ## Rules
 
 - **Buyer status changes only on Alex's confirm.** Never set a status from a campaign send, an
