@@ -348,14 +348,17 @@ function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onMarked }
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [drafted, setDrafted] = useState<string | null>(null);
+  // Buyers whose draft already exists, so a retry after a failure never duplicates one.
+  const [done, setDone] = useState<Set<string>>(new Set());
   const emailable = buyers.filter((buyer) => buyer.person_email);
+  const pending = emailable.filter((buyer) => !done.has(buyer.id));
 
   /** One Gmail draft per buyer with an email, each with its own tracked links. */
   async function createDrafts() {
     setSaving(true);
     setError(null);
     try {
-      for (const buyer of emailable) {
+      for (const buyer of pending) {
         const greeting = `Hi ${(buyer.contact ?? buyer.name).split(/\s+/)[0]},`;
         await request(tradeUrl(trade.id, "/email-draft"), {
           method: "POST",
@@ -364,10 +367,11 @@ function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onMarked }
             buyer_id: buyer.id, track_links: linkTracking,
           }),
         });
+        setDone((current) => new Set(current).add(buyer.id));
       }
       setDrafted(`${emailable.length} Gmail ${emailable.length === 1 ? "draft" : "drafts"} created. Send them from Gmail, then mark the buyers.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the drafts.");
+      setError(`${err instanceof Error ? err.message : "Could not create the drafts."} Retrying only drafts the ones not yet created.`);
     }
     setSaving(false);
   }
@@ -405,9 +409,9 @@ function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onMarked }
       footer={(
         <>
           <button type="button" className={buttonClass} style={buttonStyle} onClick={copy}>{copied ? "Copied" : "Copy text"}</button>
-          {!!emailable.length && !drafted && (
+          {!!pending.length && (
             <button type="button" disabled={saving} className={buttonClass} style={buttonStyle} onClick={createDrafts}>
-              Create {emailable.length} Gmail {emailable.length === 1 ? "draft" : "drafts"}
+              Create {pending.length} Gmail {pending.length === 1 ? "draft" : "drafts"}
             </button>
           )}
           <button type="button" disabled={saving} className={darkButtonClass} style={darkButtonStyle} onClick={markSent}>

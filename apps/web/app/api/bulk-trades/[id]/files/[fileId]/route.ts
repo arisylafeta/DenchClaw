@@ -17,7 +17,8 @@ export async function GET(_req: Request, { params }: Params) {
   if (!row) return notFound("File");
   const bytes = await readTradeFile(row.storage_key).catch(() => null);
   if (!bytes) return notFound("File");
-  const safeName = row.file_name.replace(/["\\\r\n]/g, "_");
+  // Header values must be ASCII; the full name travels in filename*.
+  const safeName = row.file_name.replace(/[^\x20-\x7e]|["\\]/g, "_");
   return new Response(new Uint8Array(bytes), {
     headers: {
       "content-type": "application/octet-stream",

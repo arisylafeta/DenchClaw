@@ -71,6 +71,12 @@ describe("trade detail routes", () => {
     const res = await GET(new Request("http://localhost/x"), params({ id: "bt_1", fileId: "btf_1" }));
     expect(res.headers.get("content-type")).toBe("application/octet-stream");
     expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="stock _list_.xlsx"/);
+
+    details.getFileForDownload.mockResolvedValueOnce({ file_name: "电池报告.pdf", content_type: null, storage_key: "k" });
+    readTradeFile.mockResolvedValueOnce(Buffer.from("x"));
+    const unicode = await GET(new Request("http://localhost/x"), params({ id: "bt_1", fileId: "btf_2" }));
+    expect(unicode.status).toBe(200);
+    expect(unicode.headers.get("content-disposition")).toContain(`filename*=UTF-8''${encodeURIComponent("电池报告.pdf")}`);
   });
 
   it("makes the Gmail draft in the signed-in user's own account and logs it", async () => {

@@ -212,5 +212,35 @@ describe("TradePage overview", () => {
     renderPage();
     expect(await screen.findByText("Clicked email link 26 Sep")).toBeInTheDocument();
   });
+
+  it("retries only the teaser drafts that failed", async () => {
+    const first = { ...BUYER, person_id: "p_1", person_email: "tess@example.test", contact: "Tess Buyer" };
+    const second = { ...BUYER, id: "btb_2", name: "Second Buyer", person_id: "p_2", person_email: "sid@example.test", contact: "Sid" };
+    let failSecond = true;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/email-draft")) {
+        const body = JSON.parse(String(init!.body));
+        if (body.buyer_id === "btb_2" && failSecond) {
+          failSecond = false;
+          return new Response(JSON.stringify({ error: "Gmail did not accept the draft." }), { status: 502 });
+        }
+        return new Response(JSON.stringify({ url: "https://mail.google.com/", tracked_links: 0 }), { status: 201 });
+      }
+      return new Response(JSON.stringify({ ...DETAIL, buyers: [first, second] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await userEvent.click(await screen.findByLabelText("Select Synthetic Storage"));
+    await userEvent.click(screen.getByLabelText("Select Second Buyer"));
+    await userEvent.click(screen.getByRole("button", { name: "Send teaser to selected" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create 2 Gmail drafts" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Gmail did not accept the draft.");
+
+    await userEvent.click(screen.getByRole("button", { name: "Create 1 Gmail draft" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("2 Gmail drafts created");
+    const ids = fetchMock.mock.calls.filter(([url]) => url.endsWith("/email-draft")).map(([, init]) => JSON.parse(String(init!.body)).buyer_id);
+    expect(ids).toEqual(["btb_1", "btb_2", "btb_2"]);
+  });
 });
 

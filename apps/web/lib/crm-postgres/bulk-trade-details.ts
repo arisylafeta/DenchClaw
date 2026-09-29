@@ -172,10 +172,11 @@ export async function updateBuyer(lotId: string, buyerId: string, input: BuyerIn
 export async function addBid(lotId: string, buyerId: string, input: BidInput, userId: string): Promise<Buyer | null> {
   return withPgTransaction(async (client) => {
     const current = await client.query(
-      "select status from crm_bulk_trade_buyers where id = $1 and lot_id = $2 for update",
+      `select status, to_char(last_touch_on, 'YYYY-MM-DD') as last_touch_on
+       from crm_bulk_trade_buyers where id = $1 and lot_id = $2 for update`,
       [buyerId, lotId],
     );
-    const before = current.rows[0] as { status: string } | undefined;
+    const before = current.rows[0] as { status: string; last_touch_on: string | null } | undefined;
     if (!before) return null;
 
     const insert = insertSql("crm_bulk_trade_bids", { lot_id: lotId, buyer_id: buyerId, actor_user_id: userId, ...input });
@@ -184,11 +185,15 @@ export async function addBid(lotId: string, buyerId: string, input: BidInput, us
 
     const early = ["To contact", "Teaser sent", "No reply", "NDA, specs sent"];
     if (early.includes(before.status)) {
+      const today = todayInLondon();
       await client.query(
         "update crm_bulk_trade_buyers set status = 'Bid in', last_touch_on = $2, updated_at = now() where id = $1",
-        [buyerId, todayInLondon()],
+        [buyerId, today],
       );
-      await logEvent(client, lotId, "buyer_updated", { status: [before.status, "Bid in"] }, userId, buyerId);
+      await logEvent(client, lotId, "buyer_updated", {
+        status: [before.status, "Bid in"],
+        ...(before.last_touch_on !== today ? { last_touch_on: [before.last_touch_on, today] } : {}),
+      }, userId, buyerId);
     }
     const { rows } = await client.query(`${BUYER_SELECT} where buyer.id = $1`, [buyerId]);
     return rows[0] as Buyer;
@@ -247,8 +252,9 @@ export async function removeContact(lotId: string, contactId: string, userId: st
 // Field data
 // ---------------------------------------------------------------------------
 
+/** Locks the trade row, so concurrent first writes to the same field queue instead of colliding. */
 async function tradeKind(client: PgTransaction, lotId: string) {
-  const { rows } = await client.query("select trade_kind from crm_bulk_trade_lots where id = $1", [lotId]);
+  const { rows } = await client.query("select trade_kind from crm_bulk_trade_lots where id = $1 for update", [lotId]);
   return rows[0] as { trade_kind: BulkTrade["trade_kind"] } | undefined;
 }
 
@@ -334,7 +340,10 @@ export async function recordFile(lotId: string, file: NewFile, meta: FileMetaInp
     if (!(await tradeExists(client, lotId))) return null;
     const insert = insertSql("crm_bulk_trade_files", { lot_id: lotId, uploaded_by: userId, ...file, ...meta });
     await client.query(insert.sql, insert.values);
-    await logEvent(client, lotId, "file_added", { id: file.id, file_name: file.file_name, file_type: meta.file_type ?? file.file_type }, userId);
+    await logEvent(client, lotId, "file_added", {
+      id: file.id, file_name: file.file_name, byte_size: file.byte_size, file_type: meta.file_type ?? file.file_type,
+      visibility: meta.visibility ?? "never", source_label: meta.source_label ?? null, source_date: meta.source_date ?? null,
+    }, userId);
     const { rows } = await client.query(`${FILE_SELECT} where id = $1`, [file.id]);
     return rows[0] as TradeFile;
   });

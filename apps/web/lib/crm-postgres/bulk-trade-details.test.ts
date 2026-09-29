@@ -52,6 +52,13 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
 
     expect((await events(buyer!.id)).map((event) => event.kind))
       .toEqual(["buyer_added", "buyer_updated", "bid_added", "buyer_updated"]);
+    const other = await db.addBuyer(lotId, { name: "Touched earlier", last_touch_on: "2026-09-01" }, userId);
+    await db.addBid(lotId, other!.id, {
+      amount: 5, unit: "pack", currency: "EUR", firmness: "firm", delivery_terms: null, payment_terms: null, expires_on: null,
+    }, userId);
+    expect((await events(other!.id)).at(-1)!.changes).toEqual({
+      status: ["To contact", "Bid in"], last_touch_on: ["2026-09-01", todayInLondon()],
+    });
   });
 
   it("rejects a buyer from another trade", async () => {
@@ -121,6 +128,8 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     expect(await db.updateFile(lotId, file!.id, { visibility: "teaser" }, userId)).toMatchObject({ visibility: "teaser" });
     await db.logEmailDraft(lotId, { to: ["sam@example.test"], subject: "eBS37", draft_id: "r1" }, userId);
 
+    const added = (await events()).find((event) => event.kind === "file_added")!;
+    expect(added.changes).toMatchObject({ visibility: "never", source_label: null, byte_size: 10 });
     const kinds = (await events()).map((event) => event.kind);
     expect(kinds).toEqual(expect.arrayContaining(["contact_added", "contact_updated", "contact_removed", "file_added", "file_updated", "email_drafted"]));
     expect((await db.searchPeople("Tess"))[0]).toMatchObject({ name: "Tess Buyer", opted_out: false });
@@ -140,6 +149,14 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     expect(after.link_clicked_at).toBeTruthy();
     expect((await events(buyer!.id)).map((event) => event.kind)).toContain("link_clicked");
     expect(await db.followTrackedLink("NoSuchTokenNoSuchToken", true)).toBeNull();
+  });
+
+  it("queues concurrent first writes to the same field instead of failing", async () => {
+    const results = await Promise.all([
+      db.setField(lotId, "chemistry", { value: "NMC" }, userId),
+      db.setField(lotId, "chemistry", { value: "NMC 622" }, userId),
+    ]);
+    expect(results.every((result) => result && typeof result === "object")).toBe(true);
   });
 });
 

@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 
-const execFile = vi.fn();
-vi.mock("node:child_process", () => ({ execFile }));
+const { execFile } = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock("node:child_process", async (original) => ({ ...(await original<typeof import("node:child_process")>()), execFile }));
 
 describe("createGmailDraft", () => {
-  it("runs gog limited to draft creation with sending blocked, body on stdin", async () => {
+  it("passes the restriction flags and the body on stdin", async () => {
     let stdin = "";
     execFile.mockImplementation((_bin: string, _args: string[], _opts: unknown, done: (e: null, out: string) => void) => {
       setTimeout(() => done(null, JSON.stringify({ draft: { id: "r1", message: { id: "m1" } } })));
@@ -22,3 +23,24 @@ describe("createGmailDraft", () => {
     expect(created).toEqual({ draftId: "r1", messageId: "m1" });
   });
 });
+
+// Checks the real gog CLI enforces the restriction, using --dry-run so Gmail is never contacted.
+// Opt in with GOG_SAFETY_TEST=1 and GOG_SAFETY_ACCOUNT=<an authorised account>.
+describe.skipIf(process.env.GOG_SAFETY_TEST !== "1")("gog restriction (real CLI, dry run)", () => {
+  const account = process.env.GOG_SAFETY_ACCOUNT ?? "";
+  const gog = (...command: string[]) => execFileSync(process.env.GOG_BIN || "gog", [
+    "--account", account, "--gmail-no-send", "--enable-commands-exact", "gmail.drafts.create",
+    "--no-input", "--json", "--dry-run", ...command,
+  ], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], input: "Body" });
+
+  it("allows draft creation", () => {
+    expect(JSON.parse(gog("gmail", "drafts", "create", "--subject", "Safety check", "--body-file", "-"))).toMatchObject({
+      dry_run: true, op: "gmail.drafts.create",
+    });
+  });
+
+  it("refuses to send", () => {
+    expect(() => gog("gmail", "send", "--to", "nobody@example.test", "--subject", "x", "--body", "y")).toThrow(/not enabled/);
+  });
+});
+
