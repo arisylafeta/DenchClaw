@@ -1,4 +1,4 @@
-/** Buyer profile on a company (migration 018): who the buyer is and how we deal with them. */
+/** Buyer profile on a company (migration 019): who the buyer is and how we deal with them. */
 
 /** How well the buyer knows us, furthest first last. Set by hand; crm_buyer_engagement suggests one. */
 export const BUYER_STAGES = ["Identified", "Contacted", "Responded", "In conversation", "Qualified", "Bidding", "Customer"] as const;

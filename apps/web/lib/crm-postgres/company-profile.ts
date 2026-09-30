@@ -133,7 +133,7 @@ export type PostgresCompanyProfile = {
     strongest_contact: string | null;
   };
   commercial: CompanyCommercial;
-  /** Migration 018's buyer profile, engagement from crm_buyer_engagement, buy-boxes and the dated change log. */
+  /** Migration 019's buyer profile, engagement from crm_buyer_engagement, buy-boxes and the dated change log. */
   buyer: {
     profile: BuyerProfile;
     engagement: BuyerEngagement | null;

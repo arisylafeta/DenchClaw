@@ -69,7 +69,7 @@ Trade buyers added from a buy-box carry its `demand_id`, so offers and wins show
    Do not mark anything `agreed`: only Alex does that, after confirming spec, price and volume with the buyer.
    Do not duplicate a row that already exists; propose an edit to it instead.
 
-5. **Fill the profile.** The company's Buyer tab (migration 018 columns on `crm_companies`) holds who they are and
+5. **Fill the profile.** The company's Buyer tab (migration 019 columns on `crm_companies`) holds who they are and
    how we deal with them: `buyer_stage` (Identified, Contacted, Responded, In conversation, Qualified, Bidding,
    Customer), `buyer_tier`, `buyer_owner`, `buyer_capabilities`, `buyer_can_receive_waste`,
    `buyer_accepts_standard_terms`, `buyer_collection`, `buyer_past_issues`, `buyer_outreach_notes`,
