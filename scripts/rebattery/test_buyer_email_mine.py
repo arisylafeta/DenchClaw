@@ -63,6 +63,12 @@ class Validate(unittest.TestCase):
         self.assertEqual(p["past_issues"][0]["date"], "2026-08-20")
         self.assertEqual([f["topic"] for f in r["other_facts"]], ["logistics and packaging", "other"])
 
+    def test_recycling_demand_is_not_demand(self):
+        self.assertTrue(mine.recycling_only({"wants": "Recycle NCA packs"}))
+        self.assertTrue(mine.recycling_only({"wants": "Bid on 25T NMC", "note": "we would pay 0,2 euros per kg"}))
+        self.assertFalse(mine.recycling_only({"wants": "Bid on bus packs", "note": "for second-life resale, else scrap"}))
+        self.assertFalse(mine.recycling_only({"wants": "64 kWh KONAs"}))
+
     def test_profile_values_date_the_text_fields(self):
         values = mine.profile_values({"collection": "Own ADR truck", "payment_terms": "30% deposit", "stage": "Customer",
                                       "past_issues": [{"date": "2026-08-20", "what": "Load rejected"}]})
@@ -71,6 +77,10 @@ class Validate(unittest.TestCase):
         self.assertTrue(values["buyer_outreach_notes"].startswith("From email review "))
         self.assertIn("Payment: 30% deposit", values["buyer_outreach_notes"])
         self.assertEqual(values["buyer_past_issues"], "2026-08-20: Load rejected")
+        values = mine.profile_values({}, [{"topic": "projects and end customers", "value": "10 MW BESS in Brandenburg",
+                                           "date": "2026-09-21"}, {"topic": "sites and capacity", "value": "x", "date": "d"}],
+                                     "Develops second-life storage.")
+        self.assertEqual(values, {"buyer_projects": "10 MW BESS in Brandenburg (2026-09-21)", "about": "Develops second-life storage."})
 
 
 if __name__ == "__main__":

@@ -82,6 +82,9 @@ Reply with ONLY JSON:
 }
 
 Rules:
+- Demand means buying for REUSE or SECOND LIFE only (repurposing, storage, conversions, resale for reuse).
+  Buying batteries to recycle, shred or treat, scrap and black mass, gate fees and per-kg recycling prices are
+  NOT demand: leave them out, and a company that only recycles is role "other".
 - Record only what THEY said or clearly confirmed. ReBattery's pitches, teasers and offers are not their demand.
 - request = a specific need now or by a date ("1,000 cells in 3 weeks"); standing = ongoing or repeat buying
   ("20-30 packs a month", "we buy LFP regularly"). A request they repeat three or more times is standing.
@@ -202,6 +205,16 @@ def busiest(cur, mailbox, limit, skip):
 # Checking
 # ---------------------------------------------------------------------------
 
+RECYCLING = re.compile(r"recycl|black mass|scrap|gate fee|per kg|/kg|feedstock|end[- ]of[- ]life|shred|dismantl", re.I)
+REUSE = re.compile(r"second[- ]life|re-?use|repurpos|resale|resell", re.I)
+
+
+def recycling_only(box):
+    """A buy-box about recycling with no sign of reuse: not demand (ReBattery's demand is reuse and second life)."""
+    text = f"{box.get('wants') or ''} {box.get('note') or ''}"
+    return bool(RECYCLING.search(text)) and not REUSE.search(text)
+
+
 def evidence_ok(items, by_id):
     """Keeps evidence whose quote appears in the cited message; adds that message's date."""
     kept = []
@@ -222,6 +235,9 @@ def validate(raw, messages):
               "dropped": 0}
     for box in raw.get("buy_boxes") or []:
         if not isinstance(box, dict) or not str(box.get("wants") or "").strip():
+            continue
+        if recycling_only(box):
+            result["recycling_dropped"] = result.get("recycling_dropped", 0) + 1
             continue
         evidence = evidence_ok(box.get("evidence"), by_id)
         if not evidence:
@@ -412,10 +428,16 @@ PROFILE_COLUMNS = {"capabilities": "buyer_capabilities", "can_receive_waste": "b
                    "stage": "buyer_stage"}
 
 
-def profile_values(p):
-    """Column -> value for a company's proposed profile; text fields are dated so the history stays readable."""
+def profile_values(p, facts=(), summary=None):
+    """Column -> value for a company's proposed profile; text fields are dated so the history stays readable.
+    Projects come from the "projects and end customers" facts, the company summary goes to the empty about field."""
     today = dt.date.today().isoformat()
     values = {col: p[k] for k, col in PROFILE_COLUMNS.items() if k in p}
+    projects = [f for f in facts if "project" in f["topic"].lower()]
+    if projects:
+        values["buyer_projects"] = "\n".join(f"{f['value']} ({f['date']})" for f in projects)
+    if summary and not summary.startswith(("No email", "Model call failed")):
+        values["about"] = summary
     notes = []
     if p.get("outreach_notes"):
         notes.append(p["outreach_notes"])
@@ -430,7 +452,7 @@ def profile_values(p):
 
 def conflicts(cur, r):
     """Proposed profile values that differ from values already in the CRM."""
-    values = profile_values(r.get("profile") or {})
+    values = profile_values(r.get("profile") or {}, r.get("other_facts") or [], r.get("summary"))
     if not values:
         return []
     cur.execute(f"select {', '.join(values)} from crm_companies where id = %s", (r["company_id"],))
@@ -438,7 +460,8 @@ def conflicts(cur, r):
     out = []
     for col, value in values.items():
         current = row.get(col)
-        if current not in (None, "", []) and current != value and col not in ("buyer_outreach_notes", "buyer_past_issues"):
+        if current not in (None, "", []) and current != value and col not in (
+                "buyer_outreach_notes", "buyer_past_issues", "buyer_projects", "about"):
             out.append(f"{col}: CRM has {current!r}, email suggests {value!r}")
     return out
 
@@ -453,6 +476,9 @@ def apply(conn, args):
             if only and r["company_id"] not in only or r.get("error"):
                 continue
             for box in r["buy_boxes"]:
+                if recycling_only(box):
+                    print(f"skip (recycling): {r['name']} | {box['wants'][:70]}")
+                    continue
                 digest = hashlib.sha1(box["wants"].encode()).hexdigest()[:10]
                 row = {k: box.get(k) for k in ("kind", "wants", "location", "note", "volume", "volume_unit", "max_price",
                                                 "price_currency", "price_unit", "needed_by", "spec", "observed_on")}
@@ -468,7 +494,7 @@ def apply(conn, args):
                                    where source_kind = 'email' and source_id = %s""", (box["status"], row["source_id"]))
                 added += new
                 print(f"{'add' if new else 'already in'}: {r['name']} | {box['kind']} {box['status']} | {box['wants'][:70]}")
-            values = profile_values(r.get("profile") or {})
+            values = profile_values(r.get("profile") or {}, r.get("other_facts") or [], r.get("summary"))
             email = (r.get("profile") or {}).get("main_contact_email")
             if email:
                 cur.execute("select id from crm_people where lower(email) = %s limit 1", (email,))

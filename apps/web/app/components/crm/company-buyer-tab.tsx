@@ -51,6 +51,7 @@ function toDraft(profile: BuyerProfile): Draft {
     main_contact_id: profile.main_contact_id ?? "",
     next_step: profile.next_step ?? "",
     next_step_on: profile.next_step_on ?? "",
+    projects: profile.projects ?? "",
   };
 }
 
@@ -269,6 +270,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
             </div>
             {text("next_step", "Next step")}
             {text("next_step_on", "Next step on", { type: "date" })}
+            <div className="sm:col-span-2">{area("projects", "Projects and end customers")}</div>
             <div className="sm:col-span-2">{area("past_issues", "Past issues")}</div>
             <div className="sm:col-span-2">{area("outreach_notes", "Outreach notes")}</div>
           </div>
@@ -282,6 +284,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
             <Fact label="Collection" value={profile.collection} />
             <Fact label="Capabilities" value={profile.capabilities.length ? profile.capabilities.join(", ") : null} />
             <Fact label="Next step" value={profile.next_step ? `${profile.next_step}${profile.next_step_on ? `, ${formatDayLabel(profile.next_step_on)}` : ""}` : null} />
+            <Fact label="Projects and end customers" value={profile.projects} wide />
             <Fact label="Past issues" value={profile.past_issues} wide />
             <Fact label="Outreach notes" value={profile.outreach_notes} wide />
           </dl>

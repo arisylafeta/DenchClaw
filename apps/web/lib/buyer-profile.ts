@@ -25,6 +25,8 @@ export type BuyerProfile = {
   main_contact_id: string | null;
   next_step: string | null;
   next_step_on: string | null;
+  /** What they build with the batteries, where and for whom. */
+  projects: string | null;
   category: string | null;
   workstream_status: string | null;
   evidence: string | null;
@@ -71,6 +73,7 @@ export const BUYER_FIELD_NAMES = {
   main_contact_id: "Buyer Main Contact",
   next_step: "Buyer Next Step",
   next_step_on: "Buyer Next Step On",
+  projects: "Buyer Projects",
 } as const satisfies Partial<Record<keyof BuyerProfile, string>>;
 
 export function stageRank(stage: string | null | undefined): number {

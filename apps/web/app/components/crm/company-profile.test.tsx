@@ -44,7 +44,8 @@ function buildCompanyResponse(
       profile: {
         stage: "Contacted", stage_changed_on: "2026-09-01", tier: "A", owner: "Alex", capabilities: ["Test and grade"],
         can_receive_waste: null, accepts_standard_terms: "Not asked", collection: null, past_issues: "Dispute at loading over test data.",
-        outreach_notes: null, main_contact_id: null, next_step: null, next_step_on: null, category: "Repurposer",
+        outreach_notes: null, main_contact_id: null, next_step: null, next_step_on: null,
+        projects: "10 MW second-life BESS in Brandenburg", category: "Repurposer",
         workstream_status: "Approved", evidence: "Builds BESS from EV packs.", last_reviewed_at: "2026-09-21",
       },
       engagement: {
@@ -272,6 +273,7 @@ describe("CompanyProfile tab reset on entry change", () => {
     expect(screen.getByText(/200 packs a month · max GBP 45\/kWh · Spain/)).toBeInTheDocument();
     expect(screen.getByText("Dispute at loading over test data.")).toBeInTheDocument();
     expect(screen.getByText("Builds BESS from EV packs.")).toBeInTheDocument();
+    expect(screen.getByText("10 MW second-life BESS in Brandenburg")).toBeInTheDocument();
     expect(screen.getByText("Stage: Identified → Contacted")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Set to Bidding" }));
