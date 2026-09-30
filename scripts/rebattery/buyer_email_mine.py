@@ -475,6 +475,10 @@ def apply(conn, args):
         for r in results:
             if only and r["company_id"] not in only or r.get("error"):
                 continue
+            if r["company_id"].startswith("new:"):
+                print(f"skip (no CRM company yet): {r['name']}")
+                continue
+            source_kind, source_label = r.get("source_kind", "email"), r.get("source_label", "Alex's email")
             for box in r["buy_boxes"]:
                 if recycling_only(box):
                     print(f"skip (recycling): {r['name']} | {box['wants'][:70]}")
@@ -483,15 +487,15 @@ def apply(conn, args):
                 row = {k: box.get(k) for k in ("kind", "wants", "location", "note", "volume", "volume_unit", "max_price",
                                                 "price_currency", "price_unit", "needed_by", "spec", "observed_on")}
                 row.update(basis="stated" if box["kind"] == "standing" else None, company_id=r["company_id"],
-                           buyer=r["name"], source_kind="email", source_label="Alex's email",
-                           source_id=f"email:{box['evidence'][0]['message_id']}:{digest}")
+                           buyer=r["name"], source_kind=source_kind, source_label=source_label,
+                           source_id=f"{source_kind}:{box['evidence'][0]['message_id']}:{digest}")
                 if box["kind"] != "request":
                     row["needed_by"] = None
                 survey.link(cur, row)
                 new = survey.insert(cur, row)
                 if new and box["status"] != "open":
                     cur.execute("""update crm_bulk_trade_demand set status = 'closed', closed_reason = %s
-                                   where source_kind = 'email' and source_id = %s""", (box["status"], row["source_id"]))
+                                   where source_kind = %s and source_id = %s""", (box["status"], source_kind, row["source_id"]))
                 added += new
                 print(f"{'add' if new else 'already in'}: {r['name']} | {box['kind']} {box['status']} | {box['wants'][:70]}")
             values = profile_values(r.get("profile") or {}, r.get("other_facts") or [], r.get("summary"))
