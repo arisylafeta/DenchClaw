@@ -51,6 +51,8 @@ type ObjectKanbanProps = {
   hiddenColumns?: string[];
   /** Columns shown folded until the viewer opens them; their choice is then remembered. */
   collapsedColumns?: string[];
+  /** Columns whose cards show as one-line rows that unfold in place. */
+  compactCardColumns?: string[];
   /** Optional outer grouping rendered as independently expandable Kanban accordions. */
   accordionGroupFieldName?: string;
   onEntryClick?: (entryId: string) => void;
@@ -218,6 +220,7 @@ function DraggableCard({
   onEntryClick,
   objectName,
   onToast,
+  compact = false,
 }: {
   entry: Record<string, unknown>;
   fields: Field[];
@@ -226,12 +229,34 @@ function DraggableCard({
   onEntryClick?: (entryId: string) => void;
   objectName?: string;
   onToast?: (message: string, opts?: { type?: "success" | "error" | "info" }) => void;
+  /** One-line row that unfolds in place; a click on the unfolded card opens the entry. */
+  compact?: boolean;
 }) {
   const entryId = safeString(entry.entry_id) || "";
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: entryId,
     data: { entry },
   });
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = compact && !unfolded;
+
+  const toggle = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setUnfolded((value) => !value);
+      }}
+      aria-expanded={!folded}
+      aria-label={`${folded ? "Show" : "Hide"} details for ${getEntryTitle(entry, fields)}`}
+      className="w-5 h-5 -ml-1 flex-shrink-0 flex items-center justify-center rounded cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
+      style={{ color: "var(--color-text-muted)" }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${folded ? "" : "rotate-90"}`} aria-hidden>
+        <path d="m9 18 6-6-6-6" />
+      </svg>
+    </button>
+  );
 
   return (
     <div
@@ -239,13 +264,15 @@ function DraggableCard({
       {...listeners}
       {...attributes}
       onClick={(e) => {
-        // Only open if not dragging
-        if (!isDragging && onEntryClick) {
-          e.stopPropagation();
+        if (isDragging) {return;}
+        e.stopPropagation();
+        if (folded) {
+          setUnfolded(true);
+        } else if (onEntryClick) {
           onEntryClick(entryId);
         }
       }}
-      className="rounded-lg p-3 mb-2 transition-all duration-100 cursor-grab active:cursor-grabbing select-none"
+      className={`rounded-lg ${folded ? "px-3 py-1.5 mb-1" : "p-3 mb-2"} transition-all duration-100 cursor-grab active:cursor-grabbing select-none`}
       style={{
         background: "var(--color-surface)",
         border: `1px solid ${isDragging ? "var(--color-accent)" : "var(--color-border)"}`,
@@ -253,14 +280,28 @@ function DraggableCard({
         transform: isDragging ? "scale(1.02)" : undefined,
       }}
     >
-      <CardContent
-        entry={entry}
-        fields={fields}
-        members={members}
-        relationLabels={relationLabels}
-        objectName={objectName}
-        onToast={onToast}
-      />
+      {folded ? (
+        <div className="flex items-center gap-1.5 min-w-0">
+          {toggle}
+          <span className="text-sm truncate min-w-0" style={{ color: "var(--color-text)" }}>
+            {getEntryTitle(entry, fields)}
+          </span>
+        </div>
+      ) : (
+        <div className={compact ? "flex items-start gap-1.5" : undefined}>
+          {compact && toggle}
+          <div className="min-w-0 flex-1">
+            <CardContent
+              entry={entry}
+              fields={fields}
+              members={members}
+              relationLabels={relationLabels}
+              objectName={objectName}
+              onToast={onToast}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -504,7 +545,9 @@ function DroppableColumn({
   onToast,
   collapsed = false,
   onToggleCollapsed,
+  compactCards = false,
 }: {
+  compactCards?: boolean;
   columnName: string;
   droppableId: string;
   color: string;
@@ -703,6 +746,7 @@ function DroppableColumn({
               onEntryClick={onEntryClick}
               objectName={objectName}
               onToast={onToast}
+              compact={compactCards}
             />
           ))
         )}
@@ -723,6 +767,7 @@ export function ObjectKanban({
   groupFieldName,
   hiddenColumns = [],
   collapsedColumns = [],
+  compactCardColumns = [],
   accordionGroupFieldName,
   onEntryClick,
   onRefresh,
@@ -1001,6 +1046,7 @@ export function ObjectKanban({
             objectName={objectName}
             onRefresh={onRefresh}
             onToast={showToast}
+            compactCards={compactCardColumns.includes(col.name)}
             collapsed={!accordionField && collapsed.has(col.name)}
             onToggleCollapsed={accordionField ? undefined : () => toggleCollapsed(col.name)}
           />

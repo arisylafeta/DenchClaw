@@ -211,6 +211,32 @@ describe("folded columns", () => {
     expect(JSON.parse(window.localStorage.getItem("kanban-collapsed:dismantler")!)).toEqual(["Parked", "Contacted"]);
   });
 
+  it("shows compact columns as one-line rows that unfold, then open on a second click", async () => {
+    window.localStorage.clear();
+    const opened: string[] = [];
+    const fields = [...stageFields, { id: "next", name: "Next step", type: "text" }];
+    render(
+      <ObjectKanban objectName="dismantler" fields={fields} statuses={[]} compactCardColumns={["Found"]}
+        entries={[
+          { entry_id: "d1", Name: "Backlog one", Stage: "Found", "Next step": "Find a contact" },
+          { entry_id: "d3", Name: "In talks", Stage: "Contacted", "Next step": "Book a call" },
+        ]}
+        onEntryClick={(id) => opened.push(id)} />,
+    );
+    expect(screen.getByText("Book a call")).toBeTruthy();
+    expect(screen.queryByText("Find a contact")).toBeNull();
+
+    await userEvent.click(screen.getByText("Backlog one"));
+    expect(screen.getByText("Find a contact")).toBeTruthy();
+    expect(opened).toEqual([]);
+
+    await userEvent.click(screen.getByText("Find a contact"));
+    expect(opened).toEqual(["d1"]);
+    await userEvent.click(screen.getByRole("button", { name: "Hide details for Backlog one" }));
+    expect(screen.queryByText("Find a contact")).toBeNull();
+    expect(opened).toEqual(["d1"]);
+  });
+
   it("folds nothing by default", () => {
     window.localStorage.clear();
     render(<ObjectKanban objectName="other" fields={stageFields} entries={stageEntries} statuses={[]} />);

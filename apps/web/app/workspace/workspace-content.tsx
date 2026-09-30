@@ -3184,9 +3184,10 @@ function ContentRenderer({
 
 // --- Object View (header + display field selector + table/kanban) ---
 
-// Board columns that start folded: backlogs too long to scroll past.
-const DEFAULT_FOLDED_KANBAN_COLUMNS: Record<string, string[]> = {
-  dismantler: ["Found", "Parked"],
+// Per-board defaults: columns that start folded, and long backlogs whose cards
+// show as one-line rows that unfold in place.
+const KANBAN_BOARD_DEFAULTS: Record<string, { folded?: string[]; compactCards?: string[] }> = {
+  dismantler: { folded: ["Parked"], compactCards: ["Found"] },
 };
 
 function ObjectView({
@@ -4036,7 +4037,8 @@ function ObjectView({
               relationLabels={data.relationLabels}
               groupFieldName={effectiveSettings.kanbanField}
               hiddenColumns={effectiveSettings.kanbanHiddenColumns}
-              collapsedColumns={DEFAULT_FOLDED_KANBAN_COLUMNS[data.object.name]}
+              collapsedColumns={KANBAN_BOARD_DEFAULTS[data.object.name]?.folded}
+              compactCardColumns={KANBAN_BOARD_DEFAULTS[data.object.name]?.compactCards}
               accordionGroupFieldName={data.object.name === "work_task" ? "Project" : undefined}
               onEntryClick={handleEntryClickProp}
               onRefresh={handleRefresh}
