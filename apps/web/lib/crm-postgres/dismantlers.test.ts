@@ -69,6 +69,16 @@ describe.skipIf(!TEST_URL)("dismantlers object", () => {
     expect((await dismantler(entryId)).stage_since).not.toBe("2026-01-01");
   });
 
+  it("keeps due dates as plain YYYY-MM-DD, clears blanks and refuses bad dates", async () => {
+    const { entryId } = await entries.createPostgresEntry("dismantler", { Name: `Due Dates ${suffix}`, "Next step due": "2026-10-08" });
+    const due = async () => (await pg.queryPg<{ next_step_due: string | null }>(
+      "select next_step_due from crm_dismantlers where id = $1", [entryId]))[0].next_step_due;
+    expect(await due()).toBe("2026-10-08");
+    await entries.updatePostgresEntry("dismantler", entryId, { "Next step due": "" });
+    expect(await due()).toBeNull();
+    await expect(entries.updatePostgresEntry("dismantler", entryId, { "Next step due": "2026-02-30" })).rejects.toThrow();
+  });
+
   it("shows on the board with stage columns and company labels, and untags on delete", async () => {
     const { entryId } = await entries.createPostgresEntry("dismantler", { Name: `Board Card ${suffix}` });
     const data = await objects.getPostgresObjectData("dismantler", new URL("http://test/?path=dismantler"));

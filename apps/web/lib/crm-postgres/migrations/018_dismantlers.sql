@@ -10,9 +10,11 @@ create table if not exists crm_dismantlers (
   name text,
   company_id text not null unique references crm_companies(id) on delete restrict,
   stage text not null default 'Found',
-  stage_since date not null default current_date,
+  -- Dates are YYYY-MM-DD text: the workspace date picker reads and writes that
+  -- form, and a date column would reach it as a full timestamp.
+  stage_since text not null default to_char(current_date, 'YYYY-MM-DD'),
   next_step text,
-  next_step_due date,
+  next_step_due text,
   owner_id uuid references crm_users(id) on delete set null,
   route text,
   country text,
@@ -20,7 +22,11 @@ create table if not exists crm_dismantlers (
   platform_account_id text,
   notes text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint crm_dismantlers_stage_since_check
+    check (stage_since = to_char(stage_since::date, 'YYYY-MM-DD')),
+  constraint crm_dismantlers_next_step_due_check
+    check (next_step_due is null or next_step_due = to_char(next_step_due::date, 'YYYY-MM-DD'))
 );
 
 create index if not exists crm_dismantlers_stage_due_idx
@@ -37,6 +43,7 @@ declare
   matches text[];
 begin
   new.name := nullif(btrim(coalesce(new.name, '')), '');
+  new.next_step_due := nullif(btrim(coalesce(new.next_step_due, '')), '');
   if new.company_id is null then
     if new.name is null then
       raise exception 'A dismantler needs a name or a company';
@@ -59,7 +66,7 @@ begin
    where id = new.company_id and not ('dismantler' = any(coalesce(tags, '{}')));
   if tg_op = 'UPDATE' then
     if new.stage is distinct from old.stage then
-      new.stage_since := current_date;
+      new.stage_since := to_char(current_date, 'YYYY-MM-DD');
     end if;
     if new.company_id is distinct from old.company_id then
       update crm_companies set tags = array_remove(tags, 'dismantler'), updated_at = now()
@@ -92,6 +99,9 @@ create trigger crm_dismantlers_untag_company_trigger
   after delete on crm_dismantlers
   for each row execute function crm_dismantlers_untag_company();
 
+-- Cards show the first three filled fields after the name, so next step, due
+-- date and owner come first; Company repeats the name and sits later.
+
 -- The Company field needs a company object to point at. Production already has
 -- one; this only covers a fresh database.
 insert into crm_objects (id, name, entity_table, description, display_field, hidden_in_sidebar)
@@ -117,11 +127,11 @@ insert into crm_fields (id, object_id, name, type, canonical_column, enum_values
   ('reb_dismantler_fld_stage', 'reb_dismantler_object', 'Stage', 'enum', 'stage',
    '["Found", "Contacted", "Onboarding", "Live", "Syncing", "Parked"]',
    '["#94a3b8", "#60a5fa", "#f59e0b", "#22c55e", "#15803d", "#a8a29e"]', 1),
-  ('reb_dismantler_fld_next_step', 'reb_dismantler_object', 'Next step', 'text', 'next_step', null, null, 3),
-  ('reb_dismantler_fld_next_step_due', 'reb_dismantler_object', 'Next step due', 'date', 'next_step_due', null, null, 4),
+  ('reb_dismantler_fld_next_step', 'reb_dismantler_object', 'Next step', 'text', 'next_step', null, null, 2),
+  ('reb_dismantler_fld_next_step_due', 'reb_dismantler_object', 'Next step due', 'date', 'next_step_due', null, null, 3),
   ('reb_dismantler_fld_route', 'reb_dismantler_object', 'Route', 'enum', 'route',
-   '["eBay", "API", "Other"]', null, 6),
-  ('reb_dismantler_fld_country', 'reb_dismantler_object', 'Country', 'text', 'country', null, null, 7),
+   '["eBay", "API", "Other"]', null, 5),
+  ('reb_dismantler_fld_country', 'reb_dismantler_object', 'Country', 'text', 'country', null, null, 6),
   ('reb_dismantler_fld_ebay', 'reb_dismantler_object', 'eBay username', 'text', 'ebay_username', null, null, 8),
   ('reb_dismantler_fld_platform', 'reb_dismantler_object', 'Platform account', 'text', 'platform_account_id', null, null, 9),
   ('reb_dismantler_fld_stage_since', 'reb_dismantler_object', 'In stage since', 'date', 'stage_since', null, null, 10),
@@ -134,10 +144,10 @@ on conflict (object_id, name) do update set
   sort_order = excluded.sort_order;
 
 insert into crm_fields (id, object_id, name, type, canonical_column, related_object_id, relationship_type, sort_order)
-select 'reb_dismantler_fld_company', 'reb_dismantler_object', 'Company', 'relation', 'company_id', c.id, 'many_to_one', 2
+select 'reb_dismantler_fld_company', 'reb_dismantler_object', 'Company', 'relation', 'company_id', c.id, 'many_to_one', 7
   from crm_objects c where c.name = 'company'
 union all
-select 'reb_dismantler_fld_owner', 'reb_dismantler_object', 'Owner', 'relation', 'owner_id', u.id, 'many_to_one', 5
+select 'reb_dismantler_fld_owner', 'reb_dismantler_object', 'Owner', 'relation', 'owner_id', u.id, 'many_to_one', 4
   from crm_objects u where u.name = 'crm_user'
 on conflict (object_id, name) do update set
   canonical_column = excluded.canonical_column,
