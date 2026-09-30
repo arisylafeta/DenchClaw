@@ -16,7 +16,7 @@ function row(overrides: Partial<Demand>): Demand {
     needed_by: null, volume: null, volume_unit: null, max_price: null, price_currency: null, price_unit: null, spec: {},
     source_kind: "email", source_label: "Gmail · adam@gv.example", source_url: null, source_quote: "Can you supply matched packs?",
     observed_on: "2026-09-18", status: "open", closed_reason: null, confirmed_on: "2026-09-18",
-    updated_at: "2026-09-18T10:00:00Z", fits: [], trades: [], ...overrides,
+    updated_at: "2026-09-18T10:00:00Z", fits: [], trades: [], waiting: null, ...overrides,
   };
 }
 
@@ -26,7 +26,8 @@ const ROWS = [
   row({ id: "btd_3", buyer: "Old buyer", wants: "Anything", status: "closed", closed_reason: "bought_elsewhere" }),
   row({ id: "btd_4", kind: "request", basis: null, buyer: "Exigo Recycling", wants: "CATL cells, urgent", needed_by: "2026-10-21",
     volume: 10000, volume_unit: "cells", spec: { chemistries: ["LFP"], formats: ["Cells"] }, max_price: 30, price_currency: "EUR", price_unit: "kWh" }),
-  row({ id: "btd_5", kind: "request", basis: null, buyer: "Late buyer", wants: "Modules", needed_by: "2026-09-01" }),
+  row({ id: "btd_5", kind: "request", basis: null, buyer: "Late buyer", wants: "Modules", needed_by: "2026-09-01",
+    waiting: { since: new Date(Date.now() - 3 * 86_400_000).toISOString(), who: "Rahul", subject: "Cells?" } }),
   row({ id: "btd_6", basis: "estimated", buyer: "Gridturn", wants: "Second-life EV modules", confirmed_on: null, observed_on: "2026-09-20",
     trades: [{ lot_id: "bt_69", title: "Iveco FPT eBS69", status: "Won" }] }),
 ];
@@ -61,6 +62,7 @@ describe("DemandPage", () => {
     expect(within(table).getByText("Chemistry: LFP · Format: Cells · max EUR 30/kWh")).toBeInTheDocument();
     expect(within(table).getByText("21 Oct")).toBeInTheDocument();
     expect(within(table).getByText("Past needed-by")).toBeInTheDocument(); // Late buyer, 1 Sep
+    expect(within(table).getByText("Waiting 3d")).toBeInTheDocument();
     expect(within(table).queryByText("Green Voltage")).not.toBeInTheDocument();
     const possible = screen.getByRole("region", { name: "Possible demand" });
     expect(within(possible).getByText("Revoxa buyer wants: LFP packs")).toBeInTheDocument();

@@ -77,6 +77,8 @@ export type Demand = {
   updated_at: string;
   fits: DemandFit[];
   trades: DemandTrade[];
+  /** The buyer's contact whose latest email is newer than our last email to them (email only). */
+  waiting: { since: string; who: string | null; subject: string | null } | null;
 };
 
 /** An open demand row the matching picked for a trade, shown as a Suggested buyer. */
@@ -251,6 +253,12 @@ export function volumeLabel(demand: Pick<Demand, "kind" | "volume" | "volume_uni
 export function priceLabel(demand: Pick<Demand, "max_price" | "price_currency" | "price_unit">): string | null {
   if (demand.max_price == null || !demand.price_currency || !demand.price_unit) return null;
   return `${demand.price_currency} ${Number(demand.max_price).toLocaleString("en-GB")}/${demand.price_unit}`;
+}
+
+/** "Waiting 3d" style age of an unanswered email; "Waiting today" under a day. */
+export function waitingLabel(since: string, now: Date = new Date()): string {
+  const days = Math.floor((now.getTime() - Date.parse(since)) / 86_400_000);
+  return days < 1 ? "Waiting today" : `Waiting ${days}d`;
 }
 
 /** One line per filled spec field, e.g. ["Chemistry: LFP, NMC", "Min SOH %: 70"]. */

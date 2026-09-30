@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+from zoneinfo import ZoneInfo
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -487,6 +488,40 @@ class DemandRun(unittest.TestCase):
                          {"kind": "request", "needed_by": "2099-01-01", "spec": {"chemistries": ["LFP"]}})
         self.assertEqual(rows["btd_est"]["basis"], "estimated")
         self.assertNotIn("spec", rows["btd_est"])  # empty values are left out
+
+    def test_summary_lists_buyers_waiting_requests_due_and_buy_boxes_to_reconfirm(self):
+        today = dt.datetime.now(ZoneInfo("Europe/London")).date()
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""
+              insert into crm_companies (id, name) values ('co_wait', 'Waiting Energy') on conflict do nothing;
+              insert into crm_people (id, full_name, email, company_id) values
+                ('p_wait', 'Wanda Waiting', 'wanda@waiting.example', 'co_wait'),
+                ('p_done', 'Dan Answered', 'dan@answered.example', null),
+                ('p_ooo', 'Otto Away', 'otto@away.example', null) on conflict do nothing;
+              insert into crm_bulk_trade_demand (id, kind, basis, buyer, person_id, company_id, wants, needed_by, confirmed_on) values
+                ('btd_w', 'standing', 'agreed', 'Waiting Energy', 'p_wait', 'co_wait', 'LFP packs', null, '2026-01-05'),
+                ('btd_d', 'standing', 'stated', 'Answered Ltd', 'p_done', null, 'Modules', null, %(today)s),
+                ('btd_o', 'request', null, 'Away GmbH', 'p_ooo', null, 'CATL cells', %(soon)s, %(today)s) on conflict do nothing;
+              insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email) values
+                ('m_out_w', 'Offer', now() - interval '5 days', null, 'alex@rebattery.io'),
+                ('m_in_w', 'Re: Offer, can you do 40 packs?', now() - interval '3 days', 'p_wait', 'wanda@waiting.example'),
+                ('m_in_d', 'Question', now() - interval '3 days', 'p_done', 'dan@answered.example'),
+                ('m_out_d', 'Re: Question', now() - interval '2 days', null, 'ari@rebattery.io'),
+                ('m_out_o', 'Cells', now() - interval '2 days', null, 'alex@rebattery.io'),
+                ('m_in_o', 'Automatic reply: Cells', now() - interval '1 day', 'p_ooo', 'otto@away.example') on conflict do nothing;
+              insert into crm_email_message_recipients (message_id, person_id, recipient_type) values
+                ('m_out_w', 'p_wait', 'to'), ('m_out_d', 'p_done', 'cc'), ('m_out_o', 'p_ooo', 'to') on conflict do nothing;
+            """, {"today": today, "soon": today + dt.timedelta(days=3)})
+        out = io.StringIO()
+        with redirect_stdout(out):
+            check.summary(self.conn)
+        text = out.getvalue()
+        self.assertIn("Buyers waiting on you:\n- Wanda Waiting (Waiting Energy): Re: Offer, can you do 40 packs? [3d]", text)
+        self.assertNotIn("Dan Answered", text)  # Ari answered from the other mailbox
+        self.assertNotIn("Otto Away", text)  # an auto-reply is not waiting on us
+        self.assertIn("- Request from Away GmbH: CATL cells, needed in 3d, no offer yet", text)
+        self.assertIn("Buy-boxes to reconfirm: Waiting Energy (agreed)", text)
+        self.assertNotIn("Answered Ltd", text.split("Buy-boxes to reconfirm:")[1])
 
 if __name__ == "__main__":
     unittest.main()

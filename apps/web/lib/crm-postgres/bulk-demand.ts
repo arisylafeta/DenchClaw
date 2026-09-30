@@ -31,15 +31,34 @@ const RANK = `case when demand.kind = 'request' then 0 when demand.basis = 'agre
 
 /** Every demand row: open first, then requests by date, then buy-boxes by basis and buyer. */
 export async function listDemand(): Promise<Demand[]> {
-  return queryPg<Demand>(
+  return withWaiting(await queryPg<Demand>(
     `${DEMAND_SELECT} order by demand.status = 'closed', ${RANK}, demand.needed_by nulls last, demand.buyer,
        demand.confirmed_on desc nulls last`,
-  );
+  ));
 }
 
 export async function getDemand(id: string): Promise<Demand | null> {
-  const [row] = await queryPg<Demand>(`${DEMAND_SELECT} where demand.id = $1`, [id]);
+  const [row] = await withWaiting(await queryPg<Demand>(`${DEMAND_SELECT} where demand.id = $1`, [id]));
   return row ?? null;
+}
+
+type WaitingRow = { person_id: string; company_id: string | null; full_name: string | null; waiting_since: string; last_in_subject: string | null };
+
+/** Adds the buyer contact waiting longest on our reply (by person, else anyone at the company), from one view read. */
+async function withWaiting(rows: Demand[]): Promise<Demand[]> {
+  const open = rows.filter((row) => row.status === "open" && (row.person_id || row.company_id));
+  const waiting = open.length ? await queryPg<WaitingRow>(
+    `select person_id, company_id, full_name, waiting_since, last_in_subject from crm_bulk_trade_buyer_waiting
+     where waiting_since is not null and (person_id = any($1::text[]) or company_id = any($2::text[]))
+     order by waiting_since`,
+    [open.map((row) => row.person_id).filter(Boolean), open.map((row) => row.company_id).filter(Boolean)],
+  ) : [];
+  return rows.map((row) => {
+    const hit = row.status === "open"
+      ? waiting.find((w) => w.person_id === row.person_id) ?? waiting.find((w) => row.company_id && w.company_id === row.company_id)
+      : undefined;
+    return { ...row, waiting: hit ? { since: new Date(hit.waiting_since).toISOString(), who: hit.full_name, subject: hit.last_in_subject } : null };
+  });
 }
 
 /** Open "possible demand" cards from the inbox check, newest first. */

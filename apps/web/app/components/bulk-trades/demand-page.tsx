@@ -17,6 +17,7 @@ import {
   priceLabel,
   specLines,
   volumeLabel,
+  waitingLabel,
   type Basis,
   type ClosedReason,
   type Demand,
@@ -164,7 +165,15 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                   <div className="flex min-w-0 flex-col items-start gap-1">
                     <div className="max-w-full truncate text-sm font-semibold">{row.buyer}</div>
                     {row.contact && <div className="max-w-full truncate text-xs" style={{ color: "var(--bt-muted)" }}>{row.contact}</div>}
-                    <DemandBadge kind={row.kind} basis={row.basis} />
+                    <span className="flex flex-wrap gap-1">
+                      <DemandBadge kind={row.kind} basis={row.basis} />
+                      {row.waiting && (
+                        <span className="rounded-none border px-1.5 py-px text-xs font-medium" title={row.waiting.subject ?? undefined}
+                          style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" }}>
+                          {waitingLabel(row.waiting.since)}
+                        </span>
+                      )}
+                    </span>
                   </div>
                   <span className="flex flex-col gap-0.5 text-[13px] leading-snug">
                     {row.wants}
@@ -248,6 +257,12 @@ function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade }:
         </div>
         <button type="button" onClick={onClose} className="text-sm" style={{ color: "var(--bt-muted)" }}>Close</button>
       </div>
+      {demand.waiting && (
+        <p className="rounded-none border px-3 py-2 text-[13px]" style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" }}>
+          {waitingLabel(demand.waiting.since)} on your reply{demand.waiting.who ? ` to ${demand.waiting.who}` : ""}
+          {demand.waiting.subject ? `: “${demand.waiting.subject}”` : ""}
+        </p>
+      )}
       <p className="text-[15px] leading-snug">{demand.wants}</p>
       <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
         <dt style={{ color: "var(--bt-muted)" }}>Volume</dt><dd>{volumeLabel(demand) ?? "—"}</dd>

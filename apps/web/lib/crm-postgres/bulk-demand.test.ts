@@ -155,4 +155,15 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(row).toMatchObject({ kind: "request", basis: null, needed_by: "2026-10-20", volume: 1000, volume_unit: "cells",
       spec: { chemistries: ["LFP"], formats: ["Cells"] }, source_kind: "call", observed_on: "2026-09-29" });
   });
+  it("marks a buyer waiting on our reply until either founder writes back", async () => {
+    await pg.queryPg(`insert into crm_people (id, full_name, email) values ('p_jc', 'Jonathan Cogman', 'jc@ce.example') on conflict do nothing`);
+    const row = await demand.addDemand({ buyer: "Connected Energy", person_id: "p_jc", wants: "600+ packs of one type" }, user.id);
+    expect(row.waiting).toBeNull();
+    await pg.queryPg(`insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email)
+      values ('m_jc_in', 'Continuity of supply', now() - interval '2 days', 'p_jc', 'jc@ce.example')`);
+    expect((await demand.getDemand(row.id))?.waiting).toMatchObject({ who: "Jonathan Cogman", subject: "Continuity of supply" });
+    await pg.queryPg(`insert into crm_email_messages (id, subject, sent_at, from_email) values ('m_jc_out', 'Re: Continuity', now(), 'ari@rebattery.io');
+      insert into crm_email_message_recipients (message_id, person_id, recipient_type) values ('m_jc_out', 'p_jc', 'to')`);
+    expect((await demand.getDemand(row.id))?.waiting).toBeNull();
+  });
 });

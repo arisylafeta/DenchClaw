@@ -900,6 +900,7 @@ DEMAND_INTENT = re.compile(
     r"monthly (?:volume|demand|requirement)|offtake|to source)\b", re.I)
 NEWSLETTER = re.compile(r"unsubscribe|view (?:this email )?in (?:your )?browser|newsletter|webinar", re.I)
 MAX_DEMAND_SOURCES = 30
+STALE_DAYS = 60  # stated and agreed buy-boxes to reconfirm; matches STALE_DAYS in apps/web/lib/bulk-demand.ts
 
 DEMAND_SYSTEM = """You find BULK BUY DEMAND for ReBattery, a broker of second-life and surplus EV batteries, modules, cells and BESS.
 Reply with ONLY JSON: {"demands": [{"source_id", "buyer_company", "contact_name", "contact_email", "wants", "quantity",
@@ -1390,7 +1391,8 @@ def history(conn, args):
 
 
 def summary(conn):
-    """The 08:00 list: overdue and due-today next steps, new auction offers, auctions closing soon, and cards waiting."""
+    """The 08:00 list: buyers waiting on a reply, requests due within a week with no offer, overdue and due-today
+    next steps, new auction offers, auctions closing soon, new demand matches, cards waiting, and buy-boxes to reconfirm."""
     today = dt.datetime.now(ZoneInfo("Europe/London")).date()
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
@@ -1426,7 +1428,35 @@ def summary(conn):
                  and m.matched_at > now() - interval '24 hours' and l.trade_stage = any(%s)
                group by l.title order by l.title""", (list(LIVE_STAGES),))
         matches = cur.fetchall()
+        cur.execute(
+            """select w.full_name, w.email, c.name as company, w.waiting_since, w.last_in_subject
+               from crm_bulk_trade_buyer_waiting w left join crm_companies c on c.id = w.company_id
+               where w.waiting_since is not null order by w.waiting_since limit 10""")
+        waiting = cur.fetchall()
+        cur.execute(
+            """select d.buyer, d.wants, d.needed_by from crm_bulk_trade_demand d
+               where d.status = 'open' and d.kind = 'request' and d.needed_by between %s and %s
+                 and not exists (select 1 from crm_bulk_trade_buyers b where b.demand_id = d.id)
+               order by d.needed_by, d.buyer""", (today, today + dt.timedelta(days=7)))
+        due = cur.fetchall()
+        cur.execute(
+            """select d.buyer, d.basis from crm_bulk_trade_demand d
+               where d.status = 'open' and d.kind = 'standing' and d.basis in ('stated', 'agreed')
+                 and (d.confirmed_on is null or d.confirmed_on < %s)
+               order by d.basis = 'agreed' desc, d.confirmed_on nulls first, d.buyer""", (today - dt.timedelta(days=STALE_DAYS),))
+        reconfirm = cur.fetchall()
     lines = [f"Bulk Trades, {today:%a %d %b}"]
+    if waiting:
+        lines.append("Buyers waiting on you:")
+        for row in waiting:
+            days = (today - row["waiting_since"].astimezone(ZoneInfo("Europe/London")).date()).days
+            who = row["full_name"] or row["email"] or "Unknown"
+            at = f" ({row['company']})" if row["company"] else ""
+            subject = f": {row['last_in_subject']}" if row["last_in_subject"] else ""
+            lines.append(f"- {who}{at}{subject} [{'today' if days < 1 else f'{days}d'}]")
+    for row in due:
+        days = (row["needed_by"] - today).days
+        lines.append(f"- Request from {row['buyer']}: {row['wants']}, needed {'today' if days == 0 else f'in {days}d'}, no offer yet")
     for row in rows:
         days = (today - row["next_step_due"]).days
         when = "today" if days == 0 else f"{days}d late"
@@ -1442,6 +1472,10 @@ def summary(conn):
         lines.append(f"- {row['title']}: matches open demand from {row['buyers']}")
     if possible:
         lines.append(f"{possible} possible new trade{'s' if possible != 1 else ''} to review.")
+    if reconfirm:
+        names = ", ".join(f"{r['buyer']}{' (agreed)' if r['basis'] == 'agreed' else ''}" for r in reconfirm[:8])
+        more = f" and {len(reconfirm) - 8} more" if len(reconfirm) > 8 else ""
+        lines.append(f"Buy-boxes to reconfirm: {names}{more}.")
     lines.append("https://crm.rebattery.io/?path=bulk_trade")
     print("\n".join(lines))
     return 0
