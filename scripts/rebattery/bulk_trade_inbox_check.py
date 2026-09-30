@@ -54,6 +54,7 @@ import psycopg2.extras
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = json.loads((REPO / "apps/web/lib/bulk-trade-templates.json").read_text())
+BUY_BOX = json.loads((REPO / "apps/web/lib/buy-box-spec.json").read_text())
 GRANOLA_DIR = Path(os.environ.get("GRANOLA_DATA_DIR", "/root/.local/share/rebattery/granola"))
 GRANOLA_BIN = os.environ.get("GRANOLA_INGESTION_BIN", "/root/.local/bin/granola-ingestion")
 GATEWAY_URL = os.environ.get("HERMES_API_BASE_URL", "http://127.0.0.1:8642") + "/v1/chat/completions"
@@ -902,14 +903,64 @@ MAX_DEMAND_SOURCES = 30
 
 DEMAND_SYSTEM = """You find BULK BUY DEMAND for ReBattery, a broker of second-life and surplus EV batteries, modules, cells and BESS.
 Reply with ONLY JSON: {"demands": [{"source_id", "buyer_company", "contact_name", "contact_email", "wants", "quantity",
-"where", "quote"}]}.
+"where", "kind", "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "quote"}]}.
 Include a source only when a person or company OUTSIDE ReBattery says they want to BUY or source batteries in bulk
 (2 or more packs/modules/systems, cells in volume, or recycling feedstock by the tonne), now or on a recurring basis.
 Skip sellers offering stock, ReBattery's own outreach, newsletters, marketing, single-battery retail requests, and
 vague "keep us in mind".
 - "wants": one plain line in the buyer's terms, e.g. "NMC EV packs 30-70 kWh for storage builds, up to ~EUR 20/kWh".
-- "quantity" e.g. "100+ packs" or null; "where": delivery country or region, or null.
-- "quote": copied EXACTLY from the source (8-300 characters). An empty list is a good answer."""
+- "quantity": the amount in their words, e.g. "100+ packs" or null; "where": delivery country or region, or null.
+- "kind": "request" for a one-off need (a quantity wanted now or by a date), "standing" for ongoing or repeat buying.
+- "needed_by": YYYY-MM-DD, requests only, only when a date or deadline is stated; else null.
+- "volume" + "volume_unit" (%(volume_units)s): a number, the total for a request, per month for standing; else null.
+- "max_price" + "price_currency" (%(currencies)s) + "price_unit" (%(price_units)s): only when a ceiling is stated.
+- "spec": only these keys, each a list of values copied exactly from its options, only what is stated:
+%(lists)s
+  and numbers kwh_min, kwh_max (per unit), min_soh (0-100); mixed_ok true/false. {} when nothing is stated.
+- "quote": copied EXACTLY from the source (8-300 characters). An empty list is a good answer.""" % {
+    "volume_units": ", ".join(BUY_BOX["volume_units"]), "currencies": ", ".join(BUY_BOX["currencies"]),
+    "price_units": ", ".join(BUY_BOX["price_units"]),
+    "lists": "\n".join(f"  {key}: {' | '.join(values)}" for key, values in BUY_BOX["lists"].items())}
+
+
+def clean_spec(raw):
+    """Keeps the valid parts of a model-written spec: known list values, in-range numbers, a boolean mixed_ok."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, value in raw.items():
+        if key in BUY_BOX["lists"] and isinstance(value, list):
+            kept = [v for v in dict.fromkeys(value) if v in BUY_BOX["lists"][key]]
+            if kept:
+                out[key] = kept
+        elif key in BUY_BOX["numbers"] and isinstance(value, (int, float)) and not isinstance(value, bool):
+            limits = BUY_BOX["numbers"][key]
+            if limits["min"] <= value <= limits["max"]:
+                out[key] = value
+        elif key == "mixed_ok" and isinstance(value, bool):
+            out[key] = value
+    if "kwh_min" in out and "kwh_max" in out and out["kwh_min"] > out["kwh_max"]:
+        out.pop("kwh_min"), out.pop("kwh_max")
+    return out
+
+
+def clean_structured(d):
+    """The structured part of a found demand, keeping only values the app will accept."""
+    out = {"kind": d.get("kind") if d.get("kind") in ("request", "standing") else None}
+    needed = str(d.get("needed_by") or "")
+    if out["kind"] == "request" and re.fullmatch(r"\d{4}-\d{2}-\d{2}", needed):
+        out["needed_by"] = needed
+    volume = d.get("volume")
+    if isinstance(volume, (int, float)) and not isinstance(volume, bool) and volume > 0 and d.get("volume_unit") in BUY_BOX["volume_units"]:
+        out["volume"], out["volume_unit"] = volume, d["volume_unit"]
+    price = d.get("max_price")
+    if (isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0
+            and d.get("price_currency") in BUY_BOX["currencies"] and d.get("price_unit") in BUY_BOX["price_units"]):
+        out["max_price"], out["price_currency"], out["price_unit"] = price, d["price_currency"], d["price_unit"]
+    spec = clean_spec(d.get("spec"))
+    if spec:
+        out["spec"] = spec
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def screen_demand(cur, sources, key, report):
@@ -948,17 +999,21 @@ def screen_demand(cur, sources, key, report):
         proposed = {"buyer": name[:120], "contact": str(d.get("contact_name") or "").strip()[:120] or None, "email": email,
                     "wants": wants[:300], "quantity": str(d.get("quantity") or "").strip()[:80] or None,
                     "location": str(d.get("where") or "").strip()[:80] or None,
-                    "demand_id": existing["id"] if existing else None}
+                    "demand_id": existing["id"] if existing else None, **clean_structured(d)}
+        label = "needs" if proposed.get("kind") == "request" else "wants"
         out.append({"kind": "possible_demand", "target": proposed["demand_id"], "proposed": proposed,
-                    "summary": f"{name} {'updated what they want' if existing else 'wants'}: {wants}"[:300],
+                    "summary": f"{name} {'updated what they want' if existing else label}: {wants}"[:300],
                     "quote": str(d["quote"]).strip()[:300], "source": source})
     return out
 
 
 MATCH_SYSTEM = """You match open buyer DEMAND to one bulk battery TRADE (supply) for ReBattery, a broker of second-life and
 surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON: {"matches": [{"demand_id", "strength", "reason"}]}.
+Each DEMAND row is a "request" (a one-off need, maybe by "needed_by") or a "standing" buy-box with a "basis":
+"agreed" and "stated" come from the buyer; "estimated" is ReBattery's guess from research, so match it only on a
+clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words.
 - "strong": the trade's batch is the kind of thing the buyer asked for (form, chemistry, size, quantity, use) and
-  nothing obvious rules it out.
+  nothing obvious rules it out, including anything in spec "excludes".
 - "partial": a plausible fit with one clear catch (e.g. packs vs cells, region, price, volume); name the catch.
 Leave out rows that do not fit. "reason": one short plain sentence for Alex, naming the fit and any catch."""
 
@@ -972,14 +1027,18 @@ def match_demand(conn, key, report, dry_run=False):
     """Re-matches each live trade whose facts or the open demand changed since it was last matched."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            """select id, buyer, wants, quantity, location, to_char(confirmed_on, 'YYYY-MM-DD') as confirmed,
+            """select id, kind, basis, buyer, wants, quantity, location, to_char(needed_by, 'YYYY-MM-DD') as needed_by,
+                      volume::float8 as volume, volume_unit, max_price::float8 as max_price, price_currency, price_unit, spec,
+                      to_char(confirmed_on, 'YYYY-MM-DD') as confirmed,
                       to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated
-               from crm_bulk_trade_demand where status = 'open' order by id""")
+               from crm_bulk_trade_demand
+               where status = 'open' and (kind <> 'request' or needed_by is null or needed_by >= current_date)
+               order by id""")
         demand = cur.fetchall()
         trades = load_trades(cur)
         cur.execute("select id, demand_fingerprint from crm_bulk_trade_lots where id = any(%s)", (list(trades),))
         fingerprints = {r["id"]: r["demand_fingerprint"] for r in cur.fetchall()}
-        rows = [{k: d[k] for k in ("id", "buyer", "wants", "quantity", "location", "confirmed")} for d in demand]
+        rows = [{k: v for k, v in d.items() if k != "updated" and v not in (None, {}, [])} for d in demand]
         ids = {d["id"] for d in demand}
         matched = 0
         for lot_id, trade in trades.items():
@@ -1355,10 +1414,15 @@ def summary(conn):
                order by auction_closes_at""")
         closing = cur.fetchall()
         cur.execute(
-            """select l.title, string_agg(d.buyer, ', ' order by d.buyer) as buyers
+            """select l.title, string_agg(d.buyer || case when d.kind = 'request' then ' (request)'
+                                                          when d.basis = 'agreed' then ' (agreed)'
+                                                          when d.basis = 'estimated' then ' (estimated)' else '' end,
+                                          ', ' order by case when d.kind = 'request' then 0 when d.basis = 'agreed' then 1
+                                                             when d.basis = 'stated' then 2 else 3 end, d.buyer) as buyers
                from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand d on d.id = m.demand_id
                join crm_bulk_trade_lots l on l.id = m.lot_id
                where m.strength = 'strong' and not m.hidden and m.buyer_id is null and d.status = 'open'
+                 and (d.kind <> 'request' or d.needed_by is null or d.needed_by >= current_date)
                  and m.matched_at > now() - interval '24 hours' and l.trade_stage = any(%s)
                group by l.title order by l.title""", (list(LIVE_STAGES),))
         matches = cur.fetchall()

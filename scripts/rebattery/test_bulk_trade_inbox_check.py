@@ -443,6 +443,51 @@ class DemandRun(unittest.TestCase):
         self.assertEqual(rows, [("btd_hid", "partial", True), ("btd_open", "strong", False)])
 
 
+    def test_screen_keeps_a_requests_date_volume_and_valid_spec_only(self):
+        source = {**SOURCE, "id": "d9", "from": "rahul.py@exigo.example",
+                  "text": "Subject: cells\n\nWe need 1,000 LFP cells by 20 October, max EUR 30/kWh."}
+        reply = {"demands": [{"source_id": "d9", "buyer_company": "Exigo py", "wants": "1,000 LFP cells", "kind": "request",
+                              "needed_by": "2026-10-20", "volume": 1000, "volume_unit": "cells", "max_price": 30,
+                              "price_currency": "EUR", "price_unit": "kWh",
+                              "spec": {"chemistries": ["LFP", "Graphene"], "formats": ["Cells"], "min_soh": 150},
+                              "quote": "We need 1,000 LFP cells by 20 October"}]}
+        with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur, \
+             patch.object(check, "call_model", lambda system, user, key: reply):
+            [card] = check.screen_demand(cur, [source], "k", {"warnings": []})
+        self.assertEqual(card["summary"], "Exigo py needs: 1,000 LFP cells")
+        self.assertEqual({k: card["proposed"][k] for k in ("kind", "needed_by", "volume", "volume_unit", "max_price", "spec")},
+                         {"kind": "request", "needed_by": "2026-10-20", "volume": 1000, "volume_unit": "cells", "max_price": 30,
+                          "spec": {"chemistries": ["LFP"], "formats": ["Cells"]}})
+
+    def test_clean_structured_drops_dates_on_standing_rows_and_half_prices(self):
+        self.assertEqual(check.clean_structured({"kind": "standing", "needed_by": "2026-10-20", "volume": 8, "volume_unit": "packs",
+                                                 "max_price": 20, "price_currency": "EUR"}),
+                         {"kind": "standing", "volume": 8, "volume_unit": "packs"})
+        self.assertEqual(check.clean_structured({"kind": "weekly", "volume": True, "volume_unit": "packs",
+                                                 "spec": {"kwh_min": 60, "kwh_max": 30, "mixed_ok": "yes"}}), {})
+
+    def test_matching_sends_kind_basis_and_spec_and_skips_requests_past_their_date(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""insert into crm_bulk_trade_demand (id, kind, basis, buyer, wants, needed_by, spec) values
+                             ('btd_req', 'request', null, 'Live request', 'LFP cells', '2099-01-01', '{"chemistries": ["LFP"]}'),
+                             ('btd_late', 'request', null, 'Late request', 'LFP cells', '2020-01-01', '{}'),
+                             ('btd_est', 'standing', 'estimated', 'Gridturn', 'EV modules', null, '{}')
+                           on conflict do nothing""")
+        seen = []
+
+        def fake_model(system, user, key):
+            seen.extend(json.loads(user)["DEMAND"])
+            return {"matches": []}
+
+        with patch.object(check, "call_model", fake_model):
+            check.match_demand(self.conn, "k", {"warnings": []})
+        rows = {r["id"]: r for r in seen}
+        self.assertNotIn("btd_late", rows)
+        self.assertEqual({k: rows["btd_req"][k] for k in ("kind", "needed_by", "spec")},
+                         {"kind": "request", "needed_by": "2099-01-01", "spec": {"chemistries": ["LFP"]}})
+        self.assertEqual(rows["btd_est"]["basis"], "estimated")
+        self.assertNotIn("spec", rows["btd_est"])  # empty values are left out
+
 if __name__ == "__main__":
     unittest.main()
 

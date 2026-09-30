@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SuggestedBuyer } from "@/lib/bulk-demand";
 import { shortDate } from "@/lib/bulk-trade-details";
+import { DemandBadge } from "./demand-badge";
 import { Card, ErrorText, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request, tradeUrl } from "./trade-ui";
 
 type Props = {
@@ -17,7 +18,7 @@ const STRENGTH = {
   partial: { label: "Partial fit", style: { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" } },
 } as const;
 
-/** Open buyer demand the daily matching picked for this trade, each one click from the buyer list. */
+/** Open buyer demand the matching picked for this trade, ranked by how firm it is, each one click from the buyer list. */
 export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
     <Card label="Suggested buyers">
       <header className="flex flex-wrap items-center gap-3 border-b px-5 py-3.5" style={{ borderColor: "var(--bt-divider)" }}>
         <h2 className="text-base font-semibold">Suggested buyers</h2>
-        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>from open demand</span>
+        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>requests first, then agreed, stated and estimated buy-boxes</span>
         <span className="flex-1" />
         {onOpenDemand && (
           <button type="button" onClick={onOpenDemand} className="text-[13px] font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
@@ -55,11 +56,15 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
             style={{ borderColor: "var(--bt-divider)" }}>
             <div className="flex flex-col items-start gap-1">
               <span className="text-sm font-semibold">{item.buyer}</span>
-              <span className="rounded-none border px-1.5 py-px text-xs font-medium" style={STRENGTH[item.strength].style}>{STRENGTH[item.strength].label}</span>
+              <span className="flex flex-wrap gap-1">
+                <DemandBadge kind={item.kind} basis={item.basis} />
+                <span className="rounded-none border px-1.5 py-px text-xs font-medium" style={STRENGTH[item.strength].style}>{STRENGTH[item.strength].label}</span>
+              </span>
             </div>
             <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>
               “{item.wants}”
-              {item.confirmed_on && <span style={{ color: "var(--bt-muted)" }}> · confirmed {shortDate(item.confirmed_on)}</span>}
+              {item.kind === "request" && item.needed_by && <span style={{ color: "var(--bt-muted)" }}> · needed by {shortDate(item.needed_by)}</span>}
+              {item.kind === "standing" && item.confirmed_on && <span style={{ color: "var(--bt-muted)" }}> · confirmed {shortDate(item.confirmed_on)}</span>}
             </span>
             <span className="text-[13px]">{item.reason}</span>
             <button type="button" disabled={busy === item.demand_id} onClick={() => act(item.demand_id, "POST")} className={`${darkButtonClass} h-8`} style={darkButtonStyle}>

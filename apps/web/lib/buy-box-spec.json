@@ -1,0 +1,32 @@
+{
+  "lists": {
+    "chemistries": ["LFP", "NMC", "NCA", "LMO", "LMFP", "LTO", "Sodium-ion", "Lead-acid", "Mixed"],
+    "formats": ["Cells", "Modules", "Packs", "Systems"],
+    "cell_formats": ["Cylindrical", "Prismatic", "Pouch"],
+    "conditions": ["New or surplus", "Second-life, tested", "Second-life, untested", "Recall stock", "B-grade or production scrap", "Damaged or end of life"],
+    "origins": ["Passenger EV", "Bus or truck", "Stationary storage", "Industrial", "Consumer or other"],
+    "makes": ["Tesla", "VW Group", "Renault", "Nissan", "Hyundai or Kia", "BMW or Mini", "Mercedes-Benz", "Stellantis", "Ford", "GM", "BYD", "MG or SAIC", "Volvo or Polestar", "JLR", "Toyota or Lexus"],
+    "cell_makers": ["CATL", "LG", "Samsung SDI", "SK On", "Panasonic", "BYD", "EVE", "CALB", "Gotion", "Northvolt", "AESC"],
+    "evidence": ["BMS readout", "Capacity test", "Internal resistance", "Usage history", "Photos", "UN 38.3 and shipping documents", "Any stated method", "None, they test"],
+    "excludes": ["Fire or thermal history", "Water or impact damage", "No test data", "Unknown provenance"]
+  },
+  "labels": {
+    "chemistries": "Chemistry",
+    "formats": "Format",
+    "cell_formats": "Cell format",
+    "conditions": "Condition",
+    "origins": "From",
+    "makes": "Vehicle makes",
+    "cell_makers": "Cell makers",
+    "evidence": "Evidence needed",
+    "excludes": "Won't take"
+  },
+  "numbers": {
+    "kwh_min": { "label": "Min kWh per unit", "min": 0, "max": 100000 },
+    "kwh_max": { "label": "Max kWh per unit", "min": 0, "max": 100000 },
+    "min_soh": { "label": "Min SOH %", "min": 0, "max": 100 }
+  },
+  "volume_units": ["packs", "modules", "cells", "systems", "kWh", "MWh", "tonnes"],
+  "price_units": ["kWh", "pack", "cell"],
+  "currencies": ["EUR", "USD", "GBP"]
+}

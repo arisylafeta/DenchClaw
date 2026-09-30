@@ -1,10 +1,18 @@
 import "server-only";
-import type { DemandInput } from "./bulk-demand";
+import { CURRENCIES, cleanSpec, PRICE_UNITS, SPEC_LISTS, SPEC_LIST_KEYS, VOLUME_UNITS, parseDemandInput, type DemandInput } from "./bulk-demand";
 
 const SYSTEM = `You read a pasted email or note in which a company asks to buy batteries, and fill a demand form.
-Reply with ONLY JSON: {"buyer", "contact", "email", "wants", "quantity", "location"}; null when not stated.
-"wants" is one plain line in the buyer's terms, e.g. "NMC EV packs 30-70 kWh for storage builds, up to ~EUR 20/kWh".
-"buyer" is the buying company (else the person). Never invent a value.`;
+Reply with ONLY JSON: {"buyer", "contact", "email", "wants", "quantity", "location", "kind", "needed_by", "volume",
+"volume_unit", "max_price", "price_currency", "price_unit", "spec"}; null when not stated. Never invent a value.
+- "wants": one plain line in the buyer's terms, e.g. "NMC EV packs 30-70 kWh for storage builds, up to ~EUR 20/kWh".
+- "buyer": the buying company (else the person). "location": delivery country or region.
+- "kind": "request" for a one-off need (a quantity wanted now or by a date), "standing" for ongoing or repeat buying.
+- "needed_by": YYYY-MM-DD, requests only, only when a date or deadline is stated.
+- "volume" + "volume_unit" (${VOLUME_UNITS.join(", ")}): the total for a request, per month for standing.
+- "max_price" + "price_currency" (${CURRENCIES.join(", ")}) + "price_unit" (${PRICE_UNITS.join(", ")}).
+- "spec": only these keys, each a list of values copied exactly from its options, only when stated:
+${SPEC_LIST_KEYS.map((key) => `  ${key}: ${SPEC_LISTS[key].join(" | ")}`).join("\n")}
+  and numbers kwh_min, kwh_max (per unit), min_soh (0-100); mixed_ok true/false.`;
 
 /** Fills the Add demand form from pasted text, through the Hermes gateway. Values are for Alex to check. */
 export async function fillDemandFromText(text: string): Promise<DemandInput> {
@@ -31,6 +39,20 @@ export async function fillDemandFromText(text: string): Promise<DemandInput> {
     const value = raw[key];
     if (typeof value === "string" && value.trim()) out[key] = value.trim().slice(0, 300);
   }
+  // Each structured value is kept only if it passes the same checks as the form.
+  for (const key of ["kind", "needed_by"] as const) {
+    if (raw[key] === null || raw[key] === undefined) continue;
+    const checked = parseDemandInput({ [key]: raw[key] }, false);
+    if (!("error" in checked) && checked.value[key] != null) Object.assign(out, { [key]: checked.value[key] });
+  }
+  for (const [amount, ...parts] of [["volume", "volume_unit"], ["max_price", "price_currency", "price_unit"]] as const) {
+    const group = Object.fromEntries([amount, ...parts].map((key) => [key, raw[key] ?? null]));
+    const checked = parseDemandInput(group, false);
+    if (!("error" in checked) && checked.value[amount] != null) Object.assign(out, checked.value);
+  }
+  const spec = cleanSpec(raw.spec);
+  if (Object.keys(spec).length) out.spec = spec;
   if (out.email) out.email = out.email.toLowerCase();
+  if (out.kind === "standing") delete out.needed_by;
   return out;
 }

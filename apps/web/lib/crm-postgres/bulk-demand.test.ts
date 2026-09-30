@@ -87,4 +87,72 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.getDemand(row.id)).toMatchObject({ wants: "LFP packs and blade cells", location: "Romania" });
     expect((await demand.possibleDemand()).map((p) => p.id)).not.toContain(update);
   });
+  it("keeps requests and standing buy-boxes apart, moves a buy-box through its bases, and makes a request standing", async () => {
+    const request = await demand.addDemand({
+      kind: "request", buyer: "Exigo Recycling", wants: "CATL prismatic cells, urgent", needed_by: "2026-10-21",
+      volume: 10000, volume_unit: "cells", max_price: 30, price_currency: "EUR", price_unit: "kWh",
+      spec: { chemistries: ["LFP"], formats: ["Cells"], cell_makers: ["CATL"] },
+    }, user.id, { source_kind: "email" });
+    expect(request).toMatchObject({ kind: "request", basis: null, needed_by: "2026-10-21", volume: 10000, volume_unit: "cells",
+      max_price: 30, spec: { chemistries: ["LFP"], formats: ["Cells"], cell_makers: ["CATL"] }, source_kind: "email", trades: [] });
+
+    const estimate = await demand.addDemand({ buyer: "Gridturn", wants: "Second-life EV modules for cabinets", basis: "estimated" }, user.id,
+      { source_kind: "research", source_id: "gridturn-2026-09" });
+    // Our own estimate is not a confirmation from the buyer.
+    expect(estimate).toMatchObject({ kind: "standing", basis: "estimated", confirmed_on: null });
+    expect(estimate.observed_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // One row per source, however often it is imported.
+    await expect(demand.addDemand({ buyer: "Gridturn", wants: "Again", basis: "estimated" }, user.id,
+      { source_kind: "research", source_id: "gridturn-2026-09" })).rejects.toThrow();
+
+    expect(await demand.setBasis(estimate.id, "agreed")).toMatchObject({ basis: "agreed" });
+    expect((await demand.getDemand(estimate.id))?.confirmed_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(await demand.setBasis(request.id, "agreed")).toBeNull(); // requests have no basis
+
+    const standing = await demand.makeStanding(request.id);
+    expect(standing).toMatchObject({ kind: "standing", basis: "stated", needed_by: null, volume: 10000 });
+    expect(await demand.makeStanding(request.id)).toBeNull();
+
+    // The database refuses a request with a basis and a standing row with a date.
+    await expect(pg.queryPg("update crm_bulk_trade_demand set kind = 'request' where id = $1", [estimate.id])).rejects.toThrow();
+    await expect(pg.queryPg("update crm_bulk_trade_demand set needed_by = '2026-12-01' where id = $1", [estimate.id])).rejects.toThrow();
+    await expect(pg.queryPg("update crm_bulk_trade_demand set volume = 5 where id = $1", [estimate.id])).rejects.toThrow(); // no unit
+  });
+
+  it("ranks suggestions requests first, then agreed, stated and estimated, drops past requests, and links the buyer", async () => {
+    const lot = (await trades.createBulkTrade({ title: "Ranking trade LFP packs", trade_kind: "packs", trade_stage: "With buyers" }, user.id)).id;
+    const add = (buyer: string, extra: object) => demand.addDemand({ buyer, wants: "LFP packs", ...extra }, user.id);
+    const estimated = await add("Estimated Co", { basis: "estimated" });
+    const stated = await add("Stated Co", { basis: "stated" });
+    const agreed = await add("Agreed Co", { basis: "agreed" });
+    const live = await add("Live Request Co", { kind: "request", needed_by: "2099-01-01" });
+    const past = await add("Past Request Co", { kind: "request", needed_by: "2020-01-01" });
+    for (const row of [estimated, stated, agreed, live, past]) {
+      await pg.queryPg("insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values ($1, $2, $3, 'fits')",
+        [row.id, lot, row === stated ? "strong" : "partial"]);
+    }
+    expect((await demand.suggestedBuyers(lot)).map((s) => [s.buyer, s.kind, s.basis])).toEqual([
+      ["Live Request Co", "request", null], ["Agreed Co", "standing", "agreed"], ["Stated Co", "standing", "stated"],
+      ["Estimated Co", "standing", "estimated"],
+    ]);
+
+    const buyer = await demand.addSuggestedBuyer(lot, agreed.id, user.id);
+    const [{ demand_id }] = await pg.queryPg<{ demand_id: string }>("select demand_id from crm_bulk_trade_buyers where id = $1", [buyer!.id]);
+    expect(demand_id).toBe(agreed.id);
+    expect((await demand.getDemand(agreed.id))?.trades).toEqual([{ lot_id: lot, title: "Ranking trade LFP packs", status: "To contact" }]);
+  });
+
+  it("carries a possible-demand card's kind, date, volume and spec, and drops what fails the checks", async () => {
+    const [card] = await pg.queryPg<{ id: string }>(
+      `insert into crm_bulk_trade_proposals (lot_id, kind, target, proposed, summary, quote, source_kind, source_id, source_label, source_at)
+       values (null, 'possible_demand', null, $1, 'Needs cells', 'We need 1,000 cells', 'granola', gen_random_uuid()::text, 'Call', '2026-09-29')
+       returning id::text as id`,
+      [JSON.stringify({ buyer: "Rahul's buyer", wants: "1,000 LFP cells in three weeks", kind: "request", needed_by: "2026-10-20",
+        volume: 1000, volume_unit: "cells", spec: { chemistries: ["LFP", "Unobtainium"], formats: ["Cells"] } })],
+    );
+    await proposals.decideProposal(card.id, "accept", user);
+    const [row] = (await demand.listDemand()).filter((d) => d.buyer === "Rahul's buyer");
+    expect(row).toMatchObject({ kind: "request", basis: null, needed_by: "2026-10-20", volume: 1000, volume_unit: "cells",
+      spec: { chemistries: ["LFP"], formats: ["Cells"] }, source_kind: "call", observed_on: "2026-09-29" });
+  });
 });
