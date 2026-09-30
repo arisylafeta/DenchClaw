@@ -175,7 +175,7 @@ def as_input(messages):
 BUY_HINT = re.compile(
     r"\b(interested in|do you (have|still have)|have you got|any (more )?(stock|availability)|price (for|of|per)|"
     r"quot(e|ation) (for|on)|offer (for|of)|our (offer|bid)|we (can|could|would) (take|offer|pay|buy)|"
-    r"we are (buying|sourcing)|still available)\b", re.I)
+    r"we are (buying|sourcing)|still available|looking for|we need|demand is|our demand|demand for)\b", re.I)
 FREE_MAIL = re.compile(r"^(gmail|googlemail|hotmail|outlook|yahoo|icloud|live|aol|proton(mail)?|gmx|web)\.", re.I)
 
 
