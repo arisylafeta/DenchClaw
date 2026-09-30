@@ -23,7 +23,7 @@ const DISMANTLERS = [
   dismantler({ id: "dm_1", name: "Synthetic Recycling", goal: true, next_step: "Setup call" }),
   dismantler({
     id: "dm_2", name: "Quiet Yard", stage: "Live", saved_stage: "Talking", next_step: null, next_step_due: null,
-    platform: { account_id: "acc", account_name: "Quiet Yard Ltd", matched_by: "email", signed_up_on: "2026-09-01", listed: 14, listed_ever: 20, sold: 3, last_listed_on: "2026-09-28" },
+    platform: { account_id: "acc", account_name: "Quiet Yard Ltd", matched_by: "email", signed_up_on: "2026-09-01", listed: 14, listed_ever: 20, sold: 3, first_listed_on: "2026-09-02", last_listed_on: "2026-09-28" },
   }),
   dismantler({ id: "dm_3", name: "Backlog Breakers", stage: "Found", next_step: null, next_step_due: null, ebay_listings: 16, country: "UK" }),
   dismantler({ id: "dm_4", name: "Baltic Parts", stage: "Found", next_step: null, next_step_due: null, ebay_listings: 245, country: "Lithuania" }),

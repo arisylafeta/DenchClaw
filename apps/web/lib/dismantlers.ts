@@ -35,10 +35,11 @@ export type PlatformFacts = {
   signed_up_on: string;
   /** Listings published now. */
   listed: number;
-  /** Listings ever made, in any state. */
+  /** Listings ever published, including ones since sold or withdrawn. Drafts do not count. */
   listed_ever: number;
   /** Completed sales. */
   sold: number;
+  first_listed_on: string | null;
   last_listed_on: string | null;
 };
 
@@ -96,6 +97,11 @@ export function platformStage(platform: PlatformFacts | null): Stage | null {
 export function effectiveStage(saved: Stage, platform: PlatformFacts | null): Stage {
   const proven = platformStage(platform);
   return proven && RANK[proven] > RANK[saved] ? proven : saved;
+}
+
+/** When a lifted stage began, by ReBattery's dates: first listing for Live, account for Signed up. */
+export function platformStageSince(stage: Stage, platform: PlatformFacts): string {
+  return (stage === "Live" ? platform.first_listed_on : null) ?? platform.signed_up_on;
 }
 
 export function isValidDate(value: string): boolean {

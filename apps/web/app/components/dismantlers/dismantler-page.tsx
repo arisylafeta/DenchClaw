@@ -307,6 +307,7 @@ function OnReBattery({ d, error, onEdit }: { d: Dismantler; error: string | null
           {row("Signed up", p.signed_up_on ? dayMonth(p.signed_up_on) : "yes")}
           {row("Listed now", String(p.listed))}
           {row("Listed ever", String(p.listed_ever))}
+          {row("First listing", p.first_listed_on ? dayMonth(p.first_listed_on) : "none yet")}
           {row("Sold", String(p.sold))}
           {row("Last listing", p.last_listed_on ? dayMonth(p.last_listed_on) : "none yet")}
         </>

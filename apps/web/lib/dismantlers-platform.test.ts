@@ -24,6 +24,10 @@ function from(table: string) {
 }
 vi.mock("./platform-admin/supabase", () => ({ getSupabaseAdminClient: () => ({ from }) }));
 
+// Every dismantler in the CRM, as the match sees them.
+let everyone: DismantlerRow[] = [];
+vi.mock("./crm-postgres/dismantlers", () => ({ listMatchInputs: async () => everyone }));
+
 const row = (o: Partial<DismantlerRow>): DismantlerRow => ({
   id: "d", company_id: "c", name: "Yard", stage: "Talking", stage_since: "2026-09-01", parked_from: null, park_reason: null,
   revisit_on: null, next_step: null, next_step_due: null, next_step_person_id: null, next_step_person_name: null,
@@ -35,6 +39,7 @@ describe("ReBattery facts on dismantlers", () => {
   beforeEach(() => {
     vi.resetModules();
     failing = false;
+    everyone = [];
     Object.assign(tables, {
       accounts: [
         { id: "a1", name: "Lister Ltd", role: "supplier", created_at: "2026-08-20T10:00:00Z" },
@@ -55,6 +60,8 @@ describe("ReBattery facts on dismantlers", () => {
         { id: "l1", supplier_account_id: "a1", listing_status: "published", created_at: "2026-09-10T09:00:00Z" },
         { id: "l2", supplier_account_id: "a1", listing_status: "published", created_at: "2026-09-28T09:00:00Z" },
         { id: "l3", supplier_account_id: "a1", listing_status: "completed", created_at: "2026-09-01T09:00:00Z" },
+        { id: "l4", supplier_account_id: "a1", listing_status: "draft", created_at: "2026-09-29T09:00:00Z" },
+        { id: "l5", supplier_account_id: "a2", listing_status: "draft", created_at: "2026-09-29T09:00:00Z" },
       ],
       deals: [
         { id: "x1", supplier_account_id: "a1", status: "completed" },
@@ -71,18 +78,29 @@ describe("ReBattery facts on dismantlers", () => {
       row({ id: "nobody", match_emails: ["someone@elsewhere.example"] }),
     ]);
     expect(platform_error).toBeNull();
-    expect(dismantlers.map((d) => [d.id, d.saved_stage, d.stage])).toEqual([
-      ["lister", "Talking", "Live"],
-      ["signup", "Found", "Signed up"],
-      ["nobody", "Talking", "Talking"],
+    // A draft proves nothing: New Signup has one and stays Signed up. A lifted stage dates from ReBattery.
+    expect(dismantlers.map((d) => [d.id, d.saved_stage, d.stage, d.stage_since])).toEqual([
+      ["lister", "Talking", "Live", "2026-09-01"],
+      ["signup", "Found", "Signed up", "2026-09-25"],
+      ["nobody", "Talking", "Talking", "2026-09-01"],
     ]);
     expect(dismantlers[0].platform).toEqual({
       account_id: "a1", account_name: "Lister Ltd", matched_by: "email", signed_up_on: "2026-08-20",
-      listed: 2, listed_ever: 3, sold: 1, last_listed_on: "2026-09-28",
+      listed: 2, listed_ever: 3, sold: 1, first_listed_on: "2026-09-01", last_listed_on: "2026-09-28",
     });
     expect(dismantlers[1].platform).toMatchObject({ matched_by: "domain", listed_ever: 0 });
     // The match inputs stay on the server.
     expect(dismantlers[0]).not.toHaveProperty("match_emails");
+  });
+
+  it("gives no account to one dismantler that another could claim too, even when read alone", async () => {
+    everyone = [
+      row({ id: "one", match_domain: "lister.example" }),
+      row({ id: "two", match_emails: ["sam@lister.example"] }),
+    ];
+    const { withPlatform, withPlatformOne } = await import("./dismantlers-platform");
+    expect((await withPlatformOne(everyone[0])).platform).toBeNull();
+    expect((await withPlatform([everyone[1]])).dismantlers[0].platform).toBeNull();
   });
 
   it("keeps saved stages and says why when ReBattery cannot be read", async () => {

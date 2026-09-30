@@ -22,7 +22,7 @@ const D = (o: Partial<Dismantler>): Dismantler => ({
 
 const P = (o: Partial<PlatformFacts>): PlatformFacts => ({
   account_id: "acc", account_name: "Yard Ltd", matched_by: "email", signed_up_on: "2026-09-01",
-  listed: 0, listed_ever: 0, sold: 0, last_listed_on: null, ...o,
+  listed: 0, listed_ever: 0, sold: 0, first_listed_on: null, last_listed_on: null, ...o,
 });
 
 describe("dismantler rules", () => {

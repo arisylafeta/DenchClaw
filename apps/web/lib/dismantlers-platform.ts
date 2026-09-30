@@ -5,9 +5,9 @@ import "server-only";
 // are read fresh for the matched accounts only.
 import { getSupabaseAdminClient } from "./platform-admin/supabase";
 import { readAllRows, readAllRowsInBatches } from "./platform-admin/queries";
-import { effectiveStage, type Dismantler, type PlatformFacts } from "./dismantlers";
+import { effectiveStage, platformStageSince, type Dismantler, type PlatformFacts } from "./dismantlers";
 import { matchAccounts, type AccountForMatch } from "./dismantlers-match";
-import type { DismantlerRow } from "./crm-postgres/dismantlers";
+import { listMatchInputs, type DismantlerRow } from "./crm-postgres/dismantlers";
 
 type SupplierAccount = AccountForMatch & { created_at: string };
 
@@ -41,7 +41,7 @@ export function supplierAccounts(): Promise<SupplierAccount[]> {
   return cache.accounts;
 }
 
-type Activity = { listed: number; listed_ever: number; sold: number; last_listed_on: string | null };
+type Activity = { listed: number; listed_ever: number; sold: number; first_listed_on: string | null; last_listed_on: string | null };
 
 async function readActivity(accountIds: string[]): Promise<Map<string, Activity>> {
   const supabase = getSupabaseAdminClient();
@@ -51,14 +51,16 @@ async function readActivity(accountIds: string[]): Promise<Map<string, Activity>
     readAllRowsInBatches<{ supplier_account_id: string }>(accountIds, (batch, from, to) =>
       supabase.from("deals").select("supplier_account_id").eq("status", "completed").in("supplier_account_id", batch).order("id").range(from, to)),
   ]);
-  const activity = new Map<string, Activity>(accountIds.map((id) => [id, { listed: 0, listed_ever: 0, sold: 0, last_listed_on: null }]));
+  const activity = new Map<string, Activity>(accountIds.map((id) => [id, { listed: 0, listed_ever: 0, sold: 0, first_listed_on: null, last_listed_on: null }]));
   for (const listing of listings) {
     const entry = activity.get(listing.supplier_account_id);
-    if (!entry) continue;
+    // A draft was never on show, so it proves nothing.
+    if (!entry || listing.listing_status === "draft") continue;
     entry.listed_ever += 1;
     if (listing.listing_status === "published") entry.listed += 1;
     const day = listing.created_at.slice(0, 10);
     if (!entry.last_listed_on || day > entry.last_listed_on) entry.last_listed_on = day;
+    if (!entry.first_listed_on || day < entry.first_listed_on) entry.first_listed_on = day;
   }
   for (const deal of deals) {
     const entry = activity.get(deal.supplier_account_id);
@@ -84,12 +86,16 @@ export async function withPlatformOne(row: DismantlerRow): Promise<Dismantler> {
  */
 export async function withPlatform(rows: DismantlerRow[]): Promise<{ dismantlers: Dismantler[]; platform_error: string | null }> {
   try {
-    const accounts = await supplierAccounts();
+    // Match across every dismantler, not just these rows, so an account two could claim goes to neither.
+    const [accounts, everyone] = await Promise.all([supplierAccounts(), listMatchInputs()]);
+    const inputs = new Map(everyone.map((row) => [row.id, row]));
+    for (const row of rows) inputs.set(row.id, row);
     const matches = matchAccounts(
-      rows.map((row) => ({ id: row.id, platform_account_id: row.platform_account_id, emails: row.match_emails ?? [], domain: row.match_domain })),
+      [...inputs.values()].map((row) => ({ id: row.id, platform_account_id: row.platform_account_id, emails: row.match_emails ?? [], domain: row.match_domain })),
       accounts,
     );
-    const matched = [...new Set([...matches.values()].map((match) => match.account.id))];
+    const wanted = new Set(rows.map((row) => row.id));
+    const matched = [...new Set([...matches].filter(([id]) => wanted.has(id)).map(([, match]) => match.account.id))];
     const activity = matched.length ? await readActivity(matched) : new Map<string, Activity>();
     const created = new Map(accounts.map((account) => [account.id, account.created_at.slice(0, 10)]));
     const dismantlers = rows.map((row) => {
@@ -101,9 +107,10 @@ export async function withPlatform(rows: DismantlerRow[]): Promise<{ dismantlers
         account_name: match.account.name,
         matched_by: match.matched_by,
         signed_up_on: created.get(match.account.id) ?? "",
-        ...(activity.get(match.account.id) ?? { listed: 0, listed_ever: 0, sold: 0, last_listed_on: null }),
+        ...(activity.get(match.account.id) ?? { listed: 0, listed_ever: 0, sold: 0, first_listed_on: null, last_listed_on: null }),
       };
-      return { ...base, platform, stage: effectiveStage(row.stage, platform) };
+      const stage = effectiveStage(row.stage, platform);
+      return stage === row.stage ? { ...base, platform } : { ...base, platform, stage, stage_since: platformStageSince(stage, platform) };
     });
     return { dismantlers, platform_error: null };
   } catch (err) {

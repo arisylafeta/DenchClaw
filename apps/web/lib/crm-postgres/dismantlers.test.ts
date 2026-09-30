@@ -168,5 +168,8 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
       [`ann-${s}`, `mt-${s}`, `nob-${s}`]);
     const d = await db.createDismantler({ company_id: `mt-${s}`, patch: {} }, userId);
     expect(await db.getDismantler(d.id)).toMatchObject({ match_emails: ["ann@matchyard.example"], match_domain: "https://www.matchyard.example/" });
+    expect((await db.listMatchInputs()).find((input) => input.id === d.id)).toEqual({
+      id: d.id, platform_account_id: null, match_emails: ["ann@matchyard.example"], match_domain: "https://www.matchyard.example/",
+    });
   });
 });

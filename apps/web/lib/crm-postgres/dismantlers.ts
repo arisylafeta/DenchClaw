@@ -42,6 +42,16 @@ export async function listDismantlers(): Promise<{ dismantlers: DismantlerRow[];
   return { dismantlers, owners };
 }
 
+/** What the ReBattery match needs for every dismantler, so one account is never given to two. */
+export async function listMatchInputs(): Promise<Array<Pick<DismantlerRow, "id" | "platform_account_id" | "match_emails" | "match_domain">>> {
+  return queryPg(
+    `select d.id, d.platform_account_id, coalesce(nullif(company.domain, ''), company.website) as match_domain,
+            (select array_agg(distinct lower(p.email)) from crm_people p
+              where p.company_id = d.company_id and p.email like '%@%') as match_emails
+       from crm_dismantlers d join crm_companies company on company.id = d.company_id`,
+  );
+}
+
 async function readOne(client: Queryable, id: string): Promise<DismantlerRow | null> {
   const { rows } = await client.query(select("where d.id = $1"), [id]);
   return (rows[0] as DismantlerRow | undefined) ?? null;
