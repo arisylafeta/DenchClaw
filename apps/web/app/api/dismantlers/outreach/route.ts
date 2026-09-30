@@ -1,12 +1,13 @@
 import { OUTREACH_STEP, OUTREACH_WORKING_DAYS, addWorkingDays, isValidDate } from "@/lib/dismantlers";
 import { todayInLondon } from "@/lib/bulk-trades";
 import { startOutreach } from "@/lib/crm-postgres/dismantlers";
+import { withPlatform } from "@/lib/dismantlers-platform";
 import { badRequest, dismantlerWrite, guardDismantlers, readJson } from "@/lib/dismantlers-route";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** POST { ids, next_step?, next_step_due? }: moves a batch to Contacted with a follow-up. */
+/** POST { ids, next_step?, next_step_due? }: moves a batch to Talking with a follow-up. */
 export async function POST(req: Request) {
   const guard = await guardDismantlers();
   if ("response" in guard) return guard.response;
@@ -18,6 +19,6 @@ export async function POST(req: Request) {
   if (!isValidDate(due)) return badRequest("next_step_due must be a YYYY-MM-DD date.");
   return dismantlerWrite(async () => {
     const dismantlers = await startOutreach([...new Set(ids as string[])], { next_step: step, next_step_due: due }, guard.userId);
-    return Response.json({ dismantlers });
+    return Response.json({ dismantlers: (await withPlatform(dismantlers)).dismantlers });
   });
 }

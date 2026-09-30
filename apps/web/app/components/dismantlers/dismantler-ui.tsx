@@ -6,20 +6,18 @@ export const dismantlerUrl = (id: string, path = "") => `/api/dismantlers/${enco
 
 const STAGE_TAG: Record<Stage, React.CSSProperties> = {
   Found: { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" },
-  Contacted: { background: "var(--bt-blue-bg)", color: "var(--bt-blue)", borderColor: "var(--bt-blue-border)" },
-  Onboarding: { background: "var(--bt-purple-bg)", color: "var(--bt-purple)", borderColor: "var(--bt-purple-border)" },
-  Live: { background: "var(--bt-green-bg)", color: "var(--bt-green)", borderColor: "var(--bt-green-border)" },
-  Syncing: { background: "var(--bt-green)", color: "var(--bt-surface)", borderColor: "var(--bt-green)" },
+  Talking: { background: "var(--bt-blue-bg)", color: "var(--bt-blue)", borderColor: "var(--bt-blue-border)" },
+  "Signed up": { background: "var(--bt-purple-bg)", color: "var(--bt-purple)", borderColor: "var(--bt-purple-border)" },
+  Live: { background: "var(--bt-green)", color: "var(--bt-surface)", borderColor: "var(--bt-green)" },
   Parked: { background: "transparent", color: "var(--bt-muted)", borderColor: "var(--bt-border)" },
 };
 
 /** Stage colour for dots and progress bars. */
 export const STAGE_DOT: Record<Stage, string> = {
   Found: "#8a8a8a",
-  Contacted: "#3b82f6",
-  Onboarding: "#8b5cf6",
-  Live: "#22c55e",
-  Syncing: "#15803d",
+  Talking: "#3b82f6",
+  "Signed up": "#8b5cf6",
+  Live: "#15803d",
   Parked: "#c4c4c4",
 };
 
@@ -44,7 +42,7 @@ export function GoalTag() {
 const TONE_TEXT = { red: "var(--bt-red)", amber: "var(--bt-amber)", grey: "var(--bt-text-2)" } as const;
 export const toneText = (tone: keyof typeof TONE_TEXT) => TONE_TEXT[tone];
 
-/** "UK · eBay · seller", skipping what is not known. */
-export function metaLine(d: { country: string | null; route: string | null; ebay_username: string | null }) {
-  return [d.country, d.route, d.ebay_username].filter(Boolean).join(" · ");
+/** "UK · seller on eBay", skipping what is not known. */
+export function metaLine(d: { country: string | null; ebay_username: string | null }) {
+  return [d.country, d.ebay_username ? `${d.ebay_username} on eBay` : null].filter(Boolean).join(" · ");
 }

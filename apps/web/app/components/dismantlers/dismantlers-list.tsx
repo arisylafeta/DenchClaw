@@ -7,13 +7,14 @@ import {
   contactTone,
   dueLabel,
   groupDismantlers,
+  platformLabel,
   type Dismantler,
 } from "@/lib/dismantlers";
 import { DueChip, TONE_HEADING } from "../bulk-trades/trade-chips";
 import { darkButtonClass, darkButtonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { GoalTag, StageDot, StageTag, metaLine, toneText } from "./dismantler-ui";
 
-const COLUMNS = "grid-cols-[minmax(0,1.4fr)_120px_minmax(0,1.8fr)_120px_110px]";
+const COLUMNS = "grid-cols-[minmax(0,1.4fr)_100px_minmax(0,1.8fr)_110px_minmax(0,1fr)_90px]";
 const BACKLOG_COLUMNS = "grid-cols-[24px_minmax(0,1.4fr)_140px_160px_minmax(0,1fr)]";
 const BACKLOG_PAGE = 50;
 
@@ -31,11 +32,11 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
   const parked = dismantlers.filter((d) => d.stage === "Parked").length;
 
   return (
-    <div className="flex min-w-[860px] flex-col gap-5">
+    <div className="flex min-w-[960px] flex-col gap-5">
       {groups.length ? (
         <>
           <div className={`bt-label grid ${COLUMNS} gap-4 px-5`}>
-            <span>Dismantler</span><span>Stage</span><span>Next step</span><span>Due</span><span>Last contact</span>
+            <span>Dismantler</span><span>Stage</span><span>Next step</span><span>Due</span><span>On ReBattery</span><span>Last contact</span>
           </div>
           {groups.map((group) => (
             <section key={group.name} className="flex flex-col gap-1.5" aria-label={group.name}>
@@ -66,11 +67,12 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                       </div>
                       {d.next_step_person_name && (
                         <div className="mt-0.5 text-xs" style={{ color: "var(--bt-muted)" }}>
-                          {d.waiting_on === "them" ? "Waiting on" : "For"} {d.next_step_person_name}
+                          For {d.next_step_person_name}
                         </div>
                       )}
                     </div>
                     <span><DueChip label={dueLabel(d, today)} tone={GROUP_TONE[group.name]} /></span>
+                    <span className="truncate text-[13px]" style={{ color: d.platform ? "var(--bt-text)" : "var(--bt-muted)" }}>{platformLabel(d.platform) || "No account yet"}</span>
                     <span className="text-[13px]" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span>
                   </button>
                 ))}

@@ -7,6 +7,7 @@ import {
   dismantlerGroup,
   dueLabel,
   nextStage,
+  platformLabel,
   type Dismantler,
   type Stage,
 } from "@/lib/dismantlers";
@@ -15,7 +16,7 @@ import { DueChip } from "../bulk-trades/trade-chips";
 import { GoalTag, StageDot, metaLine } from "./dismantler-ui";
 
 const FOUND_SHOWN = 30;
-const ACTIVE: Stage[] = ["Contacted", "Onboarding", "Live", "Syncing"];
+const ACTIVE: Stage[] = ["Talking", "Signed up", "Live"];
 
 type Props = {
   dismantlers: Dismantler[];
@@ -26,7 +27,8 @@ type Props = {
 };
 
 const EMPTY: Partial<Record<Stage, string>> = {
-  Syncing: "None yet. A dismantler moves here after two syncs at least 7 days apart, with a sold or changed item updated.",
+  "Signed up": "Moves here by itself when a dismantler's ReBattery account is found.",
+  Live: "Moves here by itself when they list their first battery on ReBattery.",
 };
 
 function useDrop(stage: Stage, dismantlers: Dismantler[], onMove: Props["onMove"]) {
@@ -102,9 +104,9 @@ function FoundColumn({ dismantlers, onOpen, onMove, onShowList }: Omit<Props, "t
                   {d.ebay_listings != null && <span>{d.ebay_listings} battery listings on eBay</span>}
                   {d.next_step && <span>{d.next_step}</span>}
                   <div className="mt-0.5 flex gap-1.5">
-                    <button type="button" onClick={() => onMove(d, "Contacted")} className="h-7 px-2.5 text-xs font-medium"
+                    <button type="button" onClick={() => onMove(d, "Talking")} className="h-7 px-2.5 text-xs font-medium"
                       style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
-                      Contacted →
+                      Talking →
                     </button>
                     <button type="button" onClick={() => onOpen(d)} className="h-7 border px-2.5 text-xs font-medium"
                       style={{ borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
@@ -156,7 +158,7 @@ function Column({ stage, dismantlers, today, onOpen, onMove }: Omit<Props, "onSh
                 <button type="button" onClick={() => onOpen(d)} className="flex-1 truncate text-left text-sm font-semibold hover:underline">{d.name}</button>
                 {d.goal && <GoalTag />}
               </div>
-              <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{[d.country, d.route].filter(Boolean).join(" · ")}</div>
+              <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{[d.country, platformLabel(d.platform)].filter(Boolean).join(" · ")}</div>
             </div>
             <div className="border-t pt-2 text-[13px] leading-[1.35]" style={{ borderColor: "var(--bt-divider)", color: d.next_step ? undefined : "var(--bt-muted)" }}>
               {d.next_step ?? "Set a next step"}

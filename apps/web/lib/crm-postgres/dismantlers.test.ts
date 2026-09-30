@@ -36,7 +36,7 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
 
   it("adds a dismantler by name as a new CRM company, tagged and logged", async () => {
     const d = await db.createDismantler({ name: `Synthetic Breakers ${s}`, patch: { country: "UK" } }, userId);
-    expect(d).toMatchObject({ name: `Synthetic Breakers ${s}`, stage: "Found", stage_since: today, country: "UK", waiting_on: "us" });
+    expect(d).toMatchObject({ name: `Synthetic Breakers ${s}`, stage: "Found", stage_since: today, country: "UK" });
     expect(await tags(d.company_id)).toEqual(["dismantler"]);
     expect((await events(d.id)).map((event) => event.kind)).toEqual(["created"]);
   });
@@ -57,17 +57,17 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     const d = await db.createDismantler({ company_id: `st-${s}`, patch: {} }, userId);
     await pg.queryPg("update crm_dismantlers set stage_since = '2026-01-01' where id = $1", [d.id]);
 
-    const contacted = await db.updateDismantler(d.id, { stage: "Contacted", waiting_on: "them" }, userId);
-    expect(contacted).toMatchObject({ stage: "Contacted", stage_since: today, waiting_on: "them", waiting_since: today });
+    const talking = await db.updateDismantler(d.id, { stage: "Talking" }, userId);
+    expect(talking).toMatchObject({ stage: "Talking", stage_since: today });
     const parked = await db.updateDismantler(d.id, { stage: "Parked", park_reason: "Not now", revisit_on: "2027-01-04" }, userId);
-    expect(parked).toMatchObject({ stage: "Parked", parked_from: "Contacted", park_reason: "Not now", revisit_on: "2027-01-04" });
-    const back = await db.updateDismantler(d.id, { stage: "Contacted" }, userId);
-    expect(back).toMatchObject({ stage: "Contacted", parked_from: null, park_reason: null, revisit_on: null });
+    expect(parked).toMatchObject({ stage: "Parked", parked_from: "Talking", park_reason: "Not now", revisit_on: "2027-01-04" });
+    const back = await db.updateDismantler(d.id, { stage: "Talking" }, userId);
+    expect(back).toMatchObject({ stage: "Talking", parked_from: null, park_reason: null, revisit_on: null });
 
     const log = await events(d.id);
     expect(log.map((event) => event.kind)).toEqual(["created", "updated", "updated", "updated"]);
-    expect(log[1].changes).toMatchObject({ stage: ["Found", "Contacted"], waiting_on: ["us", "them"] });
-    expect(await db.updateDismantler(d.id, { stage: "Contacted" }, userId)).toMatchObject({ stage: "Contacted" });
+    expect(log[1].changes).toEqual({ stage: ["Found", "Talking"] });
+    expect(await db.updateDismantler(d.id, { stage: "Talking" }, userId)).toMatchObject({ stage: "Talking" });
     expect((await events(d.id)).length).toBe(4);
   });
 
@@ -83,15 +83,15 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     expect(saved).toMatchObject({ next_step: "Intro call", next_step_person_name: "Pat Example" });
   });
 
-  it("starts outreach on a batch: Contacted, waiting on them, with a follow-up", async () => {
+  it("starts outreach on a batch: Talking, with a follow-up", async () => {
     const a = await db.createDismantler({ name: `Batch A ${s}`, patch: {} }, userId);
-    const b = await db.createDismantler({ name: `Batch B ${s}`, patch: { stage: "Onboarding" } }, userId);
+    const b = await db.createDismantler({ name: `Batch B ${s}`, patch: { stage: "Signed up" } }, userId);
     const saved = await db.startOutreach([a.id, b.id], { next_step: "Follow up if no reply", next_step_due: "2026-10-06" }, userId);
-    expect(saved.map((d) => [d.stage, d.waiting_on, d.next_step_due])).toEqual([
-      ["Contacted", "them", "2026-10-06"],
-      ["Onboarding", "them", "2026-10-06"],
+    expect(saved.map((d) => [d.stage, d.next_step_due])).toEqual([
+      ["Talking", "2026-10-06"],
+      ["Signed up", "2026-10-06"],
     ]);
-    expect((await events(a.id)).at(-1)).toMatchObject({ kind: "outreach", changes: { stage: ["Found", "Contacted"] } });
+    expect((await events(a.id)).at(-1)).toMatchObject({ kind: "outreach", changes: { stage: ["Found", "Talking"] } });
     await expect(db.startOutreach([a.id, "dm_missing"], { next_step: "x", next_step_due: "2026-10-06" }, userId)).rejects.toThrow(/no longer exists/);
   });
 
@@ -122,7 +122,7 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
          ($2, 'Di Mail', 'di@example.test', $3, '2026-09-28T23:30:00Z')`,
       [`mo-${s}`, `di-${s}`, `m-${s}`],
     );
-    const d = await db.createDismantler({ company_id: `m-${s}`, patch: { stage: "Contacted" } }, userId);
+    const d = await db.createDismantler({ company_id: `m-${s}`, patch: { stage: "Talking" } }, userId);
     // Latest across the company's people, as a UK date (23:30 UTC on 28 Sep is 29 Sep in London).
     expect((await db.getDismantler(d.id))!.last_contact).toBe("2026-09-29");
     expect((await db.listDismantlers()).dismantlers.find((row) => row.id === d.id)!.last_contact).toBe("2026-09-29");
@@ -160,5 +160,13 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
 
     await pg.queryPg("delete from crm_dismantlers where id = $1", [d.id]);
     expect((await events(d.id)).length).toBe(0);
+  });
+
+  it("gives the ReBattery match the company's emails and domain", async () => {
+    await pg.queryPg("insert into crm_companies (id, name, website) values ($1, $2, 'https://www.matchyard.example/')", [`mt-${s}`, `Match Yard ${s}`]);
+    await pg.queryPg("insert into crm_people (id, full_name, email, company_id) values ($1, 'Ann', 'Ann@MatchYard.example', $2), ($3, 'Nobody', null, $2)",
+      [`ann-${s}`, `mt-${s}`, `nob-${s}`]);
+    const d = await db.createDismantler({ company_id: `mt-${s}`, patch: {} }, userId);
+    expect(await db.getDismantler(d.id)).toMatchObject({ match_emails: ["ann@matchyard.example"], match_domain: "https://www.matchyard.example/" });
   });
 });

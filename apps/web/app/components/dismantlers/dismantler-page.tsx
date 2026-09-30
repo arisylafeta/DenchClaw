@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dayMonth, dueText, type TradeOwner } from "@/lib/bulk-trades";
+import { dayMonth, type TradeOwner } from "@/lib/bulk-trades";
 import {
+  GROUP_TONE,
   JOURNEY,
-  SETUP_KEYS,
   TO_REACH_NEXT,
+  dismantlerGroup,
+  dueLabel,
   addDays,
   nextStage,
-  setupLabels,
   type Dismantler,
   type DismantlerPatch,
   type JourneyStage,
@@ -71,7 +72,6 @@ export function DismantlerPage({ id, owners, today, onBack, onSaved }: Props) {
   const d = detail.dismantler;
   const meta = [
     d.country,
-    d.route ? `route ${d.route}` : null,
     d.ebay_username ? `${d.ebay_username} on eBay` : null,
     d.ebay_listings != null ? `${d.ebay_listings} battery listings on eBay` : null,
     d.owner_name ? `owner ${d.owner_name}` : null,
@@ -105,7 +105,7 @@ export function DismantlerPage({ id, owners, today, onBack, onSaved }: Props) {
         <Journey d={d} today={today} onMove={(stage) => void run({ stage })} />
         <NextStepBar detail={detail} today={today} onSave={save} />
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-          <Setup d={d} today={today} onSave={run} />
+          <OnReBattery d={d} error={detail.platform_error ?? null} onEdit={() => setEditing(true)} />
           <ActivityCard activity={detail.activity} />
         </div>
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
@@ -140,11 +140,10 @@ function Journey({ d, today, onMove }: { d: Dismantler; today: string; onMove: (
   const index = JOURNEY.indexOf(current as JourneyStage);
   const next = nextStage(current);
   const days = Math.max(0, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${d.stage_since}T00:00:00Z`)) / 86_400_000));
-  const setupDone = SETUP_KEYS.filter((key) => d[key]).length;
 
   return (
     <Card label="Journey" className="flex flex-col gap-3.5 px-5 py-[18px]">
-      <ol className="grid grid-cols-5 gap-2">
+      <ol className="grid grid-cols-4 gap-2">
         {JOURNEY.map((stage, position) => {
           const state = position < index ? "done" : position === index ? "now" : "todo";
           return (
@@ -175,7 +174,7 @@ function Journey({ d, today, onMove }: { d: Dismantler; today: string; onMove: (
           ) : (
             <>
               {TO_REACH_NEXT[current as JourneyStage]}
-              {(current === "Onboarding" || current === "Live") && ` ${setupDone} of ${SETUP_KEYS.length} setup steps done.`}
+              {d.stage !== d.saved_stage && " ReBattery shows they are here."}
             </>
           )}
         </p>
@@ -201,8 +200,7 @@ function NextStepBar({ detail, today, onSave }: { detail: DismantlerDetail; toda
   const [snoozing, setSnoozing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menu = useRef<HTMLDivElement>(null);
-  // A follow-up shows as due on its day, even while waiting on them.
-  const due = d.next_step && d.next_step_due === today ? { text: "Due today", tone: "amber" as const } : dueText(d, today);
+  const due = { text: dueLabel(d, today), tone: GROUP_TONE[dismantlerGroup(d, today)] };
   const person = detail.people.find((candidate) => candidate.id === d.next_step_person_id)
     ?? detail.people.find((candidate) => candidate.email);
 
@@ -237,7 +235,7 @@ function NextStepBar({ detail, today, onSave }: { detail: DismantlerDetail; toda
         <div className="text-[15px] font-medium leading-snug">{d.next_step ?? "Set one so this dismantler comes back at the right time."}</div>
         {d.next_step_person_name && (
           <div className="mt-0.5 text-[13px]" style={{ color: "var(--bt-muted)" }}>
-            {d.waiting_on === "them" ? "Waiting on" : "For"} {d.next_step_person_name} · {d.name}
+            For {d.next_step_person_name} · {d.name}
           </div>
         )}
         <ErrorText error={error} />
@@ -282,31 +280,50 @@ function NextStepBar({ detail, today, onSave }: { detail: DismantlerDetail; toda
   );
 }
 
-function Setup({ d, today, onSave }: { d: Dismantler; today: string; onSave: (patch: DismantlerPatch) => Promise<void> }) {
-  const labels = setupLabels(d.route);
+/** What ReBattery shows for them. It moves the stage to Signed up and Live by itself. */
+function OnReBattery({ d, error, onEdit }: { d: Dismantler; error: string | null; onEdit: () => void }) {
+  const p = d.platform;
+  const how = p?.matched_by === "linked" ? "linked by hand" : p?.matched_by === "email" ? "matched by a shared email" : "matched by their web domain";
+  const row = (label: string, value: string) => (
+    <div className="flex items-center border-b px-5 py-[11px] text-sm last:border-b-0" style={{ borderColor: "var(--bt-divider)" }}>
+      <span className="flex-1" style={{ color: "var(--bt-text-2)" }}>{label}</span>
+      <span className="bt-mono font-medium">{value}</span>
+    </div>
+  );
   return (
-    <Card label="Setup">
+    <Card label="On ReBattery">
       <header className="flex items-center border-b px-5 py-4" style={{ borderColor: "var(--bt-divider)" }}>
-        <h2 className="flex-1 text-base font-semibold">Setup</h2>
-        <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{d.route ? `${d.route} route · ` : ""}tick as it happens</span>
+        <h2 className="flex-1 text-base font-semibold">On ReBattery</h2>
+        <button type="button" onClick={onEdit} className="text-xs font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
+          {p ? "Change account" : "Link account"}
+        </button>
       </header>
-      {SETUP_KEYS.map((key) => {
-        const done = d[key];
-        return (
-          <label key={key} className="flex cursor-pointer items-center gap-3 border-b px-5 py-[11px] text-sm" style={{ borderColor: "var(--bt-divider)" }}>
-            <input type="checkbox" checked={!!done} onChange={() => void onSave({ [key]: done ? null : today })} className="h-4 w-4 accent-[var(--bt-text)]" />
-            <span className="flex-1" style={{ color: done ? "var(--bt-muted)" : undefined }}>{labels[key]}</span>
-            <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{done ? dayMonth(done) : ""}</span>
-          </label>
-        );
-      })}
-      <p className="px-5 pb-3.5 pt-2.5 text-xs" style={{ color: "var(--bt-muted)" }}>Later, the platform sync ticks these for you.</p>
+      {p ? (
+        <>
+          <p className="border-b px-5 py-3 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
+            <span className="font-semibold">{p.account_name}</span>
+            <span style={{ color: "var(--bt-muted)" }}> · {how}</span>
+          </p>
+          {row("Signed up", p.signed_up_on ? dayMonth(p.signed_up_on) : "yes")}
+          {row("Listed now", String(p.listed))}
+          {row("Listed ever", String(p.listed_ever))}
+          {row("Sold", String(p.sold))}
+          {row("Last listing", p.last_listed_on ? dayMonth(p.last_listed_on) : "none yet")}
+        </>
+      ) : (
+        <p className="px-5 py-4 text-sm" style={{ color: "var(--bt-muted)" }}>
+          {d.platform_account_id === "none"
+            ? "Marked as having no ReBattery account."
+            : "No ReBattery account found. It links by itself when someone here signs up with an email we know, or link it by hand."}
+        </p>
+      )}
+      {error && <p className="px-5 pb-3 text-xs" style={{ color: "var(--bt-amber)" }}>{error}</p>}
     </Card>
   );
 }
 
 const FIELD_NAMES: Record<string, string> = {
-  stage: "Stage", next_step: "Next step", next_step_due: "Due", waiting_on: "Waiting on", route: "Route",
+  stage: "Stage", next_step: "Next step", next_step_due: "Due", platform_account_id: "ReBattery account",
   owner_user_id: "Owner", goal: "Q4 goal", country: "Country", notes: "Notes",
 };
 
@@ -318,11 +335,9 @@ function eventText(item: Extract<Activity, { kind: "event" }>): string {
   if (item.event === "imported") return "Added from an imported list";
   if (item.event === "email_draft") return `Gmail draft: ${String(changes.subject ?? "")}`;
   const stage = pair("stage");
-  if (stage) return `${String(stage[0])} → ${String(stage[1])}${item.event === "outreach" ? " (outreach started)" : ""}`;
-  const ticked = SETUP_KEYS.find((key) => pair(key));
-  if (ticked) {
-    const [, now] = pair(ticked)!;
-    return `${now ? "Ticked" : "Unticked"}: ${setupLabels(null)[ticked]}`;
+  if (stage) {
+    const note = item.event === "outreach" ? " (outreach started)" : item.event === "simplified" ? " (stages simplified)" : "";
+    return `${String(stage[0])} → ${String(stage[1])}${note}`;
   }
   const step = pair("next_step");
   if (step?.[1]) return `Next step: ${String(step[1])}`;

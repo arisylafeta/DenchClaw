@@ -5,12 +5,10 @@ import type { TradeOwner } from "@/lib/bulk-trades";
 import {
   OUTREACH_STEP,
   OUTREACH_WORKING_DAYS,
-  ROUTES,
   addDays,
   addWorkingDays,
   type Dismantler,
   type DismantlerPatch,
-  type Route,
 } from "@/lib/dismantlers";
 import type { DismantlerDetail, ImportPlan } from "@/lib/crm-postgres/dismantlers";
 import {
@@ -30,26 +28,6 @@ import { dismantlerUrl } from "./dismantler-ui";
 
 type CompanyMatch = { id: string; name: string; people: number };
 
-function RoutePicker({ value, onChange }: { value: string; onChange: (route: string) => void }) {
-  const options: Array<[string, string]> = [...ROUTES.map((route) => [route, route] as [string, string]), ["", "Not sure"]];
-  return (
-    <fieldset className="flex flex-col gap-1">
-      <legend className="mb-1 text-xs font-medium" style={{ color: "var(--bt-muted)" }}>Likely route</legend>
-      <div role="group" className="flex self-start border" style={{ borderColor: "var(--bt-border)" }}>
-        {options.map(([route, label]) => (
-          <button key={label} type="button" aria-pressed={value === route} onClick={() => onChange(route)}
-            className="h-8 border-l px-3.5 text-[13px] font-medium first:border-l-0"
-            style={value === route
-              ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)", borderColor: "var(--bt-border)" }
-              : { background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" }}>
-            {label}
-          </button>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 /** Company search first: every dismantler is a CRM company. */
 export function AddDismantlerDialog({ today, onClose, onAdded }: {
   owners: TradeOwner[];
@@ -60,7 +38,7 @@ export function AddDismantlerDialog({ today, onClose, onAdded }: {
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<CompanyMatch[]>([]);
   const [company, setCompany] = useState<CompanyMatch | null>(null);
-  const form = useForm({ country: "", ebay_username: "", route: "", next_step: "", next_step_due: "" }, async (draft) => {
+  const form = useForm({ country: "", ebay_username: "", next_step: "", next_step_due: "" }, async (draft) => {
     const name = query.trim();
     if (!company && !name) throw new Error("Pick a company or type a name.");
     const { dismantler } = await request<{ dismantler: Dismantler }>("/api/dismantlers", {
@@ -117,7 +95,6 @@ export function AddDismantlerDialog({ today, onClose, onAdded }: {
         <FormField label="Country">{form.input("country", { placeholder: "UK" })}</FormField>
         <FormField label="eBay seller name">{form.input("ebay_username")}</FormField>
       </div>
-      <RoutePicker value={form.draft.route} onChange={(route) => form.setDraft((current) => ({ ...current, route }))} />
       <div className="grid grid-cols-[1fr_150px] gap-3">
         <FormField label="Next step (optional)">{form.input("next_step", { placeholder: "Send intro email" })}</FormField>
         <FormField label="Due">{form.input("next_step_due", { type: "date" })}</FormField>
@@ -186,7 +163,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   );
 }
 
-/** Moves a batch to Contacted, waiting on them, with a follow-up date. */
+/** Moves a batch to Talking, with a follow-up date. */
 export function OutreachDialog({ batch, today, onClose, onDone }: {
   batch: Dismantler[];
   today: string;
@@ -202,12 +179,12 @@ export function OutreachDialog({ batch, today, onClose, onDone }: {
   });
   return (
     <Modal title={`Start outreach to ${batch.length}`} onClose={onClose} onSubmit={form.submit}
-      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Move {batch.length} to Contacted</button>}>
+      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Move {batch.length} to Talking</button>}>
       <p className="text-sm">
         {batch.slice(0, 5).map((d) => d.name).join(", ")}{batch.length > 5 ? ` and ${batch.length - 5} more` : ""}
       </p>
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        Send the first message yourself, then move them here. Each gets this follow-up, waiting on them. A reply moves them on; no reply brings them back on the date.
+        Send the first message yourself, then move them here. Each gets this follow-up, so no reply brings them back on the date.
       </p>
       <FormField label="Follow-up">{form.input("next_step", { required: true })}</FormField>
       <FormField label="Follow up on">{form.input("next_step_due", { type: "date", required: true })}</FormField>
@@ -239,11 +216,16 @@ export function EditDismantlerDialog({ dismantler: d, owners, onClose, onSave }:
   onClose: () => void;
   onSave: (patch: DismantlerPatch) => Promise<void>;
 }) {
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string }> | null>(null);
+  useEffect(() => {
+    request<{ accounts: Array<{ id: string; name: string }> }>("/api/dismantlers/platform-accounts")
+      .then((data) => setAccounts(data.accounts))
+      .catch(() => setAccounts(null));
+  }, []);
   const form = useForm({
     country: d.country ?? "",
     ebay_username: d.ebay_username ?? "",
     ebay_listings: d.ebay_listings == null ? "" : String(d.ebay_listings),
-    route: d.route ?? "",
     platform_account_id: d.platform_account_id ?? "",
     owner_user_id: d.owner_user_id ?? "",
     source: d.source ?? "",
@@ -255,7 +237,6 @@ export function EditDismantlerDialog({ dismantler: d, owners, onClose, onSave }:
       country: draft.country,
       ebay_username: draft.ebay_username,
       ebay_listings: listings ? Number(listings) : null,
-      route: (draft.route || null) as Route | null,
       platform_account_id: draft.platform_account_id,
       owner_user_id: draft.owner_user_id || null,
       source: draft.source,
@@ -270,10 +251,14 @@ export function EditDismantlerDialog({ dismantler: d, owners, onClose, onSave }:
         <FormField label="Owner">{form.select("owner_user_id", ["", ...owners.map((owner) => owner.id)], Object.fromEntries([["", "Nobody"], ...owners.map((owner) => [owner.id, owner.name])]))}</FormField>
         <FormField label="eBay seller name">{form.input("ebay_username")}</FormField>
         <FormField label="eBay battery listings">{form.input("ebay_listings", { inputMode: "numeric" })}</FormField>
-        <FormField label="ReBattery platform account">{form.input("platform_account_id", { placeholder: "Account id, once they have one" })}</FormField>
+        <FormField label="ReBattery account">
+          {accounts
+            ? form.select("platform_account_id", ["", "none", ...accounts.map((account) => account.id)],
+              Object.fromEntries([["", "Match automatically"], ["none", "No ReBattery account"], ...accounts.map((account) => [account.id, account.name])]))
+            : form.input("platform_account_id", { placeholder: "Account id, or none" })}
+        </FormField>
         <FormField label="Found via">{form.input("source")}</FormField>
       </div>
-      <RoutePicker value={form.draft.route} onChange={(route) => form.setDraft((current) => ({ ...current, route }))} />
       <FormField label="Q4 goal dismantler">{form.select("goal", ["no", "yes"], { no: "No", yes: "Yes" })}</FormField>
       <ErrorText error={form.error} />
     </Modal>
@@ -287,8 +272,8 @@ export function SetNextDialog({ detail, today, onClose, onSave }: {
   onSave: (patch: DismantlerPatch) => Promise<void>;
 }) {
   const d = detail.dismantler;
-  const form = useForm({ next_step: "", next_step_due: addDays(today, 1), waiting_on: "us", next_step_person_id: d.next_step_person_id ?? "" }, async (draft) => {
-    await onSave({ ...draft, waiting_on: draft.waiting_on as "us" | "them", next_step_person_id: draft.next_step_person_id || null });
+  const form = useForm({ next_step: "", next_step_due: addDays(today, 1), next_step_person_id: d.next_step_person_id ?? "" }, async (draft) => {
+    await onSave({ ...draft, next_step_person_id: draft.next_step_person_id || null });
     onClose();
   });
   return (
@@ -300,10 +285,8 @@ export function SetNextDialog({ detail, today, onClose, onSave }: {
         {form.select("next_step_person_id", ["", ...detail.people.map((person) => person.id)],
           Object.fromEntries([["", "No one in particular"], ...detail.people.map((person) => [person.id, person.name])]))}
       </FormField>
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label="Due">{form.input("next_step_due", { type: "date", required: true })}</FormField>
-        <FormField label="Waiting on">{form.select("waiting_on", ["us", "them"], { us: "Us", them: "Them" })}</FormField>
-      </div>
+      <FormField label="Due">{form.input("next_step_due", { type: "date", required: true })}</FormField>
+      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Waiting on them? Make the next step checking back, on the day you would chase.</p>
       <ErrorText error={form.error} />
     </Modal>
   );

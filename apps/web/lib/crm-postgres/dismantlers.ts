@@ -3,6 +3,12 @@ import { pgPool, queryPg, withPgTransaction, type PgTransaction } from "../postg
 import { todayInLondon, type TradeOwner } from "../bulk-trades";
 import type { Dismantler, DismantlerPatch, ImportRow, Stage } from "../dismantlers";
 
+/** A dismantler as saved, plus what the ReBattery match needs (never sent to the browser). */
+export type DismantlerRow = Omit<Dismantler, "saved_stage" | "platform"> & {
+  match_emails: string[] | null;
+  match_domain: string | null;
+};
+
 type Queryable = Pick<PgTransaction, "query">;
 
 const COLUMNS = `
@@ -10,15 +16,11 @@ const COLUMNS = `
   d.parked_from, d.park_reason, to_char(d.revisit_on, 'YYYY-MM-DD') as revisit_on,
   d.next_step, to_char(d.next_step_due, 'YYYY-MM-DD') as next_step_due, d.next_step_person_id,
   coalesce(nullif(person.full_name, ''), nullif(concat_ws(' ', person.first_name, person.last_name), ''), person.email) as next_step_person_name,
-  d.waiting_on, to_char(d.waiting_since, 'YYYY-MM-DD') as waiting_since,
-  d.owner_user_id, owner.display_name as owner_name, d.goal, d.route, d.country, d.ebay_username,
+  d.owner_user_id, owner.display_name as owner_name, d.goal, d.country, d.ebay_username,
   d.ebay_listings, d.platform_account_id, d.source, d.notes,
-  to_char(d.setup_account_on, 'YYYY-MM-DD') as setup_account_on,
-  to_char(d.setup_route_on, 'YYYY-MM-DD') as setup_route_on,
-  to_char(d.setup_connected_on, 'YYYY-MM-DD') as setup_connected_on,
-  to_char(d.setup_first_stock_on, 'YYYY-MM-DD') as setup_first_stock_on,
-  to_char(d.setup_first_sync_on, 'YYYY-MM-DD') as setup_first_sync_on,
-  to_char(d.setup_second_sync_on, 'YYYY-MM-DD') as setup_second_sync_on,
+  coalesce(nullif(company.domain, ''), company.website) as match_domain,
+  (select array_agg(distinct lower(p.email)) from crm_people p
+    where p.company_id = d.company_id and p.email like '%@%') as match_emails,
   -- Latest email or meeting with anyone at the company, as the CRM sync keeps it on each person.
   (select to_char(max(p.last_interaction_at) at time zone 'Europe/London', 'YYYY-MM-DD')
      from crm_people p where p.company_id = d.company_id) as last_contact,
@@ -32,20 +34,20 @@ const FROM = `
 
 const select = (where: string) => `select ${COLUMNS} from ${FROM} ${where}`;
 
-export async function listDismantlers(): Promise<{ dismantlers: Dismantler[]; owners: TradeOwner[] }> {
+export async function listDismantlers(): Promise<{ dismantlers: DismantlerRow[]; owners: TradeOwner[] }> {
   const [dismantlers, owners] = await Promise.all([
-    queryPg<Dismantler>(select("order by company.name")),
+    queryPg<DismantlerRow>(select("order by company.name")),
     queryPg<TradeOwner>("select id, display_name as name from crm_users where is_active order by display_name"),
   ]);
   return { dismantlers, owners };
 }
 
-async function readOne(client: Queryable, id: string): Promise<Dismantler | null> {
+async function readOne(client: Queryable, id: string): Promise<DismantlerRow | null> {
   const { rows } = await client.query(select("where d.id = $1"), [id]);
-  return (rows[0] as Dismantler | undefined) ?? null;
+  return (rows[0] as DismantlerRow | undefined) ?? null;
 }
 
-export async function getDismantler(id: string): Promise<Dismantler | null> {
+export async function getDismantler(id: string): Promise<DismantlerRow | null> {
   return readOne(pgPool, id);
 }
 
@@ -54,9 +56,10 @@ export type Activity =
   | { kind: "email"; at: string; subject: string | null; from: string | null; outgoing: boolean }
   | { kind: "event"; at: string; event: string; changes: Record<string, unknown>; actor: string | null };
 
-export type DismantlerDetail = { dismantler: Dismantler; people: CompanyPerson[]; activity: Activity[] };
+export type DismantlerDetail = { dismantler: Dismantler; people: CompanyPerson[]; activity: Activity[]; platform_error?: string | null };
+type DetailRow = Omit<DismantlerDetail, "dismantler"> & { dismantler: DismantlerRow };
 
-export async function getDismantlerDetail(id: string, viewerId: string): Promise<DismantlerDetail | null> {
+export async function getDismantlerDetail(id: string, viewerId: string): Promise<DetailRow | null> {
   const dismantler = await getDismantler(id);
   if (!dismantler) return null;
   const [people, emails, events] = await Promise.all([
@@ -161,7 +164,6 @@ async function insertDismantler(
 ): Promise<string> {
   const id = `dm_${randomUUID()}`;
   const fields: Record<string, unknown> = { ...patch };
-  if (fields.waiting_on === "them") fields.waiting_since = todayInLondon();
   const keys = Object.keys(fields);
   await client.query(
     `insert into crm_dismantlers (id, company_id, stage_since${keys.map((key) => `, ${key}`).join("")})
@@ -176,7 +178,7 @@ async function insertDismantler(
 export async function createDismantler(
   input: { company_id?: string | null; name?: string | null; patch: DismantlerPatch },
   userId: string,
-): Promise<Dismantler> {
+): Promise<DismantlerRow> {
   return withPgTransaction(async (client) => {
     const companyId = await resolveCompany(client, input);
     await assertPersonAtCompany(client, input.patch.next_step_person_id, companyId);
@@ -191,13 +193,13 @@ async function assertPersonAtCompany(client: Queryable, personId: string | null 
   if (!rows.length) throw new DismantlerError("That person is not at this company in the CRM.");
 }
 
-async function applyPatch(client: Queryable, before: Dismantler, patch: DismantlerPatch, userId: string, kind = "updated") {
+async function applyPatch(client: Queryable, before: DismantlerRow, patch: DismantlerPatch, userId: string, kind = "updated") {
   const today = todayInLondon();
   await assertPersonAtCompany(client, patch.next_step_person_id, before.company_id);
   const fields: Record<string, unknown> = {};
   const changes: Record<string, [unknown, unknown]> = {};
   for (const [key, value] of Object.entries(patch)) {
-    const old = before[key as keyof Dismantler] ?? null;
+    const old = before[key as keyof DismantlerRow] ?? null;
     if (old !== value) {
       fields[key] = value;
       changes[key] = [old, value];
@@ -211,7 +213,6 @@ async function applyPatch(client: Queryable, before: Dismantler, patch: Dismantl
       Object.assign(fields, { parked_from: null, park_reason: null, revisit_on: null });
     }
   }
-  if ("waiting_on" in fields) fields.waiting_since = fields.waiting_on === "them" ? today : null;
   if (!Object.keys(changes).length) return;
 
   const set = assignments(fields, 2);
@@ -219,7 +220,7 @@ async function applyPatch(client: Queryable, before: Dismantler, patch: Dismantl
   await logEvent(client, before.id, kind, changes, userId);
 }
 
-export async function updateDismantler(id: string, patch: DismantlerPatch, userId: string): Promise<Dismantler | null> {
+export async function updateDismantler(id: string, patch: DismantlerPatch, userId: string): Promise<DismantlerRow | null> {
   return withPgTransaction(async (client) => {
     await client.query("select 1 from crm_dismantlers where id = $1 for update", [id]);
     const before = await readOne(client, id);
@@ -230,22 +231,22 @@ export async function updateDismantler(id: string, patch: DismantlerPatch, userI
 }
 
 /**
- * Start outreach on a batch: each moves to Contacted, waiting on them, with a follow-up step.
+ * Start outreach on a batch: each moves to Talking with a follow-up step.
  * Dismantlers already past Found keep their stage and only get the follow-up.
  */
 export async function startOutreach(
   ids: string[],
   followUp: { next_step: string; next_step_due: string },
   userId: string,
-): Promise<Dismantler[]> {
+): Promise<DismantlerRow[]> {
   return withPgTransaction(async (client) => {
-    const saved: Dismantler[] = [];
+    const saved: DismantlerRow[] = [];
     for (const id of ids) {
       await client.query("select 1 from crm_dismantlers where id = $1 for update", [id]);
       const before = await readOne(client, id);
       if (!before) throw new DismantlerError("A dismantler in this batch no longer exists. Refresh and try again.");
-      const stage: Stage = before.stage === "Found" || before.stage === "Parked" ? "Contacted" : before.stage;
-      await applyPatch(client, before, { stage, ...followUp, waiting_on: "them" }, userId, "outreach");
+      const stage: Stage = before.stage === "Found" || before.stage === "Parked" ? "Talking" : before.stage;
+      await applyPatch(client, before, { stage, ...followUp }, userId, "outreach");
       saved.push((await readOne(client, id))!);
     }
     return saved;

@@ -11,18 +11,20 @@ const today = todayInLondon();
 
 function dismantler(o: Partial<Dismantler>): Dismantler {
   return {
-    id: "dm", company_id: "c", name: "Yard", stage: "Contacted", stage_since: today, parked_from: null, park_reason: null,
-    revisit_on: null, next_step: "Follow up", next_step_due: today, next_step_person_id: null, next_step_person_name: null,
-    waiting_on: "us", waiting_since: null, owner_user_id: null, owner_name: null, goal: false, route: "eBay", country: "UK",
-    ebay_username: null, ebay_listings: null, platform_account_id: null, source: null, notes: null,
-    setup_account_on: null, setup_route_on: null, setup_connected_on: null, setup_first_stock_on: null,
-    setup_first_sync_on: null, setup_second_sync_on: null, last_contact: null, updated_at: "", ...o,
+    id: "dm", company_id: "c", name: "Yard", stage: "Talking", saved_stage: "Talking", stage_since: today, parked_from: null,
+    park_reason: null, revisit_on: null, next_step: "Follow up", next_step_due: today, next_step_person_id: null,
+    next_step_person_name: null, owner_user_id: null, owner_name: null, goal: false, country: "UK",
+    ebay_username: null, ebay_listings: null, platform_account_id: null, platform: null, source: null, notes: null,
+    last_contact: null, updated_at: "", ...o,
   };
 }
 
 const DISMANTLERS = [
-  dismantler({ id: "dm_1", name: "Synthetic Recycling", stage: "Onboarding", goal: true, next_step: "Setup call" }),
-  dismantler({ id: "dm_2", name: "Quiet Yard", stage: "Live", next_step: null, next_step_due: null }),
+  dismantler({ id: "dm_1", name: "Synthetic Recycling", goal: true, next_step: "Setup call" }),
+  dismantler({
+    id: "dm_2", name: "Quiet Yard", stage: "Live", saved_stage: "Talking", next_step: null, next_step_due: null,
+    platform: { account_id: "acc", account_name: "Quiet Yard Ltd", matched_by: "email", signed_up_on: "2026-09-01", listed: 14, listed_ever: 20, sold: 3, last_listed_on: "2026-09-28" },
+  }),
   dismantler({ id: "dm_3", name: "Backlog Breakers", stage: "Found", next_step: null, next_step_due: null, ebay_listings: 16, country: "UK" }),
   dismantler({ id: "dm_4", name: "Baltic Parts", stage: "Found", next_step: null, next_step_due: null, ebay_listings: 245, country: "Lithuania" }),
   dismantler({ id: "dm_5", name: "Resting Salvage", stage: "Parked", park_reason: "Not now", next_step: null, next_step_due: null }),
@@ -42,13 +44,13 @@ function mockFetch(calls: Call[]) {
       return new Response(JSON.stringify({
         dismantler: one,
         people: [{ id: "p1", name: "Pat Example", email: "pat@example.test", job_title: "Director" }],
-        activity: [{ kind: "event", at: `${today}T09:00:00Z`, event: "updated", changes: { stage: ["Contacted", "Onboarding"] }, actor: "Alex" }],
+        activity: [{ kind: "event", at: `${today}T09:00:00Z`, event: "updated", changes: { stage: ["Found", "Talking"] }, actor: "Alex" }],
       }));
     }
     if (url === "/api/dismantlers/outreach") {
-      return new Response(JSON.stringify({ dismantlers: DISMANTLERS.filter((d) => (body!.ids as string[]).includes(d.id)).map((d) => ({ ...d, stage: "Contacted" })) }));
+      return new Response(JSON.stringify({ dismantlers: DISMANTLERS.filter((d) => (body!.ids as string[]).includes(d.id)).map((d) => ({ ...d, stage: "Talking" })) }));
     }
-    return new Response(JSON.stringify({ dismantlers: DISMANTLERS, owners: [] }));
+    return new Response(JSON.stringify({ dismantlers: DISMANTLERS, owners: [], platform_error: null }));
   });
 }
 
@@ -56,15 +58,20 @@ describe("DismantlersView", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows stage counts, groups those in play, and keeps Found as a backlog sorted by eBay listings", async () => {
+  it("leads with the goal, groups those in play, and keeps Found as a backlog sorted by eBay listings", async () => {
     vi.stubGlobal("fetch", mockFetch([]));
     render(<DismantlersView />);
 
-    const journey = await screen.findByRole("navigation", { name: "Journey" });
-    expect(within(journey).getByText("Found").parentElement!.parentElement).toHaveTextContent("Found2not contacted yet");
+    const goal = await screen.findByRole("region", { name: "Goal" });
+    expect(goal).toHaveTextContent("Q4 goal0 of 1goal dismantlers live");
+    expect(goal).toHaveTextContent("Live1listing on ReBattery");
+    expect(goal).toHaveTextContent("Listed now14");
+    expect(goal).toHaveTextContent("Sold3");
+    expect(screen.getByRole("navigation", { name: "Stages" })).toHaveTextContent("Found 2");
+    expect(within(screen.getByRole("region", { name: "No next step" })).getByText("14 listed · 3 sold")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Due today" })).getByText("Synthetic Recycling")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "No next step" })).getByText("Quiet Yard")).toBeInTheDocument();
-    expect(screen.getByText("Q4 goal")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Due today" })).getByText("Q4 goal")).toBeInTheDocument();
 
     const backlog = screen.getByRole("region", { name: "Found" });
     const names = within(backlog).getAllByRole("button").map((button) => button.textContent).filter((text) => /Parts|Breakers/.test(text ?? ""));
@@ -82,7 +89,7 @@ describe("DismantlersView", () => {
     await userEvent.click(within(backlog).getByLabelText("Select Baltic Parts"));
     expect(within(backlog).getByText("1 selected")).toBeInTheDocument();
     await userEvent.click(within(backlog).getByRole("button", { name: "Start outreach" }));
-    await userEvent.click(screen.getByRole("button", { name: "Move 1 to Contacted" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move 1 to Talking" }));
 
     await waitFor(() => expect(calls.some((call) => call.url === "/api/dismantlers/outreach")).toBe(true));
     const sent = calls.find((call) => call.url === "/api/dismantlers/outreach")!.body!;
@@ -96,8 +103,8 @@ describe("DismantlersView", () => {
     render(<DismantlersView />);
 
     await userEvent.click(await screen.findByRole("tab", { name: "Board" }));
-    await userEvent.click(screen.getByRole("button", { name: "Move Synthetic Recycling to Live" }));
-    await waitFor(() => expect(calls.find((call) => call.method === "PATCH")).toMatchObject({ url: "/api/dismantlers/dm_1", body: { stage: "Live" } }));
+    await userEvent.click(screen.getByRole("button", { name: "Move Synthetic Recycling to Signed up" }));
+    await waitFor(() => expect(calls.find((call) => call.method === "PATCH")).toMatchObject({ url: "/api/dismantlers/dm_1", body: { stage: "Signed up" } }));
 
     const found = screen.getByRole("region", { name: "Found" });
     expect(within(found).queryByText("245 battery listings on eBay")).not.toBeInTheDocument();
@@ -116,20 +123,21 @@ describe("DismantlersView", () => {
     }));
   });
 
-  it("opens a dismantler: what the next stage needs, setup ticks, and history", async () => {
+  it("opens a dismantler: what the next stage needs, what ReBattery shows, and history", async () => {
     const calls: Call[] = [];
     vi.stubGlobal("fetch", mockFetch(calls));
     render(<DismantlersView />);
 
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic Recycling/ }));
     expect(await screen.findByRole("heading", { name: "Synthetic Recycling" })).toBeInTheDocument();
-    expect(screen.getByText(/To reach Live: their first stock is published on ReBattery\. 0 of 6 setup steps done\./)).toBeInTheDocument();
+    expect(screen.getByText(/To reach Signed up: they make a ReBattery account\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Email Pat" })).toBeInTheDocument();
-    expect(screen.getByText("Contacted → Onboarding")).toBeInTheDocument();
+    expect(screen.getByText("Found → Talking")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "On ReBattery" })).getByText(/No ReBattery account found/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByLabelText("eBay connected, Fulfillment permission ticked"));
+    await userEvent.click(screen.getByRole("button", { name: "Move to Signed up →" }));
     await waitFor(() => expect(calls.find((call) => call.method === "PATCH")).toMatchObject({
-      url: "/api/dismantlers/dm_1", body: { setup_connected_on: today },
+      url: "/api/dismantlers/dm_1", body: { stage: "Signed up" },
     }));
   });
 });

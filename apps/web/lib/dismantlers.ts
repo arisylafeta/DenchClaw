@@ -1,67 +1,55 @@
 // Dismantlers: shared types, validation, list grouping and labels. Safe for client and server.
 import { dayMonth, daysBetween } from "./bulk-trades";
 
-export const STAGES = ["Found", "Contacted", "Onboarding", "Live", "Syncing", "Parked"] as const;
+export const STAGES = ["Found", "Talking", "Signed up", "Live", "Parked"] as const;
 /** The journey, in order. Parked sits beside it. */
-export const JOURNEY = ["Found", "Contacted", "Onboarding", "Live", "Syncing"] as const;
-/** Stages worked from the list's urgency groups. Found is the backlog; Parked is out of play. */
-export const IN_PLAY = ["Contacted", "Onboarding", "Live", "Syncing"] as const;
-export const ROUTES = ["eBay", "API", "Other"] as const;
+export const JOURNEY = ["Found", "Talking", "Signed up", "Live"] as const;
+/** Stages worked from the list. Found is the backlog; Parked is out of play. */
+export const IN_PLAY = ["Talking", "Signed up", "Live"] as const;
 
 export type Stage = (typeof STAGES)[number];
 export type JourneyStage = (typeof JOURNEY)[number];
-export type Route = (typeof ROUTES)[number];
 
 export const STAGE_HINT: Record<Stage, string> = {
   Found: "not contacted yet",
-  Contacted: "in conversation",
-  Onboarding: "said yes, setting up",
-  Live: "stock on ReBattery",
-  Syncing: "two syncs, 7+ days apart",
+  Talking: "in touch with us",
+  "Signed up": "has a ReBattery account",
+  Live: "batteries listed on ReBattery",
   Parked: "not now or not a fit",
 };
 
 /** What has to be true to move on from each stage. */
 export const TO_REACH_NEXT: Record<JourneyStage, string> = {
-  Found: "To reach Contacted: send them a first message.",
-  Contacted: "To reach Onboarding: they say yes and a route is agreed.",
-  Onboarding: "To reach Live: their first stock is published on ReBattery.",
-  Live: "To reach Syncing: two stock syncs at least 7 days apart, with a sold or changed item updated.",
-  Syncing: "Fully set up. Keep in touch, and check the syncs keep running.",
+  Found: "To reach Talking: send them a first message.",
+  Talking: "To reach Signed up: they make a ReBattery account. Once it is linked, they move by themselves.",
+  "Signed up": "To reach Live: they list their first battery on ReBattery. They move by themselves when they do.",
+  Live: "Live. Keep their stock coming, and check in if listings stop.",
 };
 
-export const SETUP_KEYS = [
-  "setup_account_on",
-  "setup_route_on",
-  "setup_connected_on",
-  "setup_first_stock_on",
-  "setup_first_sync_on",
-  "setup_second_sync_on",
-] as const;
-export type SetupKey = (typeof SETUP_KEYS)[number];
-
-/** Setup checklist wording for the dismantler's route. */
-export function setupLabels(route: Route | null): Record<SetupKey, string> {
-  const connected = route === "API"
-    ? "API key issued and used"
-    : route === "eBay"
-      ? "eBay connected, Fulfillment permission ticked"
-      : "Connected: eBay or API";
-  return {
-    setup_account_on: "ReBattery account made",
-    setup_route_on: route ? `Route agreed: ${route}` : "Route agreed",
-    setup_connected_on: connected,
-    setup_first_stock_on: "First listings published",
-    setup_first_sync_on: "First stock sync ran",
-    setup_second_sync_on: "Second sync, 7+ days later, with a sold or changed item updated",
-  };
-}
+/** What ReBattery shows for the dismantler's supplier account. */
+export type PlatformFacts = {
+  account_id: string;
+  account_name: string;
+  /** How the account was found: set by hand, a shared email, or the company's web domain. */
+  matched_by: "linked" | "email" | "domain";
+  signed_up_on: string;
+  /** Listings published now. */
+  listed: number;
+  /** Listings ever made, in any state. */
+  listed_ever: number;
+  /** Completed sales. */
+  sold: number;
+  last_listed_on: string | null;
+};
 
 export type Dismantler = {
   id: string;
   company_id: string;
   name: string;
+  /** The stage shown: the saved stage, lifted to Signed up or Live when ReBattery shows it. */
   stage: Stage;
+  /** The stage as saved by hand. */
+  saved_stage: Stage;
   stage_since: string;
   parked_from: JourneyStage | null;
   park_reason: string | null;
@@ -70,24 +58,17 @@ export type Dismantler = {
   next_step_due: string | null;
   next_step_person_id: string | null;
   next_step_person_name: string | null;
-  waiting_on: "us" | "them";
-  waiting_since: string | null;
   owner_user_id: string | null;
   owner_name: string | null;
   goal: boolean;
-  route: Route | null;
   country: string | null;
   ebay_username: string | null;
   ebay_listings: number | null;
+  /** Set by hand: an account id, "none", or null to match automatically. */
   platform_account_id: string | null;
+  platform: PlatformFacts | null;
   source: string | null;
   notes: string | null;
-  setup_account_on: string | null;
-  setup_route_on: string | null;
-  setup_connected_on: string | null;
-  setup_first_stock_on: string | null;
-  setup_first_sync_on: string | null;
-  setup_second_sync_on: string | null;
   /** Latest email or meeting with anyone at the company, from the CRM sync. Shared by everyone. */
   last_contact: string | null;
   updated_at: string;
@@ -95,13 +76,27 @@ export type Dismantler = {
 
 export type DismantlerPatch = Partial<Pick<Dismantler,
   | "stage" | "park_reason" | "revisit_on" | "next_step" | "next_step_due" | "next_step_person_id"
-  | "waiting_on" | "owner_user_id" | "goal" | "route" | "country" | "ebay_username" | "ebay_listings"
-  | "platform_account_id" | "source" | "notes" | SetupKey
+  | "owner_user_id" | "goal" | "country" | "ebay_username" | "ebay_listings"
+  | "platform_account_id" | "source" | "notes"
 >>;
 
 const TEXT_FIELDS = ["park_reason", "next_step", "country", "ebay_username", "platform_account_id", "source", "notes"] as const;
-const DATE_FIELDS = ["revisit_on", "next_step_due", ...SETUP_KEYS] as const;
+const DATE_FIELDS = ["revisit_on", "next_step_due"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const RANK: Record<Stage, number> = { Parked: -1, Found: 0, Talking: 1, "Signed up": 2, Live: 3 };
+
+/** What ReBattery proves: an account means Signed up, any listing ever means Live. */
+export function platformStage(platform: PlatformFacts | null): Stage | null {
+  if (!platform) return null;
+  return platform.listed_ever > 0 || platform.sold > 0 ? "Live" : "Signed up";
+}
+
+/** The saved stage, lifted by what ReBattery proves. Facts win over Parked too. */
+export function effectiveStage(saved: Stage, platform: PlatformFacts | null): Stage {
+  const proven = platformStage(platform);
+  return proven && RANK[proven] > RANK[saved] ? proven : saved;
+}
 
 export function isValidDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -129,13 +124,6 @@ export function parseDismantlerPatch(body: unknown): { patch: DismantlerPatch } 
       else return { error: `${key} must be a YYYY-MM-DD date.` };
     } else if (key === "stage") {
       if (!oneOf(STAGES, value)) return { error: "Unknown stage." };
-      patch[key] = value;
-    } else if (key === "route") {
-      if (value === null || value === "") patch[key] = null;
-      else if (oneOf(ROUTES, value)) patch[key] = value;
-      else return { error: "route must be eBay, API or Other." };
-    } else if (key === "waiting_on") {
-      if (!oneOf(["us", "them"] as const, value)) return { error: "waiting_on must be us or them." };
       patch[key] = value;
     } else if (key === "goal") {
       if (typeof value !== "boolean") return { error: "goal must be true or false." };
@@ -166,68 +154,83 @@ export function nextStage(stage: Stage): JourneyStage | null {
   return index >= 0 && index < JOURNEY.length - 1 ? JOURNEY[index + 1] : null;
 }
 
-export type GroupName = "Overdue" | "Due today" | "No next step" | "Waiting on them" | "Later";
-export const GROUPS: GroupName[] = ["Overdue", "Due today", "No next step", "Waiting on them", "Later"];
+export type GroupName = "Overdue" | "Due today" | "No next step" | "This week" | "Later";
+export const GROUPS: GroupName[] = ["Overdue", "Due today", "No next step", "This week", "Later"];
 export const GROUP_TONE: Record<GroupName, "red" | "amber" | "grey"> = {
   Overdue: "red",
   "Due today": "amber",
   "No next step": "amber",
-  "Waiting on them": "grey",
+  "This week": "grey",
   Later: "grey",
 };
 
-export function dismantlerGroup(d: Dismantler, today: string): GroupName {
+export function dismantlerGroup(d: Pick<Dismantler, "next_step" | "next_step_due">, today: string): GroupName {
   const due = d.next_step_due;
-  if (due && due < today && (d.next_step || d.waiting_on === "them")) return "Overdue";
-  // A follow-up comes back on its day, even while waiting on them.
-  if (due === today && d.next_step) return "Due today";
-  if (d.waiting_on === "them") return "Waiting on them";
   if (!d.next_step || !due) return "No next step";
-  return due === today ? "Due today" : "Later";
+  if (due < today) return "Overdue";
+  if (due === today) return "Due today";
+  return daysBetween(today, due) <= 7 ? "This week" : "Later";
 }
 
-/** Dismantlers in play, grouped in list order, most pressing first. */
+const inPlay = (d: Pick<Dismantler, "stage">) => (IN_PLAY as readonly string[]).includes(d.stage);
+
+/** Dismantlers in play, grouped in list order, most pressing first. Q4 goal ones lead each group. */
 export function groupDismantlers(dismantlers: Dismantler[], today: string) {
   const groups = new Map<GroupName, Dismantler[]>(GROUPS.map((name) => [name, []]));
-  for (const d of dismantlers) {
-    if ((IN_PLAY as readonly string[]).includes(d.stage)) groups.get(dismantlerGroup(d, today))!.push(d);
-  }
-  const byDate = (key: "next_step_due" | "waiting_since" | "last_contact") => (a: Dismantler, b: Dismantler) =>
-    String(a[key] ?? "9999").localeCompare(String(b[key] ?? "9999")) || a.name.localeCompare(b.name);
-  groups.get("Overdue")!.sort(byDate("next_step_due"));
-  groups.get("Due today")!.sort((a, b) => a.name.localeCompare(b.name));
-  groups.get("No next step")!.sort(byDate("last_contact"));
-  groups.get("Waiting on them")!.sort(byDate("waiting_since"));
-  groups.get("Later")!.sort(byDate("next_step_due"));
-  return GROUPS.map((name) => ({ name, dismantlers: groups.get(name)! })).filter((group) => group.dismantlers.length);
+  for (const d of dismantlers) if (inPlay(d)) groups.get(dismantlerGroup(d, today))!.push(d);
+  const order = (a: Dismantler, b: Dismantler) =>
+    Number(b.goal) - Number(a.goal)
+    || String(a.next_step_due ?? a.last_contact ?? "9999").localeCompare(String(b.next_step_due ?? b.last_contact ?? "9999"))
+    || a.name.localeCompare(b.name);
+  return GROUPS.map((name) => ({ name, dismantlers: groups.get(name)!.sort(order) })).filter((group) => group.dismantlers.length);
 }
 
-/** "2 days late", "Today", "2 Oct", "since 24 Sep", "No date" or "None". */
-export function dueLabel(d: Dismantler, today: string): string {
+/** The numbers the tab exists to move. */
+export function summarise(dismantlers: Dismantler[], today: string) {
+  const live = dismantlers.filter((d) => d.stage === "Live");
+  const goal = dismantlers.filter((d) => d.goal);
+  return {
+    live: live.length,
+    goal: goal.length,
+    goalLive: goal.filter((d) => d.stage === "Live").length,
+    listed: dismantlers.reduce((sum, d) => sum + (d.platform?.listed ?? 0), 0),
+    sold: dismantlers.reduce((sum, d) => sum + (d.platform?.sold ?? 0), 0),
+    due: dismantlers.filter((d) => inPlay(d) && ["Overdue", "Due today", "This week"].includes(dismantlerGroup(d, today))).length,
+  };
+}
+
+/** "2 days late", "Today", "Tomorrow", "2 Oct", "No date" or "None". */
+export function dueLabel(d: Pick<Dismantler, "next_step" | "next_step_due">, today: string): string {
   const due = d.next_step_due;
-  if (due && due < today) {
+  if (!d.next_step) return "None";
+  if (!due) return "No date";
+  if (due < today) {
     const days = daysBetween(due, today);
     return `${days} ${days === 1 ? "day" : "days"} late`;
   }
-  if (due === today && d.next_step) return "Today";
-  if (d.waiting_on === "them") return d.waiting_since ? `since ${dayMonth(d.waiting_since)}` : "Waiting";
-  if (!due) return d.next_step ? "No date" : "None";
   if (due === today) return "Today";
   return daysBetween(today, due) === 1 ? "Tomorrow" : dayMonth(due);
 }
 
 /** "Today", "Yesterday", "8 days" or "" when there has been no email. */
-export function contactLabel(d: Dismantler, today: string): string {
+export function contactLabel(d: Pick<Dismantler, "last_contact">, today: string): string {
   if (!d.last_contact) return "";
   const days = daysBetween(d.last_contact, today);
   return days <= 0 ? "Today" : days === 1 ? "Yesterday" : `${days} days`;
 }
 
 /** Contact goes amber after two weeks and red after four, while a dismantler is in play. */
-export function contactTone(d: Dismantler, today: string): "red" | "amber" | "grey" {
-  if (!d.last_contact || !(IN_PLAY as readonly string[]).includes(d.stage)) return "grey";
+export function contactTone(d: Pick<Dismantler, "last_contact" | "stage">, today: string): "red" | "amber" | "grey" {
+  if (!d.last_contact || !inPlay(d)) return "grey";
   const days = daysBetween(d.last_contact, today);
   return days > 28 ? "red" : days > 14 ? "amber" : "grey";
+}
+
+/** "14 listed · 3 sold", "Signed up, nothing listed yet", or "" with no account. */
+export function platformLabel(platform: PlatformFacts | null): string {
+  if (!platform) return "";
+  if (!platform.listed_ever && !platform.sold) return "Signed up, nothing listed yet";
+  return [`${platform.listed} listed`, platform.sold ? `${platform.sold} sold` : null].filter(Boolean).join(" · ");
 }
 
 export function addDays(date: string, days: number): string {
