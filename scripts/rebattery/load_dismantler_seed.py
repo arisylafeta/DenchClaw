@@ -7,7 +7,8 @@
 FILE holds {"rows": [...]}. Each row has a name and optionally: company (an exact CRM company
 name to link), rename_to (a clearer name for that company), country, ebay_username,
 ebay_listings, route, stage, goal, next_step, next_step_due, waiting_on, waiting_since,
-person_email (who the next step is for), source and notes.
+person_email (who the next step is for), attach_people (emails of CRM people with no company, to
+attach to this company), source and notes.
 
 Every dismantler is a CRM company: the named company, else the one company with the row's exact
 name, else a new company. A name several companies share stops the run. A company that is
@@ -31,6 +32,12 @@ FIELDS = ["country", "ebay_username", "ebay_listings", "route", "stage", "goal",
 
 
 def company_for(cur, row):
+    if row.get("company_id"):
+        cur.execute("select id, name, country from crm_companies where id = %s", (row["company_id"],))
+        found = cur.fetchone()
+        if not found:
+            raise SystemExit(f"No CRM company with id {row['company_id']!r}.")
+        return found
     wanted = row.get("company") or row["name"]
     cur.execute("select id, name, country from crm_companies where lower(btrim(name)) = lower(btrim(%s))", (wanted,))
     found = cur.fetchall()
@@ -79,6 +86,9 @@ def main():
             cur.execute("""update crm_companies set tags = array_append(coalesce(tags, '{}'), 'dismantler'), updated_at = now()
                             where id = %s and not ('dismantler' = any(coalesce(tags, '{}')))""", (company_id,))
 
+            for email in row.get("attach_people", []):
+                cur.execute("update crm_people set company_id = %s, updated_at = now() where lower(email) = lower(%s) and company_id is null",
+                            (company_id, email))
             person_id = None
             if row.get("person_email"):
                 cur.execute("select id from crm_people where lower(email) = lower(%s) and company_id = %s", (row["person_email"], company_id))
