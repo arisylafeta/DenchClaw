@@ -1012,7 +1012,8 @@ def screen_demand(cur, sources, key, report):
 
 MATCH_SYSTEM = """You match open buyer DEMAND rows to bulk battery TRADES (supply) for ReBattery, a broker of second-life
 and surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON:
-{"matches": [{"trade_id", "demand_id", "strength", "reason"}]}, one entry per trade and row that fit; leave out the rest.
+{"matches": [{"trade", "row", "buyer", "strength", "reason"}]}, one entry per trade and row that fit; leave out the rest.
+"trade" and "row" are the labels given (T1, R7); "buyer" is that row's buyer, copied exactly.
 Each DEMAND row is a "request" (a one-off need, maybe by "needed_by") or a "standing" buy-box with a "basis":
 "agreed" and "stated" come from the buyer; "estimated" is ReBattery's guess from research, so match it only on a
 clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words; "note"
@@ -1045,32 +1046,44 @@ def live_trade_facts(trade):
     return {k: trade[k] for k in ("title", "trade_kind", "trade_stage", "fact_line")} | {"fields": fields}
 
 
+def same_buyer(said, actual):
+    """True when the model's buyer name is the row's buyer (it names the row it judged)."""
+    a, b = norm(said), norm(actual)
+    return bool(a) and (a in b or b in a)
+
+
 def judge(trades, rows, key, report):
-    """Asks the model which (trade, row) pairs fit, in calls of at most MATCH_ROWS_PER_CALL rows. Returns the valid
-    pairs, or None when a call failed (so nothing is recorded as judged)."""
-    trade_ids = {lot for lot, _ in trades}
+    """Asks the model which (trade, row) pairs fit, in calls of at most MATCH_ROWS_PER_CALL rows. Trades and rows go
+    out under short labels (T1, R1), because the model mixes up long ids, and each answer must name its row's buyer.
+    Returns the valid pairs, or None when a call failed (so nothing is recorded as judged)."""
+    trade_by_label = {f"T{i}": lot for i, (lot, _) in enumerate(trades, 1)}
     pairs, seen = [], set()
     for start in range(0, len(rows), MATCH_ROWS_PER_CALL):
-        chunk = rows[start:start + MATCH_ROWS_PER_CALL]
-        row_ids = {r["id"] for r in chunk}
-        payload = {"TRADES": [{"trade_id": lot, **facts} for lot, facts in trades], "DEMAND": chunk}
+        chunk = {f"R{i}": row for i, row in enumerate(rows[start:start + MATCH_ROWS_PER_CALL], start + 1)}
+        payload = {"TRADES": [{"trade": label, **facts} for label, (_, facts) in zip(trade_by_label, trades)],
+                   "DEMAND": [{"row": label, **{k: v for k, v in row.items() if k != "id"}} for label, row in chunk.items()]}
         try:
             raw = call_model(MATCH_SYSTEM, json.dumps(payload, ensure_ascii=False, default=str), key)
             report["model_calls"] += 1
         except Exception as err:
             report["warnings"].append(f"demand matching failed ({type(err).__name__})")
             return None
-        # One trade per call needs no trade_id from the model.
-        only = next(iter(trade_ids)) if len(trade_ids) == 1 else None
+        only = next(iter(trade_by_label.values())) if len(trade_by_label) == 1 else None
         for m in raw.get("matches") or []:
             if not isinstance(m, dict):
                 continue
-            lot = m.get("trade_id") if m.get("trade_id") in trade_ids else only
-            if lot and m.get("demand_id") in row_ids and m.get("strength") in ("strong", "partial") \
-                    and str(m.get("reason") or "").strip() and (lot, m["demand_id"]) not in seen:
-                seen.add((lot, m["demand_id"]))  # the model sometimes repeats a pair; the first one counts
-                pairs.append({"lot_id": lot, "demand_id": m["demand_id"], "strength": m["strength"],
-                              "reason": str(m["reason"]).strip()[:300]})
+            lot = trade_by_label.get(str(m.get("trade"))) or only
+            row = chunk.get(str(m.get("row")))
+            if not lot or not row or m.get("strength") not in ("strong", "partial") or not str(m.get("reason") or "").strip():
+                continue
+            if not same_buyer(m.get("buyer"), row.get("buyer")):
+                report["dropped"] = report.get("dropped", 0) + 1  # the answer does not agree with the row it names
+                continue
+            if (lot, row["id"]) in seen:
+                continue  # the model sometimes repeats a pair; the first one counts
+            seen.add((lot, row["id"]))
+            pairs.append({"lot_id": lot, "demand_id": row["id"], "strength": m["strength"],
+                          "reason": str(m["reason"]).strip()[:300]})
     return pairs
 
 

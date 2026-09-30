@@ -433,11 +433,13 @@ class DemandRun(unittest.TestCase):
 
         def fake_model(system, user, key):
             payload = json.loads(user)
-            calls.append(([t["title"] for t in payload["TRADES"]], [d["id"] for d in payload["DEMAND"]]))
-            return {"matches": [{"trade_id": "bt_dem", "demand_id": "btd_open", "strength": "strong", "reason": "A matched lot"},
-                                {"trade_id": "bt_dem", "demand_id": "btd_hid", "strength": "partial", "reason": "Packs, not modules"},
-                                {"trade_id": "bt_dem", "demand_id": "btd_nope", "strength": "strong", "reason": "not a real row"},
-                                {"trade_id": "bt_nowhere", "demand_id": "btd_open", "strength": "strong", "reason": "not a trade"}]}
+            calls.append(([t["title"] for t in payload["TRADES"]], [d["buyer"] for d in payload["DEMAND"]]))
+            trade = next((t["trade"] for t in payload["TRADES"] if t["title"] == "Demand match trade"), None)
+            label = {d["buyer"]: d["row"] for d in payload["DEMAND"]}
+            return {"matches": [{"trade": trade, "row": label.get("Green Voltage"), "buyer": "Green Voltage", "strength": "strong", "reason": "A matched lot"},
+                                {"trade": trade, "row": label.get("Somerset EV"), "buyer": "Somerset EV", "strength": "partial", "reason": "Packs, not modules"},
+                                {"trade": trade, "row": "R999", "buyer": "Nobody", "strength": "strong", "reason": "not a real row"},
+                                {"trade": "T99", "row": label.get("Green Voltage"), "buyer": "Green Voltage", "strength": "strong", "reason": "not a trade"}]}
 
         def ours():
             return [c for c in calls if "Demand match trade" in c[0]]
@@ -465,7 +467,7 @@ class DemandRun(unittest.TestCase):
             check.match_demand(self.conn, "k")
             self.assertEqual(len(calls), 1)
             self.assertIn("Demand match trade", calls[0][0])
-            self.assertEqual(calls[0][1], ["btd_open"])
+            self.assertEqual(calls[0][1], ["Green Voltage"])
 
             calls.clear()
             with self.conn, self.conn.cursor() as cur:  # closed: suggestion gone, no call
@@ -478,11 +480,17 @@ class DemandRun(unittest.TestCase):
             self.assertEqual(cur.fetchone(), ("ok",))
 
     def test_judge_keeps_the_first_of_a_repeated_pair(self):
-        reply = {"matches": [{"demand_id": "d1", "strength": "strong", "reason": "first"},
-                             {"demand_id": "d1", "strength": "partial", "reason": "again"}]}
-        with patch.object(check, "call_model", lambda system, user, key: reply):
-            pairs = check.judge([("lot1", {})], [{"id": "d1"}], "k", {"model_calls": 0, "warnings": []})
+        reply = {"matches": [{"row": "R1", "buyer": "Acme Energy", "strength": "strong", "reason": "first"},
+                             {"row": "R1", "buyer": "Acme Energy", "strength": "partial", "reason": "again"},
+                             {"row": "R2", "buyer": "Acme Energy", "strength": "strong", "reason": "names the wrong row"}]}
+        sent = []
+        report = {"model_calls": 0, "warnings": []}
+        with patch.object(check, "call_model", lambda system, user, key: sent.append(json.loads(user)) or reply):
+            pairs = check.judge([("lot1", {})], [{"id": "d1", "buyer": "Acme Energy Ltd"}, {"id": "d2", "buyer": "Volt Co"}], "k", report)
         self.assertEqual(pairs, [{"lot_id": "lot1", "demand_id": "d1", "strength": "strong", "reason": "first"}])
+        self.assertEqual(report["dropped"], 1)
+        self.assertEqual([r["row"] for r in sent[0]["DEMAND"]], ["R1", "R2"])
+        self.assertNotIn("id", sent[0]["DEMAND"][0])  # long ids never reach the model
 
     def test_matching_gives_the_seller_price_and_survives_a_model_failure(self):
         with self.conn, self.conn.cursor() as cur:
@@ -496,7 +504,7 @@ class DemandRun(unittest.TestCase):
 
         with patch.object(check, "call_model", failing):
             out = check.match_demand(self.conn, "k")
-        mine = [t for payload in seen for t in payload["TRADES"] if t["trade_id"] == "bt_dem"]
+        mine = [t for payload in seen for t in payload["TRADES"] if t["title"] == "Demand match trade"]
         self.assertEqual(mine[0]["fields"]["seller_price"], "€29/kWh")
         self.assertIn("demand matching failed (TimeoutError)", out["warnings"])
         with self.conn.cursor() as cur:  # not recorded as judged, so the next pass tries again
@@ -548,12 +556,12 @@ class DemandRun(unittest.TestCase):
 
         with patch.object(check, "call_model", fake_model):
             check.match_demand(self.conn, "k", {"warnings": []})
-        rows = {r["id"]: r for r in seen}
-        self.assertNotIn("btd_late", rows)
-        self.assertEqual({k: rows["btd_req"][k] for k in ("kind", "needed_by", "spec")},
+        rows = {r["buyer"]: r for r in seen}
+        self.assertNotIn("Late request", rows)
+        self.assertEqual({k: rows["Live request"][k] for k in ("kind", "needed_by", "spec")},
                          {"kind": "request", "needed_by": "2099-01-01", "spec": {"chemistries": ["LFP"]}})
-        self.assertEqual(rows["btd_est"]["basis"], "estimated")
-        self.assertNotIn("spec", rows["btd_est"])  # empty values are left out
+        self.assertEqual(rows["Gridturn"]["basis"], "estimated")
+        self.assertNotIn("spec", rows["Gridturn"])  # empty values are left out
 
     def test_matching_sees_the_note(self):
         with self.conn, self.conn.cursor() as cur:
@@ -562,7 +570,7 @@ class DemandRun(unittest.TestCase):
         seen = []
         with patch.object(check, "call_model", lambda system, user, key: seen.extend(json.loads(user)["DEMAND"]) or {"matches": []}):
             check.match_demand(self.conn, "k", {"warnings": []})
-        self.assertEqual({r["id"]: r.get("note") for r in seen}["btd_note"], "Voltage: 48V")
+        self.assertEqual({r["buyer"]: r.get("note") for r in seen}["Volt buyer"], "Voltage: 48V")
 
     def test_summary_lists_buyers_waiting_requests_due_and_buy_boxes_to_reconfirm(self):
         today = dt.datetime.now(ZoneInfo("Europe/London")).date()
