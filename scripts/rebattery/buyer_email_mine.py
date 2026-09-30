@@ -488,7 +488,8 @@ def apply(conn, args):
                                                 "price_currency", "price_unit", "needed_by", "spec", "observed_on")}
                 row.update(basis="stated" if box["kind"] == "standing" else None, company_id=r["company_id"],
                            buyer=r["name"], source_kind=source_kind, source_label=source_label,
-                           source_id=f"{source_kind}:{box['evidence'][0]['message_id']}:{digest}")
+                           source_id=f"{source_kind}:{box['evidence'][0]['message_id']}:{digest}",
+                           source_quote=box["evidence"][-1]["quote"])  # the latest quote: the buyer's current words
                 if box["kind"] != "request":
                     row["needed_by"] = None
                 survey.link(cur, row)

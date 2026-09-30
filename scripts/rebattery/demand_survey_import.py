@@ -324,7 +324,7 @@ def load_opportunities(cur):
 
 ROW_KEYS = {"kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
             "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on",
-            "source_kind", "source_id", "source_label", "source_url"}
+            "source_kind", "source_id", "source_label", "source_url", "source_quote"}
 
 
 def load_rows(path):
@@ -383,7 +383,7 @@ def link(cur, row):
 
 COLUMNS = ["kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
            "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on",
-           "confirmed_on", "source_kind", "source_id", "source_label", "source_url"]
+           "confirmed_on", "source_kind", "source_id", "source_label", "source_url", "source_quote"]
 
 
 def insert(cur, row):
