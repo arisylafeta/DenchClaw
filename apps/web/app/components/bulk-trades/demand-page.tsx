@@ -28,7 +28,7 @@ import {
 } from "@/lib/bulk-demand";
 import { shortDate, type Proposal } from "@/lib/bulk-trade-details";
 import { CrmSearch } from "./buyer-dialogs";
-import { DemandBadge } from "./demand-badge";
+import { DemandBadge, TierBadge } from "./demand-badge";
 import { ProposalRow } from "./proposal-row";
 import {
   Card,
@@ -89,8 +89,8 @@ export function DemandPage({ today, onOpenTrade }: Props) {
     const rows = filter === "closed" ? demand.filter((row) => row.status === "closed")
       : filter === "check" ? toCheck
         : filter === "requests" ? requests
-          // Grouped by buyer; the server already orders each buyer's rows agreed, stated, estimated.
-          : standing.toSorted((a, b) => a.buyer.localeCompare(b.buyer));
+          // Tier A buyers first, grouped by buyer; the server already orders each buyer's rows agreed, stated, estimated.
+          : standing.toSorted((a, b) => tierOrder(a.tier) - tierOrder(b.tier) || a.buyer.localeCompare(b.buyer));
     return needle ? rows.filter((row) => `${row.buyer} ${row.contact ?? ""} ${row.wants} ${specLines(row.spec).join(" ")}`
       .toLowerCase().includes(needle)) : rows;
   }, [demand, filter, query, toCheck, requests, standing]);
@@ -166,6 +166,7 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                     <div className="max-w-full truncate text-sm font-semibold">{row.buyer}</div>
                     {row.contact && <div className="max-w-full truncate text-xs" style={{ color: "var(--bt-muted)" }}>{row.contact}</div>}
                     <span className="flex flex-wrap gap-1">
+                      <TierBadge tier={row.tier} />
                       <DemandBadge kind={row.kind} basis={row.basis} />
                       {row.waiting && (
                         <span className="rounded-none border px-1.5 py-px text-xs font-medium" title={row.waiting.subject ?? undefined}
@@ -366,6 +367,8 @@ function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade }:
     </aside>
   );
 }
+
+const tierOrder = (tier: string | null) => ({ A: 0, B: 1, C: 2 } as Record<string, number>)[tier ?? ""] ?? 3;
 
 const MAIN_LISTS: SpecListKey[] = ["chemistries", "formats", "conditions", "origins"];
 const MORE_LISTS: SpecListKey[] = ["cell_formats", "makes", "cell_makers", "evidence", "excludes"];

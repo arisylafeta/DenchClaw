@@ -16,7 +16,7 @@ function row(overrides: Partial<Demand>): Demand {
     needed_by: null, volume: null, volume_unit: null, max_price: null, price_currency: null, price_unit: null, spec: {},
     source_kind: "email", source_label: "Gmail · adam@gv.example", source_url: null, source_quote: "Can you supply matched packs?",
     observed_on: "2026-09-18", status: "open", closed_reason: null, confirmed_on: "2026-09-18",
-    updated_at: "2026-09-18T10:00:00Z", fits: [], trades: [], waiting: null, ...overrides,
+    updated_at: "2026-09-18T10:00:00Z", fits: [], trades: [], waiting: null, tier: null, ...overrides,
   };
 }
 
@@ -178,11 +178,12 @@ describe("SuggestedBuyers", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
     render(<SuggestedBuyers tradeId="bt_69" onChanged={onChanged} suggested={[
-      { demand_id: "btd_1", kind: "request", basis: null, buyer: "H. Nolden Investment", contact: "Markus", wants: "Tested EV packs 50 kWh+",
+      { demand_id: "btd_1", tier: "A", kind: "request", basis: null, buyer: "H. Nolden Investment", contact: "Markus", wants: "Tested EV packs 50 kWh+",
         needed_by: "2026-10-15", confirmed_on: "2026-09-21", strength: "strong", reason: "A homogeneous lot." },
     ]} />);
     expect(screen.getByText("Strong fit")).toBeInTheDocument();
     expect(screen.getByText("Request")).toBeInTheDocument();
+    expect(screen.getByText("Tier A")).toBeInTheDocument();
     expect(screen.getByText("· needed by 15 Oct", { exact: false })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add to buyers" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_69/suggested/btd_1", expect.objectContaining({ method: "POST" }));

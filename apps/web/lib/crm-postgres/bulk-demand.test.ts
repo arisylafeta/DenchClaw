@@ -136,6 +136,13 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
       ["Estimated Co", "standing", "estimated"],
     ]);
 
+    // A tier-A buyer outranks everything else, whatever the kind of its row.
+    await pg.queryPg(`insert into crm_companies (id, name, buyer_tier) values ('co_tier_a', 'Tier A Co', 'A') on conflict do nothing`);
+    await pg.queryPg("update crm_bulk_trade_demand set company_id = 'co_tier_a' where id = $1", [estimated.id]);
+    const ranked = await demand.suggestedBuyers(lot);
+    expect(ranked.map((s) => [s.buyer, s.tier])[0]).toEqual(["Estimated Co", "A"]);
+    expect((await demand.getDemand(estimated.id))?.tier).toBe("A");
+
     const buyer = await demand.addSuggestedBuyer(lot, agreed.id, user.id);
     const [{ demand_id }] = await pg.queryPg<{ demand_id: string }>("select demand_id from crm_bulk_trade_buyers where id = $1", [buyer!.id]);
     expect(demand_id).toBe(agreed.id);

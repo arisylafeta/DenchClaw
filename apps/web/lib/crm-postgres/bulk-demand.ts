@@ -23,11 +23,15 @@ const DEMAND_SELECT = `
       select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'status', buyer.status) order by buyer.created_at)
       from crm_bulk_trade_buyers buyer join crm_bulk_trade_lots lot on lot.id = buyer.lot_id
       where buyer.demand_id = demand.id
-    ), '[]'::json) as trades
+    ), '[]'::json) as trades,
+    (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier
   from crm_bulk_trade_demand demand`;
 
 // Live requests first (soonest date first), then agreed, stated and estimated buy-boxes.
 const RANK = `case when demand.kind = 'request' then 0 when demand.basis = 'agreed' then 1 when demand.basis = 'stated' then 2 else 3 end`;
+// A-tier buyers first (the procurement-desk shortlist), then B, C and untiered.
+const TIER_RANK = `case (select company.buyer_tier from crm_companies company where company.id = demand.company_id)
+  when 'A' then 0 when 'B' then 1 when 'C' then 2 else 3 end`;
 
 /** Every demand row: open first, then requests by date, then buy-boxes by basis and buyer. */
 export async function listDemand(): Promise<Demand[]> {
@@ -51,6 +55,9 @@ export async function getDemand(id: string): Promise<Demand | null> {
   return row ?? null;
 }
 
+/** Unanswered buyer email older than this has usually moved to WhatsApp or the phone, so it is not flagged. */
+const WAITING_DAYS = 30;
+
 type WaitingRow = { person_id: string; company_id: string | null; full_name: string | null; waiting_since: string; last_in_subject: string | null };
 
 /** Adds the buyer contact waiting longest on our reply (by person, else anyone at the company), from one view read. */
@@ -58,7 +65,7 @@ async function withWaiting(rows: Demand[]): Promise<Demand[]> {
   const open = rows.filter((row) => row.status === "open" && (row.person_id || row.company_id));
   const waiting = open.length ? await queryPg<WaitingRow>(
     `select person_id, company_id, full_name, waiting_since, last_in_subject from crm_bulk_trade_buyer_waiting
-     where waiting_since is not null and (person_id = any($1::text[]) or company_id = any($2::text[]))
+     where waiting_since > now() - interval '${WAITING_DAYS} days' and (person_id = any($1::text[]) or company_id = any($2::text[]))
      order by waiting_since`,
     [open.map((row) => row.person_id).filter(Boolean), open.map((row) => row.company_id).filter(Boolean)],
   ) : [];
@@ -182,20 +189,21 @@ export async function closeDemand(id: string, reason: ClosedReason): Promise<Dem
   return rows.length ? getDemand(id) : null;
 }
 
-/** Open demand the matching picked for a trade, minus hidden ones and buyers already on the trade. Requests
- * first, then agreed, stated and estimated buy-boxes; strong before partial within each. */
+/** Open demand the matching picked for a trade, minus hidden ones and buyers already on the trade. A-tier buyers
+ * first, then B, C and untiered; within a tier requests, then agreed, stated and estimated; strong before partial. */
 export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> {
   return queryPg<SuggestedBuyer>(
     `select demand.id as demand_id, demand.kind, demand.basis, demand.buyer, demand.contact, demand.wants,
        to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on,
-       m.strength, m.reason
+       m.strength, m.reason,
+       (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier
      from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand demand on demand.id = m.demand_id
      where m.lot_id = $1 and not m.hidden and m.buyer_id is null and demand.status = 'open'
        and (demand.kind <> 'request' or demand.needed_by is null or demand.needed_by >= current_date)
        and not exists (
          select 1 from crm_bulk_trade_buyers buyer where buyer.lot_id = m.lot_id
            and ((demand.person_id is not null and buyer.person_id = demand.person_id) or lower(buyer.name) = lower(demand.buyer)))
-     order by ${RANK}, m.strength desc, demand.needed_by nulls last, demand.confirmed_on desc nulls last`,
+     order by ${TIER_RANK}, ${RANK}, m.strength desc, demand.needed_by nulls last, demand.confirmed_on desc nulls last`,
     [lotId],
   );
 }

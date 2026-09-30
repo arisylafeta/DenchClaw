@@ -77,6 +77,8 @@ export type Demand = {
   updated_at: string;
   fits: DemandFit[];
   trades: DemandTrade[];
+  /** The buyer company's tier: A (procurement desk), B (qualified), C (the rest), or null. */
+  tier: string | null;
   /** The buyer's contact whose latest email is newer than our last email to them (email only). */
   waiting: { since: string; who: string | null; subject: string | null } | null;
 };
@@ -84,6 +86,7 @@ export type Demand = {
 /** An open demand row the matching picked for a trade, shown as a Suggested buyer. */
 export type SuggestedBuyer = {
   demand_id: string;
+  tier: string | null;
   kind: DemandKind;
   basis: Basis | null;
   buyer: string;

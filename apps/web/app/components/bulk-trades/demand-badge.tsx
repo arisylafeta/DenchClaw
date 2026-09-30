@@ -16,3 +16,12 @@ export function DemandBadge({ kind, basis }: { kind: DemandKind; basis: Basis | 
     </span>
   );
 }
+
+/** "Tier A" for the procurement-desk shortlist; B and C are quieter. Nothing for untiered buyers. */
+export function TierBadge({ tier }: { tier: string | null }) {
+  if (!tier) return null;
+  const style = tier === "A"
+    ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)", borderColor: "var(--bt-badge)" }
+    : { background: "transparent", color: "var(--bt-muted)", borderColor: "var(--bt-grey-border)" };
+  return <span className="rounded-none border px-1.5 py-px text-xs font-medium" style={style}>Tier {tier}</span>;
+}

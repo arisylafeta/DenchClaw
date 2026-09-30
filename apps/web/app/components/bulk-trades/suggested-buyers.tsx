@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SuggestedBuyer } from "@/lib/bulk-demand";
 import { shortDate } from "@/lib/bulk-trade-details";
-import { DemandBadge } from "./demand-badge";
+import { DemandBadge, TierBadge } from "./demand-badge";
 import { Card, ErrorText, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request, tradeUrl } from "./trade-ui";
 
 type Props = {
@@ -41,7 +41,7 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
     <Card label="Suggested buyers">
       <header className="flex flex-wrap items-center gap-3 border-b px-5 py-3.5" style={{ borderColor: "var(--bt-divider)" }}>
         <h2 className="text-base font-semibold">Suggested buyers</h2>
-        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>requests first, then agreed, stated and estimated buy-boxes</span>
+        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Tier A buyers first, then requests, agreed, stated and estimated</span>
         <span className="flex-1" />
         {onOpenDemand && (
           <button type="button" onClick={onOpenDemand} className="text-[13px] font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
@@ -57,6 +57,7 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
             <div className="flex flex-col items-start gap-1">
               <span className="text-sm font-semibold">{item.buyer}</span>
               <span className="flex flex-wrap gap-1">
+                <TierBadge tier={item.tier} />
                 <DemandBadge kind={item.kind} basis={item.basis} />
                 <span className="rounded-none border px-1.5 py-px text-xs font-medium" style={STRENGTH[item.strength].style}>{STRENGTH[item.strength].label}</span>
               </span>
