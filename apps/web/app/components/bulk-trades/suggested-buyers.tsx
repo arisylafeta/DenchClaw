@@ -22,6 +22,7 @@ const STRENGTH = {
 export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   if (!suggested.length) return null;
 
   async function act(demandId: string, method: "POST" | "DELETE") {
@@ -41,7 +42,7 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
     <Card label="Suggested buyers">
       <header className="flex flex-wrap items-center gap-3 border-b px-5 py-3.5" style={{ borderColor: "var(--bt-divider)" }}>
         <h2 className="text-base font-semibold">Suggested buyers</h2>
-        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Tier A buyers first, then requests, agreed, stated and estimated</span>
+        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>One line per buyer · tier A first, then requests, agreed, stated, estimated</span>
         <span className="flex-1" />
         {onOpenDemand && (
           <button type="button" onClick={onOpenDemand} className="text-[13px] font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
@@ -66,6 +67,20 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
               “{item.wants}”
               {item.kind === "request" && item.needed_by && <span style={{ color: "var(--bt-muted)" }}> · needed by {shortDate(item.needed_by)}</span>}
               {item.kind === "standing" && item.confirmed_on && <span style={{ color: "var(--bt-muted)" }}> · confirmed {shortDate(item.confirmed_on)}</span>}
+              {item.more.length > 0 && (
+                <button type="button" aria-expanded={expanded === item.demand_id}
+                  onClick={() => setExpanded(expanded === item.demand_id ? null : item.demand_id)}
+                  className="ml-1 font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
+                  {expanded === item.demand_id ? "hide" : `+${item.more.length} more ${item.more.length === 1 ? "want" : "wants"}`}
+                </button>
+              )}
+              {expanded === item.demand_id && (
+                <ul className="mt-1.5 flex flex-col gap-1">
+                  {item.more.map((other) => (
+                    <li key={other.demand_id}>“{other.wants}” <span style={{ color: "var(--bt-muted)" }}>· {other.strength}, {other.reason}</span></li>
+                  ))}
+                </ul>
+              )}
             </span>
             <span className="text-[13px]">{item.reason}</span>
             <button type="button" disabled={busy === item.demand_id} onClick={() => act(item.demand_id, "POST")} className={`${darkButtonClass} h-8`} style={darkButtonStyle}>

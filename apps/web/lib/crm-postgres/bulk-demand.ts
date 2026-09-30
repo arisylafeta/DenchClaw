@@ -189,32 +189,65 @@ export async function closeDemand(id: string, reason: ClosedReason): Promise<Dem
   return rows.length ? getDemand(id) : null;
 }
 
-/** Open demand the matching picked for a trade, minus hidden ones and buyers already on the trade. A-tier buyers
- * first, then B, C and untiered; within a tier requests, then agreed, stated and estimated; strong before partial. */
+// One buyer: the CRM company when the row has one, else the buyer name.
+const BUYER_KEY = `coalesce(demand.company_id, 'name:' || lower(demand.buyer))`;
+
+/**
+ * Open demand the matching picked for a trade, one line per buyer: the buyer's best-fitting row (strong before
+ * partial, then requests, agreed, stated, estimated), with their other fitting rows under `more`. Hidden pairs and
+ * buyers already on the trade are left out. A-tier buyers first, then B, C and untiered.
+ */
 export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> {
   return queryPg<SuggestedBuyer>(
-    `select demand.id as demand_id, demand.kind, demand.basis, demand.buyer, demand.contact, demand.wants,
-       to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on,
-       m.strength, m.reason,
-       (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier
-     from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand demand on demand.id = m.demand_id
-     where m.lot_id = $1 and not m.hidden and m.buyer_id is null and demand.status = 'open'
-       and (demand.kind <> 'request' or demand.needed_by is null or demand.needed_by >= current_date)
-       and not exists (
-         select 1 from crm_bulk_trade_buyers buyer where buyer.lot_id = m.lot_id
-           and ((demand.person_id is not null and buyer.person_id = demand.person_id) or lower(buyer.name) = lower(demand.buyer)))
-     order by ${TIER_RANK}, ${RANK}, m.strength desc, demand.needed_by nulls last, demand.confirmed_on desc nulls last`,
+    `with fitting as (
+       select demand.id as demand_id, demand.kind, demand.basis, demand.buyer, demand.contact, demand.wants,
+         to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on,
+         m.strength, m.reason,
+         (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier,
+         ${BUYER_KEY} as buyer_key,
+         ${TIER_RANK} as tier_rank,
+         row_number() over (partition by ${BUYER_KEY}
+           order by m.strength desc, ${RANK}, demand.needed_by nulls last, demand.confirmed_on desc nulls last, demand.id) as place
+       from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand demand on demand.id = m.demand_id
+       where m.lot_id = $1 and not m.hidden and m.buyer_id is null and demand.status = 'open'
+         and (demand.kind <> 'request' or demand.needed_by is null or demand.needed_by >= current_date)
+         and not exists (
+           select 1 from crm_bulk_trade_buyers buyer where buyer.lot_id = m.lot_id
+             and ((demand.person_id is not null and buyer.person_id = demand.person_id) or lower(buyer.name) = lower(demand.buyer)))
+     )
+     select best.demand_id, best.kind, best.basis, best.buyer, best.contact, best.wants, best.needed_by, best.confirmed_on,
+       best.strength, best.reason, best.tier,
+       coalesce((select json_agg(json_build_object('demand_id', other.demand_id, 'wants', other.wants, 'strength', other.strength,
+                  'reason', other.reason) order by other.place)
+                 from fitting other where other.buyer_key = best.buyer_key and other.place > 1), '[]'::json) as more
+     from fitting best
+     where best.place = 1
+     order by best.tier_rank, case when best.kind = 'request' then 0 when best.basis = 'agreed' then 1
+       when best.basis = 'stated' then 2 else 3 end, best.strength desc, best.needed_by nulls last, best.confirmed_on desc nulls last`,
     [lotId],
   );
 }
 
-/** "Not a fit": hidden for this trade, and stays hidden after re-matching. */
+/** "Not a fit": hides the buyer (every row of theirs) for this trade; it stays hidden after re-matching. */
 export async function hideSuggestion(lotId: string, demandId: string): Promise<boolean> {
   const rows = await queryPg(
-    "update crm_bulk_trade_demand_matches set hidden = true where lot_id = $1 and demand_id = $2 returning demand_id",
+    `update crm_bulk_trade_demand_matches m set hidden = true
+     from crm_bulk_trade_demand demand
+     where m.lot_id = $1 and demand.id = m.demand_id
+       and ${BUYER_KEY} = (select ${BUYER_KEY} from crm_bulk_trade_demand demand where demand.id = $2)
+     returning m.demand_id`,
     [lotId, demandId],
   );
   return rows.length > 0;
+}
+
+/** The latest demand-matching pass, for the "Matched 08:00" line. */
+export async function lastMatchRun(): Promise<{ at: string; status: "running" | "ok" | "failed"; matches: number } | null> {
+  const [row] = await queryPg<{ at: string; status: "running" | "ok" | "failed"; matches: number }>(
+    `select coalesce(finished_at, started_at) as at, status, proposals_made as matches
+     from crm_bulk_trade_check_runs where kind = 'match' order by started_at desc limit 1`,
+  );
+  return row ?? null;
 }
 
 /** Adds the demand's buyer to the trade at To contact, with their want as Wants, and links the buyer and the match

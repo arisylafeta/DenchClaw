@@ -96,6 +96,8 @@ export type SuggestedBuyer = {
   confirmed_on: string | null;
   strength: "strong" | "partial";
   reason: string;
+  /** The buyer's other rows that fit this trade, best first. */
+  more: { demand_id: string; wants: string; strength: "strong" | "partial"; reason: string }[];
 };
 
 export type DemandInput = Partial<Pick<Demand,
