@@ -272,7 +272,7 @@ def map_formbricks(response, now=None):
     created = str(response.get("created_at") or "")[:10] or None
     return {
         "kind": "standing", "basis": "stated", "email": email, "contact": None,
-        "company": str(hidden.get("company") or "").strip() or None,
+        "company": str(hidden.get("company") or data.get("company") or "").strip() or None,
         "wants": wants_line(use, spec), "quantity": f"Lots of {lot}" if lot else None, "location": None,
         "spec": spec, "note": "\n".join(notes) or None, "observed_on": created,
         "source_kind": "survey", "source_id": f"formbricks:{response['id']}", "source_label": "Formbricks buyer survey",
