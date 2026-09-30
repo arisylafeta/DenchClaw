@@ -77,6 +77,8 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
       [`pat-${s}`, `p-${s}`, `out-${s}`, `x-${s}`]);
     const d = await db.createDismantler({ company_id: `p-${s}`, patch: {} }, userId);
     await expect(db.updateDismantler(d.id, { next_step_person_id: `out-${s}` }, userId)).rejects.toThrow(/not at this company/);
+    await expect(db.createDismantler({ name: `Wrong Person ${s}`, patch: { next_step_person_id: `out-${s}` } }, userId)).rejects.toThrow(/not at this company/);
+    expect((await pg.queryPg("select 1 from crm_companies where name = $1", [`Wrong Person ${s}`])).length).toBe(0);
     const saved = await db.updateDismantler(d.id, { next_step: "Intro call", next_step_person_id: `pat-${s}` }, userId);
     expect(saved).toMatchObject({ next_step: "Intro call", next_step_person_name: "Pat Example" });
   });
@@ -131,12 +133,25 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
       expect.objectContaining({ subject: "Their reply", outgoing: false }),
     ]);
     expect(detail.activity.some((item) => item.kind === "event" && item.event === "created")).toBe(true);
+
+    await db.logEmailDraft(d.id, { to: ["mo@example.test"], subject: "Private draft", draft_id: "r1" }, userId);
+    const drafts = async (viewer: string) => (await db.getDismantlerDetail(d.id, viewer))!.activity
+      .filter((item) => item.kind === "event" && item.event === "email_draft");
+    expect(await drafts(userId)).toHaveLength(1);
+    expect(await drafts(otherUserId)).toHaveLength(0);
   });
 
   it("keeps history append-only, but removes it with the dismantler", async () => {
     const d = await db.createDismantler({ name: `History ${s}`, patch: {} }, userId);
     await expect(pg.queryPg("update crm_dismantler_events set kind = 'x' where dismantler_id = $1", [d.id])).rejects.toThrow(/append-only/);
     await expect(pg.queryPg("delete from crm_dismantler_events where dismantler_id = $1", [d.id])).rejects.toThrow(/append-only/);
+    const [leaver] = await pg.queryPg<{ id: string }>(
+      "insert into crm_users (email, display_name, password_hash) values ('leaver-' || gen_random_uuid() || '@example.test', 'Leaver', 'x') returning id::text");
+    await db.updateDismantler(d.id, { country: "UK" }, leaver.id);
+    await pg.queryPg("delete from crm_users where id = $1", [leaver.id]);
+    expect((await pg.queryPg<{ actor_user_id: string | null }>(
+      "select actor_user_id from crm_dismantler_events where dismantler_id = $1 and kind = 'updated'", [d.id]))[0].actor_user_id).toBeNull();
+
     await pg.queryPg("delete from crm_dismantlers where id = $1", [d.id]);
     expect((await events(d.id)).length).toBe(0);
   });

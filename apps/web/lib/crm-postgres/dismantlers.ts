@@ -101,8 +101,11 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
     queryPg<{ at: string; event: string; changes: Record<string, unknown>; actor: string | null }>(
       `select e.created_at as at, e.kind as event, e.changes, u.display_name as actor
          from crm_dismantler_events e left join crm_users u on u.id = e.actor_user_id
-        where e.dismantler_id = $1 order by e.id desc limit 40`,
-      [id],
+        where e.dismantler_id = $1
+          -- A Gmail draft is private to the person who made it.
+          and (e.kind <> 'email_draft' or e.actor_user_id = $2::uuid)
+        order by e.id desc limit 40`,
+      [id, viewerId],
     ),
   ]);
   const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : String(value));
@@ -143,6 +146,8 @@ async function resolveCompany(client: Queryable, input: { company_id?: string | 
   } else {
     const name = input.name?.trim();
     if (!name) throw new DismantlerError("Pick a company or type a name.");
+    // Serialises adds of the same name, so two at once cannot both create the company.
+    await client.query("select pg_advisory_xact_lock(hashtext('crm_dismantlers:' || lower($1)))", [name]);
     const { rows } = await client.query("select id from crm_companies where lower(btrim(name)) = lower($1)", [name]);
     if (rows.length > 1) throw new DismantlerError(`Several CRM companies are called "${name}". Pick one from the list.`);
     companyId = (rows[0]?.id as string | undefined) ?? null;
@@ -192,17 +197,21 @@ export async function createDismantler(
 ): Promise<Dismantler> {
   return withPgTransaction(async (client) => {
     const companyId = await resolveCompany(client, input);
+    await assertPersonAtCompany(client, input.patch.next_step_person_id, companyId);
     const id = await insertDismantler(client, companyId, input.patch, userId);
     return (await readOne(client, id, userId))!;
   });
 }
 
+async function assertPersonAtCompany(client: Queryable, personId: string | null | undefined, companyId: string) {
+  if (!personId) return;
+  const { rows } = await client.query("select 1 from crm_people where id = $1 and company_id = $2", [personId, companyId]);
+  if (!rows.length) throw new DismantlerError("That person is not at this company in the CRM.");
+}
+
 async function applyPatch(client: Queryable, before: Dismantler, patch: DismantlerPatch, userId: string, kind = "updated") {
   const today = todayInLondon();
-  if (patch.next_step_person_id) {
-    const { rows } = await client.query("select 1 from crm_people where id = $1 and company_id = $2", [patch.next_step_person_id, before.company_id]);
-    if (!rows.length) throw new DismantlerError("That person is not at this company in the CRM.");
-  }
+  await assertPersonAtCompany(client, patch.next_step_person_id, before.company_id);
   const fields: Record<string, unknown> = {};
   const changes: Record<string, [unknown, unknown]> = {};
   for (const [key, value] of Object.entries(patch)) {

@@ -201,7 +201,8 @@ function NextStepBar({ detail, today, onSave }: { detail: DismantlerDetail; toda
   const [snoozing, setSnoozing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const due = dueText(d, today);
+  // A follow-up shows as due on its day, even while waiting on them.
+  const due = d.next_step && d.next_step_due === today ? { text: "Due today", tone: "amber" as const } : dueText(d, today);
   const person = detail.people.find((candidate) => candidate.id === d.next_step_person_id)
     ?? detail.people.find((candidate) => candidate.email);
 

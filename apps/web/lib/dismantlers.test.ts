@@ -52,6 +52,13 @@ describe("dismantler rules", () => {
     expect([nextStage("Found"), nextStage("Live"), nextStage("Syncing"), nextStage("Parked")]).toEqual(["Contacted", "Syncing", null, null]);
   });
 
+  it("brings a follow-up back on its day, even while waiting on them", () => {
+    const followUp = D({ name: "Outreach", waiting_on: "them", waiting_since: "2026-09-30", next_step: "Follow up if no reply", next_step_due: "2026-10-06" });
+    expect(groupDismantlers([followUp], "2026-10-05")[0].name).toBe("Waiting on them");
+    expect(groupDismantlers([followUp], "2026-10-06")[0].name).toBe("Due today");
+    expect(dueLabel(followUp, "2026-10-06")).toBe("Today");
+  });
+
   it("counts follow-ups in working days", () => {
     expect(addWorkingDays("2026-09-30", 4)).toBe("2026-10-06");
     expect(addWorkingDays("2026-10-02", 1)).toBe("2026-10-05");
@@ -67,5 +74,10 @@ describe("dismantler rules", () => {
       errors: [],
     });
     expect(parseImport("Yard A\nyard a").errors).toEqual(["Line 2: yard a is listed twice."]);
+    expect(parseImport("Smith, Jones Breakers\tUK\tsmithjones\t16").rows).toEqual([
+      { name: "Smith, Jones Breakers", country: "UK", ebay_username: "smithjones", ebay_listings: 16 },
+    ]);
+    expect(parseImport("Smith, Jones Breakers, UK, smithjones, 16").errors[0]).toMatch(/more than 4 columns/);
+    expect(parseImport("Yard, UK, seller, lots").errors).toEqual(["Line 1: battery listings must be a number."]);
   });
 });

@@ -62,6 +62,11 @@ begin
   if tg_op = 'DELETE' and not exists (select 1 from crm_dismantlers where id = old.dismantler_id) then
     return old;
   end if;
+  -- Deleting a CRM user clears their name from history (on delete set null); nothing else changes.
+  if tg_op = 'UPDATE' and new.actor_user_id is null and old.actor_user_id is not null
+     and (new.dismantler_id, new.kind, new.changes, new.created_at) = (old.dismantler_id, old.kind, old.changes, old.created_at) then
+    return new;
+  end if;
   raise exception 'crm_dismantler_events is append-only';
 end;
 $$;

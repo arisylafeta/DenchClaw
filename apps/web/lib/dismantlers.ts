@@ -179,6 +179,8 @@ export const GROUP_TONE: Record<GroupName, "red" | "amber" | "grey"> = {
 export function dismantlerGroup(d: Dismantler, today: string): GroupName {
   const due = d.next_step_due;
   if (due && due < today && (d.next_step || d.waiting_on === "them")) return "Overdue";
+  // A follow-up comes back on its day, even while waiting on them.
+  if (due === today && d.next_step) return "Due today";
   if (d.waiting_on === "them") return "Waiting on them";
   if (!d.next_step || !due) return "No next step";
   return due === today ? "Due today" : "Later";
@@ -207,6 +209,7 @@ export function dueLabel(d: Dismantler, today: string): string {
     const days = daysBetween(due, today);
     return `${days} ${days === 1 ? "day" : "days"} late`;
   }
+  if (due === today && d.next_step) return "Today";
   if (d.waiting_on === "them") return d.waiting_since ? `since ${dayMonth(d.waiting_since)}` : "Waiting";
   if (!due) return d.next_step ? "No date" : "None";
   if (due === today) return "Today";
@@ -257,19 +260,21 @@ export function parseImport(text: string): { rows: ImportRow[]; errors: string[]
   const seen = new Set<string>();
   text.split(/\r?\n/).forEach((line, index) => {
     if (!line.trim()) return;
-    const cells = line.split(/\t|,/).map((cell) => cell.trim());
+    // A spreadsheet paste is tab-separated, so commas inside names survive; typed lines use commas.
+    const cells = line.split(line.includes("\t") ? "\t" : ",").map((cell) => cell.trim());
     const [name, country, seller, listings] = cells;
     if (!name) return void errors.push(`Line ${index + 1}: no name.`);
     if (/^name$/i.test(name)) return;
+    if (cells.length > 4) return void errors.push(`Line ${index + 1}: more than 4 columns. Put names with commas in a spreadsheet, or leave the comma out.`);
+    if (listings && !/^\d[\d,]*$/.test(listings)) return void errors.push(`Line ${index + 1}: battery listings must be a number.`);
     const key = name.toLowerCase();
     if (seen.has(key)) return void errors.push(`Line ${index + 1}: ${name} is listed twice.`);
     seen.add(key);
-    const count = listings ? Number(listings.replace(/[^\d]/g, "")) : NaN;
     rows.push({
       name,
       country: country || null,
       ebay_username: seller || null,
-      ebay_listings: Number.isFinite(count) && listings ? count : null,
+      ebay_listings: listings ? Number(listings.replace(/,/g, "")) : null,
     });
   });
   return { rows, errors };
