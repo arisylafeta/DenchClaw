@@ -330,6 +330,7 @@ ROW_KEYS = {"kind", "basis", "buyer", "company_id", "person_id", "contact", "ema
 def load_rows(path):
     """{"rows": [...]} with the demand columns. Each row needs wants, a kind, a source_kind and a source_id; the
     spec keeps only values from the shared lists, and a basis or date that does not fit the kind is refused."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))  # the sibling module, from any working directory
     from bulk_trade_inbox_check import clean_structured
     rows = []
     with open(path) as handle:
