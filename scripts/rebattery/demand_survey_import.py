@@ -4,6 +4,7 @@
   demand_survey_import.py --formbricks                 # show what the Formbricks buyer survey would add
   demand_survey_import.py --csv FILE.csv               # the same for a Typeform demand survey CSV export
   demand_survey_import.py --opportunities              # old crm_commercial_opportunities demand rows, as requests
+  demand_survey_import.py --rows FILE.json             # reviewed rows, e.g. estimated buy-boxes from a buyer review
   ... --apply                                          # write them
 
 Each answer becomes one row keyed by (source_kind, source_id), so a re-run or a scheduled run adds nothing
@@ -299,6 +300,40 @@ def load_opportunities(cur):
 
 
 # ---------------------------------------------------------------------------
+# Reviewed rows (a buyer review's estimated or stated buy-boxes)
+# ---------------------------------------------------------------------------
+
+ROW_KEYS = {"kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
+            "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on",
+            "source_kind", "source_id", "source_label", "source_url"}
+
+
+def load_rows(path):
+    """{"rows": [...]} with the demand columns. Each row needs wants, a kind, a source_kind and a source_id; the
+    spec keeps only values from the shared lists, and a basis or date that does not fit the kind is refused."""
+    from bulk_trade_inbox_check import clean_structured
+    rows = []
+    for i, raw in enumerate(json.load(open(path))["rows"]):
+        unknown = set(raw) - ROW_KEYS
+        if unknown:
+            raise SystemExit(f"row {i}: unknown keys {sorted(unknown)}")
+        if not raw.get("wants") or not raw.get("source_kind") or not raw.get("source_id"):
+            raise SystemExit(f"row {i}: wants, source_kind and source_id are required")
+        kind = raw.get("kind", "standing")
+        basis = raw.get("basis", "estimated" if raw["source_kind"] == "research" else "stated") if kind == "standing" else None
+        if kind == "request" and raw.get("basis") or kind == "standing" and raw.get("needed_by"):
+            raise SystemExit(f"row {i}: a request has a date and no basis; a standing buy-box has a basis and no date")
+        if basis not in (None, "estimated", "stated", "agreed"):
+            raise SystemExit(f"row {i}: basis must be estimated, stated or agreed")
+        structured = clean_structured({**raw, "kind": kind})
+        rows.append({**{k: v for k, v in raw.items() if k not in ("spec", "volume", "volume_unit", "max_price",
+                                                                 "price_currency", "price_unit", "needed_by")},
+                     **structured, "kind": kind, "basis": basis,
+                     "email": (raw.get("email") or "").lower() or None, "spec": structured.get("spec", {})})
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Writing
 # ---------------------------------------------------------------------------
 
@@ -310,21 +345,31 @@ def link(cur, row):
                        left join crm_companies c on c.id = p.company_id
                        where lower(p.email) = %s order by p.updated_at desc nulls last limit 1""", (row["email"],))
         person = cur.fetchone()
-    row.setdefault("person_id", person and person["id"])
-    row.setdefault("company_id", person and person["company_id"])
+    if not row.get("person_id"):
+        row["person_id"] = person and person["id"]
+    if not row.get("company_id"):
+        row["company_id"] = person and person["company_id"]
     row["contact"] = row.get("contact") or (person and person["full_name"])
-    row["buyer"] = (person and person["company"]) or row.get("company") or row["contact"] or row["email"] or "Unknown buyer"
+    company = None
+    if row.get("company_id"):
+        cur.execute("select name from crm_companies where id = %s", (row["company_id"],))
+        company = cur.fetchone()
+    row["buyer"] = (row.get("buyer") or (company and company["name"]) or (person and person["company"]) or row.get("company")
+                    or row["contact"] or row["email"] or "Unknown buyer")
     return row
 
 
 COLUMNS = ["kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
-           "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
-           "source_kind", "source_id", "source_label"]
+           "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on",
+           "confirmed_on", "source_kind", "source_id", "source_label", "source_url"]
 
 
 def insert(cur, row):
     """Adds the row unless its source is already in; returns True when added."""
-    row = {**row, "confirmed_on": row.get("observed_on"), "spec": json.dumps(row.get("spec") or {})}
+    # A buyer's own answer confirms the buy-box on that date; our estimate confirms nothing.
+    observed = row.get("observed_on") or dt.date.today().isoformat()
+    confirmed = None if row.get("basis") == "estimated" else observed
+    row = {**row, "observed_on": observed, "confirmed_on": confirmed, "spec": json.dumps(row.get("spec") or {})}
     values = [row.get(c) for c in COLUMNS]
     cur.execute(
         f"""insert into crm_bulk_trade_demand (id, {', '.join(COLUMNS)})
@@ -343,6 +388,7 @@ def main():
     parser.add_argument("--formbricks", action="store_true", help="read the Formbricks buyer survey")
     parser.add_argument("--formbricks-json", help="read Formbricks responses from a JSON file instead")
     parser.add_argument("--opportunities", action="store_true", help="old crm_commercial_opportunities demand rows")
+    parser.add_argument("--rows", action="append", default=[], help="reviewed rows from a JSON file ({\"rows\": [...]})")
     parser.add_argument("--apply", action="store_true", help="write; without it nothing is saved")
     parser.add_argument("--quiet", action="store_true", help="print only the totals (for scheduled runs)")
     args = parser.parse_args()
@@ -361,6 +407,9 @@ def main():
             mapped = map_formbricks(response)
             skipped += mapped is None
             candidates += [mapped] if mapped else []
+
+    for path in args.rows:
+        candidates += load_rows(path)
 
     conn = psycopg2.connect(args.dsn)
     added = 0

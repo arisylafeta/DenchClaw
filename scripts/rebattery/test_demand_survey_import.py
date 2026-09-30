@@ -105,6 +105,32 @@ class FormbricksMapping(unittest.TestCase):
                                                            "data": {"email": "b@x.example", "formats": ["Packs"], "min_soh": 999}})["spec"])
 
 
+class ReviewedRows(unittest.TestCase):
+    def write(self, rows):
+        import tempfile
+        handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump({"rows": rows}, handle)
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+        return handle.name
+
+    def test_research_rows_default_to_estimated_and_keep_only_valid_spec(self):
+        [row] = survey.load_rows(self.write([{
+            "buyer": "Gridturn", "wants": "Second-life EV modules for BESS cabinets", "source_kind": "research",
+            "source_id": "research:gridturn:2026-10-01", "source_url": "https://gridturn.example",
+            "spec": {"formats": ["Modules", "Crates"], "min_soh": 80}, "volume": 20, "volume_unit": "modules"}]))
+        self.assertEqual((row["kind"], row["basis"], row["spec"], row["volume"]),
+                         ("standing", "estimated", {"formats": ["Modules"], "min_soh": 80}, 20))
+
+    def test_refuses_rows_that_do_not_fit_their_kind_or_lack_a_source(self):
+        for bad in ({"wants": "x", "source_kind": "research", "source_id": "a", "kind": "request", "basis": "agreed"},
+                    {"wants": "x", "source_kind": "research", "source_id": "a", "needed_by": "2026-11-01"},
+                    {"wants": "x", "source_kind": "research"},
+                    {"wants": "x", "source_kind": "research", "source_id": "a", "colour": "red"}):
+            with self.assertRaises(SystemExit):
+                survey.load_rows(self.write([bad]))
+
+
 TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 
@@ -128,6 +154,20 @@ class Writing(unittest.TestCase):
         conn.close()
         self.assertEqual((saved["kind"], saved["basis"], saved["confirmed_on"], saved["volume"]), ("standing", "stated", "2026-08-20", 200.0))
         self.assertEqual(saved["spec"]["kwh_min"], 30)
+
+    def test_an_estimate_is_not_a_confirmation(self):
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(TEST_URL)
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            row = survey.link(cur, {"kind": "standing", "basis": "estimated", "buyer": "Accu't", "wants": "EV modules",
+                                    "spec": {}, "source_kind": "research", "source_id": "research:accut:test"})
+            self.assertTrue(survey.insert(cur, row))
+            cur.execute("select confirmed_on, observed_on from crm_bulk_trade_demand where source_id = 'research:accut:test'")
+            saved = cur.fetchone()
+        conn.close()
+        self.assertIsNone(saved["confirmed_on"])
+        self.assertIsNotNone(saved["observed_on"])
 
 
 if __name__ == "__main__":
