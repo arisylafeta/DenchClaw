@@ -2,7 +2,7 @@
 """Reads Alex's email history one company at a time and proposes buy-boxes and buyer profile values.
 
   buyer_email_mine.py extract --companies ID,ID [--also PERSON_ID=COMPANY_ID]   # one batch, read-only
-  buyer_email_mine.py extract --top 20 --skip-reviewed --workers 4              # the next 20 busiest, 4 at a time
+  buyer_email_mine.py extract --top 20 --skip-reviewed --workers 4              # next 20 that most ask to buy, 4 at a time
   buyer_email_mine.py apply RUN_DIR [--only ID,ID] [--apply]                    # load an approved batch
 
 extract writes a run folder under /root/.hermes/workspace/artifacts/buyer-email-mine/ with results.json (every
@@ -171,15 +171,31 @@ def as_input(messages):
     return out, len(messages) - len(out)
 
 
+# Buying language beyond the inbox check's strict demand phrases: interest, availability, price and bids.
+BUY_HINT = re.compile(
+    r"\b(interested in|do you (have|still have)|have you got|any (more )?(stock|availability)|price (for|of|per)|"
+    r"quot(e|ation) (for|on)|offer (for|of)|our (offer|bid)|we (can|could|would) (take|offer|pay|buy)|"
+    r"we are (buying|sourcing)|still available)\b", re.I)
+FREE_MAIL = re.compile(r"^(gmail|googlemail|hotmail|outlook|yahoo|icloud|live|aol|proton(mail)?|gmx|web)\.", re.I)
+
+
 def busiest(cur, mailbox, limit, skip):
-    """Companies with the most inbound mail in Alex's mailbox, excluding ReBattery and companies already done."""
+    """Companies whose inbound mail in Alex's mailbox most often uses buying language, excluding ReBattery,
+    free-mail pseudo-companies and companies already done."""
     cur.execute(
-        """select p.company_id as id, c.name, count(*) as inbound
+        """select p.company_id as id, c.name, m.body
            from crm_email_messages m join crm_people p on p.id = m.from_person_id join crm_companies c on c.id = p.company_id
            where m.mailbox_owner_id = %s and coalesce(m.from_email, '') !~* '@rebattery\\.io$'
-             and c.name !~* 'rebattery' and not (p.company_id = any(%s))
-           group by 1, 2 order by 3 desc limit %s""", (mailbox, list(skip), limit))
-    return [r["id"] for r in cur.fetchall()]
+             and c.name !~* 'rebattery' and not (p.company_id = any(%s))""", (mailbox, list(skip)))
+    hits = {}
+    for r in cur.fetchall():
+        text = clean_body(r["body"])
+        if FREE_MAIL.search(r["name"] or ""):
+            continue  # a free-mail pseudo-company lumps unrelated people together
+        if ((check.DEMAND_INTENT.search(text) or BUY_HINT.search(text)) and check.DEAL_WORDS.search(text)
+                and not check.NEWSLETTER.search(text)):
+            hits[r["id"]] = hits.get(r["id"], 0) + 1
+    return [company for company, _ in sorted(hits.items(), key=lambda kv: -kv[1])[:limit]]
 
 
 # ---------------------------------------------------------------------------
