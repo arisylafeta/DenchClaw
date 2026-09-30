@@ -49,8 +49,6 @@ type ObjectKanbanProps = {
   groupFieldName?: string;
   /** Enum values retained in data but omitted from this board. */
   hiddenColumns?: string[];
-  /** Columns shown folded until the viewer opens them; their choice is then remembered. */
-  collapsedColumns?: string[];
   /** Optional outer grouping rendered as independently expandable Kanban accordions. */
   accordionGroupFieldName?: string;
   onEntryClick?: (entryId: string) => void;
@@ -502,15 +500,11 @@ function DroppableColumn({
   objectName,
   onRefresh,
   onToast,
-  collapsed = false,
-  onToggleCollapsed,
 }: {
   columnName: string;
   droppableId: string;
   color: string;
   fluid?: boolean;
-  collapsed?: boolean;
-  onToggleCollapsed?: () => void;
   items: Record<string, unknown>[];
   cardFields: Field[];
   members?: Array<{ id: string; name: string }>;
@@ -565,40 +559,6 @@ function DroppableColumn({
       setEditingName(false);
     }
   }, [nameValue, columnName, groupFieldId, objectName, onRefresh]);
-
-  if (collapsed) {
-    // A slim bar: still a drop target, and one click opens the column.
-    return (
-      <button
-        ref={setNodeRef}
-        type="button"
-        onClick={onToggleCollapsed}
-        aria-expanded={false}
-        aria-label={`Open ${columnName}, ${items.length} ${items.length === 1 ? "entry" : "entries"}`}
-        title={`Open ${columnName}`}
-        className="flex-shrink-0 flex flex-col items-center gap-2 py-3 rounded-xl cursor-pointer transition-colors duration-150 hover:bg-[var(--color-surface-hover)]"
-        style={{
-          width: "44px",
-          background: isOver ? "var(--color-surface)" : "var(--color-bg)",
-          border: `1px solid ${isOver ? "var(--color-accent)" : "var(--color-border)"}`,
-        }}
-      >
-        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color }} />
-        <span
-          className="text-xs px-1.5 py-0.5 rounded-full"
-          style={{ background: "var(--color-surface)", color: "var(--color-text-muted)" }}
-        >
-          {items.length}
-        </span>
-        <span
-          className="text-sm font-medium whitespace-nowrap"
-          style={{ color: "var(--color-text)", writingMode: "vertical-rl" }}
-        >
-          {isOver ? "Drop here" : columnName}
-        </span>
-      </button>
-    );
-  }
 
   return (
     <div
@@ -663,21 +623,6 @@ function DroppableColumn({
         >
           {items.length}
         </span>
-        {onToggleCollapsed && (
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            aria-expanded
-            aria-label={`Fold ${columnName}`}
-            title={`Fold ${columnName}`}
-            className="w-6 h-6 -mr-1 flex items-center justify-center rounded cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-        )}
       </div>
 
       {/* Cards */}
@@ -722,34 +667,11 @@ export function ObjectKanban({
   relationLabels,
   groupFieldName,
   hiddenColumns = [],
-  collapsedColumns = [],
   accordionGroupFieldName,
   onEntryClick,
   onRefresh,
 }: ObjectKanbanProps) {
   const showToast = useToast();
-  const collapsedStorageKey = `kanban-collapsed:${objectName}`;
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    try {
-      const saved = window.localStorage.getItem(collapsedStorageKey);
-      if (saved) {return new Set(JSON.parse(saved) as string[]);}
-    } catch {
-      // No storage: fall back to the board's defaults.
-    }
-    return new Set(collapsedColumns);
-  });
-  const toggleCollapsed = useCallback((columnName: string) => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(columnName)) {next.delete(columnName);} else {next.add(columnName);}
-      try {
-        window.localStorage.setItem(collapsedStorageKey, JSON.stringify(Array.from(next)));
-      } catch {
-        // The choice still holds for this visit.
-      }
-      return next;
-    });
-  }, [collapsedStorageKey]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
@@ -1001,8 +923,6 @@ export function ObjectKanban({
             objectName={objectName}
             onRefresh={onRefresh}
             onToast={showToast}
-            collapsed={!accordionField && collapsed.has(col.name)}
-            onToggleCollapsed={accordionField ? undefined : () => toggleCollapsed(col.name)}
           />
         );
       })}

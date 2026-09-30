@@ -3184,11 +3184,6 @@ function ContentRenderer({
 
 // --- Object View (header + display field selector + table/kanban) ---
 
-// Board columns that start folded: backlogs too long to scroll past.
-const DEFAULT_FOLDED_KANBAN_COLUMNS: Record<string, string[]> = {
-  dismantler: ["Found", "Parked"],
-};
-
 function ObjectView({
   data,
   members,
@@ -4036,7 +4031,6 @@ function ObjectView({
               relationLabels={data.relationLabels}
               groupFieldName={effectiveSettings.kanbanField}
               hiddenColumns={effectiveSettings.kanbanHiddenColumns}
-              collapsedColumns={DEFAULT_FOLDED_KANBAN_COLUMNS[data.object.name]}
               accordionGroupFieldName={data.object.name === "work_task" ? "Project" : undefined}
               onEntryClick={handleEntryClickProp}
               onRefresh={handleRefresh}
