@@ -40,6 +40,30 @@ function buildCompanyResponse(
       event_count: 0,
       strongest_contact: null,
     },
+    buyer: {
+      profile: {
+        stage: "Contacted", stage_changed_on: "2026-09-01", tier: "A", owner: "Alex", capabilities: ["Test and grade"],
+        can_receive_waste: null, accepts_standard_terms: "Not asked", collection: null, past_issues: "Dispute at loading over test data.",
+        outreach_notes: null, main_contact_id: null, next_step: null, next_step_on: null, category: "Repurposer",
+        workstream_status: "Approved", evidence: "Builds BESS from EV packs.", last_reviewed_at: "2026-09-21",
+      },
+      engagement: {
+        last_in_at: "2026-09-28T10:00:00Z", last_out_at: "2026-09-20T10:00:00Z", waiting_since: "2026-09-28T10:00:00Z",
+        last_heard_at: "2026-09-28T10:00:00Z", emails_in_90d: 4, emails_out_90d: 3, meetings: 1, last_meeting_at: null,
+        campaign_clicks: 2, auction_views: 5, auction_offers: 1, trades_offered: 2, trades_won: 0, bids: 1,
+        last_bid_at: "2026-09-29T10:00:00Z", open_requests: 0, open_buy_boxes: 1, agreed_buy_boxes: 0, surveys: 1,
+        suggested_stage: "Bidding",
+      },
+      demand: [{
+        id: "btd_1", kind: "standing", basis: "stated", buyer: name, company_id: id, person_id: null, contact: null, email: null,
+        wants: "Packs, NMC / LFP, 30+ kWh", quantity: null, location: "Spain", note: null, needed_by: null, volume: 200,
+        volume_unit: "packs", max_price: 45, price_currency: "GBP", price_unit: "kWh", spec: { chemistries: ["NMC", "LFP"] },
+        source_kind: "survey", source_label: "Typeform demand survey", source_url: null, source_quote: null,
+        observed_on: "2026-08-20", status: "open", closed_reason: null, confirmed_on: "2026-08-20",
+        updated_at: "2026-08-20T00:00:00Z", fits: [], trades: [], waiting: null,
+      }],
+      changes: [{ field: "buyer_stage", old_value: "Identified", new_value: "Contacted", changed_at: "2026-09-01T09:00:00Z" }],
+    },
     commercial: {
       roles: ["supplier"],
       profiles: [
@@ -155,7 +179,8 @@ function buildCompanyResponse(
 function mockFetchForCompany() {
   return vi
     .spyOn(globalThis, "fetch")
-    .mockImplementation((input: RequestInfo | URL) => {
+    .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return Promise.resolve(new Response("{}", { status: 200 }));
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const match = url.match(/\/api\/crm\/companies\/([^/?]+)/);
       const id = match ? decodeURIComponent(match[1]) : "unknown";
@@ -231,21 +256,63 @@ describe("CompanyProfile tab reset on entry change", () => {
     expect(getActiveTabLabel()).toBe("Emails");
   });
 
-  it("shows commercial tabs and renders profile + opportunity details", async () => {
+  it("shows the Buyer tab: stage with the data's suggestion, waiting, engagement, buy-boxes, profile and history", async () => {
     const user = userEvent.setup();
     render(<CompanyProfile companyId="acme" />);
-
     await waitFor(() => {
       expect(screen.getByText("Company acme")).toBeInTheDocument();
     });
+    await user.click(screen.getByRole("button", { name: /Buyer/ }));
 
-    expect(screen.getByRole("button", { name: /Profiles/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Opportunities/ })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Stage" })).toHaveValue("Contacted");
+    expect(screen.getByText("Bidding", { selector: "strong" })).toBeInTheDocument(); // the data says
+    expect(screen.getByText(/Waiting on our reply since/)).toBeInTheDocument();
+    expect(screen.getByText("4 in · 3 out")).toBeInTheDocument();
+    expect(screen.getByText("Packs, NMC / LFP, 30+ kWh")).toBeInTheDocument();
+    expect(screen.getByText(/200 packs a month · max GBP 45\/kWh · Spain/)).toBeInTheDocument();
+    expect(screen.getByText("Dispute at loading over test data.")).toBeInTheDocument();
+    expect(screen.getByText("Builds BESS from EV packs.")).toBeInTheDocument();
+    expect(screen.getByText("Stage: Identified → Contacted")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Profiles/ }));
-    expect(screen.getByText("Seller supply profile")).toBeInTheDocument();
-    expect(screen.getByText("Typical salvage EV battery supply.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Set to Bidding" }));
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith("/api/workspace/objects/company/entries/acme", expect.objectContaining({
+        method: "PATCH", body: JSON.stringify({ fields: { "Buyer Stage": "Bidding" } }),
+      }));
+    });
+  });
 
+  it("saves only the changed buyer profile fields", async () => {
+    const user = userEvent.setup();
+    render(<CompanyProfile companyId="acme" />);
+    await waitFor(() => {
+      expect(screen.getByText("Company acme")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Buyer/ }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Accepts standard terms" }), "Yes");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Can receive waste batteries" }), "no");
+    await user.click(screen.getByRole("button", { name: "Recycle" }));
+    await user.type(screen.getByRole("textbox", { name: "Outreach notes" }), "Wants continuity of supply, one type.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith("/api/workspace/objects/company/entries/acme", expect.objectContaining({ method: "PATCH" }));
+    });
+    const patch = fetchSpy.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")!;
+    expect(JSON.parse(String((patch[1] as RequestInit).body))).toEqual({ fields: {
+      "Buyer Capabilities": ["Test and grade", "Recycle"],
+      "Buyer Can Receive Waste": false,
+      "Buyer Accepts Standard Terms": "Yes",
+      "Buyer Outreach Notes": "Wants continuity of supply, one type.",
+    } });
+  });
+
+  it("still shows opportunity details", async () => {
+    const user = userEvent.setup();
+    render(<CompanyProfile companyId="acme" />);
+    await waitFor(() => {
+      expect(screen.getByText("Company acme")).toBeInTheDocument();
+    });
     await user.click(screen.getByRole("button", { name: /Opportunities/ }));
     expect(screen.getByText("Nissan Leaf battery pack")).toBeInTheDocument();
     expect(screen.getByText("NMC · Pack · Nissan Leaf")).toBeInTheDocument();

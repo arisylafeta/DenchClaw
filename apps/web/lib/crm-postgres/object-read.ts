@@ -291,6 +291,8 @@ function buildRuleCondition(
           : [String(rule.value)];
       if (values.length === 0) return null;
       params.push(values.map(String));
+      // A multi-value field (a text[] column such as tags) matches when it holds any of the values.
+      if (field.enum_multiple) return `${expr} && $${params.length}::text[]`;
       return `${expr}::text = any($${params.length}::text[])`;
     }
     case "is_none_of": {
@@ -301,6 +303,7 @@ function buildRuleCondition(
           : [String(rule.value)];
       if (values.length === 0) return null;
       params.push(values.map(String));
+      if (field.enum_multiple) return `(${expr} is null or not (${expr} && $${params.length}::text[]))`;
       return `(${expr} is null or not (${expr}::text = any($${params.length}::text[])))`;
     }
     case "contains":

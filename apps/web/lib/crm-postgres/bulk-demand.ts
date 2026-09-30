@@ -37,6 +37,15 @@ export async function listDemand(): Promise<Demand[]> {
   ));
 }
 
+/** A company's demand rows, open first, in the same order as the Demand page. */
+export async function listDemandForCompany(companyId: string): Promise<Demand[]> {
+  return withWaiting(await queryPg<Demand>(
+    `${DEMAND_SELECT} where demand.company_id = $1
+     order by demand.status = 'closed', ${RANK}, demand.needed_by nulls last, demand.observed_on desc nulls last`,
+    [companyId],
+  ));
+}
+
 export async function getDemand(id: string): Promise<Demand | null> {
   const [row] = await withWaiting(await queryPg<Demand>(`${DEMAND_SELECT} where demand.id = $1`, [id]));
   return row ?? null;

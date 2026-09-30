@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
+import { BuyerTab, type BuyerData } from "./company-buyer-tab";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CompanyFavicon } from "./company-favicon";
@@ -76,21 +77,23 @@ type CompanyResponse = {
     opportunities: CommercialOpportunity[];
     summary: CommercialSummary;
   };
+  /** Missing only when the page talks to an older API. */
+  buyer?: BuyerData;
 };
 
-export type CompanyProfileTab = "overview" | "team" | "profiles" | "opportunities" | "emails" | "meetings";
+export type CompanyProfileTab = "overview" | "team" | "buyer" | "opportunities" | "emails" | "meetings";
 
 const TABS: ReadonlyArray<{ id: CompanyProfileTab; label: string; count: (d: CompanyResponse) => number | null }> = [
   { id: "overview", label: "Overview", count: () => null },
   { id: "team", label: "Team", count: (d) => d.summary.people_count },
-  { id: "profiles", label: "Profiles", count: (d) => d.commercial.profiles.length },
+  { id: "buyer", label: "Buyer", count: (d) => d.buyer?.demand.filter((row) => row.status === "open").length ?? null },
   { id: "opportunities", label: "Opportunities", count: (d) => d.commercial.opportunities.length },
   { id: "emails", label: "Emails", count: (d) => d.summary.thread_count },
   { id: "meetings", label: "Meetings", count: (d) => d.summary.event_count },
 ];
 
 function isCompanyProfileTab(value: string | undefined): value is CompanyProfileTab {
-  return value === "overview" || value === "team" || value === "profiles" || value === "opportunities" || value === "emails" || value === "meetings";
+  return value === "overview" || value === "team" || value === "buyer" || value === "opportunities" || value === "emails" || value === "meetings";
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +234,7 @@ export function CompanyProfile({
         <div className={`mx-auto w-full px-6 py-6 ${tab === "opportunities" ? "max-w-none" : "max-w-4xl"}`}>
           {tab === "overview" && <OverviewTab data={data} />}
           {tab === "team" && <TeamTab data={data} onOpenPerson={onOpenPerson} />}
-          {tab === "profiles" && <ProfilesTab data={data} />}
+          {tab === "buyer" && data.buyer && <BuyerTab key={data.company.id} companyId={data.company.id} buyer={data.buyer} people={data.people} onSaved={() => void load()} />}
           {tab === "opportunities" && <OpportunitiesTab data={data} />}
           {tab === "emails" && <EmailsTab data={data} onOpenPerson={onOpenPerson} />}
           {tab === "meetings" && (
@@ -458,52 +461,8 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
   );
 }
 
-function profileTypeLabel(profileType: CommercialProfile["profile_type"]): string {
-  if (profileType === "buyer_demand") { return "Buyer demand profile"; }
-  if (profileType === "seller_supply") { return "Seller supply profile"; }
-  return "Recycler intake profile";
-}
-
 function joinOrDash(items: string[]): string {
   return items.length > 0 ? items.join(", ") : "—";
-}
-
-function ProfilesTab({ data }: { data: CompanyResponse }) {
-  if (data.commercial.profiles.length === 0) {
-    return <CrmEmptyState title="No commercial profiles yet" />;
-  }
-
-  return (
-    <div className="space-y-3">
-      {data.commercial.profiles.map((profile) => (
-        <section key={profile.id} className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <h3 className="text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>
-              {profileTypeLabel(profile.profile_type)}
-            </h3>
-            <span className="rounded-full px-2 py-0.5 text-[11px] capitalize" style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}>
-              {profile.status}
-            </span>
-          </div>
-          <div className="space-y-2">
-            <Field label="Contact" value={profile.contact_person_name ?? null} />
-            <Field label="Chemistry" value={joinOrDash(profile.chemistries)} />
-            <Field label="Formats" value={joinOrDash(profile.formats)} />
-            <Field label="Applications" value={joinOrDash(profile.previous_applications)} />
-            <Field label="Conditions" value={joinOrDash(profile.conditions)} />
-            <Field label="Specifics" value={joinOrDash(profile.specific_types)} />
-            <Field label="Geography" value={joinOrDash(profile.geographies)} />
-            <Field label="SoH floor" value={profile.soh_floor == null ? null : `${profile.soh_floor}%`} />
-            <Field
-              label="Volume range"
-              value={profile.volume_min == null && profile.volume_max == null ? null : `${profile.volume_min ?? "—"} - ${profile.volume_max ?? "—"}`}
-            />
-            <Field label="Notes" value={profile.notes} />
-          </div>
-        </section>
-      ))}
-    </div>
-  );
 }
 
 function batteryDisplay(opportunity: CommercialOpportunity): string {

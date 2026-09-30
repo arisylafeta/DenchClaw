@@ -1,4 +1,7 @@
 import { queryPg } from "../postgres";
+import type { Demand } from "../bulk-demand";
+import type { BuyerEngagement, BuyerProfile, BuyerProfileChange } from "../buyer-profile";
+import { listDemandForCompany } from "./bulk-demand";
 import { deriveDisplayDomain, deriveWebsite } from "../website-from-domain";
 
 export type CommercialProfile = {
@@ -130,6 +133,13 @@ export type PostgresCompanyProfile = {
     strongest_contact: string | null;
   };
   commercial: CompanyCommercial;
+  /** Migration 018's buyer profile, engagement from crm_buyer_engagement, buy-boxes and the dated change log. */
+  buyer: {
+    profile: BuyerProfile;
+    engagement: BuyerEngagement | null;
+    demand: Demand[];
+    changes: BuyerProfileChange[];
+  };
 };
 
 type CompanyRow = {
@@ -554,5 +564,37 @@ export async function getPostgresCompanyProfile(
       strongest_contact: people[0]?.name ?? people[0]?.email ?? null,
     },
     commercial,
+    buyer: await getBuyer(company.id),
   };
+}
+
+const ISO = (column: string) => `to_char(${column}, 'YYYY-MM-DD')`;
+
+export async function getBuyer(companyId: string): Promise<PostgresCompanyProfile["buyer"]> {
+  const [[profile], [engagement], demand, changes] = await Promise.all([
+    queryPg<BuyerProfile>(
+      `select buyer_stage as stage, ${ISO("buyer_stage_changed_on")} as stage_changed_on, buyer_tier as tier,
+         buyer_owner as owner, coalesce(buyer_capabilities, '{}') as capabilities, buyer_can_receive_waste as can_receive_waste,
+         buyer_accepts_standard_terms as accepts_standard_terms, buyer_collection as collection, buyer_past_issues as past_issues,
+         buyer_outreach_notes as outreach_notes, buyer_main_contact_id as main_contact_id, buyer_next_step as next_step,
+         ${ISO("buyer_next_step_on")} as next_step_on, buyer_category as category, buyer_workstream_status as workstream_status,
+         buyer_evidence as evidence, ${ISO("buyer_last_reviewed_at")} as last_reviewed_at
+       from crm_companies where id = $1`,
+      [companyId],
+    ),
+    queryPg<BuyerEngagement>(
+      `select last_in_at, last_out_at, waiting_since, last_heard_at, emails_in_90d::int, emails_out_90d::int, meetings::int,
+         last_meeting_at, campaign_clicks::int, auction_views::int, auction_offers::int, trades_offered::int, trades_won::int,
+         bids::int, last_bid_at, open_requests::int, open_buy_boxes::int, agreed_buy_boxes::int, surveys::int, suggested_stage
+       from crm_buyer_engagement where company_id = $1`,
+      [companyId],
+    ),
+    listDemandForCompany(companyId),
+    queryPg<BuyerProfileChange>(
+      `select field, old_value, new_value, changed_at from crm_buyer_profile_changes
+       where company_id = $1 order by changed_at desc, id desc limit 20`,
+      [companyId],
+    ),
+  ]);
+  return { profile, engagement: engagement ?? null, demand, changes };
 }

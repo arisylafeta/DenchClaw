@@ -69,14 +69,22 @@ Trade buyers added from a buy-box carry its `demand_id`, so offers and wins show
    Do not mark anything `agreed`: only Alex does that, after confirming spec, price and volume with the buyer.
    Do not duplicate a row that already exists; propose an edit to it instead.
 
-5. **Show Alex before writing.** Give a short brief:
+5. **Fill the profile.** The company's Buyer tab (migration 018 columns on `crm_companies`) holds who they are and
+   how we deal with them: `buyer_stage` (Identified, Contacted, Responded, In conversation, Qualified, Bidding,
+   Customer), `buyer_tier`, `buyer_owner`, `buyer_capabilities`, `buyer_can_receive_waste`,
+   `buyer_accepts_standard_terms`, `buyer_collection`, `buyer_past_issues`, `buyer_outreach_notes`,
+   `buyer_main_contact_id`, `buyer_next_step`, `buyer_next_step_on`. `crm_buyer_engagement.suggested_stage` is the
+   data's view; set Qualified only when a buy-box is stated or agreed. Every change is logged in
+   `crm_buyer_profile_changes`.
+
+6. **Show Alex before writing.** Give a short brief:
    - Who they are and what they do with batteries, with links.
    - What they have bought from us and what went wrong (disputes, delays).
    - Anyone waiting on a reply.
-   - The proposed rows (kind, basis, wants, spec, volume, price, source).
+   - The proposed rows (kind, basis, wants, spec, volume, price, source) and profile values.
    - The questions to ask the buyer to move each row up: estimated to stated, stated to agreed.
 
-6. **Write on Alex's yes.** Put the approved rows in a JSON file and load them:
+7. **Write on Alex's yes.** Put the approved rows in a JSON file and load them:
    ```bash
    cd /root/.hermes/projects/denchclaw
    python3 scripts/rebattery/demand_survey_import.py --rows /tmp/<buyer>-buy-boxes.json          # dry run
@@ -86,7 +94,8 @@ Trade buyers added from a buy-box carry its `demand_id`, so offers and wins show
    "volume_unit"?, "max_price"?, "price_currency"?, "price_unit"?, "location"?, "note"?, "needed_by"?,
    "source_kind", "source_id", "source_label", "source_url"?, "observed_on"?}]}`. Spec values that are not in
    the lists are dropped, so check the dry run. Edits to existing rows go through the Demand page or its API.
-   Then set `buyer_last_reviewed_at = now()` on the company.
+   Then write the approved profile values and `buyer_last_reviewed_at = now()` in one update on the company, or
+   let Alex enter them on the Buyer tab.
 
 ## Rules
 

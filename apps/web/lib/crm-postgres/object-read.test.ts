@@ -688,6 +688,32 @@ describe("postgres object read adapter", () => {
     expect(countCall?.[1]).toEqual(["obj_work_task", "", "In Progress"]);
   });
 
+  it("matches multi-value fields (text[] columns such as tags) on any of the chosen values", async () => {
+    const base = queryPg.getMockImplementation()!;
+    queryPg.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("from information_schema.columns") && params?.[0] !== "crm_companies") {
+        return [...(await base(sql, params)), { column_name: "tags" }];
+      }
+      if (sql.includes("from crm_fields") && sql.includes("object_id = $1")) {
+        return [...(await base(sql, params)), { id: "f_tags", name: "Tags", type: "select", canonical_column: "tags", enum_multiple: true, sort_order: 9 }];
+      }
+      return base(sql, params);
+    });
+    const encode = (operator: string) => Buffer.from(JSON.stringify({
+      id: "root", conjunction: "and", rules: [{ id: "tag-rule", field: "Tags", operator, value: ["buyer", "ess-2026"] }],
+    })).toString("base64");
+
+    const { getPostgresObjectData } = await import("./object-read");
+    await getPostgresObjectData("people", new URL(`http://localhost?filters=${encodeURIComponent(encode("is_any_of"))}`));
+    const anyCall = queryPg.mock.calls.findLast(([sql]) => String(sql).includes("select count(*)"));
+    expect(String(anyCall?.[0])).toContain('e."tags" && $2::text[]');
+    expect(anyCall?.[1]).toContainEqual(["buyer", "ess-2026"]);
+
+    await getPostgresObjectData("people", new URL(`http://localhost?filters=${encodeURIComponent(encode("is_none_of"))}`));
+    const noneCall = queryPg.mock.calls.findLast(([sql]) => String(sql).includes("select count(*)"));
+    expect(String(noneCall?.[0])).toContain('(e."tags" is null or not (e."tags" && $2::text[]))');
+  });
+
   it("keeps unset enum values in negative enum filters", async () => {
     const filters = Buffer.from(
       JSON.stringify({
