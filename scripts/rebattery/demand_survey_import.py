@@ -133,6 +133,8 @@ def map_typeform_row(header, row):
     email = (stem("What's your email?") or stem("email")).lower()
     if not email or internal(email) or stem("Response Type") not in ("", "completed"):
         return None
+    if re.search(r"recycl", stem("What will you use these batteries for?"), re.I):
+        return None  # demand is reuse and second life only
     spec, notes, kwh = {}, [], []
     note_hits = {label: [] for label in NOTE_OPTIONS}
     for i, name in enumerate(header):
@@ -255,6 +257,8 @@ def map_formbricks(response, now=None):
         spec["min_soh"] = whole(soh)
     if not spec and not any(as_list(data.get(k)) for k in ("use_case", "lot_size", "regions", "notes")):
         return None  # an unfinished response with nothing in it
+    if re.search(r"recycl", str(data.get("use_case") or ""), re.I):
+        return None  # demand is reuse and second life only
     if not response.get("finished") and still_open(response, now):
         return None  # the buyer may still be filling it in
     if not response.get("finished"):

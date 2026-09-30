@@ -88,9 +88,13 @@ Rules:
 - Record only what THEY said or clearly confirmed. ReBattery's pitches, teasers and offers are not their demand.
 - request = a specific need now or by a date ("1,000 cells in 3 weeks"); standing = ongoing or repeat buying
   ("20-30 packs a month", "we buy LFP regularly"). A request they repeat three or more times is standing.
+- "wants" names what they want to BUY ("40ft BYD containerised BESS units, EXW or FOB, full BOM"), never a request for
+  a price or information ("EXW pricing for...").
 - One buy-box per distinct thing they want. When later messages change it, give the latest version and put the
   change in the note with its date. Set status from what happened later in the history.
 - Never invent or infer a value; unknown is null. Spec values must match LISTS exactly, else use the note.
+- Storage systems (BESS, containers): formats "Systems", origins "Stationary storage", the brand in system_brands
+  (not makes, which are vehicle makes).
 - Every buy-box, every profile value and every other fact needs evidence: a message_id from the input and a quote
   copied EXACTLY from that message (8 to 300 characters). No evidence, leave it out.
 - other_facts: anything else that would help match batteries to this buyer or deal with them and that the fields

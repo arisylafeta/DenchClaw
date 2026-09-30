@@ -91,7 +91,7 @@ class FormbricksMapping(unittest.TestCase):
         row = survey.map_formbricks({
             "id": "fb1", "created_at": "2026-07-17T07:50:28Z", "finished": True,
             "data": {"formats": ["Cells", "Modules", "Mixed lots / depends"], "chemistries": ["LFP", "NMC", "LCO"],
-                     "use_case": "Recycling", "condition": ["Used and tested", "Damaged / scrap"],
+                     "use_case": "Energy storage", "condition": ["Used and tested", "Damaged / scrap"],
                      "sources": ["EV packs", "Truck / eBus batteries"], "min_soh": "any", "lot_size": "2-5 MWh",
                      "regions": ["UK", "Europe"], "requirements": ["Photos", "SOH report"]},
             "variables": {"email": "BatterySolutions@exigo.example", "company": "Exigo Recycling pvt Ltd"}})
@@ -100,9 +100,13 @@ class FormbricksMapping(unittest.TestCase):
                                        "origins": ["Passenger EV", "Bus or truck"], "evidence": ["Photos"]})
         self.assertEqual((row["email"], row["company"], row["quantity"], row["observed_on"], row["source_id"]),
                          ("batterysolutions@exigo.example", "Exigo Recycling pvt Ltd", "Lots of 2-5 MWh", "2026-07-17", "formbricks:fb1"))
-        self.assertEqual(row["note"], "Use: Recycling\nFormats: Mixed lots / depends\nChemistries: LCO\nNeeds: SOH report\n"
+        self.assertEqual(row["note"], "Use: Energy storage\nFormats: Mixed lots / depends\nChemistries: LCO\nNeeds: SOH report\n"
                                       "Sources from: UK, Europe")
-        self.assertEqual(row["wants"], "Cells / Modules, LFP / NMC, for recycling")
+        self.assertEqual(row["wants"], "Cells / Modules, LFP / NMC, for energy storage")
+
+    def test_recycling_answers_are_not_demand(self):
+        self.assertIsNone(survey.map_formbricks({"id": "fb7", "finished": True, "data": {
+            "email": "r@recycler.example", "formats": ["Cells"], "use_case": "Recycling"}}))
 
     def test_waits_a_day_before_taking_an_unfinished_response(self):
         import datetime as dt

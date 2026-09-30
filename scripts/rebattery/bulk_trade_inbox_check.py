@@ -919,6 +919,7 @@ vague "keep us in mind".
 - "spec": only these keys, each a list of values copied exactly from its options, only what is stated:
 %(lists)s
   and numbers kwh_min, kwh_max (per unit), min_soh (0-100); mixed_ok true/false. {} when nothing is stated.
+  Storage systems (BESS, containers): formats "Systems", origins "Stationary storage", brand in system_brands, not makes.
 - "quote": copied EXACTLY from the source (8-300 characters). An empty list is a good answer.""" % {
     "volume_units": ", ".join(BUY_BOX["volume_units"]), "currencies": ", ".join(BUY_BOX["currencies"]),
     "price_units": ", ".join(BUY_BOX["price_units"]),

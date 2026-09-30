@@ -371,7 +371,7 @@ function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade }:
 const tierOrder = (tier: string | null) => ({ A: 0, B: 1, C: 2 } as Record<string, number>)[tier ?? ""] ?? 3;
 
 const MAIN_LISTS: SpecListKey[] = ["chemistries", "formats", "conditions", "origins"];
-const MORE_LISTS: SpecListKey[] = ["cell_formats", "makes", "cell_makers", "evidence", "excludes"];
+const MORE_LISTS: SpecListKey[] = ["cell_formats", "makes", "cell_makers", "system_brands", "evidence", "excludes"];
 
 /** Toggle chips for one spec list. */
 function SpecChips({ name, selected, onChange }: { name: SpecListKey; selected: string[]; onChange: (values: string[]) => void }) {
@@ -530,7 +530,7 @@ function DemandDialog({ demand, onClose, onSaved }: {
           <FormField label="Mixed batches">{form.select("mixed_ok", ["", "yes", "no"], { "": "Not known", yes: "OK", no: "One make and model" })}</FormField>
         </div>
         <details>
-          <summary className="cursor-pointer text-[13px] font-medium">Makes, cell makers, evidence, won&apos;t take</summary>
+          <summary className="cursor-pointer text-[13px] font-medium">Makes, cell makers, system brands, evidence, won&apos;t take</summary>
           <div className="mt-3 flex flex-col gap-3">
             {MORE_LISTS.map((key) => <SpecChips key={key} name={key} selected={lists[key] ?? []} onChange={setList(key)} />)}
           </div>

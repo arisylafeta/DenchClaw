@@ -12,7 +12,8 @@ Reply with ONLY JSON: {"buyer", "contact", "email", "wants", "quantity", "locati
 - "max_price" + "price_currency" (${CURRENCIES.join(", ")}) + "price_unit" (${PRICE_UNITS.join(", ")}).
 - "spec": only these keys, each a list of values copied exactly from its options, only when stated:
 ${SPEC_LIST_KEYS.map((key) => `  ${key}: ${SPEC_LISTS[key].join(" | ")}`).join("\n")}
-  and numbers kwh_min, kwh_max (per unit), min_soh (0-100); mixed_ok true/false.`;
+  and numbers kwh_min, kwh_max (per unit), min_soh (0-100); mixed_ok true/false.
+  Storage systems (BESS, containers): formats "Systems", origins "Stationary storage", brand in system_brands, not makes.`;
 
 /** Fills the Add demand form from pasted text, through the Hermes gateway. Values are for Alex to check. */
 export async function fillDemandFromText(text: string): Promise<DemandInput> {
