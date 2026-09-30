@@ -175,3 +175,46 @@ describe("Kanban column visibility", () => {
     expect(screen.queryByText("Completed")).toBeNull();
   });
 });
+
+describe("folded columns", () => {
+  const stageFields = [
+    { id: "name", name: "Name", type: "text" },
+    { id: "stage", name: "Stage", type: "enum", enum_values: ["Found", "Contacted", "Parked"] },
+  ];
+  const stageEntries = [
+    { entry_id: "d1", Name: "Backlog one", Stage: "Found" },
+    { entry_id: "d2", Name: "Backlog two", Stage: "Found" },
+    { entry_id: "d3", Name: "In talks", Stage: "Contacted" },
+  ];
+
+  it("starts the given columns folded, opens on click, and remembers the choice", async () => {
+    window.localStorage.clear();
+    const board = () => (
+      <ObjectKanban objectName="dismantler" fields={stageFields} entries={stageEntries} statuses={[]}
+        collapsedColumns={["Found", "Parked"]} />
+    );
+    const { unmount } = render(board());
+
+    expect(screen.getByText("In talks")).toBeTruthy();
+    expect(screen.queryByText("Backlog one")).toBeNull();
+    const found = screen.getByRole("button", { name: "Open Found, 2 entries" });
+    expect(screen.getByRole("button", { name: "Open Parked, 0 entries" })).toBeTruthy();
+
+    await userEvent.click(found);
+    expect(screen.getByText("Backlog one")).toBeTruthy();
+    unmount();
+
+    render(board());
+    expect(screen.getByText("Backlog two")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Fold Contacted" }));
+    expect(screen.queryByText("In talks")).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem("kanban-collapsed:dismantler")!)).toEqual(["Parked", "Contacted"]);
+  });
+
+  it("folds nothing by default", () => {
+    window.localStorage.clear();
+    render(<ObjectKanban objectName="other" fields={stageFields} entries={stageEntries} statuses={[]} />);
+    expect(screen.getByText("Backlog one")).toBeTruthy();
+    expect(screen.getByText("In talks")).toBeTruthy();
+  });
+});
