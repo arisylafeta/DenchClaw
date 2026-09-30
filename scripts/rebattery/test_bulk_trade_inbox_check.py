@@ -477,6 +477,13 @@ class DemandRun(unittest.TestCase):
             cur.execute("select status from crm_bulk_trade_check_runs where kind = 'match' order by id desc limit 1")
             self.assertEqual(cur.fetchone(), ("ok",))
 
+    def test_judge_keeps_the_first_of_a_repeated_pair(self):
+        reply = {"matches": [{"demand_id": "d1", "strength": "strong", "reason": "first"},
+                             {"demand_id": "d1", "strength": "partial", "reason": "again"}]}
+        with patch.object(check, "call_model", lambda system, user, key: reply):
+            pairs = check.judge([("lot1", {})], [{"id": "d1"}], "k", {"model_calls": 0, "warnings": []})
+        self.assertEqual(pairs, [{"lot_id": "lot1", "demand_id": "d1", "strength": "strong", "reason": "first"}])
+
     def test_matching_gives_the_seller_price_and_survives_a_model_failure(self):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""insert into crm_bulk_trade_fields (lot_id, field_key, value) values ('bt_dem', 'seller_price', '€29/kWh')

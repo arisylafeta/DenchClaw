@@ -1023,7 +1023,10 @@ room above it; when it does not, the pair is at best "partial" with price as the
 - "strong": the trade's batch is the kind of thing the buyer asked for (form, chemistry, size, quantity, use) and
   nothing obvious rules it out, including anything in spec "excludes".
 - "partial": a plausible fit with one clear catch (e.g. packs vs cells, region, price, volume); name the catch.
-"reason": one short plain sentence for Alex, naming the fit and any catch."""
+A row that names only a broad format or "lithium-ion" (e.g. "battery packs", "li-ion cells, modules and packs") with no
+chemistry, size, make, use or condition is at most "partial", with the catch "broad buy-box, confirm what they want".
+Give each trade and row at most once. "reason": one short plain sentence for Alex about THAT row's buyer only,
+naming the fit and any catch."""
 
 MATCH_ROWS_PER_CALL = 60
 # What a demand row is judged on. A "Still wanted" confirmation, a close or a contact edit changes none of it.
@@ -1046,7 +1049,7 @@ def judge(trades, rows, key, report):
     """Asks the model which (trade, row) pairs fit, in calls of at most MATCH_ROWS_PER_CALL rows. Returns the valid
     pairs, or None when a call failed (so nothing is recorded as judged)."""
     trade_ids = {lot for lot, _ in trades}
-    pairs = []
+    pairs, seen = [], set()
     for start in range(0, len(rows), MATCH_ROWS_PER_CALL):
         chunk = rows[start:start + MATCH_ROWS_PER_CALL]
         row_ids = {r["id"] for r in chunk}
@@ -1064,7 +1067,8 @@ def judge(trades, rows, key, report):
                 continue
             lot = m.get("trade_id") if m.get("trade_id") in trade_ids else only
             if lot and m.get("demand_id") in row_ids and m.get("strength") in ("strong", "partial") \
-                    and str(m.get("reason") or "").strip():
+                    and str(m.get("reason") or "").strip() and (lot, m["demand_id"]) not in seen:
+                seen.add((lot, m["demand_id"]))  # the model sometimes repeats a pair; the first one counts
                 pairs.append({"lot_id": lot, "demand_id": m["demand_id"], "strength": m["strength"],
                               "reason": str(m["reason"]).strip()[:300]})
     return pairs
