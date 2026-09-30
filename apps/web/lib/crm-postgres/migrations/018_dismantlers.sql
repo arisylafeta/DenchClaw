@@ -1,158 +1,90 @@
 begin;
 
 -- Dismantlers: ATFs, breakers and dismantlers we want supplying through ReBattery.
--- One row per dismantler, and every row is a CRM company. The tab is a generic
--- CRM object, so Board, List and Table views come from the workspace with no
--- custom screens or API routes.
+-- One row per dismantler, and every dismantler is a CRM company (its name is the
+-- company's name). The Dismantlers screen reads and writes these through
+-- /api/dismantlers; every change is logged in crm_dismantler_events.
 
 create table if not exists crm_dismantlers (
-  id text primary key default gen_random_uuid()::text,
-  name text,
+  id text primary key default ('dm_' || gen_random_uuid()),
   company_id text not null unique references crm_companies(id) on delete restrict,
-  stage text not null default 'Found',
-  -- Dates are YYYY-MM-DD text: the workspace date picker reads and writes that
-  -- form, and a date column would reach it as a full timestamp.
-  stage_since text not null default to_char(current_date, 'YYYY-MM-DD'),
+  stage text not null default 'Found'
+    check (stage in ('Found', 'Contacted', 'Onboarding', 'Live', 'Syncing', 'Parked')),
+  stage_since date not null default current_date,
+  parked_from text check (parked_from in ('Found', 'Contacted', 'Onboarding', 'Live', 'Syncing')),
+  park_reason text,
+  revisit_on date,
   next_step text,
-  next_step_due text,
-  owner_id uuid references crm_users(id) on delete set null,
-  route text,
+  next_step_due date,
+  next_step_person_id text references crm_people(id) on delete set null,
+  waiting_on text not null default 'us' check (waiting_on in ('us', 'them')),
+  waiting_since date,
+  owner_user_id uuid references crm_users(id) on delete set null,
+  goal boolean not null default false,
+  route text check (route in ('eBay', 'API', 'Other')),
   country text,
   ebay_username text,
+  ebay_listings integer check (ebay_listings >= 0),
   platform_account_id text,
+  source text,
   notes text,
+  -- Setup checklist: the date each step happened.
+  setup_account_on date,
+  setup_route_on date,
+  setup_connected_on date,
+  setup_first_stock_on date,
+  setup_first_sync_on date,
+  setup_second_sync_on date,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint crm_dismantlers_stage_since_check
-    check (stage_since = to_char(stage_since::date, 'YYYY-MM-DD')),
-  constraint crm_dismantlers_next_step_due_check
-    check (next_step_due is null or next_step_due = to_char(next_step_due::date, 'YYYY-MM-DD'))
+  updated_at timestamptz not null default now()
 );
 
-create index if not exists crm_dismantlers_stage_due_idx
-  on crm_dismantlers(stage, next_step_due);
+create index if not exists crm_dismantlers_stage_due_idx on crm_dismantlers(stage, next_step_due);
 
--- Keeps the "every dismantler is a CRM company" rule, whichever way a row is made:
--- a row with only a name links the one company of that name or creates it;
--- a row with only a company takes the company's name.
-create or replace function crm_dismantlers_link_company()
-returns trigger
-language plpgsql
-as $$
-declare
-  matches text[];
-begin
-  new.name := nullif(btrim(coalesce(new.name, '')), '');
-  new.next_step_due := nullif(btrim(coalesce(new.next_step_due, '')), '');
-  if new.company_id is null then
-    if new.name is null then
-      raise exception 'A dismantler needs a name or a company';
-    end if;
-    select array_agg(id) into matches
-      from crm_companies where lower(btrim(name)) = lower(new.name);
-    if coalesce(array_length(matches, 1), 0) > 1 then
-      raise exception 'Several CRM companies are called "%". Pick the right one in Company.', new.name;
-    end if;
-    new.company_id := coalesce(matches[1], gen_random_uuid()::text);
-    if matches is null then
-      insert into crm_companies (id, name) values (new.company_id, new.name);
-    end if;
-  end if;
-  if new.name is null then
-    select name into new.name from crm_companies where id = new.company_id;
-  end if;
-  update crm_companies
-     set tags = array_append(coalesce(tags, '{}'), 'dismantler'), updated_at = now()
-   where id = new.company_id and not ('dismantler' = any(coalesce(tags, '{}')));
-  if tg_op = 'UPDATE' then
-    if new.stage is distinct from old.stage then
-      new.stage_since := to_char(current_date, 'YYYY-MM-DD');
-    end if;
-    if new.company_id is distinct from old.company_id then
-      update crm_companies set tags = array_remove(tags, 'dismantler'), updated_at = now()
-       where id = old.company_id;
-    end if;
-  end if;
-  new.updated_at := now();
-  return new;
-end;
-$$;
+-- Append-only history: stage moves, next steps, setup ticks.
+create table if not exists crm_dismantler_events (
+  id bigserial primary key,
+  dismantler_id text not null references crm_dismantlers(id) on delete cascade,
+  kind text not null,
+  changes jsonb not null default '{}'::jsonb,
+  actor_user_id uuid references crm_users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
 
-drop trigger if exists crm_dismantlers_link_company_trigger on crm_dismantlers;
-create trigger crm_dismantlers_link_company_trigger
-  before insert or update on crm_dismantlers
-  for each row execute function crm_dismantlers_link_company();
+create index if not exists crm_dismantler_events_dismantler_idx on crm_dismantler_events(dismantler_id, id);
 
-create or replace function crm_dismantlers_untag_company()
+create or replace function crm_dismantler_events_append_only()
 returns trigger
 language plpgsql
 as $$
 begin
-  update crm_companies set tags = array_remove(tags, 'dismantler'), updated_at = now()
-   where id = old.company_id;
-  return old;
+  -- Deleting a dismantler removes its history with it; nothing else rewrites history.
+  if tg_op = 'DELETE' and not exists (select 1 from crm_dismantlers where id = old.dismantler_id) then
+    return old;
+  end if;
+  raise exception 'crm_dismantler_events is append-only';
 end;
 $$;
 
-drop trigger if exists crm_dismantlers_untag_company_trigger on crm_dismantlers;
-create trigger crm_dismantlers_untag_company_trigger
-  after delete on crm_dismantlers
-  for each row execute function crm_dismantlers_untag_company();
+drop trigger if exists crm_dismantler_events_append_only_trigger on crm_dismantler_events;
+create trigger crm_dismantler_events_append_only_trigger
+  before update or delete on crm_dismantler_events
+  for each row execute function crm_dismantler_events_append_only();
 
--- Cards show the first three filled fields after the name, so next step, due
--- date and owner come first; Company repeats the name and sits later.
-
--- The Company field needs a company object to point at. Production already has
--- one; this only covers a fresh database.
-insert into crm_objects (id, name, entity_table, description, display_field, hidden_in_sidebar)
-values ('reb_company_object', 'company', 'crm_companies', 'CRM companies', 'Name', true)
-on conflict (name) do nothing;
-
+-- Sidebar entry. The workspace shows the Dismantlers screen for this object instead
+-- of the generic table, and generic edits are refused (immutable).
 insert into crm_objects
-  (id, name, entity_table, description, default_view, display_field, sort_order)
+  (id, name, entity_table, description, default_view, immutable, hidden_in_sidebar, sort_order)
 values
   ('reb_dismantler_object', 'dismantler', 'crm_dismantlers',
    'ATFs, breakers and dismantlers, from first found to syncing stock with ReBattery',
-   'kanban', 'Name', 3)
+   'table', true, false, 3)
 on conflict (name) do update set
   entity_table = excluded.entity_table,
   description = excluded.description,
-  default_view = excluded.default_view,
-  display_field = excluded.display_field,
+  immutable = excluded.immutable,
+  hidden_in_sidebar = excluded.hidden_in_sidebar,
   sort_order = excluded.sort_order,
   updated_at = now();
-
-insert into crm_fields (id, object_id, name, type, canonical_column, enum_values, enum_colors, sort_order) values
-  ('reb_dismantler_fld_name', 'reb_dismantler_object', 'Name', 'text', 'name', null, null, 0),
-  ('reb_dismantler_fld_stage', 'reb_dismantler_object', 'Stage', 'enum', 'stage',
-   '["Found", "Contacted", "Onboarding", "Live", "Syncing", "Parked"]',
-   '["#94a3b8", "#60a5fa", "#f59e0b", "#22c55e", "#15803d", "#a8a29e"]', 1),
-  ('reb_dismantler_fld_next_step', 'reb_dismantler_object', 'Next step', 'text', 'next_step', null, null, 2),
-  ('reb_dismantler_fld_next_step_due', 'reb_dismantler_object', 'Next step due', 'date', 'next_step_due', null, null, 3),
-  ('reb_dismantler_fld_route', 'reb_dismantler_object', 'Route', 'enum', 'route',
-   '["eBay", "API", "Other"]', null, 5),
-  ('reb_dismantler_fld_country', 'reb_dismantler_object', 'Country', 'text', 'country', null, null, 6),
-  ('reb_dismantler_fld_ebay', 'reb_dismantler_object', 'eBay username', 'text', 'ebay_username', null, null, 8),
-  ('reb_dismantler_fld_platform', 'reb_dismantler_object', 'Platform account', 'text', 'platform_account_id', null, null, 9),
-  ('reb_dismantler_fld_stage_since', 'reb_dismantler_object', 'In stage since', 'date', 'stage_since', null, null, 10),
-  ('reb_dismantler_fld_notes', 'reb_dismantler_object', 'Notes', 'text', 'notes', null, null, 11)
-on conflict (object_id, name) do update set
-  type = excluded.type,
-  canonical_column = excluded.canonical_column,
-  enum_values = excluded.enum_values,
-  enum_colors = excluded.enum_colors,
-  sort_order = excluded.sort_order;
-
-insert into crm_fields (id, object_id, name, type, canonical_column, related_object_id, relationship_type, sort_order)
-select 'reb_dismantler_fld_company', 'reb_dismantler_object', 'Company', 'relation', 'company_id', c.id, 'many_to_one', 7
-  from crm_objects c where c.name = 'company'
-union all
-select 'reb_dismantler_fld_owner', 'reb_dismantler_object', 'Owner', 'relation', 'owner_id', u.id, 'many_to_one', 4
-  from crm_objects u where u.name = 'crm_user'
-on conflict (object_id, name) do update set
-  canonical_column = excluded.canonical_column,
-  related_object_id = excluded.related_object_id,
-  relationship_type = excluded.relationship_type,
-  sort_order = excluded.sort_order;
 
 commit;

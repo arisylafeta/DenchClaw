@@ -31,6 +31,8 @@ const canonicalTableByObjectName: Record<string, string> = {
 // return a false-success response. Routes map the "read-only" message to HTTP 403.
 const READ_ONLY_OBJECTS = new Set([
   "campaign",
+  // Written only through /api/dismantlers, which logs each change.
+  "dismantler",
   "campaigns",
   "automation_loop",
   "automation_loop_run",

@@ -129,14 +129,15 @@ export function todayInLondon(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(now);
 }
 
-function daysBetween(from: string, to: string): number {
+export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 // Fixed names: newer ICU versions print "Sept" for en-GB.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function dayMonth(date: string): string {
+/** "2 Oct" from 2026-10-02. */
+export function dayMonth(date: string): string {
   const [, month, day] = date.split("-").map(Number);
   return `${day} ${MONTHS[month - 1]}`;
 }
