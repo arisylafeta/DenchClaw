@@ -6,7 +6,7 @@
 
 FILE holds {"rows": [...]}. Each row has a name and optionally: company (an exact CRM company
 name to link), rename_to (a clearer name for that company), country, ebay_username,
-ebay_listings, route, stage, goal, next_step, next_step_due, waiting_on, waiting_since,
+ebay_listings, stage, goal, next_step, next_step_due,
 person_email (who the next step is for), attach_people (emails of CRM people with no company, to
 attach to this company), source, notes, and website and phone (filled on the company when blank).
 
@@ -25,10 +25,9 @@ from zoneinfo import ZoneInfo
 import psycopg2
 import psycopg2.extras
 
-STAGES = {"Found", "Contacted", "Onboarding", "Live", "Syncing", "Parked"}
-ROUTES = {"eBay", "API", "Other", None}
-FIELDS = ["country", "ebay_username", "ebay_listings", "route", "stage", "goal", "next_step",
-          "next_step_due", "waiting_on", "waiting_since", "source", "notes"]
+STAGES = {"Found", "Talking", "Signed up", "Live", "Parked"}
+FIELDS = ["country", "ebay_username", "ebay_listings", "stage", "goal", "next_step",
+          "next_step_due", "source", "notes"]
 
 
 def company_for(cur, row):
@@ -67,8 +66,8 @@ def main():
             raise SystemExit(f"No CRM user {args.actor}.")
         for row in rows:
             stage = row.get("stage", "Found")
-            if stage not in STAGES or row.get("route") not in ROUTES:
-                raise SystemExit(f"{row['name']}: bad stage or route.")
+            if stage not in STAGES:
+                raise SystemExit(f"{row['name']}: unknown stage {stage!r}.")
             company = company_for(cur, row)
             if company:
                 cur.execute("select 1 from crm_dismantlers where company_id = %s", (company["id"],))
@@ -102,8 +101,6 @@ def main():
             values = {key: row[key] for key in FIELDS if row.get(key) is not None}
             values.setdefault("stage", "Found")
             values.setdefault("country", (company or {}).get("country"))
-            if values.get("waiting_on") == "them":
-                values.setdefault("waiting_since", today)
             values["next_step_person_id"] = person_id
             values = {key: value for key, value in values.items() if value is not None}
             dismantler_id = f"dm_{uuid.uuid4()}"
