@@ -2499,6 +2499,9 @@ td:has(> div > :empty) {
   --bt-blue-bg: #e8f0ff;
   --bt-blue-border: #3b82f655;
   --bt-grey-border: #8a8a8a33;
+  --bt-purple: #6d28d9;
+  --bt-purple-bg: #f3eeff;
+  --bt-purple-border: #8b5cf655;
   --bt-bar: #0a0a0a;
   --bt-on-bar: #ffffff;
   --bt-bar-border: #3d3d3d;
@@ -2540,6 +2543,9 @@ td:has(> div > :empty) {
   --bt-blue-bg: rgba(59, 130, 246, 0.16);
   --bt-blue-border: rgba(59, 130, 246, 0.4);
   --bt-grey-border: rgba(163, 163, 163, 0.3);
+  --bt-purple: #c4b5fd;
+  --bt-purple-bg: rgba(139, 92, 246, 0.16);
+  --bt-purple-border: rgba(139, 92, 246, 0.4);
   --bt-bar: #222222;
   --bt-bar-border: #525252;
 }
