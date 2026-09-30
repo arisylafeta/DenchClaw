@@ -2,7 +2,7 @@
 """Reads Alex's email history one company at a time and proposes buy-boxes and buyer profile values.
 
   buyer_email_mine.py extract --companies ID,ID [--also PERSON_ID=COMPANY_ID]   # one batch, read-only
-  buyer_email_mine.py extract --top 20 --skip-reviewed                          # the next 20 busiest companies
+  buyer_email_mine.py extract --top 20 --skip-reviewed --workers 4              # the next 20 busiest, 4 at a time
   buyer_email_mine.py apply RUN_DIR [--only ID,ID] [--apply]                    # load an approved batch
 
 extract writes a run folder under /root/.hermes/workspace/artifacts/buyer-email-mine/ with results.json (every
@@ -23,6 +23,8 @@ import hashlib
 import json
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -340,26 +342,38 @@ def extract(conn, args):
         key = check.gateway_key()
         run = RUNS / dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run.mkdir(parents=True, exist_ok=True)
-        results = []
+        # Read every company's history first; the model calls then run in parallel.
+        jobs = []
         for company_id in ids:
             person_ids = [p for p, c in people.items() if c == company_id]
             messages, cut = as_input(company_history(cur, mailbox, person_ids)) if person_ids else ([], 0)
-            base = {"company_id": company_id, "name": names.get(company_id, company_id), "messages_read": len(messages),
-                    "messages_cut": cut}
+            jobs.append(({"company_id": company_id, "name": names.get(company_id, company_id),
+                          "messages_read": len(messages), "messages_cut": cut}, messages))
+        results = [None] * len(jobs)
+        lock = threading.Lock()
+
+        def run_one(index):
+            base, messages = jobs[index]
             if not messages:
-                results.append({**base, "role": "other", "summary": "No email in Alex's mailbox.", "buy_boxes": [],
-                                "profile": {}, "other_facts": [], "dropped": 0})
-                continue
-            print(f"reading {base['name']}: {len(messages)} messages", file=sys.stderr, flush=True)
-            try:
-                raw = check.call_model(SYSTEM, json.dumps({"COMPANY": base["name"], "MESSAGES": messages},
-                                                          ensure_ascii=False, default=str), key)
-            except Exception as err:  # one bad company does not stop the batch
-                results.append({**base, "role": "other", "summary": f"Model call failed ({type(err).__name__}).",
-                                "buy_boxes": [], "profile": {}, "other_facts": [], "dropped": 0, "error": True})
-                continue
-            results.append({**base, **validate(raw, messages)})
-            (run / "results.json").write_text(json.dumps(results, indent=1, ensure_ascii=False, default=str))
+                result = {**base, "role": "other", "summary": "No email in Alex's mailbox.", "buy_boxes": [],
+                          "profile": {}, "other_facts": [], "dropped": 0}
+            else:
+                print(f"reading {base['name']}: {len(messages)} messages", file=sys.stderr, flush=True)
+                try:
+                    raw = check.call_model(SYSTEM, json.dumps({"COMPANY": base["name"], "MESSAGES": messages},
+                                                              ensure_ascii=False, default=str), key)
+                    result = {**base, **validate(raw, messages)}
+                except Exception as err:  # one bad company does not stop the batch
+                    result = {**base, "role": "other", "summary": f"Model call failed ({type(err).__name__}).",
+                              "buy_boxes": [], "profile": {}, "other_facts": [], "dropped": 0, "error": True}
+                print(f"done {base['name']}: {result['role']}, {len(result['buy_boxes'])} buy-boxes", file=sys.stderr, flush=True)
+            with lock:
+                results[index] = result
+                (run / "results.json").write_text(json.dumps([r for r in results if r], indent=1,
+                                                             ensure_ascii=False, default=str))
+
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            list(pool.map(run_one, range(len(jobs))))
         for r in results:
             r["conflicts"] = conflicts(cur, r)
     (run / "results.json").write_text(json.dumps(results, indent=1, ensure_ascii=False, default=str))
@@ -462,6 +476,7 @@ def main():
     e.add_argument("--also", action="append", default=[], help="PERSON_ID=COMPANY_ID: read this person's mail for that company")
     e.add_argument("--top", type=int, default=20)
     e.add_argument("--skip-reviewed", action="store_true", help="leave out companies in earlier runs")
+    e.add_argument("--workers", type=int, default=1, help="model calls at once")
     a = sub.add_parser("apply")
     a.add_argument("run")
     a.add_argument("--only", help="comma-separated company ids to load")
