@@ -4,6 +4,7 @@ import { getTradeDetail } from "@/lib/crm-postgres/bulk-trade-details";
 import { appliedChanges, historyStatus, tradeProposals } from "@/lib/crm-postgres/bulk-trade-proposals";
 import { badRequest, guardBulkTrades, linkedWrite, notFound, readJson } from "@/lib/bulk-trades-route";
 import { trackedLinkBase } from "@/lib/tracked-links";
+import { suggestedBuyers } from "@/lib/crm-postgres/bulk-demand";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,11 +15,11 @@ export async function GET(_req: Request, { params }: Params) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
   const { id } = await params;
-  const [detail, proposals, applied, history] = await Promise.all([
-    getTradeDetail(id), tradeProposals(id), appliedChanges(id), historyStatus(id),
+  const [detail, proposals, applied, history, suggested] = await Promise.all([
+    getTradeDetail(id), tradeProposals(id), appliedChanges(id), historyStatus(id), suggestedBuyers(id),
   ]);
   return detail
-    ? Response.json({ ...detail, proposals, applied, history, link_tracking: trackedLinkBase() !== null })
+    ? Response.json({ ...detail, proposals, applied, history, suggested, link_tracking: trackedLinkBase() !== null })
     : notFound("Trade");
 }
 

@@ -382,6 +382,67 @@ class HistoryRun(unittest.TestCase):
         self.assertEqual(run, ("history", "ok", 3))
 
 
+@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+class DemandRun(unittest.TestCase):
+    def setUp(self):
+        import psycopg2
+        self.conn = psycopg2.connect(TEST_URL)
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""
+              insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
+                values ('bt_dem', 'supply', 'Demand match trade', '', '', 'confirmed', 'With buyers', 'packs') on conflict do nothing;
+              insert into crm_bulk_trade_demand (id, buyer, email, wants, confirmed_on)
+                values ('btd_open', 'Green Voltage', 'adam@gv.example', 'Matched packs in repeat batches', '2026-09-18'),
+                       ('btd_hid', 'Somerset EV', null, 'MEB modules', '2026-08-14') on conflict do nothing;
+              insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason, hidden)
+                values ('btd_hid', 'bt_dem', 'partial', 'old', true) on conflict do nothing;
+            """)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_screen_turns_buy_requests_into_cards_and_updates_known_buyers(self):
+        new = {**SOURCE, "id": "d1", "from": "dawid.py@revoxa.example",
+               "text": "Subject: LFP\n\nWe are looking for LFP batteries from EV or BESS applications, complete packs or modules."}
+        known = {**SOURCE, "id": "d2", "from": "adam@gv.example",
+                 "text": "Subject: packs\n\nCan you supply matched packs or modules in repeat batches, with test data?"}
+        seller = {**SOURCE, "id": "d3", "text": "Subject: stock\n\nWe have 400 packs available. Are you looking for batteries?"}
+        reply = {"demands": [
+            {"source_id": "d1", "buyer_company": "Revoxa py buyer", "contact_email": "dawid.py@revoxa.example", "wants": "LFP packs or modules",
+             "quote": "We are looking for LFP batteries from EV or BESS applications"},
+            {"source_id": "d2", "buyer_company": "Green Voltage", "wants": "Matched packs, repeat batches",
+             "quote": "Can you supply matched packs or modules in repeat batches"},
+            {"source_id": "d3", "buyer_company": "Seller", "wants": "packs", "quote": "an invented line that is not there"},
+        ]}
+        report = {"warnings": []}
+        with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur, \
+             patch.object(check, "call_model", lambda system, user, key: reply):
+            cards = check.screen_demand(cur, [new, known, seller], "k", report)
+        self.assertEqual([(c["proposed"]["buyer"], c["target"]) for c in cards], [("Revoxa py buyer", None), ("Green Voltage", "btd_open")])
+        self.assertEqual(cards[0]["proposed"]["email"], "dawid.py@revoxa.example")
+
+    def test_matching_runs_once_per_change_and_keeps_not_a_fit_hidden(self):
+        calls = []
+
+        def fake_model(system, user, key):
+            calls.append(json.loads(user)["TRADE"]["title"])
+            return {"matches": [{"demand_id": "btd_open", "strength": "strong", "reason": "A matched lot"},
+                                {"demand_id": "btd_hid", "strength": "partial", "reason": "Packs, not modules"},
+                                {"demand_id": "btd_nope", "strength": "strong", "reason": "not a real row"}]}
+
+        with patch.object(check, "call_model", fake_model):
+            check.match_demand(self.conn, "k", {"warnings": []})
+            check.match_demand(self.conn, "k", {"warnings": []})  # nothing changed: no new call
+            with self.conn, self.conn.cursor() as cur:
+                cur.execute("update crm_bulk_trade_demand set wants = 'Matched packs, 300 kWh builds', updated_at = now() + interval '1 second' where id = 'btd_open'")
+            check.match_demand(self.conn, "k", {"warnings": []})
+        with self.conn.cursor() as cur:
+            cur.execute("select demand_id, strength, hidden from crm_bulk_trade_demand_matches where lot_id = 'bt_dem' order by 1")
+            rows = cur.fetchall()
+        self.assertEqual(calls.count("Demand match trade"), 2)
+        self.assertEqual(rows, [("btd_hid", "partial", True), ("btd_open", "strong", False)])
+
+
 if __name__ == "__main__":
     unittest.main()
 

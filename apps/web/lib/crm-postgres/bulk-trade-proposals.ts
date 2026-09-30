@@ -5,6 +5,7 @@ import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
 import { createBulkTrade, updateBulkTrade } from "./bulk-trades";
 import { addBuyer, addContact, recordFile, setField, updateBuyer } from "./bulk-trade-details";
+import { addDemand, crmIdsForEmail, updateDemand } from "./bulk-demand";
 
 const PROPOSAL_SELECT = `
   select id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url, source_label,
@@ -196,6 +197,24 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       return lotId; // Acknowledged; Alex handles the thread by hand.
     case "bid":
       throw new Error("Bids from email are added automatically.");
+    case "possible_demand": {
+      const wants = text(proposed.wants);
+      const source = { source_label: p.source_label, source_url: p.source_url, source_quote: p.quote };
+      // Only what the email states; an update never blanks a value it does not mention.
+      const details = Object.fromEntries(Object.entries({
+        wants, quantity: text(proposed.quantity), location: text(proposed.location), confirmed_on: p.source_date,
+      }).filter(([, value]) => value)) as { wants?: string; quantity?: string; location?: string; confirmed_on?: string };
+      const demandId = text(proposed.demand_id);
+      if (demandId) {
+        if (!(await updateDemand(demandId, details, source))) throw new Error("That demand row no longer exists.");
+        return null;
+      }
+      const buyer = text(proposed.buyer);
+      if (!buyer || !wants) throw new Error("The demand has no buyer or no want.");
+      const email = text(proposed.email);
+      await addDemand({ ...details, wants, buyer, contact: text(proposed.contact), email, ...(await crmIdsForEmail(email)) }, user.id, source);
+      return null;
+    }
     case "link_auction": {
       // The auction sync fills in its people on its next run.
       const linked = await queryPg(

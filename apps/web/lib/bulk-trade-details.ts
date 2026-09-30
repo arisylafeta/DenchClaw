@@ -157,7 +157,7 @@ export type TradeFile = {
 
 export type ProposalKind =
   | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade"
-  | "trade_kind" | "bid" | "link_auction";
+  | "trade_kind" | "bid" | "link_auction" | "possible_demand";
 
 /**
  * Something the inbox check found in Gmail or Granola. Most findings are applied straight away
@@ -197,6 +197,7 @@ export const CHANGE_NOUN: Record<ProposalKind, [string, string]> = {
   next_step: ["next step", "next steps"],
   trade_kind: ["trade kind", "trade kinds"],
   link_auction: ["auction", "auctions"],
+  possible_demand: ["demand", "demand"],
   needs_triage: ["thread", "threads"],
   possible_trade: ["trade", "trades"],
 };
@@ -252,6 +253,8 @@ export type TradeDetail = {
   applied?: AppliedChange[];
   /** The marketplace auction, when the trade is sold through one. */
   auction?: TradeAuction | null;
+  /** Open buyer demand that fits this trade, from the daily matching. */
+  suggested?: import("./bulk-demand").SuggestedBuyer[];
   /** Latest history pass over this trade's past emails and calls. */
   history?: HistoryStatus;
 };
@@ -346,7 +349,7 @@ export function teaserText(trade: BulkTrade, fields: TradeField[], recipient?: s
 // Validation
 // ---------------------------------------------------------------------------
 
-type Parsed<T> = { value: T } | { error: string };
+export type Parsed<T> = { value: T } | { error: string };
 
 function isDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -362,10 +365,10 @@ function asObject(body: unknown): Record<string, unknown> | null {
   return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
 }
 
-type Rule = "text" | "date" | readonly string[];
+export type Rule = "text" | "date" | readonly string[];
 
 /** Checks known keys only; unknown keys are an error. Empty text and dates become null. */
-function parseShape(body: unknown, rules: Record<string, Rule>, required: string[] = []): Parsed<Record<string, unknown>> {
+export function parseShape(body: unknown, rules: Record<string, Rule>, required: string[] = []): Parsed<Record<string, unknown>> {
   const input = asObject(body);
   if (!input) return { error: "Body must be an object." };
   const out: Record<string, unknown> = {};
@@ -474,7 +477,6 @@ export function bidLabel(bid: Bid): string {
 export type PersonMatch = { id: string; name: string; company: string | null; email: string | null; opted_out: boolean };
 export type CompanyMatch = { id: string; name: string; people: number };
 
-/** Strongest signal first: "Bounced 24 Sep", "Clicked 25 Sep", "Opened …", "Delivered …", "Sent …". */
 const CURRENCY_SIGN: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
 
 /** "€31.5/kWh EXW" or "Buy now 2 × $1,200". */
@@ -498,6 +500,7 @@ export function auctionLabel(activity: AuctionActivity): { label: string; tone: 
   return null;
 }
 
+/** Strongest signal first: "Bounced 24 Sep", "Clicked 25 Sep", "Opened …", "Delivered …", "Sent …". */
 export function trackingLabel(tracking: EmailTracking): { label: string; tone: "red" | "green" | "grey" } | null {
   const pick = (
     [

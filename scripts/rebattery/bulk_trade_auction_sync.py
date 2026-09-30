@@ -456,6 +456,9 @@ def run(conn, args, platform=None):
     except Exception as err:
         check.fail_run(conn, run_id, err)
         raise
+    key = check.gateway_key()
+    if key and not args.dry_run and not getattr(args, "no_match", False):
+        check.match_demand(conn, key, report)  # new auction trades and buyers change who fits
     json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
     print()
     return 0

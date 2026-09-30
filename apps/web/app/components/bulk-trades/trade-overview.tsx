@@ -19,6 +19,7 @@ import { BuyersTable } from "./buyers-table";
 import { EmailDialog } from "./email-dialog";
 import { FileLink, FileThumb } from "./file-preview";
 import { InboxUpdates } from "./inbox-updates";
+import { SuggestedBuyers } from "./suggested-buyers";
 import {
   Card,
   ErrorText,
@@ -73,6 +74,7 @@ export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts
         onProposalDecided={onProposalDecided}
         onBuyer={onBuyer}
       />
+      <SuggestedBuyers tradeId={trade.id} suggested={detail.suggested ?? []} onChanged={onProposalDecided} />
       {detail.auction && <AuctionCard tradeId={trade.id} auction={detail.auction} today={today} onChanged={onProposalDecided} />}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         <MissingCard detail={detail} onTradePatch={onTradePatch} />

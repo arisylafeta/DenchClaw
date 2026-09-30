@@ -15,6 +15,7 @@ const ACCEPT_LABEL: Record<Proposal["kind"], string> = {
   trade_kind: "Set kind",
   bid: "Add bid",
   link_auction: "Link auction",
+  possible_demand: "Add demand",
   possible_trade: "Create trade",
 };
 
@@ -23,10 +24,12 @@ type Props = {
   /** Called after Alex accepts or ignores; lot_id is the trade it applied to. */
   onDecided: (proposal: Proposal, action: "accept" | "ignore", lotId: string | null) => void;
   compact?: boolean;
+  /** Overrides the accept button's wording. */
+  acceptLabel?: string;
 };
 
 /** One inbox-check finding waiting for Alex, with its quote and source. Nothing changes until Accept. */
-export function ProposalRow({ proposal, onDecided, compact }: Props) {
+export function ProposalRow({ proposal, onDecided, compact, acceptLabel }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,7 +72,7 @@ export function ProposalRow({ proposal, onDecided, compact }: Props) {
         <ErrorText error={error} />
       </div>
       <button type="button" disabled={saving} onClick={() => decide("accept")} className={`${darkButtonClass} h-8`} style={darkButtonStyle}>
-        {ACCEPT_LABEL[proposal.kind]}
+        {acceptLabel ?? ACCEPT_LABEL[proposal.kind]}
       </button>
       {proposal.kind !== "needs_triage" && (
         <button type="button" disabled={saving} onClick={() => decide("ignore")} className={`${buttonClass} h-8`} style={buttonStyle}>

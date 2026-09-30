@@ -92,7 +92,7 @@ class SyncRun(unittest.TestCase):
         views = [{"auction_id": "a69", "first_viewed_at": "2026-09-27T09:00:00+00:00", "last_viewed_at": "2026-09-29T09:00:00+00:00",
                   "view_count": 3, "email": "looker@viewco.example"}]
         platform = FakePlatform(auctions, submissions, views)
-        args = type("Args", (), {"dry_run": False})
+        args = type("Args", (), {"dry_run": False, "no_match": True})
         with redirect_stdout(io.StringIO()):
             sync.run(conn, args, platform)
             sync.run(conn, args, platform)  # nothing new the second time

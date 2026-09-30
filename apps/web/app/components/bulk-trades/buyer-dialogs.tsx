@@ -232,7 +232,7 @@ export function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onM
  * Search CRM people and companies. A company fills the buyer name; a person also fills the contact
  * and links them, so emails to them are tracked on this trade.
  */
-function CrmSearch({ onCompany, onPerson }: {
+export function CrmSearch({ onCompany, onPerson }: {
   onCompany: (company: CompanyMatch) => void;
   onPerson: (person: PersonMatch) => void;
 }) {

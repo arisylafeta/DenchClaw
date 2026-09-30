@@ -6,6 +6,7 @@ it is about, and update those trades with what it finds.
   bulk_trade_inbox_check.py --dry-run        # print what it would do, write nothing
   bulk_trade_inbox_check.py --summary        # the 08:00 list of overdue and due-today steps
   bulk_trade_inbox_check.py --history LOT_ID # one-off pass over a trade's whole email and call history
+  bulk_trade_inbox_check.py --match          # match open demand to live trades that changed
   ... --only-at 08:00,10:30                  # act only within 15 minutes after these UK times
 
 Hermes cron runs on UTC, so the jobs fire every half hour and --only-at keeps them on UK time
@@ -27,11 +28,15 @@ Sources:
    they replaced, so each can be undone in the app. A value Alex entered or accepted is never
    overwritten: a different value from email becomes a conflict for him to settle. Buyer status
    changes, unclear threads and possible new trades stay as cards for Alex.
+5. Demand. New mail and calls in which someone asks to buy batteries in bulk become "possible
+   demand" cards; after each run, live trades whose facts or the open demand changed are matched
+   against open demand (one model call per changed trade) for their Suggested buyers.
 Every run is recorded in crm_bulk_trade_check_runs, including failures.
 """
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import mimetypes
 import os
@@ -616,7 +621,7 @@ def insert_proposal(cur, run_id, lot_id, p, status="new"):
 
 # Applied in this order, so the trade kind is set before fields and buyers exist before updates.
 APPLY_ORDER = ["trade_kind", "link_contact", "new_buyer", "field", "file", "buyer_update", "bid", "next_step"]
-CARD_KINDS = {"needs_triage", "possible_trade"}
+CARD_KINDS = {"needs_triage", "possible_trade", "possible_demand"}
 
 
 def is_card(p):
@@ -884,6 +889,135 @@ def start_history(lot_id, args):
 
 
 # ---------------------------------------------------------------------------
+# Demand
+# ---------------------------------------------------------------------------
+
+DEMAND_INTENT = re.compile(
+    r"\b(looking for|we (?:are |'re )?(?:looking|searching) for|we (?:need|require)|in need of|"
+    r"interested in (?:buying|purchasing|acquiring|sourcing)|want to (?:buy|purchase)|wish to (?:buy|purchase)|"
+    r"would like to (?:buy|purchase)|wtb|in the market for|rfq|request for quot\w*|can you supply|"
+    r"monthly (?:volume|demand|requirement)|offtake|to source)\b", re.I)
+NEWSLETTER = re.compile(r"unsubscribe|view (?:this email )?in (?:your )?browser|newsletter|webinar", re.I)
+MAX_DEMAND_SOURCES = 30
+
+DEMAND_SYSTEM = """You find BULK BUY DEMAND for ReBattery, a broker of second-life and surplus EV batteries, modules, cells and BESS.
+Reply with ONLY JSON: {"demands": [{"source_id", "buyer_company", "contact_name", "contact_email", "wants", "quantity",
+"where", "quote"}]}.
+Include a source only when a person or company OUTSIDE ReBattery says they want to BUY or source batteries in bulk
+(2 or more packs/modules/systems, cells in volume, or recycling feedstock by the tonne), now or on a recurring basis.
+Skip sellers offering stock, ReBattery's own outreach, newsletters, marketing, single-battery retail requests, and
+vague "keep us in mind".
+- "wants": one plain line in the buyer's terms, e.g. "NMC EV packs 30-70 kWh for storage builds, up to ~EUR 20/kWh".
+- "quantity" e.g. "100+ packs" or null; "where": delivery country or region, or null.
+- "quote": copied EXACTLY from the source (8-300 characters). An empty list is a good answer."""
+
+
+def screen_demand(cur, sources, key, report):
+    """Possible-demand cards for new mail and calls that ask to buy in bulk. A buyer who already has
+    an open demand row gets an update card for that row instead."""
+    candidates = [s for s in sources if s["inbound"] and DEMAND_INTENT.search(s["text"][:6000])
+                  and DEAL_WORDS.search(s["text"][:6000]) and not NEWSLETTER.search(s["text"])][-MAX_DEMAND_SOURCES:]
+    if not candidates:
+        return []
+    try:
+        raw = call_model(DEMAND_SYSTEM, json.dumps({"SOURCES": [
+            {"source_id": s["id"], "type": s["kind"], "date": s["at"].date().isoformat() if s["at"] else None,
+             "from": s.get("from"), "text": s["text"][:5000 if s["kind"] == "granola" else 3000]} for s in candidates]},
+            ensure_ascii=False, default=str), key)
+        report["model_calls"] = report.get("model_calls", 0) + 1
+    except Exception as err:
+        report["warnings"].append(f"demand screen failed ({type(err).__name__})")
+        return []
+    by_id = {s["id"]: s for s in candidates}
+    out = []
+    for d in raw.get("demands") or []:
+        source = by_id.get(str(d.get("source_id")))
+        wants = str(d.get("wants") or "").strip()
+        if not source or not wants or not quote_ok(d.get("quote"), source["text"]):
+            continue
+        email = str(d.get("contact_email") or source.get("from") or "").strip().lower() or None
+        if email and email.endswith("@" + OWN_DOMAIN):
+            continue
+        company = str(d.get("buyer_company") or "").strip() or None
+        cur.execute(
+            """select id from crm_bulk_trade_demand where status = 'open'
+                 and ((%s::text is not null and email = %s) or (%s::text is not null and lower(buyer) = lower(%s)))
+               order by updated_at desc limit 1""", (email, email, company, company))
+        existing = cur.fetchone()
+        name = company or str(d.get("contact_name") or "").strip() or email or "Unknown buyer"
+        proposed = {"buyer": name[:120], "contact": str(d.get("contact_name") or "").strip()[:120] or None, "email": email,
+                    "wants": wants[:300], "quantity": str(d.get("quantity") or "").strip()[:80] or None,
+                    "location": str(d.get("where") or "").strip()[:80] or None,
+                    "demand_id": existing["id"] if existing else None}
+        out.append({"kind": "possible_demand", "target": proposed["demand_id"], "proposed": proposed,
+                    "summary": f"{name} {'updated what they want' if existing else 'wants'}: {wants}"[:300],
+                    "quote": str(d["quote"]).strip()[:300], "source": source})
+    return out
+
+
+MATCH_SYSTEM = """You match open buyer DEMAND to one bulk battery TRADE (supply) for ReBattery, a broker of second-life and
+surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON: {"matches": [{"demand_id", "strength", "reason"}]}.
+- "strong": the trade's batch is the kind of thing the buyer asked for (form, chemistry, size, quantity, use) and
+  nothing obvious rules it out.
+- "partial": a plausible fit with one clear catch (e.g. packs vs cells, region, price, volume); name the catch.
+Leave out rows that do not fit. "reason": one short plain sentence for Alex, naming the fit and any catch."""
+
+
+def live_trade_facts(trade):
+    return {k: trade[k] for k in ("title", "trade_kind", "trade_stage", "fact_line")} | {
+        "fields": {k: v["value"] for k, v in sorted(trade["fields"].items()) if v.get("value") and k != "seller_price"}}
+
+
+def match_demand(conn, key, report, dry_run=False):
+    """Re-matches each live trade whose facts or the open demand changed since it was last matched."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """select id, buyer, wants, quantity, location, to_char(confirmed_on, 'YYYY-MM-DD') as confirmed,
+                      to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated
+               from crm_bulk_trade_demand where status = 'open' order by id""")
+        demand = cur.fetchall()
+        trades = load_trades(cur)
+        cur.execute("select id, demand_fingerprint from crm_bulk_trade_lots where id = any(%s)", (list(trades),))
+        fingerprints = {r["id"]: r["demand_fingerprint"] for r in cur.fetchall()}
+        rows = [{k: d[k] for k in ("id", "buyer", "wants", "quantity", "location", "confirmed")} for d in demand]
+        ids = {d["id"] for d in demand}
+        matched = 0
+        for lot_id, trade in trades.items():
+            facts = live_trade_facts(trade)
+            fingerprint = hashlib.sha1(json.dumps([facts, [(d["id"], d["updated"]) for d in demand]],
+                                                  sort_keys=True, default=str).encode()).hexdigest()
+            if fingerprints.get(lot_id) == fingerprint:
+                continue
+            results = []
+            if demand:
+                try:
+                    raw = call_model(MATCH_SYSTEM, json.dumps({"TRADE": facts, "DEMAND": rows}, ensure_ascii=False, default=str), key)
+                    report["model_calls"] = report.get("model_calls", 0) + 1
+                except Exception as err:
+                    report["warnings"].append(f"{trade['title']}: demand matching failed ({type(err).__name__})")
+                    continue
+                results = [m for m in raw.get("matches") or [] if isinstance(m, dict) and m.get("demand_id") in ids
+                           and m.get("strength") in ("strong", "partial") and str(m.get("reason") or "").strip()]
+            matched += 1
+            report.setdefault("matches", []).extend(
+                {"lot_id": lot_id, "demand_id": m["demand_id"], "strength": m["strength"]} for m in results)
+            if dry_run:
+                continue
+            keep = [m["demand_id"] for m in results]
+            cur.execute("""delete from crm_bulk_trade_demand_matches where lot_id = %s and not hidden and buyer_id is null
+                           and not (demand_id = any(%s))""", (lot_id, keep))
+            for m in results:
+                cur.execute(
+                    """insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values (%s, %s, %s, %s)
+                       on conflict (demand_id, lot_id) do update set strength = excluded.strength, reason = excluded.reason,
+                         matched_at = now()""", (m["demand_id"], lot_id, m["strength"], str(m["reason"]).strip()[:300]))
+            cur.execute("update crm_bulk_trade_lots set demand_fingerprint = %s where id = %s", (fingerprint, lot_id))
+            conn.commit()
+        report["trades_matched"] = matched
+    return report
+
+
+# ---------------------------------------------------------------------------
 # Runs
 # ---------------------------------------------------------------------------
 
@@ -1007,6 +1141,8 @@ def run(conn, args):
             for lot_id, sources in by_trade.items():
                 findings.setdefault(lot_id, []).extend(extract(trades[lot_id], sorted(sources, key=lambda s: s["at"] or EPOCH), key, report))
 
+            if key:
+                findings.setdefault(None, []).extend(screen_demand(cur, emails + notes, key, report))
             if unmatched and key:
                 for item in screen_possible(cur, unmatched, key, report):
                     findings.setdefault(item.pop("lot_id", None), []).append(item)
@@ -1024,6 +1160,8 @@ def run(conn, args):
         raise
     for lot_id in ctx["new_contacts"]:  # someone new on a trade: read their past emails for it
         start_history(lot_id, args)
+    if key:
+        match_demand(conn, key, report, args.dry_run)
     json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
     print()
     return 0
@@ -1216,6 +1354,14 @@ def summary(conn):
                where auction_status = 'published' and auction_closes_at between now() and now() + interval '2 days'
                order by auction_closes_at""")
         closing = cur.fetchall()
+        cur.execute(
+            """select l.title, string_agg(d.buyer, ', ' order by d.buyer) as buyers
+               from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand d on d.id = m.demand_id
+               join crm_bulk_trade_lots l on l.id = m.lot_id
+               where m.strength = 'strong' and not m.hidden and m.buyer_id is null and d.status = 'open'
+                 and m.matched_at > now() - interval '24 hours' and l.trade_stage = any(%s)
+               group by l.title order by l.title""", (list(LIVE_STAGES),))
+        matches = cur.fetchall()
     lines = [f"Bulk Trades, {today:%a %d %b}"]
     for row in rows:
         days = (today - row["next_step_due"]).days
@@ -1228,6 +1374,8 @@ def summary(conn):
         lines.append(f"- {row['title']}: {row['n']} new auction offer{'s' if row['n'] != 1 else ''} ({row['offers']})")
     for row in closing:
         lines.append(f"- {row['title']}: auction closes {row['auction_closes_at'].astimezone(ZoneInfo('Europe/London')):%a %d %b %H:%M}")
+    for row in matches:
+        lines.append(f"- {row['title']}: matches open demand from {row['buyers']}")
     if possible:
         lines.append(f"{possible} possible new trade{'s' if possible != 1 else ''} to review.")
     lines.append("https://crm.rebattery.io/?path=bulk_trade")
@@ -1255,6 +1403,7 @@ def main():
     parser.add_argument("--summary", action="store_true", help="print the overdue and due-today list")
     parser.add_argument("--only-at", help="comma-separated UK times; do nothing outside them")
     parser.add_argument("--history", metavar="LOT_ID", help="one-off pass over this trade's whole history")
+    parser.add_argument("--match", action="store_true", help="match open demand to live trades that changed")
     args = parser.parse_args()
     if args.only_at and not due_now([t.strip() for t in args.only_at.split(",") if t.strip()]):
         return 0
@@ -1262,6 +1411,11 @@ def main():
     try:
         if args.history:
             return history(conn, args)
+        if args.match:
+            report = match_demand(conn, gateway_key(), {"warnings": []}, args.dry_run)
+            json.dump(report, sys.stdout, indent=2, default=str)
+            print()
+            return 0
         return summary(conn) if args.summary else run(conn, args)
     finally:
         conn.close()
