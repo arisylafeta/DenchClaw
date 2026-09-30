@@ -1012,7 +1012,8 @@ MATCH_SYSTEM = """You match open buyer DEMAND to one bulk battery TRADE (supply)
 surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON: {"matches": [{"demand_id", "strength", "reason"}]}.
 Each DEMAND row is a "request" (a one-off need, maybe by "needed_by") or a "standing" buy-box with a "basis":
 "agreed" and "stated" come from the buyer; "estimated" is ReBattery's guess from research, so match it only on a
-clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words.
+clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words; "note"
+holds other requirements (voltage, connectors, use, risk answers) that rule a batch out as surely as the spec.
 - "strong": the trade's batch is the kind of thing the buyer asked for (form, chemistry, size, quantity, use) and
   nothing obvious rules it out, including anything in spec "excludes".
 - "partial": a plausible fit with one clear catch (e.g. packs vs cells, region, price, volume); name the catch.
@@ -1030,6 +1031,7 @@ def match_demand(conn, key, report, dry_run=False):
         cur.execute(
             """select id, kind, basis, buyer, wants, quantity, location, to_char(needed_by, 'YYYY-MM-DD') as needed_by,
                       volume::float8 as volume, volume_unit, max_price::float8 as max_price, price_currency, price_unit, spec,
+                      left(note, 600) as note,
                       to_char(confirmed_on, 'YYYY-MM-DD') as confirmed,
                       to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated
                from crm_bulk_trade_demand
@@ -1436,7 +1438,7 @@ def summary(conn):
         cur.execute(
             """select d.buyer, d.wants, d.needed_by from crm_bulk_trade_demand d
                where d.status = 'open' and d.kind = 'request' and d.needed_by between %s and %s
-                 and not exists (select 1 from crm_bulk_trade_buyers b where b.demand_id = d.id)
+                 and not exists (select 1 from crm_bulk_trade_buyers b where b.demand_id = d.id and b.status <> 'To contact')
                order by d.needed_by, d.buyer""", (today, today + dt.timedelta(days=7)))
         due = cur.fetchall()
         cur.execute(

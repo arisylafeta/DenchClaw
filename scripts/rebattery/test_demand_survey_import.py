@@ -75,6 +75,17 @@ class TypeformMapping(unittest.TestCase):
         self.assertIsNone(survey.map_typeform_row(HEADER, typeform_row(**{"#": "z", "What's your email?": "qa-approved-buyer@example.com"})))
 
 
+class Numbers(unittest.TestCase):
+    def test_reads_thousands_decimals_and_ranges(self):
+        self.assertEqual([survey.number(v) for v in ("1,000", "1,500 packs", "2.5", "2,5", "20 to 30", "any", "12,000,000")],
+                         [1000, 1500, 2.5, 2.5, 20, None, 12000000])
+
+    def test_an_other_use_answer_comes_from_the_use_questions_own_column(self):
+        header = ["#", "What's your email?", "What will you use these batteries for?", "Other", "Chemistry", "Other", "Response Type"]
+        row = survey.map_typeform_row(header, ["r9", "b@x.example", "Other", "Marine propulsion", "", "Something else", "completed"])
+        self.assertTrue(row["wants"].endswith("for marine propulsion"))
+
+
 class FormbricksMapping(unittest.TestCase):
     def test_maps_the_sidebar_survey_and_keeps_unmapped_answers_in_the_note(self):
         row = survey.map_formbricks({
@@ -92,6 +103,14 @@ class FormbricksMapping(unittest.TestCase):
         self.assertEqual(row["note"], "Use: Recycling\nFormats: Mixed lots / depends\nChemistries: LCO\nNeeds: SOH report\n"
                                       "Sources from: UK, Europe")
         self.assertEqual(row["wants"], "Cells / Modules, LFP / NMC, for recycling")
+
+    def test_waits_a_day_before_taking_an_unfinished_response(self):
+        import datetime as dt
+        now = dt.datetime(2026, 9, 30, 12, tzinfo=dt.timezone.utc)
+        response = {"id": "fb6", "created_at": "2026-09-30T08:00:00Z", "updated_at": "2026-09-30T08:10:00Z", "finished": False,
+                    "data": {"email": "new@buyer.example", "formats": ["Packs"]}}
+        self.assertIsNone(survey.map_formbricks(response, now))
+        self.assertIsNotNone(survey.map_formbricks(response, now + dt.timedelta(days=1)))
 
     def test_keeps_an_unfinished_response_with_answers_and_drops_an_empty_one(self):
         partial = survey.map_formbricks({"id": "fb2", "created_at": "2026-06-01", "finished": False,
@@ -154,6 +173,41 @@ class Writing(unittest.TestCase):
         conn.close()
         self.assertEqual((saved["kind"], saved["basis"], saved["confirmed_on"], saved["volume"]), ("standing", "stated", "2026-08-20", 200.0))
         self.assertEqual(saved["spec"]["kwh_min"], 30)
+
+    def test_a_finished_answer_replaces_the_unfinished_import_unless_someone_edited_it(self):
+        import psycopg2
+        import psycopg2.extras
+        old = {"id": "fb_up", "created_at": "2026-06-01T10:00:00Z", "finished": False,
+               "data": {"email": "martyn@zenobe.example", "formats": ["Packs"]}}
+        done = {**old, "finished": True, "data": {**old["data"], "chemistries": ["LFP"], "min_soh": 80}}
+        conn = psycopg2.connect(TEST_URL)
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            self.assertTrue(survey.insert(cur, survey.link(cur, survey.map_formbricks(old))))
+            self.assertTrue(survey.insert(cur, survey.link(cur, survey.map_formbricks(done))))
+            self.assertFalse(survey.insert(cur, survey.link(cur, survey.map_formbricks(done))))  # nothing new
+            cur.execute("select spec, note from crm_bulk_trade_demand where source_id = 'formbricks:fb_up'")
+            saved = cur.fetchone()
+            self.assertEqual(saved["spec"], {"formats": ["Packs"], "chemistries": ["LFP"], "min_soh": 80})
+            self.assertIsNone(saved["note"])
+            # Once someone has edited the row, a later import leaves it alone.
+            cur.execute("""update crm_bulk_trade_demand set note = 'Unfinished survey. Alex: call them', updated_at = now() + interval '1 minute'
+                           where source_id = 'formbricks:fb_up'""")
+            self.assertFalse(survey.insert(cur, survey.link(cur, survey.map_formbricks(done))))
+        conn.close()
+
+    def test_an_old_opportunity_keeps_its_deadline(self):
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(TEST_URL)
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""insert into crm_companies (id, name) values ('co_sls', 'SLS Energy') on conflict do nothing;
+                           insert into crm_commercial_opportunities (id, company_id, opportunity_type, title, deadline_at)
+                           values ('opp-sls-test', 'co_sls', 'demand', 'SLS Energy - procurement of 3 MWh of prismatic cells', '2026-07-01')
+                           on conflict do nothing""")
+            [row] = [r for r in survey.load_opportunities(cur) if r["source_id"] == "opportunity:opp-sls-test"]
+            conn.rollback()
+        conn.close()
+        self.assertEqual((row["kind"], row["needed_by"], row["wants"]), ("request", "2026-07-01", "Procurement of 3 MWh of prismatic cells"))
 
     def test_an_estimate_is_not_a_confirmation(self):
         import psycopg2

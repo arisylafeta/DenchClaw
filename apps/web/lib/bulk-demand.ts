@@ -189,11 +189,16 @@ export function parseDemandInput(body: unknown, creating: boolean): Parsed<Deman
     if (key in value && !value[key]) return { error: `${key} is required.` };
   }
   if (value.email) value.email = value.email.toLowerCase();
-  if ("volume" in value && "volume_unit" in value && (value.volume == null) !== (value.volume_unit == null)) {
+  // Pairs are set together, so a partial edit can never leave half a pair behind.
+  const volumeKeys = (["volume", "volume_unit"] as const).filter((key) => key in value);
+  if (volumeKeys.length && (volumeKeys.length < 2 || (value.volume == null) !== (value.volume_unit == null))) {
     return { error: "Give both a volume and its unit, or neither." };
   }
-  if ("max_price" in value && (value.max_price != null) && (!value.price_currency || !value.price_unit)) {
-    return { error: "A max price needs a currency and a unit." };
+  const priceKeys = (["max_price", "price_currency", "price_unit"] as const).filter((key) => key in value);
+  if (priceKeys.length && (priceKeys.length < 3
+    || !((value.max_price == null && value.price_currency == null && value.price_unit == null)
+      || (value.max_price != null && value.price_currency != null && value.price_unit != null)))) {
+    return { error: "A max price needs a currency and a unit; clear all three together." };
   }
   if (creating) {
     value.kind ??= "standing";

@@ -94,7 +94,9 @@ UNITS = {"packs": "packs", "modules": "modules", "cells": "cells", "kwh": "kWh",
 
 
 def number(value):
-    match = re.search(r"\d+(?:[.,]\d+)?", str(value or ""))
+    """The first number in a text: "1,000" is a thousand, "2.5" two and a half, "20 to 30" is 20."""
+    text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", str(value or ""))
+    match = re.search(r"\d+(?:[.,]\d+)?", text)
     return float(match.group().replace(",", ".")) if match else None
 
 
@@ -120,8 +122,7 @@ def wants_line(use, spec):
 
 def map_typeform_row(header, row):
     """One Typeform demand survey response (CSV header and row) as a demand row, or None to skip."""
-    cells = dict(zip(header, row))  # first column wins for repeated headers ("Other", "No preference")
-    first = {}
+    first = {}  # the first column wins for repeated headers ("Other", "No preference")
     for i, name in enumerate(header):
         first.setdefault(name, i)
 
@@ -165,7 +166,7 @@ def map_typeform_row(header, row):
 
     use = stem("What will you use these batteries for?")
     if use == "Other":
-        use = cells.get("Other", "").strip() or use
+        use = stem("Other") or use  # the first "Other" column is the use question's
     for label, question in NOTE_STEMS:
         if stem(question):
             notes.append(f"{label}: {stem(question)}")
@@ -222,8 +223,21 @@ def as_list(value):
     return [str(value).strip()] if str(value or "").strip() else []
 
 
-def map_formbricks(response):
+def still_open(response, now):
+    """An unfinished response touched in the last day may still be in progress."""
+    raw = str(response.get("updated_at") or response.get("created_at") or "")
+    try:
+        touched = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if touched.tzinfo is None:
+        touched = touched.replace(tzinfo=dt.timezone.utc)
+    return now - touched < dt.timedelta(days=1)
+
+
+def map_formbricks(response, now=None):
     """One Formbricks response ({id, created_at, finished, data, variables, contactAttributes}) as a demand row, or None."""
+    now = now or dt.datetime.now(dt.timezone.utc)
     data = response.get("data") or {}
     hidden = {**(response.get("contactAttributes") or {}), **(response.get("variables") or {})}
     email = str(data.get("email") or hidden.get("email") or "").strip().lower()
@@ -241,6 +255,8 @@ def map_formbricks(response):
         spec["min_soh"] = whole(soh)
     if not spec and not any(as_list(data.get(k)) for k in ("use_case", "lot_size", "regions", "notes")):
         return None  # an unfinished response with nothing in it
+    if not response.get("finished") and still_open(response, now):
+        return None  # the buyer may still be filling it in
     if not response.get("finished"):
         notes.append("Unfinished survey.")
     use = str(data.get("use_case") or "").strip()
@@ -264,12 +280,13 @@ def map_formbricks(response):
 
 
 def fetch_formbricks():
-    """Every response to the buyer survey, read from the Formbricks database container."""
-    sql = f"""copy (select coalesce(json_agg(json_build_object('id', r.id, 'created_at', r.created_at, 'finished', r.finished,
-      'data', r.data, 'variables', r.variables, 'contactAttributes', r."contactAttributes") order by r.created_at), '[]')
-      from "Response" r join "Survey" s on s.id = r."surveyId" where s.name = '{FORMBRICKS_SURVEY}') to stdout"""
+    """Every response to the buyer survey, read from the Formbricks database container. A plain select, not COPY:
+    COPY's text format would escape the backslashes inside the JSON."""
+    sql = f"""select coalesce(json_agg(json_build_object('id', r.id, 'created_at', r.created_at, 'updated_at', r.updated_at,
+      'finished', r.finished, 'data', r.data, 'variables', r.variables, 'contactAttributes', r."contactAttributes")
+      order by r.created_at), '[]') from "Response" r join "Survey" s on s.id = r."surveyId" where s.name = '{FORMBRICKS_SURVEY}'"""
     out = subprocess.run(["docker", "exec", "-i", FORMBRICKS_CONTAINER, "sh", "-c",
-                          'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -At'],
+                          'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -At -v ON_ERROR_STOP=1'],
                          input=sql, capture_output=True, text=True, check=True)
     return json.loads(out.stdout or "[]")
 
@@ -280,7 +297,8 @@ def fetch_formbricks():
 
 def load_opportunities(cur):
     cur.execute("""select o.id, o.title, o.company_id, c.name as company, o.contact_person_id, p.email, p.full_name,
-                          o.chemistry, o.format, o.quantity::text as quantity, o.location_country, o.notes, o.created_at::date as created
+                          o.chemistry, o.format, o.quantity::text as quantity, o.location_country, o.notes, o.created_at::date as created,
+                          o.deadline_at::date as deadline
                    from crm_commercial_opportunities o left join crm_companies c on c.id = o.company_id
                    left join crm_people p on p.id = o.contact_person_id
                    where o.opportunity_type = 'demand' and o.status in ('draft', 'open', 'matched')""")
@@ -293,6 +311,7 @@ def load_opportunities(cur):
             "kind": "request", "basis": None, "email": (o["email"] or "").lower() or None, "contact": o["full_name"],
             "company": o["company"], "company_id": o["company_id"], "person_id": o["contact_person_id"],
             "wants": wants[:1].upper() + wants[1:], "quantity": o["quantity"], "location": o["location_country"],
+            "needed_by": str(o["deadline"]) if o["deadline"] else None,
             "spec": {}, "note": note, "observed_on": str(o["created"]),
             "source_kind": "import", "source_id": f"opportunity:{o['id']}", "source_label": "CRM opportunity",
         })
@@ -313,7 +332,9 @@ def load_rows(path):
     spec keeps only values from the shared lists, and a basis or date that does not fit the kind is refused."""
     from bulk_trade_inbox_check import clean_structured
     rows = []
-    for i, raw in enumerate(json.load(open(path))["rows"]):
+    with open(path) as handle:
+        raw_rows = json.load(handle)["rows"]
+    for i, raw in enumerate(raw_rows):
         unknown = set(raw) - ROW_KEYS
         if unknown:
             raise SystemExit(f"row {i}: unknown keys {sorted(unknown)}")
@@ -365,7 +386,8 @@ COLUMNS = ["kind", "basis", "buyer", "company_id", "person_id", "contact", "emai
 
 
 def insert(cur, row):
-    """Adds the row unless its source is already in; returns True when added."""
+    """Adds the row unless its source is already in (then only a still-unfinished survey answer is refreshed).
+    Returns True when a row was added or refreshed."""
     # A buyer's own answer confirms the buy-box on that date; our estimate confirms nothing.
     observed = row.get("observed_on") or dt.date.today().isoformat()
     confirmed = None if row.get("basis") == "estimated" else observed
@@ -374,7 +396,14 @@ def insert(cur, row):
     cur.execute(
         f"""insert into crm_bulk_trade_demand (id, {', '.join(COLUMNS)})
             values (%s, {', '.join(['%s'] * len(COLUMNS))})
-            on conflict (source_kind, source_id) where source_id is not null do nothing returning id""",
+            on conflict (source_kind, source_id) where source_id is not null do update set
+              wants = excluded.wants, spec = excluded.spec, note = excluded.note, quantity = excluded.quantity,
+              location = excluded.location, observed_on = excluded.observed_on, confirmed_on = excluded.confirmed_on,
+              updated_at = now()
+            -- Only an unfinished survey answer that nobody has touched since is replaced by the finished one.
+            where crm_bulk_trade_demand.note like 'Unfinished survey.%%' and excluded.note is distinct from crm_bulk_trade_demand.note
+              and crm_bulk_trade_demand.basis = 'stated' and crm_bulk_trade_demand.updated_at = crm_bulk_trade_demand.created_at
+            returning id""",
         [f"btd_{uuid.uuid4()}", *values])
     return cur.fetchone() is not None
 
@@ -402,7 +431,11 @@ def main():
             skipped += mapped is None
             candidates += [mapped] if mapped else []
     if args.formbricks or args.formbricks_json:
-        responses = json.load(open(args.formbricks_json)) if args.formbricks_json else fetch_formbricks()
+        if args.formbricks_json:
+            with open(args.formbricks_json) as handle:
+                responses = json.load(handle)
+        else:
+            responses = fetch_formbricks()
         for response in responses:
             mapped = map_formbricks(response)
             skipped += mapped is None

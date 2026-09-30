@@ -23,7 +23,12 @@ describe("parseDemandInput", () => {
     expect(parseDemandInput({ volume: 200, volume_unit: "packs", max_price: 20, price_currency: "EUR", price_unit: "kWh" }, false))
       .toEqual({ value: { volume: 200, volume_unit: "packs", max_price: 20, price_currency: "EUR", price_unit: "kWh" } });
     expect(parseDemandInput({ volume: 200, volume_unit: null }, false)).toEqual({ error: "Give both a volume and its unit, or neither." });
-    expect(parseDemandInput({ max_price: 20 }, false)).toEqual({ error: "A max price needs a currency and a unit." });
+    expect(parseDemandInput({ max_price: 20 }, false)).toEqual({ error: "A max price needs a currency and a unit; clear all three together." });
+    // Pairs go together, so a create or an edit can never leave half a pair for the database to refuse.
+    expect(parseDemandInput({ buyer: "Acme", wants: "Packs", volume: 100 }, true)).toEqual({ error: "Give both a volume and its unit, or neither." });
+    expect(parseDemandInput({ max_price: null }, false)).toMatchObject({ error: expect.stringContaining("clear all three together") });
+    expect(parseDemandInput({ max_price: null, price_currency: null, price_unit: null }, false))
+      .toEqual({ value: { max_price: null, price_currency: null, price_unit: null } });
     expect(parseDemandInput({ volume: -1 }, false)).toEqual({ error: "volume must be a positive number." });
     expect(parseDemandInput({ volume_unit: "barrels" }, false)).toMatchObject({ error: expect.stringContaining("volume_unit must be one of") });
     expect(parseDemandInput({ spec: { chemistries: ["Graphene"] } }, false)).toMatchObject({ error: expect.stringContaining("spec.chemistries") });

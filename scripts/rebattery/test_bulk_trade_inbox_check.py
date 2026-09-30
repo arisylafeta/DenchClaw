@@ -489,6 +489,15 @@ class DemandRun(unittest.TestCase):
         self.assertEqual(rows["btd_est"]["basis"], "estimated")
         self.assertNotIn("spec", rows["btd_est"])  # empty values are left out
 
+    def test_matching_sees_the_note(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""insert into crm_bulk_trade_demand (id, buyer, wants, note) values
+                             ('btd_note', 'Volt buyer', 'EV packs', 'Voltage: 48V') on conflict do nothing""")
+        seen = []
+        with patch.object(check, "call_model", lambda system, user, key: seen.extend(json.loads(user)["DEMAND"]) or {"matches": []}):
+            check.match_demand(self.conn, "k", {"warnings": []})
+        self.assertEqual({r["id"]: r.get("note") for r in seen}["btd_note"], "Voltage: 48V")
+
     def test_summary_lists_buyers_waiting_requests_due_and_buy_boxes_to_reconfirm(self):
         today = dt.datetime.now(ZoneInfo("Europe/London")).date()
         with self.conn, self.conn.cursor() as cur:
@@ -498,6 +507,8 @@ class DemandRun(unittest.TestCase):
                 ('p_wait', 'Wanda Waiting', 'wanda@waiting.example', 'co_wait'),
                 ('p_done', 'Dan Answered', 'dan@answered.example', null),
                 ('p_ooo', 'Otto Away', 'otto@away.example', null) on conflict do nothing;
+              insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
+                values ('bt_sum', 'supply', 'Summary trade', '', '', 'confirmed', 'With buyers', 'cells') on conflict do nothing;
               insert into crm_bulk_trade_demand (id, kind, basis, buyer, person_id, company_id, wants, needed_by, confirmed_on) values
                 ('btd_w', 'standing', 'agreed', 'Waiting Energy', 'p_wait', 'co_wait', 'LFP packs', null, '2026-01-05'),
                 ('btd_d', 'standing', 'stated', 'Answered Ltd', 'p_done', null, 'Modules', null, %(today)s),
@@ -511,6 +522,9 @@ class DemandRun(unittest.TestCase):
                 ('m_in_o', 'Automatic reply: Cells', now() - interval '1 day', 'p_ooo', 'otto@away.example') on conflict do nothing;
               insert into crm_email_message_recipients (message_id, person_id, recipient_type) values
                 ('m_out_w', 'p_wait', 'to'), ('m_out_d', 'p_done', 'cc'), ('m_out_o', 'p_ooo', 'to') on conflict do nothing;
+              -- Added to a trade but not contacted yet: still no offer.
+              insert into crm_bulk_trade_buyers (id, lot_id, name, status, demand_id) values ('b_sum', 'bt_sum', 'Away GmbH', 'To contact', 'btd_o')
+                on conflict do nothing;
             """, {"today": today, "soon": today + dt.timedelta(days=3)})
         out = io.StringIO()
         with redirect_stdout(out):
