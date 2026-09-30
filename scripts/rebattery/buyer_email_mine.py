@@ -41,6 +41,10 @@ CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "exp
 CAPABILITIES = ["Dismantle packs", "Test and grade", "BMS repair", "Cell rebuild", "Recycle", "Integrate systems",
                 "HV workshop", "Dangerous-goods shipping"]
 STAGES = ["Contacted", "Responded", "In conversation", "Qualified", "Bidding", "Customer"]
+# Fixed topics for other_facts, so facts group into candidate CRM fields across companies.
+TOPICS = ["sites and capacity", "permits and certifications", "logistics and packaging", "contract and payment",
+          "decision process and timing", "projects and end customers", "technical requirements",
+          "supply they offer", "competitors and other suppliers", "people and contacts", "other"]
 
 SYSTEM = """You read ReBattery's full email history with ONE company and record what they buy and how to deal with
 them. ReBattery brokers second-life and surplus EV batteries, modules, cells and BESS. Messages are oldest first.
@@ -74,7 +78,7 @@ Reply with ONLY JSON:
     "stage": one of STAGES or null (the furthest reached: Bidding = they made an offer; Customer = they bought from us),
     "evidence": [{"field", "message_id", "quote"}]
   },
-  "other_facts": [{"topic": short label, "value": one line, "message_id", "quote"}]
+  "other_facts": [{"topic": one of TOPICS, "value": one line, "message_id", "quote"}]
 }
 
 Rules:
@@ -89,13 +93,16 @@ Rules:
 - other_facts: anything else that would help match batteries to this buyer or deal with them and that the fields
   above do not hold (certifications, sites and storage, lead times, end customers, OEM relationships, volumes
   bought elsewhere, budget cycles, languages, decision process). Skip small talk.
-- A seller or unrelated company: set role and leave buy_boxes empty.
+- Bids or offers they made on a specific ReBattery lot are demand with a price: record them as request buy-boxes
+  with "wants" starting "Bid on <lot>:", and the status from what happened next.
+- A seller or unrelated company: set role and leave buy_boxes empty; supply they offer goes in other_facts.
 LISTS: %(lists)s
 VOLUME_UNITS: %(volume_units)s
 CAPABILITIES: %(capabilities)s
-STAGES: %(stages)s""" % {
+STAGES: %(stages)s
+TOPICS: %(topics)s""" % {
     "lists": json.dumps(check.BUY_BOX["lists"], ensure_ascii=False), "volume_units": ", ".join(check.BUY_BOX["volume_units"]),
-    "capabilities": ", ".join(CAPABILITIES), "stages": ", ".join(STAGES)}
+    "capabilities": ", ".join(CAPABILITIES), "stages": ", ".join(STAGES), "topics": ", ".join(TOPICS)}
 
 QUOTED = re.compile(
     r"^(>|On .{5,200}wrote:\s*$|-{2,}\s*Original Message|From: .+\n(Sent|Date): |_{10,}|Sent from my |Von: .+\nGesendet)",
@@ -242,7 +249,8 @@ def validate(raw, messages):
     p["evidence"] = quoted
     result["profile"] = p
     for fact in raw.get("other_facts") or []:
-        if isinstance(fact, dict) and evidence_ok([fact], by_id) and str(fact.get("topic") or "").strip():
+        if isinstance(fact, dict) and evidence_ok([fact], by_id):
+            fact["topic"] = fact.get("topic") if fact.get("topic") in TOPICS else "other"
             message = by_id[str(fact["message_id"])]
             result["other_facts"].append({"topic": str(fact["topic"]).strip()[:60], "value": str(fact.get("value") or "").strip()[:300],
                                           "quote": str(fact["quote"]).strip()[:300], "date": message["date"],

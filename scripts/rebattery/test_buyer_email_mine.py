@@ -44,8 +44,9 @@ class Validate(unittest.TestCase):
                              {"field": "payment_terms", "message_id": "m1", "quote": "We pay 30% deposit"},
                              {"field": "capabilities", "message_id": "m9", "quote": "no such message here"}],
             },
-            "other_facts": [{"topic": "Truck size", "value": "Buys by the full truck", "message_id": "m1",
-                             "quote": "by the full truck"}],
+            "other_facts": [{"topic": "logistics and packaging", "value": "Buys by the full truck", "message_id": "m1",
+                             "quote": "by the full truck"},
+                            {"topic": "Truck size", "value": "Free-text topic", "message_id": "m1", "quote": "around 20 packs a month"}],
         }
         r = mine.validate(raw, MESSAGES)
         self.assertEqual(r["dropped"], 1)
@@ -60,7 +61,7 @@ class Validate(unittest.TestCase):
         self.assertNotIn("stage", p)  # no quote for it
         self.assertEqual(p["main_contact_email"], "dan@ser.example")
         self.assertEqual(p["past_issues"][0]["date"], "2026-08-20")
-        self.assertEqual(r["other_facts"][0]["topic"], "Truck size")
+        self.assertEqual([f["topic"] for f in r["other_facts"]], ["logistics and packaging", "other"])
 
     def test_profile_values_date_the_text_fields(self):
         values = mine.profile_values({"collection": "Own ADR truck", "payment_terms": "30% deposit", "stage": "Customer",
