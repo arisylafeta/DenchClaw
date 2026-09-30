@@ -8,7 +8,7 @@ FILE holds {"rows": [...]}. Each row has a name and optionally: company (an exac
 name to link), rename_to (a clearer name for that company), country, ebay_username,
 ebay_listings, route, stage, goal, next_step, next_step_due, waiting_on, waiting_since,
 person_email (who the next step is for), attach_people (emails of CRM people with no company, to
-attach to this company), source and notes.
+attach to this company), source, notes, and website and phone (filled on the company when blank).
 
 Every dismantler is a CRM company: the named company, else the one company with the row's exact
 name, else a new company. A name several companies share stops the run. A company that is
@@ -81,6 +81,12 @@ def main():
                 company_id, action = str(uuid.uuid4()), "new company"
                 cur.execute("insert into crm_companies (id, name, country) values (%s, %s, %s)",
                             (company_id, row["name"], row.get("country")))
+            for column in ("website", "phone"):
+                if row.get(column):
+                    cur.execute(f"update crm_companies set {column} = %s where id = %s and coalesce({column}, '') = ''", (row[column], company_id))
+            if row.get("website") and "://" in row["website"]:
+                domain = row["website"].split("://", 1)[1].split("/", 1)[0].removeprefix("www.").lower()
+                cur.execute("update crm_companies set domain = %s where id = %s and coalesce(domain, '') = ''", (domain, company_id))
             if row.get("rename_to"):
                 cur.execute("update crm_companies set name = %s, updated_at = now() where id = %s", (row["rename_to"], company_id))
             cur.execute("""update crm_companies set tags = array_append(coalesce(tags, '{}'), 'dismantler'), updated_at = now()
