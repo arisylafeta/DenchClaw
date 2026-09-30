@@ -1459,6 +1459,8 @@ def summary(conn):
     for row in due:
         days = (row["needed_by"] - today).days
         lines.append(f"- Request from {row['buyer']}: {row['wants']}, needed {'today' if days == 0 else f'in {days}d'}, no offer yet")
+    if waiting or due:
+        lines.append("Trades:")
     for row in rows:
         days = (today - row["next_step_due"]).days
         when = "today" if days == 0 else f"{days}d late"
