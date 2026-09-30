@@ -110,7 +110,10 @@ export function parseTradePatch(body: unknown): { patch: TradePatch } | { error:
 }
 
 /** "3 days late", "Due today", "Due tomorrow", "Due 2 Oct", "Waiting on them since 22 Sep" or "No due date". */
-export function dueText(trade: BulkTrade, today: string): { text: string; tone: "red" | "amber" | "grey" } {
+export function dueText(
+  trade: Pick<BulkTrade, "next_step" | "next_step_due" | "waiting_on" | "waiting_since">,
+  today: string,
+): { text: string; tone: "red" | "amber" | "grey" } {
   const due = trade.next_step_due;
   if (due && due < today) {
     const days = daysBetween(due, today);

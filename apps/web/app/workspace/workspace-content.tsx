@@ -39,6 +39,7 @@ import { CompanyProfile } from "../components/crm/company-profile";
 import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../components/chat-panel";
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
+import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
@@ -2932,6 +2933,9 @@ function ContentRenderer({
     case "object":
       if (content.data.object.name === "bulk_trade") {
         return <BulkTradesView onOpenEntry={onOpenEntry} />;
+      }
+      if (content.data.object.name === "dismantler") {
+        return <DismantlersView />;
       }
       return (
         <ObjectView
