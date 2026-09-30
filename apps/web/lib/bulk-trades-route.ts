@@ -2,10 +2,10 @@ import { currentUser } from "@/lib/auth";
 
 type Guarded = { userId: string; email: string } | { response: Response };
 
-/** Shared checks for Bulk Trades routes: Postgres backend and a signed-in user. */
-export async function guardBulkTrades(): Promise<Guarded> {
+/** Shared checks for Bulk Trades (and Dismantlers) routes: Postgres backend and a signed-in user. */
+export async function guardBulkTrades(feature = "Bulk Trades"): Promise<Guarded> {
   if (process.env.CRM_DB_BACKEND !== "postgres") {
-    return { response: Response.json({ error: "Bulk Trades requires the Postgres backend" }, { status: 503 }) };
+    return { response: Response.json({ error: `${feature} requires the Postgres backend` }, { status: 503 }) };
   }
   const user = await currentUser();
   if (!user) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };

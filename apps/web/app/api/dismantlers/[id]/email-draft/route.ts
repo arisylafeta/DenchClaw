@@ -12,7 +12,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = parseEmailDraft(await readJson(req));
   if ("error" in parsed) return badRequest(parsed.error);
   const { id } = await params;
-  if (!(await getDismantler(id, guard.userId))) return notFound("Dismantler");
+  if (!(await getDismantler(id))) return notFound("Dismantler");
 
   let created;
   try {

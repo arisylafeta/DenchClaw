@@ -110,25 +110,31 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     await db.importDismantlers(rows, true, userId);
     const again = await db.importDismantlers(rows, false, userId);
     expect(again.map((item) => item.action)).toEqual(["already a dismantler", "already a dismantler"]);
-    const { dismantlers } = await db.listDismantlers(userId);
+    const { dismantlers } = await db.listDismantlers();
     expect(dismantlers.find((d) => d.name === `Fresh Yard ${s}`)).toMatchObject({ ebay_listings: 12, source: "Imported list", stage: "Found" });
   });
 
-  it("shows last contact and email activity from the viewer's own mailbox only", async () => {
+  it("shares last contact from the CRM sync, and keeps email activity and drafts to their owner", async () => {
     await pg.queryPg("insert into crm_companies (id, name) values ($1, $2)", [`m-${s}`, `Mail Yard ${s}`]);
-    await pg.queryPg("insert into crm_people (id, full_name, email, company_id) values ($1, 'Mo Mail', 'mo@example.test', $2)", [`mo-${s}`, `m-${s}`]);
+    await pg.queryPg(
+      `insert into crm_people (id, full_name, email, company_id, last_interaction_at) values
+         ($1, 'Mo Mail', 'mo@example.test', $3, '2026-09-20T10:00:00Z'),
+         ($2, 'Di Mail', 'di@example.test', $3, '2026-09-28T23:30:00Z')`,
+      [`mo-${s}`, `di-${s}`, `m-${s}`],
+    );
     const d = await db.createDismantler({ company_id: `m-${s}`, patch: { stage: "Contacted" } }, userId);
+    // Latest across the company's people, as a UK date (23:30 UTC on 28 Sep is 29 Sep in London).
+    expect((await db.getDismantler(d.id))!.last_contact).toBe("2026-09-29");
+    expect((await db.listDismantlers()).dismantlers.find((row) => row.id === d.id)!.last_contact).toBe("2026-09-29");
+
     await pg.queryPg(
       `insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email, mailbox_owner_id) values
          ($1, 'Their reply', '2026-09-20T10:00:00Z', $3, 'mo@example.test', $4::uuid),
          ($2, 'Colleague thread', '2026-09-28T10:00:00Z', $3, 'mo@example.test', $5::uuid)`,
       [`e1-${s}`, `e2-${s}`, `mo-${s}`, userId, otherUserId],
     );
-    expect((await db.getDismantler(d.id, userId))!.last_contact).toBe("2026-09-20");
-    expect((await db.getDismantler(d.id, otherUserId))!.last_contact).toBe("2026-09-28");
-
     const detail = (await db.getDismantlerDetail(d.id, userId))!;
-    expect(detail.people).toEqual([{ id: `mo-${s}`, name: "Mo Mail", email: "mo@example.test", job_title: null }]);
+    expect(detail.people.map((person) => person.name).sort()).toEqual(["Di Mail", "Mo Mail"]);
     expect(detail.activity.filter((item) => item.kind === "email")).toEqual([
       expect.objectContaining({ subject: "Their reply", outgoing: false }),
     ]);

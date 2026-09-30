@@ -88,7 +88,7 @@ export type Dismantler = {
   setup_first_stock_on: string | null;
   setup_first_sync_on: string | null;
   setup_second_sync_on: string | null;
-  /** Latest email with someone at the company, in the viewer's mailbox. */
+  /** Latest email or meeting with anyone at the company, from the CRM sync. Shared by everyone. */
   last_contact: string | null;
   updated_at: string;
 };

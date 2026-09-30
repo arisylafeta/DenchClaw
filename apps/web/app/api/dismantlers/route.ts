@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export async function GET() {
   const guard = await guardDismantlers();
   if ("response" in guard) return guard.response;
-  return Response.json(await listDismantlers(guard.userId));
+  return Response.json(await listDismantlers());
 }
 
 /** POST { company_id } or { name }, plus any dismantler fields. */

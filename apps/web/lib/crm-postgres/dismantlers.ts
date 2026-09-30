@@ -19,52 +19,34 @@ const COLUMNS = `
   to_char(d.setup_first_stock_on, 'YYYY-MM-DD') as setup_first_stock_on,
   to_char(d.setup_first_sync_on, 'YYYY-MM-DD') as setup_first_sync_on,
   to_char(d.setup_second_sync_on, 'YYYY-MM-DD') as setup_second_sync_on,
-  to_char(contact.at at time zone 'Europe/London', 'YYYY-MM-DD') as last_contact,
+  -- Latest email or meeting with anyone at the company, as the CRM sync keeps it on each person.
+  (select to_char(max(p.last_interaction_at) at time zone 'Europe/London', 'YYYY-MM-DD')
+     from crm_people p where p.company_id = d.company_id) as last_contact,
   d.updated_at`;
-
-/**
- * Latest email with anyone at each dismantler's company, from the viewer's own mailbox ($1).
- * Emails are private to their mailbox, so each viewer sees their own last contact.
- */
-const CONTACT_CTE = `
-  with contact as (
-    select p.company_id, max(m.sent_at) as at
-      from crm_email_messages m
-      join lateral (
-        select m.from_person_id as person_id
-        union
-        select r.person_id from crm_email_message_recipients r where r.message_id = m.id
-      ) involved on true
-      join crm_people p on p.id = involved.person_id
-     where m.mailbox_owner_id = $1::uuid
-       and p.company_id in (select company_id from crm_dismantlers)
-     group by p.company_id
-  )`;
 
 const FROM = `
   crm_dismantlers d
   join crm_companies company on company.id = d.company_id
   left join crm_users owner on owner.id = d.owner_user_id
-  left join crm_people person on person.id = d.next_step_person_id
-  left join contact on contact.company_id = d.company_id`;
+  left join crm_people person on person.id = d.next_step_person_id`;
 
-const select = (where: string) => `${CONTACT_CTE} select ${COLUMNS} from ${FROM} ${where}`;
+const select = (where: string) => `select ${COLUMNS} from ${FROM} ${where}`;
 
-export async function listDismantlers(viewerId: string): Promise<{ dismantlers: Dismantler[]; owners: TradeOwner[] }> {
+export async function listDismantlers(): Promise<{ dismantlers: Dismantler[]; owners: TradeOwner[] }> {
   const [dismantlers, owners] = await Promise.all([
-    queryPg<Dismantler>(select("order by company.name"), [viewerId]),
+    queryPg<Dismantler>(select("order by company.name")),
     queryPg<TradeOwner>("select id, display_name as name from crm_users where is_active order by display_name"),
   ]);
   return { dismantlers, owners };
 }
 
-async function readOne(client: Queryable, id: string, viewerId: string): Promise<Dismantler | null> {
-  const { rows } = await client.query(select("where d.id = $2"), [viewerId, id]);
+async function readOne(client: Queryable, id: string): Promise<Dismantler | null> {
+  const { rows } = await client.query(select("where d.id = $1"), [id]);
   return (rows[0] as Dismantler | undefined) ?? null;
 }
 
-export async function getDismantler(id: string, viewerId: string): Promise<Dismantler | null> {
-  return readOne(pgPool, id, viewerId);
+export async function getDismantler(id: string): Promise<Dismantler | null> {
+  return readOne(pgPool, id);
 }
 
 export type CompanyPerson = { id: string; name: string; email: string | null; job_title: string | null };
@@ -75,7 +57,7 @@ export type Activity =
 export type DismantlerDetail = { dismantler: Dismantler; people: CompanyPerson[]; activity: Activity[] };
 
 export async function getDismantlerDetail(id: string, viewerId: string): Promise<DismantlerDetail | null> {
-  const dismantler = await getDismantler(id, viewerId);
+  const dismantler = await getDismantler(id);
   if (!dismantler) return null;
   const [people, emails, events] = await Promise.all([
     queryPg<CompanyPerson>(
@@ -199,7 +181,7 @@ export async function createDismantler(
     const companyId = await resolveCompany(client, input);
     await assertPersonAtCompany(client, input.patch.next_step_person_id, companyId);
     const id = await insertDismantler(client, companyId, input.patch, userId);
-    return (await readOne(client, id, userId))!;
+    return (await readOne(client, id))!;
   });
 }
 
@@ -240,10 +222,10 @@ async function applyPatch(client: Queryable, before: Dismantler, patch: Dismantl
 export async function updateDismantler(id: string, patch: DismantlerPatch, userId: string): Promise<Dismantler | null> {
   return withPgTransaction(async (client) => {
     await client.query("select 1 from crm_dismantlers where id = $1 for update", [id]);
-    const before = await readOne(client, id, userId);
+    const before = await readOne(client, id);
     if (!before) return null;
     await applyPatch(client, before, patch, userId);
-    return readOne(client, id, userId);
+    return readOne(client, id);
   });
 }
 
@@ -260,11 +242,11 @@ export async function startOutreach(
     const saved: Dismantler[] = [];
     for (const id of ids) {
       await client.query("select 1 from crm_dismantlers where id = $1 for update", [id]);
-      const before = await readOne(client, id, userId);
+      const before = await readOne(client, id);
       if (!before) throw new DismantlerError("A dismantler in this batch no longer exists. Refresh and try again.");
       const stage: Stage = before.stage === "Found" || before.stage === "Parked" ? "Contacted" : before.stage;
       await applyPatch(client, before, { stage, ...followUp, waiting_on: "them" }, userId, "outreach");
-      saved.push((await readOne(client, id, userId))!);
+      saved.push((await readOne(client, id))!);
     }
     return saved;
   });
