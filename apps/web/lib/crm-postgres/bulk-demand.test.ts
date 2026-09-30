@@ -149,6 +149,29 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect((await demand.getDemand(agreed.id))?.trades).toEqual([{ lot_id: lot, title: "Ranking trade LFP packs", status: "To contact" }]);
   });
 
+  it("shows each buyer once, with their best row first and the rest under more, and hides the whole buyer", async () => {
+    const lot = (await trades.createBulkTrade({ title: "Grouping trade NMC packs", trade_kind: "packs", trade_stage: "With buyers" }, user.id)).id;
+    await pg.queryPg(`insert into crm_companies (id, name, buyer_tier) values ('co_group', 'Group Energy', 'B') on conflict do nothing`);
+    const add = (wants: string, extra: object = {}) => demand.addDemand({ buyer: "Group Energy", company_id: "co_group", wants, ...extra }, user.id);
+    const partial = await add("NMC modules");
+    const strong = await add("NMC packs for storage");
+    const request = await add("40 NMC packs by December", { kind: "request", needed_by: "2099-12-01" });
+    const solo = await demand.addDemand({ buyer: "Solo Buyer", wants: "Any EV packs" }, user.id);
+    const match = (row: { id: string }, strength: string) => pg.queryPg(
+      "insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values ($1, $2, $3, 'fits')", [row.id, lot, strength]);
+    await match(partial, "partial");
+    await match(strong, "strong");
+    await match(request, "strong");
+    await match(solo, "partial");
+
+    const lines = await demand.suggestedBuyers(lot);
+    expect(lines.map((line) => [line.buyer, line.demand_id])).toEqual([["Group Energy", request.id], ["Solo Buyer", solo.id]]);
+    expect(lines[0].more.map((other) => [other.demand_id, other.strength])).toEqual([[strong.id, "strong"], [partial.id, "partial"]]);
+
+    expect(await demand.hideSuggestion(lot, request.id)).toBe(true);
+    expect((await demand.suggestedBuyers(lot)).map((line) => line.buyer)).toEqual(["Solo Buyer"]);
+  });
+
   it("carries a possible-demand card's kind, date, volume and spec, and drops what fails the checks", async () => {
     const [card] = await pg.queryPg<{ id: string }>(
       `insert into crm_bulk_trade_proposals (lot_id, kind, target, proposed, summary, quote, source_kind, source_id, source_label, source_at)

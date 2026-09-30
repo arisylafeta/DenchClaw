@@ -26,7 +26,7 @@ import {
   type Spec,
   type SpecListKey,
 } from "@/lib/bulk-demand";
-import { shortDate, type Proposal } from "@/lib/bulk-trade-details";
+import { shortDate, ukTime, type Proposal } from "@/lib/bulk-trade-details";
 import { CrmSearch } from "./buyer-dialogs";
 import { DemandBadge, TierBadge } from "./demand-badge";
 import { ProposalRow } from "./proposal-row";
@@ -44,6 +44,9 @@ import {
   useForm,
 } from "./trade-ui";
 
+/** The latest demand-matching pass. */
+type MatchRun = { at: string; status: "running" | "ok" | "failed" };
+
 type Filter = "requests" | "standing" | "check" | "closed";
 
 type Props = {
@@ -60,6 +63,7 @@ const COLUMNS = "grid-cols-[minmax(160px,1fr)_minmax(260px,2.2fr)_130px_100px_12
 export function DemandPage({ today, onOpenTrade }: Props) {
   const [demand, setDemand] = useState<Demand[]>([]);
   const [possible, setPossible] = useState<Proposal[]>([]);
+  const [matched, setMatched] = useState<MatchRun | null>(null);
   const [chosen, setFilter] = useState<Filter | null>(null);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,9 +72,10 @@ export function DemandPage({ today, onOpenTrade }: Props) {
 
   const load = useCallback(async () => {
     try {
-      const data = await request<{ demand: Demand[]; possible: Proposal[] }>("/api/bulk-trades/demand");
+      const data = await request<{ demand: Demand[]; possible: Proposal[]; matched?: MatchRun | null }>("/api/bulk-trades/demand");
       setDemand(data.demand);
       setPossible(data.possible);
+      setMatched(data.matched ?? null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load demand.");
@@ -142,6 +147,11 @@ export function DemandPage({ today, onOpenTrade }: Props) {
             style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }} />
           <span className="flex-1" />
           <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Bulk only, 2+ units</span>
+          {matched && (
+            <span className="text-[13px]" style={{ color: matched.status === "failed" ? "var(--bt-red)" : "var(--bt-muted)" }}>
+              {matched.status === "failed" ? "Matching failed" : matched.status === "running" ? "Matching now" : "Matched"} {ukTime(matched.at)}
+            </span>
+          )}
           <button type="button" onClick={() => setEditing("new")} className="h-9 rounded-none bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
             style={{ color: "var(--bt-on-accent)" }}>
             Add demand

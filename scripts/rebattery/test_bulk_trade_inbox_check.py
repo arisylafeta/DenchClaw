@@ -397,6 +397,7 @@ class DemandRun(unittest.TestCase):
                        ('btd_hid', 'Somerset EV', null, 'MEB modules', '2026-08-14') on conflict do nothing;
               insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason, hidden)
                 values ('btd_hid', 'bt_dem', 'partial', 'old', true) on conflict do nothing;
+              update crm_bulk_trade_demand set status = 'open', closed_reason = null where id in ('btd_open', 'btd_hid');
             """)
 
     def tearDown(self):
@@ -422,26 +423,84 @@ class DemandRun(unittest.TestCase):
         self.assertEqual([(c["proposed"]["buyer"], c["target"]) for c in cards], [("Revoxa py buyer", None), ("Green Voltage", "btd_open")])
         self.assertEqual(cards[0]["proposed"]["email"], "dawid.py@revoxa.example")
 
-    def test_matching_runs_once_per_change_and_keeps_not_a_fit_hidden(self):
+    def test_matching_judges_only_what_changed_and_keeps_not_a_fit_hidden(self):
+        with self.conn, self.conn.cursor() as cur:  # start from a trade and rows never judged
+            cur.execute("""update crm_bulk_trade_lots set demand_fingerprint = null where id = 'bt_dem';
+                           update crm_bulk_trade_demand set match_hash = null, status = 'open', closed_reason = null,
+                             wants = 'Matched packs in repeat batches' where id in ('btd_open', 'btd_hid');
+                           delete from crm_bulk_trade_demand_matches where lot_id = 'bt_dem' and not hidden;""")
         calls = []
 
         def fake_model(system, user, key):
-            calls.append(json.loads(user)["TRADE"]["title"])
-            return {"matches": [{"demand_id": "btd_open", "strength": "strong", "reason": "A matched lot"},
-                                {"demand_id": "btd_hid", "strength": "partial", "reason": "Packs, not modules"},
-                                {"demand_id": "btd_nope", "strength": "strong", "reason": "not a real row"}]}
+            payload = json.loads(user)
+            calls.append(([t["title"] for t in payload["TRADES"]], [d["id"] for d in payload["DEMAND"]]))
+            return {"matches": [{"trade_id": "bt_dem", "demand_id": "btd_open", "strength": "strong", "reason": "A matched lot"},
+                                {"trade_id": "bt_dem", "demand_id": "btd_hid", "strength": "partial", "reason": "Packs, not modules"},
+                                {"trade_id": "bt_dem", "demand_id": "btd_nope", "strength": "strong", "reason": "not a real row"},
+                                {"trade_id": "bt_nowhere", "demand_id": "btd_open", "strength": "strong", "reason": "not a trade"}]}
+
+        def ours():
+            return [c for c in calls if "Demand match trade" in c[0]]
+
+        def matches():
+            with self.conn.cursor() as cur:
+                cur.execute("select demand_id, strength, hidden from crm_bulk_trade_demand_matches where lot_id = 'bt_dem' order by 1")
+                return cur.fetchall()
 
         with patch.object(check, "call_model", fake_model):
-            check.match_demand(self.conn, "k", {"warnings": []})
-            check.match_demand(self.conn, "k", {"warnings": []})  # nothing changed: no new call
-            with self.conn, self.conn.cursor() as cur:
-                cur.execute("update crm_bulk_trade_demand set wants = 'Matched packs, 300 kWh builds', updated_at = now() + interval '1 second' where id = 'btd_open'")
-            check.match_demand(self.conn, "k", {"warnings": []})
+            first = check.match_demand(self.conn, "k")
+            self.assertEqual(len(ours()), 1)  # the new trade, against every open row
+            self.assertEqual(matches(), [("btd_hid", "partial", True), ("btd_open", "strong", False)])
+            self.assertEqual(first["warnings"], [])
+
+            calls.clear()
+            again = check.match_demand(self.conn, "k")
+            with self.conn, self.conn.cursor() as cur:  # "Still wanted": not a matching change
+                cur.execute("update crm_bulk_trade_demand set confirmed_on = current_date, updated_at = now() where id = 'btd_open'")
+            check.match_demand(self.conn, "k")
+            self.assertEqual((calls, again["model_calls"]), ([], 0))
+
+            with self.conn, self.conn.cursor() as cur:  # a changed want: that row only, against the steady trades
+                cur.execute("update crm_bulk_trade_demand set wants = 'Matched packs, 300 kWh builds' where id = 'btd_open'")
+            check.match_demand(self.conn, "k")
+            self.assertEqual(len(calls), 1)
+            self.assertIn("Demand match trade", calls[0][0])
+            self.assertEqual(calls[0][1], ["btd_open"])
+
+            calls.clear()
+            with self.conn, self.conn.cursor() as cur:  # closed: suggestion gone, no call
+                cur.execute("update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other' where id = 'btd_open'")
+            check.match_demand(self.conn, "k")
+            self.assertEqual(calls, [])
+            self.assertEqual(matches(), [("btd_hid", "partial", True)])
         with self.conn.cursor() as cur:
-            cur.execute("select demand_id, strength, hidden from crm_bulk_trade_demand_matches where lot_id = 'bt_dem' order by 1")
-            rows = cur.fetchall()
-        self.assertEqual(calls.count("Demand match trade"), 2)
-        self.assertEqual(rows, [("btd_hid", "partial", True), ("btd_open", "strong", False)])
+            cur.execute("select status from crm_bulk_trade_check_runs where kind = 'match' order by id desc limit 1")
+            self.assertEqual(cur.fetchone(), ("ok",))
+
+    def test_matching_gives_the_seller_price_and_survives_a_model_failure(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""insert into crm_bulk_trade_fields (lot_id, field_key, value) values ('bt_dem', 'seller_price', '€29/kWh')
+                           on conflict (lot_id, field_key) do update set value = excluded.value""")
+        seen = []
+
+        def failing(system, user, key):
+            seen.append(json.loads(user))
+            raise TimeoutError()
+
+        with patch.object(check, "call_model", failing):
+            out = check.match_demand(self.conn, "k")
+        mine = [t for payload in seen for t in payload["TRADES"] if t["trade_id"] == "bt_dem"]
+        self.assertEqual(mine[0]["fields"]["seller_price"], "€29/kWh")
+        self.assertIn("demand matching failed (TimeoutError)", out["warnings"])
+        with self.conn.cursor() as cur:  # not recorded as judged, so the next pass tries again
+            cur.execute("select demand_fingerprint from crm_bulk_trade_lots where id = 'bt_dem'")
+            fingerprint = cur.fetchone()[0]
+        with patch.object(check, "call_model", lambda system, user, key: {"matches": []}):
+            retry = check.match_demand(self.conn, "k")
+        self.assertGreaterEqual(retry["model_calls"], 1)
+        with self.conn.cursor() as cur:
+            cur.execute("select demand_fingerprint from crm_bulk_trade_lots where id = 'bt_dem'")
+            self.assertNotEqual(cur.fetchone()[0], fingerprint)
 
 
     def test_screen_keeps_a_requests_date_volume_and_valid_spec_only(self):

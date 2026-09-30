@@ -179,7 +179,8 @@ describe("SuggestedBuyers", () => {
     const onChanged = vi.fn();
     render(<SuggestedBuyers tradeId="bt_69" onChanged={onChanged} suggested={[
       { demand_id: "btd_1", tier: "A", kind: "request", basis: null, buyer: "H. Nolden Investment", contact: "Markus", wants: "Tested EV packs 50 kWh+",
-        needed_by: "2026-10-15", confirmed_on: "2026-09-21", strength: "strong", reason: "A homogeneous lot." },
+        needed_by: "2026-10-15", confirmed_on: "2026-09-21", strength: "strong", reason: "A homogeneous lot.",
+        more: [{ demand_id: "btd_2", wants: "Modules for BESS", strength: "partial", reason: "Modules, not packs." }] },
     ]} />);
     expect(screen.getByText("Strong fit")).toBeInTheDocument();
     expect(screen.getByText("Request")).toBeInTheDocument();
@@ -190,5 +191,7 @@ describe("SuggestedBuyers", () => {
     await userEvent.click(screen.getByRole("button", { name: "Not a fit: H. Nolden Investment" }));
     expect(fetchMock).toHaveBeenLastCalledWith("/api/bulk-trades/bt_69/suggested/btd_1", expect.objectContaining({ method: "DELETE" }));
     expect(onChanged).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByRole("button", { name: "+1 more want" }));
+    expect(screen.getByText(/Modules for BESS/)).toBeInTheDocument();
   });
 });

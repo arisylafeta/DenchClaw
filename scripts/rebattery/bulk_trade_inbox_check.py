@@ -1010,75 +1010,161 @@ def screen_demand(cur, sources, key, report):
     return out
 
 
-MATCH_SYSTEM = """You match open buyer DEMAND to one bulk battery TRADE (supply) for ReBattery, a broker of second-life and
-surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON: {"matches": [{"demand_id", "strength", "reason"}]}.
+MATCH_SYSTEM = """You match open buyer DEMAND rows to bulk battery TRADES (supply) for ReBattery, a broker of second-life
+and surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON:
+{"matches": [{"trade_id", "demand_id", "strength", "reason"}]}, one entry per trade and row that fit; leave out the rest.
 Each DEMAND row is a "request" (a one-off need, maybe by "needed_by") or a "standing" buy-box with a "basis":
 "agreed" and "stated" come from the buyer; "estimated" is ReBattery's guess from research, so match it only on a
 clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words; "note"
 holds other requirements (voltage, connectors, use, risk answers) that rule a batch out as surely as the spec.
+A missing spec value means unknown, not "no".
+A TRADE's "seller_price", when given, is what ReBattery pays the seller (internal). A buyer's max_price must leave
+room above it; when it does not, the pair is at best "partial" with price as the catch.
 - "strong": the trade's batch is the kind of thing the buyer asked for (form, chemistry, size, quantity, use) and
   nothing obvious rules it out, including anything in spec "excludes".
 - "partial": a plausible fit with one clear catch (e.g. packs vs cells, region, price, volume); name the catch.
-Leave out rows that do not fit. "reason": one short plain sentence for Alex, naming the fit and any catch."""
+"reason": one short plain sentence for Alex, naming the fit and any catch."""
+
+MATCH_ROWS_PER_CALL = 60
+# What a demand row is judged on. A "Still wanted" confirmation, a close or a contact edit changes none of it.
+MATCH_CONTENT = ("kind", "basis", "buyer", "wants", "quantity", "location", "needed_by", "volume", "volume_unit",
+                 "max_price", "price_currency", "price_unit", "spec", "note")
+
+
+def content_hash(value):
+    return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def live_trade_facts(trade):
-    return {k: trade[k] for k in ("title", "trade_kind", "trade_stage", "fact_line")} | {
-        "fields": {k: v["value"] for k, v in sorted(trade["fields"].items()) if v.get("value") and k != "seller_price"}}
+    """What the matching sees of a trade. seller_price is included for the price check; the model's reasons are
+    shown only to Alex, never to buyers."""
+    fields = {k: v["value"] for k, v in sorted(trade["fields"].items()) if v.get("value")}
+    return {k: trade[k] for k in ("title", "trade_kind", "trade_stage", "fact_line")} | {"fields": fields}
 
 
-def match_demand(conn, key, report, dry_run=False):
-    """Re-matches each live trade whose facts or the open demand changed since it was last matched."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+def judge(trades, rows, key, report):
+    """Asks the model which (trade, row) pairs fit, in calls of at most MATCH_ROWS_PER_CALL rows. Returns the valid
+    pairs, or None when a call failed (so nothing is recorded as judged)."""
+    trade_ids = {lot for lot, _ in trades}
+    pairs = []
+    for start in range(0, len(rows), MATCH_ROWS_PER_CALL):
+        chunk = rows[start:start + MATCH_ROWS_PER_CALL]
+        row_ids = {r["id"] for r in chunk}
+        payload = {"TRADES": [{"trade_id": lot, **facts} for lot, facts in trades], "DEMAND": chunk}
+        try:
+            raw = call_model(MATCH_SYSTEM, json.dumps(payload, ensure_ascii=False, default=str), key)
+            report["model_calls"] += 1
+        except Exception as err:
+            report["warnings"].append(f"demand matching failed ({type(err).__name__})")
+            return None
+        # One trade per call needs no trade_id from the model.
+        only = next(iter(trade_ids)) if len(trade_ids) == 1 else None
+        for m in raw.get("matches") or []:
+            if not isinstance(m, dict):
+                continue
+            lot = m.get("trade_id") if m.get("trade_id") in trade_ids else only
+            if lot and m.get("demand_id") in row_ids and m.get("strength") in ("strong", "partial") \
+                    and str(m.get("reason") or "").strip():
+                pairs.append({"lot_id": lot, "demand_id": m["demand_id"], "strength": m["strength"],
+                              "reason": str(m["reason"]).strip()[:300]})
+    return pairs
+
+
+def store_pairs(cur, lot_ids, demand_ids, pairs):
+    """Replaces the verdicts for every judged (trade, row) pair. Hidden pairs stay hidden; pairs whose buyer is already
+    on the trade are left alone."""
+    keep = [(p["lot_id"], p["demand_id"]) for p in pairs]
+    cur.execute(
+        """delete from crm_bulk_trade_demand_matches m
+           where m.lot_id = any(%s) and m.demand_id = any(%s) and not m.hidden and m.buyer_id is null
+             and not exists (select 1 from unnest(%s::text[], %s::text[]) as k(lot_id, demand_id)
+                             where k.lot_id = m.lot_id and k.demand_id = m.demand_id)""",
+        (list(lot_ids), list(demand_ids), [k[0] for k in keep], [k[1] for k in keep]))
+    for p in pairs:
         cur.execute(
-            """select id, kind, basis, buyer, wants, quantity, location, to_char(needed_by, 'YYYY-MM-DD') as needed_by,
-                      volume::float8 as volume, volume_unit, max_price::float8 as max_price, price_currency, price_unit, spec,
-                      left(note, 600) as note,
-                      to_char(confirmed_on, 'YYYY-MM-DD') as confirmed,
-                      to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated
-               from crm_bulk_trade_demand
-               where status = 'open' and (kind <> 'request' or needed_by is null or needed_by >= current_date)
-               order by id""")
-        demand = cur.fetchall()
-        trades = load_trades(cur)
-        cur.execute("select id, demand_fingerprint from crm_bulk_trade_lots where id = any(%s)", (list(trades),))
-        fingerprints = {r["id"]: r["demand_fingerprint"] for r in cur.fetchall()}
-        rows = [{k: v for k, v in d.items() if k != "updated" and v not in (None, {}, [])} for d in demand]
-        ids = {d["id"] for d in demand}
-        matched = 0
-        for lot_id, trade in trades.items():
-            facts = live_trade_facts(trade)
-            fingerprint = hashlib.sha1(json.dumps([facts, [(d["id"], d["updated"]) for d in demand]],
-                                                  sort_keys=True, default=str).encode()).hexdigest()
-            if fingerprints.get(lot_id) == fingerprint:
-                continue
-            results = []
-            if demand:
-                try:
-                    raw = call_model(MATCH_SYSTEM, json.dumps({"TRADE": facts, "DEMAND": rows}, ensure_ascii=False, default=str), key)
-                    report["model_calls"] = report.get("model_calls", 0) + 1
-                except Exception as err:
-                    report["warnings"].append(f"{trade['title']}: demand matching failed ({type(err).__name__})")
+            """insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values (%s, %s, %s, %s)
+               on conflict (demand_id, lot_id) do update set strength = excluded.strength, reason = excluded.reason,
+                 matched_at = now()""", (p["demand_id"], p["lot_id"], p["strength"], p["reason"]))
+
+
+def match_demand(conn, key, report=None, dry_run=False):
+    """Judges only what changed: a live trade whose facts changed against every open row, and rows whose matching
+    content changed against the other live trades. A closed or expired row loses its suggestions without a call.
+    Recorded as a run of kind 'match'; the summary is also returned (and put under report["demand_matching"])."""
+    out = {"model_calls": 0, "trades_rejudged": 0, "rows_rejudged": 0, "matches": [], "warnings": []}
+    if report is not None:
+        report["demand_matching"] = out
+    run_id = None
+    if not dry_run:
+        with conn.cursor() as cur:
+            cur.execute("insert into crm_bulk_trade_check_runs (kind) values ('match') returning id")
+            run_id = cur.fetchone()[0]
+        conn.commit()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """select id, kind, basis, buyer, wants, quantity, location, to_char(needed_by, 'YYYY-MM-DD') as needed_by,
+                          volume::float8 as volume, volume_unit, max_price::float8 as max_price, price_currency, price_unit,
+                          spec, left(note, 600) as note, to_char(confirmed_on, 'YYYY-MM-DD') as confirmed, match_hash
+                   from crm_bulk_trade_demand
+                   where status = 'open' and (kind <> 'request' or needed_by is null or needed_by >= current_date)
+                   order by id""")
+            demand = cur.fetchall()
+            trades = load_trades(cur)
+            cur.execute("select id, demand_fingerprint from crm_bulk_trade_lots where id = any(%s)", (list(trades),))
+            stored = {r["id"]: r["demand_fingerprint"] for r in cur.fetchall()}
+
+            facts = {lot: live_trade_facts(t) for lot, t in trades.items()}
+            trade_hash = {lot: content_hash(f) for lot, f in facts.items()}
+            row_hash = {d["id"]: content_hash({k: d[k] for k in MATCH_CONTENT}) for d in demand}
+            rows = {d["id"]: {k: v for k, v in d.items() if k != "match_hash" and v not in (None, {}, [])} for d in demand}
+            all_ids = list(rows)
+
+            changed_trades = [lot for lot in trades if stored.get(lot) != trade_hash[lot]]
+            steady_trades = [lot for lot in trades if lot not in changed_trades]
+            changed_rows = [d["id"] for d in demand if d["match_hash"] != row_hash[d["id"]]]
+            every_trade_judged = True
+
+            for lot in changed_trades:  # 1. a changed trade against every open row
+                pairs = judge([(lot, facts[lot])], list(rows.values()), key, out) if rows else []
+                if pairs is None:
+                    every_trade_judged = False
                     continue
-                results = [m for m in raw.get("matches") or [] if isinstance(m, dict) and m.get("demand_id") in ids
-                           and m.get("strength") in ("strong", "partial") and str(m.get("reason") or "").strip()]
-            matched += 1
-            report.setdefault("matches", []).extend(
-                {"lot_id": lot_id, "demand_id": m["demand_id"], "strength": m["strength"]} for m in results)
-            if dry_run:
-                continue
-            keep = [m["demand_id"] for m in results]
-            cur.execute("""delete from crm_bulk_trade_demand_matches where lot_id = %s and not hidden and buyer_id is null
-                           and not (demand_id = any(%s))""", (lot_id, keep))
-            for m in results:
+                out["trades_rejudged"] += 1
+                out["matches"] += pairs
+                if not dry_run:
+                    store_pairs(cur, [lot], all_ids, pairs)
+                    cur.execute("update crm_bulk_trade_lots set demand_fingerprint = %s where id = %s", (trade_hash[lot], lot))
+                    conn.commit()
+
+            judged_rows = changed_rows if every_trade_judged else []
+            if changed_rows and steady_trades:  # 2. changed rows against the trades that did not change
+                pairs = judge([(lot, facts[lot]) for lot in steady_trades], [rows[i] for i in changed_rows], key, out)
+                if pairs is None:
+                    judged_rows = []
+                else:
+                    out["matches"] += pairs
+                    if not dry_run:
+                        store_pairs(cur, steady_trades, changed_rows, pairs)
+            out["rows_rejudged"] = len(judged_rows)
+
+            if not dry_run:
+                for row_id in judged_rows:
+                    cur.execute("update crm_bulk_trade_demand set match_hash = %s where id = %s", (row_hash[row_id], row_id))
+                # 3. closed or expired rows, and trades no longer live, keep no open suggestions
                 cur.execute(
-                    """insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values (%s, %s, %s, %s)
-                       on conflict (demand_id, lot_id) do update set strength = excluded.strength, reason = excluded.reason,
-                         matched_at = now()""", (m["demand_id"], lot_id, m["strength"], str(m["reason"]).strip()[:300]))
-            cur.execute("update crm_bulk_trade_lots set demand_fingerprint = %s where id = %s", (fingerprint, lot_id))
-            conn.commit()
-        report["trades_matched"] = matched
-    return report
+                    """delete from crm_bulk_trade_demand_matches m
+                       where not m.hidden and m.buyer_id is null
+                         and (not (m.demand_id = any(%s)) or not (m.lot_id = any(%s)))""", (all_ids, list(trades)))
+                cur.execute(
+                    """update crm_bulk_trade_check_runs set status = 'ok', finished_at = now(), proposals_made = %s,
+                         error = %s where id = %s""",
+                    (len(out["matches"]), "; ".join(out["warnings"]) or None, run_id))
+                conn.commit()
+    except Exception as err:  # matching must never take the inbox check or auction sync down with it
+        fail_run(conn, run_id, err)
+        out["warnings"].append(f"demand matching stopped ({type(err).__name__}: {str(err)[:200]})")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1225,7 +1311,7 @@ def run(conn, args):
     for lot_id in ctx["new_contacts"]:  # someone new on a trade: read their past emails for it
         start_history(lot_id, args)
     if key:
-        match_demand(conn, key, report, args.dry_run)
+        match_demand(conn, key, report, dry_run=args.dry_run)
     json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
     print()
     return 0
@@ -1524,8 +1610,8 @@ def main():
         if args.history:
             return history(conn, args)
         if args.match:
-            report = match_demand(conn, gateway_key(), {"warnings": []}, args.dry_run)
-            json.dump(report, sys.stdout, indent=2, default=str)
+            report = match_demand(conn, gateway_key(), dry_run=args.dry_run)
+            json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
             print()
             return 0
         return summary(conn) if args.summary else run(conn, args)
