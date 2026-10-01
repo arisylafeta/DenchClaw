@@ -21,6 +21,8 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
     fact_line: null,
     next_step: "Do the thing",
     next_step_due: TODAY,
+    next_step_contact_id: null,
+    next_step_buyer_id: null,
     waiting_on: "us",
     waiting_since: null,
     owner_user_id: null,

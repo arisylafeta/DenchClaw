@@ -12,6 +12,7 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
   return {
     id: "t", title: "Trade", trade_stage: "With buyers", trade_kind: null, fact_line: null,
     next_step: "Follow up", next_step_due: today, waiting_on: "us", waiting_since: null,
+    next_step_contact_id: null, next_step_buyer_id: null,
     owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
     ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: null, auction_slug: null, auction_status: null, auction_closes_at: null, updated_at: "2026-09-28T09:00:00Z",
     ...overrides,

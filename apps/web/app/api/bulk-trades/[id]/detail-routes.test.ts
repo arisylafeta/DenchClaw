@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as GmailDrafts from "@/lib/gmail-drafts";
 
 const currentUser = vi.fn();
 vi.mock("@/lib/auth", () => ({ currentUser }));
@@ -20,12 +21,13 @@ vi.mock("@/lib/crm-postgres/bulk-trade-details", () => details);
 const decideProposal = vi.fn();
 const requestHistoryPass = vi.fn();
 vi.mock("@/lib/crm-postgres/bulk-trade-proposals", () => ({
-  decideProposal, requestHistoryPass, tradeProposals: vi.fn(async () => []), historyStatus: vi.fn(async () => null),
+  decideProposal, requestHistoryPass, tradeProposals: vi.fn(async () => []), historyStatus: vi.fn(async () => null), appliedChanges: vi.fn(async () => []),
 }));
+vi.mock("@/lib/crm-postgres/bulk-demand", () => ({ suggestedBuyers: vi.fn(async () => []) }));
 const getBulkTrade = vi.fn(async (id: string) => (id === "bt_1" ? { id } : null));
 vi.mock("@/lib/crm-postgres/bulk-trades", () => ({ updateBulkTrade: vi.fn(), getBulkTrade }));
-const createGmailDraft = vi.fn(async () => ({ draftId: "r1", messageId: "m1" }));
-vi.mock("@/lib/gmail-drafts", async (original) => ({ ...(await original<typeof import("@/lib/gmail-drafts")>()), createGmailDraft }));
+const createGmailDraft = vi.fn<typeof GmailDrafts.createGmailDraft>(async () => ({ draftId: "r1", messageId: "m1" }));
+vi.mock("@/lib/gmail-drafts", async (original) => ({ ...(await original<typeof GmailDrafts>()), createGmailDraft }));
 
 const USER = { id: "11111111-1111-4111-8111-111111111111", email: "alex@rebattery.io", displayName: "Alex" };
 const post = (body: unknown) => new Request("http://localhost/x", { method: "POST", body: JSON.stringify(body) });

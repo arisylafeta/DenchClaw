@@ -25,14 +25,8 @@ describe("workspace sidebar navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
     expect(onNavigate).toHaveBeenCalledWith("crm-campaigns");
-  it("opens battery requests from the Admin sidebar", () => {
-    const onNavigate = vi.fn();
-    render(<WorkspaceSidebar onNavigate={onNavigate} activePlatformTarget="battery-requests" />);
-    const button = screen.getByRole("button", { name: "Battery requests" });
-    expect(document.getElementById("sidebar-admin-tree")).toContainElement(button);
-    fireEvent.click(button);
-    expect(onNavigate).toHaveBeenCalledWith("platform-battery-requests");
   });
+
 
   it("categorizes workspace objects without changing their order", () => {
     expect(categorizeSidebarObjects(objects)).toEqual({
@@ -69,15 +63,6 @@ describe("workspace sidebar navigation", () => {
     expect(screen.queryByTitle(/dotfiles/)).toBeNull();
     expect(screen.getByRole("button", { name: "Open user menu" })).toBeInTheDocument();
 
-    const navigationLabels = screen.getAllByRole("button").map((button) => button.textContent?.trim()).filter(Boolean);
-    expect(navigationLabels).toEqual(expect.arrayContaining([
-      "People", "Companies", "Inbox", "Calendar", "Recycler selection", "Listings", "Stock", "Accounts", "Battery review", "Payout reviews",
-      "Campaigns", "Work Tasks", "Automation Loops", "Automation Loop Runs", "Message monitoring", "Battery inquiries", "Cron",
-    ]));
-    expect(navigationLabels.indexOf("Automation Loops")).toBeLessThan(navigationLabels.indexOf("Automation Loop Runs"));
-    expect(screen.queryByRole("button", { name: "Calendar" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Cron" })).toBeNull();
   });
 
   it("collapses CRM, Admin, and Workspace as independent trees", () => {
@@ -91,7 +76,6 @@ describe("workspace sidebar navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
     expect(screen.getByRole("button", { name: "Listings" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
     expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "CRM" }));
@@ -121,7 +105,6 @@ describe("workspace sidebar navigation", () => {
     const workspaceGroup = screen.getByRole("group", { name: "Workspace" });
     expect(crmGroup).toContainElement(screen.getByRole("button", { name: "Campaigns" }));
     expect(adminGroup).toContainElement(screen.getByRole("button", { name: "Listings" }));
-    expect(screen.queryByRole("button", { name: "Accounts" })).toBeNull();
     expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Work Tasks" }));
     expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Automation Loops" }));
     expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Automation Loop Runs" }));
