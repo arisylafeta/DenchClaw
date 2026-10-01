@@ -25,6 +25,8 @@ describe("workspace sidebar navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
     expect(onNavigate).toHaveBeenCalledWith("crm-campaigns");
+  });
+
   it("opens battery requests from the Admin sidebar", () => {
     const onNavigate = vi.fn();
     render(<WorkspaceSidebar onNavigate={onNavigate} activePlatformTarget="battery-requests" />);

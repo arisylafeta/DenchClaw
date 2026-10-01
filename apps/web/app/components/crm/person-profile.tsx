@@ -72,6 +72,7 @@ type PersonResponse = {
     last_inbound_at: string | null;
   };
   campaigns?: Array<{
+    send_id: string;
     campaign_id: string;
     campaign_name: string;
     listing_id: string;
@@ -83,6 +84,24 @@ type PersonResponse = {
     bounced_at: string | null;
     provider_opened_at: string | null;
     provider_link_clicked_at: string | null;
+    last_synced_at: string | null;
+    links: Array<{
+      cta_key: string;
+      listing_id: string | null;
+      first_clicked_at: string | null;
+    }>;
+  }>;
+  campaign_summary: {
+    sent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+    tracking_pending: number;
+  };
+  listing_engagement: Array<{
+    listing_id: string;
+    cta_key: string;
+    clicked_updates: number;
   }>;
 };
 
@@ -298,21 +317,7 @@ export function PersonProfile({
               onOpenCompany={onOpenCompany}
             />
           )}
-          {tab === "campaigns" && (
-            <section aria-label="Campaign pitches" className="space-y-3">
-              {(data.campaigns ?? []).length === 0 ? <p>No campaign pitches recorded.</p> :
-                data.campaigns!.map((send) => (
-                  <div key={send.campaign_id} className="rounded-lg border p-4" style={{ borderColor: "var(--color-border)" }}>
-                    <div className="font-medium">{send.campaign_name}</div>
-                    <div className="text-sm">Listing {send.listing_id} · {send.pitch_count} recorded pitch{send.pitch_count === 1 ? "" : "es"}</div>
-                    <div className="text-sm">{send.accepted_at ? `Postmark accepted ${send.accepted_at}` : send.state}</div>
-                    <div className="text-sm">{send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : "Delivery unconfirmed"}</div>
-                    {send.provider_opened_at && <div className="text-sm">Provider open recorded</div>}
-                    {send.provider_link_clicked_at && <div className="text-sm">Email link clicked (site visit unverified)</div>}
-                  </div>
-                ))}
-            </section>
-          )}
+          {tab === "campaigns" && <CampaignsTab data={data} />}
           {tab === "notes" && <NotesTab data={data} onSave={handleSaveNotes} />}
         </div>
       </div>
@@ -510,6 +515,100 @@ function PersonHeader({
 // ---------------------------------------------------------------------------
 // Tabs — bodies
 // ---------------------------------------------------------------------------
+
+function CampaignsTab({ data }: { data: PersonResponse }) {
+  const campaigns = data.campaigns ?? [];
+  const summary = data.campaign_summary;
+
+  return (
+    <section aria-label="Campaign engagement" className="space-y-6">
+      <div className="space-y-3">
+        <h2 className="font-medium">Across all updates</h2>
+        <dl aria-label="Campaign totals" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Sent" value={summary.sent} />
+          <Stat label="Delivered" value={`${summary.delivered} of ${summary.sent}`} />
+          <Stat label="Opened" value={`${summary.opened} of ${summary.sent}`} />
+          <Stat label="Clicked" value={`${summary.clicked} of ${summary.sent}`} />
+        </dl>
+        <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+          Opens and clicks count updates with tracked activity, not repeated actions or verified people.
+          Email clicks are not website visits.
+        </p>
+        {summary.tracking_pending > 0 && (
+          <p role="status" className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+            Tracking pending for {summary.tracking_pending} sent update{summary.tracking_pending === 1 ? "" : "s"}.
+            Missing activity on these updates is unknown, not zero engagement.
+          </p>
+        )}
+      </div>
+
+      {data.listing_engagement.length > 0 && (
+        <section aria-label="Listing engagement" className="space-y-3">
+          <h2 className="font-medium">Listings clicked across updates</h2>
+          <ul className="space-y-3">
+            {data.listing_engagement.map((listing) => (
+              <li key={listing.listing_id} className="rounded-lg border p-4" style={{ borderColor: "var(--color-border)" }}>
+                <div className="font-medium">{listing.cta_key}</div>
+                <div className="text-sm">Clicked in {listing.clicked_updates} update{listing.clicked_updates === 1 ? "" : "s"}</div>
+                <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Listing {listing.listing_id}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section aria-label="Campaign updates" className="space-y-3">
+        <h2 className="font-medium">Per-update activity</h2>
+        {campaigns.length === 0 ? <p>No campaign updates recorded.</p> : campaigns.map((send) => {
+          const trackingPending = Boolean(send.accepted_at && !send.last_synced_at);
+          const pitchedListing = send.links.find((link) => link.listing_id === send.listing_id);
+          const firstEmailClick = send.links.reduce<string | null>((first, link) => {
+            const clickedAt = link.first_clicked_at;
+            return clickedAt && (!first || clickedAt < first) ? clickedAt : first;
+          }, send.provider_link_clicked_at);
+          return (
+            <article key={send.send_id} aria-label={send.campaign_name} className="rounded-lg border p-4 space-y-2" style={{ borderColor: "var(--color-border)" }}>
+              <div className="font-medium">{send.campaign_name}</div>
+              {send.listing_id && (
+                <div className="text-sm">
+                  {pitchedListing ? `${pitchedListing.cta_key} · ` : ""}Listing {send.listing_id} · {send.pitch_count} recorded pitch{send.pitch_count === 1 ? "" : "es"}
+                </div>
+              )}
+              <div className="text-sm">{send.accepted_at ? `Postmark accepted ${send.accepted_at}` : send.state}</div>
+              <div className="text-sm">{send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : "Delivery unconfirmed"}</div>
+              <div className="text-sm">
+                {send.provider_opened_at ? `First tracked open: ${send.provider_opened_at}` :
+                  trackingPending ? "Open activity unknown — tracking pending" : "No tracked open"}
+              </div>
+              <div className="text-sm">
+                {firstEmailClick ? <>First tracked email click: <time dateTime={firstEmailClick}>{firstEmailClick}</time></> :
+                  trackingPending ? "Click activity unknown — tracking pending" : "No tracked email click"}
+              </div>
+              {trackingPending && <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Tracking pending; observed activity may be incomplete.</div>}
+              {send.last_synced_at && <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Tracking last synced: <time dateTime={send.last_synced_at}>{send.last_synced_at}</time></div>}
+              {send.links.length > 0 && (
+                <ul aria-label="CTA activity" className="space-y-2 border-t pt-2" style={{ borderColor: "var(--color-border)" }}>
+                  {send.links.map((link) => (
+                    <li key={link.cta_key} className="text-sm">
+                      <span className="font-medium">{link.cta_key}</span>
+                      <span style={{ color: "var(--color-text-muted)" }}>
+                        {link.listing_id ? ` · Listing ${link.listing_id}` : " · General CTA"}
+                      </span>
+                      <div>
+                        {link.first_clicked_at ? <>First clicked: <time dateTime={link.first_clicked_at}>{link.first_clicked_at}</time></> :
+                          trackingPending ? "Click activity unknown — tracking pending" : "No tracked click"}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          );
+        })}
+      </section>
+    </section>
+  );
+}
 
 function OverviewTab({
   data,

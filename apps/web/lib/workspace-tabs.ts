@@ -1005,6 +1005,14 @@ export function contentTabFromUrl(
       preview: false,
     });
   }
+  if (path === "campaign") {
+    return makeContentTab({
+      kind: "object",
+      path: "campaign",
+      title: "Campaigns",
+      preview: false,
+    });
+  }
   const kind = shell.resolveKind?.(path) ?? inferContentTabKindFromPath(path);
   return makeContentTab({
     kind,
