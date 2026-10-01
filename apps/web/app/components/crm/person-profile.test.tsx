@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PersonProfile } from "./person-profile";
@@ -37,6 +37,9 @@ function buildPersonResponse(id: string, name: string) {
       last_outbound_at: null,
       last_inbound_at: null,
     },
+    campaigns: [],
+    campaign_summary: { sent: 0, delivered: 0, opened: 0, clicked: 0, tracking_pending: 0 },
+    listing_engagement: [],
   };
 }
 
@@ -130,22 +133,121 @@ describe("PersonProfile tab reset on entry change", () => {
     expect(getActiveTabLabel()).toBe("Emails");
   });
 
-  it("shows the per-listing pitch count without treating email clicks as site visits", async () => {
+  it("shows lifetime update totals and listing clicks separately from general CTA activity, including a click without an open", async () => {
+    const clickedAt = "2026-09-23T10:02:00Z";
+    const openedAt = "2026-09-23T10:01:00Z";
+    const baseSend = {
+      campaign_id: "campaign-1", campaign_name: "Auction pilot", listing_id: "listing-fpt",
+      recipient_email: "alice@example.com", state: "accepted", pitch_count: 2,
+      accepted_at: "2026-09-23T10:00:00Z", delivered_at: "2026-09-23T10:00:10Z",
+      bounced_at: null, last_synced_at: "2026-09-23T11:00:00Z",
+    };
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({
       ...buildPersonResponse("alice", "Person alice"),
+      campaign_summary: { sent: 4, delivered: 4, opened: 3, clicked: 2, tracking_pending: 0 },
+      listing_engagement: [{ listing_id: "listing-fpt", cta_key: "FPT", clicked_updates: 2 }],
+      campaigns: [
+        {
+          ...baseSend, send_id: "send-1", provider_opened_at: openedAt, provider_link_clicked_at: clickedAt,
+          links: [
+            { cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: clickedAt },
+            { cta_key: "grid", listing_id: null, first_clicked_at: clickedAt },
+          ],
+        },
+        {
+          ...baseSend, send_id: "send-2", provider_opened_at: openedAt, provider_link_clicked_at: null,
+          links: [
+            { cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: null },
+            { cta_key: "sourcing", listing_id: null, first_clicked_at: null },
+          ],
+        },
+        {
+          ...baseSend, send_id: "send-3", campaign_id: "campaign-2", campaign_name: "Follow-up",
+          provider_opened_at: openedAt, provider_link_clicked_at: null, links: [],
+        },
+        {
+          ...baseSend, send_id: "send-4", campaign_id: "campaign-3", campaign_name: "Final update",
+          provider_opened_at: null, provider_link_clicked_at: clickedAt,
+          links: [{ cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: clickedAt }],
+        },
+      ],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    render(<PersonProfile personId="alice" activeTab="campaigns" />);
+
+    // Read each metric's value, rather than relying on explanatory copy.
+    const summary = await screen.findByRole("region", { name: "Campaign engagement" });
+    const metric = (label: string) => within(summary).getByText(label, { selector: "dt" }).parentElement!;
+    expect(within(metric("Sent")).getByText("4", { selector: "dd" })).toBeInTheDocument();
+    expect(within(metric("Opened")).getByText("3 of 4", { selector: "dd" })).toBeInTheDocument();
+    expect(within(metric("Clicked")).getByText("2 of 4", { selector: "dd" })).toBeInTheDocument();
+    expect(within(metric("Delivered")).getByText("4 of 4", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    const listings = screen.getByRole("region", { name: "Listing engagement" });
+    expect(within(listings).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(listings).getByText("FPT")).toBeInTheDocument();
+    expect(within(listings).getByText("Clicked in 2 updates")).toBeInTheDocument();
+    expect(within(listings).getByText("Listing listing-fpt")).toBeInTheDocument();
+    expect(within(listings).queryByText("grid")).not.toBeInTheDocument();
+    expect(within(listings).queryByText("sourcing")).not.toBeInTheDocument();
+
+    expect(screen.getAllByRole("article")).toHaveLength(4);
+    const pilots = screen.getAllByRole("article", { name: "Auction pilot" });
+    const firstCtas = within(pilots[0]).getByRole("list", { name: "CTA activity" });
+    const firstLinks = within(firstCtas).getAllByRole("listitem");
+    expect(within(firstLinks[0]).getByText("FPT")).toBeInTheDocument();
+    expect(within(firstLinks[0]).getByText(/Listing listing-fpt/)).toBeInTheDocument();
+    expect(within(firstLinks[0]).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
+    expect(within(firstLinks[1]).getByText("grid")).toBeInTheDocument();
+    expect(within(firstLinks[1]).getByText(/General CTA/)).toBeInTheDocument();
+    expect(within(firstLinks[1]).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
+    const secondCtas = within(pilots[1]).getByRole("list", { name: "CTA activity" });
+    expect(within(secondCtas).getAllByText("No tracked click")).toHaveLength(2);
+
+    const clickWithoutOpen = screen.getByRole("article", { name: "Final update" });
+    expect(within(clickWithoutOpen).getByText("No tracked open")).toBeInTheDocument();
+    const clickedCtas = within(clickWithoutOpen).getByRole("list", { name: "CTA activity" });
+    expect(within(clickedCtas).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
+  });
+
+  it("keeps unsynced activity unknown while showing clicks already observed", async () => {
+    const clickedAt = "2026-09-23T10:02:00Z";
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      ...buildPersonResponse("alice", "Person alice"),
+      campaign_summary: { sent: 1, delivered: 0, opened: 0, clicked: 1, tracking_pending: 1 },
+      listing_engagement: [],
       campaigns: [{
-        campaign_id: "campaign-1", campaign_name: "Auction pilot", listing_id: "listing-1",
-        recipient_email: "alice@example.com", state: "accepted", pitch_count: 2,
-        accepted_at: "2026-09-23T10:00:00Z", delivered_at: "2026-09-23T10:00:10Z",
-        bounced_at: null, provider_opened_at: null,
-        provider_link_clicked_at: "2026-09-23T10:02:00Z",
+        send_id: "send-pending", campaign_id: "campaign-1", campaign_name: "Pending update",
+        listing_id: "", recipient_email: "alice@example.com", state: "accepted", pitch_count: 0,
+        accepted_at: "2026-09-23T10:00:00Z", delivered_at: null, bounced_at: null,
+        provider_opened_at: null, provider_link_clicked_at: null, last_synced_at: null,
+        links: [
+          { cta_key: "grid", listing_id: null, first_clicked_at: clickedAt },
+          { cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: null },
+        ],
       }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    const user = userEvent.setup();
-    render(<PersonProfile personId="alice" />);
-    await screen.findByText("Person alice");
-    await user.click(screen.getByRole("button", { name: /Campaigns/ }));
-    expect(screen.getByText("Listing listing-1 · 2 recorded pitches")).toBeInTheDocument();
-    expect(screen.getByText("Email link clicked (site visit unverified)")).toBeInTheDocument();
+    render(<PersonProfile personId="alice" activeTab="campaigns" />);
+    const update = await screen.findByRole("article", { name: "Pending update" });
+    expect(screen.getByRole("status")).toHaveTextContent(/1 sent update/);
+    expect(within(update).queryByText("No tracked open")).not.toBeInTheDocument();
+    expect(within(update).queryByText("No tracked click")).not.toBeInTheDocument();
+    expect(within(update).getByText(/Open activity unknown/)).toBeInTheDocument();
+    const clicks = within(update).getAllByText(clickedAt, { selector: "time" });
+    expect(clicks.some((time) => !time.closest("ul"))).toBe(true);
+    const links = within(within(update).getByRole("list", { name: "CTA activity" })).getAllByRole("listitem");
+    expect(within(links[0]).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
+    expect(within(links[1]).getByText(/Click activity unknown/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Listing engagement" })).not.toBeInTheDocument();
+  });
+
+  it("shows zero sent updates without listing or per-update activity when no campaigns exist", async () => {
+    render(<PersonProfile personId="alice" activeTab="campaigns" />);
+    const section = await screen.findByRole("region", { name: "Campaign engagement" });
+    const sent = within(section).getByText("Sent", { selector: "dt" }).parentElement!;
+    expect(within(sent).getByText("0", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Listing engagement" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

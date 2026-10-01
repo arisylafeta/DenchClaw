@@ -53,6 +53,7 @@ type InteractionSummaryRow = {
 };
 
 type CampaignSendRow = {
+  send_id: string;
   campaign_id: string;
   campaign_name: string;
   listing_id: string;
@@ -63,7 +64,21 @@ type CampaignSendRow = {
   bounced_at: string | Date | null;
   provider_opened_at: string | Date | null;
   provider_link_clicked_at: string | Date | null;
+  last_synced_at: string | Date | null;
   pitch_count: number | string;
+};
+
+type CampaignLinkRow = {
+  send_id: string;
+  cta_key: string;
+  listing_id: string | null;
+  first_clicked_at: string | Date | null;
+};
+
+type CampaignLink = {
+  cta_key: string;
+  listing_id: string | null;
+  first_clicked_at: string | null;
 };
 
 export type PostgresPersonProfile = {
@@ -85,13 +100,27 @@ export type PostgresPersonProfile = {
   derived_website: string | null;
   threads: ThreadRow[];
   events: EventRow[];
-  campaigns: Array<Omit<CampaignSendRow, "pitch_count" | "accepted_at" | "delivered_at" | "bounced_at" | "provider_opened_at" | "provider_link_clicked_at"> & {
+  campaigns: Array<Omit<CampaignSendRow, "pitch_count" | "accepted_at" | "delivered_at" | "bounced_at" | "provider_opened_at" | "provider_link_clicked_at" | "last_synced_at"> & {
     pitch_count: number;
     accepted_at: string | null;
     delivered_at: string | null;
     bounced_at: string | null;
     provider_opened_at: string | null;
     provider_link_clicked_at: string | null;
+    last_synced_at: string | null;
+    links: CampaignLink[];
+  }>;
+  campaign_summary: {
+    sent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+    tracking_pending: number;
+  };
+  listing_engagement: Array<{
+    listing_id: string;
+    cta_key: string;
+    clicked_updates: number;
   }>;
   interactions_summary: {
     email_count: number;
@@ -241,18 +270,68 @@ export async function getPostgresPersonProfile(
   `, [person.id]);
   const summary = summaryRows[0];
 
-  const campaignTable = await queryPg<{ available: boolean }>(
-    "select to_regclass('crm_campaign_sends') is not null as available",
+  const campaignTable = await queryPg<{ available: boolean; links_available: boolean }>(
+    `select to_regclass('crm_campaign_sends') is not null as available,
+            to_regclass('crm_campaign_send_links') is not null as links_available`,
   );
   const campaignRows = campaignTable[0]?.available ? await queryPg<CampaignSendRow>(`
-    select s.campaign_id, c.campaign_name, s.listing_id, s.recipient_email,
+    select s.id as send_id, s.campaign_id, c.campaign_name, s.listing_id, s.recipient_email,
            s.state, s.accepted_at, s.delivered_at, s.bounced_at,
-           s.provider_opened_at, s.provider_link_clicked_at,
+           s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
            count(*) filter (where s.accepted_at is not null) over (partition by s.person_id, s.listing_id) as pitch_count
       from crm_campaign_sends s join campaigns c on c.id = s.campaign_id
      where s.person_id = $1
-     order by s.created_at desc limit 100
+     order by s.created_at desc
   `, [person.id]) : [];
+  const linkRows = campaignTable[0]?.available && campaignTable[0]?.links_available
+    ? await queryPg<CampaignLinkRow>(`
+      select l.send_id, l.cta_key, l.listing_id, l.first_clicked_at
+        from crm_campaign_send_links l
+        join crm_campaign_sends s on s.id = l.send_id
+       where s.person_id = $1
+       order by l.cta_key
+    `, [person.id])
+    : [];
+  const linksBySend = new Map<string, CampaignLink[]>();
+  for (const row of linkRows) {
+    const links = linksBySend.get(row.send_id) ?? [];
+    links.push({
+      cta_key: row.cta_key,
+      listing_id: row.listing_id,
+      first_clicked_at: iso(row.first_clicked_at),
+    });
+    linksBySend.set(row.send_id, links);
+  }
+
+  const campaignSummary = { sent: 0, delivered: 0, opened: 0, clicked: 0, tracking_pending: 0 };
+  const listingEngagement = new Map<string, PostgresPersonProfile["listing_engagement"][number]>();
+  for (const row of campaignRows) {
+    if (!row.accepted_at) continue;
+    campaignSummary.sent += 1;
+    if (row.delivered_at) campaignSummary.delivered += 1;
+    if (row.provider_opened_at) campaignSummary.opened += 1;
+    if (!row.last_synced_at) campaignSummary.tracking_pending += 1;
+
+    const links = linksBySend.get(row.send_id) ?? [];
+    if (row.provider_link_clicked_at || links.some((link) => link.first_clicked_at)) {
+      campaignSummary.clicked += 1;
+    }
+    const clickedListings = new Set<string>();
+    for (const link of links) {
+      if (!link.listing_id || !link.first_clicked_at || clickedListings.has(link.listing_id)) continue;
+      clickedListings.add(link.listing_id);
+      const engagement = listingEngagement.get(link.listing_id);
+      if (engagement) {
+        engagement.clicked_updates += 1;
+      } else {
+        listingEngagement.set(link.listing_id, {
+          listing_id: link.listing_id,
+          cta_key: link.cta_key,
+          clicked_updates: 1,
+        });
+      }
+    }
+  }
 
   return {
     person,
@@ -277,7 +356,11 @@ export async function getPostgresPersonProfile(
       bounced_at: iso(row.bounced_at),
       provider_opened_at: iso(row.provider_opened_at),
       provider_link_clicked_at: iso(row.provider_link_clicked_at),
+      last_synced_at: iso(row.last_synced_at),
+      links: linksBySend.get(row.send_id) ?? [],
     })),
+    campaign_summary: campaignSummary,
+    listing_engagement: [...listingEngagement.values()],
     interactions_summary: {
       email_count: summary?.email_count ? Number(summary.email_count) : 0,
       meeting_count: summary?.meeting_count ? Number(summary.meeting_count) : 0,

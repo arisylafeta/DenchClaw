@@ -89,6 +89,21 @@ npx denchclaw start --skip-daemon-install
 
 ---
 
+## Campaign engagement
+
+In PostgreSQL-backed workspaces, a person's **Campaigns** tab shows lifetime
+accepted-send, delivery, tracked-open and tracked-click totals, listing clicks
+across updates, and each update's CTA activity. Counts use existing
+`crm_campaign_sends` and `crm_campaign_send_links` records; multiple links in one
+email do not multiply the send count, and multiple CTAs for one listing count
+once per update. General CTAs are not listing engagement.
+
+Counts measure emails with observed activity, not repeated opens/clicks or
+verified human visits. Unsynced sends show pending tracking; each synced update
+shows its last sync time. Email clicks do not establish site visits. This view
+does not add interaction rows or change relationship scores. The campaign
+`sync --campaign-id <id> --apply` command remains the existing data-refresh path.
+
 ## Troubleshooting
 
 ### `pairing required`
