@@ -18,6 +18,7 @@ export type CampaignActivityTotals = CampaignActivityCounts & {
 export type CampaignActivityPerson = CampaignActivityCounts & {
   person_id: string;
   email_clicked_at: string | null;
+  last_clicked_at: string | null;
   first_browser_at: string | null;
   last_browser_at: string | null;
   last_offer_at: string | null;

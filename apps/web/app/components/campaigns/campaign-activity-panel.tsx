@@ -30,14 +30,15 @@ export function CampaignWebsiteActivity({ activity, loading }: Pick<Props, "acti
   );
 }
 
-function emailRows(recipients: CampaignRecipient[], key: string, kind: "listing" | "other"): CampaignPersonRow[] {
+function emailRows(recipients: CampaignRecipient[], key: string, kind: "listing" | "other", destination?: CampaignActivityDestination): CampaignPersonRow[] {
   const rows = new Map<string, CampaignPersonRow>();
+  const observations = new Map<string, CampaignActivityDestination["people"][number]>();
+  for (const person of destination?.people ?? []) { observations.set(person.person_id, person); }
   for (const recipient of recipients) {
     if (!recipient.accepted_at && recipient.state !== "accepted") { continue; }
     const click = kind === "listing" ? recipient.listing_clicks.find((value) => value.listing_id === key) : recipient.other_clicks.find((value) => value.cta_key === key);
     if (!click) { continue; }
-    const previous = rows.get(recipient.person_id);
-    if (!previous || click.first_clicked_at < previous.clickedAt!) { rows.set(recipient.person_id, { recipient, clickedAt: click.first_clicked_at }); }
+    if (!rows.has(recipient.person_id)) { rows.set(recipient.person_id, { recipient, activity: observations.get(recipient.person_id) }); }
   }
   return [...rows.values()];
 }
@@ -45,7 +46,7 @@ function emailRows(recipients: CampaignRecipient[], key: string, kind: "listing"
 function activityRows(destination: CampaignActivityDestination, byId: ReadonlyMap<string, CampaignRecipient>, source: Exclude<PeopleSource, "email">): CampaignPersonRow[] {
   const rows: CampaignPersonRow[] = [];
   for (const activity of destination.people) {
-    const positive = source === "browser" ? activity.page_views > 0 : activity[SUBMISSION_FIELDS[source].count] > 0;
+    const positive = source === "browser" ? activity.page_views > 0 : source === "click" ? activity.redirect_events > 0 : activity[SUBMISSION_FIELDS[source].count] > 0;
     const recipient = byId.get(activity.person_id);
     if (recipient && positive) { rows.push({ recipient, activity }); }
   }
@@ -69,7 +70,7 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
             <tbody>
               {detail.listings.map((listing) => {
                 const destination = available ? activity.destinations.find((value) => value.listing_id === listing.listing_id) : undefined;
-                const clicked = emailRows(detail.recipients, listing.listing_id, "listing");
+                const clicked = emailRows(detail.recipients, listing.listing_id, "listing", destination);
                 return <tr key={listing.listing_id} className="hover:bg-[var(--bt-row-hover)]">
                   <td className={`${cellClass} min-w-[180px]`} style={cellStyle}>{listing.url ? <a href={listing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1.5 font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{listing.label}<ExternalLink size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span></a> : <span className="font-medium">{listing.label}</span>}</td>
                   <td className={`${cellClass} bt-mono`} style={cellStyle}>{listing.recipients}</td>
@@ -87,7 +88,7 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
           <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Destination", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className="bt-label border-b px-3.5 py-2.5" style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>{detail.other_destinations.map((other) => {
             const destination = available ? activity.destinations.find((value) => value.listing_id == null && value.cta_key === other.cta_key) : undefined;
-            const clicked = emailRows(detail.recipients, other.cta_key, "other");
+            const clicked = emailRows(detail.recipients, other.cta_key, "other", destination);
             return <tr key={other.cta_key} className="hover:bg-[var(--bt-row-hover)]">
               <td className={cellClass} style={cellStyle}>{other.label}</td>
               <td className={cellClass} style={cellStyle}><CampaignPeopleSheet destination={other.label} source="email" count={clicked.length} rows={clicked} onNavigatePerson={onNavigatePerson} /></td>
@@ -107,6 +108,7 @@ function WebsiteCells({ label, destination, recipientsById, onNavigatePerson }: 
     <td className={cellClass} style={cellStyle}>
       <CampaignPeopleSheet destination={label} source="browser" count={destination.visited_recipients} rows={activityRows(destination, recipientsById, "browser")} onNavigatePerson={onNavigatePerson} />
       <span className="mt-0.5 block text-xs" style={mutedStyle}>{destination.sessions} {destination.sessions === 1 ? "browser session" : "browser sessions"}</span>
+      <div className="mt-1"><CampaignPeopleSheet destination={label} source="click" count={destination.redirect_events} rows={activityRows(destination, recipientsById, "click")} onNavigatePerson={onNavigatePerson} /></div>
     </td>
     <td className={cellClass} style={cellStyle}>
       {submissions.length ? <div className="flex flex-col items-start gap-1">{submissions.map((source) => <div key={source}>
