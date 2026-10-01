@@ -2,11 +2,11 @@ create extension if not exists pgcrypto;
 
 -- Denchclaw CRM schema — matches production database as of 2026-06-21
 --
--- This file mirrors the live `denchclaw` database schema exactly.
--- Tables that were dropped (crm_custom_field_values, crm_saved_views,
--- crm_object_view_settings, crm_statuses, crm_action_runs,
+-- Base schema plus git-tracked product additions.
+-- Tables that were dropped (crm_custom_field_values, crm_statuses, crm_action_runs,
 -- crm_commercial_profiles) and the crm_company_commercial_summary_v view
 -- are intentionally absent. crm_relation_links is a VIEW, defined at the bottom.
+-- Saved views use crm_object_views rather than the dropped split storage tables.
 
 create table if not exists crm_companies (
   id text primary key,
@@ -20,7 +20,9 @@ create table if not exists crm_companies (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   notes text,
-  tags text[]
+  tags text[],
+  platform_role text,
+  roles text[]
 );
 
 create table if not exists crm_people (
@@ -132,6 +134,31 @@ create table if not exists crm_objects (
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists crm_object_views (
+  object_id text primary key references crm_objects(id) on delete cascade,
+  views jsonb not null default '[]'::jsonb,
+  active_view text,
+  view_settings jsonb,
+  updated_at timestamptz not null default now(),
+  constraint crm_object_views_array_check check (
+    jsonb_typeof(views) = 'array'
+    and not jsonb_path_exists(views, '$[*] ? (@.type() != "object" || !exists(@.name) || @.name.type() != "string")')
+  ),
+  constraint crm_object_views_settings_check check (
+    view_settings is null or jsonb_typeof(view_settings) = 'object'
+  ),
+  constraint crm_object_views_active_check check (
+    active_view is null or views @> jsonb_build_array(jsonb_build_object('name', active_view))
+  )
+);
+
+create table if not exists crm_private_object_views (
+  like crm_object_views including defaults including constraints,
+  user_id uuid not null,
+  primary key (object_id, user_id),
+  foreign key (object_id) references crm_objects(id) on delete cascade
 );
 
 create table if not exists crm_fields (

@@ -3,7 +3,6 @@ import type {
   FilterRule,
   SavedView,
   SortRule,
-  ViewType,
   ViewTypeSettings,
 } from "../object-filters";
 import { deserializeFilters } from "../object-filters";
@@ -12,6 +11,8 @@ import { projectCampaignMetrics } from "./campaign-metrics";
 import { buildGoogleFaviconUrl } from "../workspace-cell-format";
 import { getColumnFillRates, getTableColumns } from "./table-columns";
 import { buildWorkTaskReadScope } from "./work-task-read-scope";
+import { getPostgresObjectViews } from "./views";
+import { purposeEntity, purposeField, purposeFieldExpression } from "./purpose";
 
 type ObjectRow = {
   id: string;
@@ -37,6 +38,7 @@ type FieldRow = {
   enum_values?: unknown;
   enum_colors?: unknown;
   enum_multiple?: boolean | null;
+  read_only?: boolean;
   related_object_id?: string | null;
   relationship_type?: string | null;
   sort_order?: number | null;
@@ -49,22 +51,6 @@ type StatusRow = {
   color?: string | null;
   sort_order?: number | null;
   is_default?: boolean | null;
-};
-
-type SavedViewRow = {
-  id: string;
-  name: string;
-  view_type?: ViewType | null;
-  filters?: SavedView["filters"] | null;
-  sort?: SavedView["sort"] | null;
-  columns?: string[] | null;
-  column_widths?: Record<string, number> | null;
-  settings?: ViewTypeSettings | null;
-};
-
-type ObjectViewSettingsRow = {
-  active_view_id?: string | null;
-  settings?: ViewTypeSettings | null;
 };
 
 export type PostgresObjectData = {
@@ -161,19 +147,6 @@ function rankFieldsByFillRate(
   );
 }
 
-function toSavedView(row: SavedViewRow): SavedView & { id?: string } {
-  return {
-    id: row.id,
-    name: row.name,
-    view_type: row.view_type ?? undefined,
-    filters: row.filters ?? undefined,
-    sort: row.sort ?? undefined,
-    columns: row.columns ?? undefined,
-    column_widths: row.column_widths ?? undefined,
-    settings: row.settings ?? undefined,
-  };
-}
-
 const WORK_TASK_PREVIEW_LENGTH = 240;
 
 function projectWorkTaskListFields(fields: FieldRow[]): FieldRow[] {
@@ -202,25 +175,22 @@ function buildEntrySelect(
   fields: FieldRow[],
   existingColumns: Set<string>,
 ): string {
-  const canonicalSelects = fields
-    .filter(
-      (field) =>
-        field.canonical_column && existingColumns.has(field.canonical_column),
-    )
-    .map((field) => {
-      if (
-        field.name === "Preview" &&
-        field.canonical_column === "task_details"
-      ) {
-        return `left(btrim(regexp_replace(coalesce(${quoteIdentifier(field.canonical_column)}, ''), '[[:space:]]+', ' ', 'g')), ${WORK_TASK_PREVIEW_LENGTH}) as ${quoteIdentifier(field.name)}`;
-      }
-      return `${quoteIdentifier(field.canonical_column!)} as ${quoteIdentifier(field.name)}`;
-    });
+  const canonicalSelects = fields.flatMap((field) => {
+    const expression = appendFieldExpression(field, "e", existingColumns);
+    if (!expression) return [];
+    if (
+      field.name === "Preview" &&
+      field.canonical_column === "task_details"
+    ) {
+      return [`left(btrim(regexp_replace(coalesce(${expression}, ''), '[[:space:]]+', ' ', 'g')), ${WORK_TASK_PREVIEW_LENGTH}) as ${quoteIdentifier(field.name)}`];
+    }
+    return [`${expression} as ${quoteIdentifier(field.name)}`];
+  });
 
   return [
-    "id as entry_id",
-    "created_at",
-    "updated_at",
+    "e.id as entry_id",
+    "e.created_at",
+    "e.updated_at",
     ...canonicalSelects,
   ].join(", ");
 }
@@ -247,8 +217,9 @@ function appendFieldExpression(
   field: FieldRow,
   tableAlias: string,
   existingColumns: Set<string>,
-  _params: unknown[],
 ): string | null {
+  const purpose = purposeFieldExpression(field.id, tableAlias);
+  if (purpose) return purpose;
   if (field.canonical_column && existingColumns.has(field.canonical_column))
     return `${tableAlias}.${quoteIdentifier(field.canonical_column)}`;
   return null;
@@ -267,14 +238,17 @@ function buildRuleCondition(
     field,
     tableAlias,
     existingColumns,
-    params,
   );
   if (!expr) return null;
   switch (rule.operator) {
     case "is_empty":
-      return `(${expr} is null or ${expr}::text = '')`;
+      return field.enum_multiple
+        ? `coalesce(cardinality(${expr}), 0) = 0`
+        : `(${expr} is null or ${expr}::text = '')`;
     case "is_not_empty":
-      return `(${expr} is not null and ${expr}::text <> '')`;
+      return field.enum_multiple
+        ? `coalesce(cardinality(${expr}), 0) > 0`
+        : `(${expr} is not null and ${expr}::text <> '')`;
     case "is_true":
       return field.type === "boolean"
         ? `(${expr}) is true`
@@ -312,10 +286,12 @@ function buildRuleCondition(
     case "equals":
     case "is":
       params.push(String(rule.value ?? ""));
+      if (field.enum_multiple) return `$${params.length}::text = any(${expr})`;
       return `lower(${expr}::text) = lower($${params.length})`;
     case "not_equals":
     case "is_not":
       params.push(String(rule.value ?? ""));
+      if (field.enum_multiple) return `(${expr} is null or not ($${params.length}::text = any(${expr})))`;
       return `(${expr} is null or lower(${expr}::text) <> lower($${params.length}))`;
     default:
       return null;
@@ -364,16 +340,13 @@ function buildSearchCondition(
   if (!trimmed) return null;
   params.push(`%${trimmed}%`);
   const placeholder = `$${params.length}`;
-  const textFields = fields.filter((field) => textLikeTypes.has(field.type));
-  const parts = textFields
-    .filter(
-      (field) =>
-        field.canonical_column && existingColumns.has(field.canonical_column),
-    )
-    .map(
-      (field) =>
-        `lower(${tableAlias}.${quoteIdentifier(field.canonical_column!)}::text) like lower(${placeholder})`,
-    );
+  const textFields = fields.filter(
+    (field) => textLikeTypes.has(field.type) || (field.read_only && field.name === "Purpose"),
+  );
+  const parts = textFields.flatMap((field) => {
+    const expression = appendFieldExpression(field, tableAlias, existingColumns);
+    return expression ? [`lower(${expression}::text) like lower(${placeholder})`] : [];
+  });
   return parts.length ? `(${parts.join(" or ")})` : null;
 }
 
@@ -382,7 +355,6 @@ function buildOrderBy(
   fieldsByName: Map<string, FieldRow>,
   tableAlias: string,
   existingColumns: Set<string>,
-  _params: unknown[],
 ): string {
   const parts: string[] = [];
   for (const rule of sort ?? []) {
@@ -392,13 +364,9 @@ function buildOrderBy(
       continue;
     }
     const field = fieldsByName.get(rule.field);
-    if (
-      field?.canonical_column &&
-      existingColumns.has(field.canonical_column)
-    ) {
-      parts.push(
-        `${tableAlias}.${quoteIdentifier(field.canonical_column)} ${direction}`,
-      );
+    if (field) {
+      const expression = appendFieldExpression(field, tableAlias, existingColumns);
+      if (expression) parts.push(`${expression} ${direction}`);
     }
   }
   parts.push(`${tableAlias}.created_at desc`, `${tableAlias}.id desc`);
@@ -556,10 +524,8 @@ export async function getPostgresObjectData(
       order by f.sort_order`,
     [object.id],
   );
-  // crm_statuses, crm_saved_views, and crm_object_view_settings tables were dropped.
   const statuses: StatusRow[] = [];
-  const savedViewRows: SavedViewRow[] = [];
-  const settingsRows: ObjectViewSettingsRow[] = [];
+  const objectViews = await getPostgresObjectViews(object.name, userId);
 
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const pageSizeParam =
@@ -580,6 +546,11 @@ export async function getPostgresObjectData(
   if (object.name === "work_task") {
     fields = projectWorkTaskListFields(fields);
   }
+  const entity = purposeEntity(object.name);
+  if (entity) {
+    // Virtual metadata belongs only to the generic list, not stored classifications.
+    fields = [...fields.filter((field) => field.name !== "Purpose"), purposeField(entity)];
+  }
   const effectiveDisplayField = resolveDisplayField(object, fields);
   if (tableName && FILL_RATE_OBJECTS.has(object.name)) {
     const fillRates = await getColumnFillRates(tableName, existingColumns);
@@ -590,12 +561,12 @@ export async function getPostgresObjectData(
   const search = url.searchParams.get("search");
   const rowScope =
     object.name === "work_task"
-      ? (params.push(userId),
+      ? (params.push(userId || null),
         buildWorkTaskReadScope("e.assignee_id", `$${params.length}`))
       : object.name === "email_thread" || object.name === "email_message"
-        ? (params.push(userId), `e.mailbox_owner_id = $${params.length}::uuid`)
+        ? (params.push(userId || null), `e.mailbox_owner_id = $${params.length}::uuid`)
         : object.name === "interaction"
-          ? (params.push(userId),
+          ? (params.push(userId || null),
             `(e.email_message_id is null or exists (
             select 1 from crm_email_messages scoped_message
              where scoped_message.id = e.email_message_id
@@ -626,7 +597,6 @@ export async function getPostgresObjectData(
     fieldsByName,
     "e",
     existingColumns,
-    params,
   );
   const totalCount = tableName
     ? Number(totalCountRows[0]?.count ?? 0)
@@ -647,12 +617,6 @@ export async function getPostgresObjectData(
     : loadedEntries;
   const resolvedRelations = await resolveRelationLabels(fields, entries);
 
-  const savedViews = savedViewRows.map(toSavedView);
-  const activeViewId = settingsRows[0]?.active_view_id;
-  const activeView = activeViewId
-    ? savedViewRows.find((view) => view.id === activeViewId)?.name
-    : undefined;
-
   return {
     object,
     fields,
@@ -662,9 +626,9 @@ export async function getPostgresObjectData(
     relationFaviconUrls: resolvedRelations.faviconUrls,
     reverseRelations: [],
     effectiveDisplayField,
-    savedViews,
-    activeView,
-    viewSettings: settingsRows[0]?.settings ?? undefined,
+    savedViews: objectViews.views,
+    activeView: objectViews.activeView,
+    viewSettings: objectViews.viewSettings,
     totalCount,
     page,
     pageSize,

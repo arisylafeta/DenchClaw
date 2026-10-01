@@ -171,8 +171,8 @@ export function autoDetectViewField(
 	switch (settingKey) {
 		case "kanbanField":
 			return (
-				fields.find((f) => f.type === "enum" && /status/i.test(f.name))?.name ??
-				fields.find((f) => f.type === "enum")?.name
+				fields.find((f) => f.type === "enum" && !f.enum_multiple && !f.read_only && /status/i.test(f.name))?.name ??
+				fields.find((f) => f.type === "enum" && !f.enum_multiple && !f.read_only)?.name
 			);
 		case "calendarDateField":
 		case "timelineStartField":
@@ -184,7 +184,7 @@ export function autoDetectViewField(
 		case "timelineEndField":
 			return fields.find((f) => f.type === "date" && /end|finish|close/i.test(f.name))?.name;
 		case "timelineGroupField":
-			return fields.find((f) => f.type === "enum")?.name;
+			return fields.find((f) => f.type === "enum" && !f.enum_multiple)?.name;
 		case "galleryTitleField":
 		case "listTitleField":
 			return (
@@ -204,6 +204,8 @@ export function autoDetectViewField(
 export type FieldMeta = {
 	name: string;
 	type: string; // "text" | "number" | "date" | "boolean" | "enum" | "relation" | "richtext" | "email" | "user"
+	enum_multiple?: boolean;
+	read_only?: boolean;
 };
 
 // ---------------------------------------------------------------------------

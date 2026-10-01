@@ -30,6 +30,7 @@ type Field = {
 	enum_values?: string[];
 	enum_colors?: string[];
 	enum_multiple?: boolean;
+	read_only?: boolean;
 	related_object_id?: string;
 	relationship_type?: string;
 	related_object_name?: string;
@@ -514,7 +515,7 @@ function EditableCellInner({
 	}, [editing]);
 
 	// Non-editable types: render read-only (relations are now editable via dropdown)
-	const isEditable = !["user"].includes(field.type);
+	const isEditable = !field.read_only && !["user"].includes(field.type);
 	const isRelation = field.type === "relation" && !!field.related_object_name;
 	const isTags = field.type === "tags";
 
@@ -549,6 +550,14 @@ function EditableCellInner({
 	// Read-only display for non-editable types
 	if (!isEditable) {
 		if (field.type === "user") {return <UserCell value={initialValue} members={members} />;}
+		if (field.type === "enum" && field.enum_multiple) {
+			const values = Array.isArray(initialValue) ? initialValue.map(String) : [];
+			return values.length ? (
+				<span className="flex flex-wrap gap-1">
+					{values.map((value) => <EnumBadge key={value} value={value} enumValues={field.enum_values} enumColors={field.enum_colors} />)}
+				</span>
+			) : <span style={{ color: "var(--color-text-muted)", opacity: 0.5 }}>--</span>;
+		}
 		return <span className="truncate block max-w-[300px]">{safeString(initialValue)}</span>;
 	}
 
@@ -1280,6 +1289,14 @@ export function ObjectTable({
 				accessorKey: field.name,
 				meta: { label: field.name, fieldName: field.name, fieldType: field.type },
 				header: ({ column }: { column: { getIsSorted: () => "asc" | "desc" | false; toggleSorting: (desc: boolean) => void; toggleVisibility: (visible: boolean) => void } }) => {
+					if (field.read_only) {
+						return (
+							<button type="button" className="flex items-center gap-1.5" title="Computed, read-only field. Click to sort." onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+								<FieldTypeIcon type={field.type} size={12} className="shrink-0 opacity-50" />
+								<span>{field.name}</span>
+							</button>
+						);
+					}
 					if (renamingFieldId === field.id) {
 						return (
 							<InlineRenameInput
@@ -1896,7 +1913,7 @@ export function AddEntryModal({
 					onSubmit={(e) => { e.preventDefault(); void handleSave(); }}
 					className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
 				>
-					{fields.map((field) => {
+					{fields.filter((field) => !field.read_only).map((field) => {
 						const isRelation = field.type === "relation";
 						const isUser = field.type === "user";
 

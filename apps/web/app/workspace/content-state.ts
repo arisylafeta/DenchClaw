@@ -35,6 +35,7 @@ export type ObjectData = {
     enum_values?: string[];
     enum_colors?: string[];
     enum_multiple?: boolean;
+    read_only?: boolean;
     related_object_id?: string;
     relationship_type?: string;
     related_object_name?: string;

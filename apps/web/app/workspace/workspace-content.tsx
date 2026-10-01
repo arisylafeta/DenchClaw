@@ -3421,10 +3421,10 @@ function ObjectView({
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ views: savedViews, activeView: activeViewName, viewSettings: newSettings }),
+        body: JSON.stringify({ viewSettings: newSettings }),
       },
     ).catch(() => {});
-  }, [data.fields, data.object.name, viewSettings, savedViews, activeViewName]);
+  }, [data.fields, data.object.name, viewSettings]);
 
   // Fetch entries from server with current pagination/filter/sort/search state
   const fetchEntries = useCallback(async (opts?: {
@@ -3595,7 +3595,7 @@ function ObjectView({
     [totalCount, serverPage, serverPageSize, handlePageChange, handlePageSizeChange],
   );
 
-  // Save view to .object.yaml via API
+  // Save shared object views through the selected storage backend.
   const handleSaveView = useCallback(async (name: string) => {
     const newView: SavedView = {
       name,
@@ -3632,7 +3632,15 @@ function ObjectView({
     if (view.settings) {setViewSettings((prev) => ({ ...prev, ...view.settings }));}
     setServerPage(1);
     void fetchEntries({ page: 1, filters: newFilters });
-  }, [fetchEntries]);
+    void fetch(
+      `/api/workspace/objects/${encodeURIComponent(data.object.name)}/views`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeView: view.name }),
+      },
+    ).catch(() => {});
+  }, [fetchEntries, data.object.name]);
 
   const handleDeleteView = useCallback(async (name: string) => {
     const updated = savedViews.filter((v) => v.name !== name);
@@ -3668,13 +3676,13 @@ function ObjectView({
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ views: savedViews, activeView: name }),
+          body: JSON.stringify({ activeView: name ?? null }),
         },
       );
     } catch {
       // ignore
     }
-  }, [savedViews, data.object.name]);
+  }, [data.object.name]);
 
   // View type change handler
   const handleViewTypeChange = useCallback((vt: ViewType) => {

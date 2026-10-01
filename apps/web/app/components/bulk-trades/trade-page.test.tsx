@@ -12,13 +12,14 @@ const today = todayInLondon();
 const TRADE: BulkTrade = {
   id: "bt_1", title: "Synthetic eBS37", trade_stage: "With buyers", trade_kind: "packs",
   fact_line: "161 packs · NMC", next_step: "Follow up supplier", next_step_due: today, waiting_on: "us",
+  next_step_contact_id: null, next_step_buyer_id: null,
   waiting_since: null, owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
   ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: "lst_1", auction_slug: null, auction_status: null, auction_closes_at: null, updated_at: "2026-09-28T09:00:00Z",
 };
 
 const BUYER: Buyer = {
   id: "btb_1", name: "Synthetic Storage", person_id: null, person_email: null, email_tracking: null, link_clicked_at: null, contact: "Test Person", wants: "36-pack pilot", status: "To contact",
-  last_touch_on: null, last_touch_via: null, chase_on: null, latest_bid: null,
+  last_touch_on: null, last_touch_via: null, chase_on: null, latest_bid: null, auction: null,
 };
 
 const field = (field_key: string, value: string, visibility: TradeField["visibility"] = "teaser"): TradeField => ({
