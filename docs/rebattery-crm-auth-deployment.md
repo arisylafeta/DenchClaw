@@ -16,3 +16,24 @@ The bootstrap hashes each password independently and only writes the matching ha
 The application must keep every non-public page and API route behind its database-backed session middleware. Unsafe mutations require a same-origin request. The intentionally public surface is limited to the login and session-establishment route, required OAuth callbacks, inbound webhook routes, and static login assets. User-scoped email and Work Task authorization remains server-side and default-deny.
 
 Keep the exact `/api/formbricks-buyer-sourcing-webhook` nginx route public and proxied to its dedicated loopback service. Keep Tailscale Serve as a private operational fallback to the loopback-only CRM runtime; it is not the canonical public hostname. Never restore shared nginx credentials or enable public signup.
+
+## Shared CRM discovery views
+
+Companies and People have shared `Buyers` and `Dismantlers` saved views. Migration
+`023_saved_purpose_views.sql` stores their definitions, active selection and view
+settings in `crm_object_views`, keyed by the registered CRM object. Apply it only
+after a current database backup. Reapplying the migration preserves user refinements
+and intentionally deleted views.
+
+Both views filter a read-only, computed `Purpose` field. Buyer membership includes
+all `Supply Update` and `New to Supply Updates` contacts, buyer/repurposer purpose
+tags, existing buyer roles and profile signals, and linked companies or people.
+There is no import-date or research-cohort restriction. Unlinked newsletter contacts
+remain in People; companies without contacts remain in Companies. Dismantler
+membership uses the existing dismantler directory and purpose tags/roles, plus linked
+people. A record can have both purposes. Internal records are excluded.
+
+These are broad discovery views, not sending audiences or qualification decisions.
+Opt-out and exclusion flags remain visible. Viewing or refining them does not
+subscribe contacts, change classifications, or send messages. The dedicated
+Dismantlers workspace and its outreach stages remain unchanged.
