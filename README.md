@@ -92,9 +92,21 @@ npx denchclaw start --skip-daemon-install
 ## Campaign engagement
 
 Open the campaign list at `/?path=campaign` or from **Campaigns** in the sidebar.
-The direct link opens the CRM table even when campaigns are hidden from the
-workspace file tree. Choose a campaign to see **Invited people**, then click a
-recipient's name and open their **Campaigns** tab for activity across updates.
+Campaigns use the same square cards, compact rows and stats strip as Dismantlers.
+The dedicated page works even when campaigns are hidden from the workspace tree.
+Open `/?path=campaign&entry=campaign:<id>` for a campaign's full detail page.
+**Recipients** is the default tab: search by person, company, email or clicked
+listing, then filter by observed opens, clicks, bounces or pending tracking.
+Recipient names open their People profiles. **Listings** shows included listings
+and unique clicked recipients; links use canonical marketplace destinations,
+never recipient tracking redirects. Technical metadata and notes are collapsed
+under **Details**.
+
+Historical campaign snapshots remain separate from the retained recipient ledger:
+the original sent count can exceed the number of recipient records still present.
+`dench-campaign` totals use the existing ledger. Unknown tracking remains unknown,
+and the latest recipient check does not imply that every recipient was checked.
+The list and detail are read-only; they do not send messages or capture new events.
 
 In PostgreSQL-backed workspaces, a person's **Campaigns** tab shows lifetime
 accepted-send, delivery, tracked-open and tracked-click totals, listing clicks

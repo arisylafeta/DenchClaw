@@ -49,6 +49,7 @@ import {
  */
 export type ContentTabKind =
   | "object"
+  | "campaigns"
   | "directory"
   | "browse"
   | "document"
@@ -102,7 +103,7 @@ export type ContentTab = {
  * unset and let `useTabContent` do all the work.
  */
 export type ContentTabMeta = {
-  /** For `crm-person` / `crm-company`: the entry id to render. */
+  /** For CRM profiles or Campaigns: the selected entry id. */
   entryId?: string;
   /** For `crm-person` / `crm-company`: the active profile subtab. */
   profileTab?: string;
@@ -341,6 +342,7 @@ export function createGatewayChatTab(params: {
 
 /** Infer the content-tab kind from a workspace path. Used by URL hydration. */
 export function inferContentTabKindFromPath(path: string): ContentTabKind {
+  if (path === "campaign") {return "campaigns";}
   if (path === "~cron") return "cron-dashboard";
   if (path.startsWith("~cron/")) return "cron-job";
   if (path === "~skills") return "skills";
@@ -353,6 +355,7 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
 
 /** Build a default title from a path when none was provided. */
 export function inferContentTabTitle(path: string, fallback?: string): string {
+  if (path === "campaign") {return "Campaigns";}
   if (fallback) return fallback;
   if (path === "~cron") return "Cron";
   if (path.startsWith("~cron/")) return path.slice("~cron/".length) || "Cron Job";
@@ -900,6 +903,11 @@ export function projectUrlState(
       if (tab.meta.profileTab && tab.meta.profileTab !== "overview") {
         out.profileTab = tab.meta.profileTab;
       }
+    } else if (tab.kind === "campaigns") {
+      out.path = "campaign";
+      if (tab.meta?.entryId) {
+        out.entry = { objectName: "campaign", entryId: tab.meta.entryId };
+      }
     } else {
       out.path = tab.path;
     }
@@ -950,6 +958,15 @@ export function contentTabFromUrl(
   url: WorkspaceUrlState,
   shell: ShellUrlState,
 ): ContentTab | null {
+  if (url.entry && (url.entry.objectName === "campaign" || url.entry.objectName === "campaigns")) {
+    return makeContentTab({
+      kind: "campaigns",
+      path: "campaign",
+      title: "Campaigns",
+      meta: { entryId: url.entry.entryId },
+      preview: false,
+    });
+  }
   if (!url.path) {
     if (url.crm === "people") {
       return makeContentTab({
@@ -1007,7 +1024,7 @@ export function contentTabFromUrl(
   }
   if (path === "campaign") {
     return makeContentTab({
-      kind: "object",
+      kind: "campaigns",
       path: "campaign",
       title: "Campaigns",
       preview: false,
@@ -1094,6 +1111,14 @@ export function loadTabsState(workspaceId: string | null): WorkspaceTabsState {
     const contentTabs = Array.isArray(parsed.contentTabs)
       ? parsed.contentTabs.filter(isContentTab)
       : [];
+    // Restore every saved Campaigns page, including tabs inactive at hydration.
+    for (const tab of contentTabs) {
+      if (tab.path === "campaign" && tab.kind !== "campaigns") {
+        tab.kind = "campaigns";
+        tab.title = "Campaigns";
+        tab.preview = false;
+      }
+    }
     const chatTabs = Array.isArray(parsed.chatTabs)
       ? parsed.chatTabs.filter(isChatTab)
       : [];

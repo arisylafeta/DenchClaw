@@ -40,6 +40,7 @@ import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../comp
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
+import { CampaignsView } from "../components/campaigns/campaigns-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
@@ -385,6 +386,7 @@ function collectCrmObjectNodes(
  * dashboard, not as a directory listing.
  */
 function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
+  if (path === "campaign") {return "campaigns";}
   if (path === "~cron") return "cron-dashboard";
   if (path.startsWith("~cron/")) return "cron-job";
   if (path === "~skills") return "skills";
@@ -1702,11 +1704,8 @@ function WorkspacePageInner() {
   // Open entry modal handler
   const handleOpenEntry = useCallback(
     (objectName: string, entryId: string, relatedObjectId?: string) => {
-      // People + Company entries swap the MAIN panel for an Attio-style
-      // profile (mirroring dench-2025's base-object-vs-generic-object
-      // pattern). All other objects keep the existing side-panel modal.
-      // The parent tab points at the resolved workspace object so the
-      // back-to-list affordance lands on the unified ObjectView.
+      // People, Company and Campaign entries have dedicated pages; other
+      // objects keep the side-panel modal. Profiles return to their object list.
       //
       // Routing precedence:
       //   1. `relatedObjectId` (when provided by a relation chip) is the
@@ -1747,6 +1746,19 @@ function WorkspacePageInner() {
             title: "Company",
             meta: { entryId },
             preview: true,
+          },
+        });
+        setEntryModal(null);
+      } else if (objectName === "campaign" || objectName === "campaigns") {
+        dispatch({
+          type: "openContent",
+          tab: {
+            id: contentTabIdFor("campaigns", "campaign"),
+            kind: "campaigns",
+            path: "campaign",
+            title: "Campaigns",
+            meta: { entryId },
+            preview: false,
           },
         });
         setEntryModal(null);
@@ -1825,7 +1837,8 @@ function WorkspacePageInner() {
     // carries them over only when the active table path is unchanged so
     // switching tables drops the previous table's view state.
     const current = new URLSearchParams(window.location.search);
-    const merged = mergePreservedTableView(projected, current);
+    const merged = selectActiveContentTab(tabsState)?.kind === "campaigns"
+      ? projected : mergePreservedTableView(projected, current);
     const nextQs = serializeUrlState(merged);
     const currentQs = current.toString();
     if (nextQs !== currentQs) {
@@ -1852,10 +1865,12 @@ function WorkspacePageInner() {
   // popstate. Both paths funnel through the reducer's `applyUrl` action.
   useEffect(() => {
     if (hydrationPhase.current !== "init") return;
-    if (treeLoading || tree.length === 0) return;
+    if (treeLoading) {return;}
     if (tabLoadedForWorkspace.current !== (workspaceName || null)) return;
 
     const urlState = parseUrlState(searchParams);
+    if (tree.length === 0 && urlState.path !== "campaign"
+      && urlState.entry?.objectName !== "campaign" && urlState.entry?.objectName !== "campaigns") {return;}
     const shell = buildShellUrlState();
     dispatch({ type: "applyUrl", url: urlState, shell });
 
@@ -1872,7 +1887,7 @@ function WorkspacePageInner() {
         openSessionChatTab(urlState.chat);
       }
     }
-    if (urlState.entry && urlState.entry.objectName !== "people" && urlState.entry.objectName !== "company" && urlState.entry.objectName !== "companies") {
+    if (urlState.entry && !["people", "company", "companies", "campaign", "campaigns"].includes(urlState.entry.objectName)) {
       setEntryModal(urlState.entry);
     }
     if (urlState.browse) setBrowseDir(urlState.browse);
@@ -1907,7 +1922,7 @@ function WorkspacePageInner() {
           openSessionChatTab(urlState.chat);
         }
       }
-      if (urlState.entry && urlState.entry.objectName !== "people" && urlState.entry.objectName !== "company" && urlState.entry.objectName !== "companies") {
+      if (urlState.entry && !["people", "company", "companies", "campaign", "campaigns"].includes(urlState.entry.objectName)) {
         setEntryModal(urlState.entry);
       } else {
         setEntryModal(null);
@@ -2049,7 +2064,9 @@ function WorkspacePageInner() {
         }
         return null;
       }
-      const node = findObjectNode(tree);
+      const node = objectName === "campaign"
+        ? resolveCrmObjectNode(tree, "campaign")
+        : findObjectNode(tree);
       if (node) {
         ensureRightPanelOpenWide();
         handleNodeSelect(node);
@@ -2071,6 +2088,10 @@ function WorkspacePageInner() {
           handleOpenEntry(parsed.objectName, parsed.entryId);
           return;
         }
+        if (parsed.path === "campaign") {
+          handleNavigateToObject("campaign");
+          return;
+        }
         // File/object link -- resolve using the path from the URL
         const node = resolveNode(tree, parsed.path);
         if (node) {
@@ -2085,7 +2106,7 @@ function WorkspacePageInner() {
         handleNodeSelect(node);
       }
     },
-    [tree, handleNodeSelect, handleOpenEntry],
+    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject],
   );
 
   // Refresh callback for the currently displayed object — exposed via the
@@ -2339,7 +2360,7 @@ function WorkspacePageInner() {
           (activeContentTab?.kind === "object" &&
             (activeContentTab.path === "company" || activeContentTab.path === "companies"))
           ? "companies" as const
-          : activeContentTab?.kind === "object" && activeContentTab.path === "campaign"
+          : activeContentTab?.kind === "campaigns"
             ? "campaigns" as const
           : activeContentTab?.kind === "crm-inbox"
             ? "inbox" as const
@@ -2928,6 +2949,16 @@ function ContentRenderer({
         <div className="flex items-center justify-center h-full">
           <UnicodeSpinner name="braille" className="text-2xl" style={{ color: "var(--color-text-muted)" }} />
         </div>
+      );
+
+    case "campaigns":
+      return (
+        <CampaignsView
+          campaignId={content.campaignId}
+          onOpenCampaign={(id) => onOpenEntry("campaign", id)}
+          onBack={() => onNavigateToObject("campaign")}
+          onNavigatePerson={(id) => onOpenEntry("people", id)}
+        />
       );
 
     case "object":

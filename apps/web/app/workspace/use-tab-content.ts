@@ -259,6 +259,7 @@ export function useTabContent(
 
 function kindIsDerived(kind: ContentTab["kind"]): boolean {
   switch (kind) {
+    case "campaigns":
     case "directory":
     case "browse":
     case "cron-dashboard":
@@ -281,6 +282,8 @@ function resolveDerivedContent(
   deps: { tree: TreeNode[]; cronJobs: CronJob[] },
 ): ContentState {
   switch (tab.kind) {
+    case "campaigns":
+      return { kind: "campaigns", campaignId: tab.meta?.entryId ?? null };
     case "directory": {
       const node = findNode(deps.tree, tab.path);
       if (node) return { kind: "directory", node };

@@ -355,7 +355,7 @@ describe("URL roundtrip / popstate idempotency", () => {
     expect(active?.preview).toBe(false);
   });
 
-  it("opens the campaign table from a direct URL when it is absent from the workspace tree", () => {
+  it("opens the campaign page from a direct URL when it is absent from the workspace tree", () => {
     const state = applyUrlToState(
       EMPTY_TABS_STATE,
       parseUrlState("path=campaign"),
@@ -363,12 +363,12 @@ describe("URL roundtrip / popstate idempotency", () => {
     );
 
     expect(selectActiveContentTab(state)).toMatchObject({
-      kind: "object",
+      kind: "campaigns",
       path: "campaign",
     });
   });
 
-  it("repairs a persisted campaign file tab on refresh and restores the table through history", () => {
+  it("repairs a persisted campaign file tab on refresh and restores the page through history", () => {
     const stale = openContent(EMPTY_TABS_STATE, fileInput("campaign"));
     saveTabsState(stale, "campaign-refresh");
     const url = parseUrlState("path=campaign");
@@ -376,7 +376,7 @@ describe("URL roundtrip / popstate idempotency", () => {
     let state = applyUrlToState(loadTabsState("campaign-refresh"), url, shell);
 
     expect(selectActiveContentTab(state)).toMatchObject({
-      kind: "object",
+      kind: "campaigns",
       path: "campaign",
     });
 
@@ -388,10 +388,55 @@ describe("URL roundtrip / popstate idempotency", () => {
 
     state = applyUrlToState(state, url, shell);
     expect(selectActiveContentTab(state)).toMatchObject({
-      kind: "object",
+      kind: "campaigns",
       path: "campaign",
     });
   });
+
+  it("restores an inactive legacy campaign tab to the dedicated page when activated after reload", () => {
+    let state = openContent(EMPTY_TABS_STATE, {
+      kind: "object", path: "campaign", title: "Campaigns", preview: true,
+    });
+    state = openContent(state, { ...fileInput("notes.md"), preview: false });
+    saveTabsState(state, "inactive-campaign");
+    state = applyUrlToState(loadTabsState("inactive-campaign"), parseUrlState("path=notes.md"), {});
+    state = workspaceTabsReducer(state, { type: "activateContent", id: "campaign" });
+    expect(selectActiveContentTab(state)?.kind).toBe("campaigns");
+    state = applyUrlToState(state, parseUrlState("entry=people:recipient"), {});
+    expect(state.contentTabs.some((tab) => tab.path === "campaign")).toBe(true);
+  });
+
+  it.each(["entry=campaign:update", "path=campaign&entry=campaign:update"])(
+    "restores campaign detail through a recipient profile and clears selection on return to the list (%s)",
+    (query) => {
+      const shell = { resolveKind: () => null };
+      let state = applyUrlToState(EMPTY_TABS_STATE, parseUrlState(query), shell);
+      expect(selectActiveContentTab(state)).toMatchObject({
+        kind: "campaigns",
+        path: "campaign",
+        meta: { entryId: "update" },
+      });
+      const projected = projectUrlState(state, {
+        chatSessionId: null,
+        chatSubagentKey: null,
+        entryModal: null,
+        browseDir: null,
+        showHidden: false,
+        terminalOpen: false,
+        cron: { view: "overview", calMode: "month", date: null, runFilter: "all", run: null },
+      });
+      expect(projected.path).toBe("campaign");
+      expect(projected.entry).toEqual({ objectName: "campaign", entryId: "update" });
+      const detailUrl = parseUrlState(serializeUrlState(projected));
+      state = applyUrlToState(state, parseUrlState("entry=people:recipient"), shell);
+      expect(selectActiveContentTab(state)?.kind).toBe("crm-person");
+      state = applyUrlToState(state, detailUrl, shell);
+      expect(selectActiveContentTab(state)?.meta?.entryId).toBe("update");
+      state = applyUrlToState(state, parseUrlState("path=campaign"), shell);
+      expect(selectActiveContentTab(state)?.kind).toBe("campaigns");
+      expect(selectActiveContentTab(state)?.meta?.entryId).toBeUndefined();
+    },
+  );
 
   it("maps path=company to the company object view without a tree resolver", () => {
     const state = applyUrlToState(EMPTY_TABS_STATE, parseUrlState("path=company"), {});

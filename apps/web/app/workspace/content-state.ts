@@ -97,6 +97,7 @@ export type ContentState =
   | { kind: "none" }
   | { kind: "loading" }
   | { kind: "object"; data: ObjectData }
+  | { kind: "campaigns"; campaignId: string | null }
   | { kind: "document"; data: FileData; title: string }
   | { kind: "file"; data: FileData; filename: string }
   | { kind: "code"; data: FileData; filename: string; filePath: string }

@@ -46,3 +46,27 @@ metadata. Companies and People remain shared.
 Selecting a view or resizing columns updates only selection/settings; it never
 resubmits stale view definitions from another tab. Computed multi-value Purpose
 cannot be used as an editable Kanban grouping or scalar timeline grouping.
+
+## Campaigns workspace
+
+Campaigns has a dedicated full-width workspace page at `/?path=campaign`, with
+detail selected by `entry=campaign:<id>`. It does not use the generic object
+properties sheet or require a visible campaign node in the file tree. The tab
+model owns campaign selection, direct links and browser-history restoration.
+Saved Campaigns tabs normalize before activation, including tabs inactive at
+reload.
+The UI reuses Dismantlers' square `--bt-*` surfaces and shared trade controls.
+
+Authenticated, PostgreSQL-only reads use `/api/campaigns` and
+`/api/campaigns/[id]`, backed by `lib/crm-postgres/campaigns.ts`. Existing session
+middleware and the shared CRM read guard remain default-deny. No campaign
+recipient data or audit metadata is added to the public surface.
+
+Historical saved campaign metrics retain snapshot provenance; native
+`dench-campaign` metrics derive from accepted sends and recorded provider/CTA
+observations. Pending tracking is not proof of no engagement. General CTAs do
+not count as listing engagement, and per-listing counts deduplicate recipients.
+Listing titles and canonical auction links can use the existing local
+`crm_bulk_trade_lots` cache; this read never follows tracking redirects or calls
+the marketplace provider. Technical fields and notes are shown only under
+Details. This page adds no schema, sending, tracking capture or scoring changes.
