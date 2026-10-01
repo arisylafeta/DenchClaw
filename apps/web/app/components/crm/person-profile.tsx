@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ExternalLink, Mail } from "lucide-react";
 import { Button } from "../ui/button";
 import { PersonAvatar } from "./person-avatar";
 import { CompanyFavicon } from "./company-favicon";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
-import { EnrichButton } from "./enrich-button";
 import { ProfileThreadList } from "./inbox/profile-thread-list";
 import { EventListItem } from "./event-list-item";
 import { ActivityTimeline } from "./activity-timeline";
@@ -77,6 +77,8 @@ type PersonResponse = {
     campaign_name: string;
     listing_id: string;
     recipient_email: string;
+    listing_title?: string | null;
+    listing_url?: string | null;
     state: string;
     pitch_count: number;
     accepted_at: string | null;
@@ -88,6 +90,8 @@ type PersonResponse = {
     links: Array<{
       cta_key: string;
       listing_id: string | null;
+      listing_title?: string | null;
+      listing_url?: string | null;
       first_clicked_at: string | null;
     }>;
   }>;
@@ -102,6 +106,8 @@ type PersonResponse = {
     listing_id: string;
     cta_key: string;
     clicked_updates: number;
+    listing_title?: string | null;
+    listing_url?: string | null;
   }>;
 };
 
@@ -261,14 +267,14 @@ export function PersonProfile({
 
   if (loading && !data) {
     return (
-      <div className="flex h-full flex-col" style={{ background: "var(--color-background)" }}>
+      <div className="crm-person-profile bulk-trades flex h-full flex-col" style={{ background: "var(--bt-bg)" }}>
         <CrmLoadingState label="Loading profile…" />
       </div>
     );
   }
   if (error || !data) {
     return (
-      <div className="flex h-full flex-col" style={{ background: "var(--color-background)" }}>
+      <div className="crm-person-profile bulk-trades flex h-full flex-col" style={{ background: "var(--bt-bg)" }}>
         <CrmEmptyState
           title="Couldn't load this contact"
           description={error ?? "The record may have been deleted."}
@@ -286,8 +292,8 @@ export function PersonProfile({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
-      style={{ background: "var(--color-background)" }}
+      className="crm-person-profile bulk-trades flex h-full min-h-0 flex-col"
+      style={{ background: "var(--bt-bg)", color: "var(--bt-text)" }}
     >
       <PersonHeader
         data={data}
@@ -298,7 +304,7 @@ export function PersonProfile({
         onSaveName={handleSaveName}
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-6 py-6">
+        <div className="w-full px-4 py-4 sm:px-6">
           {tab === "overview" && (
             <OverviewTab data={data} onOpenCompany={onOpenCompany} />
           )}
@@ -345,169 +351,58 @@ function PersonHeader({
   onSaveName: (newName: string) => Promise<void>;
 }) {
   const { person, company, derived_website } = data;
-  // Avatar still uses the email/Unknown fallback so an empty-name person
-  // gets a recognizable monogram from their email rather than a "?" tile —
-  // the heading itself swaps to the "Add a name" affordance independently.
   const displayName = person.name?.trim() || person.email || "Unknown contact";
   const website = company?.website || derived_website;
+  const actionClass = "inline-flex h-8 items-center justify-center gap-1.5 rounded-none border px-2.5 text-[12px] font-medium hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]";
+  const actionStyle = { background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" };
 
   return (
-    <header
-      className="shrink-0 px-6 pt-4 pb-0"
-      style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-background)" }}
-    >
-      {/* Breadcrumb row */}
-      <div className="mb-3 flex items-center gap-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-        {onBackToList && (
-          <button
-            type="button"
-            onClick={onBackToList}
-            className="inline-flex items-center gap-1 hover:underline"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-            People
-          </button>
+    <header className="shrink-0 border-b px-4 pt-3 sm:px-6" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
+      {onBackToList && (
+        <button type="button" onClick={onBackToList} className="mb-2 inline-flex items-center gap-1 text-[12px] hover:underline" style={{ color: "var(--bt-muted)" }}>
+          <ArrowLeft size={13} aria-hidden="true" /> People
+        </button>
+      )}
+      <div className="flex flex-wrap items-start gap-3">
+        <PersonAvatar src={person.avatar_url} name={displayName} seed={person.email ?? person.id} size="md" />
+        <div className="min-w-0 flex-1">
+          <div className="crm-profile-title"><EditableTitleHeading name={person.name} saveName={onSaveName} /></div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: "var(--bt-text-2)" }}>
+            {person.email && <a href={`mailto:${person.email}`} className="truncate hover:underline">{person.email}</a>}
+            {person.job_title && <span>{person.job_title}</span>}
+            {company && onOpenCompany ? (
+              <button type="button" onClick={() => onOpenCompany(company.id)} className="inline-flex items-center gap-1 hover:underline">
+                <CompanyFavicon domain={company.domain} name={company.name} size="sm" />{company.name ?? company.domain}
+              </button>
+            ) : person.company_name ? <span>{person.company_name}</span> : null}
+            {person.phone && <a href={`tel:${person.phone}`} className="hover:underline">{person.phone}</a>}
+            {website && <a href={website} target="_blank" rel="noreferrer" className="hover:underline">{website.replace(/^https?:\/\//, "")}</a>}
+            {person.linkedin_url && <a href={person.linkedin_url} target="_blank" rel="noreferrer" className="hover:underline">LinkedIn</a>}
+          </div>
+        </div>
+        {person.email && (
+          <div className="flex shrink-0 items-center gap-2">
+            <a href={`mailto:${person.email}`} className={actionClass} style={actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</a>
+            <a href={`https://mail.google.com/mail/u/0/#search/${encodeURIComponent("from:" + person.email + " OR to:" + person.email)}`} target="_blank" rel="noreferrer" className={actionClass} style={actionStyle}>
+              <ExternalLink size={14} aria-hidden="true" /> Open in Gmail
+            </a>
+          </div>
         )}
       </div>
-
-      {/* Hero row */}
-      <div className="flex items-start gap-4">
-        <PersonAvatar
-          src={person.avatar_url}
-          name={displayName}
-          seed={person.email ?? person.id}
-          size="xl"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <EditableTitleHeading name={person.name} saveName={onSaveName} />
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
-            {person.email && (
-              <a
-                href={`mailto:${person.email}`}
-                className="hover:underline truncate"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                {person.email}
-              </a>
-            )}
-            {company && onOpenCompany && (
-              <button
-                type="button"
-                onClick={() => onOpenCompany(company.id)}
-                className="inline-flex items-center gap-1.5 hover:underline"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                <CompanyFavicon domain={company.domain} name={company.name} size="sm" />
-                <span>{company.name ?? company.domain}</span>
-              </button>
-            )}
-            {website && (
-              <a
-                href={website}
-                target="_blank"
-                rel="noreferrer"
-                className="hover:underline"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                {website.replace(/^https?:\/\//, "")}
-              </a>
-            )}
-          </div>
-          {(person.job_title || person.phone || person.linkedin_url) && (
-            <div
-              className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              {person.job_title && <span>{person.job_title}</span>}
-              {person.phone && <span>{person.phone}</span>}
-              {person.linkedin_url && (
-                <a href={person.linkedin_url} target="_blank" rel="noreferrer" className="hover:underline">
-                  LinkedIn
-                </a>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Action icons */}
-        <div className="flex shrink-0 items-center gap-2">
-          {person.email && (
-            <a
-              href={`mailto:${person.email}`}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg"
-              style={{
-                background: "var(--color-surface)",
-                color: "var(--color-text-muted)",
-                border: "1px solid var(--color-border)",
-              }}
-              title="Compose email"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="5" width="18" height="14" rx="2" />
-                <path d="m3 7 9 6 9-6" />
-              </svg>
-            </a>
-          )}
-          {person.email && (
-            <a
-              href={`https://mail.google.com/mail/u/0/#search/${encodeURIComponent("from:" + person.email + " OR to:" + person.email)}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg"
-              style={{
-                background: "var(--color-surface)",
-                color: "var(--color-text-muted)",
-                border: "1px solid var(--color-border)",
-              }}
-              title="Open in Gmail"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 3h6v6" />
-                <path d="M10 14 21 3" />
-                <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
-              </svg>
-            </a>
-          )}
-          {/* <EnrichButton type="people" id={person.id} /> */}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="mt-5 flex items-center gap-4 -mb-px">
+      <nav aria-label="Profile sections" className="mt-3 flex items-center gap-1 overflow-x-auto -mb-px">
         {TABS.map((t) => {
           const count = t.getCount?.(data);
           const active = t.id === tab;
           return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => onTabChange(t.id)}
-              className="relative flex items-center gap-1.5 px-1 py-2 text-[13px] font-medium transition-colors"
-              style={{
-                color: active ? "var(--color-text)" : "var(--color-text-muted)",
-                borderBottom: active ? "2px solid var(--color-text)" : "2px solid transparent",
-              }}
-            >
+            <button key={t.id} type="button" aria-current={active ? "page" : undefined} onClick={() => onTabChange(t.id)}
+              className="flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 py-2 text-[12px] font-medium hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]"
+              style={{ color: active ? "var(--bt-text)" : "var(--bt-muted)", borderColor: active ? "var(--bt-text)" : "transparent" }}>
               {t.label}
-              {typeof count === "number" && count > 0 && (
-                <span
-                  className="rounded-full px-1.5 py-0 text-[10px]"
-                  style={{
-                    background: "var(--color-surface-hover)",
-                    color: "var(--color-text-muted)",
-                  }}
-                >
-                  {count}
-                </span>
-              )}
+              {typeof count === "number" && count > 0 && <span className="bt-mono px-1 text-[10px]" style={{ background: "var(--bt-divider)", color: "var(--bt-text-2)" }}>{count}</span>}
             </button>
           );
         })}
-      </div>
+      </nav>
     </header>
   );
 }
@@ -516,92 +411,112 @@ function PersonHeader({
 // Tabs — bodies
 // ---------------------------------------------------------------------------
 
+const UUID_LABEL = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function destinationLabel(title: string | null | undefined, cta: string | undefined, listing: boolean): string {
+  if (title?.trim() && !UUID_LABEL.test(title.trim())) { return title.trim(); }
+  if (cta && !UUID_LABEL.test(cta)) { return cta.replace(/[-_]+/g, " ").trim() || (listing ? "Listing" : "General destination"); }
+  return listing ? "Listing" : "General destination";
+}
+
+const campaignDate = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+});
+
+function CampaignTime({ value }: { value: string }) {
+  const date = new Date(value);
+  return <time dateTime={value}>{Number.isNaN(date.getTime()) ? "Unknown date" : campaignDate.format(date)}</time>;
+}
+
+function Destination({ label, url }: { label: string; url?: string | null }) {
+  return url ? (
+    <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1 font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
+      {label}<ExternalLink size={12} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  ) : <span className="font-medium">{label}</span>;
+}
+
 function CampaignsTab({ data }: { data: PersonResponse }) {
   const campaigns = data.campaigns ?? [];
   const summary = data.campaign_summary;
-
+  const cellStyle = { borderColor: "var(--bt-divider)" };
+  const cellClass = "border-b px-3 py-2 text-[12px] align-top";
   return (
-    <section aria-label="Campaign engagement" className="space-y-6">
-      <div className="space-y-3">
-        <h2 className="font-medium">Across all updates</h2>
-        <dl aria-label="Campaign totals" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <section aria-label="Campaign engagement" className="space-y-5">
+      <div className="space-y-2">
+        <h2 className="text-[13px] font-semibold">Across all updates</h2>
+        <dl aria-label="Campaign totals" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Sent" value={summary.sent} />
           <Stat label="Delivered" value={`${summary.delivered} of ${summary.sent}`} />
           <Stat label="Opened" value={`${summary.opened} of ${summary.sent}`} />
           <Stat label="Clicked" value={`${summary.clicked} of ${summary.sent}`} />
         </dl>
-        <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-          Opens and clicks count updates with tracked activity, not repeated actions or verified people.
-          Email clicks are not website visits.
-        </p>
-        {summary.tracking_pending > 0 && (
-          <p role="status" className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-            Tracking pending for {summary.tracking_pending} sent update{summary.tracking_pending === 1 ? "" : "s"}.
-            Missing activity on these updates is unknown, not zero engagement.
-          </p>
-        )}
+        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>Email activity uses Postmark observations and tracked CTA clicks. Totals count updates, not repeated actions or verified people. Email clicks are not website visits.</p>
+        {summary.tracking_pending > 0 && <p role="status" className="text-[12px]" style={{ color: "var(--bt-amber)" }}>Tracking pending for {summary.tracking_pending} sent update{summary.tracking_pending === 1 ? "" : "s"}; missing activity is unknown.</p>}
       </div>
-
       {data.listing_engagement.length > 0 && (
-        <section aria-label="Listing engagement" className="space-y-3">
-          <h2 className="font-medium">Listings clicked across updates</h2>
-          <ul className="space-y-3">
-            {data.listing_engagement.map((listing) => (
-              <li key={listing.listing_id} className="rounded-lg border p-4" style={{ borderColor: "var(--color-border)" }}>
-                <div className="font-medium">{listing.cta_key}</div>
-                <div className="text-sm">Clicked in {listing.clicked_updates} update{listing.clicked_updates === 1 ? "" : "s"}</div>
-                <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Listing {listing.listing_id}</div>
-              </li>
-            ))}
-          </ul>
+        <section aria-label="Listing engagement">
+          <h2 className="mb-2 text-[13px] font-semibold">Listings clicked across updates</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left" aria-label="Listing engagement">
+              <thead style={{ background: "var(--bt-table-head)" }}><tr>
+                <th scope="col" className={cellClass} style={cellStyle}>Listing</th><th scope="col" className={cellClass} style={cellStyle}>Updates with email clicks</th>
+              </tr></thead>
+              <tbody>{data.listing_engagement.map((listing) => <tr key={listing.listing_id} className="hover:bg-[var(--bt-row-hover)]">
+                <td className={cellClass} style={cellStyle}><Destination label={destinationLabel(listing.listing_title, listing.cta_key, true)} url={listing.listing_url} /></td>
+                <td className={`${cellClass} bt-mono`} style={cellStyle}>{listing.clicked_updates}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
         </section>
       )}
-
-      <section aria-label="Campaign updates" className="space-y-3">
-        <h2 className="font-medium">Per-update activity</h2>
-        {campaigns.length === 0 ? <p>No campaign updates recorded.</p> : campaigns.map((send) => {
-          const trackingPending = Boolean(send.accepted_at && !send.last_synced_at);
+      <section aria-label="Campaign updates">
+        <h2 className="mb-2 text-[13px] font-semibold">Per-update activity</h2>
+        {campaigns.length === 0 ? <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>No campaign updates recorded.</p> : campaigns.map((send) => {
+          const accepted = Boolean(send.accepted_at || send.state === "accepted");
+          const trackingPending = accepted && !send.last_synced_at;
           const pitchedListing = send.links.find((link) => link.listing_id === send.listing_id);
           const firstEmailClick = send.links.reduce<string | null>((first, link) => {
             const clickedAt = link.first_clicked_at;
             return clickedAt && (!first || clickedAt < first) ? clickedAt : first;
           }, send.provider_link_clicked_at);
+          const missingOpen = !accepted ? "Not sent" : trackingPending ? "Open activity unknown — tracking pending" : "No tracked open";
+          const missingClick = !accepted ? "Not sent" : trackingPending ? "Click activity unknown — tracking pending" : "No tracked email click";
           return (
-            <article key={send.send_id} aria-label={send.campaign_name} className="rounded-lg border p-4 space-y-2" style={{ borderColor: "var(--color-border)" }}>
-              <div className="font-medium">{send.campaign_name}</div>
-              {send.listing_id && (
-                <div className="text-sm">
-                  {pitchedListing ? `${pitchedListing.cta_key} · ` : ""}Listing {send.listing_id} · {send.pitch_count} recorded pitch{send.pitch_count === 1 ? "" : "es"}
-                </div>
-              )}
-              <div className="text-sm">{send.accepted_at ? `Postmark accepted ${send.accepted_at}` : send.state}</div>
-              <div className="text-sm">{send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : "Delivery unconfirmed"}</div>
-              <div className="text-sm">
-                {send.provider_opened_at ? `First tracked open: ${send.provider_opened_at}` :
-                  trackingPending ? "Open activity unknown — tracking pending" : "No tracked open"}
+            <article key={send.send_id} aria-label={send.campaign_name} className="border-t py-3" style={cellStyle}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+                <h3 className="text-[13px] font-semibold">{send.campaign_name}</h3>
+                <span style={{ color: send.bounced_at ? "var(--bt-red)" : "var(--bt-text-2)" }}>{send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : accepted ? "Delivery unconfirmed" : send.state.replace(/_/g, " ")}</span>
+                {send.accepted_at && <span style={{ color: "var(--bt-muted)" }}>Accepted <CampaignTime value={send.accepted_at} /></span>}
               </div>
-              <div className="text-sm">
-                {firstEmailClick ? <>First tracked email click: <time dateTime={firstEmailClick}>{firstEmailClick}</time></> :
-                  trackingPending ? "Click activity unknown — tracking pending" : "No tracked email click"}
-              </div>
-              {trackingPending && <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Tracking pending; observed activity may be incomplete.</div>}
-              {send.last_synced_at && <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>Tracking last synced: <time dateTime={send.last_synced_at}>{send.last_synced_at}</time></div>}
-              {send.links.length > 0 && (
-                <ul aria-label="CTA activity" className="space-y-2 border-t pt-2" style={{ borderColor: "var(--color-border)" }}>
-                  {send.links.map((link) => (
-                    <li key={link.cta_key} className="text-sm">
-                      <span className="font-medium">{link.cta_key}</span>
-                      <span style={{ color: "var(--color-text-muted)" }}>
-                        {link.listing_id ? ` · Listing ${link.listing_id}` : " · General CTA"}
-                      </span>
-                      <div>
-                        {link.first_clicked_at ? <>First clicked: <time dateTime={link.first_clicked_at}>{link.first_clicked_at}</time></> :
-                          trackingPending ? "Click activity unknown — tracking pending" : "No tracked click"}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {send.listing_id && <div className="mt-1 text-[12px]"><Destination label={destinationLabel(send.listing_title ?? pitchedListing?.listing_title, pitchedListing?.cta_key, true)} url={send.listing_url ?? pitchedListing?.listing_url} /><span style={{ color: "var(--bt-muted)" }}> · {send.pitch_count} recorded pitch{send.pitch_count === 1 ? "" : "es"}</span></div>}
+              <dl className="my-2 grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-2">
+                <div><dt className="inline" style={{ color: "var(--bt-muted)" }}>First tracked open: </dt><dd className="inline">{send.provider_opened_at ? <CampaignTime value={send.provider_opened_at} /> : missingOpen}</dd></div>
+                <div><dt className="inline" style={{ color: "var(--bt-muted)" }}>First tracked email click: </dt><dd className="inline">{firstEmailClick ? <CampaignTime value={firstEmailClick} /> : missingClick}</dd></div>
+              </dl>
+              {send.links.length > 0 && <div className="overflow-x-auto">
+                <table aria-label="CTA activity" className="w-full min-w-[440px] text-left">
+                  <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Destination", "Type", "First tracked email click"].map((label) => <th key={label} scope="col" className={cellClass} style={cellStyle}>{label}</th>)}</tr></thead>
+                  <tbody>{send.links.map((link) => <tr key={link.cta_key} className="hover:bg-[var(--bt-row-hover)]">
+                    <td className={cellClass} style={cellStyle}><Destination label={destinationLabel(link.listing_title, link.cta_key, Boolean(link.listing_id))} url={link.listing_url} /></td>
+                    <td className={cellClass} style={{ ...cellStyle, color: "var(--bt-muted)" }}>{link.listing_id ? "Listing" : "General CTA"}</td>
+                    <td className={cellClass} style={cellStyle}>{link.first_clicked_at ? <CampaignTime value={link.first_clicked_at} /> : !accepted ? "Not sent" : trackingPending ? "Click activity unknown — tracking pending" : "No tracked click"}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>}
+              <details className="mt-2 text-[11px]" style={{ color: "var(--bt-muted)" }}>
+                <summary className="w-fit cursor-pointer hover:underline">Details</summary>
+                <dl className="mt-2 grid gap-1 break-all">
+                  <div><dt className="inline">Campaign ID: </dt><dd className="inline">{send.campaign_id}</dd></div>
+                  <div><dt className="inline">Send ID: </dt><dd className="inline">{send.send_id}</dd></div>
+                  {send.listing_id && <div><dt className="inline">Listing ID: </dt><dd className="inline">{send.listing_id}</dd></div>}
+                  <div><dt className="inline">Recipient: </dt><dd className="inline">{send.recipient_email}</dd></div>
+                  <div><dt className="inline">Ledger state: </dt><dd className="inline">{send.state}</dd></div>
+                  <div><dt className="inline">Tracking last synced: </dt><dd className="inline">{send.last_synced_at ? <CampaignTime value={send.last_synced_at} /> : "Not recorded"}</dd></div>
+                  <div>Postmark open and provider-wide click timestamps are the first observations retained by the email ledger. Destination clicks are first observations for each CTA; they do not identify a website visit.</div>
+                  {send.links.map((link) => <div key={link.cta_key}>CTA {link.cta_key}{link.listing_id ? ` · Listing ID: ${link.listing_id}` : ""}</div>)}
+                </dl>
+              </details>
             </article>
           );
         })}
@@ -618,79 +533,49 @@ function OverviewTab({
   onOpenCompany?: (id: string) => void;
 }) {
   const { person, company, interactions_summary } = data;
-
   return (
-    <div className="space-y-6">
-      <section>
-        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
-          At a glance
-        </h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="space-y-4">
+      <section aria-label="At a glance">
+        <h2 className="mb-2 text-[13px] font-semibold">At a glance</h2>
+        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Company" value={person.company_name ?? "—"} />
-          <Stat
-            label="Last contact"
-            value={
-              person.last_interaction_at
-                ? formatRelativeDate(person.last_interaction_at)
-                : "—"
-            }
-          />
+          <Stat label="Last contact" value={person.last_interaction_at ? formatRelativeDate(person.last_interaction_at) : "—"} />
           <Stat label="Emails" value={interactions_summary.email_count.toLocaleString()} />
           <Stat label="Meetings" value={interactions_summary.meeting_count.toLocaleString()} />
-        </div>
+        </dl>
       </section>
-
-      <section>
-        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
-          Contact
-        </h3>
-        <div className="space-y-2.5 rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
-          <Field label="Email" value={person.email} link={person.email ? `mailto:${person.email}` : undefined} />
-          <Field label="Phone" value={person.phone} link={person.phone ? `tel:${person.phone}` : undefined} />
-          <Field label="LinkedIn" value={person.linkedin_url} link={person.linkedin_url ?? undefined} external />
-          <Field label="Job title" value={person.job_title} />
-          <Field label="Status" value={person.status} />
-          <Field label="Source" value={person.source} />
-        </div>
-      </section>
-
-      {company && (
-        <section>
-          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
-            Company
-          </h3>
-          <button
-            type="button"
-            onClick={() => onOpenCompany?.(company.id)}
-            disabled={!onOpenCompany}
-            className="flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition-colors disabled:cursor-default"
-            style={{
-              borderColor: "var(--color-border)",
-              background: "var(--color-surface)",
-            }}
-            onMouseEnter={(e) => {
-              if (!onOpenCompany) {return;}
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--color-accent)";
-            }}
-            onMouseLeave={(e) => {
-              if (!onOpenCompany) {return;}
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--color-border)";
-            }}
-          >
-            <CompanyFavicon domain={company.domain} name={company.name} size="lg" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate" style={{ color: "var(--color-text)" }}>
-                {company.name ?? company.domain ?? "Unknown company"}
-              </p>
-              {(company.domain || company.industry) && (
-                <p className="mt-0.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-                  {[company.domain, company.industry].filter(Boolean).join(" · ")}
-                </p>
-              )}
-            </div>
-          </button>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <section aria-label="Contact">
+          <h2 className="mb-2 text-[13px] font-semibold">Contact</h2>
+          <dl className="space-y-2 border p-3" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
+            <Field label="Email" value={person.email} link={person.email ? `mailto:${person.email}` : undefined} />
+            <Field label="Phone" value={person.phone} link={person.phone ? `tel:${person.phone}` : undefined} />
+            <Field label="LinkedIn" value={person.linkedin_url} link={person.linkedin_url ?? undefined} external />
+            <Field label="Job title" value={person.job_title} />
+            <Field label="Status" value={person.status} />
+            <Field label="Source" value={person.source} />
+          </dl>
         </section>
-      )}
+        <div className="space-y-4">
+          {company && <section aria-label="Company">
+            <h2 className="mb-2 text-[13px] font-semibold">Company</h2>
+            <button type="button" onClick={() => onOpenCompany?.(company.id)} disabled={!onOpenCompany}
+              className="flex w-full items-center gap-2.5 border p-3 text-left hover:bg-[var(--bt-row-hover)] disabled:cursor-default"
+              style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
+              <CompanyFavicon domain={company.domain} name={company.name} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium">{company.name ?? company.domain ?? "Unknown company"}</p>
+                {(company.domain || company.industry) && <p className="mt-0.5 text-[12px]" style={{ color: "var(--bt-muted)" }}>{[company.domain, company.industry].filter(Boolean).join(" · ")}</p>}
+              </div>
+              {onOpenCompany && <ExternalLink size={14} aria-hidden="true" />}
+            </button>
+          </section>}
+          <section aria-label="Saved notes">
+            <h2 className="mb-2 text-[13px] font-semibold">Notes</h2>
+            <p className="whitespace-pre-wrap break-words border p-3 text-[13px] leading-relaxed" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)", color: person.notes ? "var(--bt-text)" : "var(--bt-muted)" }}>{person.notes || "No notes yet. Add context in the Notes tab."}</p>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
@@ -714,7 +599,7 @@ function EmailsTab({
   // expands the conversation reader inline on click — same MessageCard /
   // MessageBody / QuickReply chain the Inbox uses, no external Gmail
   // round-trip required.
-  return <ProfileThreadList threads={data.threads} onOpenPerson={onOpenPerson} />;
+  return <ProfileThreadList presentation="compact" threads={data.threads} onOpenPerson={onOpenPerson} />;
 }
 
 function CalendarTab({
@@ -749,12 +634,12 @@ function CalendarTab({
       {Array.from(groups.entries()).map(([day, events]) => (
         <section key={day}>
           <h3
-            className="sticky top-0 z-10 mb-2 px-1 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]"
-            style={{ color: "var(--color-text-muted)", background: "var(--color-background)" }}
+            className="sticky top-0 z-10 mb-2 border-b py-2 text-[12px] font-semibold"
+            style={{ color: "var(--bt-muted)", background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}
           >
             {day}
           </h3>
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {events.map((event) => (
               <EventListItem
                 key={event.id}
@@ -800,9 +685,9 @@ function ActivityTab({
   // both attended. The label below makes that distinction explicit so
   // users don't wonder why "500" doesn't match what they're scrolling.
   return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="space-y-4">
+      <section className="space-y-2">
+        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Interactions" value={summary.total.toLocaleString()} />
           <Stat label="Emails" value={summary.email_count.toLocaleString()} />
           <Stat label="Meetings" value={summary.meeting_count.toLocaleString()} />
@@ -810,15 +695,15 @@ function ActivityTab({
             label="Last reply"
             value={summary.last_inbound_at ? formatRelativeDate(summary.last_inbound_at) : "—"}
           />
-        </div>
+        </dl>
         {summary.last_outbound_at && (
           <div
-            className="rounded-2xl border px-4 py-3 text-[13px]"
-            style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+            className="border-l-2 px-3 py-2 text-[12px]"
+            style={{ borderColor: "var(--bt-divider)" }}
           >
-            <p style={{ color: "var(--color-text-muted)" }}>
+            <p style={{ color: "var(--bt-muted)" }}>
               You last reached out{" "}
-              <strong style={{ color: "var(--color-text)" }}>
+              <strong style={{ color: "var(--bt-text)" }}>
                 {formatRelativeDate(summary.last_outbound_at)}
               </strong>
               .
@@ -829,12 +714,13 @@ function ActivityTab({
 
       <section>
         <h3
-          className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]"
-          style={{ color: "var(--color-text-muted)" }}
+          className="mb-2 text-[13px] font-semibold"
+          style={{ color: "var(--bt-text)" }}
         >
           Timeline
         </h3>
         <ActivityTimeline
+          presentation="compact"
           personId={data.person.id}
           onOpenPerson={onOpenPerson}
           onOpenCompany={onOpenCompany}
@@ -943,6 +829,10 @@ function NotesTab({
 
   return (
     <section className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-[13px] font-semibold">Notes</h2>
+        <span className="text-[11px]" style={{ color: "var(--bt-muted)" }}>Saves on blur · Ctrl/⌘ Enter to save · Escape to revert</span>
+      </div>
       <textarea
         ref={textareaRef}
         value={draft}
@@ -962,18 +852,18 @@ function NotesTab({
         }}
         placeholder={placeholder}
         aria-label="Notes"
-        className="w-full resize-none rounded-2xl border px-4 py-3 text-[14px] leading-relaxed transition-shadow focus:outline-none focus:ring-2 focus:ring-(--color-accent)/30"
+        className="w-full resize-none rounded-none border px-3 py-3 text-[13px] leading-relaxed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--bt-link)]"
         style={{
           minHeight: 160,
-          color: "var(--color-text)",
-          background: "var(--color-surface)",
-          borderColor: "var(--color-border)",
+          color: "var(--bt-text)",
+          background: "var(--bt-surface)",
+          borderColor: "var(--bt-border)",
           fontFamily: "inherit",
         }}
       />
       <div
         className="flex items-center justify-end gap-2 px-1 text-[11px]"
-        style={{ color: "var(--color-text-muted)" }}
+        style={{ color: "var(--bt-muted)" }}
       >
         {error ? (
           <button
@@ -982,7 +872,7 @@ function NotesTab({
               void commit(draft);
             }}
             className="hover:underline"
-            style={{ color: "var(--color-error)" }}
+            style={{ color: "var(--bt-red)" }}
           >
             Couldn&apos;t save — retry
           </button>
@@ -1009,13 +899,13 @@ function NotesTab({
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div
-      className="rounded-2xl border p-3"
-      style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+      className="border px-3 py-2"
+      style={{ borderColor: "var(--bt-divider)", background: "var(--bt-surface)" }}
     >
-      <dt className="text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
+      <dt className="text-[10px] font-medium uppercase tracking-[0.04em]" style={{ color: "var(--bt-muted)" }}>
         {label}
       </dt>
-      <dd className="mt-1 text-[14px] font-medium" style={{ color: "var(--color-text)" }}>
+      <dd className="mt-1 text-[14px] font-semibold" style={{ color: "var(--bt-text)" }}>
         {value}
       </dd>
     </div>
@@ -1036,10 +926,10 @@ function Field({
   if (!value) {
     return (
       <div className="flex items-baseline gap-3 text-[13px]">
-        <dt className="w-24 shrink-0" style={{ color: "var(--color-text-muted)" }}>
+        <dt className="w-24 shrink-0" style={{ color: "var(--bt-muted)" }}>
           {label}
         </dt>
-        <dd style={{ color: "var(--color-text-muted)" }}>—</dd>
+        <dd style={{ color: "var(--bt-muted)" }}>—</dd>
       </div>
     );
   }
@@ -1049,18 +939,18 @@ function Field({
       target={external ? "_blank" : undefined}
       rel={external ? "noreferrer" : undefined}
       className="hover:underline truncate"
-      style={{ color: "var(--color-text)" }}
+      style={{ color: "var(--bt-link)" }}
     >
       {value}
     </a>
   ) : (
-    <span className="truncate" style={{ color: "var(--color-text)" }}>
+    <span className="truncate" style={{ color: "var(--bt-text)" }}>
       {value}
     </span>
   );
   return (
     <div className="flex items-baseline gap-3 text-[13px] min-w-0">
-      <dt className="w-24 shrink-0" style={{ color: "var(--color-text-muted)" }}>
+      <dt className="w-24 shrink-0" style={{ color: "var(--bt-muted)" }}>
         {label}
       </dt>
       <dd className="min-w-0">{inner}</dd>
@@ -1068,5 +958,3 @@ function Field({
   );
 }
 
-// Suppress unused variable warning when memoization is unused but kept for future use
-void useMemo;

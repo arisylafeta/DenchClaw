@@ -92,7 +92,9 @@ npx denchclaw start --skip-daemon-install
 ## Campaign engagement
 
 Open the campaign list at `/?path=campaign` or from **Campaigns** in the sidebar.
-Campaigns use the same square cards, compact rows and stats strip as Dismantlers.
+Campaigns use Dismantlers' compact rows, square controls and palette. The list's
+search sits directly on the page body; its table is full width without an
+enclosing card.
 The dedicated page works even when campaigns are hidden from the workspace tree.
 Open `/?path=campaign&entry=campaign:<id>` for a campaign's full detail page.
 **Recipients** is the default tab: search by person, company, email or clicked
@@ -117,6 +119,14 @@ the original sent count can exceed the number of recipient records still present
 `dench-campaign` totals use the existing ledger. Unknown tracking remains unknown,
 and the latest recipient check does not imply that every recipient was checked.
 The list and detail are read-only; they do not send messages or capture new events.
+
+Registered CRM People tables use the same compact square presentation without
+changing saved views, editing or table interactions. Company tables and custom
+objects named People retain their existing presentation. Person profiles use
+readable contact sections and compact campaign/destination tables. Listing
+titles and safe public links come from the existing local auction cache; raw
+identifiers and sync diagnostics stay under Details. Historical email first
+observations remain first observations, not inferred latest website activity.
 
 Website evidence is a separate read-only PostHog view. It shows page events,
 distinct browser sessions and recorded offer, message and buy-now submissions

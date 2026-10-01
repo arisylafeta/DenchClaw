@@ -59,23 +59,9 @@ function mockFetchForPerson() {
     });
 }
 
-/**
- * Read the active-tab label from the rendered header. The active tab is
- * the one with a solid border-bottom; inactive tabs have a transparent
- * border-bottom. We rely on the inline style rather than a class because
- * the header sets the colors via inline `style` attributes.
- */
 function getActiveTabLabel(): string | null {
-  const tablist = screen.getByText("Overview").parentElement;
-  if (!tablist) return null;
-  for (const child of Array.from(tablist.children)) {
-    if (!(child instanceof HTMLButtonElement)) continue;
-    const border = child.style.borderBottom;
-    if (border && border.includes("var(--color-text)")) {
-      return child.textContent?.trim() ?? null;
-    }
-  }
-  return null;
+  const navigation = screen.getByRole("navigation", { name: "Profile sections" });
+  return within(navigation).getByRole("button", { current: "page" }).textContent?.trim() ?? null;
 }
 
 describe("PersonProfile tab reset on entry change", () => {
@@ -184,33 +170,33 @@ describe("PersonProfile tab reset on entry change", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     const listings = screen.getByRole("region", { name: "Listing engagement" });
-    expect(within(listings).getAllByRole("listitem")).toHaveLength(1);
-    expect(within(listings).getByText("FPT")).toBeInTheDocument();
-    expect(within(listings).getByText("Clicked in 2 updates")).toBeInTheDocument();
-    expect(within(listings).getByText("Listing listing-fpt")).toBeInTheDocument();
+    const listingRows = within(listings).getAllByRole("row");
+    expect(listingRows).toHaveLength(2);
+    expect(within(listingRows[1]).getByRole("cell", { name: "FPT" })).toBeInTheDocument();
+    expect(within(listingRows[1]).getByRole("cell", { name: "2" })).toBeInTheDocument();
     expect(within(listings).queryByText("grid")).not.toBeInTheDocument();
     expect(within(listings).queryByText("sourcing")).not.toBeInTheDocument();
 
     expect(screen.getAllByRole("article")).toHaveLength(4);
     const pilots = screen.getAllByRole("article", { name: "Auction pilot" });
-    const firstCtas = within(pilots[0]).getByRole("list", { name: "CTA activity" });
-    const firstLinks = within(firstCtas).getAllByRole("listitem");
-    expect(within(firstLinks[0]).getByText("FPT")).toBeInTheDocument();
-    expect(within(firstLinks[0]).getByText(/Listing listing-fpt/)).toBeInTheDocument();
-    expect(within(firstLinks[0]).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
-    expect(within(firstLinks[1]).getByText("grid")).toBeInTheDocument();
-    expect(within(firstLinks[1]).getByText(/General CTA/)).toBeInTheDocument();
-    expect(within(firstLinks[1]).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
-    const secondCtas = within(pilots[1]).getByRole("list", { name: "CTA activity" });
+    const firstCtas = within(pilots[0]).getByRole("table", { name: "CTA activity" });
+    const firstLinks = within(firstCtas).getAllByRole("row").slice(1);
+    expect(within(firstLinks[0]).getByRole("cell", { name: "FPT" })).toBeInTheDocument();
+    expect(within(firstLinks[0]).getByRole("cell", { name: "Listing" })).toBeInTheDocument();
+    expect(firstLinks[0].querySelector("time")?.dateTime).toBe(clickedAt);
+    expect(within(firstLinks[1]).getByRole("cell", { name: "grid" })).toBeInTheDocument();
+    expect(within(firstLinks[1]).getByRole("cell", { name: "General CTA" })).toBeInTheDocument();
+    expect(firstLinks[1].querySelector("time")?.dateTime).toBe(clickedAt);
+    const secondCtas = within(pilots[1]).getByRole("table", { name: "CTA activity" });
     expect(within(secondCtas).getAllByText("No tracked click")).toHaveLength(2);
 
     const clickWithoutOpen = screen.getByRole("article", { name: "Final update" });
     expect(within(clickWithoutOpen).getByText("No tracked open")).toBeInTheDocument();
-    const clickedCtas = within(clickWithoutOpen).getByRole("list", { name: "CTA activity" });
-    expect(within(clickedCtas).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
+    const clickedCtas = within(clickWithoutOpen).getByRole("table", { name: "CTA activity" });
+    expect(clickedCtas.querySelector("time")?.dateTime).toBe(clickedAt);
   });
 
-  it("keeps unsynced activity unknown while showing clicks already observed", async () => {
+  it.each(["2026-09-23T10:00:00Z", null])("keeps accepted unsynced activity unknown with acceptance timestamp %s while showing observed clicks", async (acceptedAt) => {
     const clickedAt = "2026-09-23T10:02:00Z";
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({
       ...buildPersonResponse("alice", "Person alice"),
@@ -219,7 +205,7 @@ describe("PersonProfile tab reset on entry change", () => {
       campaigns: [{
         send_id: "send-pending", campaign_id: "campaign-1", campaign_name: "Pending update",
         listing_id: "", recipient_email: "alice@example.com", state: "accepted", pitch_count: 0,
-        accepted_at: "2026-09-23T10:00:00Z", delivered_at: null, bounced_at: null,
+        accepted_at: acceptedAt, delivered_at: null, bounced_at: null,
         provider_opened_at: null, provider_link_clicked_at: null, last_synced_at: null,
         links: [
           { cta_key: "grid", listing_id: null, first_clicked_at: clickedAt },
@@ -233,12 +219,41 @@ describe("PersonProfile tab reset on entry change", () => {
     expect(within(update).queryByText("No tracked open")).not.toBeInTheDocument();
     expect(within(update).queryByText("No tracked click")).not.toBeInTheDocument();
     expect(within(update).getByText(/Open activity unknown/)).toBeInTheDocument();
-    const clicks = within(update).getAllByText(clickedAt, { selector: "time" });
-    expect(clicks.some((time) => !time.closest("ul"))).toBe(true);
-    const links = within(within(update).getByRole("list", { name: "CTA activity" })).getAllByRole("listitem");
-    expect(within(links[0]).getByText(clickedAt, { selector: "time" })).toBeInTheDocument();
+    const clicks = update.querySelectorAll("time");
+    expect(Array.from(clicks).filter((time) => time.dateTime === clickedAt && !time.closest("table"))).toHaveLength(1);
+    const links = within(within(update).getByRole("table", { name: "CTA activity" })).getAllByRole("row").slice(1);
+    expect(links[0].querySelector("time")?.dateTime).toBe(clickedAt);
     expect(within(links[1]).getByText(/Click activity unknown/)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Listing engagement" })).not.toBeInTheDocument();
+  });
+
+  it("uses cached listing titles and keeps an uncached UUID destination inside collapsed details", async () => {
+    const listingId = "d197f1ce-2e9e-4ec5-b341-7c915fdc85bc";
+    const fallbackId = "37b898b8-a442-41cb-aa5f-ec4d516beb0c";
+    const listingUrl = "https://rebattery.io/marketplace/auctions/fpt-modules";
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      ...buildPersonResponse("alice", "Person alice"),
+      campaigns: [{
+        send_id: "send", campaign_id: "campaign", campaign_name: "Battery update",
+        listing_id: listingId, listing_title: "FPT battery modules", listing_url: listingUrl,
+        recipient_email: "alice@example.com", state: "accepted", pitch_count: 1,
+        accepted_at: "2026-09-23T10:00:00Z", delivered_at: null, bounced_at: null,
+        provider_opened_at: null, provider_link_clicked_at: null, last_synced_at: "2026-09-23T11:00:00Z",
+        links: [
+          { cta_key: listingId, listing_id: listingId, listing_title: "FPT battery modules", listing_url: listingUrl, first_clicked_at: null },
+          { cta_key: fallbackId, listing_id: fallbackId, listing_title: null, listing_url: null, first_clicked_at: null },
+        ],
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    render(<PersonProfile personId="alice" activeTab="campaigns" />);
+    const update = await screen.findByRole("article", { name: "Battery update" });
+    const table = within(update).getByRole("table", { name: "CTA activity" });
+    expect(within(table).getByRole("link", { name: /FPT battery modules/ })).toHaveAttribute("href", listingUrl);
+    expect(within(table).queryByText(fallbackId)).not.toBeInTheDocument();
+    expect(within(table).queryByRole("link", { name: "Listing" })).not.toBeInTheDocument();
+    const details = update.querySelector("details")!;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain(fallbackId);
   });
 
   it("shows zero sent updates without listing or per-update activity when no campaigns exist", async () => {
