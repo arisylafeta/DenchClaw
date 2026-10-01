@@ -105,15 +105,10 @@ describe("campaign projections", () => {
       {
         listing_id: "listing-a", label: "battery a", url: "https://www.rebattery.io/marketplace/auctions/battery-a",
         recipients: 3, clicked_recipients: 2,
-        clicked_people: [
-          { person_id: "person-link-only", name: "Buyer link-only", company_name: "Battery Buyers" },
-          { person_id: "person-provider", name: "Buyer provider", company_name: "Battery Buyers" },
-        ],
       },
       {
         listing_id: "listing-b", label: "battery b", url: "https://www.rebattery.io/marketplace/auctions/battery-b",
         recipients: 3, clicked_recipients: 1,
-        clicked_people: [{ person_id: "person-link-only", name: "Buyer link-only", company_name: "Battery Buyers" }],
       },
     ]);
     const serialized = JSON.stringify(detail);
@@ -122,6 +117,54 @@ describe("campaign projections", () => {
     expect(serialized).not.toContain("private-fragment");
     expect(serialized).not.toContain("destination_url");
     expect(serialized).not.toContain("provider_message_id");
+  });
+
+  it("attributes general email CTAs only to accepted sends, deduplicates their first clicks, and keeps destinations private", async () => {
+    const opaqueKey = "11111111-1111-4111-8111-111111111111";
+    const tracked = { destination_url: "https://crm.rebattery.io/t/private-general-token?recipient=private-recipient-token#private-fragment" };
+    detailRows(campaign(), [
+      send("general", { listing_id: null, accepted_at: null }),
+      send("provider-only", { listing_id: null, provider_link_clicked_at: AT }),
+      send("rejected", { listing_id: null, state: "rejected", accepted_at: null, provider_link_clicked_at: AT }),
+      send("queued", { listing_id: null, state: "queued", accepted_at: null }),
+    ], [
+      link("general", "auction_grid", null, { ...tracked, first_clicked_at: AT }),
+      link("general", "auction_grid", null, { ...tracked, first_clicked_at: new Date(EARLIER) }),
+      link("general", "auction_grid", null, { ...tracked, first_clicked_at: "invalid-date" }),
+      link("general", opaqueKey, null, tracked),
+      link("general", "battery-a", "listing-a"),
+      link("provider-only", "supplier-contact", null, { destination_url: "http://www.rebattery.io/contact?recipient=private-recipient-token" }),
+      link("rejected", "auction_grid", null, { ...tracked, first_clicked_at: EARLIER }),
+      link("rejected", "supplier-contact", null, { ...tracked, first_clicked_at: EARLIER }),
+      link("queued", "supplier-contact", null, { ...tracked, first_clicked_at: EARLIER }),
+    ]);
+
+    const detail = await getCampaignDetail("campaign-1");
+    expect(detail?.other_destinations).toEqual([
+      { cta_key: "auction_grid", label: "auction grid" },
+      { cta_key: opaqueKey, label: "General destination" },
+      { cta_key: "supplier-contact", label: "supplier contact" },
+    ]);
+    expect(detail?.recipients.find((recipient) => recipient.send_id === "general")).toMatchObject({
+      clicked_at: EARLIER,
+      other_clicks: [{ cta_key: "auction_grid", label: "auction grid", first_clicked_at: EARLIER }],
+      listing_clicks: [],
+    });
+    for (const sendId of ["provider-only", "rejected", "queued"]) {
+      expect(detail?.recipients.find((recipient) => recipient.send_id === sendId)).toMatchObject({
+        other_clicks: [], listing_clicks: [],
+      });
+    }
+    expect(detail?.campaign.metrics).toMatchObject({ sent: 2, clicked: 2 });
+    expect(detail?.listings).toEqual([{
+      listing_id: "listing-a", label: "battery a", url: "https://www.rebattery.io/marketplace/auctions/battery-a",
+      recipients: 1, clicked_recipients: 0,
+    }]);
+    const serialized = JSON.stringify(detail);
+    expect(serialized).not.toContain("private-general-token");
+    expect(serialized).not.toContain("private-recipient-token");
+    expect(serialized).not.toContain("private-fragment");
+    expect(serialized).not.toContain("destination_url");
   });
 
   it("keeps unchecked tracking unknown, including when a separate positive observation is available", async () => {
@@ -216,12 +259,11 @@ describe("campaign projections", () => {
       listing_id: "listing-a", label: "Tesla Megapack 2503.2kWh",
       url: "https://rebattery.io/marketplace/auctions/tesla-megapack-577f-f300",
       recipients: 2, clicked_recipients: 1,
-      clicked_people: [{ person_id: "person-clicked", name: "Buyer clicked", company_name: "Battery Buyers" }],
     });
     expect(detail?.listings.find((listing) => listing.listing_id === "listing-b")).toMatchObject({
       label: "Kokam NMC cells",
       url: "https://rebattery.io/marketplace/auctions/kokam-kcl255103en1-0-379kwh-nmc-e720-cf32",
-      recipients: 2, clicked_recipients: 0, clicked_people: [],
+      recipients: 2, clicked_recipients: 0,
     });
     expect(detail?.listings.find((listing) => listing.listing_id === "listing-c")).toMatchObject({
       label: "Unresolved listing", url: null,
@@ -263,9 +305,11 @@ describe("campaign projections", () => {
     expect(legacy?.listings).toEqual([{
       listing_id: listingId, label: "ebus batteries",
       url: "https://www.rebattery.io/marketplace/auctions/ebus-batteries",
-      recipients: 1, clicked_recipients: 0, clicked_people: [],
+      recipients: 1, clicked_recipients: 0,
     }]);
     expect(legacy?.recipients[0].listing_clicks).toEqual([]);
+    expect(legacy?.recipients[0].other_clicks).toEqual([]);
+    expect(legacy?.other_destinations).toEqual([]);
 
     detailRows(campaign(), [send("unavailable", { listing_id: listingId, auction_url: "https://www.rebattery.io/c/private-recipient-token" })]);
     const unavailable = await getCampaignDetail("campaign-1");
@@ -279,11 +323,13 @@ describe("campaign projections", () => {
     expect(snapshot?.campaign.metrics.sent).toBe(115);
     expect(snapshot?.recipients).toEqual([]);
     expect(snapshot?.listings).toEqual([]);
+    expect(snapshot?.other_destinations).toEqual([]);
 
     queryPgMock.mockResolvedValueOnce([campaign()])
       .mockResolvedValueOnce([{ available: false, links_available: false }]);
     const ledger = await getCampaignDetail("campaign-1");
     expect(ledger?.campaign.metrics).toEqual({ sent: null, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 2 });
+    expect(ledger?.other_destinations).toEqual([]);
   });
 
   it("represents an unknown campaign as missing", async () => {

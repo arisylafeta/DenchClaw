@@ -58,8 +58,11 @@ reload.
 The UI reuses Dismantlers' square `--bt-*` surfaces and shared trade controls.
 
 Authenticated, PostgreSQL-only reads use `/api/campaigns` and
-`/api/campaigns/[id]`, backed by `lib/crm-postgres/campaigns.ts`. Existing session
-middleware and the shared CRM read guard remain default-deny. No campaign
+`/api/campaigns/[id]`, backed by `lib/crm-postgres/campaigns.ts`.
+`/api/campaigns/[id]/activity` independently reads website evidence through
+`lib/campaign-activity-server.ts`, `lib/crm-postgres/campaign-activity.ts` and
+`lib/campaign-posthog.ts`. Existing session middleware and the shared CRM read
+guard remain default-deny; activity responses are private and uncached. No
 recipient data or audit metadata is added to the public surface.
 
 Historical saved campaign metrics retain snapshot provenance; native
@@ -70,3 +73,32 @@ Listing titles and canonical auction links can use the existing local
 `crm_bulk_trade_lots` cache; this read never follows tracking redirects or calls
 the marketplace provider. Technical fields and notes are shown only under
 Details. This page adds no schema, sending, tracking capture or scoring changes.
+
+Listing count links open square right-side people sheets, filtered by destination
+and email/browser/submission source, with local identity search and 25-row
+pagination. Listing and general-destination email evidence comes from the
+ordinary CRM detail ledger and remains available if PostHog or its private
+manifest fails. Submission sheets use the selected kind's latest timestamp.
+Original snapshot totals are never replaced with retained-cohort counts.
+Unknown attribution, provider failure and recorded zero remain distinct.
+
+Website attribution joins private send-manifest identities to retained accepted
+sends using both person ID and immutable send email. Only opaque link IDs enter
+the PostHog query; API responses contain CRM person IDs and aggregate activity,
+not manifest emails, tracking URLs, provider identities or session IDs. Reads
+cover at most 30 days from the accepted-send/campaign window and reject capped
+or invalid provider results. Distinct sessions and recipients are deduplicated
+across destinations; per-destination rows can overlap. A browser event does not
+verify the named recipient, and consent gaps do not imply a bot. No conversion
+rate or human/bot score is inferred.
+
+Keep provider credentials and manifests outside the release artifact.
+`CRM_POSTHOG_CREDENTIALS_PATH` defaults to `~/.posthog/credentials.json`, must be
+a regular non-symlink file with mode `0600`, and is restricted to PostHog project
+`375247` on its US/EU API hosts. `CRM_CAMPAIGN_MANIFEST_PATH` can select a private
+manifest; otherwise `CRM_CAMPAIGN_MANIFEST_DIR` defaults to
+`~/.hermes/workspace/campaigns` with bounded shallow discovery. Missing,
+invalid or ambiguous manifests fail closed. Next.js tracing excludes these
+runtime paths; deployment must leave them private and available to the service.
+The page shows the provider's observed refresh/receipt time and queried period,
+separate from email tracking freshness.

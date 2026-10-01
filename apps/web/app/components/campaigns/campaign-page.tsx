@@ -1,19 +1,44 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import type { CampaignActivity } from "@/lib/campaign-activity";
 import type { CampaignDetail } from "@/lib/campaigns";
 import { buildFileLink } from "@/lib/workspace-links";
-import { Card } from "../bulk-trades/trade-ui";
+import { request } from "../bulk-trades/trade-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../platform-admin/ui/tabs";
 import { CampaignRecipients } from "./campaign-recipients";
-import { CampaignDate, MetricsStrip, PersonLink, StatusTag, cellClass, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignListings, CampaignWebsiteActivity } from "./campaign-activity-panel";
+import { CampaignDate, MetricsStrip, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
 type Props = { detail: CampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
+type ActivityState = { campaignId: string; activity: CampaignActivity | null; failed: boolean };
 
 export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
   const [tab, setTab] = useState("recipients");
   const campaign = detail.campaign;
+  const [evidence, setEvidence] = useState<ActivityState>({ campaignId: campaign.id, activity: null, failed: false });
+  useEffect(() => {
+    const controller = new AbortController();
+    setEvidence({ campaignId: campaign.id, activity: null, failed: false });
+    async function load() {
+      try {
+        const activity = await request<CampaignActivity>(`/api/campaigns/${encodeURIComponent(campaign.id)}/activity`, { signal: controller.signal });
+        if (!controller.signal.aborted && activity.campaign_id === campaign.id) {
+          setEvidence({ campaignId: campaign.id, activity, failed: false });
+        } else if (!controller.signal.aborted) {
+          setEvidence({ campaignId: campaign.id, activity: null, failed: true });
+        }
+      } catch {
+        if (!controller.signal.aborted) { setEvidence({ campaignId: campaign.id, activity: null, failed: true }); }
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [campaign.id]);
+  const currentEvidence = evidence.campaignId === campaign.id ? evidence : null;
+  const activity = currentEvidence?.activity ?? null;
+  const activityLoading = !currentEvidence || (!currentEvidence.failed && !activity);
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
       <header className="flex flex-col gap-3.5 border-b px-4 pb-5 pt-5 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -39,6 +64,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
           <p>Open and click tracking may include automated activity; these counts do not verify human reads or website visits.</p>
         </section>
         {campaign.tracking_pending > 0 && <p role="status" className="border px-3 py-2 text-[13px]" style={{ background: "var(--bt-amber-bg)", borderColor: "var(--bt-amber-border)", color: "var(--bt-amber)" }}>{campaign.tracking_pending} accepted {campaign.tracking_pending === 1 ? "send has" : "sends have"} not been synced. Tracking is pending, not evidence of no engagement; any recorded events remain visible.</p>}
+        <CampaignWebsiteActivity activity={activity} loading={activityLoading} />
       </header>
       <main className="min-w-0 px-4 pb-8 pt-4 sm:px-8">
         <Tabs value={tab} onValueChange={setTab} className="gap-4">
@@ -49,7 +75,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
             <CampaignRecipients recipients={detail.recipients} onNavigatePerson={onNavigatePerson} />
           </TabsContent>
           <TabsContent value="listings">
-            <CampaignListings detail={detail} onNavigatePerson={onNavigatePerson} />
+            <CampaignListings detail={detail} activity={activity} loading={activityLoading} onNavigatePerson={onNavigatePerson} />
           </TabsContent>
           <TabsContent value="details">
             <CampaignAudit detail={detail} />
@@ -57,28 +83,6 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
         </Tabs>
       </main>
     </div>
-  );
-}
-
-function CampaignListings({ detail, onNavigatePerson }: Pick<Props, "detail" | "onNavigatePerson">) {
-  return (
-    <Card label="Pitched listings">
-      <p className="border-b px-3.5 py-3 text-xs" style={{ ...mutedStyle, borderColor: "var(--bt-divider)" }}>Unique clicked recipients from the retained ledger, not total click events.{detail.campaign.tracking_pending > 0 ? " Tracking is incomplete; zero observed clicks is not evidence of no engagement." : ""}</p>
-      <div className="max-w-full overflow-x-auto">
-        <table aria-label="Listings" className="w-full min-w-[580px] border-collapse text-left">
-          <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Listing", "Recipients pitched", "Unique clicked recipients", "Clicked people"].map((label) => <th key={label} scope="col" className="bt-label border-b px-3.5 py-2.5" style={cellStyle}>{label}</th>)}</tr></thead>
-          <tbody>
-            {detail.listings.map((listing) => <tr key={listing.listing_id} className="hover:bg-[var(--bt-row-hover)]">
-              <td className={`${cellClass} min-w-[180px]`} style={cellStyle}>{listing.url ? <a href={listing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1.5 font-medium hover:underline" style={{ color: "var(--bt-link)" }}>{listing.label}<ExternalLink size={13} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span></a> : <span className="font-medium">{listing.label}</span>}</td>
-              <td className={`${cellClass} bt-mono`} style={cellStyle}>{listing.recipients}</td>
-              <td className={`${cellClass} bt-mono`} style={cellStyle}>{listing.clicked_recipients}{detail.campaign.tracking_pending > 0 && <span className="block text-xs" style={mutedStyle}>observed · pending</span>}</td>
-              <td className={cellClass} style={cellStyle}>{listing.clicked_people.length ? <ul className="flex flex-col gap-1">{listing.clicked_people.map((person) => <li key={person.person_id}><PersonLink id={person.person_id} onNavigate={onNavigatePerson}>{person.name}</PersonLink>{person.company_name && <span style={mutedStyle}> · {person.company_name}</span>}</li>)}</ul> : <span style={mutedStyle}>{detail.campaign.tracking_pending > 0 ? "Unknown · pending" : "None observed"}</span>}</td>
-            </tr>)}
-            {!detail.listings.length && <tr><td colSpan={4} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No pitched listings are recorded in the retained ledger.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </Card>
   );
 }
 

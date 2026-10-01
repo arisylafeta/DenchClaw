@@ -97,16 +97,29 @@ The dedicated page works even when campaigns are hidden from the workspace tree.
 Open `/?path=campaign&entry=campaign:<id>` for a campaign's full detail page.
 **Recipients** is the default tab: search by person, company, email or clicked
 listing, then filter by observed opens, clicks, bounces or pending tracking.
-Recipient names open their People profiles. **Listings** shows included listings
-and unique clicked recipients; links use canonical marketplace destinations,
-never recipient tracking redirects. Technical metadata and notes are collapsed
-under **Details**.
+Recipient names open their People profiles. **Listings** uses compact count
+links instead of stacked names. Email clicks, browser activity and recorded
+submissions open square right-side sheets, filtered by destination and source.
+Each sheet has a searchable people table, 25 records per page, activity
+timestamps and ordinary People links. Submission timestamps match the selected
+action type. Listing links use canonical marketplace destinations, never
+recipient tracking redirects. Technical metadata and notes are collapsed under
+**Details**.
 
 Historical campaign snapshots remain separate from the retained recipient ledger:
 the original sent count can exceed the number of recipient records still present.
 `dench-campaign` totals use the existing ledger. Unknown tracking remains unknown,
 and the latest recipient check does not imply that every recipient was checked.
 The list and detail are read-only; they do not send messages or capture new events.
+
+Website evidence is a separate read-only PostHog view. It shows page events,
+distinct browser sessions and recorded offer, message and buy-now submissions
+for assigned campaign links; general destinations remain separate from listings.
+The observed source time and bounded campaign period are shown explicitly.
+Missing attribution or unavailable evidence is **unknown**, not zero, and does
+not block the email ledger. Forwarded links do not verify the named recipient,
+and missing consented browser events do not prove inactivity. Email and website
+snapshots are not a conversion rate or a human/bot classification.
 
 In PostgreSQL-backed workspaces, a person's **Campaigns** tab shows lifetime
 accepted-send, delivery, tracked-open and tracked-click totals, listing clicks
