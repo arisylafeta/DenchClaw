@@ -239,20 +239,25 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     cachedByListing.set(cached.listing_id, { title: cached.title?.trim() || null, url });
   }
   const linksBySend = new Map<string, LinkRow[]>();
+  const otherDestinations = new Map<string, CampaignDetail["other_destinations"][number]>();
   for (const link of links) {
     const group = linksBySend.get(link.send_id) ?? [];
     group.push(link);
     linksBySend.set(link.send_id, group);
+    if (!link.listing_id && !otherDestinations.has(link.cta_key)) {
+      const label = UUID.test(link.cta_key) ? "General destination" : link.cta_key.replace(/[-_]+/g, " ").trim() || "General destination";
+      otherDestinations.set(link.cta_key, { cta_key: link.cta_key, label });
+    }
   }
   const listings = new Map<string, {
     listing: CampaignListing;
     included: Set<string>;
     clicked: Set<string>;
-    people: Set<string>;
   }>();
   const recipients: CampaignRecipient[] = sends.map((send) => {
     const sendLinks = linksBySend.get(send.send_id) ?? [];
     const listingClicks = new Map<string, CampaignRecipient["listing_clicks"][number]>();
+    const otherClicks = new Map<string, CampaignRecipient["other_clicks"][number]>();
     // Before per-CTA tracking, a send could have only a primary listing. Never
     // attribute a provider-wide click to it: the clicked destination is unknown.
     const includedLinks: LinkRow[] = sendLinks.length ? sendLinks : send.listing_id ? [{
@@ -263,7 +268,14 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       first_clicked_at: null,
     }] : [];
     for (const link of includedLinks) {
-      if (!link.listing_id) { continue; } // General CTAs are not listing engagement.
+      if (!link.listing_id) {
+        const click = accepted(send) ? iso(link.first_clicked_at) : null;
+        const previous = otherClicks.get(link.cta_key);
+        if (click && (!previous || click < previous.first_clicked_at)) {
+          otherClicks.set(link.cta_key, { ...otherDestinations.get(link.cta_key)!, first_clicked_at: click });
+        }
+        continue; // General CTAs are not listing engagement.
+      }
       const cached = cachedByListing.get(link.listing_id);
       const url = cached?.url ?? canonicalListingUrl(link.destination_url);
       let labelKey = link.cta_key;
@@ -274,8 +286,8 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       let aggregate = listings.get(link.listing_id);
       if (!aggregate) {
         aggregate = {
-          listing: { listing_id: link.listing_id, label: cached?.title || labelKey.replace(/[-_]+/g, " ").trim() || "Listing", url, recipients: 0, clicked_recipients: 0, clicked_people: [] },
-          included: new Set(), clicked: new Set(), people: new Set(),
+          listing: { listing_id: link.listing_id, label: cached?.title || labelKey.replace(/[-_]+/g, " ").trim() || "Listing", url, recipients: 0, clicked_recipients: 0 },
+          included: new Set(), clicked: new Set(),
         };
         listings.set(link.listing_id, aggregate);
       } else if (!aggregate.listing.url && url) {
@@ -289,14 +301,6 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
         listingClicks.set(link.listing_id, { listing_id: link.listing_id, label: aggregate.listing.label, first_clicked_at: click });
       }
       aggregate.clicked.add(send.send_id);
-      if (send.person_id && !aggregate.people.has(send.person_id)) {
-        aggregate.people.add(send.person_id);
-        aggregate.listing.clicked_people.push({
-          person_id: send.person_id,
-          name: send.person_name || send.recipient_email || send.person_id,
-          company_name: send.company_name ?? null,
-        });
-      }
     }
     // Also derive from loaded links, so link-only clicks are not lost if the
     // provider's aggregate timestamp is absent or later than a recorded CTA.
@@ -318,16 +322,17 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       last_synced_at: iso(send.last_synced_at),
       tracking_pending: pending(send),
       listing_clicks: [...listingClicks.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
+      other_clicks: [...otherClicks.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
     };
   });
   return {
     campaign: summarize(campaign, sends, ledger.available),
     recipients,
+    other_destinations: [...otherDestinations.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
     listings: [...listings.values()].map(({ listing, included, clicked }) => ({
       ...listing,
       recipients: included.size,
       clicked_recipients: clicked.size,
-      clicked_people: listing.clicked_people.toSorted((a, b) => a.name.localeCompare(b.name)),
     })).toSorted((a, b) => a.label.localeCompare(b.label)),
     details: {
       auction_slug: campaign.auction_slug ?? null,

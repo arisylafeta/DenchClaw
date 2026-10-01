@@ -42,6 +42,15 @@ const nextConfig: NextConfig = {
   // instead of resolving through pnpm's virtual store symlinks.
   outputFileTracingRoot: path.join(import.meta.dirname, "..", ".."),
 
+  // Campaign attribution reads private runtime files, never packaged credentials or manifests.
+  outputFileTracingExcludes: {
+    "/*": [
+      path.relative(import.meta.dirname, process.env.CRM_POSTHOG_CREDENTIALS_PATH || path.join(homedir(), ".posthog", "credentials.json")),
+      `${path.relative(import.meta.dirname, process.env.CRM_CAMPAIGN_MANIFEST_DIR || path.join(homedir(), ".hermes", "workspace", "campaigns"))}/**`,
+      ...(process.env.CRM_CAMPAIGN_MANIFEST_PATH ? [path.relative(import.meta.dirname, process.env.CRM_CAMPAIGN_MANIFEST_PATH)] : []),
+    ],
+  },
+
   // Externalize packages with native addons so webpack doesn't break them
   serverExternalPackages: ["ws", "bufferutil", "utf-8-validate", "node-pty"],
 

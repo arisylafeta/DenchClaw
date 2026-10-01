@@ -44,6 +44,11 @@ export type CampaignRecipient = {
     label: string;
     first_clicked_at: string;
   }>;
+  other_clicks: Array<{
+    cta_key: string;
+    label: string;
+    first_clicked_at: string;
+  }>;
 };
 
 export type CampaignListing = {
@@ -52,17 +57,13 @@ export type CampaignListing = {
   url: string | null;
   recipients: number;
   clicked_recipients: number;
-  clicked_people: Array<{
-    person_id: string;
-    name: string;
-    company_name: string | null;
-  }>;
 };
 
 export type CampaignDetail = {
   campaign: CampaignSummary;
   recipients: CampaignRecipient[];
   listings: CampaignListing[];
+  other_destinations: Array<{ cta_key: string; label: string }>;
   details: {
     auction_slug: string | null;
     source_system: string | null;
