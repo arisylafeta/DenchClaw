@@ -100,12 +100,14 @@ export type ColumnHeaderMenuProps = {
 	/** Controlled open state for programmatic opening (e.g. header click). */
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
+	/** Optional scoped presentation for the portaled popup. */
+	popupClassName?: string;
 };
 
 export function ColumnHeaderMenu({
 	field, sortDirection, onSort, onHide, onRename, onDelete,
 	canMoveLeft, canMoveRight, onMoveLeft, onMoveRight, onReEnrich, onOptionsUpdate,
-	open: controlledOpen, onOpenChange,
+	open: controlledOpen, onOpenChange, popupClassName,
 }: ColumnHeaderMenuProps) {
 	const isEnrichment = (() => {
 		if (!field.default_value) return false;
@@ -131,7 +133,7 @@ export function ColumnHeaderMenu({
 					<path d="m6 9 6 6 6-6" />
 				</svg>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" sideOffset={6} className={field.type === "enum" ? "min-w-[260px]" : "min-w-[180px]"}>
+			<DropdownMenuContent align="start" sideOffset={6} className={`${field.type === "enum" ? "min-w-[260px]" : "min-w-[180px]"} ${popupClassName ?? ""}`}>
 				<div className="flex items-center gap-2 px-2.5 py-1.5 text-xs normal-case tracking-normal" style={{ color: "var(--color-text-muted)" }}>
 					<FieldTypeIcon type={field.type} size={14} className="shrink-0" />
 					<span className="font-medium">{fieldTypeLabel(field.type)}</span>
@@ -541,12 +543,14 @@ export function AddColumnPopover({
 	fields,
 	enrichmentAvailable: enrichmentAvailableProp,
 	onEnrichmentStart,
+	popupClassName,
 }: {
 	objectName: string;
 	onCreated: () => void;
 	fields?: AddColumnField[];
 	enrichmentAvailable?: boolean;
 	onEnrichmentStart?: (payload: EnrichmentStartPayload) => void;
+	popupClassName?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	const [type, setType] = useState("text");
@@ -797,7 +801,7 @@ export function AddColumnPopover({
 			{open && typeof document !== "undefined" && createPortal(
 				<div
 					ref={panelRef}
-					className="fixed z-[10000] w-[280px] rounded-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 slide-in-from-top-2"
+					className={`fixed z-[10000] w-[280px] rounded-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 ${popupClassName ?? ""}`}
 					style={{
 						top: position.top,
 						left: position.left,

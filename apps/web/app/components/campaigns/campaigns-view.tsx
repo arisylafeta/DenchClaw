@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CampaignDetail, CampaignSummary } from "@/lib/campaigns";
 import { buildEntryLink, buildFileLink } from "@/lib/workspace-links";
-import { Card, ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
+import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import { CampaignPage } from "./campaign-page";
 import { CampaignDate, PAGE_SIZE, Pagination, StatusTag, cellClass, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
@@ -50,10 +50,10 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
             {campaignId != null && <a href={buildFileLink("campaign")} onClick={(event) => followInApp(event, onBack)} className="inline-flex self-start items-center gap-1.5 text-[13px] hover:underline" style={mutedStyle}><ArrowLeft size={14} aria-hidden="true" />Back to Campaigns</a>}
             <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Campaigns</h1>
           </header>
-          <main className="min-w-0 flex-1 px-4 pb-8 pt-6 sm:px-8">
-            {current?.error ? <div className="flex flex-col items-start gap-3"><ErrorText error={current.error} /><button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button></div>
+          <main className="min-w-0 flex-1 pb-8 pt-6">
+            {current?.error ? <div className="flex flex-col items-start gap-3 px-4 sm:px-8"><ErrorText error={current.error} /><button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button></div>
               : current?.payload?.kind === "list" ? <CampaignsList campaigns={current.payload.campaigns} onOpenCampaign={onOpenCampaign} />
-              : <p role="status" className="text-[13px]" style={mutedStyle}>Loading {campaignId == null ? "campaigns" : "campaign"}…</p>}
+              : <p role="status" className="px-4 text-[13px] sm:px-8" style={mutedStyle}>Loading {campaignId == null ? "campaigns" : "campaign"}…</p>}
           </main>
         </>
       )}
@@ -69,10 +69,10 @@ function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: CampaignSumma
   const rows = campaigns.filter((campaign) => !term || [campaign.name, campaign.audience, campaign.status].some((value) => value?.toLocaleLowerCase().replace(/[_-]+/g, " ").includes(term)));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1));
 
-  if (!campaigns.length) { return <p className="py-8 text-[13px]" style={mutedStyle}>No campaigns are recorded yet.</p>; }
+  if (!campaigns.length) { return <p className="px-4 py-8 text-[13px] sm:px-8" style={mutedStyle}>No campaigns are recorded yet.</p>; }
   return (
-    <Card label="Campaign list">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-3" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}>
+    <section aria-label="Campaign list">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 sm:px-8">
         <Input type="search" aria-label="Search campaigns" placeholder="Search campaign, audience or status" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
         <span className="text-[13px]" style={mutedStyle}>{campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"}</span>
       </div>
@@ -95,6 +95,6 @@ function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: CampaignSumma
         </table>
       </div>
       <Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} />
-    </Card>
+    </section>
   );
 }

@@ -1,6 +1,7 @@
 import { extractEmailHost } from "../email-domain";
 import { queryPg } from "../postgres";
 import { deriveWebsite } from "../website-from-domain";
+import { cachedListingMetadata, canonicalListingUrl } from "./campaigns";
 
 type PersonRow = {
   id: string;
@@ -58,6 +59,7 @@ type CampaignSendRow = {
   campaign_name: string;
   listing_id: string;
   recipient_email: string;
+  auction_url: string | null;
   state: string;
   accepted_at: string | Date | null;
   delivered_at: string | Date | null;
@@ -73,11 +75,14 @@ type CampaignLinkRow = {
   cta_key: string;
   listing_id: string | null;
   first_clicked_at: string | Date | null;
+  destination_url: string | null;
 };
 
 type CampaignLink = {
   cta_key: string;
   listing_id: string | null;
+  listing_title: string | null;
+  listing_url: string | null;
   first_clicked_at: string | null;
 };
 
@@ -100,8 +105,10 @@ export type PostgresPersonProfile = {
   derived_website: string | null;
   threads: ThreadRow[];
   events: EventRow[];
-  campaigns: Array<Omit<CampaignSendRow, "pitch_count" | "accepted_at" | "delivered_at" | "bounced_at" | "provider_opened_at" | "provider_link_clicked_at" | "last_synced_at"> & {
+  campaigns: Array<Omit<CampaignSendRow, "auction_url" | "pitch_count" | "accepted_at" | "delivered_at" | "bounced_at" | "provider_opened_at" | "provider_link_clicked_at" | "last_synced_at"> & {
     pitch_count: number;
+    listing_title: string | null;
+    listing_url: string | null;
     accepted_at: string | null;
     delivered_at: string | null;
     bounced_at: string | null;
@@ -120,6 +127,8 @@ export type PostgresPersonProfile = {
   listing_engagement: Array<{
     listing_id: string;
     cta_key: string;
+    listing_title: string | null;
+    listing_url: string | null;
     clicked_updates: number;
   }>;
   interactions_summary: {
@@ -270,12 +279,13 @@ export async function getPostgresPersonProfile(
   `, [person.id]);
   const summary = summaryRows[0];
 
-  const campaignTable = await queryPg<{ available: boolean; links_available: boolean }>(
+  const campaignTable = await queryPg<{ available: boolean; links_available: boolean; listings_available: boolean }>(
     `select to_regclass('crm_campaign_sends') is not null as available,
-            to_regclass('crm_campaign_send_links') is not null as links_available`,
+            to_regclass('crm_campaign_send_links') is not null as links_available,
+            to_regclass('crm_bulk_trade_lots') is not null as listings_available`,
   );
   const campaignRows = campaignTable[0]?.available ? await queryPg<CampaignSendRow>(`
-    select s.id as send_id, s.campaign_id, c.campaign_name, s.listing_id, s.recipient_email,
+    select s.id as send_id, s.campaign_id, c.campaign_name, s.listing_id, s.auction_url, s.recipient_email,
            s.state, s.accepted_at, s.delivered_at, s.bounced_at,
            s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
            count(*) filter (where s.accepted_at is not null) over (partition by s.person_id, s.listing_id) as pitch_count
@@ -285,19 +295,39 @@ export async function getPostgresPersonProfile(
   `, [person.id]) : [];
   const linkRows = campaignTable[0]?.available && campaignTable[0]?.links_available
     ? await queryPg<CampaignLinkRow>(`
-      select l.send_id, l.cta_key, l.listing_id, l.first_clicked_at
+      select l.send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
         from crm_campaign_send_links l
         join crm_campaign_sends s on s.id = l.send_id
        where s.person_id = $1
        order by l.cta_key
     `, [person.id])
     : [];
+  const listingIds = new Set<string>();
+  for (const row of campaignRows) { if (row.listing_id) { listingIds.add(row.listing_id); } }
+  for (const row of linkRows) { if (row.listing_id) { listingIds.add(row.listing_id); } }
+  const cachedListings = campaignTable[0]?.listings_available && listingIds.size
+    ? await queryPg<{ listing_id: string; title: string | null; auction_slug: string | null }>(`
+      select distinct on (lot.listing_id) lot.listing_id, lot.title, lot.auction_slug
+        from crm_bulk_trade_lots lot
+       where lot.listing_id = any($1::text[])
+       order by lot.listing_id, (nullif(lot.auction_slug, '') is not null) desc,
+                lot.updated_at desc nulls last, lot.id
+    `, [[...listingIds]])
+    : [];
+  const cachedByListing = new Map<string, { title: string | null; url: string | null }>();
+  const platformSite = (process.env.REBATTERY_SITE_URL ?? "https://rebattery.io").replace(/\/$/, "");
+  for (const cached of cachedListings) {
+    cachedByListing.set(cached.listing_id, cachedListingMetadata(cached, platformSite));
+  }
   const linksBySend = new Map<string, CampaignLink[]>();
   for (const row of linkRows) {
+    const cached = row.listing_id ? cachedByListing.get(row.listing_id) : undefined;
     const links = linksBySend.get(row.send_id) ?? [];
     links.push({
       cta_key: row.cta_key,
       listing_id: row.listing_id,
+      listing_title: cached?.title ?? null,
+      listing_url: row.listing_id ? cached?.url ?? canonicalListingUrl(row.destination_url) : null,
       first_clicked_at: iso(row.first_clicked_at),
     });
     linksBySend.set(row.send_id, links);
@@ -327,6 +357,8 @@ export async function getPostgresPersonProfile(
         listingEngagement.set(link.listing_id, {
           listing_id: link.listing_id,
           cta_key: link.cta_key,
+          listing_title: link.listing_title,
+          listing_url: link.listing_url,
           clicked_updates: 1,
         });
       }
@@ -348,17 +380,27 @@ export async function getPostgresPersonProfile(
       start_at: iso(row.start_at),
       end_at: iso(row.end_at),
     })),
-    campaigns: campaignRows.map((row) => ({
-      ...row,
-      pitch_count: Number(row.pitch_count),
-      accepted_at: iso(row.accepted_at),
-      delivered_at: iso(row.delivered_at),
-      bounced_at: iso(row.bounced_at),
-      provider_opened_at: iso(row.provider_opened_at),
-      provider_link_clicked_at: iso(row.provider_link_clicked_at),
-      last_synced_at: iso(row.last_synced_at),
-      links: linksBySend.get(row.send_id) ?? [],
-    })),
+    campaigns: campaignRows.map((row) => {
+      const cached = cachedByListing.get(row.listing_id);
+      return {
+        send_id: row.send_id,
+        campaign_id: row.campaign_id,
+        campaign_name: row.campaign_name,
+        listing_id: row.listing_id,
+        recipient_email: row.recipient_email,
+        state: row.state,
+        listing_title: cached?.title ?? null,
+        listing_url: cached?.url ?? canonicalListingUrl(row.auction_url),
+        pitch_count: Number(row.pitch_count),
+        accepted_at: iso(row.accepted_at),
+        delivered_at: iso(row.delivered_at),
+        bounced_at: iso(row.bounced_at),
+        provider_opened_at: iso(row.provider_opened_at),
+        provider_link_clicked_at: iso(row.provider_link_clicked_at),
+        last_synced_at: iso(row.last_synced_at),
+        links: linksBySend.get(row.send_id) ?? [],
+      };
+    }),
     campaign_summary: campaignSummary,
     listing_engagement: [...listingEngagement.values()],
     interactions_summary: {

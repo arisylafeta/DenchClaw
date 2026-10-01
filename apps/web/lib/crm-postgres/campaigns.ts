@@ -188,7 +188,7 @@ export async function listCampaigns(): Promise<CampaignSummary[]> {
 }
 
 /** Never return a recipient-specific redirect, credential, query string, or fragment. */
-function canonicalListingUrl(raw: string | null | undefined): string | null {
+export function canonicalListingUrl(raw: string | null | undefined): string | null {
   if (!raw) { return null; }
   try {
     const url = new URL(raw);
@@ -202,6 +202,16 @@ function canonicalListingUrl(raw: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+export function cachedListingMetadata(
+  cached: { title: string | null; auction_slug: string | null }, platformSite: string,
+): { title: string | null; url: string | null } {
+  // Slugs come from the auction sync cache, never a tracker or inferred listing ID.
+  const slug = cached.auction_slug;
+  const url = slug && /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(slug)
+    ? canonicalListingUrl(`${platformSite}/marketplace/auctions/${slug}`) : null;
+  return { title: cached.title?.trim() || null, url };
 }
 
 export async function getCampaignDetail(id: string): Promise<CampaignDetail | null> {
@@ -231,12 +241,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
   const cachedByListing = new Map<string, { title: string | null; url: string | null }>();
   const platformSite = (process.env.REBATTERY_SITE_URL ?? "https://rebattery.io").replace(/\/$/, "");
   for (const cached of cachedListings) {
-    // Slugs come from the existing auction sync cache, not a tracker redirect
-    // or an inferred listing ID. Validate them before constructing a public URL.
-    const slug = cached.auction_slug;
-    const url = slug && /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(slug)
-      ? canonicalListingUrl(`${platformSite}/marketplace/auctions/${slug}`) : null;
-    cachedByListing.set(cached.listing_id, { title: cached.title?.trim() || null, url });
+    cachedByListing.set(cached.listing_id, cachedListingMetadata(cached, platformSite));
   }
   const linksBySend = new Map<string, LinkRow[]>();
   const otherDestinations = new Map<string, CampaignDetail["other_destinations"][number]>();

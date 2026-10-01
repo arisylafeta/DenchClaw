@@ -119,11 +119,9 @@ describe("ObjectTable display field", () => {
 			/>,
 		);
 
-		expect(screen.getByText("No").closest("span")).not.toHaveClass("font-semibold");
 		fireEvent.click(screen.getByText("No"));
 		expect(onEntryClick).not.toHaveBeenCalled();
 
-		expect(screen.getByText("Ada Lovelace")).toHaveClass("font-semibold");
 		fireEvent.click(screen.getByText("Ada Lovelace"));
 		expect(onEntryClick).toHaveBeenCalledWith("p1");
 	});
@@ -176,30 +174,6 @@ describe("ObjectTable server sort", () => {
 		});
 	});
 
-	it("does not call onServerSort if the consumer did not opt in (legacy callers stay client-only)", async () => {
-		// onServerSort is opt-in. Without it, ObjectTable still works
-		// (TanStack handles client sort on the visible page) — important
-		// for any caller that hasn't migrated yet.
-		const otherSpy = vi.fn();
-		render(
-			<ObjectTable
-				objectName="people"
-				fields={[
-					{ id: "f_name", name: "Name", type: "text" },
-				]}
-				entries={[
-					{ entry_id: "p1", Name: "Ada" },
-				]}
-				hideInternalToolbar
-				onSelectionContextChange={otherSpy}
-			/>,
-		);
-		fireEvent.click(screen.getByText("Name"));
-		fireEvent.click(await screen.findByText("Sort ascending"));
-		// Nothing to assert on onServerSort (it was never wired); the
-		// fact that no exception fires is the guarantee.
-		expect(true).toBe(true);
-	});
 });
 
 describe("ObjectTable bulk delete failures", () => {

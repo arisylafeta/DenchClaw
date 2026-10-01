@@ -2550,6 +2550,36 @@ td:has(> div > :empty) {
   --bt-bar-border: #525252;
 }
 
+/* Person-only bridge for shared email, meeting and activity components. */
+.crm-person-profile {
+  --color-background: var(--bt-bg);
+  --color-bg: var(--bt-bg);
+  --color-main-bg: var(--bt-bg);
+  --color-surface: var(--bt-surface);
+  --color-surface-hover: var(--bt-row-hover);
+  --color-border: var(--bt-border);
+  --color-text: var(--bt-text);
+  --color-text-secondary: var(--bt-text-2);
+  --color-text-muted: var(--bt-muted);
+  --color-accent: var(--bt-link);
+  --color-accent-light: var(--bt-blue-bg);
+  --color-accent-fill: var(--bt-accent);
+  --color-accent-foreground: var(--bt-on-accent);
+  --color-error: var(--bt-red);
+}
+
+.crm-person-profile :where(button, input, textarea, select) {
+  border-radius: 0;
+  font-family: inherit;
+}
+
+.crm-person-profile .crm-profile-title :where(h1, input, button) {
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 .bulk-trades .bt-mono {
   font-family: "Geist Mono", ui-monospace, "SF Mono", monospace;
 }

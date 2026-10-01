@@ -12,6 +12,7 @@ import type {
   FileData,
 } from "./content-state";
 import { ObjectTable, AddEntryModal } from "../components/workspace/object-table";
+import compactTableStyles from "../components/workspace/compact-table.module.css";
 import { ObjectKanban } from "../components/workspace/object-kanban";
 import { ObjectCalendar, type CalendarDateChangePayload } from "../components/workspace/object-calendar";
 import { ObjectTimeline, type TimelineDateChangePayload } from "../components/workspace/object-timeline";
@@ -3884,14 +3885,16 @@ function ObjectView({
     },
     [handleServerSearch],
   );
+  const compactPeopleTable = currentViewType === "table" && isSeedPeopleObjectId(data.object.id);
 
   return (
-    <div className="flex flex-col h-full min-w-0 overflow-hidden">
+    <div className={`flex flex-col h-full min-w-0 overflow-hidden${compactPeopleTable ? ` bulk-trades ${compactTableStyles.surface}` : ""}`}>
       {/* Unified toolbar — title + count, view switcher, search, filter, views, settings, refresh, +Add.
           Use `flex-wrap` so when the right panel is narrow the items wrap to
           a second row instead of overlapping each other. `overflow-x-auto`
           would also clip vertically (CSS quirk) and hide dropdown menus. */}
       <div
+        data-table-part="toolbar"
         className="px-4 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 flex-shrink-0 min-w-0"
         style={{ borderBottom: "1px solid var(--color-border)" }}
       >
@@ -3919,13 +3922,14 @@ function ObjectView({
             title={`Change icon for ${displayObjectName(data.object.name)}`}
           />
           <h1
-            className="text-sm font-semibold truncate"
+            className={compactPeopleTable ? "text-lg font-semibold tracking-tight truncate" : "text-sm font-semibold truncate"}
             style={{ color: "var(--color-text)" }}
             title={data.object.description || displayObjectName(data.object.name)}
           >
             {displayObjectName(data.object.name)}
           </h1>
           <span
+            data-table-part="count"
             className="text-[11px] tabular-nums px-1.5 py-0.5 rounded-full flex-shrink-0"
             style={{
               color: "var(--color-text-muted)",
@@ -3947,6 +3951,7 @@ function ObjectView({
         <div className="ml-auto flex min-w-0 max-w-full flex-[1_1_280px] flex-wrap items-center justify-end gap-1.5">
           {/* Search input — shrinks/wraps before core actions disappear. */}
           <div
+            data-table-part="search"
             className="flex min-w-[128px] max-w-[180px] flex-[1_1_150px] items-center gap-1.5 h-7 px-2 rounded-md focus-within:ring-2 focus-within:ring-(--color-accent)/30 transition-shadow"
             style={{
               border: "1px solid var(--color-border)",
@@ -4028,7 +4033,7 @@ function ObjectView({
           <button
             type="button"
             onClick={handleRefresh}
-            className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
+            className={`flex items-center justify-center w-7 h-7 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer${compactPeopleTable ? " border border-[var(--bt-border)] bg-[var(--bt-surface)]" : ""}`}
             style={{ color: "var(--color-text-muted)" }}
             title="Refresh"
             aria-label="Refresh"
@@ -4083,6 +4088,7 @@ function ObjectView({
         {currentViewType === "table" && (
           <ObjectTable
             objectName={data.object.name}
+            presentation={compactPeopleTable ? "compact" : "default"}
             fields={data.fields}
             displayField={data.effectiveDisplayField}
             entries={filteredEntries}

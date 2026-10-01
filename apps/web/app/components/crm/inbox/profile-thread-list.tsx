@@ -51,9 +51,11 @@ export type ProfileThread = {
 export function ProfileThreadList({
   threads,
   onOpenPerson,
+  presentation = "default",
 }: {
   threads: ReadonlyArray<ProfileThread>;
   onOpenPerson?: (id: string) => void;
+  presentation?: "default" | "compact";
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -69,6 +71,7 @@ export function ProfileThreadList({
         <ProfileThreadListItem
           key={thread.id}
           thread={thread}
+          compact={presentation === "compact"}
           expanded={expandedId === thread.id}
           onToggle={() =>
             setExpandedId((prev) => (prev === thread.id ? null : thread.id))
@@ -85,11 +88,13 @@ function ProfileThreadListItem({
   expanded,
   onToggle,
   onOpenPerson,
+  compact,
 }: {
   thread: ProfileThread;
   expanded: boolean;
   onToggle: () => void;
   onOpenPerson?: (id: string) => void;
+  compact: boolean;
 }) {
   const senderName =
     thread.primary_sender_name ??
@@ -166,10 +171,10 @@ function ProfileThreadListItem({
             </span>
             {senderTypeColor && (
               <span
-                className="shrink-0 inline-flex items-center gap-1 rounded-full px-1.5 py-0 text-[10px] uppercase tracking-[0.06em]"
+                className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0 text-[10px] uppercase tracking-[0.06em] ${compact ? "rounded-none" : "rounded-full"}`}
                 style={{
-                  background: `${senderTypeColor}1f`,
-                  color: senderTypeColor,
+                  background: compact ? "var(--bt-segment)" : `${senderTypeColor}1f`,
+                  color: compact ? "var(--bt-muted)" : senderTypeColor,
                   fontWeight: 600,
                 }}
               >
@@ -179,7 +184,7 @@ function ProfileThreadListItem({
                     width: 5,
                     height: 5,
                     borderRadius: 99,
-                    background: senderTypeColor,
+                    background: compact ? "var(--bt-muted)" : senderTypeColor,
                   }}
                 />
                 {thread.primary_sender_type}
@@ -198,7 +203,7 @@ function ProfileThreadListItem({
               className="mt-0.5 truncate text-[13px]"
               style={{
                 color: "var(--color-text-muted)",
-                fontFamily: '"Bookerly", Georgia, "Times New Roman", serif',
+                fontFamily: compact ? "inherit" : '"Bookerly", Georgia, "Times New Roman", serif',
               }}
             >
               {senderName && (

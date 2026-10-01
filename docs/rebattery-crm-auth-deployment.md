@@ -47,6 +47,29 @@ Selecting a view or resizing columns updates only selection/settings; it never
 resubmits stale view definitions from another tab. Computed multi-value Purpose
 cannot be used as an editable Kanban grouping or scalar timeline grouping.
 
+## People interface
+
+Only the registered CRM People object's table view opts into the compact
+`--bt-*` presentation, using `isSeedPeopleObjectId` at the workspace host.
+`ObjectTable` and `DataTable` keep their existing interaction engine; the
+presentation is explicit and defaults unchanged for Companies and custom
+People-named objects. Scoped table CSS covers the host toolbar, rows, focus,
+selection, pagination and portaled column/action menus.
+
+`PersonProfile` uses the same square presentation across its header, tabs,
+overview and notes. Its profile-only token bridge and explicit compact thread
+and activity variants leave shared Company surfaces unchanged. Campaign updates
+use compact rows and destination tables; IDs and sync metadata remain collapsed
+under Details. Dates are formatted for reading without changing their meaning.
+
+`lib/crm-postgres/person-profile.ts` resolves cached listing metadata in one
+batched local `crm_bulk_trade_lots` read. Campaign detail and Person profiles share
+`cachedListingMetadata` and `canonicalListingUrl`; only validated public listing
+URLs are returned, never raw recipient redirects. Missing cache data uses an
+honest readable fallback. Historical email first observations remain first;
+pending tracking stays unknown. No schema, provider calls, tracking capture,
+authorization or mutation behavior changes.
+
 ## Campaigns workspace
 
 Campaigns has a dedicated full-width workspace page at `/?path=campaign`, with

@@ -198,11 +198,14 @@ export function ActivityTimeline({
   personId,
   onOpenPerson,
   onOpenCompany,
+  presentation = "default",
 }: {
   personId: string;
   onOpenPerson?: (id: string) => void;
   onOpenCompany?: (id: string) => void;
+  presentation?: "default" | "compact";
 }) {
+  const compact = presentation === "compact";
   const [items, setItems] = useState<ActivityRow[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -312,11 +315,12 @@ export function ActivityTimeline({
           >
             {bucketLabel(key)}
           </h3>
-          <ul className="space-y-2">
+          <ul className={compact ? "border-t" : "space-y-2"} style={compact ? { borderColor: "var(--bt-border)" } : undefined}>
             {rows.map((item) => (
               <ActivityRowItem
                 key={item.id}
                 row={item}
+                compact={compact}
                 expanded={expandedId === item.id}
                 onToggle={() =>
                   setExpandedId((prev) => (prev === item.id ? null : item.id))
@@ -335,6 +339,8 @@ export function ActivityTimeline({
             type="button"
             variant="outline"
             size="sm"
+            className={compact ? "h-8 rounded-none px-3 text-xs shadow-none" : undefined}
+            style={compact ? { background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" } : undefined}
             onClick={loadMore}
             disabled={loadingMore}
           >
@@ -372,12 +378,14 @@ function ActivityRowItem({
   onToggle,
   onOpenPerson,
   onOpenCompany,
+  compact,
 }: {
   row: ActivityRow;
   expanded: boolean;
   onToggle: () => void;
   onOpenPerson?: (id: string) => void;
   onOpenCompany?: (id: string) => void;
+  compact: boolean;
 }) {
   const dirStyle = row.direction ? DIRECTION_STYLE[row.direction] : null;
   const tintBg = dirStyle ? `${dirStyle.color}1a` : "var(--color-surface-hover)";
@@ -390,10 +398,10 @@ function ActivityRowItem({
 
   return (
     <li
-      className="rounded-xl border overflow-hidden"
+      className={compact ? "overflow-hidden border-b" : "rounded-xl border overflow-hidden"}
       style={{
         borderColor: expanded ? "var(--color-accent)" : "var(--color-border)",
-        background: "var(--color-surface)",
+        background: compact ? "transparent" : "var(--color-surface)",
         transition: "border-color 120ms ease",
       }}
     >
@@ -423,10 +431,10 @@ function ActivityRowItem({
       >
         {/* Type icon — direction-tinted circle */}
         <span
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full shrink-0"
+          className={`inline-flex h-7 w-7 items-center justify-center shrink-0 ${compact ? "rounded-none" : "rounded-full"}`}
           style={{
-            background: tintBg,
-            color: tintFg,
+            background: compact ? "var(--bt-segment)" : tintBg,
+            color: compact ? "var(--bt-muted)" : tintFg,
           }}
           aria-hidden
         >
@@ -437,7 +445,7 @@ function ActivityRowItem({
         <div className="min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
             <span
-              className="font-instrument truncate"
+              className={compact ? "truncate" : "font-instrument truncate"}
               style={{
                 color: "var(--color-text)",
                 fontSize: 14,
@@ -448,10 +456,10 @@ function ActivityRowItem({
             </span>
             {dirStyle && (
               <span
-                className="shrink-0 inline-flex items-center gap-1 rounded-full px-1.5 py-0 text-[10px] uppercase tracking-[0.06em]"
+                className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0 text-[10px] uppercase tracking-[0.06em] ${compact ? "rounded-none" : "rounded-full"}`}
                 style={{
-                  background: `${dirStyle.color}1f`,
-                  color: dirStyle.color,
+                  background: compact ? "var(--bt-segment)" : `${dirStyle.color}1f`,
+                  color: compact ? "var(--bt-muted)" : dirStyle.color,
                   fontWeight: 600,
                 }}
               >
@@ -459,7 +467,7 @@ function ActivityRowItem({
               </span>
             )}
           </div>
-          <ContextLine row={row} />
+          <ContextLine row={row} compact={compact} />
         </div>
 
         {/* Time */}
@@ -491,7 +499,7 @@ function ActivityRowItem({
   );
 }
 
-function ContextLine({ row }: { row: ActivityRow }) {
+function ContextLine({ row, compact }: { row: ActivityRow; compact: boolean }) {
   if (row.type === "Email" && row.email) {
     const senderName =
       row.email.from?.name?.trim() || row.email.from?.email || null;
@@ -502,7 +510,7 @@ function ContextLine({ row }: { row: ActivityRow }) {
         className="mt-0.5 truncate text-[13px]"
         style={{
           color: "var(--color-text-muted)",
-          fontFamily: '"Bookerly", Georgia, "Times New Roman", serif',
+          fontFamily: compact ? "inherit" : '"Bookerly", Georgia, "Times New Roman", serif',
         }}
       >
         {senderName && (

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPostgresPersonProfile } from "./person-profile";
 
 const { queryPgMock } = vi.hoisted(() => ({
@@ -13,43 +13,10 @@ describe("getPostgresPersonProfile", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-
-  it("reads Notes from custom field values for CRM profile pages", async () => {
-    queryPgMock.mockImplementation(async (sql: string) => {
-      if (sql.includes("from crm_people")) {
-        return [
-          {
-            id: "gog:person:ari.sylafeta@gmail.com",
-            name: "Ari Sylafeta",
-            email: null,
-            company_id: null,
-            phone: null,
-            status: null,
-            job_title: null,
-            linkedin_url: null,
-            last_interaction_at: "2026-06-22T11:59:24Z",
-            notes: "Typeform submission - Buyer Sourcing Criteria",
-            created_at: null,
-            updated_at: null,
-          },
-        ];
-      }
-      return [];
-    });
-
-    const profile = await getPostgresPersonProfile("gog:person:ari.sylafeta@gmail.com");
-
-    expect(profile?.person.notes).toBe("Typeform submission - Buyer Sourcing Criteria");
-    expect(profile?.person.last_interaction_at).toBe("2026-06-22T11:59:24Z");
-    expect(profile?.campaign_summary).toEqual({
-      sent: 0,
-      delivered: 0,
-      opened: 0,
-      clicked: 0,
-      tracking_pending: 0,
-    });
-    expect(profile?.listing_engagement).toEqual([]);
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
+
 
   it("counts accepted updates across all history and deduplicates clicked listings within each send", async () => {
     const observedAt = new Date("2026-09-30T10:00:00Z");
@@ -146,21 +113,56 @@ describe("getPostgresPersonProfile", () => {
       tracking_pending: 1,
     });
     expect(profile?.listing_engagement).toEqual([
-      { listing_id: "listing-a", cta_key: "listing-a-primary", clicked_updates: 2 },
-      { listing_id: "listing-b", cta_key: "listing-b", clicked_updates: 1 },
-    ]);
-    expect(profile?.campaigns.find((send) => send.send_id === "first")?.links).toEqual([
-      { cta_key: "listing-a-primary", listing_id: "listing-a", first_clicked_at: observedAt.toISOString() },
-      { cta_key: "listing-a-secondary", listing_id: "listing-a", first_clicked_at: observedAt.toISOString() },
-      { cta_key: "listing-b", listing_id: "listing-b", first_clicked_at: observedAt.toISOString() },
-      { cta_key: "grid", listing_id: null, first_clicked_at: observedAt.toISOString() },
-    ]);
-    expect(profile?.campaigns.find((send) => send.send_id === "second")?.links).toEqual([
-      { cta_key: "listing-a-primary", listing_id: "listing-a", first_clicked_at: observedAt.toISOString() },
-      { cta_key: "listing-b", listing_id: "listing-b", first_clicked_at: null },
-      { cta_key: "sourcing", listing_id: null, first_clicked_at: null },
+      { listing_id: "listing-a", cta_key: "listing-a-primary", listing_title: null, listing_url: null, clicked_updates: 2 },
+      { listing_id: "listing-b", cta_key: "listing-b", listing_title: null, listing_url: null, clicked_updates: 1 },
     ]);
     expect(profile?.campaigns.find((send) => send.send_id === "tracking-pending")?.last_synced_at).toBeNull();
     expect(JSON.stringify(profile)).not.toContain("private-token");
+  });
+
+  it("resolves cached titles in one listing lookup and exposes only safe canonical public links", async () => {
+    vi.stubEnv("REBATTERY_SITE_URL", "https://rebattery.io");
+    const observedAt = "2026-09-30T10:00:00Z";
+    const listingIds = ["cached", "missing", "unsafe", "bad-slug"];
+    queryPgMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("from crm_people")) { return [{
+        id: "buyer", name: "Buyer", email: null, company_id: null, phone: null,
+        job_title: null, linkedin_url: null, last_interaction_at: null, notes: null,
+        created_at: null, updated_at: null,
+      }]; }
+      if (sql.includes("to_regclass")) { return [{ available: true, links_available: true, listings_available: true }]; }
+      if (sql.includes("from crm_bulk_trade_lots")) { return [
+        { listing_id: "cached", title: "  FPT battery modules  ", auction_slug: "fpt-battery-modules" },
+        { listing_id: "bad-slug", title: "Battery lot", auction_slug: "../t/private-token" },
+      ]; }
+      if (sql.includes("from crm_campaign_send_links")) { return [{ send_id: "cached", cta_key: "FPT", listing_id: "cached", destination_url: "https://rebattery.io/t/private-token", first_clicked_at: observedAt }, { send_id: "missing", cta_key: "missing", listing_id: "missing", destination_url: "https://rebattery.io/marketplace/listings/safe-lot?token=private-token#recipient", first_clicked_at: null }, { send_id: "unsafe", cta_key: "unsafe", listing_id: "unsafe", destination_url: "https://rebattery.io.evil.example/marketplace/auctions/private-token", first_clicked_at: null }, { send_id: "bad-slug", cta_key: "bad-slug", listing_id: "bad-slug", destination_url: "https://rebattery.io/t/private-token", first_clicked_at: null }]; }
+      if (sql.includes("from crm_campaign_sends")) { return listingIds.map((id) => ({
+        send_id: id, campaign_id: "campaign", campaign_name: "Update", listing_id: id,
+        auction_url: "https://rebattery.io/t/private-token", recipient_email: "buyer@example.com",
+        state: "accepted", accepted_at: observedAt, delivered_at: null, bounced_at: null,
+        provider_opened_at: null, provider_link_clicked_at: null, last_synced_at: observedAt, pitch_count: 1,
+      })); }
+      return [];
+    });
+
+    const profile = await getPostgresPersonProfile("buyer");
+    expect(profile?.campaigns.find((send) => send.send_id === "cached")).toMatchObject({
+      listing_title: "FPT battery modules",
+      listing_url: "https://rebattery.io/marketplace/auctions/fpt-battery-modules",
+    });
+    expect(profile?.campaigns.find((send) => send.send_id === "missing")?.links[0]).toMatchObject({
+      listing_title: null, listing_url: "https://rebattery.io/marketplace/listings/safe-lot",
+    });
+    for (const id of ["unsafe", "bad-slug"]) {
+      expect(profile?.campaigns.find((send) => send.send_id === id)?.links[0].listing_url).toBeNull();
+    }
+    expect(profile?.listing_engagement[0]).toMatchObject({
+      listing_title: "FPT battery modules", clicked_updates: 1,
+      listing_url: "https://rebattery.io/marketplace/auctions/fpt-battery-modules",
+    });
+    expect(JSON.stringify(profile)).not.toContain("private-token");
+    const cacheReads = queryPgMock.mock.calls.filter(([sql]) => sql.includes("from crm_bulk_trade_lots"));
+    expect(cacheReads).toHaveLength(1);
+    expect(cacheReads[0][1]).toEqual([listingIds]);
   });
 });

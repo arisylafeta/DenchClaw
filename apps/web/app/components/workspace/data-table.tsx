@@ -44,6 +44,7 @@ import {
 } from "../ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { UrlFavicon } from "./url-favicon";
+import compactStyles from "./compact-table.module.css";
 import type { TableCellSelectionState, TableSelectionPoint } from "@/lib/table-selection";
 
 /* ─── Types ─── */
@@ -61,6 +62,8 @@ export type DataTableProps<TData, TValue> = {
 	columns: ColumnDef<TData, TValue>[];
 	data: TData[];
 	loading?: boolean;
+	/** Opt-in styling; the host determines canonical object identity. */
+	presentation?: "default" | "compact";
 	// search
 	searchPlaceholder?: string;
 	enableGlobalFilter?: boolean;
@@ -236,6 +239,7 @@ export function DataTable<TData, TValue>({
 	columns,
 	data,
 	loading = false,
+	presentation = "default",
 	searchPlaceholder = "Search...",
 	enableGlobalFilter = true,
 	enableSorting = true,
@@ -276,6 +280,8 @@ export function DataTable<TData, TValue>({
 	stickyFirstColumnValue,
 	onStickyFirstColumnChange,
 }: DataTableProps<TData, TValue>) {
+	const compact = presentation === "compact";
+	const menuClassName = compact ? `bulk-trades ${compactStyles.surface} ${compactStyles.menu}` : undefined;
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [internalGlobalFilter, setInternalGlobalFilter] = useState("");
 	const globalFilter = globalFilterProp !== undefined ? globalFilterProp : internalGlobalFilter;
@@ -505,6 +511,7 @@ export function DataTable<TData, TValue>({
 						<RowActionsMenu
 							row={row.original}
 							actions={rowActionsRef.current?.(row.original) ?? []}
+							className={menuClassName}
 						/>
 					),
 					size: 48,
@@ -514,7 +521,7 @@ export function DataTable<TData, TValue>({
 					enableResizing: false,
 				};
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [hasRowActions]);
+	}, [hasRowActions, menuClassName]);
 
 	const allColumns = useMemo(() => {
 		const cols: ColumnDef<TData, TValue>[] = [];
@@ -715,10 +722,11 @@ export function DataTable<TData, TValue>({
 	// ─── Render ───
 
 	return (
-		<div className="w-full h-full flex flex-col overflow-hidden" style={{ overscrollBehavior: "contain" }}>
+		<div className={cn("w-full h-full flex flex-col overflow-hidden", compact && `bulk-trades ${compactStyles.surface}`)} style={{ overscrollBehavior: "contain" }}>
 			{/* Toolbar */}
 			{!hideToolbar && (
 			<div
+				data-table-part="toolbar"
 				className="flex items-center gap-3 px-3 py-2 shrink-0 flex-wrap backdrop-blur-md"
 				style={{ background: "var(--color-glass)", borderBottom: "1px solid var(--color-border)" }}
 			>
@@ -734,6 +742,7 @@ export function DataTable<TData, TValue>({
 				{/* Search */}
 				{enableGlobalFilter && (
 					<div
+						data-table-part="search"
 						className="flex min-w-[140px] max-w-[260px] flex-[1_1_180px] items-center gap-2 h-8 px-3 backdrop-blur-sm rounded-full focus-within:ring-2 focus-within:ring-(--color-accent)/30 transition-shadow shadow-[0_0_21px_0_rgba(0,0,0,0.05)]"
 						style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)" }}
 					>
@@ -788,7 +797,7 @@ export function DataTable<TData, TValue>({
 							</svg>
 							Columns
 						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" sideOffset={6}>
+						<DropdownMenuContent align="end" sideOffset={6} className={menuClassName}>
 							<DropdownMenuCheckboxItem
 								checked={stickyFirstColumn}
 								onSelect={() => setStickyFirstColumn((v) => !v)}
@@ -850,6 +859,7 @@ export function DataTable<TData, TValue>({
 			{/* Table */}
 			<div
 				ref={scrollContainerRef}
+				data-table-part="table-scroll"
 				className="overflow-auto flex-1 min-h-0 max-h-full relative"
 				onScroll={handleScroll}
 				onKeyDown={handleCellKeyDown}
@@ -944,6 +954,7 @@ export function DataTable<TData, TValue>({
 															<>
 																<span
 																	className={innerClassName}
+																	data-table-part="header-content"
 																	onClick={canSort && !disableHeaderClickSort ? header.column.getToggleSortingHandler() : undefined}
 																	style={{ color: "var(--color-text-muted)", cursor: "grab" }}
 																	{...dragListeners}
@@ -971,6 +982,7 @@ export function DataTable<TData, TValue>({
 													className={thClassName}
 												>
 													<span
+														data-table-part="header-content"
 														className={innerClassName}
 														onClick={canSort && !disableHeaderClickSort ? header.column.getToggleSortingHandler() : undefined}
 														style={{ color: "var(--color-text-muted)" }}
@@ -1017,6 +1029,7 @@ export function DataTable<TData, TValue>({
 			{/* Pagination footer */}
 			{!loading && data.length > 0 && (
 				<div
+					data-table-part="footer"
 					className="flex items-center justify-between px-3 py-1 text-[11px] shrink-0 backdrop-blur-xl"
 					style={{
 						borderTop: "1px solid var(--color-border)",
@@ -1236,6 +1249,7 @@ function TableRowInner({
 					<td
 						key={cell.id}
 						data-dt-cell-active={isCellActive ? "true" : undefined}
+						data-dt-cell-selected={isCellSelected ? "true" : undefined}
 						data-row-index={isDataCell ? rowIdx : undefined}
 						data-column-id={isDataCell ? cell.column.id : undefined}
 						className={cn(
@@ -1414,12 +1428,14 @@ function EmptyTableBody({
 	return (
 		<tbody>
 			<tr>
-				<td colSpan={safeColSpan} className="p-0 border-0">
+				<td colSpan={safeColSpan} data-table-part="empty-cell" className="p-0 border-0">
 					<div
+						data-table-part="empty"
 						className="flex flex-col items-center gap-4 py-24 px-12"
 						style={{ position: "sticky", left: 0, display: "inline-flex" }}
 					>
 						<div
+							data-table-part="empty-icon"
 							className="rounded-full p-4 mb-2 backdrop-blur-sm"
 							style={{
 								background: "var(--color-glass)",
@@ -1479,7 +1495,7 @@ function PaginationButton({ onClick, disabled, label }: { onClick: () => void; d
 	);
 }
 
-function RowActionsMenu<TData>({ row, actions }: { row: TData; actions: RowAction<TData>[] }) {
+function RowActionsMenu<TData>({ row, actions, className }: { row: TData; actions: RowAction<TData>[]; className?: string }) {
 	if (actions.length === 0) return null;
 
 	return (
@@ -1492,7 +1508,7 @@ function RowActionsMenu<TData>({ row, actions }: { row: TData; actions: RowActio
 			>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></svg>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" sideOffset={4}>
+			<DropdownMenuContent align="end" sideOffset={4} className={className}>
 				{actions.map((action, i) => (
 					<DropdownMenuItem
 						key={i}
@@ -1513,7 +1529,7 @@ function LoadingSkeleton({ columnCount }: { columnCount: number }) {
 	return (
 		<div className="w-full">
 			{/* Skeleton header */}
-			<div className="flex gap-0 border-b" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+			<div data-table-part="loading-header" className="flex gap-0 border-b" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
 				{Array.from({ length: Math.min(columnCount, 6) }).map((_col, j) => (
 					<div key={j} className="flex-1 h-11 px-4 flex items-center" style={{ borderRight: j < Math.min(columnCount, 6) - 1 ? "1px solid var(--color-border)" : "none" }}>
 						<div
@@ -1527,6 +1543,7 @@ function LoadingSkeleton({ columnCount }: { columnCount: number }) {
 			{Array.from({ length: 15 }).map((_, i) => (
 				<div
 					key={i}
+					data-table-part="loading-row"
 					className="flex gap-0 border-b"
 					style={{ borderColor: "var(--color-border)" }}
 				>
