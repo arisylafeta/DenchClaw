@@ -48,7 +48,7 @@ function mockDetail(value: CampaignDetail = detail, activity: CampaignActivity =
 }
 
 function activityPerson(personId: string, overrides: Partial<CampaignActivityPerson>): CampaignActivityPerson {
-  return { person_id: personId, redirect_events: 0, page_views: 0, sessions: 0, offer_events: 0, message_events: 0, buy_now_events: 0, email_clicked_at: null, first_browser_at: null, last_browser_at: null, last_offer_at: null, last_message_at: null, last_buy_now_at: null, ...overrides };
+  return { person_id: personId, redirect_events: 0, page_views: 0, sessions: 0, offer_events: 0, message_events: 0, buy_now_events: 0, email_clicked_at: null, last_clicked_at: null, first_browser_at: null, last_browser_at: null, last_offer_at: null, last_message_at: null, last_buy_now_at: null, ...overrides };
 }
 function destination(overrides: Partial<CampaignActivityDestination>): CampaignActivityDestination {
   return { ...emptyTotals, cta_key: "nissan", listing_id: "internal-listing-1", label: "Nissan Leaf 40 kWh", recipient_count: 4, email_clicked_recipients: 1, people: [], ...overrides };
@@ -220,7 +220,6 @@ describe("Campaign destination evidence sheets", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("North Batteries")).toBeInTheDocument();
     expect(within(dialog).getByText("ada@example.test")).toBeInTheDocument();
-    expect(dialog.querySelector("time")).toHaveAttribute("datetime", AT);
     expect(within(dialog).getByRole("link", { name: "Ada" })).toHaveAttribute("href", buildEntryLink("people", "person:a"));
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -297,7 +296,6 @@ describe("Campaign destination evidence sheets", () => {
     expect(sheetPeople()).toEqual(["Ada", "Cora"]);
     const browserRow = within(screen.getByRole("dialog")).getByRole("link", { name: "Cora" }).closest("tr")!;
     expect(within(browserRow).getAllByRole("cell").slice(1, 3).map((cell) => cell.textContent)).toEqual(["2", "2"]);
-    expect(browserRow.querySelectorAll("time")).toHaveLength(2);
     await user.type(within(screen.getByRole("dialog")).getByRole("searchbox"), "Ada");
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Nissan Leaf 40 kWh: Offers, 2" }));
@@ -317,6 +315,29 @@ describe("Campaign destination evidence sheets", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Renault Zoe 52 kWh: Browser activity, 1" }));
     expect(sheetPeople()).toEqual(["Ben"]);
+  });
+
+  it("shows repeated redirect counts and latest click/view without replacing the historical email cohort", async () => {
+    const lastClick = "2026-09-30T16:00:00.000Z";
+    const lastView = "2026-09-30T17:00:00.000Z";
+    mockDetail(detail, availableActivity([destination({ redirect_events: 5, redirect_recipients: 2, people: [
+      activityPerson("person:a", { redirect_events: 3, last_clicked_at: lastClick, page_views: 2, last_browser_at: lastView }),
+      activityPerson("person:d", { redirect_events: 2, last_clicked_at: AT }),
+    ] })]));
+    const user = userEvent.setup();
+    render(<CampaignsView {...props} />);
+    await openListings(user);
+    await user.click(screen.getByRole("button", { name: "Nissan Leaf 40 kWh: Email clicks, 1" }));
+    expect(sheetPeople()).toEqual(["Ada"]);
+    const row = within(screen.getByRole("dialog")).getByRole("link", { name: "Ada" }).closest("tr")!;
+    expect(within(row).getAllByRole("cell")[1]).toHaveTextContent("3");
+    expect([...row.querySelectorAll("time")].map((time) => time.dateTime)).toEqual([lastClick, lastView]);
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Nissan Leaf 40 kWh: Tracked clicks, 5" }));
+    expect(sheetPeople()).toEqual(["Ada", "Dev"]);
+    const redirectOnly = within(screen.getByRole("dialog")).getByRole("link", { name: "Dev" }).closest("tr")!;
+    expect(within(redirectOnly).getAllByRole("cell")[1]).toHaveTextContent("2");
+    expect(redirectOnly.querySelector("time")).toHaveAttribute("datetime", AT);
   });
 
   it.each(["http", "unmapped", "unavailable"] as const)("retains the email ledger and renders unknown website counts for %s evidence", async (failure) => {
@@ -340,7 +361,7 @@ describe("Campaign destination evidence sheets", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "General stock grid: Email clicks, 1" }));
     expect(sheetPeople()).toEqual(["Ada"]);
-    expect(screen.getByRole("dialog").querySelector("time")).toHaveAttribute("datetime", AT);
+    expect(within(screen.getByRole("dialog")).getAllByRole("cell").slice(1).map((cell) => cell.textContent)).toEqual(["Unknown", "Unknown", "Unknown"]);
   });
 
   it("distinguishes a mapped available zero from an unmapped listing", async () => {

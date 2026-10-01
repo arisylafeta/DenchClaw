@@ -149,13 +149,13 @@ export function aggregateCampaignActivity(attribution: Attribution[], events: Ca
     let person = people.get(link.person_id);
     if (!person) {
       person = { ...counts(), person_id: link.person_id, email_clicked_at: clickAt,
-        first_browser_at: null, last_browser_at: null, last_offer_at: null, last_message_at: null, last_buy_now_at: null };
+        last_clicked_at: null, first_browser_at: null, last_browser_at: null, last_offer_at: null, last_message_at: null, last_buy_now_at: null };
       people.set(link.person_id, person);
       sessionSets.set(person, new Set());
     } else if (clickAt && (!person.email_clicked_at || clickAt < person.email_clicked_at)) { person.email_clicked_at = clickAt; }
     if (!globalPeople.has(link.person_id)) {
       const global = { ...counts(), person_id: link.person_id, email_clicked_at: null,
-        first_browser_at: null, last_browser_at: null, last_offer_at: null, last_message_at: null, last_buy_now_at: null };
+        last_clicked_at: null, first_browser_at: null, last_browser_at: null, last_offer_at: null, last_message_at: null, last_buy_now_at: null };
       globalPeople.set(link.person_id, global);
       sessionSets.set(global, new Set());
     }
@@ -173,7 +173,11 @@ export function aggregateCampaignActivity(attribution: Attribution[], events: Ca
       aggregate[metric] += event.event_count;
       if (event.event === "campaign_page_viewed" && event.session_id) { sessionSets.get(aggregate)!.add(event.session_id); }
     }
-    if (event.event === "campaign_page_viewed") {
+    if (event.event === "campaign_link_clicked") {
+      for (const recipient of [person, global]) {
+        if (!recipient.last_clicked_at || event.last_at > recipient.last_clicked_at) { recipient.last_clicked_at = event.last_at; }
+      }
+    } else if (event.event === "campaign_page_viewed") {
       for (const recipient of [person, global]) {
         if (!recipient.first_browser_at || event.first_at < recipient.first_browser_at) { recipient.first_browser_at = event.first_at; }
         if (!recipient.last_browser_at || event.last_at > recipient.last_browser_at) { recipient.last_browser_at = event.last_at; }

@@ -106,6 +106,12 @@ action type. Listing links use canonical marketplace destinations, never
 recipient tracking redirects. Technical metadata and notes are collapsed under
 **Details**.
 
+The sheets show observed redirect-click counts, last click and last view instead
+of first-click/first-view timestamps. These counts and latest times come from
+PostHog, not the historical Postmark snapshot. Unmapped or unavailable evidence
+stays unknown. Tracked-click count links include all retained records with
+observed redirects, separately from the email-clicked cohort.
+
 Historical campaign snapshots remain separate from the retained recipient ledger:
 the original sent count can exceed the number of recipient records still present.
 `dench-campaign` totals use the existing ledger. Unknown tracking remains unknown,

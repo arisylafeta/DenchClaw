@@ -82,6 +82,14 @@ manifest fails. Submission sheets use the selected kind's latest timestamp.
 Original snapshot totals are never replaced with retained-cohort counts.
 Unknown attribution, provider failure and recorded zero remain distinct.
 
+Email sheets retain the native email-clicked cohort but enrich each record with
+separate PostHog redirect-event counts and last click/view times. A tracked-click
+sheet includes all retained records with observed redirects, including records
+outside the earlier email snapshot. Click timestamps use the latest redirect
+event, never a page view or submission. Browser sheets show page/session counts
+and last view. Missing provider attribution remains unknown, not zero or a
+manufactured last-click timestamp.
+
 Website attribution joins private send-manifest identities to retained accepted
 sends using both person ID and immutable send email. Only opaque link IDs enter
 the PostHog query; API responses contain CRM person IDs and aggregate activity,

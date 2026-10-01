@@ -74,6 +74,25 @@ describe("campaign attribution identities and aggregation", () => {
     for (const sensitive of [A, B, C, "shared-session", "one@example.test", "private.invalid"]) { expect(serialized).not.toContain(sensitive); }
   });
 
+  it("counts repeated clicks and keeps the latest click isolated from views, submissions and other destinations", () => {
+    const result = aggregateCampaignActivity(mapCampaignManifest(manifest, ledger), [
+      { ...event(A, "campaign_link_clicked", 3, null), last_at: "2026-09-26T12:00:00.000Z" },
+      event(A, "campaign_link_clicked", 2, null),
+      { ...event(A, "campaign_page_viewed", 1, "browser"), last_at: "2026-09-27T12:00:00.000Z" },
+      { ...event(A, "public_auction_submission_created", 1, null, "offer"), last_at: "2026-09-28T12:00:00.000Z" },
+      { ...event(B, "campaign_link_clicked", 4, null), last_at: "2026-09-29T12:00:00.000Z" },
+    ]);
+    expect(result.totals.redirect_events).toBe(9);
+    const fpt = result.destinations.find(destination => destination.cta_key === "fpt")!;
+    expect(fpt.people.find(person => person.person_id === "p1")).toMatchObject({
+      redirect_events: 5, last_clicked_at: "2026-09-26T12:00:00.000Z", last_browser_at: "2026-09-27T12:00:00.000Z",
+    });
+    expect(fpt.people.find(person => person.person_id === "p2")).toMatchObject({ redirect_events: 0, last_clicked_at: null });
+    expect(result.destinations.find(destination => destination.cta_key === "grid")?.people[0]).toMatchObject({
+      redirect_events: 4, last_clicked_at: "2026-09-29T12:00:00.000Z", last_browser_at: null,
+    });
+  });
+
   it("records a server submission without inventing a browser visit or browser session", () => {
     const result = aggregateCampaignActivity(mapCampaignManifest(manifest, ledger), [
       event(C, "public_auction_submission_created", 1, "server-session", "offer"),
