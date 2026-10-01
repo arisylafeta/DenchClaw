@@ -355,6 +355,44 @@ describe("URL roundtrip / popstate idempotency", () => {
     expect(active?.preview).toBe(false);
   });
 
+  it("opens the campaign table from a direct URL when it is absent from the workspace tree", () => {
+    const state = applyUrlToState(
+      EMPTY_TABS_STATE,
+      parseUrlState("path=campaign"),
+      { resolveKind: () => null },
+    );
+
+    expect(selectActiveContentTab(state)).toMatchObject({
+      kind: "object",
+      path: "campaign",
+    });
+  });
+
+  it("repairs a persisted campaign file tab on refresh and restores the table through history", () => {
+    const stale = openContent(EMPTY_TABS_STATE, fileInput("campaign"));
+    saveTabsState(stale, "campaign-refresh");
+    const url = parseUrlState("path=campaign");
+    const shell = { resolveKind: () => null };
+    let state = applyUrlToState(loadTabsState("campaign-refresh"), url, shell);
+
+    expect(selectActiveContentTab(state)).toMatchObject({
+      kind: "object",
+      path: "campaign",
+    });
+
+    state = applyUrlToState(state, parseUrlState("entry=people:recipient"), shell);
+    expect(selectActiveContentTab(state)).toMatchObject({
+      kind: "crm-person",
+      meta: { entryId: "recipient" },
+    });
+
+    state = applyUrlToState(state, url, shell);
+    expect(selectActiveContentTab(state)).toMatchObject({
+      kind: "object",
+      path: "campaign",
+    });
+  });
+
   it("maps path=company to the company object view without a tree resolver", () => {
     const state = applyUrlToState(EMPTY_TABS_STATE, parseUrlState("path=company"), {});
     const active = selectActiveContentTab(state);

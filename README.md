@@ -91,6 +91,11 @@ npx denchclaw start --skip-daemon-install
 
 ## Campaign engagement
 
+Open the campaign list at `/?path=campaign` or from **Campaigns** in the sidebar.
+The direct link opens the CRM table even when campaigns are hidden from the
+workspace file tree. Choose a campaign to see **Invited people**, then click a
+recipient's name and open their **Campaigns** tab for activity across updates.
+
 In PostgreSQL-backed workspaces, a person's **Campaigns** tab shows lifetime
 accepted-send, delivery, tracked-open and tracked-click totals, listing clicks
 across updates, and each update's CTA activity. Counts use existing
