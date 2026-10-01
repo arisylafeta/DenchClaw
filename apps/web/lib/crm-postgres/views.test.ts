@@ -140,6 +140,49 @@ describe.skipIf(!TEST_URL)("postgres saved views", () => {
     expect(await pg.queryPg("select object_id from crm_object_views where object_id = $1", [otherId])).toEqual([]);
   });
 
+  it("updates selection and settings without overwriting newer saved definitions", async () => {
+    await storage.savePostgresObjectViews(objectName, [buyers], "Buyers", settings);
+    await storage.savePostgresObjectViews(objectName, [buyers, dismantlers], "Buyers");
+    await storage.updatePostgresObjectViewState(objectName, { activeView: "Dismantlers" });
+    expect(await storage.getPostgresObjectViews(objectName)).toEqual({
+      views: [buyers, dismantlers], activeView: "Dismantlers", viewSettings: settings,
+    });
+    await storage.updatePostgresObjectViewState(objectName, { viewSettings: {} });
+    expect(await storage.getPostgresObjectViews(objectName)).toEqual({
+      views: [buyers, dismantlers], activeView: "Dismantlers", viewSettings: {},
+    });
+    await storage.savePostgresObjectViews(objectName, [buyers], "Buyers");
+    await storage.updatePostgresObjectViewState(objectName, { activeView: "Dismantlers" });
+    expect(await storage.getPostgresObjectViews(objectName)).toEqual({
+      views: [buyers], activeView: undefined, viewSettings: {},
+    });
+  });
+
+  it("keeps private filter metadata per user and denies anonymous access", async () => {
+    const privateId = randomUUID();
+    const userA = randomUUID();
+    const userB = randomUUID();
+    const created = await pg.queryPg<{ id: string }>(
+      "insert into crm_objects (id, name) values ($1, 'email_thread') on conflict (name) do nothing returning id",
+      [privateId],
+    );
+    try {
+      expect(await storage.savePostgresObjectViews("email_thread", [buyers], "Buyers", settings, userA)).toBe(true);
+      expect((await storage.getPostgresObjectViews("email_thread", userA)).views).toEqual([buyers]);
+      expect((await storage.getPostgresObjectViews("email_thread", userB)).views).toEqual([]);
+      expect((await storage.getPostgresObjectViews("email_thread")).views).toEqual([]);
+      expect(await storage.savePostgresObjectViews("email_thread", [dismantlers])).toBe(false);
+      expect(await storage.updatePostgresObjectViewState("email_thread", { activeView: null })).toBe(false);
+      await storage.savePostgresObjectViews("email_thread", [dismantlers], "Dismantlers", undefined, userB);
+      await storage.updatePostgresObjectViewState("email_thread", { activeView: null }, userA);
+      expect((await storage.getPostgresObjectViews("email_thread", userA)).activeView).toBeUndefined();
+      expect((await storage.getPostgresObjectViews("email_thread", userB)).activeView).toBe("Dismantlers");
+    } finally {
+      await pg.queryPg("delete from crm_private_object_views where user_id in ($1::uuid, $2::uuid)", [userA, userB]);
+      if (created.length) await pg.queryPg("delete from crm_objects where id = $1", [privateId]);
+    }
+  });
+
   it("rejects malformed storage and stale active names without losing the previous state", async () => {
     await storage.savePostgresObjectViews(objectName, [buyers], "Buyers", settings);
     for (const invalidViews of [{ name: "Buyers" }, ["Buyers"], [{}], [{ name: 123 }]]) {

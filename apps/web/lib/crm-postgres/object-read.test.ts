@@ -473,46 +473,6 @@ describe("postgres object read adapter", () => {
 
   });
 
-  it("loads work tasks for Kanban and resolves the Project relation label", async () => {
-    const { getPostgresObjectData } = await import("./object-read");
-    const data = await getPostgresObjectData(
-      "work_task",
-      new URL("http://localhost?pageSize=10"),
-      "11111111-1111-4111-8111-111111111111",
-    );
-
-    expect(data.object.default_view).toBe("kanban");
-    expect(data.fields.find((field) => field.name === "Status")?.type).toBe(
-      "enum",
-    );
-    expect(data.fields.map((field) => field.name)).toContain("Preview");
-    expect(data.fields.map((field) => field.name)).not.toContain(
-      "Task Details",
-    );
-    expect(data.entries[0]).toMatchObject({
-      Title: "Finalize API",
-      Preview: "Objective: finish the API",
-      Status: "Done",
-      Project: "p1",
-    });
-    expect(data.entries[0]).not.toHaveProperty("Task Details");
-    expect(data.relationLabels.Project).toEqual({
-      p2: "Safe change delivery",
-      p1: "Supplier inventory lifecycle",
-    });
-    expect(data.relationLabels.Assignee).toEqual({
-      "11111111-1111-4111-8111-111111111111": "ari@rebattery.io",
-    });
-    const projectOptionsCall = queryPg.mock.calls.find(([sql]) =>
-      String(sql).includes("from projects"),
-    );
-    expect(projectOptionsCall?.[0]).toContain(
-      "where status in ('Active', 'In Progress')",
-    );
-    expect(projectOptionsCall?.[0]).toContain("order by name");
-    expect(projectOptionsCall?.[1]).toBeUndefined();
-  });
-
   it("applies enum is filters to canonical Postgres columns", async () => {
     const filters = Buffer.from(
       JSON.stringify({

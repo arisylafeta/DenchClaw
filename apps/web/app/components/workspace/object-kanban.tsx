@@ -27,6 +27,8 @@ type Field = {
   type: string;
   enum_values?: string[];
   enum_colors?: string[];
+  enum_multiple?: boolean;
+  read_only?: boolean;
   related_object_name?: string;
   default_value?: string;
 };
@@ -692,16 +694,18 @@ export function ObjectKanban({
   // Find the grouping field
   const groupField = useMemo(() => {
     const configuredField = groupFieldName
-      ? fields.find((field) => field.type === "enum" && field.name === groupFieldName)
+      ? fields.find((field) => field.type === "enum" && !field.enum_multiple && !field.read_only && field.name === groupFieldName)
       : undefined;
     if (configuredField) {return configuredField;}
     const statusField = fields.find(
       (f) =>
         f.type === "enum" &&
+        !f.enum_multiple &&
+        !f.read_only &&
         f.name.toLowerCase().includes("status"),
     );
     if (statusField) {return statusField;}
-    return fields.find((f) => f.type === "enum") ?? null;
+    return fields.find((f) => f.type === "enum" && !f.enum_multiple && !f.read_only) ?? null;
   }, [fields, groupFieldName]);
 
   const accordionField = useMemo(

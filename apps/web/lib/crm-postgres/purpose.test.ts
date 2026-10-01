@@ -45,6 +45,7 @@ describe.skipIf(!TEST_URL)("computed CRM discovery purpose", () => {
         ('other_name', 'obj_other', 'Name', 'text', 'name', 1)`);
       seedSql = await readFile(new URL("./migrations/023_saved_purpose_views.sql", import.meta.url), "utf8");
       await client.query(seedSql);
+      await client.query(await readFile(new URL("./migrations/024_private_view_scopes.sql", import.meta.url), "utf8"));
       await client.query(`insert into crm_companies (id, name, tags, platform_role, roles, buyer_category, buyer_stage, buyer_evidence, buyer_workstream_status, buyer_exclusion_reason) values
         ('old_prospect', 'Old prospect', array['buyer-discovery-2020-01-02'], null, null, null, null, null, null, null),
         ('new_prospect', 'Recent prospect', array['buyer-prospect'], null, null, null, null, null, null, null),

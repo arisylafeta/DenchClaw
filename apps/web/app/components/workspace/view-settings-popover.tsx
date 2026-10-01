@@ -12,6 +12,8 @@ type Field = {
 	name: string;
 	type: string;
 	enum_values?: string[];
+	enum_multiple?: boolean;
+	read_only?: boolean;
 };
 
 type ViewSettingsPopoverProps = {
@@ -147,7 +149,7 @@ function KanbanSettings({
 			label="Group by field"
 			value={settings.kanbanField}
 			onChange={(v) => onSettingsChange({ ...settings, kanbanField: v })}
-			fields={fields}
+			fields={fields.filter((field) => !field.enum_multiple && !field.read_only)}
 			filterType="enum"
 		/>
 	);
@@ -224,7 +226,7 @@ function TimelineSettings({
 				label="Group by (optional)"
 				value={settings.timelineGroupField}
 				onChange={(v) => onSettingsChange({ ...settings, timelineGroupField: v })}
-				fields={fields}
+				fields={fields.filter((field) => !field.enum_multiple)}
 				filterType="enum"
 				allowEmpty
 			/>

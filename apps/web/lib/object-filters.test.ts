@@ -4,11 +4,31 @@ import {
 	normalizeFilterGroup,
 	matchesFilter,
 	buildWhereClause,
+	autoDetectViewField,
 	type FilterRule,
 	type FilterGroup,
 	type FieldMeta,
 } from "./object-filters";
 
+
+describe("scalar view grouping detection", () => {
+	const fields: FieldMeta[] = [
+		{ name: "Purpose", type: "enum", enum_multiple: true, read_only: true },
+		{ name: "Derived Status", type: "enum", read_only: true },
+		{ name: "Tags", type: "enum", enum_multiple: true },
+		{ name: "Stage", type: "enum" },
+	];
+
+	it("chooses editable scalar enums for Kanban even when derived status fields precede them", () => {
+		expect(autoDetectViewField("kanban", "kanbanField", fields)).toBe("Stage");
+		expect(autoDetectViewField("kanban", "kanbanField", fields.slice(0, 3))).toBeUndefined();
+	});
+
+	it("allows read-only scalar timeline groups but skips multi-value enums", () => {
+		expect(autoDetectViewField("timeline", "timelineGroupField", fields)).toBe("Derived Status");
+		expect(autoDetectViewField("timeline", "timelineGroupField", [fields[0], fields[2]])).toBeUndefined();
+	});
+});
 // ─── normalizeFilterRule ───
 
 describe("normalizeFilterRule", () => {

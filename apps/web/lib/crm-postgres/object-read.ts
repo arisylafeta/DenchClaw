@@ -525,7 +525,7 @@ export async function getPostgresObjectData(
     [object.id],
   );
   const statuses: StatusRow[] = [];
-  const objectViews = await getPostgresObjectViews(object.name);
+  const objectViews = await getPostgresObjectViews(object.name, userId);
 
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const pageSizeParam =
@@ -561,12 +561,12 @@ export async function getPostgresObjectData(
   const search = url.searchParams.get("search");
   const rowScope =
     object.name === "work_task"
-      ? (params.push(userId),
+      ? (params.push(userId || null),
         buildWorkTaskReadScope("e.assignee_id", `$${params.length}`))
       : object.name === "email_thread" || object.name === "email_message"
-        ? (params.push(userId), `e.mailbox_owner_id = $${params.length}::uuid`)
+        ? (params.push(userId || null), `e.mailbox_owner_id = $${params.length}::uuid`)
         : object.name === "interaction"
-          ? (params.push(userId),
+          ? (params.push(userId || null),
             `(e.email_message_id is null or exists (
             select 1 from crm_email_messages scoped_message
              where scoped_message.id = e.email_message_id

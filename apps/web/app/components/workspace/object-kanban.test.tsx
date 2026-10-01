@@ -175,3 +175,49 @@ describe("Kanban column visibility", () => {
     expect(screen.queryByText("Completed")).toBeNull();
   });
 });
+
+describe("Kanban compatible grouping", () => {
+  it.each([
+    { enum_multiple: true, read_only: true },
+    { enum_multiple: true },
+    { read_only: true },
+  ])("rejects incompatible persisted grouping and uses an editable scalar field: %j", (metadata) => {
+    render(
+      <ObjectKanban
+        objectName="company"
+        fields={[
+          { id: "purpose", name: "Purpose", type: "enum", enum_values: ["Buyer", "Dismantler"], ...metadata },
+          { id: "stage", name: "Stage", type: "enum", enum_values: ["Prospect", "Qualified"] },
+          { id: "name", name: "Name", type: "text" },
+        ]}
+        entries={[{ entry_id: "company-1", Name: "Acme", Purpose: ["Buyer"], Stage: "Qualified" }]}
+        statuses={[]}
+        groupFieldName="Purpose"
+      />,
+    );
+
+    expect(screen.getByText("Prospect")).toBeTruthy();
+    expect(screen.getByText("Qualified")).toBeTruthy();
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(screen.queryByText("Dismantler")).toBeNull();
+    expect(screen.queryByText("Ungrouped")).toBeNull();
+  });
+
+  it("shows the no-group state when only derived multi-value enums exist", () => {
+    render(
+      <ObjectKanban
+        objectName="company"
+        fields={[{
+          id: "purpose", name: "Purpose", type: "enum",
+          enum_values: ["Buyer", "Dismantler"], enum_multiple: true, read_only: true,
+        }]}
+        entries={[{ entry_id: "company-1", Purpose: ["Buyer", "Dismantler"] }]}
+        statuses={[]}
+      />,
+    );
+
+    expect(screen.getByText(/No enum field found for kanban grouping/)).toBeTruthy();
+    expect(screen.queryByText("Buyer")).toBeNull();
+    expect(screen.queryByText("Dismantler")).toBeNull();
+  });
+});

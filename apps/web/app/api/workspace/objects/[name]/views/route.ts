@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getPostgresObjectViews, savePostgresObjectViews } from "@/lib/crm-postgres/views";
+import { currentUser } from "@/lib/auth";
+import { getPostgresObjectViews, savePostgresObjectViews, updatePostgresObjectViewState } from "@/lib/crm-postgres/views";
 import { getObjectViews, saveObjectViews } from "@/lib/workspace";
 import type { SavedView, ViewTypeSettings } from "@/lib/object-filters";
 
@@ -8,7 +9,7 @@ type Params = { params: Promise<{ name: string }> };
 /**
  * GET /api/workspace/objects/[name]/views
  *
- * Returns saved views, active_view, and view_settings from the object's .object.yaml.
+ * Returns saved definitions and persisted selection/settings.
  */
 export async function GET(_req: Request, ctx: Params) {
 	const { name } = await ctx.params;
@@ -16,7 +17,9 @@ export async function GET(_req: Request, ctx: Params) {
 
 	try {
 		if (process.env.CRM_DB_BACKEND === "postgres") {
-			const { views, activeView, viewSettings } = await getPostgresObjectViews(objectName);
+			const user = await currentUser();
+			if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+			const { views, activeView, viewSettings } = await getPostgresObjectViews(objectName, user.id);
 			return NextResponse.json({ views, activeView, viewSettings });
 		}
 
@@ -33,8 +36,8 @@ export async function GET(_req: Request, ctx: Params) {
 /**
  * PUT /api/workspace/objects/[name]/views
  *
- * Save views, active_view, and view_settings to the object's .object.yaml.
- * Body: { views: SavedView[], activeView?: string, viewSettings?: ViewTypeSettings }
+ * Save definitions, or update selection/settings independently when views are omitted.
+ * Body: { views?: SavedView[], activeView?: string | null, viewSettings?: ViewTypeSettings }
  */
 export async function PUT(req: Request, ctx: Params) {
 	const { name } = await ctx.params;
@@ -43,17 +46,23 @@ export async function PUT(req: Request, ctx: Params) {
 	try {
 		const body = (await req.json()) as {
 			views?: SavedView[];
-			activeView?: string;
+			activeView?: string | null;
 			viewSettings?: ViewTypeSettings;
 		};
 
-		const views = body.views ?? [];
-		const activeView = body.activeView;
-		const viewSettings = body.viewSettings;
-
-		const ok = process.env.CRM_DB_BACKEND === "postgres"
-			? await savePostgresObjectViews(objectName, views, activeView, viewSettings)
-			: saveObjectViews(objectName, views, activeView, viewSettings);
+		let ok: boolean;
+		if (process.env.CRM_DB_BACKEND === "postgres") {
+			const user = await currentUser();
+			if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+			ok = body.views === undefined
+				? await updatePostgresObjectViewState(objectName, body, user.id)
+				: await savePostgresObjectViews(objectName, body.views, body.activeView ?? undefined, body.viewSettings, user.id);
+		} else {
+			const previous = getObjectViews(objectName);
+			ok = saveObjectViews(objectName, body.views ?? previous.views,
+				Object.hasOwn(body, "activeView") ? body.activeView ?? undefined : previous.activeView,
+				body.viewSettings ?? previous.viewSettings);
+		}
 		if (!ok) {
 			return NextResponse.json(
 				{ error: "Object directory not found" },

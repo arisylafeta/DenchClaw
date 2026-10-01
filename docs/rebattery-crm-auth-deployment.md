@@ -37,3 +37,12 @@ These are broad discovery views, not sending audiences or qualification decision
 Opt-out and exclusion flags remain visible. Viewing or refining them does not
 subscribe contacts, change classifications, or send messages. The dedicated
 Dismantlers workspace and its outreach stages remain unchanged.
+
+Migration `024_private_view_scopes.sql` keeps saved filters for email threads,
+email messages, interactions and Work Tasks in `crm_private_object_views`, keyed
+by object and authenticated user. Anonymous callers cannot read or write this
+metadata. Companies and People remain shared.
+
+Selecting a view or resizing columns updates only selection/settings; it never
+resubmits stale view definitions from another tab. Computed multi-value Purpose
+cannot be used as an editable Kanban grouping or scalar timeline grouping.

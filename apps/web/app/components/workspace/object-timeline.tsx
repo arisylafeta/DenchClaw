@@ -20,6 +20,8 @@ type Field = {
 	type: string;
 	enum_values?: string[];
 	enum_colors?: string[];
+	enum_multiple?: boolean;
+	read_only?: boolean;
 };
 
 type TimelineItem = {
@@ -360,7 +362,7 @@ export function ObjectTimeline({
 	entries,
 	startDateField,
 	endDateField,
-	groupField,
+	groupField: configuredGroupField,
 	zoom,
 	onZoomChange,
 	members: _members,
@@ -368,6 +370,9 @@ export function ObjectTimeline({
 	onEntryDateChange,
 }: ObjectTimelineProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
+	const groupField = fields.find((field) => field.name === configuredGroupField)?.enum_multiple
+		? undefined
+		: configuredGroupField;
 
 	const items = useMemo(
 		() => parseItems(entries, fields, startDateField, endDateField, groupField),
