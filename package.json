@@ -53,7 +53,7 @@
     "github:sync-secrets": "bash scripts/with-root-env.sh bash scripts/sync-github-secrets.sh",
     "lint": "oxlint --type-aware",
     "loops:monitor:setup": "node scripts/rebattery/setup-loop-monitor.mjs",
-    "loops:monitor:sync": "bun apps/web/scripts/sync-loop-monitor.ts",
+    "loops:history:import": "bun apps/web/scripts/import-loop-history.ts",
     "prepack": "pnpm build:seed-duckdb && pnpm build:plugin-env && pnpm build:dench-plugins && pnpm build && pnpm web:build && pnpm web:prepack",
     "projects:mvp": "node scripts/rebattery/run-projects-mvp-fixture.mjs",
     "start": "node denchclaw.mjs",

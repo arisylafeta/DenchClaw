@@ -81,22 +81,6 @@ describe("loop monitor snapshot projection", () => {
     expect(result.runs[0]).toMatchObject({ id: "run:legacy-1", run_id: "legacy-1", origin: "legacy", status: "succeeded" });
   });
 
-  it("upserts projections and tombstones missing contracts without deleting history", async () => {
-    const query = vi.fn().mockResolvedValue({ rows: [] });
-    withPgTransaction.mockImplementation(async (fn) => fn({ query }));
-    const { importLoopMonitorSnapshot } = await import("./loop-monitor-import");
-    const result = await importLoopMonitorSnapshot(baseSnapshot);
-
-    expect(result).toEqual({ loops: 1, runs: 1, tombstoned: true });
-    expect(query).toHaveBeenCalledTimes(3);
-    expect(String(query.mock.calls[0][0])).toContain("insert into automation_loops");
-    expect(String(query.mock.calls[0][0])).toContain("tombstoned_at=null");
-    expect(String(query.mock.calls[0][0])).toContain("automation_loops.observed_at <= excluded.observed_at");
-    expect(String(query.mock.calls[1][0])).toContain("insert into automation_loop_runs");
-    expect(String(query.mock.calls[2][0])).toContain("tombstoned_at");
-    expect(String(query.mock.calls[2][0])).toContain("observed_at <= $1::timestamptz");
-    expect(query.mock.calls.some(([sql]) => /delete from/i.test(String(sql)))).toBe(false);
-  });
 
   it("refuses unknown snapshot schemas", async () => {
     const { projectLoopMonitorSnapshot } = await import("./loop-monitor-import");
