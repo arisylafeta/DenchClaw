@@ -128,7 +128,7 @@ describe.skipIf(!TEST_URL)("computed CRM discovery purpose", () => {
     const companies = await read("company", "Buyers");
     expect(companies.entries.map((row) => row.entry_id).sort()).toEqual(buyers);
     expect(companies.totalCount).toBe(buyers.length);
-    expect(companies.fields.find((field) => field.name === "Purpose")).toMatchObject({ enum_multiple: true, read_only: true });
+    expect(companies.fields.find((field) => field.name === "Purpose")).toMatchObject({ enum_multiple: true, read_only: false });
     for (const entry of companies.entries) expect(entry.Purpose).toContain("Buyer");
     const people = await read("people", "Buyers");
     expect(people.entries.map((row) => row.entry_id).sort()).toEqual(buyerPeople);
@@ -216,6 +216,31 @@ describe.skipIf(!TEST_URL)("computed CRM discovery purpose", () => {
     expect(final.savedViews).toEqual(refined);
     expect(final.activeView).toBe("Dismantlers");
     expect(final.viewSettings).toEqual({ column_widths: { Purpose: 240 } });
+  });
+
+  it("uses the stored company purpose where set and the computed rules only where it is empty", async () => {
+    const field = (await read("company")).fields.find((f) => f.name === "Purpose");
+    expect(field).toMatchObject({ read_only: false, enum_values: expect.arrayContaining(["Supplier", "Recycler"]) });
+    const baseline = (await read("company", "Buyers")).entries.map((row) => String(row.entry_id));
+    await pg.queryPg("update crm_companies set purpose = array['Supplier'] where id = 'platform'");
+    await pg.queryPg("update crm_companies set purpose = array['Buyer', 'Recycler'] where id = 'irrelevant'");
+    await pg.queryPg("update crm_companies set purpose = array['Dismantler'] where id = 'internal_company'");
+    try {
+      const companies = await read("company");
+      const purpose = (id: string) => companies.entries.find((row) => row.entry_id === id)?.Purpose;
+      expect(purpose("platform")).toEqual(["Supplier"]);
+      expect(purpose("irrelevant")).toEqual(["Buyer", "Recycler"]);
+      expect(purpose("old_prospect")).toEqual(["Buyer"]);
+      expect(purpose("internal_company")).toEqual([]);
+      const buyerIds = (await read("company", "Buyers")).entries.map((row) => row.entry_id).sort();
+      expect(buyerIds).toEqual([...baseline.filter((id) => id !== "platform"), "irrelevant"].sort());
+      const people = await read("people", "Buyers");
+      expect(people.entries.find((row) => row.entry_id === "irrelevant_person")?.Purpose).toEqual(["Buyer"]);
+      const filters: FilterGroup = { id: "s", conjunction: "and", rules: [{ id: "p", field: "Purpose", operator: "is_any_of", value: ["Supplier"] }] };
+      expect((await read("company", undefined, { filters: JSON.stringify(filters) })).entries.map((row) => row.entry_id)).toEqual(["platform"]);
+    } finally {
+      await pg.queryPg("update crm_companies set purpose = null where id in ('platform', 'irrelevant', 'internal_company')");
+    }
   });
 
   it("recognizes outreach and compound purpose tags without matching negated labels", async () => {

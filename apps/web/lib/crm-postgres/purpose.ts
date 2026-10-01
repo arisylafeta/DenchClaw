@@ -6,15 +6,21 @@ export function purposeEntity(objectName: string): PurposeEntity | null {
   return objectName === "people" ? "people" : null;
 }
 
+// What a company is to us. Stored in crm_companies.purpose (editable, filled by the CRM clean-up); where it is empty
+// the computed Buyer/Dismantler rules below still apply, so a company no tool has classified yet is not lost.
+export const COMPANY_PURPOSES = ["Buyer", "Supplier", "Dismantler", "Recycler", "Partner", "Investor", "Service provider"];
+
 export function purposeField(entity: PurposeEntity) {
   return {
     id: `virtual_${entity}_purpose`,
     name: "Purpose",
     type: "enum",
-    enum_values: ["Buyer", "Dismantler"],
+    enum_values: entity === "company" ? COMPANY_PURPOSES : ["Buyer", "Dismantler"],
     enum_multiple: true,
-    read_only: true,
-    description: "Computed discovery purpose, not email sending eligibility.",
+    read_only: entity !== "company",
+    description: entity === "company"
+      ? "What the company is to us. Set by hand or by the CRM clean-up; where empty, worked out from tags and buyer fields."
+      : "Computed discovery purpose, not email sending eligibility.",
     sort_order: 0,
   };
 }
@@ -43,8 +49,12 @@ function rolesMatch(alias: string, purpose: "buyer" | "dismantler"): string {
   ))`;
 }
 
+function storedPurpose(alias: string): string {
+  return `nullif(${alias}.purpose, '{}'::text[])`;
+}
+
 function companyBuyer(alias: string): string {
-  return `(not ${internal(alias)} and (
+  return `(not ${internal(alias)} and case when ${storedPurpose(alias)} is not null then 'Buyer' = any(${alias}.purpose) else (
     ${rolesMatch(alias, "buyer")}
     or ${normalized(`${alias}.buyer_category`)} ~ '^(buyer|potential-buyer|buyer-prospect|repurposer|recycler|trader|battery-repurposer-second-life)$'
     or ${normalized(`${alias}.buyer_stage`)} in ('identified', 'contacted', 'responded', 'in-conversation', 'qualified', 'bidding', 'customer')
@@ -54,16 +64,16 @@ function companyBuyer(alias: string): string {
       where purpose_contact.company_id = ${alias}.id
         and not ${internal("purpose_contact")}
         and ${buyerTags("purpose_contact")})
-  ))`;
+  ) end)`;
 }
 
 function companyDismantler(alias: string): string {
-  return `(not ${internal(alias)} and (
+  return `(not ${internal(alias)} and case when ${storedPurpose(alias)} is not null then 'Dismantler' = any(${alias}.purpose) else (
     exists (select 1 from crm_dismantlers purpose_dismantler where purpose_dismantler.company_id = ${alias}.id)
     or ${tagsMatch(alias, "^(dismantler(-.*)?|auto-dismantler|ev-dismantler-reseller)$")}
     or ${rolesMatch(alias, "dismantler")}
     or ${normalized(`${alias}.buyer_category`)} = 'dismantler'
-  ))`;
+  ) end)`;
 }
 
 // Only callers' trusted aliases are accepted; field/filter values never become SQL.
@@ -88,7 +98,8 @@ export function purposeFieldExpression(fieldId: string, alias: string): string |
     buyer = companyBuyer(alias);
     dismantler = companyDismantler(alias);
   }
-  return `(case when ${excluded} then '{}'::text[] else array_remove(array[
+  const stored = entity === "company" ? `when ${storedPurpose(alias)} is not null then ${alias}.purpose ` : "";
+  return `(case when ${excluded} then '{}'::text[] ${stored}else array_remove(array[
     case when ${buyer} then 'Buyer'::text end,
     case when ${dismantler} then 'Dismantler'::text end
   ], null) end)`;

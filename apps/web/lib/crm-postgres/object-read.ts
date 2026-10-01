@@ -341,7 +341,7 @@ function buildSearchCondition(
   params.push(`%${trimmed}%`);
   const placeholder = `$${params.length}`;
   const textFields = fields.filter(
-    (field) => textLikeTypes.has(field.type) || (field.read_only && field.name === "Purpose"),
+    (field) => textLikeTypes.has(field.type) || (field.name === "Purpose" && field.id.startsWith("virtual_")),
   );
   const parts = textFields.flatMap((field) => {
     const expression = appendFieldExpression(field, tableAlias, existingColumns);
