@@ -1,6 +1,7 @@
 export function contentUsesFullView(path: string | null | undefined): boolean {
   return path === "project"
     || path === "work_task"
+    || path === "campaign"
     || path === "~platform-admin/listings"
     || path === "~platform-admin/stock"
     || path === "~platform-admin/payout-reviews"

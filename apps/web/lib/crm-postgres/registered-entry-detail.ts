@@ -54,21 +54,8 @@ export type BulkTradeOpportunityEvidence = {
   updated_at?: string | Date | null;
 };
 
-export type CampaignRecipient = {
-  person_id: string;
-  person_name: string | null;
-  recipient_email: string;
-  state: string;
-  provider_message_id: string | null;
-  accepted_at: string | Date | null;
-  delivered_at: string | Date | null;
-  bounced_at: string | Date | null;
-  provider_opened_at: string | Date | null;
-  provider_link_clicked_at: string | Date | null;
-  clicked_ctas?: Array<{ cta_key: string; destination_url: string; first_clicked_at: string | Date | null }>;
-};
 
-export type BulkTradeEntryDetail = {
+export type RegisteredEntryDetail = {
   kind: "bulk_trade";
   parties: BulkTradeParty[];
   whatsappMessages: BulkTradeWhatsAppEvidence[];
@@ -76,10 +63,6 @@ export type BulkTradeEntryDetail = {
   opportunities: BulkTradeOpportunityEvidence[];
 };
 
-export type RegisteredEntryDetail = BulkTradeEntryDetail | {
-  kind: "campaign";
-  recipients: CampaignRecipient[];
-};
 
 type DetailReader = (entryId: string, userId: string) => Promise<RegisteredEntryDetail>;
 
@@ -150,58 +133,9 @@ async function readBulkTradeDetail(entryId: string, userId: string): Promise<Reg
   return { kind: "bulk_trade", parties, whatsappMessages, gmailThreads, opportunities };
 }
 
-async function readCampaignDetail(entryId: string): Promise<RegisteredEntryDetail> {
-  const [ledger] = await queryPg<{ available: boolean }>(
-    "select to_regclass('crm_campaign_sends') is not null as available",
-  );
-  if (!ledger?.available) return { kind: "campaign", recipients: [] };
-  const [links] = await queryPg<{ available: boolean }>(
-    "select to_regclass('crm_campaign_send_links') is not null as available",
-  );
-  const recipients = await queryPg<CampaignRecipient>(
-    `select s.person_id, p.full_name as person_name, s.recipient_email, s.state,
-            s.provider_message_id, s.accepted_at, s.delivered_at, s.bounced_at,
-            s.provider_opened_at, s.provider_link_clicked_at
-       from crm_campaign_sends s
-       join crm_people p on p.id = s.person_id
-      where s.campaign_id = $1
-      order by s.recipient_email, s.person_id`,
-    [entryId],
-  );
-  if (links?.available) {
-    const clicks = await queryPg<{ send_id: string; cta_key: string; destination_url: string; first_clicked_at: string | Date | null }>(
-      `select l.send_id, l.cta_key, l.destination_url, l.first_clicked_at
-         from crm_campaign_send_links l
-         join crm_campaign_sends s on s.id = l.send_id
-        where s.campaign_id = $1 and l.first_clicked_at is not null`,
-      [entryId],
-    );
-    const personBySend = new Map(
-      (await queryPg<{ id: string; person_id: string }>(
-        "select id, person_id from crm_campaign_sends where campaign_id = $1",
-        [entryId],
-      )).map((row) => [row.id, row.person_id]),
-    );
-    const byPerson = new Map<string, CampaignRecipient["clicked_ctas"]>();
-    for (const row of clicks) {
-      const personId = personBySend.get(row.send_id);
-      if (!personId) continue;
-      const list = byPerson.get(personId) ?? [];
-      list.push({ cta_key: row.cta_key, destination_url: row.destination_url, first_clicked_at: row.first_clicked_at });
-      byPerson.set(personId, list);
-    }
-    for (const recipient of recipients) {
-      const list = byPerson.get(recipient.person_id);
-      if (list) recipient.clicked_ctas = list;
-    }
-  }
-  return { kind: "campaign", recipients };
-}
 
 const detailReaders: Record<string, DetailReader> = {
   bulk_trade: readBulkTradeDetail,
-  campaign: readCampaignDetail,
-  campaigns: readCampaignDetail,
 };
 
 export async function getRegisteredEntryDetail(
