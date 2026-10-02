@@ -497,6 +497,28 @@ class DemandRun(unittest.TestCase):
         self.assertEqual(sub["status"], "Opted out")
         self.assertNotIn("Supply Update", tags)
 
+    def test_an_unknown_buyer_or_seller_becomes_a_classified_lead(self):
+        buyer_src = {**SOURCE, "id": "l1", "from": "ola@newbuyer.example",
+                     "text": "Subject: packs\nFrom: ola@newbuyer.example\n\nWe are looking for 20 Nissan Leaf packs."}
+        demand = {"kind": "possible_demand", "target": None, "quote": "We are looking for 20 Nissan Leaf packs.",
+                  "source": buyer_src, "summary": "New Buyer AS wants: Nissan Leaf packs",
+                  "proposed": {"buyer": "New Buyer AS", "contact": "Ola Nordmann", "email": "ola@newbuyer.example",
+                               "wants": "Nissan Leaf packs", "kind": "request"}}
+        report = {"applied": [], "cards": [], "warnings": []}
+        with self.conn, self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            check.settle_all(cur, None, None, [demand], None, {"warnings": report["warnings"]}, report, False)
+            seller = check.ensure_lead(cur, "sales@newseller.example", None, None, "Supplier", "Inbox check 2026-10-02: offered 500 packs")
+            cur.execute("""select c.name, c.domain, c.purpose, c.relationship_stage, c.source, p.full_name, c.buyer_main_contact_id = p.id as main
+                           from crm_people p join crm_companies c on c.id = p.company_id
+                           where p.email in ('ola@newbuyer.example', 'sales@newseller.example') order by p.email""")
+            rows = cur.fetchall()
+            cur.execute("select company_id is not null as linked from crm_bulk_trade_demand where email = 'ola@newbuyer.example'")
+            linked = cur.fetchone()["linked"]
+        self.assertTrue(linked)
+        self.assertEqual([(r["name"], r["purpose"], r["relationship_stage"], r["source"], r["main"]) for r in rows],
+                         [("New Buyer AS", ["Buyer"], "Engaged", "Inbound", True), ("Newseller", ["Supplier"], "Engaged", "Inbound", True)])
+        self.assertIsNotNone(seller[1])
+
     def test_auto_replies_do_not_count_as_a_reply(self):
         away = {**SOURCE, "id": "r3", "from": "away@ooo.example", "title": "Automatic reply: packs",
                 "text": "Subject: Automatic reply: packs\nFrom: away@ooo.example\n\nI am out of the office."}
@@ -670,14 +692,19 @@ class DemandRun(unittest.TestCase):
                              ('co_sum_full', 'Full New Co', '{Buyer}', 'Inbound', 'Germany')
                            on conflict do nothing;
                            insert into crm_companies (id, name, tags) values ('co_sum_auto', 'Auto.com', '{auto-created}')
-                           on conflict do nothing""")
+                           on conflict do nothing;
+                           insert into crm_companies (id, name, source, source_detail) values
+                             ('co_sum_lead', 'Lead Co', 'Inbound', 'Inbox check 2026-10-02: wants packs') on conflict do nothing""")
+        with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            names = check.unclassified_companies(cur)
+        self.assertIn("Bare New Co", names)
+        self.assertNotIn("Full New Co", names)
+        self.assertNotIn("Auto.com", names)
+        self.assertNotIn("Lead Co", names)  # listed under "New leads from email" instead
         out = io.StringIO()
         with redirect_stdout(out):
             check.summary(self.conn)
-        line = next(l for l in out.getvalue().splitlines() if l.startswith("New in the CRM"))
-        self.assertIn("Bare New Co", line)
-        self.assertNotIn("Full New Co", line)
-        self.assertNotIn("Auto.com", line)
+        self.assertIn("- Lead Co: wants packs", out.getvalue().split("New leads from email:", 1)[1])
 
     def test_matching_sees_the_note(self):
         with self.conn, self.conn.cursor() as cur:

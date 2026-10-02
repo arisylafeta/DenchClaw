@@ -32,7 +32,8 @@ Sources:
    outreach saying what they buy, are added as buy-boxes (quoting the source) and close that
    company's research estimates. A reply from someone we emailed moves their company to Engaged;
    "remove me" or "not interested" takes them off the supply update ("not interested" also marks the
-   company Excluded). After each run, live trades whose facts or the open demand changed are matched
+   company Excluded). Someone unknown who asks to buy or offers stock becomes a lead: a company with
+   Purpose Buyer or Supplier, Stage Engaged, Source Inbound, and the person as its contact. After each run, live trades whose facts or the open demand changed are matched
    against open demand (one model call per changed trade) for their Suggested buyers.
 Every run is recorded in crm_bulk_trade_check_runs, including failures.
 """
@@ -851,12 +852,61 @@ def crm_contact(cur, email):
     return (row["id"], row["company_id"]) if row else (None, None)
 
 
+FREEMAIL = {"gmail", "googlemail", "yahoo", "outlook", "hotmail", "icloud", "proton", "protonmail", "aol", "live", "msn",
+            "me", "gmx", "yandex", "zoho", "mail", "btinternet", "wp", "o2", "interia", "onet", "ukr", "i", "seznam", "web",
+            "t-online"}
+
+
+def ensure_lead(cur, email, contact, company_name, purpose, detail):
+    """(person id, company id) for someone who wrote to us as a buyer or a supplier. A person or company the CRM
+    already has is reused (and gets the purpose if it lacks it); otherwise a lead is created: the company with that
+    Purpose, Stage Engaged (they wrote to us), Source Inbound, and the person as its contact."""
+    email = (email or "").strip().lower()
+    if not email or email.endswith("@" + OWN_DOMAIN):
+        return None, None
+    person_id, company_id = crm_contact(cur, email)
+    domain = email.split("@", 1)[1]
+    business = domain.split(".", 1)[0] not in FREEMAIL
+    if not company_id and business:
+        cur.execute("select id from crm_companies where lower(domain) = %s order by created_at limit 1", (domain,))
+        row = cur.fetchone()
+        company_id = row["id"] if row else None
+    if not company_id:
+        company_id = "lead_" + str(uuid.uuid4())
+        name = company_name or contact or (domain.split(".", 1)[0].capitalize() if business else email)
+        cur.execute(
+            """insert into crm_companies (id, name, domain, website, purpose, relationship_stage, buyer_stage, source,
+                 source_detail, buyer_main_contact_id)
+               values (%s, %s, %s, %s, %s, 'Engaged', %s, 'Inbound', %s, null)""",
+            (company_id, name[:120], domain if business else None, f"https://{domain}" if business else None, [purpose],
+             "Responded" if purpose == "Buyer" else None, detail[:300]))
+    else:
+        cur.execute("""update crm_companies set updated_at = now(),
+                         purpose = case when %s = any(coalesce(purpose, '{}')) then purpose
+                                        else array_append(coalesce(purpose, '{}'), %s) end,
+                         relationship_stage = case when coalesce(relationship_stage, 'New') in ('New', 'Contacted')
+                                                   then 'Engaged' else relationship_stage end
+                       where id = %s""", (purpose, purpose, company_id))
+    if not person_id:
+        person_id = "lead_person_" + str(uuid.uuid4())
+        parts = (contact or "").split(None, 1)
+        cur.execute(
+            """insert into crm_people (id, full_name, first_name, last_name, email, company_id, notes)
+               values (%s, %s, %s, %s, %s, %s, %s)""",
+            (person_id, contact or None, parts[0] if parts else None, parts[1] if len(parts) > 1 else None, email,
+             company_id, f"Added by the inbox check: {detail}"[:500]))
+        cur.execute("update crm_companies set buyer_main_contact_id = coalesce(buyer_main_contact_id, %s) where id = %s",
+                    (person_id, company_id))
+    return person_id, company_id
+
+
 def apply_demand(cur, lot_id, p, trade, ctx):
     """Adds what a buyer said they want as a buy-box (stated) or request, quoting the email. The same want already open
     for that buyer is only re-dated. A new real buy-box closes the company's open estimated (research) buy-boxes."""
     d, source = p["proposed"], p["source"]
-    person_id, company_id = crm_contact(cur, d.get("email"))
     on = source_date(p)
+    person_id, company_id = ensure_lead(cur, d.get("email"), d.get("contact"), d.get("buyer"), "Buyer",
+                                        f"Inbox check {on}: wants {d['wants']}")
     cur.execute(
         """select id from crm_bulk_trade_demand where status = 'open' and coalesce(basis, '') <> 'estimated'
              and lower(wants) = lower(%s)
@@ -1520,6 +1570,11 @@ def run(conn, args):
 
             for lot_id, items in findings.items():
                 settle_all(cur, run_id, lot_id, items, trades.get(lot_id), ctx, report, args.dry_run)
+            if not args.dry_run:  # someone offering stock we did not know: a supplier lead, next to the card
+                for item in findings.get(None, []):
+                    if item["kind"] == "possible_trade" and item["proposed"].get("email"):
+                        ensure_lead(cur, item["proposed"]["email"], None, None, "Supplier",
+                                    f"Inbox check {source_date(item)}: offered {item['proposed']['title']}")
 
             if not args.dry_run:
                 latest = lambda items, fallback: max([s["synced_at"] for s in items if s["synced_at"]] + [fallback])
@@ -1701,6 +1756,18 @@ def history(conn, args):
     return 0
 
 
+def unclassified_companies(cur):
+    """Companies created in the last day without a Purpose, Source or Country. Mailbox-sync companies are left out,
+    and so are the inbox check's own leads, which the summary lists separately."""
+    cur.execute(
+        """select name from crm_companies
+           where created_at > now() - interval '24 hours' and not (coalesce(tags, '{}') @> array['auto-created'])
+             and coalesce(source_detail, '') not like 'Inbox check %%'
+             and (coalesce(cardinality(purpose), 0) = 0 or source is null or coalesce(country, '') = '')
+           order by created_at""")
+    return [r["name"] for r in cur.fetchall()]
+
+
 def summary(conn):
     """The 08:00 list: buyers waiting on a reply, requests due within a week with no offer, overdue and due-today
     next steps, new auction offers, auctions closing soon, new demand matches (buyers to offer, and how many new buyers
@@ -1766,13 +1833,7 @@ def summary(conn):
                  and (d.confirmed_on is null or d.confirmed_on < %s)
                order by d.basis = 'agreed' desc, d.confirmed_on nulls first, d.buyer""", (today - dt.timedelta(days=STALE_DAYS),))
         reconfirm = cur.fetchall()
-        # New companies missing what the CRM is filtered by (mailbox-sync contacts are left out).
-        cur.execute(
-            """select name from crm_companies
-               where created_at > now() - interval '24 hours' and not (coalesce(tags, '{}') @> array['auto-created'])
-                 and (coalesce(cardinality(purpose), 0) = 0 or source is null or coalesce(country, '') = '')
-               order by created_at""")
-        unclassified = [r["name"] for r in cur.fetchall()]
+        unclassified = unclassified_companies(cur)
         # What the inbox check did on its own from email since yesterday: buy-boxes added, and replies saying no.
         cur.execute(
             """select summary from crm_bulk_trade_proposals
@@ -1785,6 +1846,10 @@ def summary(conn):
                where s.status = 'Opted out' and s.how like 'Replied %%' and s.updated_at > now() - interval '24 hours'
                order by s.updated_at""")
         declined = [r["who"] for r in cur.fetchall()]
+        cur.execute(
+            """select name, source_detail from crm_companies
+               where source_detail like 'Inbox check %%' and created_at > now() - interval '24 hours' order by created_at""")
+        leads = cur.fetchall()
     lines = [f"Bulk Trades, {today:%a %d %b}"]
     if waiting:
         lines.append("Buyers waiting on you:")
@@ -1822,6 +1887,9 @@ def summary(conn):
         names = ", ".join(f"{r['buyer']}{' (agreed)' if r['basis'] == 'agreed' else ''}" for r in reconfirm[:8])
         more = f" and {len(reconfirm) - 8} more" if len(reconfirm) > 8 else ""
         lines.append(f"Buy-boxes to reconfirm: {names}{more}.")
+    if leads:
+        lines.append("New leads from email:")
+        lines += [f"- {r['name']}: {r['source_detail'].split(': ', 1)[-1]}" for r in leads[:8]]
     if added:
         lines.append("Buy-boxes added from email:")
         lines += [f"- {line}" for line in added[:8]]

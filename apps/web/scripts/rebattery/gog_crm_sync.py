@@ -4,8 +4,15 @@ Gog CRM Email Sync
 
 Syncs emails from both Gmail accounts (ari + alex) into Postgres CRM.
 Only imports emails where:
-  1. The email has 'CRM' label in Gmail, OR
-  2. At least one counterparty (from/to/cc, excluding account owner) is in CRM people
+  1. The email has the 'CRM' label in Gmail, OR
+  2. The inbox triage labelled it 'Deal' or 'Inbound', OR
+  3. At least one counterparty (from/to/cc, excluding account owner) is in CRM people
+
+Only creates a person (Alex, 2 Oct 2026: "auto-adding everyone from my Gmail is not helpful"):
+  * at a company already in the CRM, matched by their email domain; or
+  * on a thread Alex labelled 'CRM' (his way to add anyone), with a company from their domain.
+Other addresses (cc'd colleagues, unknown senders on Deal threads) are not created; the message is still
+stored with its sender's address, so the Bulk Trades inbox check can read it and create real leads.
 
 Writes directly to Postgres crm_* tables.
 
@@ -132,6 +139,19 @@ def get_crm_people(conn):
         return {row[1]: row[0] for row in cur.fetchall() if row[1]}
 
 
+def get_company_domains(conn):
+    """{domain: company id} for company domains that belong to exactly one CRM company."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT lower(domain), min(id) FROM crm_companies
+            WHERE coalesce(domain, '') <> ''
+            GROUP BY lower(domain) HAVING count(*) = 1
+            """
+        )
+        return {row[0]: row[1] for row in cur.fetchall() if not is_common_email_provider(row[0])}
+
+
 def get_person_company_map(conn):
     """Load {person_id: company_id} for all people with companies."""
     with conn.cursor() as cur:
@@ -172,15 +192,17 @@ def get_owner_emails():
 
 
 COMMON_EMAIL_PROVIDERS = {
-    "gmail", "yahoo", "outlook", "hotmail", "icloud", "proton", "aol", "live", "msn"
+    "gmail", "googlemail", "yahoo", "outlook", "hotmail", "icloud", "proton", "protonmail", "aol", "live", "msn", "me",
+    "gmx", "yandex", "zoho", "mail", "btinternet", "wp", "o2", "interia", "onet", "ukr", "i", "seznam", "web", "t-online",
 }
 
 
 def is_common_email_provider(domain):
-    """Return True if domain is a public/common email provider."""
+    """Return True if domain is a public/common email provider (gmail.com, yahoo.co.uk, wp.pl, ...).
+    Matches on the name before the first dot, so every country variant counts."""
     if not domain:
         return True
-    return domain.lower() in COMMON_EMAIL_PROVIDERS
+    return domain.lower().split(".", 1)[0] in COMMON_EMAIL_PROVIDERS
 
 
 def upsert_company_by_domain(cur, domain):
@@ -217,15 +239,15 @@ def upsert_company_by_domain(cur, domain):
     company_id = "company_domain_" + hashlib.md5(str(domain).encode()).hexdigest()[:16]
     cur.execute(
         """
-        INSERT INTO crm_companies (id, name, domain, tags, source, source_detail)
-        VALUES (%s, %s, %s, ARRAY['auto-created'], 'Email mining', 'Gmail sync')
+        INSERT INTO crm_companies (id, name, domain, source, source_detail)
+        VALUES (%s, %s, %s, 'Email mining', 'Gmail: thread labelled CRM')
         """,
         (company_id, display_name, domain),
     )
     return company_id
 
 
-def upsert_person_by_email(cur, name, email, company_id):
+def upsert_person_by_email(cur, name, email, company_id, note=None):
     """
     Upsert a person by email. Returns person id.
     Uses SELECT-then-INSERT/UPDATE because the live DB does not have a
@@ -266,18 +288,20 @@ def upsert_person_by_email(cur, name, email, company_id):
     cur.execute(
         """
         INSERT INTO crm_people
-            (id, full_name, first_name, last_name, email, company_id, tags)
-        VALUES (%s, %s, %s, %s, %s, %s, ARRAY['auto-created'])
+            (id, full_name, first_name, last_name, email, company_id, notes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (person_id, full_name, first_name, last_name, email, company_id),
+        (person_id, full_name, first_name, last_name, email, company_id, note),
     )
     return person_id
 
 
-def ensure_person(cur, name, email, crm_people, owner_emails, person_company_map, stats):
+def ensure_person(cur, name, email, crm_people, owner_emails, person_company_map, stats,
+                  company_domains=None, labelled=False):
     """
-    Ensure a person exists in crm_people for the given email/name.
-    Auto-creates company and person if missing and not an owner email.
+    Ensure a person exists in crm_people for the given email/name, when there is a reason to:
+    their domain belongs to a company already in the CRM, or Alex labelled the thread 'CRM'
+    (then the company is created from the domain if needed). Otherwise nobody is created.
     Returns (person_id, created).
     """
     normalized = normalize_email(email)
@@ -291,9 +315,15 @@ def ensure_person(cur, name, email, crm_people, owner_emails, person_company_map
     domain = normalized.split("@", 1)[1]
     company_id = None
     if not is_common_email_provider(domain):
-        company_id = upsert_company_by_domain(cur, domain)
+        company_id = (company_domains or {}).get(domain)
+        if not company_id and labelled:
+            company_id = upsert_company_by_domain(cur, domain)
+    if not company_id and not labelled:
+        return None, False
+    note = ("Added from Gmail: thread labelled CRM" if labelled
+            else f"Added from Gmail: emails from {domain}, a company already in the CRM")
 
-    person_id = upsert_person_by_email(cur, name, normalized, company_id)
+    person_id = upsert_person_by_email(cur, name, normalized, company_id, note)
     crm_people[normalized] = person_id
     person_company_map[person_id] = company_id
     stats["auto_created"] += 1
@@ -367,20 +397,24 @@ def is_draft_message(raw_message):
     return any(str(label).upper() == "DRAFT" for label in labels)
 
 
-def search_label_crm(account, after_date=None):
-    """Search for non-draft messages with CRM label, optionally after a date."""
-    query = build_search_query("label:CRM", after_date)
+def search_label_crm(account, after_date=None, labels="label:CRM"):
+    """Search for non-draft messages with the given label(s), optionally after a date."""
+    query = build_search_query(labels, after_date)
     print(f"  [{account}] Searching {query}...")
     try:
         result = gog(account, "gmail", "messages", "search", query, "--max", "500")
         messages = (
             result if isinstance(result, list) else result.get("messages", [])
         )
-        print(f"    Found {len(messages)} messages with CRM label")
+        print(f"    Found {len(messages)} messages")
         return messages
     except Exception as e:
-        print(f"    Warning: CRM label search failed: {e}", file=sys.stderr)
+        print(f"    Warning: label search failed ({labels}): {e}", file=sys.stderr)
         return []
+
+
+# Labels the inbox triage puts on business threads. Their mail is imported even when nobody on it is in the CRM yet.
+TRIAGE_LABELS = "label:Deal OR label:Inbound"
 
 
 def search_by_crm_people(account, crm_emails, owner_emails, after_date=None):
@@ -726,6 +760,7 @@ def sync_account(
 ):
     """Sync one Gmail account. Returns stats dict."""
     owner_id = get_mailbox_owner_id(conn, account)
+    company_domains = get_company_domains(conn)
     account_key = account.lower()
     stats = {
         "found": 0,
@@ -749,14 +784,16 @@ def sync_account(
 
     # Search for messages
     crm_label_msgs = search_label_crm(account, after_date)
+    triage_msgs = search_label_crm(account, after_date, TRIAGE_LABELS)
     counterparty_msgs = search_by_crm_people(
         account, set(crm_people.keys()), owner_emails, after_date
     )
 
     # Deduplicate by message ID
     crm_label_ids = {msg.get("id") for msg in crm_label_msgs}
+    triage_ids = {msg.get("id") for msg in triage_msgs}
     all_msgs = {}
-    for msg in crm_label_msgs + counterparty_msgs:
+    for msg in crm_label_msgs + triage_msgs + counterparty_msgs:
         msg_id = msg.get("id")
         if msg_id and msg_id not in all_msgs:
             all_msgs[msg_id] = msg
@@ -844,8 +881,9 @@ def sync_account(
 
         # Check if should import
         has_crm_label = msg_id in crm_label_ids or "CRM" in label_ids
+        triaged = msg_id in triage_ids or bool({"Deal", "Inbound"} & set(label_ids))
         should, reason, matched_parties = check_should_import(
-            headers, crm_people, owner_emails, has_crm_label
+            headers, crm_people, owner_emails, has_crm_label or triaged
         )
 
         if not should:
@@ -886,7 +924,8 @@ def sync_account(
             # can link them naturally.
             for name, email in from_parties + to_parties + cc_parties:
                 ensure_person(
-                    cur, name, email, crm_people, owner_emails, person_company_map, stats
+                    cur, name, email, crm_people, owner_emails, person_company_map, stats,
+                    company_domains, labelled=has_crm_label,
                 )
 
             # Resolve from_person_id (now guaranteed to exist if not owner)
