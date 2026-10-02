@@ -143,3 +143,21 @@ longer reorders these columns by fill rate. Company ordering is unchanged.
 Tags uses the existing editable badge renderer; JSON editor values are decoded
 into PostgreSQL arrays on create/update. Saved filters, contact values,
 subscriptions and campaign history are unchanged.
+
+## Reviewed CSV outreach audience
+
+Migration `033_intro_audience_20261002.sql` adds the temporary People checkbox
+`Intro audience 2 Oct`, backed by `crm_people.intro_audience_20261002`. Its default
+is false. Populate it only through an approved record-ID selection from the
+reviewed CSV; email addresses do not uniquely identify CRM contacts.
+
+The shared `Buyer Outreach - 2 Oct 2026` saved table view filters this checkbox.
+Its membership is the 484 reviewed CSV person IDs, not all Buyers or all contacts
+with matching email addresses. The checkbox is hidden in this view; the normal
+contact columns remain available. Other saved-view definitions and settings are
+preserved. The short checkbox filter avoids sending the recipient list in a URL.
+
+This cohort is not a subscription, contact Stage, qualification or send approval.
+Creating it does not change Tags, opt-outs, company classifications, subscriptions
+or campaign ledgers. Personalization columns and AI enrichment require their
+separate agreed field plan.
