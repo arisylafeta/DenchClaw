@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
 import { BuyerTab, type BuyerData } from "./company-buyer-tab";
@@ -684,13 +685,13 @@ function OpportunitiesTab({ data }: { data: CompanyResponse }) {
             <tbody>
               {filteredOpportunities.map((opportunity) => (
                 <tr key={opportunity.id} className="hover:bg-[var(--color-surface-hover)]" style={{ borderBottom: "1px solid var(--color-border)" }}>
-                  <td className={`${tableStyles.cell} capitalize`}>{opportunity.opportunity_type}</td>
-                  <td className={tableStyles.cell} style={{ color: "var(--color-text)" }}>{opportunity.title}</td>
-                  <td className={tableStyles.cell} style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</td>
-                  <td className={tableStyles.cell}>{opportunity.quantity ?? "—"}</td>
-                  <td className={tableStyles.cell}>{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</td>
-                  <td className={`${tableStyles.cell} capitalize`}>{opportunity.urgency}</td>
-                  <td className={tableStyles.cell}>{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</td>
+                  <TableCell className={`${tableStyles.cell} capitalize`}>{opportunity.opportunity_type}</TableCell>
+                  <TableCell className={tableStyles.cell} style={{ color: "var(--color-text)" }}>{opportunity.title}</TableCell>
+                  <TableCell className={tableStyles.cell} style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</TableCell>
+                  <TableCell className={tableStyles.cell}>{opportunity.quantity ?? "—"}</TableCell>
+                  <TableCell className={tableStyles.cell}>{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</TableCell>
+                  <TableCell className={`${tableStyles.cell} capitalize`}>{opportunity.urgency}</TableCell>
+                  <TableCell className={tableStyles.cell}>{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</TableCell>
                 </tr>
               ))}
             </tbody>

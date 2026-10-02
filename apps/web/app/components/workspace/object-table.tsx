@@ -20,6 +20,7 @@ import { LinkOpenButton } from "./link-open-button";
 import { LinkPreviewWrapper } from "./workspace-link";
 import { RelationLink } from "./relation-link";
 import tableStyles from "../ui/data-table.module.css";
+import { useTableCellExpanded } from "../ui/table-cell";
 import type { TableCellSelectionState, TableSelectionContext } from "@/lib/table-selection";
 
 /* ─── Types ─── */
@@ -334,12 +335,13 @@ function TagChip({ tag }: { tag: string }) {
 }
 
 function TagsCell({ value }: { value: unknown }) {
+	const expanded = useTableCellExpanded();
 	const tags = parseTagsValue(value);
 	if (tags.length === 0) {return <span style={{ color: "var(--color-text-muted)", opacity: 0.5 }}>--</span>;}
 	return (
-		<span className="flex items-center gap-1 flex-wrap">
-			{tags.slice(0, 5).map((tag) => <TagChip key={tag} tag={tag} />)}
-			{tags.length > 5 && <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>+{tags.length - 5}</span>}
+		<span className="flex items-center gap-1 flex-wrap" data-table-cell-overflow={!expanded && tags.length > 5 ? "true" : undefined}>
+			{(expanded ? tags : tags.slice(0, 5)).map((tag) => <TagChip key={tag} tag={tag} />)}
+			{!expanded && tags.length > 5 && <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>+{tags.length - 5}</span>}
 		</span>
 	);
 }
@@ -427,11 +429,12 @@ function ReverseRelationCell({ links, sourceObjectName, sourceObjectId, onNaviga
 		relatedObjectId?: string,
 	) => void;
 }) {
+	const expanded = useTableCellExpanded();
 	if (!links || links.length === 0) {return <span style={{ color: "var(--color-text-muted)", opacity: 0.5 }}>--</span>;}
-	const display = links.slice(0, 5);
+	const display = expanded ? links : links.slice(0, 5);
 	const overflow = links.length - display.length;
 	return (
-		<span className="flex items-center gap-1 flex-wrap">
+		<span className="flex items-center gap-1 flex-wrap" data-table-cell-overflow={overflow > 0 ? "true" : undefined}>
 			{display.map((link) => (
 				<span
 					key={link.id}

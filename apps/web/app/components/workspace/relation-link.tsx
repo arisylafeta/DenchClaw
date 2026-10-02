@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTableCellExpanded } from "../ui/table-cell";
 
 /**
  * Elegant icon + name link for a related entry. Replaces the legacy
@@ -41,6 +42,7 @@ export function RelationLink({
 	 * cell-level horizontal overflow doesn't blow out the column. */
 	maxLabelWidth?: number;
 }) {
+	const expanded = useTableCellExpanded();
 	const isClickable = !!onClick;
 	const Tag = isClickable ? "button" : "span";
 
@@ -67,7 +69,7 @@ export function RelationLink({
 			<RelationIcon faviconUrl={faviconUrl} label={label} />
 			<span
 				className="truncate"
-				style={{ maxWidth: maxLabelWidth }}
+				style={{ maxWidth: expanded ? undefined : maxLabelWidth }}
 			>
 				{label}
 			</span>

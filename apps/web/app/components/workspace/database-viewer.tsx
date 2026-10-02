@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { useEffect, useState, useCallback, useMemo } from "react";
 
 // --- Types ---
@@ -971,24 +972,14 @@ function DataTable({
             }}
           >
             {/* Row number */}
-            <td
-              className={`${tableStyles.cell} text-right tabular-nums`}
-              style={{
-                color: "var(--color-text-muted)",
-                borderColor: "var(--color-border)",
-                opacity: 0.4,
-              }}
-            >
-              {idx + 1}
-            </td>
+            <TableCell className={`${tableStyles.cell} text-right tabular-nums`} style={{
+              color: "var(--color-text-muted)",
+              borderColor: "var(--color-border)",
+              opacity: 0.4,
+            }}>{idx + 1}</TableCell>
             {columns.map((col) => (
-              <td
-                key={col}
-                className={`${tableStyles.cell} whitespace-nowrap`}
-                style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
-              >
-                <CellContent value={row[col]} />
-              </td>
+              <TableCell key={col} className={tableStyles.cell}
+              style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}><CellContent value={row[col]} /></TableCell>
             ))}
           </tr>
         ))}
@@ -1022,15 +1013,5 @@ function CellContent({ value }: { value: unknown }) {
 
   const str = safeString(value);
 
-  // Truncate very long values
-  if (str.length > 120) {
-    return (
-      <span title={str} className="cursor-help">
-        {str.slice(0, 120)}
-        <span style={{ color: "var(--color-text-muted)" }}>...</span>
-      </span>
-    );
-  }
-
-  return <span>{str}</span>;
+  return <span title={str}>{str}</span>;
 }

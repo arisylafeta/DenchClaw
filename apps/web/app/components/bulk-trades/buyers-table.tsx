@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { BulkTrade } from "@/lib/bulk-trades";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 import {
   BUYER_STATUSES,
   BUYER_SUBJECT,
@@ -120,6 +121,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
           </div>
           {buyers.map((buyer) => (
             <div key={buyer.id} data-table-part="grid-row" className={`group grid ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-xs hover:bg-[var(--bt-row-hover)]`} style={{ borderColor: "var(--bt-divider)" }}>
+              <TableCellContent>
               <input
                 type="checkbox"
                 aria-label={`Select ${buyer.name}`}
@@ -127,13 +129,17 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 onChange={() => toggle(buyer.id)}
                 className="h-[18px] w-[18px] accent-[var(--bt-text)]"
               />
+              </TableCellContent>
+              <TableCellContent>
               <button type="button" className="min-w-0 text-left" onClick={() => setEditing(buyer)}>
                 <div className="truncate font-semibold hover:underline">{buyer.name}</div>
                 {buyer.contact && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{buyer.contact}</div>}
                 <TrackingLine buyer={buyer} />
                 <AuctionLine buyer={buyer} />
               </button>
-              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span>
+              </TableCellContent>
+              <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span></TableCellContent>
+              <TableCellContent>
               <div className="flex flex-col items-start gap-1">
                 <select
                   aria-label={`Status for ${buyer.name}`}
@@ -150,17 +156,23 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                   </button>
                 )}
               </div>
+              </TableCellContent>
+              <TableCellContent>
               <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>
                 {buyer.last_touch_on
                   ? [buyer.last_touch_via, shortDate(buyer.last_touch_on)].filter(Boolean).join(" · ")
                   : ""}
               </span>
+              </TableCellContent>
+              <TableCellContent>
               <span
                 className="text-xs"
                 style={{ color: buyer.chase_on && buyer.chase_on <= today ? "var(--bt-red)" : "var(--bt-muted)" }}
               >
                 {buyer.chase_on ? shortDate(buyer.chase_on) : ""}
               </span>
+              </TableCellContent>
+              <TableCellContent>
               {buyer.latest_bid ? (
                 <button
                   type="button"
@@ -181,6 +193,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                   + Bid
                 </button>
               )}
+              </TableCellContent>
             </div>
           ))}
           {!buyers.length && (

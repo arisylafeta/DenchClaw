@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 import tableStyles from "@/app/components/ui/data-table.module.css"
+import { TableCell as SharedTableCell } from "@/app/components/ui/table-cell"
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
@@ -82,11 +83,10 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
 
 function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
-    <td
+    <SharedTableCell
       data-slot="table-cell"
       className={cn(
-        tableStyles.cell,
-        "align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}

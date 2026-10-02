@@ -45,6 +45,7 @@ import {
 import { cn } from "@/lib/utils";
 import { UrlFavicon } from "./url-favicon";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 import type { TableCellSelectionState, TableSelectionPoint } from "@/lib/table-selection";
 
 /* ─── Types ─── */
@@ -1245,7 +1246,7 @@ function TableRowInner({
 							}
 						}}
 					>
-						<div className="overflow-hidden">
+						<TableCellContent>
 							{cellFaviconUrl ? (
 								<div className="flex min-w-0 items-center gap-2">
 									<span className="pointer-events-none shrink-0">
@@ -1258,7 +1259,7 @@ function TableRowInner({
 							) : (
 								flexRender(cell.column.columnDef.cell, cell.getContext())
 							)}
-						</div>
+						</TableCellContent>
 						{isSticky && isScrolled && (
 							<div className="absolute top-0 right-0 bottom-0 w-4 translate-x-full pointer-events-none bg-linear-to-r from-black/4 to-transparent z-100" />
 						)}

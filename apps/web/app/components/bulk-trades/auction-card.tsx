@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { useState } from "react";
 import { auctionOfferLabel, shortDate, type AuctionActivity, type TradeAuction } from "@/lib/bulk-trade-details";
 import { Card, ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
@@ -100,23 +101,19 @@ export function AuctionCard({ tradeId, auction, today, onChanged }: Props) {
             <tbody>
               {people.map((person) => (
                 <tr key={person.email} className="border-t" style={{ borderColor: "var(--bt-divider)" }}>
-                  <td className={tableStyles.cell}>{person.email}</td>
-                  <td className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.invited_at)}</td>
-                  <td className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.clicked_at)}</td>
-                  <td className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>
-                    {person.view_count ? `${person.view_count}× · ${day(person.last_viewed_at)}` : ""}
-                  </td>
-                  <td className={`${tableStyles.cell} bt-mono`}>{person.last_offer ? auctionOfferLabel(person.last_offer) : person.message_count ? "Message" : ""}</td>
-                  <td className={`${tableStyles.cell} text-right`}>
-                    {person.buyer_id
-                      ? <span className="text-xs" style={{ color: "var(--bt-muted)" }}>On buyers</span>
-                      : (
-                        <button type="button" disabled={adding === person.email} onClick={() => addBuyer(person)}
-                          className={`${buttonClass} h-7 text-xs`} style={buttonStyle}>
-                          Add to buyers
-                        </button>
-                      )}
-                  </td>
+                  <TableCell className={tableStyles.cell} >{person.email}</TableCell>
+                  <TableCell className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.invited_at)}</TableCell>
+                  <TableCell className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.clicked_at)}</TableCell>
+                  <TableCell className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{person.view_count ? `${person.view_count}× · ${day(person.last_viewed_at)}` : ""}</TableCell>
+                  <TableCell className={`${tableStyles.cell} bt-mono`} >{person.last_offer ? auctionOfferLabel(person.last_offer) : person.message_count ? "Message" : ""}</TableCell>
+                  <TableCell className={`${tableStyles.cell} text-right`} >{person.buyer_id
+                    ? <span className="text-xs" style={{ color: "var(--bt-muted)" }}>On buyers</span>
+                    : (
+                      <button type="button" disabled={adding === person.email} onClick={() => addBuyer(person)}
+                        className={`${buttonClass} h-7 text-xs`} style={buttonStyle}>
+                        Add to buyers
+                      </button>
+                    )}</TableCell>
                 </tr>
               ))}
             </tbody>

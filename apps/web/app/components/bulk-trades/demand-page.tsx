@@ -28,6 +28,7 @@ import {
 } from "@/lib/bulk-demand";
 import { shortDate, ukTime, type Proposal } from "@/lib/bulk-trade-details";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 import { CrmSearch } from "./buyer-dialogs";
 import { DemandBadge, TierBadge } from "./demand-badge";
 import { ProposalRow } from "./proposal-row";
@@ -169,10 +170,17 @@ export function DemandPage({ today, onOpenTrade }: Props) {
               const check = checkReason(row, today);
               const summary = [...specLines(row.spec).slice(0, 3), priceLabel(row) && `max ${priceLabel(row)}`].filter(Boolean).join(" · ");
               return (
-                <button key={row.id} data-table-part="grid-row" type="button" onClick={() => setSelectedId(row.id)} aria-pressed={row.id === selectedId}
+                <div key={row.id} data-table-part="grid-row" role="button" tabIndex={0} onClick={() => setSelectedId(row.id)} aria-pressed={row.id === selectedId}
+                  onKeyDown={(event) => {
+                    if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                      event.preventDefault();
+                      setSelectedId(row.id);
+                    }
+                  }}
                   className={`grid w-full ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)]`}
                   style={{ borderColor: "var(--bt-divider)", color: check || row.status === "closed" ? "var(--bt-muted)" : "var(--bt-text)",
                     background: row.id === selectedId ? "var(--bt-row-hover)" : undefined }}>
+                  <TableCellContent>
                   <div className="flex min-w-0 flex-col items-start gap-1">
                     <div className="max-w-full truncate text-xs font-semibold">{row.buyer}</div>
                     {row.contact && <div className="max-w-full truncate text-xs" style={{ color: "var(--bt-muted)" }}>{row.contact}</div>}
@@ -187,12 +195,16 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                       )}
                     </span>
                   </div>
+                  </TableCellContent>
+                  <TableCellContent>
                   <span className="flex flex-col gap-0.5 text-xs leading-snug">
                     {row.wants}
                     {summary && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{summary}</span>}
                   </span>
-                  <span className="bt-mono text-xs">{volumeLabel(row) ?? ""}</span>
-                  <span className="text-xs">{row.location ?? ""}</span>
+                  </TableCellContent>
+                  <TableCellContent><span className="bt-mono text-xs">{volumeLabel(row) ?? ""}</span></TableCellContent>
+                  <TableCellContent><span className="text-xs">{row.location ?? ""}</span></TableCellContent>
+                  <TableCellContent>
                   <span className="flex flex-col items-start gap-1 text-xs">
                     {row.kind === "request"
                       ? (row.needed_by ? shortDate(row.needed_by) : "No date")
@@ -203,10 +215,13 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                     )}
                     {row.status === "closed" && row.closed_reason && <span className="text-xs">{CLOSED_REASON_LABEL[row.closed_reason]}</span>}
                   </span>
+                  </TableCellContent>
+                  <TableCellContent>
                   <span className="text-xs" style={{ color: row.fits.length ? "var(--bt-link)" : "var(--bt-muted)" }}>
                     {row.fits.length ? row.fits.map((fit) => fit.title).join(" · ") : "—"}
                   </span>
-                </button>
+                  </TableCellContent>
+                </div>
               );
             })}
             {!shown.length && <p className="px-5 py-8 text-center text-sm" style={{ color: "var(--bt-muted)" }}>Nothing here.</p>}

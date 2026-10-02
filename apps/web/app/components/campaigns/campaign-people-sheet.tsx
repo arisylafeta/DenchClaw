@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { flushSync } from "react-dom";
@@ -74,22 +75,20 @@ function PeopleTable({ rows, source, navigate }: { rows: CampaignPersonRow[]; so
           <thead style={{ background: "var(--bt-table-head)" }}><tr>{headers.map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>
             {filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map(({ recipient, activity }) => <tr key={recipient.person_id} className="hover:bg-[var(--bt-row-hover)]">
-              <td className={`${tableStyles.cell} min-w-[220px]`} style={cellStyle}>
-                <a href={buildEntryLink("people", recipient.person_id)} onClick={(event) => navigate(event, recipient.person_id)} onAuxClick={(event) => { if (event.button === 1) { navigate(event, recipient.person_id); } }} className="font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{recipient.person_name || recipient.recipient_email}</a>
-                {recipient.company_name && <div className="mt-0.5" style={mutedStyle}>{recipient.company_name}</div>}
-                {recipient.person_name && <div className="mt-0.5 break-all text-xs" style={mutedStyle}>{recipient.recipient_email}</div>}
-              </td>
+              <TableCell className={`${tableStyles.cell} min-w-[220px]`} style={cellStyle}><a href={buildEntryLink("people", recipient.person_id)} onClick={(event) => navigate(event, recipient.person_id)} onAuxClick={(event) => { if (event.button === 1) { navigate(event, recipient.person_id); } }} className="font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{recipient.person_name || recipient.recipient_email}</a>
+              {recipient.company_name && <div className="mt-0.5" style={mutedStyle}>{recipient.company_name}</div>}
+              {recipient.person_name && <div className="mt-0.5 break-all text-xs" style={mutedStyle}>{recipient.recipient_email}</div>}</TableCell>
               {source === "email" || source === "click" ? <>
-                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.redirect_events ?? "Unknown"}</td>
-                <td className={tableStyles.cell} style={cellStyle}>{activity ? <CampaignDate value={activity.last_clicked_at} withTime /> : "Unknown"}</td>
-                <td className={tableStyles.cell} style={cellStyle}>{activity ? <CampaignDate value={activity.last_browser_at} withTime /> : "Unknown"}</td>
+                <TableCell className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.redirect_events ?? "Unknown"}</TableCell>
+                <TableCell className={tableStyles.cell} style={cellStyle}>{activity ? <CampaignDate value={activity.last_clicked_at} withTime /> : "Unknown"}</TableCell>
+                <TableCell className={tableStyles.cell} style={cellStyle}>{activity ? <CampaignDate value={activity.last_browser_at} withTime /> : "Unknown"}</TableCell>
               </> : source === "browser" ? <>
-                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.page_views ?? "Unknown"}</td>
-                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.sessions ?? "Unknown"}</td>
-                <td className={tableStyles.cell} style={cellStyle}><CampaignDate value={activity?.last_browser_at ?? null} withTime /></td>
+                <TableCell className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.page_views ?? "Unknown"}</TableCell>
+                <TableCell className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.sessions ?? "Unknown"}</TableCell>
+                <TableCell className={tableStyles.cell} style={cellStyle}><CampaignDate value={activity?.last_browser_at ?? null} withTime /></TableCell>
               </> : <>
-                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity ? activity[SUBMISSION_FIELDS[source].count] : "Unknown"}</td>
-                <td className={tableStyles.cell} style={cellStyle}><CampaignDate value={activity?.[SUBMISSION_FIELDS[source].last_at] ?? null} withTime /></td>
+                <TableCell className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity ? activity[SUBMISSION_FIELDS[source].count] : "Unknown"}</TableCell>
+                <TableCell className={tableStyles.cell} style={cellStyle}><CampaignDate value={activity?.[SUBMISSION_FIELDS[source].last_at] ?? null} withTime /></TableCell>
               </>}
             </tr>)}
             {!filtered.length && <tr><td colSpan={headers.length} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>{rows.length ? "No recipient records match this search." : "No recipient records with this activity were observed."}</td></tr>}

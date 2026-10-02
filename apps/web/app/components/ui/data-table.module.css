@@ -102,6 +102,7 @@
   border-collapse: collapse;
   color: var(--bt-text);
   font-size: 12px;
+  table-layout: fixed;
   line-height: 20px;
 }
 
@@ -120,6 +121,9 @@
   border-bottom: 1px solid var(--bt-border);
   font-size: 11px;
   line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
 }
 
@@ -153,6 +157,96 @@
   font-size: 12px;
   line-height: 20px;
   vertical-align: middle;
+}
+
+.cellContent {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.cellValue {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 20px;
+}
+
+.cellValue[data-overflow="true"] {
+  padding-inline-end: 20px;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) :where(div, p):not(:global(.flex)):not(:global(.inline-flex)):not(:global(.block)) {
+  display: inline;
+  margin-inline-end: 4px;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) :where(span, div, p, button, time) {
+  white-space: nowrap;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) :global(.flex-wrap) {
+  flex-wrap: nowrap;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) :global(.flex-col) {
+  flex-direction: row;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) :global(.block) {
+  display: inline-block;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) :global(.flex) {
+  display: inline-flex;
+}
+
+.cellCollapsed:not(:has(input:not([type="checkbox"]), textarea, select, [contenteditable="true"])) > * + * {
+  margin-inline-start: 4px;
+}
+
+.cellExpanded {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cellExpanded :where(:global(.truncate), :global(.line-clamp-3), :global(.whitespace-nowrap)) {
+  white-space: normal;
+  overflow: visible;
+  max-width: none;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
+}
+
+.cellDisclosure {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 0;
+  background: var(--bt-surface);
+  color: var(--bt-muted);
+  cursor: pointer;
+}
+
+.cellDisclosure:hover {
+  color: var(--bt-text);
+}
+
+.cellDisclosure:focus-visible {
+  outline: 2px solid var(--bt-link);
+  outline-offset: -2px;
 }
 
 /* Sticky cells inherit the same calm hover/selection as the rest of their row. */
@@ -281,6 +375,13 @@
   border-color: var(--bt-border) !important;
   font-size: 11px;
   line-height: 20px;
+}
+
+.surface [data-table-part="grid-header"] > * {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .surface [data-table-part="grid-row"] {

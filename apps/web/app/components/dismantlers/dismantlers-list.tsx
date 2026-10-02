@@ -14,6 +14,7 @@ import { DueChip, TONE_HEADING } from "../bulk-trades/trade-chips";
 import { darkButtonClass, darkButtonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { GoalTag, StageDot, StageTag, metaLine, toneText } from "./dismantler-ui";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 
 const COLUMNS = "grid-cols-[minmax(0,1.4fr)_100px_minmax(0,1.8fr)_110px_minmax(0,1fr)_90px]";
 const BACKLOG_COLUMNS = "grid-cols-[24px_minmax(0,1.4fr)_140px_160px_minmax(0,1fr)]";
@@ -47,14 +48,22 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
               </h2>
               <div className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
                 {group.dismantlers.map((d) => (
-                  <button
+                  <div
                     key={d.id}
                     data-table-part="grid-row"
-                    type="button"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault();
+                        onOpen(d);
+                      }
+                    }}
                     onClick={() => onOpen(d)}
                     className={`grid w-full ${COLUMNS} items-center gap-4 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]`}
                     style={{ borderColor: "var(--bt-divider)" }}
                   >
+                    <TableCellContent>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-xs font-semibold">{d.name}</span>
@@ -62,7 +71,9 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                       </div>
                       <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{metaLine(d)}</div>
                     </div>
-                    <span><StageTag stage={d.stage} /></span>
+                    </TableCellContent>
+                    <TableCellContent><span><StageTag stage={d.stage} /></span></TableCellContent>
+                    <TableCellContent>
                     <div className="min-w-0">
                       <div className="text-xs leading-[1.35]" style={{ color: d.next_step ? undefined : "var(--bt-muted)" }}>
                         {d.next_step ?? "Set a next step"}
@@ -73,10 +84,11 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                         </div>
                       )}
                     </div>
-                    <span><DueChip label={dueLabel(d, today)} tone={GROUP_TONE[group.name]} /></span>
-                    <span className="truncate text-xs" style={{ color: d.platform ? "var(--bt-text)" : "var(--bt-muted)" }}>{platformLabel(d.platform) || "No account yet"}</span>
-                    <span className="text-xs" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span>
-                  </button>
+                    </TableCellContent>
+                    <TableCellContent><span><DueChip label={dueLabel(d, today)} tone={GROUP_TONE[group.name]} /></span></TableCellContent>
+                    <TableCellContent><span className="truncate text-xs" style={{ color: d.platform ? "var(--bt-text)" : "var(--bt-muted)" }}>{platformLabel(d.platform) || "No account yet"}</span></TableCellContent>
+                    <TableCellContent><span className="text-xs" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span></TableCellContent>
+                  </div>
                 ))}
               </div>
             </section>
@@ -189,14 +201,16 @@ function Backlog({ found, onOpen, onStartOutreach }: {
           {visible.map((d) => (
             <div key={d.id} data-table-part="grid-row" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-xs`}
               style={{ borderColor: "var(--bt-divider)", background: picked.has(d.id) ? "var(--bt-bg)" : undefined }}>
-              <input type="checkbox" aria-label={`Select ${d.name}`} checked={picked.has(d.id)} onChange={() => toggle(d.id)} className="h-4 w-4 accent-[var(--bt-text)]" />
+              <TableCellContent><input type="checkbox" aria-label={`Select ${d.name}`} checked={picked.has(d.id)} onChange={() => toggle(d.id)} className="h-4 w-4 accent-[var(--bt-text)]" /></TableCellContent>
+              <TableCellContent>
               <div className="min-w-0">
                 <button type="button" onClick={() => onOpen(d)} className="truncate text-left font-semibold hover:underline">{d.name}</button>
                 {d.ebay_username && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{d.ebay_username}</div>}
               </div>
-              <span className="text-xs">{d.country ?? ""}</span>
-              <span className="bt-mono text-xs">{d.ebay_listings ?? ""}</span>
-              <span className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>{d.source ?? ""}</span>
+              </TableCellContent>
+              <TableCellContent><span className="text-xs">{d.country ?? ""}</span></TableCellContent>
+              <TableCellContent><span className="bt-mono text-xs">{d.ebay_listings ?? ""}</span></TableCellContent>
+              <TableCellContent><span className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>{d.source ?? ""}</span></TableCellContent>
             </div>
           ))}
           <div data-table-part="footer" className="flex items-center gap-2 px-5 py-3 text-xs" style={{ color: "var(--bt-muted)" }}>

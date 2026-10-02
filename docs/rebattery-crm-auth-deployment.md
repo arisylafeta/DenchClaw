@@ -60,6 +60,16 @@ filters, edits, selection, resizing and paging stay in their existing engines.
 Email HTML, code diffs, boards, timelines and non-tabular lists are outside this
 scope; badges and avatars keep their meaningful shapes.
 
+`ui/table-cell.tsx` owns leaf-cell disclosure. Cells—including Notes, tags and
+relations—start on one line. Overflowed values expose a keyboard-operable
+chevron and expand on a plain content click; repeat click or Escape collapses
+them. Expansion is local UI state, never a save. Links, record navigation,
+double-click editing, selection shortcuts and controls keep their own actions.
+Expanded tag and reverse-relation cells reveal the full retained collection.
+Native table cells and operational grid columns share the same primitive;
+structural detail/empty rows and active editors are not clamped. A shared resize
+observer updates overflow affordances after column resizing.
+
 `PersonProfile` keeps its square header, tabs, overview and notes. Campaigns
 groups sends by campaign identity into a five-column results table. Each campaign
 starts closed; a keyboard-operable disclosure reveals per-send and destination
