@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -24,6 +25,8 @@ from psycopg2.extras import RealDictCursor
 
 
 SUPPLY_UPDATE_LIST = "Supply update"
+PERSONALIZATION_COLUMNS = {"first_name", "last_name", "opening"}
+VARIABLE = re.compile(r"(?<!\{)\{\{([a-z][a-z0-9_]*)\}\}(?!\})")
 
 def connection(read_only=False):
     db = psycopg2.connect(os.environ.get("DENCH_CAMPAIGN_DSN", "dbname=denchclaw"))
@@ -70,6 +73,13 @@ def load_manifest(path):
         raise ValueError("Every HTML and text CTA URL must have exactly one tracking entry")
     if "{{{ pm:unsubscribe }}}" not in manifest["html"] or "{{{ pm:unsubscribe }}}" not in manifest["text"]:
         raise ValueError("Broadcast HTML and text must include Postmark's unsubscribe placeholder")
+    personalization = manifest.get("personalization", {})
+    if not isinstance(personalization, dict) or any(
+        not re.fullmatch(r"[a-z][a-z0-9_]*", variable)
+        or column not in PERSONALIZATION_COLUMNS
+        for variable, column in personalization.items()
+    ):
+        raise ValueError("Personalization must map variable names to approved CRM person columns")
     if not manifest.get("person_ids") and not manifest.get("cohort_sql"):
         raise ValueError("Provide person_ids or cohort_sql (path to a read-only SELECT returning person_id)")
     if manifest.get("person_ids") and manifest.get("cohort_sql"):
@@ -78,6 +88,9 @@ def load_manifest(path):
 
 
 def cohort(db, manifest, suppressions):
+    personalization = manifest.get("personalization", {})
+    columns = ["p.id", "p.company_id", "p.email", "coalesce(p.email_opted_out, false) as opted_out"]
+    columns.extend(f'p."{column}"' for column in sorted(set(personalization.values())))
     with db.cursor(cursor_factory=RealDictCursor) as cur:
         if manifest.get("person_ids"):
             ids = manifest["person_ids"]
@@ -89,7 +102,6 @@ def cohort(db, manifest, suppressions):
             sql = Path(manifest["cohort_sql"]).read_text().strip()
             if not sql.lower().startswith("select ") or ";" in sql:
                 raise ValueError("cohort_sql must be one SELECT returning person_id")
-            # Read-only transaction is the actual protection, including against writable CTEs/functions.
             cur.execute("set local statement_timeout = '10s'")
             cur.execute(sql)
             if [column.name for column in cur.description] != ["person_id"]:
@@ -97,7 +109,7 @@ def cohort(db, manifest, suppressions):
             ids = [row["person_id"] for row in cur.fetchall()]
             if not ids or len(ids) > 500 or len(ids) != len(set(ids)):
                 raise ValueError("Cohort must contain 1–500 distinct person IDs")
-        cur.execute("""select p.id, p.company_id, p.email, coalesce(p.email_opted_out, false) as opted_out,
+        cur.execute(f"""select {', '.join(columns)},
                               exists (select 1 from crm_subscriptions s where s.person_id=p.id
                                       and s.list=%s and s.status='Opted out') as list_opted_out
                        from crm_people p where p.id = any(%s::text[])""", (SUPPLY_UPDATE_LIST, ids))
@@ -121,10 +133,35 @@ def cohort(db, manifest, suppressions):
             if email in seen:
                 raise ValueError(f"Duplicate address in cohort: {email}")
             seen.add(email)
-            rows.append({"person_id": person_id, "company_id": row["company_id"], "email": email})
+            template_vars = dict(manifest.get("campaign_variables", {}))
+            template_vars.update({name: row[column] for name, column in personalization.items()})
+            if any(value is None or not str(value).strip() for name, value in template_vars.items() if name in personalization):
+                raise ValueError(f"Missing required personalization for CRM person: {person_id}")
+            rows.append({
+                "person_id": person_id,
+                "company_id": row["company_id"],
+                "email": email,
+                "personalization": {name: row[column] for name, column in personalization.items()},
+                "subject": render_template(manifest["subject"], template_vars),
+                "html": render_template(manifest["html"], template_vars, html_mode=True),
+                "text": render_template(manifest["text"], template_vars),
+            })
         if not rows:
             raise ValueError("No eligible recipients remain after suppression exclusions")
         return sorted(rows, key=lambda row: row["email"]), exclusions
+
+
+def render_template(template, variables, html_mode=False):
+    def replace(match):
+        name = match.group(1)
+        if name not in variables:
+            raise ValueError(f"Template variable has no CRM source: {name}")
+        value = str(variables[name])
+        return html.escape(value, quote=True) if html_mode else value
+    rendered = VARIABLE.sub(replace, template)
+    if VARIABLE.search(rendered):
+        raise ValueError("Unresolved template variable")
+    return rendered
 
 
 def digest(manifest, rows):
@@ -133,6 +170,8 @@ def digest(manifest, rows):
     contents["auction_slug"] = manifest.get("auction_slug")
     contents["links"] = manifest["links"]
     # Approval binds identities, not the database's locale-dependent row order.
+    contents["personalization"] = manifest.get("personalization", {})
+    contents["campaign_variables"] = manifest.get("campaign_variables", {})
     contents["cohort"] = sorted(rows, key=lambda row: row["email"])
     contents["track_opens"] = True
     contents["track_links"] = "HtmlAndText"
@@ -141,8 +180,9 @@ def digest(manifest, rows):
 
 def frozen_rows(db, campaign_id):
     with db.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("""select person_id, company_id, recipient_email as email from crm_campaign_sends
-                       where campaign_id = %s order by recipient_email""", (campaign_id,))
+        cur.execute("""select person_id, company_id, recipient_email as email, personalization,
+                              rendered_subject as subject, rendered_html as html, rendered_text as text
+                         from crm_campaign_sends where campaign_id = %s order by recipient_email""", (campaign_id,))
         return [dict(row) for row in cur.fetchall()]
 
 
@@ -263,10 +303,12 @@ def freeze(manifest, rows, sha):
         for row in rows:
             send_id = hashlib.sha256(f"{manifest['id']}\0{row['person_id']}".encode()).hexdigest()[:32]
             cur.execute("""insert into crm_campaign_sends
-                           (id, campaign_id, person_id, company_id, listing_id, auction_url, recipient_email)
-                           values (%s,%s,%s,%s,%s,%s,%s)""",
-                         (send_id, manifest["id"], row["person_id"], row["company_id"],
-                          manifest["listing_id"], manifest["auction_url"], row["email"]))
+                           (id, campaign_id, person_id, company_id, listing_id, auction_url, recipient_email,
+                            personalization, rendered_subject, rendered_html, rendered_text)
+                           values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
+                        (send_id, manifest["id"], row["person_id"], row["company_id"],
+                         manifest["listing_id"], manifest["auction_url"], row["email"],
+                         json.dumps(row.get("personalization", {})), row["subject"], row["html"], row["text"]))
             for link in manifest["links"]:
                 link_id = hashlib.sha256(f"{send_id}\0{link['key']}".encode()).hexdigest()[:32]
                 cur.execute("""insert into crm_campaign_send_links
@@ -285,18 +327,33 @@ def approve(campaign_id, sha, approver):
             raise ValueError("Campaign not frozen with this digest, or already approved")
 
 
-def launch(manifest, sha):
+def launch(manifest, sha, max_recipients):
     if os.environ.get("DENCH_CAMPAIGN_LIVE_SEND") != "1":
         raise ValueError("DENCH_CAMPAIGN_LIVE_SEND=1 required for a real send")
+    if max_recipients < 1:
+        raise ValueError("--max-recipients must be at least one")
     with connection(read_only=True) as db:
-        rows = frozen_rows(db, manifest["id"])
-        if not rows or digest(manifest, rows) != sha:
+        all_rows = frozen_rows(db, manifest["id"])
+        if not all_rows or digest(manifest, all_rows) != sha:
             raise ValueError("Frozen cohort or creative differs from approved manifest")
         with db.cursor() as cur:
             cur.execute("""select 1 from campaigns where id=%s and approved_manifest_sha256=%s
                            and approved_at is not null and status in ('frozen','sending')""", (manifest["id"], sha))
             if not cur.fetchone():
                 raise ValueError("Exact manifest has not been approved")
+        with db.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""select person_id, company_id, recipient_email as email, personalization,
+                                  rendered_subject as subject, rendered_html as html, rendered_text as text
+                             from crm_campaign_sends
+                            where campaign_id=%s and state='frozen'
+                            order by recipient_email limit %s""", (manifest["id"], max_recipients))
+            rows = [dict(row) for row in cur.fetchall()]
+            cur.execute("""select count(*) from crm_campaign_sends
+                            where campaign_id=%s and state in ('sending','unknown')""", (manifest["id"],))
+            if cur.fetchone()[0]:
+                raise ValueError("Campaign has sending/unknown receipts; recover them before launch")
+    if not rows:
+        raise ValueError("No frozen recipients remain to send")
     provider_preflight(manifest, rows)
     results = []
     for row in rows:
@@ -312,7 +369,7 @@ def launch(manifest, sha):
                 continue
             send_id = claimed[0]
         payload = {"From": manifest["sender"], "ReplyTo": manifest["reply_to"], "To": row["email"],
-                   "Subject": manifest["subject"], "HtmlBody": manifest["html"], "TextBody": manifest["text"],
+                   "Subject": row["subject"], "HtmlBody": row["html"], "TextBody": row["text"],
                    "Tag": manifest["id"], "MessageStream": manifest["stream"], "TrackOpens": True,
                    "TrackLinks": "HtmlAndText", "Metadata": {"campaign_id": manifest["id"],
                    "recipient_id": send_id}}
@@ -430,6 +487,8 @@ def main():
             sub.add_argument("--apply", action="store_true")
         if name == "launch":
             sub.add_argument("--approved-sha256", required=True)
+            sub.add_argument("--max-recipients", required=True, type=int,
+                             help="Hard cap for this launch invocation; recipient sends are never implicit")
     sub = commands.add_parser("approve")
     sub.add_argument("--campaign-id", required=True)
     sub.add_argument("--sha256", required=True)
@@ -448,7 +507,7 @@ def main():
             if args.command == "launch":
                 if not args.apply:
                     raise ValueError("launch requires --apply and separately approved send")
-                output = launch(manifest, args.approved_sha256)
+                output = launch(manifest, args.approved_sha256, args.max_recipients)
             elif args.command == "recover":
                 output = recover(manifest, args.apply)
             else:

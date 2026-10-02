@@ -27,15 +27,19 @@ MANIFEST = {
     "stock_snapshot_ref": "listing-1@2026-09-23", "message_version": "v1",
     "sender": "supply@example.com", "reply_to": "replies@example.com",
     "reply_owner": "Alex", "subject": "Auction test",
-    "html": "<a href='https://www.rebattery.io/marketplace/auctions/test-lot'>Auction</a> <a href='https://form.typeform.com/to/MbMTVSu8'>Sourcing</a> <a href='{{{ pm:unsubscribe }}}'>Unsubscribe</a>",
-    "text": "Auction https://www.rebattery.io/marketplace/auctions/test-lot\nSourcing https://form.typeform.com/to/MbMTVSu8\nUnsubscribe {{{ pm:unsubscribe }}}",
+    "html": "<a href='https://www.rebattery.io/marketplace/auctions/test-lot'>Auction</a> <a href='https://form.typeform.com/to/MbMTVSu8'>Sourcing</a> <a href='{{{ pm:unsubscribe }}}'>Unsubscribe</a> {{ render_name }}",
+    "text": "Auction https://www.rebattery.io/marketplace/auctions/test-lot\nSourcing https://form.typeform.com/to/MbMTVSu8\nUnsubscribe {{{ pm:unsubscribe }}}\n{{ render_name }}",
     "links": [
         {"key": "test-lot", "url": "https://www.rebattery.io/marketplace/auctions/test-lot", "listing_id": "listing-1"},
         {"key": "sourcing", "url": "https://form.typeform.com/to/MbMTVSu8"},
     ],
     "stream": "broadcasts", "person_ids": ["p1"],
+    "personalization": {"render_name": "first_name"},
 }
-ROWS = [{"person_id": "p1", "company_id": "c1", "email": "buyer@example.com"}]
+ROWS = [{"person_id": "p1", "company_id": "c1", "email": "buyer@example.com", "first_name": "Buyer",
+         "personalization": {"render_name": "Buyer"}, "subject": "Auction test Buyer",
+         "html": "<a href='https://www.rebattery.io/marketplace/auctions/test-lot'>Auction</a> Buyer",
+         "text": "Auction https://www.rebattery.io/marketplace/auctions/test-lot\nBuyer"}]
 
 
 class FakeCursor:
@@ -54,6 +58,10 @@ class FakeCursor:
             self.result = (1,)
         elif "from crm_campaign_sends" in sql and "order by recipient_email" in sql:
             self.result = ROWS
+        elif "state='frozen'" in sql and "order by recipient_email limit" in sql:
+            self.result = ROWS[:params[-1]]
+        elif "state in ('sending','unknown')" in sql:
+            self.result = (0,)
         elif "returning s.id" in sql:
             if self.state["send_state"] == "frozen":
                 self.state["send_state"] = "sending"
@@ -87,6 +95,47 @@ class FakeConnection:
 
 
 class CampaignTest(unittest.TestCase):
+    def test_freeze_stores_personalized_bodies_and_bounded_launch(self):
+        statements = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                pass
+            def execute(self, sql, params):
+                statements.append((sql, params))
+            def fetchone(self):
+                return None
+
+        class Db:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                pass
+            def cursor(self):
+                return Cursor()
+
+        recipients = [{**row, "first_name": "Buyer", "personalization": {"render_name": "Buyer"},
+                       "subject": f"Auction test Buyer {row['person_id']}",
+                       "html": f"Frozen personalized body {row['person_id']}",
+                       "text": f"Frozen personalized text {row['person_id']}"} for row in
+                      (ROWS[0], {"person_id": "p2", "company_id": "c2", "email": "two@example.com"})]
+        with patch.object(campaign, "connection", return_value=Db()):
+            campaign.freeze(MANIFEST, recipients, campaign.digest(MANIFEST, recipients))
+        frozen_sends = [params for sql, params in statements if "insert into crm_campaign_sends" in sql]
+        self.assertEqual(len(frozen_sends), 2)
+        self.assertEqual({params[8] for params in frozen_sends},
+                         {"Auction test Buyer p1", "Auction test Buyer p2"})
+        self.assertIn("Frozen personalized body p1", {params[9] for params in frozen_sends})
+        self.assertIn("Frozen personalized text p2", {params[10] for params in frozen_sends})
+        frozen_links = [params for sql, params in statements if "insert into crm_campaign_send_links" in sql]
+        self.assertEqual(len(frozen_links), 4)
+        self.assertEqual({params[2] for params in frozen_links}, {"test-lot", "sourcing"})
+        self.assertEqual(len({params[0] for params in frozen_links}), 4)
+        with patch.dict(os.environ, {"DENCH_CAMPAIGN_LIVE_SEND": "1"}):
+            with self.assertRaisesRegex(ValueError, "at least one"):
+                campaign.launch(MANIFEST, campaign.digest(MANIFEST, recipients[:1]), 0)
 
     def test_manifest_digest_binds_recipient_and_body(self):
         approved = campaign.digest(MANIFEST, ROWS)
@@ -128,10 +177,10 @@ class CampaignTest(unittest.TestCase):
              patch.object(campaign, "connection", side_effect=lambda **_: FakeConnection(state)), \
              patch.object(campaign, "provider_preflight"), \
              patch.object(campaign, "postmark", side_effect=urllib.error.URLError("timeout")) as send:
-            result = campaign.launch(MANIFEST, sha)
+            result = campaign.launch(MANIFEST, sha, 1)
             self.assertEqual(state["send_state"], "unknown")
             self.assertEqual(result[0][1], "unknown: URLError")
-            self.assertEqual(campaign.launch(MANIFEST, sha)[0][1], "skipped: already claimed or suppressed")
+            self.assertEqual(campaign.launch(MANIFEST, sha, 1)[0][1], "skipped: already claimed or suppressed")
             self.assertEqual(send.call_count, 1)
 
     def test_provider_preflight_rejects_suppressed_address(self):
@@ -150,7 +199,7 @@ class CampaignTest(unittest.TestCase):
              patch.object(campaign, "connection", side_effect=lambda **_: FakeConnection(state)), \
              patch.object(campaign, "provider_preflight"), \
              patch.object(campaign, "postmark", side_effect=rejected):
-            result = campaign.launch(MANIFEST, campaign.digest(MANIFEST, ROWS))
+            result = campaign.launch(MANIFEST, campaign.digest(MANIFEST, ROWS), 1)
         self.assertEqual(state["send_state"], "failed")
         self.assertIn("HTTP 401", result[0][1])
 
