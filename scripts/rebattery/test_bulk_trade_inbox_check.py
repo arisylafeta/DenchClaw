@@ -563,6 +563,40 @@ class DemandRun(unittest.TestCase):
         self.assertEqual(rows["Gridturn"]["basis"], "estimated")
         self.assertNotIn("spec", rows["Gridturn"])  # empty values are left out
 
+    def test_matching_sees_where_the_buyer_is(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""insert into crm_companies (id, name, country, region) values ('co_where', 'Where Buyer', 'Poland', 'CEE')
+                           on conflict do nothing;
+                           insert into crm_bulk_trade_demand (id, kind, basis, buyer, company_id, wants) values
+                             ('btd_where', 'standing', 'stated', 'Where Buyer', 'co_where', 'NMC modules')
+                           on conflict do nothing""")
+        seen = []
+
+        def fake_model(system, user, key):
+            seen.extend(json.loads(user)["DEMAND"])
+            return {"matches": []}
+
+        with patch.object(check, "call_model", fake_model):
+            check.match_demand(self.conn, "k", {"warnings": []})
+        row = next(r for r in seen if r["buyer"] == "Where Buyer")
+        self.assertEqual((row["buyer_country"], row["buyer_region"]), ("Poland", "CEE"))
+
+    def test_summary_flags_new_companies_missing_purpose_source_or_country(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""insert into crm_companies (id, name, purpose, source, country) values
+                             ('co_sum_bare', 'Bare New Co', null, null, null),
+                             ('co_sum_full', 'Full New Co', '{Buyer}', 'Inbound', 'Germany')
+                           on conflict do nothing;
+                           insert into crm_companies (id, name, tags) values ('co_sum_auto', 'Auto.com', '{auto-created}')
+                           on conflict do nothing""")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            check.summary(self.conn)
+        line = next(l for l in out.getvalue().splitlines() if l.startswith("New in the CRM"))
+        self.assertIn("Bare New Co", line)
+        self.assertNotIn("Full New Co", line)
+        self.assertNotIn("Auto.com", line)
+
     def test_matching_sees_the_note(self):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""insert into crm_bulk_trade_demand (id, buyer, wants, note) values

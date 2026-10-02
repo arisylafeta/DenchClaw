@@ -149,6 +149,24 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect((await demand.getDemand(agreed.id))?.trades).toEqual([{ lot_id: lot, title: "Ranking trade LFP packs", status: "To contact" }]);
   });
 
+  it("offers the trade to buyers we deal with first and lists new estimated-only buyers to introduce", async () => {
+    const lot = (await trades.createBulkTrade({ title: "Groups trade LFP cells", trade_kind: "cells", trade_stage: "With buyers" }, user.id)).id;
+    await pg.queryPg(`insert into crm_companies (id, name, purpose, relationship_stage, buyer_tier) values
+      ('co_grp_new', 'New Guess Co', '{Buyer}', 'New', null), ('co_grp_engaged', 'Engaged Guess Co', '{Buyer}', 'Engaged', null),
+      ('co_grp_tier', 'Tiered New Co', '{Buyer}', 'New', 'B'), ('co_grp_stated', 'New Stated Co', '{Buyer}', 'New', null)`);
+    const add = (buyer: string, company_id: string, basis: "estimated" | "stated") =>
+      demand.addDemand({ buyer, company_id, wants: "LFP cells", basis }, user.id);
+    for (const row of [await add("New Guess Co", "co_grp_new", "estimated"), await add("Engaged Guess Co", "co_grp_engaged", "estimated"),
+      await add("Tiered New Co", "co_grp_tier", "estimated"), await add("New Stated Co", "co_grp_stated", "stated")]) {
+      await pg.queryPg("insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values ($1, $2, 'strong', 'fits')",
+        [row.id, lot]);
+    }
+    expect((await demand.suggestedBuyers(lot)).map((s) => [s.buyer, s.group, s.stage])).toEqual([
+      ["Tiered New Co", "offer", "New"], ["New Stated Co", "offer", "New"], ["Engaged Guess Co", "offer", "Engaged"],
+      ["New Guess Co", "introduce", "New"],
+    ]);
+  });
+
   it("shows each buyer once, with their best row first and the rest under more, and hides the whole buyer", async () => {
     const lot = (await trades.createBulkTrade({ title: "Grouping trade NMC packs", trade_kind: "packs", trade_stage: "With buyers" }, user.id)).id;
     await pg.queryPg(`insert into crm_companies (id, name, buyer_tier) values ('co_group', 'Group Energy', 'B') on conflict do nothing`);

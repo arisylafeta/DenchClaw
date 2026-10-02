@@ -195,7 +195,11 @@ const BUYER_KEY = `coalesce(demand.company_id, 'name:' || lower(demand.buyer))`;
 /**
  * Open demand the matching picked for a trade, one line per buyer: the buyer's best-fitting row (strong before
  * partial, then requests, agreed, stated, estimated), with their other fitting rows under `more`. Hidden pairs and
- * buyers already on the trade are left out. A-tier buyers first, then B, C and untiered.
+ * buyers already on the trade are left out.
+ * Two groups: "offer" (buyers we deal with, who told us what they want, or that Alex has tiered) before "introduce"
+ * (an untiered company still at Stage New, or without a company, matched only on ReBattery's estimated buy-box). Within a group: A-tier buyers
+ * first, then B, C and untiered; then requests, agreed, stated, estimated; strong before partial; then Active,
+ * Engaged, Contacted, New.
  */
 export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> {
   return queryPg<SuggestedBuyer>(
@@ -203,12 +207,18 @@ export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> 
        select demand.id as demand_id, demand.kind, demand.basis, demand.buyer, demand.contact, demand.wants,
          to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on,
          m.strength, m.reason,
-         (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier,
+         company.buyer_tier as tier, company.relationship_stage as stage,
+         case when demand.basis = 'estimated' and coalesce(company.relationship_stage, 'New') = 'New'
+             and company.buyer_tier is null
+           then 'introduce' else 'offer' end as "group",
+         case company.relationship_stage when 'Active' then 0 when 'Engaged' then 1 when 'Contacted' then 2 else 3 end
+           as stage_rank,
          ${BUYER_KEY} as buyer_key,
          ${TIER_RANK} as tier_rank,
          row_number() over (partition by ${BUYER_KEY}
            order by m.strength desc, ${RANK}, demand.needed_by nulls last, demand.confirmed_on desc nulls last, demand.id) as place
        from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand demand on demand.id = m.demand_id
+         left join crm_companies company on company.id = demand.company_id
        where m.lot_id = $1 and not m.hidden and m.buyer_id is null and demand.status = 'open'
          and (demand.kind <> 'request' or demand.needed_by is null or demand.needed_by >= current_date)
          and not exists (
@@ -216,14 +226,15 @@ export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> 
              and ((demand.person_id is not null and buyer.person_id = demand.person_id) or lower(buyer.name) = lower(demand.buyer)))
      )
      select best.demand_id, best.kind, best.basis, best.buyer, best.contact, best.wants, best.needed_by, best.confirmed_on,
-       best.strength, best.reason, best.tier,
+       best.strength, best.reason, best.tier, best.stage, best."group",
        coalesce((select json_agg(json_build_object('demand_id', other.demand_id, 'wants', other.wants, 'strength', other.strength,
                   'reason', other.reason) order by other.place)
                  from fitting other where other.buyer_key = best.buyer_key and other.place > 1), '[]'::json) as more
      from fitting best
      where best.place = 1
-     order by best.tier_rank, case when best.kind = 'request' then 0 when best.basis = 'agreed' then 1
-       when best.basis = 'stated' then 2 else 3 end, best.strength desc, best.needed_by nulls last, best.confirmed_on desc nulls last`,
+     order by best."group" = 'introduce', best.tier_rank, case when best.kind = 'request' then 0 when best.basis = 'agreed' then 1
+       when best.basis = 'stated' then 2 else 3 end, best.strength desc, best.stage_rank, best.needed_by nulls last,
+       best.confirmed_on desc nulls last`,
     [lotId],
   );
 }

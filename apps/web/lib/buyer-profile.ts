@@ -62,7 +62,7 @@ export type BuyerProfileChange = { field: string; old_value: unknown; new_value:
 /** The field-registry names used to save each profile value through the company entry API. */
 export const BUYER_FIELD_NAMES = {
   stage: "Buyer Stage",
-  tier: "Buyer Tier",
+  tier: "Priority",
   owner: "Buyer Owner",
   capabilities: "Buyer Capabilities",
   can_receive_waste: "Buyer Can Receive Waste",

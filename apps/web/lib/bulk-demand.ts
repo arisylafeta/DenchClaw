@@ -87,6 +87,12 @@ export type Demand = {
 export type SuggestedBuyer = {
   demand_id: string;
   tier: string | null;
+  /** The buyer company's Stage (New, Contacted, Engaged, Active), or null without a company. */
+  stage: string | null;
+  /** "offer": a buyer we deal with, one who told us what they want, or one Alex has tiered. "introduce": an untiered
+   * company still at Stage New (or none) matched only on ReBattery's estimated buy-box, so this trade is a reason to
+   * introduce ourselves. */
+  group: "offer" | "introduce";
   kind: DemandKind;
   basis: Basis | null;
   buyer: string;

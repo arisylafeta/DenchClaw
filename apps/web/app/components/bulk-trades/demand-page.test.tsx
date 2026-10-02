@@ -178,15 +178,22 @@ describe("SuggestedBuyers", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
     render(<SuggestedBuyers tradeId="bt_69" onChanged={onChanged} suggested={[
-      { demand_id: "btd_1", tier: "A", kind: "request", basis: null, buyer: "H. Nolden Investment", contact: "Markus", wants: "Tested EV packs 50 kWh+",
-        needed_by: "2026-10-15", confirmed_on: "2026-09-21", strength: "strong", reason: "A homogeneous lot.",
+      { demand_id: "btd_1", tier: "A", stage: "Engaged", group: "offer", kind: "request", basis: null, buyer: "H. Nolden Investment",
+        contact: "Markus", wants: "Tested EV packs 50 kWh+", needed_by: "2026-10-15", confirmed_on: "2026-09-21", strength: "strong",
+        reason: "A homogeneous lot.",
         more: [{ demand_id: "btd_2", wants: "Modules for BESS", strength: "partial", reason: "Modules, not packs." }] },
+      { demand_id: "btd_3", tier: null, stage: "New", group: "introduce", kind: "standing", basis: "estimated", buyer: "Volt Repair Kft",
+        contact: null, wants: "EV packs for repair", needed_by: null, confirmed_on: null, strength: "partial",
+        reason: "Repairs packs like these; estimated.", more: [] },
     ]} />);
+    expect(screen.getByRole("region", { name: "Offer now" })).toHaveTextContent("H. Nolden Investment");
+    expect(screen.getByRole("region", { name: "Introduce" })).toHaveTextContent("Volt Repair Kft");
+    expect(screen.getByText("One line per buyer · 1 offer now, 1 introduce")).toBeInTheDocument();
     expect(screen.getByText("Strong fit")).toBeInTheDocument();
     expect(screen.getByText("Request")).toBeInTheDocument();
     expect(screen.getByText("Tier A")).toBeInTheDocument();
     expect(screen.getByText("· needed by 15 Oct", { exact: false })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Add to buyers" }));
+    await userEvent.click(within(screen.getByRole("region", { name: "Offer now" })).getByRole("button", { name: "Add to buyers" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_69/suggested/btd_1", expect.objectContaining({ method: "POST" }));
     await userEvent.click(screen.getByRole("button", { name: "Not a fit: H. Nolden Investment" }));
     expect(fetchMock).toHaveBeenLastCalledWith("/api/bulk-trades/bt_69/suggested/btd_1", expect.objectContaining({ method: "DELETE" }));

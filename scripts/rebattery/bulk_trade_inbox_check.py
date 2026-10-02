@@ -1019,6 +1019,8 @@ Each DEMAND row is a "request" (a one-off need, maybe by "needed_by") or a "stan
 clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words; "note"
 holds other requirements (voltage, connectors, use, risk answers) that rule a batch out as surely as the spec.
 A missing spec value means unknown, not "no".
+"buyer_country" and "buyer_region" are where the buyer is based. Many buyers import, so distance from the trade's
+location never rules a pair out; name it as the catch ("partial") only when the row says they buy locally or nearby.
 A TRADE's "seller_price", when given, is what ReBattery pays the seller (internal). A buyer's max_price must leave
 room above it; when it does not, the pair is at best "partial" with price as the catch.
 - "strong": the trade's batch is the kind of thing the buyer asked for (form, chemistry, size, quantity, use) and
@@ -1032,7 +1034,7 @@ naming the fit and any catch."""
 MATCH_ROWS_PER_CALL = 60
 # What a demand row is judged on. A "Still wanted" confirmation, a close or a contact edit changes none of it.
 MATCH_CONTENT = ("kind", "basis", "buyer", "wants", "quantity", "location", "needed_by", "volume", "volume_unit",
-                 "max_price", "price_currency", "price_unit", "spec", "note")
+                 "max_price", "price_currency", "price_unit", "spec", "note", "buyer_country", "buyer_region")
 
 
 def content_hash(value):
@@ -1120,12 +1122,14 @@ def match_demand(conn, key, report=None, dry_run=False):
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                """select id, kind, basis, buyer, wants, quantity, location, to_char(needed_by, 'YYYY-MM-DD') as needed_by,
-                          volume::float8 as volume, volume_unit, max_price::float8 as max_price, price_currency, price_unit,
-                          spec, left(note, 600) as note, to_char(confirmed_on, 'YYYY-MM-DD') as confirmed, match_hash
-                   from crm_bulk_trade_demand
-                   where status = 'open' and (kind <> 'request' or needed_by is null or needed_by >= current_date)
-                   order by id""")
+                """select d.id, d.kind, d.basis, d.buyer, d.wants, d.quantity, d.location,
+                          to_char(d.needed_by, 'YYYY-MM-DD') as needed_by, d.volume::float8 as volume, d.volume_unit,
+                          d.max_price::float8 as max_price, d.price_currency, d.price_unit, d.spec, left(d.note, 600) as note,
+                          to_char(d.confirmed_on, 'YYYY-MM-DD') as confirmed, d.match_hash,
+                          nullif(c.country, '') as buyer_country, c.region as buyer_region
+                   from crm_bulk_trade_demand d left join crm_companies c on c.id = d.company_id
+                   where d.status = 'open' and (d.kind <> 'request' or d.needed_by is null or d.needed_by >= current_date)
+                   order by d.id""")
             demand = cur.fetchall()
             trades = load_trades(cur)
             cur.execute("select id, demand_fingerprint from crm_bulk_trade_lots where id = any(%s)", (list(trades),))
@@ -1499,7 +1503,8 @@ def history(conn, args):
 
 def summary(conn):
     """The 08:00 list: buyers waiting on a reply, requests due within a week with no offer, overdue and due-today
-    next steps, new auction offers, auctions closing soon, new demand matches, cards waiting, and buy-boxes to reconfirm."""
+    next steps, new auction offers, auctions closing soon, new demand matches (buyers to offer, and how many new buyers
+    to introduce), cards waiting, buy-boxes to reconfirm, and yesterday's new companies missing Purpose, Source or Country."""
     today = dt.datetime.now(ZoneInfo("Europe/London")).date()
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
@@ -1528,7 +1533,9 @@ def summary(conn):
                                                           when d.basis = 'estimated' then ' (estimated)' else '' end,
                                           ', ' order by case c.buyer_tier when 'A' then 0 when 'B' then 1 when 'C' then 2 else 3 end,
                                                         case when d.kind = 'request' then 0 when d.basis = 'agreed' then 1
-                                                             when d.basis = 'stated' then 2 else 3 end, d.buyer) as buyers
+                                                             when d.basis = 'stated' then 2 else 3 end, d.buyer)
+                        filter (where not (d.basis = 'estimated' and coalesce(c.relationship_stage, 'New') = 'New' and c.buyer_tier is null)) as buyers,
+                      count(*) filter (where d.basis = 'estimated' and coalesce(c.relationship_stage, 'New') = 'New' and c.buyer_tier is null) as introduce
                from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand d on d.id = m.demand_id
                join crm_bulk_trade_lots l on l.id = m.lot_id left join crm_companies c on c.id = d.company_id
                where m.strength = 'strong' and not m.hidden and m.buyer_id is null and d.status = 'open'
@@ -1558,6 +1565,13 @@ def summary(conn):
                  and (d.confirmed_on is null or d.confirmed_on < %s)
                order by d.basis = 'agreed' desc, d.confirmed_on nulls first, d.buyer""", (today - dt.timedelta(days=STALE_DAYS),))
         reconfirm = cur.fetchall()
+        # New companies missing what the CRM is filtered by (mailbox-sync contacts are left out).
+        cur.execute(
+            """select name from crm_companies
+               where created_at > now() - interval '24 hours' and not (coalesce(tags, '{}') @> array['auto-created'])
+                 and (coalesce(cardinality(purpose), 0) = 0 or source is null or coalesce(country, '') = '')
+               order by created_at""")
+        unclassified = [r["name"] for r in cur.fetchall()]
     lines = [f"Bulk Trades, {today:%a %d %b}"]
     if waiting:
         lines.append("Buyers waiting on you:")
@@ -1586,13 +1600,18 @@ def summary(conn):
     for row in closing:
         lines.append(f"- {row['title']}: auction closes {row['auction_closes_at'].astimezone(ZoneInfo('Europe/London')):%a %d %b %H:%M}")
     for row in matches:
-        lines.append(f"- {row['title']}: matches open demand from {row['buyers']}")
+        offer = f"matches open demand from {row['buyers']}" if row["buyers"] else ""
+        introduce = f"{row['introduce']} new buyer{'s' if row['introduce'] != 1 else ''} to introduce" if row["introduce"] else ""
+        lines.append(f"- {row['title']}: {'; '.join(part for part in (offer, introduce) if part)}")
     if possible:
         lines.append(f"{possible} possible new trade{'s' if possible != 1 else ''} to review.")
     if reconfirm:
         names = ", ".join(f"{r['buyer']}{' (agreed)' if r['basis'] == 'agreed' else ''}" for r in reconfirm[:8])
         more = f" and {len(reconfirm) - 8} more" if len(reconfirm) > 8 else ""
         lines.append(f"Buy-boxes to reconfirm: {names}{more}.")
+    if unclassified:
+        more = f" and {len(unclassified) - 5} more" if len(unclassified) > 5 else ""
+        lines.append(f"New in the CRM without Purpose, Source or Country: {', '.join(unclassified[:5])}{more}.")
     lines.append("https://crm.rebattery.io/?path=bulk_trade")
     print("\n".join(lines))
     return 0

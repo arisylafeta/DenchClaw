@@ -201,24 +201,24 @@ def upsert_company_by_domain(cur, domain):
     row = cur.fetchone()
     display_name = domain[0].upper() + domain[1:] if domain else domain
     if row:
+        # An existing company keeps its name: only a blank name is filled from the domain.
         existing_id = row[0]
         cur.execute(
             """
             UPDATE crm_companies
-            SET name = %s,
-                domain = %s,
+            SET name = coalesce(nullif(btrim(name), ''), %s),
                 updated_at = now()
-            WHERE id = %s
+            WHERE id = %s AND coalesce(btrim(name), '') = ''
             """,
-            (display_name, domain, existing_id),
+            (display_name, existing_id),
         )
         return existing_id
 
     company_id = "company_domain_" + hashlib.md5(str(domain).encode()).hexdigest()[:16]
     cur.execute(
         """
-        INSERT INTO crm_companies (id, name, domain, tags)
-        VALUES (%s, %s, %s, ARRAY['auto-created'])
+        INSERT INTO crm_companies (id, name, domain, tags, source, source_detail)
+        VALUES (%s, %s, %s, ARRAY['auto-created'], 'Email mining', 'Gmail sync')
         """,
         (company_id, display_name, domain),
     )

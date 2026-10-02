@@ -96,6 +96,12 @@ export type PostgresCompanyProfile = {
     about: string | null;
     sectors: string[] | null;
     roles: string[] | null;
+    purpose: string[] | null;
+    segment: string | null;
+    specialisms: string[] | null;
+    stage: string | null;
+    region: string | null;
+    source: string | null;
     last_interaction_at: string | null;
     notes: string | null;
     created_at: string | null;
@@ -153,6 +159,12 @@ type CompanyRow = {
   about: string | null;
   sectors: string[] | null;
   roles: string[] | null;
+  purpose: string[] | null;
+  segment: string | null;
+  specialisms: string[] | null;
+  stage: string | null;
+  region: string | null;
+  source: string | null;
   last_interaction_at: string | Date | null;
   notes: string | null;
   created_at: string | Date | null;
@@ -286,6 +298,12 @@ export async function getPostgresCompanyProfile(
            about,
            sectors,
            roles,
+           purpose,
+           segment,
+           specialisms,
+           relationship_stage as stage,
+           region,
+           source,
            null::timestamptz as last_interaction_at,
            notes,
            created_at,
@@ -308,6 +326,12 @@ export async function getPostgresCompanyProfile(
     about: raw.about,
     sectors: raw.sectors,
     roles: raw.roles,
+    purpose: raw.purpose,
+    segment: raw.segment,
+    specialisms: raw.specialisms,
+    stage: raw.stage,
+    region: raw.region,
+    source: raw.source,
     last_interaction_at: iso(raw.last_interaction_at),
     notes: raw.notes,
     created_at: iso(raw.created_at),

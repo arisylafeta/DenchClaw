@@ -8,7 +8,10 @@ import { CompanyProfile } from "./company-profile";
 function buildCompanyResponse(
   id: string,
   name: string,
-  overrides: { sectors?: string[]; platform_role?: string; roles?: string[] } = {},
+  overrides: {
+    sectors?: string[]; platform_role?: string; roles?: string[]; purpose?: string[]; segment?: string;
+    specialisms?: string[]; stage?: string; region?: string;
+  } = {},
 ) {
   return {
     company: {
@@ -320,7 +323,7 @@ describe("CompanyProfile tab reset on entry change", () => {
     expect(screen.getByText("NMC · Pack · Nissan Leaf")).toBeInTheDocument();
   });
 
-  it("renders Sectors and Platform Role as field-like values in the Details section", async () => {
+  it("shows Purpose, Segment, Specialisms, Stage and Region instead of Sectors and Platform Role", async () => {
     fetchSpy.mockRestore();
     vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -330,6 +333,11 @@ describe("CompanyProfile tab reset on entry change", () => {
         sectors: ["automotive", "energy_storage"],
         platform_role: "BUYER",
         roles: ["buyer", "supplier"],
+        purpose: ["Buyer", "Supplier"],
+        segment: "Battery repair",
+        specialisms: ["Battery repair", "Battery trading"],
+        stage: "Engaged",
+        region: "CEE",
       });
       return Promise.resolve(
         new Response(JSON.stringify(response), {
@@ -345,10 +353,13 @@ describe("CompanyProfile tab reset on entry change", () => {
       expect(screen.getByText("Company acme")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText("Sectors").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("automotive, energy_storage")).toBeInTheDocument();
-    expect(screen.getByText("Platform Role")).toBeInTheDocument();
-    expect(screen.getByText("BUYER")).toBeInTheDocument();
+    expect(screen.getByText("Buyer, Supplier")).toBeInTheDocument();
+    expect(screen.getAllByText("Battery repair").length).toBeGreaterThanOrEqual(2); // Segment and a Specialism
+    expect(screen.getByText("Battery trading")).toBeInTheDocument();
+    expect(screen.getByText("Engaged")).toBeInTheDocument();
+    expect(screen.getByText("CEE")).toBeInTheDocument();
+    expect(screen.queryByText("Platform Role")).toBeNull();
+    expect(screen.queryByText("automotive, energy_storage")).toBeNull();
   });
 
   it("filters opportunities with inline multi-select dropdowns and clear controls", async () => {

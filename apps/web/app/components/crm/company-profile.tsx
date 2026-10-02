@@ -29,6 +29,11 @@ type CompanyResponse = {
     about: string | null;
     sectors: string[] | null;
     roles: string[] | null;
+    purpose?: string[] | null;
+    segment?: string | null;
+    specialisms?: string[] | null;
+    stage?: string | null;
+    region?: string | null;
     industry: string | null;
     type: string | null;
     source: string | null;
@@ -394,31 +399,31 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Country" value={company.country ?? "—"} />
           <Stat label="City" value={company.city ?? "—"} />
-          <Stat label="Sectors" value={company.sectors?.length ?? 0} />
-          <Stat label="Roles" value={company.roles?.length ?? 0} />
+          <Stat label="Stage" value={company.stage ?? "—"} />
+          <Stat label="Region" value={company.region ?? "—"} />
         </div>
-        {company.sectors && company.sectors.length > 0 && (
+        {company.purpose && company.purpose.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
-            {company.sectors.map((sector) => (
+            {company.purpose.map((purpose) => (
               <span
-                key={sector}
-                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
-                style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
+                key={purpose}
+                className="rounded-full px-2 py-1 text-[11px] font-semibold"
+                style={{ background: "var(--color-surface-hover)", color: "var(--color-text)" }}
               >
-                {sector.replace(/_/g, " ")}
+                {purpose}
               </span>
             ))}
           </div>
         )}
-        {company.roles && company.roles.length > 0 && (
+        {company.specialisms && company.specialisms.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
-            {company.roles.map((role) => (
+            {company.specialisms.map((specialism) => (
               <span
-                key={role}
-                className="rounded-full px-2 py-1 text-[11px] font-medium capitalize"
+                key={specialism}
+                className="rounded-full px-2 py-1 text-[11px] font-medium"
                 style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
               >
-                {role.replace(/_/g, " ")}
+                {specialism}
               </span>
             ))}
           </div>
@@ -443,8 +448,8 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
           <Field label="City" value={company.city} />
           <Field label="Industry" value={company.industry} />
           <Field label="Type" value={company.type} />
-          <Field label="Sectors" value={joinOrDash(company.sectors ?? [])} />
-          <Field label="Platform Role" value={company.platform_role} />
+          <Field label="Purpose" value={joinOrDash(company.purpose ?? [])} />
+          <Field label="Segment" value={company.segment ?? null} />
           <Field label="Source" value={company.source} />
           <Field
             label="Last contact"
