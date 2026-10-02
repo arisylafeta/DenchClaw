@@ -446,8 +446,64 @@ class DemandRun(unittest.TestCase):
         with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur, \
              patch.object(check, "call_model", lambda system, user, key: reply):
             cards = check.screen_demand(cur, [new, known, seller], "k", report)
-        self.assertEqual([(c["proposed"]["buyer"], c["target"]) for c in cards], [("Revoxa py buyer", None), ("Green Voltage", "btd_open")])
+        self.assertEqual([(c["kind"], c["proposed"]["buyer"]) for c in cards],
+                         [("possible_demand", "Revoxa py buyer"), ("possible_demand", "Green Voltage")])
         self.assertEqual(cards[0]["proposed"]["email"], "dawid.py@revoxa.example")
+
+    def test_email_demand_is_added_closes_estimates_and_a_no_opts_out(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""
+              insert into crm_companies (id, name, purpose, relationship_stage) values
+                ('co_auto', 'Auto Cells Ltd', '{Buyer}', 'Contacted'), ('co_no', 'No Thanks Ltd', '{Buyer}', 'Contacted')
+                on conflict do nothing;
+              insert into crm_people (id, full_name, email, company_id, tags) values
+                ('p_auto', 'Fern', 'fern@autocells.example', 'co_auto', '{"Supply Update"}'),
+                ('p_no', 'Nia', 'nia@nothanks.example', 'co_no', '{"Supply Update"}') on conflict do nothing;
+              insert into crm_bulk_trade_demand (id, buyer, company_id, email, wants, kind, basis) values
+                ('btd_est_auto', 'Auto Cells Ltd', 'co_auto', 'fern@autocells.example', 'Cells and modules', 'standing', 'estimated')
+                on conflict do nothing;""")
+        reply_source = {**SOURCE, "id": "r1", "from": "fern@autocells.example",
+                        "text": "Subject: Re: packs\nFrom: fern@autocells.example\n\nWe'd be interested in cells, not packs."}
+        no_source = {**SOURCE, "id": "r2", "from": "nia@nothanks.example",
+                     "text": "Subject: Re: packs\nFrom: nia@nothanks.example\n\nNot interested, we don't buy batteries."}
+        demand = {"kind": "possible_demand", "target": None, "quote": "We'd be interested in cells, not packs.", "source": reply_source,
+                  "summary": "Auto Cells Ltd wants: Cells", "proposed": {"buyer": "Auto Cells Ltd", "email": "fern@autocells.example",
+                  "wants": "Cells, not packs", "kind": "standing", "spec": {"formats": ["Cells"]}}}
+        decline = {"kind": "decline", "target": None, "quote": "Not interested, we don't buy batteries.", "source": no_source,
+                   "summary": "nia@nothanks.example is not interested",
+                   "proposed": {"decision": "not_interested", "email": "nia@nothanks.example"}}
+        report = {"applied": [], "cards": [], "warnings": []}
+        ctx = {"warnings": report["warnings"]}
+        with self.conn, self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            check.mark_replies(cur, [reply_source, no_source], {"fern@autocells.example", "nia@nothanks.example"}, report, False)
+            check.settle_all(cur, None, None, [demand], None, ctx, report, False)
+            check.settle_declines(cur, [decline], report, False)
+            check.settle_all(cur, None, None, [demand], None, ctx, report, False)  # the same email again changes nothing
+            cur.execute("select status, basis, wants, company_id from crm_bulk_trade_demand where company_id = 'co_auto' order by basis")
+            rows = cur.fetchall()
+            cur.execute("select id, relationship_stage, buyer_stage, buyer_exclusion_reason from crm_companies where id in ('co_auto', 'co_no') order by id")
+            companies = {r["id"]: r for r in cur.fetchall()}
+            cur.execute("select status from crm_subscriptions where person_id = 'p_no' and list = 'Supply update'")
+            sub = cur.fetchone()
+            cur.execute("select tags from crm_people where id = 'p_no'")
+            tags = cur.fetchone()["tags"]
+        self.assertEqual([(r["status"], r["basis"], r["wants"]) for r in rows],
+                         [("closed", "estimated", "Cells and modules"), ("open", "stated", "Cells, not packs")])
+        self.assertEqual(len(report["applied"]), 1)  # the same email a second time is already recorded
+        self.assertEqual(report["declines"], ["nia@nothanks.example is not interested"])
+        self.assertEqual((companies["co_auto"]["relationship_stage"], companies["co_auto"]["buyer_stage"]), ("Engaged", "Responded"))
+        self.assertEqual(companies["co_no"]["relationship_stage"], "Excluded")
+        self.assertIn("Not interested", companies["co_no"]["buyer_exclusion_reason"])
+        self.assertEqual(sub["status"], "Opted out")
+        self.assertNotIn("Supply Update", tags)
+
+    def test_auto_replies_do_not_count_as_a_reply(self):
+        away = {**SOURCE, "id": "r3", "from": "away@ooo.example", "title": "Automatic reply: packs",
+                "text": "Subject: Automatic reply: packs\nFrom: away@ooo.example\n\nI am out of the office."}
+        report = {}
+        with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            check.mark_replies(cur, [away], {"away@ooo.example"}, report, True)
+        self.assertEqual(report["engaged"], [])
 
     def test_matching_judges_only_what_changed_and_keeps_not_a_fit_hidden(self):
         with self.conn, self.conn.cursor() as cur:  # start from a trade and rows never judged
