@@ -44,6 +44,8 @@ export type BulkTrade = {
   updated_at: string;
   /** Open inbox-check proposals for this trade. */
   new_count?: number;
+  buyer_count?: number;
+  bid_count?: number;
 };
 
 export type TradeOwner = { id: string; name: string };
@@ -186,9 +188,9 @@ export function tradeGroup(trade: BulkTrade, today: string): TradeGroupName {
   return due === today ? "Due today" : "Later";
 }
 
-/** Live trades grouped in list order. Each group is sorted with the most pressing first. */
+/** Live trades grouped in list order (auctions still waiting for a bid are listed apart). Each group is sorted with the most pressing first. */
 export function groupTrades(trades: BulkTrade[], today: string) {
-  const live = trades.filter((trade) => (LIVE_STAGES as readonly string[]).includes(trade.trade_stage));
+  const live = trades.filter((trade) => (LIVE_STAGES as readonly string[]).includes(trade.trade_stage) && !isWaitingAuction(trade));
   const groups = new Map<TradeGroupName, BulkTrade[]>(TRADE_GROUPS.map((name) => [name, []]));
   for (const trade of live) groups.get(tradeGroup(trade, today))!.push(trade);
 
@@ -210,6 +212,22 @@ export function dueLabel(trade: BulkTrade, today: string): string {
   if (trade.waiting_on === "them") return trade.waiting_since ? `since ${dayMonth(trade.waiting_since)}` : "Waiting";
   if (!due) return trade.next_step ? "No date" : "None";
   return due === today ? "Today" : dayMonth(due);
+}
+
+/** Days without a touch before the list shows a trade as gone quiet. */
+export const QUIET_DAYS = 7;
+
+/** A passive auction trade: a published auction with no bids yet. It waits in its own folded group until an offer arrives. */
+export function isWaitingAuction(trade: BulkTrade): boolean {
+  return !!trade.auction_slug && trade.auction_status === "published" && !trade.bid_count
+    && (LIVE_STAGES as readonly string[]).includes(trade.trade_stage);
+}
+
+/** "closes 16 Oct" or "closed 8 Oct" for an auction trade. */
+export function auctionCloseLabel(trade: Pick<BulkTrade, "auction_closes_at">, today: string): string {
+  const day = trade.auction_closes_at?.slice(0, 10);
+  if (!day) return "Auction";
+  return `${day < today ? "closed" : "closes"} ${dayMonth(day)}`;
 }
 
 /** "Today", "5d" or "" when never touched. */

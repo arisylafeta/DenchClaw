@@ -1,7 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { dueLabel, groupTrades, heldTrades, holdLabel, touchedLabel, type BulkTrade } from "@/lib/bulk-trades";
+import {
+  QUIET_DAYS,
+  auctionCloseLabel,
+  daysBetween,
+  dueLabel,
+  groupTrades,
+  heldTrades,
+  holdLabel,
+  isWaitingAuction,
+  touchedLabel,
+  type BulkTrade,
+} from "@/lib/bulk-trades";
 import { DueChip, GROUP_TONE, TONE_HEADING } from "./trade-chips";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
@@ -23,6 +34,7 @@ type RowProps = {
 };
 
 function TradeRow({ trade, today, onOpen, step, due }: RowProps) {
+  const quiet = trade.trade_stage !== "On hold" && (!trade.last_touched || daysBetween(trade.last_touched, today) > QUIET_DAYS);
   return (
     <div
       data-table-part="grid-row"
@@ -54,10 +66,25 @@ function TradeRow({ trade, today, onOpen, step, due }: RowProps) {
       </div>
       </TableCellContent>
       <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{trade.trade_stage}</span></TableCellContent>
-      <TableCellContent><span className="bt-mono truncate text-xs font-medium">{trade.value ?? ""}</span></TableCellContent>
+      <TableCellContent>
+        <div className="min-w-0">
+          <div className="bt-mono truncate text-xs font-medium">{trade.value ?? ""}</div>
+          {!!(trade.buyer_count || trade.bid_count) && (
+            <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>
+              {trade.buyer_count ?? 0} {trade.buyer_count === 1 ? "buyer" : "buyers"}
+              {!!trade.bid_count && ` · ${trade.bid_count} ${trade.bid_count === 1 ? "bid" : "bids"}`}
+            </div>
+          )}
+        </div>
+      </TableCellContent>
       <TableCellContent><span className="text-xs leading-[1.35]">{step}</span></TableCellContent>
       <TableCellContent><span><DueChip label={due.label} tone={due.tone} /></span></TableCellContent>
-      <TableCellContent><span className="text-xs" style={{ color: "var(--bt-muted)" }}>{touchedLabel(trade, today)}</span></TableCellContent>
+      <TableCellContent>
+        <span className="text-xs" title={quiet ? `No touch for over ${QUIET_DAYS} days` : undefined}
+          style={{ color: quiet ? "var(--bt-amber)" : "var(--bt-muted)", fontWeight: quiet ? 600 : undefined }}>
+          {touchedLabel(trade, today) || "Never"}
+        </span>
+      </TableCellContent>
     </div>
   );
 }
@@ -103,14 +130,17 @@ function Group({ name, count, tone, children, folded, onToggle }: {
  */
 export function TradesList({ trades, today, onOpen }: Props) {
   const [showHeld, setShowHeld] = useState(false);
+  const [showAuctions, setShowAuctions] = useState(false);
   const groups = groupTrades(trades, today);
   const held = heldTrades(trades, today);
+  const auctions = trades.filter(isWaitingAuction)
+    .sort((a, b) => String(a.auction_closes_at ?? "9999").localeCompare(String(b.auction_closes_at ?? "9999")));
   const holdRow = (trade: BulkTrade, tone: RowProps["due"]["tone"]) => (
     <TradeRow key={trade.id} trade={trade} today={today} onOpen={onOpen}
       step={trade.hold_reason ?? "On hold"} due={{ label: holdLabel(trade, today), tone }} />
   );
 
-  if (!groups.length && !held.ended.length && !held.waiting.length) {
+  if (!groups.length && !held.ended.length && !held.waiting.length && !auctions.length) {
     return <p className="px-4 py-10 text-center text-sm" style={{ color: "var(--bt-muted)" }}>No live trades.</p>;
   }
 
@@ -132,6 +162,16 @@ export function TradesList({ trades, today, onOpen }: Props) {
           ))}
         </Group>
       ))}
+      {!!auctions.length && (
+        <Group name="Auctions waiting for offers" count={auctions.length} tone="var(--bt-muted)" folded={!showAuctions}
+          onToggle={() => setShowAuctions(!showAuctions)}>
+          {auctions.map((trade) => (
+            <TradeRow key={trade.id} trade={trade} today={today} onOpen={onOpen}
+              step={`No offers yet${trade.buyer_count ? ` · ${trade.buyer_count} engaged` : ""}`}
+              due={{ label: auctionCloseLabel(trade, today), tone: "grey" }} />
+          ))}
+        </Group>
+      )}
       {!!held.waiting.length && (
         <Group name="On hold" count={held.waiting.length} tone="var(--bt-muted)" folded={!showHeld} onToggle={() => setShowHeld(!showHeld)}>
           {held.waiting.map((trade) => holdRow(trade, "grey"))}

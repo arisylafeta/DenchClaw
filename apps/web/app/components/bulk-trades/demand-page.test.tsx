@@ -187,7 +187,10 @@ describe("SuggestedBuyers", () => {
         reason: "Repairs packs like these; estimated.", more: [] },
     ]} />);
     expect(screen.getByRole("region", { name: "Offer now" })).toHaveTextContent("H. Nolden Investment");
-    expect(screen.getByRole("region", { name: "Introduce" })).toHaveTextContent("Volt Repair Kft");
+    const introduce = screen.getByRole("region", { name: "Introduce" });
+    expect(introduce).not.toHaveTextContent("Volt Repair Kft"); // research matches stay folded until asked for
+    await userEvent.click(within(introduce).getByRole("button", { name: "Show" }));
+    expect(introduce).toHaveTextContent("Volt Repair Kft");
     expect(screen.getByText("One line per buyer · 1 offer now, 1 introduce")).toBeInTheDocument();
     expect(screen.getByText("Strong fit")).toBeInTheDocument();
     expect(screen.getByText("Request")).toBeInTheDocument();

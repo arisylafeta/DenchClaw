@@ -3,8 +3,10 @@ import {
   dueLabel,
   groupTrades,
   dueText,
+  auctionCloseLabel,
   heldTrades,
   holdLabel,
+  isWaitingAuction,
   parseTradePatch,
   stageTotal,
   todayInLondon,
@@ -180,5 +182,17 @@ describe("on hold", () => {
     expect(holdLabel({ hold_until: "2026-11-02" }, TODAY)).toBe("Until 2 Nov");
     expect(holdLabel({ hold_until: TODAY }, TODAY)).toBe("Hold ends today");
     expect(holdLabel({ hold_until: "2026-09-25" }, TODAY)).toBe("Hold ended 3d ago");
+  });
+});
+
+describe("auctions waiting for offers", () => {
+  it("lists a published auction apart until its first bid", () => {
+    const waiting = trade({ title: "MG packs", auction_slug: "mg-zs", auction_status: "published", auction_closes_at: "2026-10-16T12:00:00Z", bid_count: 0 });
+    const bidding = trade({ title: "eBS37", auction_slug: "ebs37", auction_status: "published", bid_count: 2 });
+    const withdrawn = trade({ title: "Old", auction_slug: "old", auction_status: "withdrawn", bid_count: 0 });
+    expect([waiting, bidding, withdrawn].filter(isWaitingAuction).map((t) => t.title)).toEqual(["MG packs"]);
+    expect(groupTrades([waiting, bidding], TODAY).flatMap((g) => g.trades.map((t) => t.title))).toEqual(["eBS37"]);
+    expect(auctionCloseLabel(waiting, TODAY)).toBe("closes 16 Oct");
+    expect(auctionCloseLabel(waiting, "2026-10-20")).toBe("closed 16 Oct");
   });
 });
