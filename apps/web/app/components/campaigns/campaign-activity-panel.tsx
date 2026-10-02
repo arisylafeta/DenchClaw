@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 import type { CampaignActivity, CampaignActivityDestination } from "@/lib/campaign-activity";
@@ -73,9 +74,9 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
                 const destination = available ? activity.destinations.find((value) => value.listing_id === listing.listing_id) : undefined;
                 const clicked = emailRows(detail.recipients, listing.listing_id, "listing", destination);
                 return <tr key={listing.listing_id} className="hover:bg-[var(--bt-row-hover)]">
-                  <td className={`${tableStyles.cell} min-w-[180px]`} style={cellStyle}>{listing.url ? <a href={listing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1.5 font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{listing.label}<ExternalLink size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span></a> : <span className="font-medium">{listing.label}</span>}</td>
-                  <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{listing.recipients}</td>
-                  <td className={tableStyles.cell} style={cellStyle}><CampaignPeopleSheet destination={listing.label} source="email" count={clicked.length} rows={clicked} onNavigatePerson={onNavigatePerson} />{detail.campaign.tracking_pending > 0 && <span className="block text-xs" style={mutedStyle}>observed · pending</span>}</td>
+                  <TableCell className={`${tableStyles.cell} min-w-[180px]`} style={cellStyle}>{listing.url ? <a href={listing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1.5 font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{listing.label}<ExternalLink size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span></a> : <span className="font-medium">{listing.label}</span>}</TableCell>
+                  <TableCell className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{listing.recipients}</TableCell>
+                  <TableCell className={tableStyles.cell} style={cellStyle}><CampaignPeopleSheet destination={listing.label} source="email" count={clicked.length} rows={clicked} onNavigatePerson={onNavigatePerson} />{detail.campaign.tracking_pending > 0 && <span className="block text-xs" style={mutedStyle}>observed · pending</span>}</TableCell>
                   <WebsiteCells label={listing.label} destination={destination} recipientsById={recipientsById} onNavigatePerson={onNavigatePerson} />
                 </tr>;
               })}
@@ -91,8 +92,8 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
             const destination = available ? activity.destinations.find((value) => value.listing_id == null && value.cta_key === other.cta_key) : undefined;
             const clicked = emailRows(detail.recipients, other.cta_key, "other", destination);
             return <tr key={other.cta_key} className="hover:bg-[var(--bt-row-hover)]">
-              <td className={tableStyles.cell} style={cellStyle}>{other.label}</td>
-              <td className={tableStyles.cell} style={cellStyle}><CampaignPeopleSheet destination={other.label} source="email" count={clicked.length} rows={clicked} onNavigatePerson={onNavigatePerson} /></td>
+              <TableCell className={tableStyles.cell} style={cellStyle}>{other.label}</TableCell>
+              <TableCell className={tableStyles.cell} style={cellStyle}><CampaignPeopleSheet destination={other.label} source="email" count={clicked.length} rows={clicked} onNavigatePerson={onNavigatePerson} /></TableCell>
               <WebsiteCells label={other.label} destination={destination} recipientsById={recipientsById} onNavigatePerson={onNavigatePerson} />
             </tr>;
           })}</tbody>
@@ -103,19 +104,15 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
 }
 
 function WebsiteCells({ label, destination, recipientsById, onNavigatePerson }: { label: string; destination?: CampaignActivityDestination; recipientsById: ReadonlyMap<string, CampaignRecipient>; onNavigatePerson: (id: string) => void }) {
-  if (!destination) { return <><td className={tableStyles.cell} style={{ ...cellStyle, ...mutedStyle }}>Unknown</td><td className={tableStyles.cell} style={{ ...cellStyle, ...mutedStyle }}>Unknown</td></>; }
+  if (!destination) { return <><TableCell className={tableStyles.cell} style={{ ...cellStyle, ...mutedStyle }}>Unknown</TableCell><TableCell className={tableStyles.cell} style={{ ...cellStyle, ...mutedStyle }}>Unknown</TableCell></>; }
   const submissions = (["offer", "message", "buy_now"] as const).filter((source) => destination[SUBMISSION_FIELDS[source].count] > 0);
   return <>
-    <td className={tableStyles.cell} style={cellStyle}>
-      <CampaignPeopleSheet destination={label} source="browser" count={destination.visited_recipients} rows={activityRows(destination, recipientsById, "browser")} onNavigatePerson={onNavigatePerson} />
-      <span className="mt-0.5 block text-xs" style={mutedStyle}>{destination.sessions} {destination.sessions === 1 ? "browser session" : "browser sessions"}</span>
-      <div className="mt-1"><CampaignPeopleSheet destination={label} source="click" count={destination.redirect_events} rows={activityRows(destination, recipientsById, "click")} onNavigatePerson={onNavigatePerson} /></div>
-    </td>
-    <td className={tableStyles.cell} style={cellStyle}>
-      {submissions.length ? <div className="flex flex-col items-start gap-1">{submissions.map((source) => <div key={source}>
-        <CampaignPeopleSheet destination={label} source={source} count={destination[SUBMISSION_FIELDS[source].count]} rows={activityRows(destination, recipientsById, source)} onNavigatePerson={onNavigatePerson} />
-        <span className="ml-1.5 text-xs" style={mutedStyle}>{source === "buy_now" ? "Buy now" : source === "offer" ? "Offers" : "Messages"}</span>
-      </div>)}</div> : <span style={mutedStyle}>0 recorded</span>}
-    </td>
+    <TableCell className={tableStyles.cell} style={cellStyle}><CampaignPeopleSheet destination={label} source="browser" count={destination.visited_recipients} rows={activityRows(destination, recipientsById, "browser")} onNavigatePerson={onNavigatePerson} />
+    <span className="mt-0.5 block text-xs" style={mutedStyle}>{destination.sessions} {destination.sessions === 1 ? "browser session" : "browser sessions"}</span>
+    <div className="mt-1"><CampaignPeopleSheet destination={label} source="click" count={destination.redirect_events} rows={activityRows(destination, recipientsById, "click")} onNavigatePerson={onNavigatePerson} /></div></TableCell>
+    <TableCell className={tableStyles.cell} style={cellStyle}>{submissions.length ? <div className="flex flex-col items-start gap-1">{submissions.map((source) => <div key={source}>
+      <CampaignPeopleSheet destination={label} source={source} count={destination[SUBMISSION_FIELDS[source].count]} rows={activityRows(destination, recipientsById, source)} onNavigatePerson={onNavigatePerson} />
+      <span className="ml-1.5 text-xs" style={mutedStyle}>{source === "buy_now" ? "Buy now" : source === "offer" ? "Offers" : "Messages"}</span>
+    </div>)}</div> : <span style={mutedStyle}>0 recorded</span>}</TableCell>
   </>;
 }

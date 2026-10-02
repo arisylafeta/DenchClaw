@@ -3,6 +3,7 @@
 import { Fragment, useRef, useState } from "react";
 import type { BulkTrade, TradePatch } from "@/lib/bulk-trades";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 import {
   FIELD_STATUSES,
   FIELD_TEMPLATES,
@@ -144,24 +145,35 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
             const claims: FieldSource[] = row ? [row, ...row.alternatives] : [];
             return (
               <Fragment key={template.key}>
-              <button
+              <div
                 data-table-part="grid-row"
-                type="button"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                    setEditing(template);
+                  }
+                }}
                 onClick={() => setEditing(template)}
                 aria-label={`Edit ${template.label}`}
                 className={`grid w-full ${FIELD_COLUMNS} items-start gap-4 border-b px-3 py-2 text-left text-xs hover:bg-[var(--bt-row-hover)]`}
                 style={{ borderColor: "var(--bt-divider)", background: status === "conflict" ? "var(--bt-amber-tint)" : undefined }}
               >
-                <span style={{ color: "var(--bt-text-2)" }}>{template.label}</span>
+                <TableCellContent><span style={{ color: "var(--bt-text-2)" }}>{template.label}</span></TableCellContent>
+                <TableCellContent>
                 <span className="flex flex-col font-medium leading-[1.4]">
                   {claims.length ? claims.map((claim, index) => <span key={index}>{claim.value || "—"}</span>) : <span>—</span>}
                 </span>
+                </TableCellContent>
+                <TableCellContent>
                 <span className="flex flex-col text-xs leading-[1.4]">
                   {claims.length ? claims.map((claim, index) => <Source key={index} source={claim} />) : <Source source={{ value: "", source_label: null, source_url: null, source_date: null }} />}
                 </span>
-                <span><span className="rounded-none px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span>
-                <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span>
-              </button>
+                </TableCellContent>
+                <TableCellContent><span><span className="rounded-none px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span></TableCellContent>
+                <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span></TableCellContent>
+              </div>
               {proposals.filter((proposal) => proposal.target === template.key).map((proposal) => (
                 <div key={proposal.id} className="border-b" style={{ borderColor: "var(--bt-divider)" }}>
                   <ProposalRow proposal={{ ...proposal, summary: `${template.label}: ${String(proposal.proposed.value)}` }} onDecided={onProposalDecided} />
@@ -290,6 +302,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
           </div>
           {files.map((file) => (
             <div key={file.id} data-table-part="grid-row" className={`grid ${FILE_COLUMNS} items-center gap-4 border-b px-3 py-2 text-xs`} style={{ borderColor: "var(--bt-divider)" }}>
+              <TableCellContent>
               <div className="flex min-w-0 items-center gap-3">
                 <FileLink trade={trade} file={file} className="flex min-w-0 items-center gap-3 hover:underline">
                   <FileThumb trade={trade} file={file} />
@@ -299,8 +312,10 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
                   <a href={fileUrl(trade, file)} className="shrink-0 text-xs" style={{ color: "var(--bt-muted)" }}>Download</a>
                 )}
               </div>
-              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{file.file_type}</span>
-              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{sourceText(file) || "Uploaded"}</span>
+              </TableCellContent>
+              <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{file.file_type}</span></TableCellContent>
+              <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{sourceText(file) || "Uploaded"}</span></TableCellContent>
+              <TableCellContent>
               <select
                 aria-label={`Who sees ${file.file_name}`}
                 value={file.visibility}
@@ -310,6 +325,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
               >
                 {VISIBILITIES.map((visibility) => <option key={visibility} value={visibility}>{VISIBILITY_LABEL[visibility]}</option>)}
               </select>
+              </TableCellContent>
             </div>
           ))}
           {proposals.map((proposal) => (

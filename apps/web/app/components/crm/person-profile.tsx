@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Mail } from "lucide-react";
 import { Button } from "../ui/button";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { PersonAvatar } from "./person-avatar";
 import { CompanyFavicon } from "./company-favicon";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
@@ -509,11 +510,11 @@ function CampaignHistory({ sends, name }: { sends: CampaignSend[]; name: string 
           const missingClick = !isAccepted(send) ? "Not sent" : !send.last_synced_at ? "Unknown" : "Not observed";
           return <Fragment key={send.send_id}>
             <tr>
-              <td className={tableStyles.cell}><CampaignSent sends={[send]} /></td>
-              <td className={tableStyles.cell}><CampaignDelivery sends={[send]} showTimes /></td>
-              <td className={tableStyles.cell}><CampaignObservation sends={[send]} kind="opened" /></td>
-              <td className={tableStyles.cell}><CampaignObservation sends={[send]} kind="clicked" /></td>
-              <td className={tableStyles.cell}>{send.listing_id ? <Destination label={destinationLabel(send.listing_title ?? pitchedListing?.listing_title, undefined, true)} url={send.listing_url ?? pitchedListing?.listing_url} /> : "—"}</td>
+              <TableCell className={tableStyles.cell} ><CampaignSent sends={[send]} /></TableCell>
+              <TableCell className={tableStyles.cell} ><CampaignDelivery sends={[send]} showTimes /></TableCell>
+              <TableCell className={tableStyles.cell} ><CampaignObservation sends={[send]} kind="opened" /></TableCell>
+              <TableCell className={tableStyles.cell} ><CampaignObservation sends={[send]} kind="clicked" /></TableCell>
+              <TableCell className={tableStyles.cell} >{send.listing_id ? <Destination label={destinationLabel(send.listing_title ?? pitchedListing?.listing_title, undefined, true)} url={send.listing_url ?? pitchedListing?.listing_url} /> : "—"}</TableCell>
             </tr>
             <tr><td colSpan={5} className={tableStyles.detailCell}>
               {send.links.length === 0 ? <p style={{ color: "var(--bt-muted)" }}>No destination activity recorded.</p> : (
@@ -521,9 +522,9 @@ function CampaignHistory({ sends, name }: { sends: CampaignSend[]; name: string 
                   <table className={`${tableStyles.table} min-w-[440px]`} aria-label={`Destination activity for ${name}${sends.length > 1 ? `, send ${index + 1}` : ""}`}>
                     <thead><tr>{["Destination", "Kind", "First email click"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell}>{label}</th>)}</tr></thead>
                     <tbody>{send.links.map((link) => <tr key={link.cta_key}>
-                      <td className={tableStyles.cell}><Destination label={destinationLabel(link.listing_title, link.cta_key, Boolean(link.listing_id))} url={link.listing_url} /></td>
-                      <td className={tableStyles.cell}>{link.listing_id ? "Listing" : "Other link"}</td>
-                      <td className={tableStyles.cell}>{link.first_clicked_at ? <CampaignTime value={link.first_clicked_at} /> : missingClick}</td>
+                      <TableCell className={tableStyles.cell} ><Destination label={destinationLabel(link.listing_title, link.cta_key, Boolean(link.listing_id))} url={link.listing_url} /></TableCell>
+                      <TableCell className={tableStyles.cell} >{link.listing_id ? "Listing" : "Other link"}</TableCell>
+                      <TableCell className={tableStyles.cell} >{link.first_clicked_at ? <CampaignTime value={link.first_clicked_at} /> : missingClick}</TableCell>
                     </tr>)}</tbody>
                   </table>
                 </div>
@@ -543,15 +544,13 @@ function CampaignRow({ sends }: { sends: CampaignSend[] }) {
   const Chevron = open ? ChevronDown : ChevronRight;
   return <>
     <tr>
-      <td className={tableStyles.cell}>
-        <button type="button" aria-expanded={open} aria-controls={detailId} aria-label={`${open ? "Hide" : "Show"} activity for ${name}`} onClick={() => setOpen(!open)} className="inline-flex items-start gap-1 text-left">
-          <Chevron size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="break-words">{name}{sends.length > 1 && <span style={{ color: "var(--bt-muted)" }}> · {sends.length} sends</span>}</span>
-        </button>
-      </td>
-      <td className={tableStyles.cell}><CampaignSent sends={sends} /></td>
-      <td className={tableStyles.cell}><CampaignDelivery sends={sends} /></td>
-      <td className={tableStyles.cell}><CampaignObservation sends={sends} kind="opened" /></td>
-      <td className={tableStyles.cell}><CampaignObservation sends={sends} kind="clicked" /></td>
+      <TableCell className={tableStyles.cell} ><button type="button" aria-expanded={open} aria-controls={detailId} aria-label={`${open ? "Hide" : "Show"} activity for ${name}`} onClick={() => setOpen(!open)} className="inline-flex items-start gap-1 text-left">
+        <Chevron size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="break-words">{name}{sends.length > 1 && <span style={{ color: "var(--bt-muted)" }}> · {sends.length} sends</span>}</span>
+      </button></TableCell>
+      <TableCell className={tableStyles.cell} ><CampaignSent sends={sends} /></TableCell>
+      <TableCell className={tableStyles.cell} ><CampaignDelivery sends={sends} /></TableCell>
+      <TableCell className={tableStyles.cell} ><CampaignObservation sends={sends} kind="opened" /></TableCell>
+      <TableCell className={tableStyles.cell} ><CampaignObservation sends={sends} kind="clicked" /></TableCell>
     </tr>
     {open && <tr><td colSpan={5} className={tableStyles.detailCell}>
       <section id={detailId} aria-label={`Activity for ${name}`}><CampaignHistory sends={sends} name={name} /></section>
@@ -599,8 +598,8 @@ function CampaignsTab({ data }: { data: PersonResponse }) {
           {listingsOpen && <table id={listingsId} className={`${tableStyles.table} min-w-[440px]`} aria-label="Listing engagement">
             <thead><tr><th scope="col" className={tableStyles.headerCell}>Listing</th><th scope="col" className={tableStyles.headerCell}>Updates with email clicks</th></tr></thead>
             <tbody>{data.listing_engagement.map((listing) => <tr key={listing.listing_id}>
-              <td className={tableStyles.cell}><Destination label={destinationLabel(listing.listing_title, undefined, true)} url={listing.listing_url} /></td>
-              <td className={tableStyles.cell}>{listing.clicked_updates}</td>
+              <TableCell className={tableStyles.cell} ><Destination label={destinationLabel(listing.listing_title, undefined, true)} url={listing.listing_url} /></TableCell>
+              <TableCell className={tableStyles.cell} >{listing.clicked_updates}</TableCell>
             </tr>)}</tbody>
           </table>}
         </section>

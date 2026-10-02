@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { TableCell } from "../ui/table-cell";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CampaignDetail, CampaignSummary } from "@/lib/campaigns";
@@ -82,14 +83,12 @@ function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: CampaignSumma
           <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Campaign", "Sent date / audience", "Status", "Sent", "Delivered", "Tracked opens", "Tracked clicks"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>
             {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => <tr key={campaign.id} className="hover:bg-[var(--bt-row-hover)]">
-              <td className={`${tableStyles.cell} min-w-[190px]`} style={cellStyle}>
-                <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
-                <div className="mt-0.5 text-xs" style={mutedStyle}>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger"} · {campaign.recipient_count} retained</div>
-                {campaign.tracking_pending > 0 && <div className="mt-0.5 text-xs" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</div>}
-              </td>
-              <td className={tableStyles.cell} style={cellStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /><div className="mt-0.5" style={mutedStyle}>{humanize(campaign.audience)}</div></td>
-              <td className={tableStyles.cell} style={cellStyle}><StatusTag status={campaign.status} /></td>
-              {[campaign.metrics.sent, campaign.metrics.delivered, campaign.metrics.opened, campaign.metrics.clicked].map((value, index) => <td key={index} className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</td>)}
+              <TableCell className={`${tableStyles.cell} min-w-[190px]`} style={cellStyle}><a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
+              <div className="mt-0.5 text-xs" style={mutedStyle}>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger"} · {campaign.recipient_count} retained</div>
+              {campaign.tracking_pending > 0 && <div className="mt-0.5 text-xs" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</div>}</TableCell>
+              <TableCell className={tableStyles.cell} style={cellStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /><div className="mt-0.5" style={mutedStyle}>{humanize(campaign.audience)}</div></TableCell>
+              <TableCell className={tableStyles.cell} style={cellStyle}><StatusTag status={campaign.status} /></TableCell>
+              {[campaign.metrics.sent, campaign.metrics.delivered, campaign.metrics.opened, campaign.metrics.clicked].map((value, index) => <TableCell key={index} className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</TableCell>)}
             </tr>)}
             {!rows.length && <tr><td colSpan={7} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your search.</td></tr>}
           </tbody>

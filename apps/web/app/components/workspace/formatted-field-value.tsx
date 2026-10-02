@@ -5,6 +5,7 @@ import { formatWorkspaceFieldValue } from "@/lib/workspace-cell-format";
 import { UrlFavicon } from "./url-favicon";
 import { LinkOpenButton } from "./link-open-button";
 import { WorkspaceLink, LinkPreviewWrapper } from "./workspace-link";
+import { useTableCellExpanded } from "../ui/table-cell";
 
 type FormattedFieldValueProps = {
 	value: unknown;
@@ -143,6 +144,7 @@ export function FormattedFieldValue({
 }: FormattedFieldValueProps) {
 	const formatted = formatWorkspaceFieldValue(value, fieldType);
 	const isTableMode = mode === "table";
+	const cellExpanded = useTableCellExpanded();
 
 	if (formatted.kind === "empty") {
 		return <EmptyValue />;
@@ -153,12 +155,12 @@ export function FormattedFieldValue({
 
 	if (hasNewlines) {
 		const lines = displayText.split("\n");
-		const containerClass = className ?? (isTableMode ? "block max-w-[300px] line-clamp-3" : "break-words");
+		const containerClass = className ?? (isTableMode ? cellExpanded ? "block max-w-full whitespace-normal break-words" : cellExpanded === false ? "inline-block max-w-full truncate align-middle" : "block max-w-[300px] line-clamp-3" : "break-words");
 		return (
 			<span className={containerClass}>
 				{lines.map((line, i) => (
 					<Fragment key={i}>
-						{i > 0 && <br />}
+						{i > 0 && (isTableMode && cellExpanded === false ? " " : <br />)}
 						<FormattedSegment
 							text={line}
 							fieldType={fieldType}
@@ -173,7 +175,7 @@ export function FormattedFieldValue({
 	}
 
 	// Single-line: full formatting with embeds
-	const textClassName = className ?? (isTableMode ? "truncate block max-w-[300px]" : "break-words");
+	const textClassName = className ?? (isTableMode ? cellExpanded ? "block max-w-full whitespace-normal break-words" : cellExpanded === false ? "inline-block max-w-full truncate align-middle" : "truncate block max-w-[300px]" : "break-words");
 
 	if (formatted.kind === "link" && formatted.href) {
 		const openInNewTab = formatted.linkType === "url" || formatted.linkType === "file";

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LiveStats } from "./preview-workspace-mock";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 
 /**
  * Right-pane preview for Step 3 (Sync). Mirrors the real `CrmListShell`
@@ -261,27 +262,27 @@ function RealPerson({ person }: { person: ApiPerson }) {
 
   return (
     <>
-      <div className="min-w-0">
-        <p className="truncate text-xs font-medium" style={{ color: "var(--bt-text)" }}>
+      <TableCellContent>
+        <p className="text-xs font-medium" style={{ color: "var(--bt-text)" }}>
           {displayName}
         </p>
         {subtitle && (
-          <p className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>
+          <p className="text-xs" style={{ color: "var(--bt-muted)" }}>
             {subtitle}
           </p>
         )}
-      </div>
+      </TableCellContent>
 
-      <p className="truncate text-xs" style={{ color: "var(--bt-text-2)" }}>
+      <TableCellContent><p className="text-xs" style={{ color: "var(--bt-text-2)" }}>
         {company ?? ""}
-      </p>
+      </p></TableCellContent>
 
-      <p
+      <TableCellContent><p
         className="text-right text-xs tabular-nums"
         style={{ color: "var(--color-text-muted)" }}
       >
         {lastTouch}
-      </p>
+      </p></TableCellContent>
     </>
   );
 }

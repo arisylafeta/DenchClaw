@@ -3,6 +3,7 @@
 import { dueLabel, groupTrades, touchedLabel, type BulkTrade } from "@/lib/bulk-trades";
 import { DueChip, GROUP_TONE, TONE_HEADING } from "./trade-chips";
 import tableStyles from "../ui/data-table.module.css";
+import { TableCellContent } from "../ui/table-cell";
 
 const COLUMNS = "grid-cols-[minmax(0,1.5fr)_120px_130px_minmax(0,1.6fr)_110px_80px]";
 
@@ -35,14 +36,22 @@ export function TradesList({ trades, today, onOpen }: Props) {
           </h2>
           <div className="overflow-hidden rounded-none border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             {group.trades.map((trade) => (
-              <button
+              <div
                 key={trade.id}
                 data-table-part="grid-row"
-                type="button"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                    onOpen(trade);
+                  }
+                }}
                 onClick={() => onOpen(trade)}
                 className={`grid w-full ${COLUMNS} items-center gap-4 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]`}
                 style={{ borderColor: "var(--bt-divider)" }}
               >
+                <TableCellContent>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-xs font-semibold">{trade.title}</span>
@@ -56,12 +65,13 @@ export function TradesList({ trades, today, onOpen }: Props) {
                     <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{trade.fact_line}</div>
                   )}
                 </div>
-                <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{trade.trade_stage}</span>
-                <span className="bt-mono truncate text-xs font-medium">{trade.value ?? ""}</span>
-                <span className="text-xs leading-[1.35]">{trade.next_step ?? "Set a next step"}</span>
-                <span><DueChip label={dueLabel(trade, today)} tone={GROUP_TONE[group.name]} /></span>
-                <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{touchedLabel(trade, today)}</span>
-              </button>
+                </TableCellContent>
+                <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{trade.trade_stage}</span></TableCellContent>
+                <TableCellContent><span className="bt-mono truncate text-xs font-medium">{trade.value ?? ""}</span></TableCellContent>
+                <TableCellContent><span className="text-xs leading-[1.35]">{trade.next_step ?? "Set a next step"}</span></TableCellContent>
+                <TableCellContent><span><DueChip label={dueLabel(trade, today)} tone={GROUP_TONE[group.name]} /></span></TableCellContent>
+                <TableCellContent><span className="text-xs" style={{ color: "var(--bt-muted)" }}>{touchedLabel(trade, today)}</span></TableCellContent>
+              </div>
             ))}
           </div>
         </section>
