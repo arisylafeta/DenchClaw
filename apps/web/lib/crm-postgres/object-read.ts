@@ -102,6 +102,12 @@ function resolveObjectTable(object: ObjectRow): string | null {
   return supportedTables[object.name] ?? null;
 }
 
+
+const PEOPLE_FIELD_ORDER: Record<string, number> = {
+  full_name: 0, company_id: 1, job_title: 2, Purpose: 3,
+  tags: 4, email: 5, phone: 6, linkedin_url: 7,
+  first_name: Number.MAX_SAFE_INTEGER - 1, last_name: Number.MAX_SAFE_INTEGER,
+};
 const FILL_RATE_OBJECTS = new Set(["people", "company", "companies"]);
 const textLikeTypes = new Set(["text", "richtext", "email", "url", "phone"]);
 
@@ -552,7 +558,11 @@ export async function getPostgresObjectData(
     fields = [...fields.filter((field) => field.name !== "Purpose"), purposeField(entity)];
   }
   const effectiveDisplayField = resolveDisplayField(object, fields);
-  if (tableName && FILL_RATE_OBJECTS.has(object.name)) {
+  if (object.name === "people") {
+    fields.sort((a, b) =>
+      (PEOPLE_FIELD_ORDER[a.canonical_column ?? a.name] ?? 8) -
+      (PEOPLE_FIELD_ORDER[b.canonical_column ?? b.name] ?? 8));
+  } else if (tableName && FILL_RATE_OBJECTS.has(object.name)) {
     const fillRates = await getColumnFillRates(tableName, existingColumns);
     fields = [...fields].sort((a, b) => rankFieldsByFillRate(a, b, fillRates));
   }
