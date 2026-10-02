@@ -3,6 +3,8 @@ import {
   dueLabel,
   groupTrades,
   dueText,
+  heldTrades,
+  holdLabel,
   parseTradePatch,
   stageTotal,
   todayInLondon,
@@ -37,6 +39,9 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
     auction_slug: null,
     auction_status: null,
     auction_closes_at: null,
+    hold_until: null,
+    hold_reason: null,
+    hold_from_stage: null,
     updated_at: "2026-09-28T09:00:00Z",
     ...overrides,
   };
@@ -149,4 +154,31 @@ describe("next step", () => {
     expect(parseTradePatch({ next_step_contact_id: contact, next_step_buyer_id: buyer })).toHaveProperty("error");
   });
 });
+});
+
+describe("on hold", () => {
+  it("needs a resume date and a reason to go on hold", () => {
+    expect(parseTradePatch({ trade_stage: "On hold" })).toEqual({ error: "Putting a trade on hold needs a resume date and a reason." });
+    expect(parseTradePatch({ trade_stage: "On hold", hold_until: "2027-03-01", hold_reason: " Batteries on site " })).toEqual({
+      patch: { trade_stage: "On hold", hold_until: "2027-03-01", hold_reason: "Batteries on site" },
+    });
+    expect(parseTradePatch({ hold_until: "not a date" })).toEqual({ error: "hold_until must be a YYYY-MM-DD date." });
+  });
+
+  it("keeps held trades out of the live groups and splits ended holds from waiting ones", () => {
+    const opium = trade({ title: "Opium", trade_stage: "On hold", hold_until: "2027-03-01", hold_reason: "On site" });
+    const ended = trade({ title: "Ended", trade_stage: "On hold", hold_until: "2026-09-20", hold_reason: "Wait" });
+    const live = trade({ title: "Live" });
+    expect(groupTrades([opium, ended, live], TODAY).flatMap((group) => group.trades.map((t) => t.title))).toEqual(["Live"]);
+    const held = heldTrades([opium, ended, live], TODAY);
+    expect(held.ended.map((t) => t.title)).toEqual(["Ended"]);
+    expect(held.waiting.map((t) => t.title)).toEqual(["Opium"]);
+  });
+
+  it("labels the hold by its date", () => {
+    expect(holdLabel({ hold_until: "2027-03-01" }, TODAY)).toBe("Until 1 Mar 2027");
+    expect(holdLabel({ hold_until: "2026-11-02" }, TODAY)).toBe("Until 2 Nov");
+    expect(holdLabel({ hold_until: TODAY }, TODAY)).toBe("Hold ends today");
+    expect(holdLabel({ hold_until: "2026-09-25" }, TODAY)).toBe("Hold ended 3d ago");
+  });
 });

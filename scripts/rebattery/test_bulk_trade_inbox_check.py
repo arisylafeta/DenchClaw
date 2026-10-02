@@ -754,6 +754,33 @@ class DemandRun(unittest.TestCase):
         self.assertIn("Buy-boxes to reconfirm: Waiting Energy (agreed)", text)
         self.assertNotIn("Answered Ltd", text.split("Buy-boxes to reconfirm:")[1])
 
+@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+class HoldSummary(unittest.TestCase):
+    def test_a_hold_ending_within_a_week_is_named_and_held_trades_are_still_watched(self):
+        import psycopg2
+        today = dt.datetime.now(ZoneInfo("Europe/London")).date()
+        conn = psycopg2.connect(TEST_URL)
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+              insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage,
+                hold_until, hold_reason, hold_from_stage, next_step, next_step_due)
+              values ('bt_hold_soon', 'supply', 'Held BESS soon', '', '', 'confirmed', 'On hold', %s, 'Batteries on site', 'With buyers',
+                       'Old step', %s),
+                     ('bt_hold_later', 'supply', 'Held BESS later', '', '', 'confirmed', 'On hold', %s, 'Wait for removal', null, null, null)
+              on conflict do nothing""", (today + dt.timedelta(days=3), today - dt.timedelta(days=5), today + dt.timedelta(days=60)))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            check.summary(conn)
+        with conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            watched = check.load_trades(cur)
+        conn.close()
+        text = out.getvalue()
+        self.assertIn("- Held BESS soon: hold ends in 3d; resume or extend (Batteries on site)", text)
+        self.assertNotIn("Held BESS later", text)
+        self.assertNotIn("Old step", text)  # an on-hold trade is never overdue
+        self.assertIn("bt_hold_later", watched)
+
+
 if __name__ == "__main__":
     unittest.main()
 

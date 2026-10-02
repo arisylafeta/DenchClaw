@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import {
+  HOLD_STAGE,
   LIVE_STAGES,
   TRADE_GROUPS,
   dueLabel,
+  heldTrades,
+  holdLabel,
   stageTotal,
   tradeGroup,
   type BulkTrade,
@@ -43,11 +46,14 @@ function useDropTarget(stage: TradeStage, trades: BulkTrade[], onMove: Props["on
 
 function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: TradeStage }) {
   const { over, handlers } = useDropTarget(stage, trades, onMove);
-  const cards = trades
-    .filter((trade) => trade.trade_stage === stage)
-    .sort((a, b) =>
-      TRADE_GROUPS.indexOf(tradeGroup(a, today)) - TRADE_GROUPS.indexOf(tradeGroup(b, today))
-      || String(a.next_step_due ?? "9999").localeCompare(String(b.next_step_due ?? "9999")));
+  const held = stage === HOLD_STAGE;
+  const cards = held
+    ? [...heldTrades(trades, today).ended, ...heldTrades(trades, today).waiting]
+    : trades
+      .filter((trade) => trade.trade_stage === stage)
+      .sort((a, b) =>
+        TRADE_GROUPS.indexOf(tradeGroup(a, today)) - TRADE_GROUPS.indexOf(tradeGroup(b, today))
+        || String(a.next_step_due ?? "9999").localeCompare(String(b.next_step_due ?? "9999")));
 
   const total = stageTotal(cards);
 
@@ -85,8 +91,10 @@ function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: Trade
           </div>
           {trade.fact_line && <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{trade.fact_line}</span>}
           <div className="flex items-center gap-2 border-t pt-1.5" style={{ borderColor: "var(--bt-divider)" }}>
-            <span className="flex-1 text-[13px] leading-[1.35]">{trade.next_step ?? "Set a next step"}</span>
-            <DueChip label={dueLabel(trade, today)} tone={GROUP_TONE[tradeGroup(trade, today)]} />
+            <span className="flex-1 text-[13px] leading-[1.35]">{held ? trade.hold_reason ?? "On hold" : trade.next_step ?? "Set a next step"}</span>
+            {held
+              ? <DueChip label={holdLabel(trade, today)} tone={trade.hold_until && trade.hold_until <= today ? "red" : "grey"} />
+              : <DueChip label={dueLabel(trade, today)} tone={GROUP_TONE[tradeGroup(trade, today)]} />}
           </div>
         </button>
       ))}
@@ -116,8 +124,9 @@ function ClosedZone({ stage, trades, onMove }: Pick<Props, "trades" | "onMove"> 
 export function TradesBoard(props: Props) {
   return (
     <div className="flex h-full min-h-[480px] flex-col gap-4">
-      <div className="grid min-h-0 flex-1 grid-cols-[repeat(3,minmax(280px,1fr))] gap-5 overflow-x-auto">
+      <div className="grid min-h-0 flex-1 grid-cols-[repeat(3,minmax(280px,1fr))_minmax(240px,0.8fr)] gap-5 overflow-x-auto">
         {LIVE_STAGES.map((stage) => <Column key={stage} stage={stage} {...props} />)}
+        <Column stage={HOLD_STAGE} {...props} />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs" style={{ color: "var(--bt-muted)" }}>Drop here to close</span>

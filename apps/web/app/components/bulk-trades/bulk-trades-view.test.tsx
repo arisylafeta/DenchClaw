@@ -14,7 +14,7 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
     next_step: "Follow up", next_step_due: today, waiting_on: "us", waiting_since: null,
     next_step_contact_id: null, next_step_buyer_id: null,
     owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
-    ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: null, auction_slug: null, auction_status: null, auction_closes_at: null, updated_at: "2026-09-28T09:00:00Z",
+    ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: null, auction_slug: null, auction_status: null, auction_closes_at: null, hold_until: null, hold_reason: null, hold_from_stage: null, updated_at: "2026-09-28T09:00:00Z",
     ...overrides,
   };
 }
@@ -131,5 +131,37 @@ describe("BulkTradesView", () => {
     expect(screen.getByText("Leaf packs, Leeds")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create trade" })).toBeInTheDocument();
   });
-});
 
+  it("folds on-hold trades at the bottom of the list, and asks for a date and reason when a card is dropped on hold", async () => {
+    const held = trade({ id: "bt_h", title: "Synthetic BESS portfolio", trade_stage: "On hold", hold_until: "2099-03-01",
+      hold_reason: "Batteries stay on site until removal", hold_from_stage: "With buyers" });
+    const live = trade({ id: "bt_l", title: "Synthetic packs" });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PATCH"
+      ? new Response(JSON.stringify({ trade: { ...live, ...JSON.parse(String(init.body)) } }))
+      : new Response(JSON.stringify({ trades: [held, live], owners: [] })));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<BulkTradesView />);
+
+    const group = await screen.findByRole("region", { name: "On hold" });
+    expect(within(group).queryByText("Synthetic BESS portfolio")).not.toBeInTheDocument();
+    await userEvent.click(within(group).getByRole("button", { name: /On hold/ }));
+    expect(within(group).getByText("Synthetic BESS portfolio")).toBeInTheDocument();
+    expect(within(group).getByText("Until 1 Mar 2099")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Board" }));
+    const column = screen.getByRole("region", { name: "On hold" });
+    expect(within(column).getByText("Batteries stay on site until removal")).toBeInTheDocument();
+    const transfer = dataTransfer();
+    fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic packs/ }), { dataTransfer: transfer });
+    fireEvent.drop(column, { dataTransfer: transfer });
+    const dialog = await screen.findByRole("dialog", { name: /Put on hold/ });
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("bt_l"), expect.anything());
+    await userEvent.click(within(dialog).getByRole("button", { name: "3 months" }));
+    await userEvent.type(within(dialog).getByLabelText("Why it waits"), "Seller relocating stock");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Put on hold" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_l", expect.objectContaining({ method: "PATCH" })));
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")![1]!.body));
+    expect(body).toMatchObject({ trade_stage: "On hold", hold_reason: "Seller relocating stock" });
+    expect(body.hold_until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});

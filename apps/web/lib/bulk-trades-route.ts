@@ -25,6 +25,9 @@ export async function linkedWrite(write: () => Promise<Response>): Promise<Respo
     return await write();
   } catch (err) {
     if ((err as { code?: string }).code === "23503") return badRequest("A linked record no longer exists. Refresh and try again.");
+    if ((err as { constraint?: string }).constraint === "crm_bulk_trade_lots_hold_check") {
+      return badRequest("A trade on hold needs a resume date and a reason, and only an on-hold trade has them.");
+    }
     throw err;
   }
 }

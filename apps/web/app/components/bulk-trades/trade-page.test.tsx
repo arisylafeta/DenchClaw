@@ -14,7 +14,7 @@ const TRADE: BulkTrade = {
   fact_line: "161 packs · NMC", next_step: "Follow up supplier", next_step_due: today, waiting_on: "us",
   next_step_contact_id: null, next_step_buyer_id: null,
   waiting_since: null, owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
-  ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: "lst_1", auction_slug: null, auction_status: null, auction_closes_at: null, updated_at: "2026-09-28T09:00:00Z",
+  ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: "lst_1", auction_slug: null, auction_status: null, auction_closes_at: null, hold_until: null, hold_reason: null, hold_from_stage: null, updated_at: "2026-09-28T09:00:00Z",
 };
 
 const BUYER: Buyer = {
