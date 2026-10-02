@@ -5,7 +5,7 @@ description: Prepare, freeze, launch, or reconcile a ReBattery Postmark campaign
 
 # ReBattery Email Campaigns
 
-Run `python3 scripts/rebattery/rebattery-campaign.py --help` from the DenchClaw repository. This skill operates the CLI; it is not a substitute for campaign, sender, schema, provider-configuration, or send approval. Read the nearest project instructions and the `writing-emails` skill for creative.
+Run `python3 scripts/rebattery/rebattery-campaign.py --help` from the committed DenchClaw checkout containing this skill, not a different or stale development checkout. This skill operates the CLI; it is not a substitute for campaign, sender, schema, provider-configuration, or send approval. Read the nearest project instructions and the `writing-emails` skill for creative.
 
 Load `POSTMARK_SERVER_TOKEN` through the approved private runtime secret source before provider checks or sending; never print the token or put it in a manifest. The web service's environment is not automatically inherited by a CLI shell. The default database is local `denchclaw`; `DENCH_CAMPAIGN_DSN` overrides it and must be verified before use.
 
