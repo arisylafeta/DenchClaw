@@ -118,7 +118,8 @@ def digest(manifest, rows):
         "stock_snapshot_ref", "message_version", "sender", "reply_to", "reply_owner", "subject", "html", "text", "stream")}
     contents["auction_slug"] = manifest.get("auction_slug")
     contents["links"] = manifest["links"]
-    contents["cohort"] = rows
+    # Approval binds identities, not the database's locale-dependent row order.
+    contents["cohort"] = sorted(rows, key=lambda row: row["email"])
     contents["track_opens"] = True
     contents["track_links"] = "HtmlAndText"
     return hashlib.sha256(json.dumps(contents, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

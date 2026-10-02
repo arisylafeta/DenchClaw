@@ -17,7 +17,7 @@ A SQL cohort file can be as small as `select id as person_id from crm_people whe
 
 1. Confirm every auction/listing identity, current stock and claims, sender signature, Broadcast stream/unsubscribe behavior, reply mailbox and owner, and the recipient-address evidence. Check CRM opt-outs, provider suppressions, stale contacts and previous pitches before approval. The CLI currently rejects CRM opt-outs and duplicate addresses; it does **not** replace the remaining human checks.
 2. Run `preview --manifest <path>`. Inspect all recipients and prior pitch counts. If any identity or suppression is uncertain, stop.
-3. `freeze --manifest <path> --apply` needs an approved database migration/write and captures the exact cohort. Freeze emits a SHA-256 digest of creative, routing, tracking options and resolved cohort. A dry run omits `--apply`.
+3. `freeze --manifest <path> --apply` needs an approved database migration/write and captures the exact cohort. Freeze emits a SHA-256 digest of creative, routing, tracking options and resolved cohort in canonical recipient-email order, independent of database collation. A dry run omits `--apply`.
 4. Show Ari the complete manifest, recipient list and digest. Only after explicit approval of those exact inputs, run `approve --campaign-id <id> --sha256 <digest> --approved-by <name> --apply`. Approval is a record of a human decision, not permission the CLI may invent.
 
 ## Launch and reconcile
