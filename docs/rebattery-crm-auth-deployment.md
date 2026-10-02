@@ -97,6 +97,14 @@ Listing titles and canonical auction links can use the existing local
 the marketplace provider. Technical fields and notes are shown only under
 Details. This page adds no schema, sending, tracking capture or scoring changes.
 
+Lot-buyer email tracking and auction synchronization attribute clicks only through
+`crm_campaign_send_links.first_clicked_at` for the matching listing. The provider's
+message-wide click timestamp must never stand in for a listing click. A multi-lot
+send supplies invitation evidence for its primary listing and every listing CTA;
+general links supply neither listing clicks nor extra listing invitations. The
+normal synchronization path refreshes stored buyer evidence; this change does not
+run a backfill, send messages, or change tracking capture or schema.
+
 Listing count links open square right-side people sheets, filtered by destination
 and email/browser/submission source, with local identity search and 25-row
 pagination. Listing and general-destination email evidence comes from the

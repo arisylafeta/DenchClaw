@@ -32,8 +32,8 @@ const TRACKING = `
     (select row_to_json(latest) from (
        select campaign.campaign_name as campaign, send.accepted_at as sent_at, send.delivered_at, send.bounced_at,
          send.provider_opened_at as opened_at,
-         coalesce(send.provider_link_clicked_at,
-           (select min(link.first_clicked_at) from crm_campaign_send_links link where link.send_id = send.id)) as clicked_at
+         (select min(link.first_clicked_at) from crm_campaign_send_links link
+          where link.send_id = send.id and link.listing_id = lot.listing_id) as clicked_at
        from crm_campaign_sends send
        join campaigns campaign on campaign.id = send.campaign_id
        join crm_bulk_trade_lots lot on lot.id = buyer.lot_id

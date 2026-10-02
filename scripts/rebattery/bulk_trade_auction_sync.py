@@ -261,8 +261,12 @@ def collect_people(cur, lot_id, listing_id, auction_id, submissions, views):
 
     if listing_id:
         cur.execute(
-            """select lower(recipient_email) as email, min(accepted_at) as invited_at, min(provider_link_clicked_at) as clicked_at
-               from crm_campaign_sends where listing_id = %s and accepted_at is not null group by 1""", (listing_id,))
+            """select lower(send.recipient_email) as email, min(send.accepted_at) as invited_at,
+                      min(link.first_clicked_at) as clicked_at
+               from crm_campaign_sends send
+               left join crm_campaign_send_links link on link.send_id = send.id and link.listing_id = %s
+               where send.accepted_at is not null and (send.listing_id = %s or link.listing_id is not null)
+               group by 1""", (listing_id, listing_id))
         for row in cur.fetchall():
             p = person(row["email"])
             if p:
