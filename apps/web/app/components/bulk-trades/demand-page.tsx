@@ -27,6 +27,7 @@ import {
   type SpecListKey,
 } from "@/lib/bulk-demand";
 import { shortDate, ukTime, type Proposal } from "@/lib/bulk-trade-details";
+import tableStyles from "../ui/data-table.module.css";
 import { CrmSearch } from "./buyer-dialogs";
 import { DemandBadge, TierBadge } from "./demand-badge";
 import { ProposalRow } from "./proposal-row";
@@ -103,7 +104,7 @@ export function DemandPage({ today, onOpenTrade }: Props) {
 
   const segment = (value: Filter, label: string) => (
     <button type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}
-      className="h-8 px-3 text-[13px] font-medium"
+      className="h-8 px-3 text-xs font-medium"
       style={filter === value ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)" } : { background: "var(--bt-surface)", color: "var(--bt-text)" }}>
       {label}
     </button>
@@ -135,15 +136,15 @@ export function DemandPage({ today, onOpenTrade }: Props) {
           </Card>
         )}
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div data-table-part="toolbar" className={`bulk-trades ${tableStyles.surface} flex flex-wrap items-center gap-3 border`}>
           <div role="group" aria-label="Filter" className="flex border" style={{ borderColor: "var(--bt-border)" }}>
             {segment("requests", `Requests ${requests.length}`)}
             {segment("standing", `Standing ${standing.length}`)}
             {segment("check", `To check ${toCheck.length}`)}
             {segment("closed", "Closed")}
           </div>
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search demand"
-            placeholder="Search buyers or wants" className="h-8 w-full max-w-[340px] rounded-none border px-2.5 text-[13px]"
+          <input data-table-part="search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search demand"
+            placeholder="Search buyers or wants" className="h-8 w-full max-w-[340px] rounded-none border px-2.5 text-xs"
             style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }} />
           <span className="flex-1" />
           <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Bulk only, 2+ units</span>
@@ -152,15 +153,15 @@ export function DemandPage({ today, onOpenTrade }: Props) {
               {matched.status === "failed" ? "Matching failed" : matched.status === "running" ? "Matching now" : "Matched"} {ukTime(matched.at)}
             </span>
           )}
-          <button type="button" onClick={() => setEditing("new")} className="h-9 rounded-none bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
+          <button type="button" onClick={() => setEditing("new")} className="h-8 rounded-none bg-[var(--bt-accent)] px-3.5 text-xs font-semibold hover:bg-[var(--bt-accent-hover)]"
             style={{ color: "var(--bt-on-accent)" }}>
             Add demand
           </button>
         </div>
 
-        <Card label="Demand" className="overflow-x-auto">
+        <Card label="Demand" className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
           <div className="min-w-[900px]">
-            <div className={`bt-label grid ${COLUMNS} gap-3.5 border-b px-5 py-2.5`} style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
+            <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-3.5 border-b px-3 py-2 font-medium`} style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
               <span>Buyer</span><span>Wants</span><span>Volume</span><span>Where</span>
               <span>{filter === "requests" ? "Needed by" : "Confirmed"}</span><span>Fits</span>
             </div>
@@ -168,12 +169,12 @@ export function DemandPage({ today, onOpenTrade }: Props) {
               const check = checkReason(row, today);
               const summary = [...specLines(row.spec).slice(0, 3), priceLabel(row) && `max ${priceLabel(row)}`].filter(Boolean).join(" · ");
               return (
-                <button key={row.id} type="button" onClick={() => setSelectedId(row.id)} aria-pressed={row.id === selectedId}
-                  className={`grid w-full ${COLUMNS} items-center gap-3.5 border-b px-5 py-3 text-left last:border-b-0 hover:bg-[var(--bt-row-hover)]`}
+                <button key={row.id} data-table-part="grid-row" type="button" onClick={() => setSelectedId(row.id)} aria-pressed={row.id === selectedId}
+                  className={`grid w-full ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)]`}
                   style={{ borderColor: "var(--bt-divider)", color: check || row.status === "closed" ? "var(--bt-muted)" : "var(--bt-text)",
                     background: row.id === selectedId ? "var(--bt-row-hover)" : undefined }}>
                   <div className="flex min-w-0 flex-col items-start gap-1">
-                    <div className="max-w-full truncate text-sm font-semibold">{row.buyer}</div>
+                    <div className="max-w-full truncate text-xs font-semibold">{row.buyer}</div>
                     {row.contact && <div className="max-w-full truncate text-xs" style={{ color: "var(--bt-muted)" }}>{row.contact}</div>}
                     <span className="flex flex-wrap gap-1">
                       <TierBadge tier={row.tier} />
@@ -186,13 +187,13 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                       )}
                     </span>
                   </div>
-                  <span className="flex flex-col gap-0.5 text-[13px] leading-snug">
+                  <span className="flex flex-col gap-0.5 text-xs leading-snug">
                     {row.wants}
                     {summary && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{summary}</span>}
                   </span>
-                  <span className="bt-mono text-[13px]">{volumeLabel(row) ?? ""}</span>
-                  <span className="text-[13px]">{row.location ?? ""}</span>
-                  <span className="flex flex-col items-start gap-1 text-[13px]">
+                  <span className="bt-mono text-xs">{volumeLabel(row) ?? ""}</span>
+                  <span className="text-xs">{row.location ?? ""}</span>
+                  <span className="flex flex-col items-start gap-1 text-xs">
                     {row.kind === "request"
                       ? (row.needed_by ? shortDate(row.needed_by) : "No date")
                       : (row.confirmed_on ? shortDate(row.confirmed_on) : "Never")}
@@ -202,7 +203,7 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                     )}
                     {row.status === "closed" && row.closed_reason && <span className="text-xs">{CLOSED_REASON_LABEL[row.closed_reason]}</span>}
                   </span>
-                  <span className="text-[13px]" style={{ color: row.fits.length ? "var(--bt-link)" : "var(--bt-muted)" }}>
+                  <span className="text-xs" style={{ color: row.fits.length ? "var(--bt-link)" : "var(--bt-muted)" }}>
                     {row.fits.length ? row.fits.map((fit) => fit.title).join(" · ") : "—"}
                   </span>
                 </button>

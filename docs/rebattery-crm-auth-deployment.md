@@ -47,20 +47,25 @@ Selecting a view or resizing columns updates only selection/settings; it never
 resubmits stale view definitions from another tab. Computed multi-value Purpose
 cannot be used as an editable Kanban grouping or scalar timeline grouping.
 
-## People interface
+## Shared data tables and People interface
 
-Only the registered CRM People object's table view opts into the compact
-`--bt-*` presentation, using `isSeedPeopleObjectId` at the workspace host.
-`ObjectTable` and `DataTable` keep their existing interaction engine; the
-presentation is explicit and defaults unchanged for Companies and custom
-People-named objects. Scoped table CSS covers the host toolbar, rows, focus,
-selection, pagination and portaled column/action menus.
+`app/components/ui/data-table.module.css` owns the compact, square `--bt-*`
+data-table presentation: headers, cells, hover/selection, focus, toolbars,
+search, pagination, empty/loading states and portaled menus. `DataTable` and
+`ObjectTable` apply it by default for People, Companies and custom objects;
+there is no People-only presentation switch. Campaigns, Company opportunities,
+Cron, database previews, onboarding, platform administration and the operational
+trade/demand/dismantler column grids consume the same contract. Existing sorting,
+filters, edits, selection, resizing and paging stay in their existing engines.
+Email HTML, code diffs, boards, timelines and non-tabular lists are outside this
+scope; badges and avatars keep their meaningful shapes.
 
-`PersonProfile` uses the same square presentation across its header, tabs,
-overview and notes. Its profile-only token bridge and explicit compact thread
-and activity variants leave shared Company surfaces unchanged. Campaign updates
-use compact rows and destination tables; IDs and sync metadata remain collapsed
-under Details. Dates are formatted for reading without changing their meaning.
+`PersonProfile` keeps its square header, tabs, overview and notes. Campaigns
+groups sends by campaign identity into a five-column results table. Each campaign
+starts closed; a keyboard-operable disclosure reveals per-send and destination
+evidence. Lifetime listing engagement is separately collapsed. Raw IDs, CTA keys
+and sync metadata are not shown. Unknown, unobserved and unsent evidence remain
+distinct, and disclosure state resets on person navigation.
 
 `lib/crm-postgres/person-profile.ts` resolves cached listing metadata in one
 batched local `crm_bulk_trade_lots` read. Campaign detail and Person profiles share
@@ -96,6 +101,14 @@ Listing titles and canonical auction links can use the existing local
 `crm_bulk_trade_lots` cache; this read never follows tracking redirects or calls
 the marketplace provider. Technical fields and notes are shown only under
 Details. This page adds no schema, sending, tracking capture or scoring changes.
+
+Lot-buyer email tracking and auction synchronization attribute clicks only through
+`crm_campaign_send_links.first_clicked_at` for the matching listing. The provider's
+message-wide click timestamp must never stand in for a listing click. A multi-lot
+send supplies invitation evidence for its primary listing and every listing CTA;
+general links supply neither listing clicks nor extra listing invitations. The
+normal synchronization path refreshes stored buyer evidence; this change does not
+run a backfill, send messages, or change tracking capture or schema.
 
 Listing count links open square right-side people sheets, filtered by destination
 and email/browser/submission source, with local identity search and 25-row
@@ -133,3 +146,13 @@ invalid or ambiguous manifests fail closed. Next.js tracing excludes these
 runtime paths; deployment must leave them private and available to the service.
 The page shows the provider's observed refresh/receipt time and queried period,
 separate from email tracking freshness.
+
+## People table layout
+
+Migrations `031_people_column_layout.sql` and `032_people_email_after_tags.sql`
+change display metadata only. People starts with Full Name, Company, Job Title,
+Purpose, Tags, Email Address, Phone Number and LinkedIn URL; First Name and Last Name remain at the end. People no
+longer reorders these columns by fill rate. Company ordering is unchanged.
+Tags uses the existing editable badge renderer; JSON editor values are decoded
+into PostgreSQL arrays on create/update. Saved filters, contact values,
+subscriptions and campaign history are unchanged.

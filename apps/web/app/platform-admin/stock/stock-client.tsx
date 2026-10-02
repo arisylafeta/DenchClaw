@@ -7,6 +7,7 @@ import { ArrowUpDown, ChevronRight, Loader2, Search } from "lucide-react";
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
 import { Input } from "@/app/components/platform-admin/ui/input";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 import {
   Select,
   SelectContent,
@@ -127,7 +128,7 @@ function FilterSelect({
       <SelectTrigger aria-label={label} className="h-8 w-[10.5rem] text-xs">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
         <SelectItem value="all">{placeholder}</SelectItem>
         {options.map((option) => (
           <SelectItem key={option} value={option}>
@@ -220,7 +221,8 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
         </header>
 
         <form
-          className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+          data-table-part="toolbar"
+          className={`bulk-trades ${tableStyles.surface} flex flex-wrap items-center gap-2 border border-[var(--bt-border)] p-3`}
           onSubmit={(event) => {
             event.preventDefault();
             navigate(filters);
@@ -229,6 +231,7 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
           <div className="relative min-w-[15rem] flex-1 basis-[20rem]">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input
+              data-table-part="search"
               aria-label="Search stock"
               value={filters.search}
               onChange={(event) => setFilters({ ...filters, search: event.target.value })}
@@ -243,19 +246,19 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
           <FilterSelect label="Filter by commercial bucket" value={filters.commercialBucket} placeholder="All buckets" options={initialPage.options.commercialBuckets} onChange={(commercialBucket) => setFilters({ ...filters, commercialBucket })} />
           <Select value={filters.sort} onValueChange={(sort) => { const next = { ...filters, sort: sort as StockFilters["sort"] }; setFilters(next); navigate(next); }}>
             <SelectTrigger aria-label="Sort stock" className="h-8 w-[10.5rem] text-xs"><ArrowUpDown className="mr-1 size-3.5" /><SelectValue /></SelectTrigger>
-            <SelectContent>{SORT_OPTIONS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+            <SelectContent className={`bulk-trades ${tableStyles.menu}`}>{SORT_OPTIONS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
           </Select>
           <Button type="submit" size="sm" className="h-8 text-xs" disabled={isPending}><Search className="size-3.5" />Apply</Button>
           <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={reset}>Reset</Button>
         </form>
 
-        <section className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
+        <section className={`bulk-trades ${tableStyles.surface} overflow-hidden border border-[var(--bt-border)]`}>
+          <div data-table-part="toolbar" className="flex items-center justify-between gap-3 border-b border-[var(--bt-border)] px-4 py-3">
             <div><h2 className="text-sm font-semibold text-[var(--color-text)]">All stock</h2><p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Historical rows remain unverified until a supplier confirms availability.</p></div>
             {isPending && <Loader2 className="size-4 animate-spin text-[var(--color-text-muted)]" aria-label="Loading stock" />}
           </div>
           {initialPage.rows.length === 0 ? (
-            <div className="flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center"><Search className="size-6 text-[var(--color-text-muted)]" /><p className="font-medium text-[var(--color-text)]">No stock matches these filters</p><p className="text-sm text-[var(--color-text-muted)]">Try a broader supplier, status, chemistry, or text search.</p></div>
+            <div data-table-part="empty" className="mx-auto flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center"><Search className="size-6 text-[var(--color-text-muted)]" /><p className="font-medium text-[var(--color-text)]">No stock matches these filters</p><p className="text-sm text-[var(--color-text-muted)]">Try a broader supplier, status, chemistry, or text search.</p></div>
           ) : (
             <div className="overflow-x-auto">
               <Table className="min-w-[980px] table-fixed">
@@ -265,7 +268,7 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
               </Table>
             </div>
           )}
-          <div className="border-t border-[var(--color-border)] px-4 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="stock item" onPageChange={(page) => navigate(initialPage.filters, page)} /></div>
+          <div data-table-part="footer" className="border-t border-[var(--bt-border)] px-4 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="stock item" onPageChange={(page) => navigate(initialPage.filters, page)} /></div>
         </section>
       </div>
 
@@ -289,7 +292,7 @@ export function StockClient({ initialPage }: { initialPage: StockPage }) {
 
 function StockRowView({ row, onOpen }: { row: StockListRow; onOpen: () => void }) {
   return (
-    <TableRow className="cursor-pointer [&>td]:py-3" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} aria-label={`Open details for ${row.supplier} ${row.stockId}`}>
+    <TableRow className="cursor-pointer" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} aria-label={`Open details for ${row.supplier} ${row.stockId}`}>
       <TableCell className="max-w-0 overflow-hidden"><p className="truncate font-medium text-[var(--color-text)]" title={row.stockId}>{row.stockId}</p><p className="truncate text-xs text-[var(--color-text-muted)]">{row.commercialBucket?.replaceAll("_", " ") ?? "No commercial bucket"}</p></TableCell>
       <TableCell className="max-w-0 overflow-hidden"><span className="block truncate" title={row.supplier}>{row.supplier}</span></TableCell>
       <TableCell className="max-w-0 overflow-hidden"><p className="truncate font-medium" title={vehicleLabel(row)}>{vehicleLabel(row)}</p><p className="truncate text-xs text-[var(--color-text-muted)]">{row.location ?? "Location unavailable"}</p></TableCell>

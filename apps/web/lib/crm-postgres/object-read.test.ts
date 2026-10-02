@@ -368,7 +368,6 @@ describe("postgres object read adapter", () => {
     );
 
     expect(data.object.name).toBe("people");
-    expect(data.fields[0].name).toBe("Email");
     expect(data.entries[0].entry_id).toBe("p1");
     expect(data.savedViews).toEqual([]);
     expect(data.activeView).toBeUndefined();

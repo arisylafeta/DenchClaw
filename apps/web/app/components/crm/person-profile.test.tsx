@@ -43,6 +43,24 @@ function buildPersonResponse(id: string, name: string) {
   };
 }
 
+function buildCampaignSend(sendId: string, campaignId = "campaign-1", name = "Auction pilot") {
+  return {
+    send_id: sendId, campaign_id: campaignId, campaign_name: name,
+    listing_id: "listing-fpt", listing_title: "FPT battery modules", listing_url: "https://rebattery.io/marketplace/auctions/fpt-modules",
+    recipient_email: "alice@example.com", state: "accepted", pitch_count: 2,
+    accepted_at: "2026-09-23T10:00:00Z" as string | null,
+    delivered_at: "2026-09-23T10:00:10Z" as string | null,
+    bounced_at: null as string | null,
+    provider_opened_at: null as string | null,
+    provider_link_clicked_at: null as string | null,
+    last_synced_at: "2026-09-23T11:00:00Z" as string | null,
+    links: [] as Array<{
+      cta_key: string; listing_id: string | null; listing_title?: string | null;
+      listing_url?: string | null; first_clicked_at: string | null;
+    }>,
+  };
+}
+
 function mockFetchForPerson() {
   return vi
     .spyOn(globalThis, "fetch")
@@ -119,94 +137,95 @@ describe("PersonProfile tab reset on entry change", () => {
     expect(getActiveTabLabel()).toBe("Emails");
   });
 
-  it("shows lifetime update totals and listing clicks separately from general CTA activity, including a click without an open", async () => {
+  it("groups sends by campaign ID, preserves backend totals, and reveals only the activated campaign", async () => {
+    const user = userEvent.setup();
     const clickedAt = "2026-09-23T10:02:00Z";
     const openedAt = "2026-09-23T10:01:00Z";
-    const baseSend = {
-      campaign_id: "campaign-1", campaign_name: "Auction pilot", listing_id: "listing-fpt",
-      recipient_email: "alice@example.com", state: "accepted", pitch_count: 2,
-      accepted_at: "2026-09-23T10:00:00Z", delivered_at: "2026-09-23T10:00:10Z",
-      bounced_at: null, last_synced_at: "2026-09-23T11:00:00Z",
-    };
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({
       ...buildPersonResponse("alice", "Person alice"),
-      campaign_summary: { sent: 4, delivered: 4, opened: 3, clicked: 2, tracking_pending: 0 },
-      listing_engagement: [{ listing_id: "listing-fpt", cta_key: "FPT", clicked_updates: 2 }],
+      campaign_summary: { sent: 9, delivered: 8, opened: 5, clicked: 3, tracking_pending: 0 },
+      listing_engagement: [{ listing_id: "listing-fpt", listing_title: "FPT battery modules", cta_key: "FPT", clicked_updates: 2 }],
       campaigns: [
         {
-          ...baseSend, send_id: "send-1", provider_opened_at: openedAt, provider_link_clicked_at: clickedAt,
+          ...buildCampaignSend("send-new"), accepted_at: "2026-09-24T10:00:00Z",
+          provider_opened_at: openedAt, provider_link_clicked_at: "2026-09-23T10:04:00Z",
           links: [
-            { cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: clickedAt },
+            { cta_key: "FPT", listing_id: "listing-fpt", listing_title: "FPT battery modules", first_clicked_at: clickedAt },
             { cta_key: "grid", listing_id: null, first_clicked_at: clickedAt },
           ],
         },
         {
-          ...baseSend, send_id: "send-2", provider_opened_at: openedAt, provider_link_clicked_at: null,
-          links: [
-            { cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: null },
-            { cta_key: "sourcing", listing_id: null, first_clicked_at: null },
-          ],
+          ...buildCampaignSend("send-old"),
+          links: [{ cta_key: "sourcing", listing_id: null, first_clicked_at: null }],
         },
         {
-          ...baseSend, send_id: "send-3", campaign_id: "campaign-2", campaign_name: "Follow-up",
-          provider_opened_at: openedAt, provider_link_clicked_at: null, links: [],
-        },
-        {
-          ...baseSend, send_id: "send-4", campaign_id: "campaign-3", campaign_name: "Final update",
-          provider_opened_at: null, provider_link_clicked_at: clickedAt,
-          links: [{ cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: clickedAt }],
+          ...buildCampaignSend("send-other", "campaign-2"),
+          links: [{ cta_key: "other-technical-key", listing_id: null, first_clicked_at: null }],
         },
       ],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     render(<PersonProfile personId="alice" activeTab="campaigns" />);
 
-    // Read each metric's value, rather than relying on explanatory copy.
     const summary = await screen.findByRole("region", { name: "Campaign engagement" });
     const metric = (label: string) => within(summary).getByText(label, { selector: "dt" }).parentElement!;
-    expect(within(metric("Sent")).getByText("4", { selector: "dd" })).toBeInTheDocument();
-    expect(within(metric("Opened")).getByText("3 of 4", { selector: "dd" })).toBeInTheDocument();
-    expect(within(metric("Clicked")).getByText("2 of 4", { selector: "dd" })).toBeInTheDocument();
-    expect(within(metric("Delivered")).getByText("4 of 4", { selector: "dd" })).toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(within(metric("Sent")).getByText("9", { selector: "dd" })).toBeInTheDocument();
+    expect(within(metric("Delivered")).getByText("8 of 9", { selector: "dd" })).toBeInTheDocument();
+    expect(within(metric("Opened")).getByText("5 of 9", { selector: "dd" })).toBeInTheDocument();
+    expect(within(metric("Clicked")).getByText("3 of 9", { selector: "dd" })).toBeInTheDocument();
+    expect(getActiveTabLabel()).toBe("Campaigns2");
+    const table = screen.getByRole("table", { name: "Campaign results" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+    expect(within(rows[1]).getByText(/2 sends/)).toBeInTheDocument();
+    expect(rows[1].querySelector("time")?.dateTime).toBe("2026-09-24T10:00:00Z");
+    expect(rows[1]).toHaveTextContent("1 observed · 1 not observed");
+    expect(screen.queryByRole("table", { name: /Destination activity/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Listing engagement" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /FPT battery modules/ })).not.toBeInTheDocument();
 
-    const listings = screen.getByRole("region", { name: "Listing engagement" });
-    const listingRows = within(listings).getAllByRole("row");
-    expect(listingRows).toHaveLength(2);
-    expect(within(listingRows[1]).getByRole("cell", { name: "FPT" })).toBeInTheDocument();
+    const buttons = screen.getAllByRole("button", { name: "Show activity for Auction pilot" });
+    buttons[0].focus();
+    await user.keyboard("{Enter}");
+    expect(buttons[0]).toHaveAttribute("aria-expanded", "true");
+    expect(buttons[1]).toHaveAttribute("aria-expanded", "false");
+    const activity = screen.getByRole("region", { name: "Activity for Auction pilot" });
+    expect(activity.id).toBe(buttons[0].getAttribute("aria-controls"));
+    const history = within(activity).getByRole<HTMLTableElement>("table", { name: "Send history for Auction pilot" });
+    const sendRows = Array.from(history.tBodies[0].rows);
+    expect(sendRows[0].cells[0].querySelector("time")?.dateTime).toBe("2026-09-24T10:00:00Z");
+    expect(sendRows[2].cells[0].querySelector("time")?.dateTime).toBe("2026-09-23T10:00:00Z");
+    const destinations = within(activity).getAllByRole("table", { name: /Destination activity/ });
+    expect(within(destinations[0]).getByText("All auctions")).toBeInTheDocument();
+    expect(within(destinations[1]).getByText("Sourcing form")).toBeInTheDocument();
+    expect(within(destinations[1]).getByText("Not observed")).toBeInTheDocument();
+    expect(screen.queryByText("other-technical-key")).not.toBeInTheDocument();
+    expect(screen.queryByText("send-new")).not.toBeInTheDocument();
+    expect(screen.queryByText("campaign-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Details")).not.toBeInTheDocument();
+    expect(screen.queryByText(/synced/i)).not.toBeInTheDocument();
+    const observedTimes = Array.from(sendRows[0].cells[3].querySelectorAll("time"));
+    expect(observedTimes.map((time) => time.dateTime)).toEqual([clickedAt]);
+
+    await user.keyboard(" ");
+    expect(buttons[0]).toHaveFocus();
+    expect(buttons[0]).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Activity for Auction pilot" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Listings across updates"));
+    const listingRows = within(screen.getByRole("table", { name: "Listing engagement" })).getAllByRole("row");
     expect(within(listingRows[1]).getByRole("cell", { name: "2" })).toBeInTheDocument();
-    expect(within(listings).queryByText("grid")).not.toBeInTheDocument();
-    expect(within(listings).queryByText("sourcing")).not.toBeInTheDocument();
-
-    expect(screen.getAllByRole("article")).toHaveLength(4);
-    const pilots = screen.getAllByRole("article", { name: "Auction pilot" });
-    const firstCtas = within(pilots[0]).getByRole("table", { name: "CTA activity" });
-    const firstLinks = within(firstCtas).getAllByRole("row").slice(1);
-    expect(within(firstLinks[0]).getByRole("cell", { name: "FPT" })).toBeInTheDocument();
-    expect(within(firstLinks[0]).getByRole("cell", { name: "Listing" })).toBeInTheDocument();
-    expect(firstLinks[0].querySelector("time")?.dateTime).toBe(clickedAt);
-    expect(within(firstLinks[1]).getByRole("cell", { name: "grid" })).toBeInTheDocument();
-    expect(within(firstLinks[1]).getByRole("cell", { name: "General CTA" })).toBeInTheDocument();
-    expect(firstLinks[1].querySelector("time")?.dateTime).toBe(clickedAt);
-    const secondCtas = within(pilots[1]).getByRole("table", { name: "CTA activity" });
-    expect(within(secondCtas).getAllByText("No tracked click")).toHaveLength(2);
-
-    const clickWithoutOpen = screen.getByRole("article", { name: "Final update" });
-    expect(within(clickWithoutOpen).getByText("No tracked open")).toBeInTheDocument();
-    const clickedCtas = within(clickWithoutOpen).getByRole("table", { name: "CTA activity" });
-    expect(clickedCtas.querySelector("time")?.dateTime).toBe(clickedAt);
+    expect(within(listingRows[1]).getByRole("cell", { name: "FPT battery modules" })).toBeInTheDocument();
   });
 
-  it.each(["2026-09-23T10:00:00Z", null])("keeps accepted unsynced activity unknown with acceptance timestamp %s while showing observed clicks", async (acceptedAt) => {
+  it.each(["2026-09-23T10:00:00Z", null])("keeps accepted unsynced evidence unknown with acceptance timestamp %s, without treating click as open", async (acceptedAt) => {
+    const user = userEvent.setup();
     const clickedAt = "2026-09-23T10:02:00Z";
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({
       ...buildPersonResponse("alice", "Person alice"),
       campaign_summary: { sent: 1, delivered: 0, opened: 0, clicked: 1, tracking_pending: 1 },
-      listing_engagement: [],
       campaigns: [{
-        send_id: "send-pending", campaign_id: "campaign-1", campaign_name: "Pending update",
-        listing_id: "", recipient_email: "alice@example.com", state: "accepted", pitch_count: 0,
-        accepted_at: acceptedAt, delivered_at: null, bounced_at: null,
-        provider_opened_at: null, provider_link_clicked_at: null, last_synced_at: null,
+        ...buildCampaignSend("send-pending", "campaign-1", "Pending update"),
+        listing_id: "", accepted_at: acceptedAt, delivered_at: null, last_synced_at: null,
         links: [
           { cta_key: "grid", listing_id: null, first_clicked_at: clickedAt },
           { cta_key: "FPT", listing_id: "listing-fpt", first_clicked_at: null },
@@ -214,55 +233,116 @@ describe("PersonProfile tab reset on entry change", () => {
       }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     render(<PersonProfile personId="alice" activeTab="campaigns" />);
-    const update = await screen.findByRole("article", { name: "Pending update" });
+    const button = await screen.findByRole("button", { name: "Show activity for Pending update" });
     expect(screen.getByRole("status")).toHaveTextContent(/1 sent update/);
-    expect(within(update).queryByText("No tracked open")).not.toBeInTheDocument();
-    expect(within(update).queryByText("No tracked click")).not.toBeInTheDocument();
-    expect(within(update).getByText(/Open activity unknown/)).toBeInTheDocument();
-    const clicks = update.querySelectorAll("time");
-    expect(Array.from(clicks).filter((time) => time.dateTime === clickedAt && !time.closest("table"))).toHaveLength(1);
-    const links = within(within(update).getByRole("table", { name: "CTA activity" })).getAllByRole("row").slice(1);
+    const row = button.closest("tr")!;
+    if (acceptedAt) {
+      expect(row.cells[1].querySelector("time")?.dateTime).toBe(acceptedAt);
+    } else {
+      expect(row.cells[1]).toHaveTextContent("Date unknown");
+    }
+    expect(row.cells[2]).toHaveTextContent("Unconfirmed");
+    expect(row.cells[3]).toHaveTextContent("Unknown");
+    expect(row.cells[4]).toHaveTextContent("Observed");
+    expect(row.cells[4].querySelector("time")?.dateTime).toBe(clickedAt);
+    await user.click(button);
+    const links = within(screen.getByRole("table", { name: /Destination activity/ })).getAllByRole("row").slice(1);
     expect(links[0].querySelector("time")?.dateTime).toBe(clickedAt);
-    expect(within(links[1]).getByText(/Click activity unknown/)).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Listing engagement" })).not.toBeInTheDocument();
+    expect(within(links[1]).getByText("Unknown")).toBeInTheDocument();
   });
 
-  it("uses cached listing titles and keeps an uncached UUID destination inside collapsed details", async () => {
+  it("retains observed, unknown and unsent send states in a mixed campaign and preserves bounce and delivery evidence", async () => {
+    const user = userEvent.setup();
+    const clickedAt = "2026-09-23T10:02:00Z";
+    const bouncedAt = "2026-09-23T10:00:20Z";
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      ...buildPersonResponse("alice", "Person alice"),
+      campaigns: [
+        { ...buildCampaignSend("bounced"), bounced_at: bouncedAt, provider_link_clicked_at: clickedAt },
+        { ...buildCampaignSend("pending"), delivered_at: null, last_synced_at: null },
+        { ...buildCampaignSend("unsent"), state: "queued", accepted_at: null, delivered_at: null, last_synced_at: null },
+      ],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    render(<PersonProfile personId="alice" activeTab="campaigns" />);
+    const button = await screen.findByRole("button", { name: "Show activity for Auction pilot" });
+    const row = button.closest("tr")!;
+    expect(row.cells[2]).toHaveTextContent("1 bounced · 1 unconfirmed · 1 not sent");
+    expect(row.cells[3]).toHaveTextContent("1 not observed · 1 unknown · 1 not sent");
+    expect(row.cells[4]).toHaveTextContent("1 observed · 1 unknown · 1 not sent");
+    await user.click(button);
+    const history = screen.getByRole<HTMLTableElement>("table", { name: "Send history for Auction pilot" });
+    const rows = Array.from(history.tBodies[0].rows);
+    expect(rows[0].cells[2]).toHaveTextContent("Not observed");
+    expect(rows[0].cells[3].querySelector("time")?.dateTime).toBe(clickedAt);
+    expect(Array.from(rows[0].cells[1].querySelectorAll("time")).map((time) => time.dateTime)).toEqual([bouncedAt, "2026-09-23T10:00:10Z"]);
+    expect(rows[4].cells[0]).toHaveTextContent("Not sent");
+    expect(rows[4].cells[3]).toHaveTextContent("Not sent");
+    expect(screen.queryByRole("table", { name: /Destination activity/ })).not.toBeInTheDocument();
+    expect(within(history).getAllByRole("link", { name: /FPT battery modules/ })).toHaveLength(3);
+  });
+
+  it("uses cached listing links and generic labels without exposing missing metadata or CTA keys", async () => {
+    const user = userEvent.setup();
     const listingId = "d197f1ce-2e9e-4ec5-b341-7c915fdc85bc";
     const fallbackId = "37b898b8-a442-41cb-aa5f-ec4d516beb0c";
     const listingUrl = "https://rebattery.io/marketplace/auctions/fpt-modules";
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({
       ...buildPersonResponse("alice", "Person alice"),
       campaigns: [{
-        send_id: "send", campaign_id: "campaign", campaign_name: "Battery update",
-        listing_id: listingId, listing_title: "FPT battery modules", listing_url: listingUrl,
-        recipient_email: "alice@example.com", state: "accepted", pitch_count: 1,
-        accepted_at: "2026-09-23T10:00:00Z", delivered_at: null, bounced_at: null,
-        provider_opened_at: null, provider_link_clicked_at: null, last_synced_at: "2026-09-23T11:00:00Z",
+        ...buildCampaignSend("send", "campaign", "Battery update"), listing_id: listingId,
         links: [
           { cta_key: listingId, listing_id: listingId, listing_title: "FPT battery modules", listing_url: listingUrl, first_clicked_at: null },
-          { cta_key: fallbackId, listing_id: fallbackId, listing_title: null, listing_url: null, first_clicked_at: null },
+          { cta_key: fallbackId, listing_id: fallbackId, listing_title: fallbackId, listing_url: null, first_clicked_at: null },
+          { cta_key: "internal_cta_key", listing_id: null, first_clicked_at: null },
         ],
       }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     render(<PersonProfile personId="alice" activeTab="campaigns" />);
-    const update = await screen.findByRole("article", { name: "Battery update" });
-    const table = within(update).getByRole("table", { name: "CTA activity" });
-    expect(within(table).getByRole("link", { name: /FPT battery modules/ })).toHaveAttribute("href", listingUrl);
-    expect(within(table).queryByText(fallbackId)).not.toBeInTheDocument();
-    expect(within(table).queryByRole("link", { name: "Listing" })).not.toBeInTheDocument();
-    const details = update.querySelector("details")!;
-    expect(details.open).toBe(false);
-    expect(details.textContent).toContain(fallbackId);
+    await user.click(await screen.findByRole("button", { name: "Show activity for Battery update" }));
+    const table = screen.getByRole("table", { name: /Destination activity/ });
+    const link = within(table).getByRole("link", { name: /FPT battery modules/ });
+    expect(link).toHaveAttribute("href", listingUrl);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    const rows = within(table).getAllByRole<HTMLTableRowElement>("row");
+    expect(rows[2].cells[0]).toHaveTextContent(/^Listing$/);
+    expect(within(rows[2]).queryByRole("link")).not.toBeInTheDocument();
+    expect(rows[3].cells[0]).toHaveTextContent(/^Other link$/);
+    expect(screen.queryByText(listingId)).not.toBeInTheDocument();
+    expect(screen.queryByText(fallbackId)).not.toBeInTheDocument();
+    expect(screen.queryByText("internal_cta_key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Details")).not.toBeInTheDocument();
   });
 
-  it("shows zero sent updates without listing or per-update activity when no campaigns exist", async () => {
+  it("resets campaign and lifetime listing disclosures when navigating to a different person", async () => {
+    const user = userEvent.setup();
+    fetchSpy.mockImplementation((input) => {
+      const id = input.toString().endsWith("/bob") ? "bob" : "alice";
+      return Promise.resolve(new Response(JSON.stringify({
+        ...buildPersonResponse(id, `Person ${id}`),
+        campaigns: [buildCampaignSend("send")],
+        listing_engagement: [{ listing_id: "listing-fpt", listing_title: "FPT battery modules", cta_key: "FPT", clicked_updates: 1 }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    const { rerender } = render(<PersonProfile personId="alice" activeTab="campaigns" />);
+    await user.click(await screen.findByRole("button", { name: "Show activity for Auction pilot" }));
+    await user.click(screen.getByText("Listings across updates"));
+    expect(screen.getByRole("region", { name: "Activity for Auction pilot" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Listing engagement" })).toBeInTheDocument();
+    rerender(<PersonProfile personId="bob" activeTab="campaigns" />);
+    await screen.findByText("Person bob");
+    expect(screen.getByRole("button", { name: "Show activity for Auction pilot" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Activity for Auction pilot" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Listing engagement" })).not.toBeInTheDocument();
+  });
+
+  it("shows zero sent updates and no activity tables when no campaigns exist", async () => {
     render(<PersonProfile personId="alice" activeTab="campaigns" />);
     const section = await screen.findByRole("region", { name: "Campaign engagement" });
     const sent = within(section).getByText("Sent", { selector: "dt" }).parentElement!;
     expect(within(sent).getByText("0", { selector: "dd" })).toBeInTheDocument();
-    expect(screen.queryByRole("article")).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Listing engagement" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByText("No campaign updates recorded.")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

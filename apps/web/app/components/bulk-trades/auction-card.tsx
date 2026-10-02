@@ -1,5 +1,6 @@
 "use client";
 
+import tableStyles from "../ui/data-table.module.css";
 import { useState } from "react";
 import { auctionOfferLabel, shortDate, type AuctionActivity, type TradeAuction } from "@/lib/bulk-trade-details";
 import { Card, ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
@@ -84,29 +85,29 @@ export function AuctionCard({ tradeId, auction, today, onChanged }: Props) {
       </div>
       {error && <div className="px-5 pb-2"><ErrorText error={error} /></div>}
       {open && (
-        <div className="overflow-x-auto border-t" style={{ borderColor: "var(--bt-divider)" }}>
-          <table className="w-full min-w-[720px] text-sm">
+        <div className={`bulk-trades ${tableStyles.surface} overflow-x-auto border-t`} style={{ borderColor: "var(--bt-divider)" }}>
+          <table className={`${tableStyles.table} min-w-[720px]`}>
             <thead style={{ background: "var(--bt-table-head)" }}>
               <tr className="bt-label text-left">
-                <th className="px-5 py-2 font-normal">Email</th>
-                <th className="px-3 py-2 font-normal">Invited</th>
-                <th className="px-3 py-2 font-normal">Clicked</th>
-                <th className="px-3 py-2 font-normal">Viewed</th>
-                <th className="px-3 py-2 font-normal">Offer</th>
-                <th className="px-5 py-2 font-normal" />
+                <th className={tableStyles.headerCell}>Email</th>
+                <th className={tableStyles.headerCell}>Invited</th>
+                <th className={tableStyles.headerCell}>Clicked</th>
+                <th className={tableStyles.headerCell}>Viewed</th>
+                <th className={tableStyles.headerCell}>Offer</th>
+                <th className={tableStyles.headerCell} />
               </tr>
             </thead>
             <tbody>
               {people.map((person) => (
                 <tr key={person.email} className="border-t" style={{ borderColor: "var(--bt-divider)" }}>
-                  <td className="px-5 py-2">{person.email}</td>
-                  <td className="px-3 py-2" style={{ color: "var(--bt-muted)" }}>{day(person.invited_at)}</td>
-                  <td className="px-3 py-2" style={{ color: "var(--bt-muted)" }}>{day(person.clicked_at)}</td>
-                  <td className="px-3 py-2" style={{ color: "var(--bt-muted)" }}>
+                  <td className={tableStyles.cell}>{person.email}</td>
+                  <td className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.invited_at)}</td>
+                  <td className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.clicked_at)}</td>
+                  <td className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>
                     {person.view_count ? `${person.view_count}× · ${day(person.last_viewed_at)}` : ""}
                   </td>
-                  <td className="bt-mono px-3 py-2">{person.last_offer ? auctionOfferLabel(person.last_offer) : person.message_count ? "Message" : ""}</td>
-                  <td className="px-5 py-2 text-right">
+                  <td className={`${tableStyles.cell} bt-mono`}>{person.last_offer ? auctionOfferLabel(person.last_offer) : person.message_count ? "Message" : ""}</td>
+                  <td className={`${tableStyles.cell} text-right`}>
                     {person.buyer_id
                       ? <span className="text-xs" style={{ color: "var(--bt-muted)" }}>On buyers</span>
                       : (

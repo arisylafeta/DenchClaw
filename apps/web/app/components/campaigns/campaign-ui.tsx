@@ -8,7 +8,6 @@ import { buttonClass, buttonStyle } from "../bulk-trades/trade-ui";
 export const PAGE_SIZE = 25;
 export const mutedStyle = { color: "var(--bt-muted)" };
 export const borderStyle = { borderColor: "var(--bt-border)" };
-export const cellClass = "border-b px-3.5 py-3 align-top text-[13px]";
 export const cellStyle = { borderColor: "var(--bt-divider)" };
 
 export function humanize(value: string | null): string {

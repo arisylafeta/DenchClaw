@@ -372,7 +372,6 @@ describe("CompanyProfile tab reset on entry change", () => {
 
     await user.click(screen.getByRole("button", { name: /Opportunities/ }));
     expect(screen.getByText("2 of 2 opportunities")).toBeInTheDocument();
-    expect(screen.getByTestId("opportunities-table-shell")).toHaveClass("w-full");
     expect(screen.getByText("Nissan Leaf battery pack")).toBeInTheDocument();
     expect(screen.getByText("Tesla Model 3 long range pack")).toBeInTheDocument();
 

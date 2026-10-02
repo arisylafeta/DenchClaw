@@ -15,6 +15,7 @@ import type {
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
 import { Input } from "@/app/components/platform-admin/ui/input";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 import {
   Select,
   SelectContent,
@@ -159,7 +160,7 @@ function FilterSelect({
       <SelectTrigger aria-label={ariaLabel} className="h-8 w-[8.25rem] text-xs">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
         <SelectItem value="all">{placeholder}</SelectItem>
         {options.map((option) => (
           <SelectItem key={option} value={option}>{option.replaceAll("_", " ")}</SelectItem>
@@ -244,7 +245,7 @@ export function ListingsClient({ initialPage }: ListingsClientProps) {
           </div>
         </header>
 
-        <section className="flex flex-col gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Repeatable target view">
+        <section className={`bulk-trades ${tableStyles.surface} flex flex-col gap-3 border border-[var(--bt-border)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between`} aria-label="Repeatable target view">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Repeatable target view</p>
             <p className="mt-1 truncate text-sm font-medium text-[var(--color-text)]" title={filterSummary(initialPage.filters)}>{filterSummary(initialPage.filters)}</p>
@@ -257,12 +258,14 @@ export function ListingsClient({ initialPage }: ListingsClientProps) {
         </section>
 
         <form
-          className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+          data-table-part="toolbar"
+          className={`bulk-trades ${tableStyles.surface} flex flex-wrap items-center gap-2 border border-[var(--bt-border)] p-3`}
           onSubmit={(event) => { event.preventDefault(); navigate(filters); }}
         >
           <div className="relative min-w-[15rem] flex-1 basis-[18rem]">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" aria-hidden />
             <Input
+              data-table-part="search"
               aria-label="Search listings"
               value={filters.search}
               onChange={(event) => setFilters({ ...filters, search: event.target.value })}
@@ -278,19 +281,19 @@ export function ListingsClient({ initialPage }: ListingsClientProps) {
           <FilterSelect ariaLabel="Filter by listing channel" value={filters.channel} placeholder="All channels" options={["sale", "recycling"]} onChange={(channel) => setFilters({ ...filters, channel: channel as ListingFilters["channel"] })} />
           <Select value={filters.sort} onValueChange={(sort) => { const next = { ...filters, sort: sort as ListingFilters["sort"] }; setFilters(next); navigate(next); }}>
             <SelectTrigger aria-label="Sort listings" className="h-8 w-[10.25rem] text-xs"><ArrowUpDown className="mr-1 size-3.5" aria-hidden /><SelectValue /></SelectTrigger>
-            <SelectContent>{SORT_OPTIONS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+            <SelectContent className={`bulk-trades ${tableStyles.menu}`}>{SORT_OPTIONS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
           </Select>
           <Button type="submit" size="sm" className="h-8 text-xs" disabled={isPending}><Search className="size-3.5" aria-hidden />Apply</Button>
           <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={resetFilters}>Reset</Button>
         </form>
 
-        <section className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
+        <section className={`bulk-trades ${tableStyles.surface} overflow-hidden border border-[var(--bt-border)]`}>
+          <div data-table-part="toolbar" className="flex items-center justify-between gap-3 border-b border-[var(--bt-border)] px-4 py-3">
             <div><h2 className="text-sm font-semibold text-[var(--color-text)]">All listings</h2><p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Capacity and weight filters run on the server. Latest updates first by default.</p></div>
             {isPending && <Loader2 className="size-4 animate-spin text-[var(--color-text-muted)]" aria-label="Loading listings" />}
           </div>
           {initialPage.rows.length === 0 ? (
-            <div className="flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center"><Search className="size-6 text-[var(--color-text-muted)]" aria-hidden /><p className="font-medium text-[var(--color-text)]">No listings match these filters</p><p className="text-sm text-[var(--color-text-muted)]">Try widening the capacity or weight range.</p></div>
+            <div data-table-part="empty" className="mx-auto flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center"><Search className="size-6 text-[var(--color-text-muted)]" aria-hidden /><p className="font-medium text-[var(--color-text)]">No listings match these filters</p><p className="text-sm text-[var(--color-text-muted)]">Try widening the capacity or weight range.</p></div>
           ) : (
             <div className="overflow-x-auto">
               <Table className="min-w-[760px] table-fixed">
@@ -300,7 +303,7 @@ export function ListingsClient({ initialPage }: ListingsClientProps) {
               </Table>
             </div>
           )}
-          <div className="border-t border-[var(--color-border)] px-4 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="listing" onPageChange={(page) => navigate(filters, page)} /></div>
+          <div data-table-part="footer" className="border-t border-[var(--bt-border)] px-4 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="listing" onPageChange={(page) => navigate(filters, page)} /></div>
         </section>
       </div>
 
@@ -324,12 +327,12 @@ export function ListingsClient({ initialPage }: ListingsClientProps) {
 
 function ListingRowView({ row, onOpen }: { row: ListingListRow; onOpen: () => void }) {
   return (
-    <TableRow className="cursor-pointer [&>td]:py-3" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} aria-label={`Open details for ${row.title ?? row.id}`}>
+    <TableRow className="cursor-pointer" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} aria-label={`Open details for ${row.title ?? row.id}`}>
       <TableCell className="max-w-0 overflow-hidden"><div className="min-w-0"><p className="truncate font-medium text-[var(--color-text)]" title={row.title ?? "Untitled listing"}>{row.title ?? "Untitled listing"}</p><p className="truncate text-xs text-[var(--color-text-muted)]" title={row.reference ?? row.id}>{row.reference ?? shortId(row.id)}</p></div></TableCell>
-      <TableCell className="max-w-0 overflow-hidden"><span className="block truncate text-sm text-[var(--color-text)]" title={row.supplierName ?? "Unknown supplier"}>{row.supplierName ?? "Unknown supplier"}</span></TableCell>
-      <TableCell className="whitespace-nowrap"><span className="text-sm font-medium text-[var(--color-text)]">{formatNumber(row.packKwh, "kWh")}</span></TableCell>
-      <TableCell className="whitespace-nowrap"><span className="text-sm font-medium text-[var(--color-text)]">{formatNumber(row.packWeightKg, "kg")}</span></TableCell>
-      <TableCell className="whitespace-nowrap"><span className="text-sm text-[var(--color-text)]">{formatQuantity(row.quantity)}</span></TableCell>
+      <TableCell className="max-w-0 overflow-hidden"><span className="block truncate text-[var(--color-text)]" title={row.supplierName ?? "Unknown supplier"}>{row.supplierName ?? "Unknown supplier"}</span></TableCell>
+      <TableCell className="whitespace-nowrap"><span className="font-medium text-[var(--color-text)]">{formatNumber(row.packKwh, "kWh")}</span></TableCell>
+      <TableCell className="whitespace-nowrap"><span className="font-medium text-[var(--color-text)]">{formatNumber(row.packWeightKg, "kg")}</span></TableCell>
+      <TableCell className="whitespace-nowrap"><span className="text-[var(--color-text)]">{formatQuantity(row.quantity)}</span></TableCell>
       <TableCell className="max-w-0 overflow-hidden"><div className="min-w-0 space-y-1">{statusBadge(row.status)}<p className="truncate text-[11px] text-[var(--color-text-muted)]">{row.channel ?? "—"} · {row.visibility ? VISIBILITY_LABELS[row.visibility] ?? row.visibility : "—"}</p></div></TableCell>
       <TableCell className="whitespace-nowrap"><span className="text-xs text-[var(--color-text-muted)]">{formatDate(row.updatedAt)}</span></TableCell>
       <TableCell><ChevronRight className="size-4 text-[var(--color-text-muted)]" aria-hidden /></TableCell>

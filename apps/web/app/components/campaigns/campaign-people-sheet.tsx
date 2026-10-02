@@ -1,5 +1,6 @@
 "use client";
 
+import tableStyles from "../ui/data-table.module.css";
 import { useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { flushSync } from "react-dom";
@@ -10,7 +11,7 @@ import { buildEntryLink } from "@/lib/workspace-links";
 import { buttonClass, buttonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../platform-admin/ui/sheet";
 import { Input } from "../ui/input";
-import { CampaignDate, PAGE_SIZE, Pagination, cellClass, cellStyle, mutedStyle } from "./campaign-ui";
+import { CampaignDate, PAGE_SIZE, Pagination, cellStyle, mutedStyle } from "./campaign-ui";
 
 export type PeopleSource = "email" | "click" | "browser" | "offer" | "message" | "buy_now";
 export type CampaignPersonRow = { recipient: CampaignRecipient; activity?: CampaignActivityPerson };
@@ -64,38 +65,38 @@ function PeopleTable({ rows, source, navigate }: { rows: CampaignPersonRow[]; so
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1));
   const headers = source === "email" ? ["Recipient", "Redirect clicks (PostHog)", "Last click (PostHog)", "Last view (PostHog)"] : source === "click" ? ["Recipient", "Redirect clicks", "Last click", "Last view"] : source === "browser" ? ["Recipient", "Page events", "Sessions", "Last view"] : ["Recipient", `${SOURCE_LABELS[source]} events`, "Last action"];
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)", background: "var(--bt-bg)" }}>
-        <Input type="search" aria-label="Search sheet people" placeholder="Search name, company or email" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
+    <div className={`bulk-trades ${tableStyles.surface} flex min-h-0 flex-1 flex-col`}>
+      <div data-table-part="toolbar" className="border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)", background: "var(--bt-bg)" }}>
+        <Input data-table-part="search" type="search" aria-label="Search sheet people" placeholder="Search name, company or email" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <table ref={table} tabIndex={-1} aria-label="Destination people" className="w-full min-w-[560px] border-collapse text-left focus:outline-none">
-          <thead style={{ background: "var(--bt-table-head)" }}><tr>{headers.map((label) => <th key={label} scope="col" className="bt-label border-b px-3.5 py-2.5" style={cellStyle}>{label}</th>)}</tr></thead>
+        <table ref={table} tabIndex={-1} aria-label="Destination people" className={`${tableStyles.table} min-w-[560px] focus:outline-none`}>
+          <thead style={{ background: "var(--bt-table-head)" }}><tr>{headers.map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>
             {filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map(({ recipient, activity }) => <tr key={recipient.person_id} className="hover:bg-[var(--bt-row-hover)]">
-              <td className={`${cellClass} min-w-[220px]`} style={cellStyle}>
+              <td className={`${tableStyles.cell} min-w-[220px]`} style={cellStyle}>
                 <a href={buildEntryLink("people", recipient.person_id)} onClick={(event) => navigate(event, recipient.person_id)} onAuxClick={(event) => { if (event.button === 1) { navigate(event, recipient.person_id); } }} className="font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{recipient.person_name || recipient.recipient_email}</a>
                 {recipient.company_name && <div className="mt-0.5" style={mutedStyle}>{recipient.company_name}</div>}
                 {recipient.person_name && <div className="mt-0.5 break-all text-xs" style={mutedStyle}>{recipient.recipient_email}</div>}
               </td>
               {source === "email" || source === "click" ? <>
-                <td className={`${cellClass} bt-mono`} style={cellStyle}>{activity?.redirect_events ?? "Unknown"}</td>
-                <td className={cellClass} style={cellStyle}>{activity ? <CampaignDate value={activity.last_clicked_at} withTime /> : "Unknown"}</td>
-                <td className={cellClass} style={cellStyle}>{activity ? <CampaignDate value={activity.last_browser_at} withTime /> : "Unknown"}</td>
+                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.redirect_events ?? "Unknown"}</td>
+                <td className={tableStyles.cell} style={cellStyle}>{activity ? <CampaignDate value={activity.last_clicked_at} withTime /> : "Unknown"}</td>
+                <td className={tableStyles.cell} style={cellStyle}>{activity ? <CampaignDate value={activity.last_browser_at} withTime /> : "Unknown"}</td>
               </> : source === "browser" ? <>
-                <td className={`${cellClass} bt-mono`} style={cellStyle}>{activity?.page_views ?? "Unknown"}</td>
-                <td className={`${cellClass} bt-mono`} style={cellStyle}>{activity?.sessions ?? "Unknown"}</td>
-                <td className={cellClass} style={cellStyle}><CampaignDate value={activity?.last_browser_at ?? null} withTime /></td>
+                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.page_views ?? "Unknown"}</td>
+                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity?.sessions ?? "Unknown"}</td>
+                <td className={tableStyles.cell} style={cellStyle}><CampaignDate value={activity?.last_browser_at ?? null} withTime /></td>
               </> : <>
-                <td className={`${cellClass} bt-mono`} style={cellStyle}>{activity ? activity[SUBMISSION_FIELDS[source].count] : "Unknown"}</td>
-                <td className={cellClass} style={cellStyle}><CampaignDate value={activity?.[SUBMISSION_FIELDS[source].last_at] ?? null} withTime /></td>
+                <td className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{activity ? activity[SUBMISSION_FIELDS[source].count] : "Unknown"}</td>
+                <td className={tableStyles.cell} style={cellStyle}><CampaignDate value={activity?.[SUBMISSION_FIELDS[source].last_at] ?? null} withTime /></td>
               </>}
             </tr>)}
             {!filtered.length && <tr><td colSpan={headers.length} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>{rows.length ? "No recipient records match this search." : "No recipient records with this activity were observed."}</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pagination page={currentPage} count={filtered.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} />
+      <div data-table-part="footer"><Pagination page={currentPage} count={filtered.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} /></div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { CrmListShell } from "@/app/components/crm/crm-list-shell";
 import { DataTable } from "@/app/components/workspace/data-table";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
 import {
@@ -199,7 +200,7 @@ export function PayoutReviewsClient({
   return (
     <>
       <CrmListShell title="Payout reviews" count={reviews.length}>
-        <div className="h-full min-h-0">
+        <div className={`bulk-trades ${tableStyles.surface} h-full min-h-0`}>
           <DataTable
             columns={columns}
             data={filtered}
@@ -215,7 +216,7 @@ export function PayoutReviewsClient({
                   <SelectTrigger className="h-8 w-36 text-xs" aria-label="Filter by review status">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                     <SelectItem value="open">Open</SelectItem>
                     <SelectItem value="requested">Requested</SelectItem>
                     <SelectItem value="processing">Processing</SelectItem>
@@ -229,7 +230,7 @@ export function PayoutReviewsClient({
                   <SelectTrigger className="h-8 w-40 text-xs" aria-label="Filter by match result">
                     <SelectValue placeholder="Match result" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                     <SelectItem value="all">All results</SelectItem>
                     <SelectItem value="partial_match">Partial match</SelectItem>
                     <SelectItem value="mismatch">Mismatch</SelectItem>

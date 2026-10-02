@@ -2,6 +2,7 @@
 
 import { Fragment, useRef, useState } from "react";
 import type { BulkTrade, TradePatch } from "@/lib/bulk-trades";
+import tableStyles from "../ui/data-table.module.css";
 import {
   FIELD_STATUSES,
   FIELD_TEMPLATES,
@@ -125,8 +126,8 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
   }
 
   return (
-    <Card label="Data" className="overflow-hidden">
-      <header className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
+    <Card label="Data" className={`bulk-trades ${tableStyles.surface} overflow-hidden`}>
+      <header data-table-part="toolbar" className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
         <h2 className="text-base font-semibold">Data</h2>
         <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Click a row to fill it in or change who sees it</span>
         <span className="flex-1" />
@@ -134,7 +135,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
       </header>
       <div className="overflow-x-auto">
         <div className="min-w-[860px]">
-          <div className={`grid ${FIELD_COLUMNS} gap-4 border-b px-5 py-2.5 bt-label`} style={tableHead}>
+          <div data-table-part="grid-header" className={`grid ${FIELD_COLUMNS} gap-4 border-b px-3 py-2 font-medium`} style={tableHead}>
             <span>Field</span><span>Value</span><span>Source</span><span>Status</span><span>Buyers see at</span>
           </div>
           {templates.map((template) => {
@@ -144,21 +145,22 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
             return (
               <Fragment key={template.key}>
               <button
+                data-table-part="grid-row"
                 type="button"
                 onClick={() => setEditing(template)}
                 aria-label={`Edit ${template.label}`}
-                className={`grid w-full ${FIELD_COLUMNS} items-start gap-4 border-b px-5 py-2.5 text-left text-sm hover:bg-[var(--bt-row-hover)]`}
+                className={`grid w-full ${FIELD_COLUMNS} items-start gap-4 border-b px-3 py-2 text-left text-xs hover:bg-[var(--bt-row-hover)]`}
                 style={{ borderColor: "var(--bt-divider)", background: status === "conflict" ? "var(--bt-amber-tint)" : undefined }}
               >
                 <span style={{ color: "var(--bt-text-2)" }}>{template.label}</span>
                 <span className="flex flex-col font-medium leading-[1.4]">
                   {claims.length ? claims.map((claim, index) => <span key={index}>{claim.value || "—"}</span>) : <span>—</span>}
                 </span>
-                <span className="flex flex-col text-[13px] leading-[1.4]">
+                <span className="flex flex-col text-xs leading-[1.4]">
                   {claims.length ? claims.map((claim, index) => <Source key={index} source={claim} />) : <Source source={{ value: "", source_label: null, source_url: null, source_date: null }} />}
                 </span>
                 <span><span className="rounded-none px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span>
-                <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span>
+                <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span>
               </button>
               {proposals.filter((proposal) => proposal.target === template.key).map((proposal) => (
                 <div key={proposal.id} className="border-b" style={{ borderColor: "var(--bt-divider)" }}>
@@ -274,36 +276,36 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
   }
 
   return (
-    <Card label="Files" className="overflow-hidden">
-      <header className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
+    <Card label="Files" className={`bulk-trades ${tableStyles.surface} overflow-hidden`}>
+      <header data-table-part="toolbar" className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
         <h2 className="text-base font-semibold">Files</h2>
         <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Stored privately. Buyers see a new file at Never until you change it.</span>
         <span className="flex-1" />
-        <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setUploading(true)}>Upload</button>
+        <button type="button" className={`${buttonClass} !h-8`} style={buttonStyle} onClick={() => setUploading(true)}>Upload</button>
       </header>
       <div className="overflow-x-auto">
         <div className="min-w-[760px]">
-          <div className={`grid ${FILE_COLUMNS} gap-4 border-b px-5 py-2.5 bt-label`} style={tableHead}>
+          <div data-table-part="grid-header" className={`grid ${FILE_COLUMNS} gap-4 border-b px-3 py-2 font-medium`} style={tableHead}>
             <span>File</span><span>Type</span><span>Source</span><span>Buyers see at</span>
           </div>
           {files.map((file) => (
-            <div key={file.id} className={`grid ${FILE_COLUMNS} items-center gap-4 border-b px-5 py-3`} style={{ borderColor: "var(--bt-divider)" }}>
+            <div key={file.id} data-table-part="grid-row" className={`grid ${FILE_COLUMNS} items-center gap-4 border-b px-3 py-2 text-xs`} style={{ borderColor: "var(--bt-divider)" }}>
               <div className="flex min-w-0 items-center gap-3">
                 <FileLink trade={trade} file={file} className="flex min-w-0 items-center gap-3 hover:underline">
                   <FileThumb trade={trade} file={file} />
-                  <span className="truncate text-sm font-semibold">{file.file_name}</span>
+                  <span className="truncate text-xs font-semibold">{file.file_name}</span>
                 </FileLink>
                 {previewType(file.file_name) && (
                   <a href={fileUrl(trade, file)} className="shrink-0 text-xs" style={{ color: "var(--bt-muted)" }}>Download</a>
                 )}
               </div>
-              <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{file.file_type}</span>
-              <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{sourceText(file) || "Uploaded"}</span>
+              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{file.file_type}</span>
+              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{sourceText(file) || "Uploaded"}</span>
               <select
                 aria-label={`Who sees ${file.file_name}`}
                 value={file.visibility}
                 onChange={(event) => changeVisibility(file, event.target.value as Visibility)}
-                className="h-[34px] rounded-none border px-1.5 text-[13px]"
+                className="h-8 rounded-none border px-1.5 text-xs"
                 style={inputStyle}
               >
                 {VISIBILITIES.map((visibility) => <option key={visibility} value={visibility}>{VISIBILITY_LABEL[visibility]}</option>)}
@@ -318,7 +320,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
           {!files.length && !proposals.length && <p className="px-5 py-5 text-sm" style={{ color: "var(--bt-muted)" }}>No files yet.</p>}
         </div>
       </div>
-      <div className="px-5 py-3 text-[13px]" style={{ color: "var(--bt-muted)" }}>
+      <div data-table-part="footer" className="px-5 py-3 text-xs" style={{ color: "var(--bt-muted)" }}>
         {stillNeeded.length ? `Still needed: ${stillNeeded.join(", ")}` : "All required files are in."}
         <ErrorText error={error} />
       </div>

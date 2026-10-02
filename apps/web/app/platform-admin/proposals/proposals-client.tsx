@@ -65,6 +65,7 @@ import {
 import { Textarea } from "@/app/components/platform-admin/ui/textarea";
 import { TablePagination } from "@/app/components/platform-admin/table-pagination";
 import { CrmListShell } from "@/app/components/crm/crm-list-shell";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -492,7 +493,7 @@ export function ProposalsClient({
           1. Select Listing + Recyclers
           ═══════════════════════════════════════════════════════════════════════ */}
       {activeView !== "proposals" && (
-        <Card>
+        <Card className={`bulk-trades ${tableStyles.surface} rounded-none shadow-none`}>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-1.5">
@@ -539,11 +540,12 @@ export function ProposalsClient({
           {activeView === "listing" ? (
           <div className="space-y-3">
           {/* Search + filter */}
-          <div className="grid gap-3 md:grid-cols-4">
+          <div data-table-part="toolbar" className="grid gap-3 md:grid-cols-4">
             <div className="md:col-span-3">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
+                  data-table-part="search"
                   placeholder="Search by listing ID, ref, title, or supplier..."
                   value={listingSearchInput}
                   onChange={(e) => setListingSearchInput(e.target.value)}
@@ -564,7 +566,7 @@ export function ProposalsClient({
                 <Filter className="mr-1.5 h-3 w-3 text-muted-foreground" />
                 <SelectValue placeholder="Channel" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All channels</SelectItem>
                 <SelectItem value="recycling">Recycling</SelectItem>
               </SelectContent>
@@ -572,7 +574,7 @@ export function ProposalsClient({
           </div>
 
           {/* Listing table */}
-          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
+          <div className="overflow-x-auto border border-[var(--bt-border)]">
             <Table className="min-w-[920px] table-fixed">
               <TableHeader>
                 <TableRow>
@@ -640,7 +642,7 @@ export function ProposalsClient({
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-muted-foreground">
                           {listing.supplier_name ?? "—"}
                         </TableCell>
                         <TableCell>
@@ -659,14 +661,14 @@ export function ProposalsClient({
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="text-sm tabular-nums">
+                          <div className="tabular-nums">
                             <span className={listing.invite_count > 0 ? "font-medium" : "text-muted-foreground"}>
                               {listing.invite_count}
                             </span>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5 text-sm tabular-nums">
+                          <div className="flex items-center gap-1.5 tabular-nums">
                             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className={listing.enquiry_count > 0 ? "font-medium" : "text-muted-foreground"}>
                               {listing.enquiry_count}
@@ -674,14 +676,14 @@ export function ProposalsClient({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5 text-sm tabular-nums">
+                          <div className="flex items-center gap-1.5 tabular-nums">
                             <Handshake className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className={listing.deal_count > 0 ? "font-medium" : "text-muted-foreground"}>
                               {listing.deal_count}
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground tabular-nums text-sm whitespace-nowrap">
+                        <TableCell className="text-muted-foreground tabular-nums whitespace-nowrap">
                           {formatDate(listing.created_at)}
                         </TableCell>
                       </TableRow>
@@ -692,6 +694,7 @@ export function ProposalsClient({
             </Table>
           </div>
 
+          <div data-table-part="footer">
           <TablePagination
             page={listings.page}
             pageSize={listings.pageSize}
@@ -703,15 +706,17 @@ export function ProposalsClient({
             }
           />
           </div>
+          </div>
 
           ) : (
           <div className="space-y-3">
           {/* Search + filters */}
-          <div className="grid gap-3 md:grid-cols-5">
+          <div data-table-part="toolbar" className="grid gap-3 md:grid-cols-5">
             <div className="md:col-span-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
+                  data-table-part="search"
                   placeholder="Search any recycler field..."
                   value={recyclerSearchInput}
                   onChange={(e) => setRecyclerSearchInput(e.target.value)}
@@ -732,7 +737,7 @@ export function ProposalsClient({
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder="Chemistry" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All chemistries</SelectItem>
                 {recyclerFilterOptions.chemistries.map((c) => (
                   <SelectItem key={c} value={c}>
@@ -754,7 +759,7 @@ export function ProposalsClient({
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder="Country" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All countries</SelectItem>
                 {recyclerFilterOptions.countries.map((c) => (
                   <SelectItem key={c} value={c}>
@@ -776,7 +781,7 @@ export function ProposalsClient({
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder="Capacity" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All capacities</SelectItem>
                 <SelectItem value="lt10">&lt;10 t/mo</SelectItem>
                 <SelectItem value="10to100">10–100 t/mo</SelectItem>
@@ -786,7 +791,7 @@ export function ProposalsClient({
           </div>
 
           {/* Summary bar */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm">
+          <div data-table-part="toolbar" className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm">
             <p className="text-muted-foreground">
               {recyclers.totalCount} recycler
               {recyclers.totalCount !== 1 ? "s" : ""}
@@ -822,7 +827,7 @@ export function ProposalsClient({
           </div>
 
           {/* Recycler table */}
-          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
+          <div className="overflow-x-auto border border-[var(--bt-border)]">
             <Table className="min-w-[1160px] table-fixed">
               <TableHeader>
                 <TableRow>
@@ -898,7 +903,7 @@ export function ProposalsClient({
                               {rType === "battery" ? "Battery" : "General"}
                             </Badge>
                           ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
                         <TableCell>
@@ -915,7 +920,7 @@ export function ProposalsClient({
                               ))}
                             </div>
                           ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
                         <TableCell>
@@ -937,18 +942,18 @@ export function ProposalsClient({
                               )}
                             </div>
                           ) : recycler.public_fields.accepted_streams ? (
-                            <span className="text-sm text-muted-foreground truncate max-w-[160px] block" title={recycler.public_fields.accepted_streams}>
+                            <span className="text-muted-foreground truncate max-w-[160px] block" title={recycler.public_fields.accepted_streams}>
                               {recycler.public_fields.accepted_streams}
                             </span>
                           ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm tabular-nums whitespace-nowrap">
+                        <TableCell className="tabular-nums whitespace-nowrap">
                           {formatCapacity(recycler.public_fields.capacity_kg_per_month, recycler.public_fields.capacity_band)}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1 text-sm">
+                          <div className="flex items-center gap-1">
                             <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
                             <span className="truncate max-w-[160px]">
                               {assembleLocation(
@@ -967,6 +972,7 @@ export function ProposalsClient({
             </Table>
           </div>
 
+          <div data-table-part="footer">
           <TablePagination
             page={recyclers.page}
             pageSize={recyclers.pageSize}
@@ -977,6 +983,7 @@ export function ProposalsClient({
               updateParams({ recyclerPage: page <= 1 ? null : String(page) })
             }
           />
+          </div>
 
           <p className="text-xs text-muted-foreground">
             Invitations are idempotent: existing active invites are kept, paused/archived
@@ -992,7 +999,7 @@ export function ProposalsClient({
           Existing Proposals
           ═══════════════════════════════════════════════════════════════════════ */}
       {activeView === "proposals" && (
-        <Card>
+        <Card className={`bulk-trades ${tableStyles.surface} rounded-none shadow-none`}>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -1019,11 +1026,12 @@ export function ProposalsClient({
         </CardHeader>
         <CardContent className="space-y-3">
           {/* Search + filters */}
-          <div className="grid gap-3 md:grid-cols-5">
+          <div data-table-part="toolbar" className="grid gap-3 md:grid-cols-5">
             <div className="md:col-span-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
+                  data-table-part="search"
                   placeholder="Search listing, supplier, recycler, state, note..."
                   value={proposalSearchInput}
                   onChange={(e) => setProposalSearchInput(e.target.value)}
@@ -1045,7 +1053,7 @@ export function ProposalsClient({
                 <Filter className="mr-1.5 h-3 w-3 text-muted-foreground" />
                 <SelectValue placeholder="Listing" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All listings</SelectItem>
                 {proposalListingOptions.map((l) => (
                   <SelectItem key={l.id} value={l.id}>
@@ -1068,7 +1076,7 @@ export function ProposalsClient({
                 <Filter className="mr-1.5 h-3 w-3 text-muted-foreground" />
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All types</SelectItem>
                 <SelectItem value="invited">Invited</SelectItem>
                 <SelectItem value="suggested">Suggested</SelectItem>
@@ -1089,7 +1097,7 @@ export function ProposalsClient({
                 <Filter className="mr-1.5 h-3 w-3 text-muted-foreground" />
                 <SelectValue placeholder="State" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="all">All states</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="paused">Paused</SelectItem>
@@ -1099,7 +1107,7 @@ export function ProposalsClient({
             </Select>
           </div>
 
-          <div className="flex items-center justify-between text-sm">
+          <div data-table-part="toolbar" className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">
               {selectedProposalCount > 0
                 ? `${selectedProposalCount} proposal${selectedProposalCount === 1 ? "" : "s"} selected`
@@ -1117,7 +1125,7 @@ export function ProposalsClient({
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto rounded-2xl bg-[var(--color-surface)] shadow-[var(--shadow-sm)]">
+          <div className="overflow-x-auto border border-[var(--bt-border)]">
             <Table className="min-w-[1280px] table-fixed">
               <TableHeader>
                 <TableRow>
@@ -1248,22 +1256,22 @@ export function ProposalsClient({
                               )}
                             </div>
                           ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
                         <TableCell>
                           {location !== "—" ? (
-                            <div className="flex items-center gap-1 text-sm">
+                            <div className="flex items-center gap-1">
                               <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
                               <span className="truncate max-w-[140px]" title={location}>
                                 {location}
                               </span>
                             </div>
                           ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm tabular-nums whitespace-nowrap">
+                        <TableCell className="tabular-nums whitespace-nowrap">
                           {formatCapacity(
                             proposal.recycler_public_fields?.capacity_kg_per_month,
                             proposal.recycler_public_fields?.capacity_band
@@ -1282,16 +1290,16 @@ export function ProposalsClient({
                          <TableCell>
                            {proposal.rebattery_notes ? (
                              <span
-                               className="text-sm text-muted-foreground line-clamp-2 max-w-[200px] block"
+                               className="text-muted-foreground line-clamp-2 max-w-[200px] block"
                                title={proposal.rebattery_notes}
                              >
                                {proposal.rebattery_notes}
                              </span>
                            ) : (
-                             <span className="text-muted-foreground text-sm">—</span>
+                             <span className="text-muted-foreground">—</span>
                            )}
                          </TableCell>
-                         <TableCell className="text-muted-foreground tabular-nums text-sm whitespace-nowrap">
+                         <TableCell className="text-muted-foreground tabular-nums whitespace-nowrap">
                            {formatDate(proposal.created_at)}
                          </TableCell>
                         <TableCell onClick={(event) => event.stopPropagation()}>
@@ -1307,7 +1315,7 @@ export function ProposalsClient({
                                   <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
+                              <DropdownMenuContent align="end" className={`bulk-trades ${tableStyles.menu}`}>
                                 {canPause && (
                                   <DropdownMenuItem
                                     onSelect={() =>
@@ -1348,6 +1356,7 @@ export function ProposalsClient({
             </Table>
           </div>
 
+          <div data-table-part="footer">
           <TablePagination
             page={proposals.page}
             pageSize={proposals.pageSize}
@@ -1358,6 +1367,7 @@ export function ProposalsClient({
               updateParams({ proposalPage: page <= 1 ? null : String(page) })
             }
           />
+          </div>
         </CardContent>
         </Card>
       )}

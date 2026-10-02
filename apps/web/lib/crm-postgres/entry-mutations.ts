@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { parseRelationIds, relationStorageValue } from "./value-codec";
+import { parseTagsValue } from "../parse-tags";
 import { withPgTransaction, type PgTransaction } from "../postgres";
 
 type ObjectRow = { id: string; name: string; entity_table?: string | null };
@@ -286,7 +287,7 @@ export async function createPostgresEntry(
         canonicalValues.push(
           relationIds
             ? relationStorageValue(relationIds, field.relationship_type)
-            : value,
+            : field.type === "tags" ? parseTagsValue(value) : value,
         );
       } else if (field.type !== "relation") {
         throw new Error(
@@ -367,7 +368,7 @@ export async function updatePostgresEntry(
         canonicalValues.push(
           relationIds
             ? relationStorageValue(relationIds, field.relationship_type)
-            : value,
+            : field.type === "tags" ? parseTagsValue(value) : value,
         );
       } else if (field.type !== "relation") {
         throw new Error(

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ExternalLink, Mail } from "lucide-react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
+import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Mail } from "lucide-react";
 import { Button } from "../ui/button";
+import tableStyles from "../ui/data-table.module.css";
 import { PersonAvatar } from "./person-avatar";
 import { CompanyFavicon } from "./company-favicon";
 import { CrmEmptyState, CrmLoadingState } from "./crm-list-shell";
@@ -122,7 +123,7 @@ const TABS: ReadonlyArray<{ id: PersonProfileTab; label: string; getCount?: (dat
   { id: "emails", label: "Emails", getCount: (d) => d.threads.length },
   { id: "calendar", label: "Meetings", getCount: (d) => d.events.length },
   { id: "activity", label: "Activity", getCount: (d) => d.interactions_summary.total },
-  { id: "campaigns", label: "Campaigns", getCount: (d) => d.campaigns?.length ?? 0 },
+  { id: "campaigns", label: "Campaigns", getCount: (d) => new Set(d.campaigns?.map((send) => send.campaign_id)).size },
   { id: "notes", label: "Notes" },
 ];
 
@@ -323,7 +324,7 @@ export function PersonProfile({
               onOpenCompany={onOpenCompany}
             />
           )}
-          {tab === "campaigns" && <CampaignsTab data={data} />}
+          {tab === "campaigns" && <CampaignsTab key={personId} data={data} />}
           {tab === "notes" && <NotesTab data={data} onSave={handleSaveNotes} />}
         </div>
       </div>
@@ -414,9 +415,12 @@ function PersonHeader({
 const UUID_LABEL = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function destinationLabel(title: string | null | undefined, cta: string | undefined, listing: boolean): string {
-  if (title?.trim() && !UUID_LABEL.test(title.trim())) { return title.trim(); }
-  if (cta && !UUID_LABEL.test(cta)) { return cta.replace(/[-_]+/g, " ").trim() || (listing ? "Listing" : "General destination"); }
-  return listing ? "Listing" : "General destination";
+  if (listing) {
+    return title?.trim() && !UUID_LABEL.test(title.trim()) ? title.trim() : "Listing";
+  }
+  if (cta === "grid") { return "All auctions"; }
+  if (cta === "sourcing") { return "Sourcing form"; }
+  return "Other link";
 }
 
 const campaignDate = new Intl.DateTimeFormat("en-GB", {
@@ -436,91 +440,171 @@ function Destination({ label, url }: { label: string; url?: string | null }) {
   ) : <span className="font-medium">{label}</span>;
 }
 
-function CampaignsTab({ data }: { data: PersonResponse }) {
-  const campaigns = data.campaigns ?? [];
-  const summary = data.campaign_summary;
-  const cellStyle = { borderColor: "var(--bt-divider)" };
-  const cellClass = "border-b px-3 py-2 text-[12px] align-top";
+type CampaignSend = NonNullable<PersonResponse["campaigns"]>[number];
+type ObservationState = "Observed" | "Not observed" | "Unknown" | "Not sent";
+
+function isAccepted(send: CampaignSend) {
+  return Boolean(send.accepted_at || send.state === "accepted");
+}
+
+function firstTimestamp(values: Array<string | null>): string | null {
+  return values.reduce<string | null>((first, value) => {
+    if (!value) { return first; }
+    if (!first) { return value; }
+    return new Date(value).getTime() < new Date(first).getTime() ? value : first;
+  }, null);
+}
+
+function observation(send: CampaignSend, kind: "opened" | "clicked"): { state: ObservationState; at: string | null } {
+  const at = kind === "opened" ? send.provider_opened_at : firstTimestamp([
+    send.provider_link_clicked_at, ...send.links.map((link) => link.first_clicked_at),
+  ]);
+  return {
+    at,
+    state: at ? "Observed" : !isAccepted(send) ? "Not sent" : !send.last_synced_at ? "Unknown" : "Not observed",
+  };
+}
+
+function CampaignObservation({ sends, kind }: { sends: CampaignSend[]; kind: "opened" | "clicked" }) {
+  const observations = sends.map((send) => observation(send, kind));
+  const first = firstTimestamp(observations.map((item) => item.at));
+  const counts = new Map<ObservationState, number>();
+  for (const item of observations) { counts.set(item.state, (counts.get(item.state) ?? 0) + 1); }
+  return <>
+    <span>{sends.length === 1 ? observations[0].state : Array.from(counts, ([state, count]) => `${count} ${state.toLowerCase()}`).join(" · ")}</span>
+    {first && <div style={{ color: "var(--bt-muted)" }}><CampaignTime value={first} /></div>}
+  </>;
+}
+
+function deliveryState(send: CampaignSend) {
+  return send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : isAccepted(send) ? "Unconfirmed" : "Not sent";
+}
+
+function CampaignDelivery({ sends, showTimes = false }: { sends: CampaignSend[]; showTimes?: boolean }) {
+  const counts = new Map<string, number>();
+  for (const send of sends) {
+    const state = deliveryState(send);
+    counts.set(state, (counts.get(state) ?? 0) + 1);
+  }
+  return <>
+    <span>{sends.length === 1 ? deliveryState(sends[0]) : Array.from(counts, ([state, count]) => `${count} ${state.toLowerCase()}`).join(" · ")}</span>
+    {showTimes && sends[0].bounced_at && <div style={{ color: "var(--bt-red)" }}><CampaignTime value={sends[0].bounced_at} /></div>}
+    {showTimes && sends[0].delivered_at && <div style={{ color: "var(--bt-muted)" }}>{sends[0].bounced_at && "Delivered "}<CampaignTime value={sends[0].delivered_at} /></div>}
+  </>;
+}
+
+function CampaignSent({ sends }: { sends: CampaignSend[] }) {
+  const acceptedDates = sends.map((send) => send.accepted_at).filter((date): date is string => Boolean(date));
+  const latest = acceptedDates.reduce<string | null>((current, date) => !current || new Date(date).getTime() > new Date(current).getTime() ? date : current, null);
+  return latest ? <>{sends.length > 1 && <span style={{ color: "var(--bt-muted)" }}>Latest </span>}<CampaignTime value={latest} /></> : sends.some(isAccepted) ? <>Date unknown</> : <>Not sent</>;
+}
+
+function CampaignHistory({ sends, name }: { sends: CampaignSend[]; name: string }) {
   return (
-    <section aria-label="Campaign engagement" className="space-y-5">
+    <div className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
+      <table className={`${tableStyles.table} min-w-[640px]`} aria-label={`Send history for ${name}`}>
+        <thead><tr>{["Sent", "Delivery", "Opened", "Clicked", "Listing"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell}>{label}</th>)}</tr></thead>
+        <tbody>{sends.map((send, index) => {
+          const pitchedListing = send.links.find((link) => link.listing_id === send.listing_id);
+          const missingClick = !isAccepted(send) ? "Not sent" : !send.last_synced_at ? "Unknown" : "Not observed";
+          return <Fragment key={send.send_id}>
+            <tr>
+              <td className={tableStyles.cell}><CampaignSent sends={[send]} /></td>
+              <td className={tableStyles.cell}><CampaignDelivery sends={[send]} showTimes /></td>
+              <td className={tableStyles.cell}><CampaignObservation sends={[send]} kind="opened" /></td>
+              <td className={tableStyles.cell}><CampaignObservation sends={[send]} kind="clicked" /></td>
+              <td className={tableStyles.cell}>{send.listing_id ? <Destination label={destinationLabel(send.listing_title ?? pitchedListing?.listing_title, undefined, true)} url={send.listing_url ?? pitchedListing?.listing_url} /> : "—"}</td>
+            </tr>
+            <tr><td colSpan={5} className={tableStyles.detailCell}>
+              {send.links.length === 0 ? <p style={{ color: "var(--bt-muted)" }}>No destination activity recorded.</p> : (
+                <div className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
+                  <table className={`${tableStyles.table} min-w-[440px]`} aria-label={`Destination activity for ${name}${sends.length > 1 ? `, send ${index + 1}` : ""}`}>
+                    <thead><tr>{["Destination", "Kind", "First email click"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell}>{label}</th>)}</tr></thead>
+                    <tbody>{send.links.map((link) => <tr key={link.cta_key}>
+                      <td className={tableStyles.cell}><Destination label={destinationLabel(link.listing_title, link.cta_key, Boolean(link.listing_id))} url={link.listing_url} /></td>
+                      <td className={tableStyles.cell}>{link.listing_id ? "Listing" : "Other link"}</td>
+                      <td className={tableStyles.cell}>{link.first_clicked_at ? <CampaignTime value={link.first_clicked_at} /> : missingClick}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+              )}
+            </td></tr>
+          </Fragment>;
+        })}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function CampaignRow({ sends }: { sends: CampaignSend[] }) {
+  const [open, setOpen] = useState(false);
+  const detailId = useId();
+  const name = sends[0].campaign_name;
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return <>
+    <tr>
+      <td className={tableStyles.cell}>
+        <button type="button" aria-expanded={open} aria-controls={detailId} aria-label={`${open ? "Hide" : "Show"} activity for ${name}`} onClick={() => setOpen(!open)} className="inline-flex items-start gap-1 text-left">
+          <Chevron size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="break-words">{name}{sends.length > 1 && <span style={{ color: "var(--bt-muted)" }}> · {sends.length} sends</span>}</span>
+        </button>
+      </td>
+      <td className={tableStyles.cell}><CampaignSent sends={sends} /></td>
+      <td className={tableStyles.cell}><CampaignDelivery sends={sends} /></td>
+      <td className={tableStyles.cell}><CampaignObservation sends={sends} kind="opened" /></td>
+      <td className={tableStyles.cell}><CampaignObservation sends={sends} kind="clicked" /></td>
+    </tr>
+    {open && <tr><td colSpan={5} className={tableStyles.detailCell}>
+      <section id={detailId} aria-label={`Activity for ${name}`}><CampaignHistory sends={sends} name={name} /></section>
+    </td></tr>}
+  </>;
+}
+
+function CampaignsTab({ data }: { data: PersonResponse }) {
+  const [listingsOpen, setListingsOpen] = useState(false);
+  const listingsId = useId();
+  const campaigns = new Map<string, CampaignSend[]>();
+  for (const send of data.campaigns ?? []) {
+    const group = campaigns.get(send.campaign_id);
+    if (group) { group.push(send); } else { campaigns.set(send.campaign_id, [send]); }
+  }
+  const summary = data.campaign_summary;
+  return (
+    <section aria-label="Campaign engagement" className="space-y-4">
       <div className="space-y-2">
         <h2 className="text-[13px] font-semibold">Across all updates</h2>
-        <dl aria-label="Campaign totals" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="Sent" value={summary.sent} />
-          <Stat label="Delivered" value={`${summary.delivered} of ${summary.sent}`} />
-          <Stat label="Opened" value={`${summary.opened} of ${summary.sent}`} />
-          <Stat label="Clicked" value={`${summary.clicked} of ${summary.sent}`} />
+        <dl aria-label="Campaign totals" className={`bulk-trades ${tableStyles.surface} grid grid-cols-2 sm:grid-cols-4`}>
+          <div className={tableStyles.cell}><dt style={{ color: "var(--bt-muted)" }}>Sent</dt><dd className="font-medium">{summary.sent}</dd></div>
+          <div className={tableStyles.cell}><dt style={{ color: "var(--bt-muted)" }}>Delivered</dt><dd className="font-medium">{summary.delivered} of {summary.sent}</dd></div>
+          <div className={tableStyles.cell}><dt style={{ color: "var(--bt-muted)" }}>Opened</dt><dd className="font-medium">{summary.opened} of {summary.sent}</dd></div>
+          <div className={tableStyles.cell}><dt style={{ color: "var(--bt-muted)" }}>Clicked</dt><dd className="font-medium">{summary.clicked} of {summary.sent}</dd></div>
         </dl>
-        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>Email activity uses Postmark observations and tracked CTA clicks. Totals count updates, not repeated actions or verified people. Email clicks are not website visits.</p>
-        {summary.tracking_pending > 0 && <p role="status" className="text-[12px]" style={{ color: "var(--bt-amber)" }}>Tracking pending for {summary.tracking_pending} sent update{summary.tracking_pending === 1 ? "" : "s"}; missing activity is unknown.</p>}
+        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>Totals count sent updates, not repeat actions. Recorded email clicks are not website visits.</p>
+        {summary.tracking_pending > 0 && <p role="status" className="text-[12px]" style={{ color: "var(--bt-amber)" }}>Activity pending for {summary.tracking_pending} sent update{summary.tracking_pending === 1 ? "" : "s"}; missing activity is unknown.</p>}
       </div>
-      {data.listing_engagement.length > 0 && (
-        <section aria-label="Listing engagement">
-          <h2 className="mb-2 text-[13px] font-semibold">Listings clicked across updates</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left" aria-label="Listing engagement">
-              <thead style={{ background: "var(--bt-table-head)" }}><tr>
-                <th scope="col" className={cellClass} style={cellStyle}>Listing</th><th scope="col" className={cellClass} style={cellStyle}>Updates with email clicks</th>
-              </tr></thead>
-              <tbody>{data.listing_engagement.map((listing) => <tr key={listing.listing_id} className="hover:bg-[var(--bt-row-hover)]">
-                <td className={cellClass} style={cellStyle}><Destination label={destinationLabel(listing.listing_title, listing.cta_key, true)} url={listing.listing_url} /></td>
-                <td className={`${cellClass} bt-mono`} style={cellStyle}>{listing.clicked_updates}</td>
-              </tr>)}</tbody>
+      <section aria-label="Campaign updates">
+        {campaigns.size === 0 ? <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>No campaign updates recorded.</p> : (
+          <div className={`bulk-trades ${tableStyles.surface} overflow-x-auto`} tabIndex={0} role="region" aria-label="Campaign results">
+            <table className={`${tableStyles.table} min-w-[640px]`} aria-label="Campaign results">
+              <thead><tr>{["Campaign", "Sent", "Delivery", "Opened", "Clicked"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell}>{label}</th>)}</tr></thead>
+              <tbody>{Array.from(campaigns, ([id, sends]) => <CampaignRow key={id} sends={sends} />)}</tbody>
             </table>
           </div>
+        )}
+      </section>
+      {data.listing_engagement.length > 0 && (
+        <section className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
+          <button type="button" className={`${tableStyles.summary} inline-flex w-full items-center gap-1 text-left`} aria-expanded={listingsOpen} aria-controls={listingsId} onClick={() => setListingsOpen(!listingsOpen)}>
+            {listingsOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}Listings across updates
+          </button>
+          {listingsOpen && <table id={listingsId} className={`${tableStyles.table} min-w-[440px]`} aria-label="Listing engagement">
+            <thead><tr><th scope="col" className={tableStyles.headerCell}>Listing</th><th scope="col" className={tableStyles.headerCell}>Updates with email clicks</th></tr></thead>
+            <tbody>{data.listing_engagement.map((listing) => <tr key={listing.listing_id}>
+              <td className={tableStyles.cell}><Destination label={destinationLabel(listing.listing_title, undefined, true)} url={listing.listing_url} /></td>
+              <td className={tableStyles.cell}>{listing.clicked_updates}</td>
+            </tr>)}</tbody>
+          </table>}
         </section>
       )}
-      <section aria-label="Campaign updates">
-        <h2 className="mb-2 text-[13px] font-semibold">Per-update activity</h2>
-        {campaigns.length === 0 ? <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>No campaign updates recorded.</p> : campaigns.map((send) => {
-          const accepted = Boolean(send.accepted_at || send.state === "accepted");
-          const trackingPending = accepted && !send.last_synced_at;
-          const pitchedListing = send.links.find((link) => link.listing_id === send.listing_id);
-          const firstEmailClick = send.links.reduce<string | null>((first, link) => {
-            const clickedAt = link.first_clicked_at;
-            return clickedAt && (!first || clickedAt < first) ? clickedAt : first;
-          }, send.provider_link_clicked_at);
-          const missingOpen = !accepted ? "Not sent" : trackingPending ? "Open activity unknown — tracking pending" : "No tracked open";
-          const missingClick = !accepted ? "Not sent" : trackingPending ? "Click activity unknown — tracking pending" : "No tracked email click";
-          return (
-            <article key={send.send_id} aria-label={send.campaign_name} className="border-t py-3" style={cellStyle}>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-                <h3 className="text-[13px] font-semibold">{send.campaign_name}</h3>
-                <span style={{ color: send.bounced_at ? "var(--bt-red)" : "var(--bt-text-2)" }}>{send.bounced_at ? "Bounced" : send.delivered_at ? "Delivered" : accepted ? "Delivery unconfirmed" : send.state.replace(/_/g, " ")}</span>
-                {send.accepted_at && <span style={{ color: "var(--bt-muted)" }}>Accepted <CampaignTime value={send.accepted_at} /></span>}
-              </div>
-              {send.listing_id && <div className="mt-1 text-[12px]"><Destination label={destinationLabel(send.listing_title ?? pitchedListing?.listing_title, pitchedListing?.cta_key, true)} url={send.listing_url ?? pitchedListing?.listing_url} /><span style={{ color: "var(--bt-muted)" }}> · {send.pitch_count} recorded pitch{send.pitch_count === 1 ? "" : "es"}</span></div>}
-              <dl className="my-2 grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-2">
-                <div><dt className="inline" style={{ color: "var(--bt-muted)" }}>First tracked open: </dt><dd className="inline">{send.provider_opened_at ? <CampaignTime value={send.provider_opened_at} /> : missingOpen}</dd></div>
-                <div><dt className="inline" style={{ color: "var(--bt-muted)" }}>First tracked email click: </dt><dd className="inline">{firstEmailClick ? <CampaignTime value={firstEmailClick} /> : missingClick}</dd></div>
-              </dl>
-              {send.links.length > 0 && <div className="overflow-x-auto">
-                <table aria-label="CTA activity" className="w-full min-w-[440px] text-left">
-                  <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Destination", "Type", "First tracked email click"].map((label) => <th key={label} scope="col" className={cellClass} style={cellStyle}>{label}</th>)}</tr></thead>
-                  <tbody>{send.links.map((link) => <tr key={link.cta_key} className="hover:bg-[var(--bt-row-hover)]">
-                    <td className={cellClass} style={cellStyle}><Destination label={destinationLabel(link.listing_title, link.cta_key, Boolean(link.listing_id))} url={link.listing_url} /></td>
-                    <td className={cellClass} style={{ ...cellStyle, color: "var(--bt-muted)" }}>{link.listing_id ? "Listing" : "General CTA"}</td>
-                    <td className={cellClass} style={cellStyle}>{link.first_clicked_at ? <CampaignTime value={link.first_clicked_at} /> : !accepted ? "Not sent" : trackingPending ? "Click activity unknown — tracking pending" : "No tracked click"}</td>
-                  </tr>)}</tbody>
-                </table>
-              </div>}
-              <details className="mt-2 text-[11px]" style={{ color: "var(--bt-muted)" }}>
-                <summary className="w-fit cursor-pointer hover:underline">Details</summary>
-                <dl className="mt-2 grid gap-1 break-all">
-                  <div><dt className="inline">Campaign ID: </dt><dd className="inline">{send.campaign_id}</dd></div>
-                  <div><dt className="inline">Send ID: </dt><dd className="inline">{send.send_id}</dd></div>
-                  {send.listing_id && <div><dt className="inline">Listing ID: </dt><dd className="inline">{send.listing_id}</dd></div>}
-                  <div><dt className="inline">Recipient: </dt><dd className="inline">{send.recipient_email}</dd></div>
-                  <div><dt className="inline">Ledger state: </dt><dd className="inline">{send.state}</dd></div>
-                  <div><dt className="inline">Tracking last synced: </dt><dd className="inline">{send.last_synced_at ? <CampaignTime value={send.last_synced_at} /> : "Not recorded"}</dd></div>
-                  <div>Postmark open and provider-wide click timestamps are the first observations retained by the email ledger. Destination clicks are first observations for each CTA; they do not identify a website visit.</div>
-                  {send.links.map((link) => <div key={link.cta_key}>CTA {link.cta_key}{link.listing_id ? ` · Listing ID: ${link.listing_id}` : ""}</div>)}
-                </dl>
-              </details>
-            </article>
-          );
-        })}
-      </section>
     </section>
   );
 }

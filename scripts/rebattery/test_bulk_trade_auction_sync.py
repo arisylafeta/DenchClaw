@@ -4,6 +4,7 @@ import os
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from uuid import uuid4
 
 spec = importlib.util.spec_from_file_location("sync", Path(__file__).with_name("bulk_trade_auction_sync.py"))
 sync = importlib.util.module_from_spec(spec)
@@ -53,6 +54,47 @@ TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
 class SyncRun(unittest.TestCase):
+    def test_multilot_invites_and_clicks_follow_only_the_matching_destination(self):
+        import psycopg2
+        import psycopg2.extras
+        prefix = "campaign_sync_" + uuid4().hex
+        email = "fixture@campaign.example"
+        primary, secondary = prefix + "_a", prefix + "_b"
+        conn = psycopg2.connect(TEST_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("insert into crm_people (id, full_name, email) values (%s, 'Fixture Buyer', %s)", (prefix, email))
+                cur.execute("insert into campaigns (id, campaign_name) values (%s, 'Synthetic multilot')", (prefix,))
+                cur.execute("""
+                    insert into crm_campaign_sends
+                      (id, campaign_id, person_id, listing_id, auction_url, recipient_email, state, accepted_at, provider_link_clicked_at)
+                    values (%s, %s, %s, %s, 'https://example.test/a', %s, 'accepted',
+                            '2026-09-24T09:00:00Z', '2026-09-24T10:00:00Z')
+                """, (prefix, prefix, prefix, primary, email))
+                cur.execute("""
+                    insert into crm_campaign_send_links (id, send_id, cta_key, destination_url, listing_id, first_clicked_at) values
+                      (%s, %s, 'primary', 'https://example.test/a', %s, null),
+                      (%s, %s, 'secondary', 'https://example.test/b', %s, null),
+                      (%s, %s, 'sourcing', 'https://example.test/form', null, '2026-09-24T10:00:00Z')
+                """, (prefix + "_la", prefix, primary, prefix + "_lb", prefix, secondary, prefix + "_lf", prefix))
+                first = sync.collect_people(cur, "fixture-lot-a", primary, "fixture-auction-a", [], [])
+                second = sync.collect_people(cur, "fixture-lot-b", secondary, "fixture-auction-b", [], [])
+                self.assertEqual(first[email]["invited_at"].isoformat(), "2026-09-24T09:00:00+00:00")
+                self.assertEqual(second[email]["invited_at"].isoformat(), "2026-09-24T09:00:00+00:00")
+                self.assertIsNone(first[email]["clicked_at"])
+                self.assertIsNone(second[email]["clicked_at"])
+                cur.execute("""
+                    update crm_campaign_send_links set first_clicked_at='2026-09-24T11:00:00Z'
+                    where send_id=%s and listing_id=%s
+                """, (prefix, secondary))
+                first = sync.collect_people(cur, "fixture-lot-a", primary, "fixture-auction-a", [], [])
+                second = sync.collect_people(cur, "fixture-lot-b", secondary, "fixture-auction-b", [], [])
+                self.assertIsNone(first[email]["clicked_at"])
+                self.assertEqual(second[email]["clicked_at"].isoformat(), "2026-09-24T11:00:00+00:00")
+        finally:
+            conn.rollback()
+            conn.close()
+
     def test_links_or_creates_trades_and_adds_engaged_people_as_buyers_once(self):
         import psycopg2
         conn = psycopg2.connect(TEST_URL)

@@ -13,6 +13,7 @@ import {
 import { DueChip, TONE_HEADING } from "../bulk-trades/trade-chips";
 import { darkButtonClass, darkButtonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { GoalTag, StageDot, StageTag, metaLine, toneText } from "./dismantler-ui";
+import tableStyles from "../ui/data-table.module.css";
 
 const COLUMNS = "grid-cols-[minmax(0,1.4fr)_100px_minmax(0,1.8fr)_110px_minmax(0,1fr)_90px]";
 const BACKLOG_COLUMNS = "grid-cols-[24px_minmax(0,1.4fr)_140px_160px_minmax(0,1fr)]";
@@ -32,10 +33,10 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
   const parked = dismantlers.filter((d) => d.stage === "Parked").length;
 
   return (
-    <div className="flex min-w-[960px] flex-col gap-5">
+    <div className={`bulk-trades ${tableStyles.surface} flex min-w-[960px] flex-col gap-5`}>
       {groups.length ? (
         <>
-          <div className={`bt-label grid ${COLUMNS} gap-4 px-5`}>
+          <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-4 border-b px-3 py-2 font-medium`}>
             <span>Dismantler</span><span>Stage</span><span>Next step</span><span>Due</span><span>On ReBattery</span><span>Last contact</span>
           </div>
           {groups.map((group) => (
@@ -48,21 +49,22 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                 {group.dismantlers.map((d) => (
                   <button
                     key={d.id}
+                    data-table-part="grid-row"
                     type="button"
                     onClick={() => onOpen(d)}
-                    className={`grid w-full ${COLUMNS} items-center gap-4 border-b px-5 py-3 text-left last:border-b-0 hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]`}
+                    className={`grid w-full ${COLUMNS} items-center gap-4 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]`}
                     style={{ borderColor: "var(--bt-divider)" }}
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold">{d.name}</span>
+                        <span className="truncate text-xs font-semibold">{d.name}</span>
                         {d.goal && <GoalTag />}
                       </div>
-                      <div className="mt-0.5 truncate text-[13px]" style={{ color: "var(--bt-muted)" }}>{metaLine(d)}</div>
+                      <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{metaLine(d)}</div>
                     </div>
                     <span><StageTag stage={d.stage} /></span>
                     <div className="min-w-0">
-                      <div className="text-sm leading-[1.35]" style={{ color: d.next_step ? undefined : "var(--bt-muted)" }}>
+                      <div className="text-xs leading-[1.35]" style={{ color: d.next_step ? undefined : "var(--bt-muted)" }}>
                         {d.next_step ?? "Set a next step"}
                       </div>
                       {d.next_step_person_name && (
@@ -72,8 +74,8 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                       )}
                     </div>
                     <span><DueChip label={dueLabel(d, today)} tone={GROUP_TONE[group.name]} /></span>
-                    <span className="truncate text-[13px]" style={{ color: d.platform ? "var(--bt-text)" : "var(--bt-muted)" }}>{platformLabel(d.platform) || "No account yet"}</span>
-                    <span className="text-[13px]" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span>
+                    <span className="truncate text-xs" style={{ color: d.platform ? "var(--bt-text)" : "var(--bt-muted)" }}>{platformLabel(d.platform) || "No account yet"}</span>
+                    <span className="text-xs" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span>
                   </button>
                 ))}
               </div>
@@ -151,20 +153,21 @@ function Backlog({ found, onOpen, onStartOutreach }: {
       </button>
       {open && found.length > 0 && (
         <div className="border-t" style={{ borderColor: "var(--bt-divider)" }}>
-          <div className="flex flex-wrap items-center gap-2.5 border-b px-5 py-3" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}>
+          <div data-table-part="toolbar" className="flex flex-wrap items-center gap-2.5 border-b px-5 py-3" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}>
             <input
+              data-table-part="search"
               type="search"
               aria-label="Search found dismantlers"
               placeholder="Search name or eBay seller"
               value={query}
               onChange={(event) => { setQuery(event.target.value); setShown(BACKLOG_PAGE); }}
-              className={`${inputClass} !h-8 !w-[280px] text-[13px]`}
+              className={`${inputClass} !h-8 !w-[280px] text-xs`}
               style={inputStyle}
             />
             <div role="group" aria-label="Country" className="flex flex-wrap border" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
               {countries.map((name) => (
                 <button key={name} type="button" aria-pressed={country === name} onClick={() => { setCountry(name); setShown(BACKLOG_PAGE); }}
-                  className="h-8 px-3 text-[13px] font-medium"
+                  className="h-8 px-3 text-xs font-medium"
                   style={country === name ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)" } : { color: "var(--bt-text)" }}>
                   {name}
                 </button>
@@ -179,24 +182,24 @@ function Backlog({ found, onOpen, onStartOutreach }: {
               Start outreach
             </button>
           </div>
-          <div className={`bt-label grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-5 py-2.5`} style={{ borderColor: "var(--bt-divider)" }}>
+          <div data-table-part="grid-header" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-3 py-2 font-medium`} style={{ borderColor: "var(--bt-divider)" }}>
             <input type="checkbox" aria-label="Select all shown" checked={allVisiblePicked} onChange={toggleVisible} className="h-4 w-4 accent-[var(--bt-text)]" />
             <span>Dismantler</span><span>Country</span><span>eBay battery listings</span><span>Found via</span>
           </div>
           {visible.map((d) => (
-            <div key={d.id} className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-5 py-2.5 text-sm`}
+            <div key={d.id} data-table-part="grid-row" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-xs`}
               style={{ borderColor: "var(--bt-divider)", background: picked.has(d.id) ? "var(--bt-bg)" : undefined }}>
               <input type="checkbox" aria-label={`Select ${d.name}`} checked={picked.has(d.id)} onChange={() => toggle(d.id)} className="h-4 w-4 accent-[var(--bt-text)]" />
               <div className="min-w-0">
                 <button type="button" onClick={() => onOpen(d)} className="truncate text-left font-semibold hover:underline">{d.name}</button>
                 {d.ebay_username && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{d.ebay_username}</div>}
               </div>
-              <span className="text-[13px]">{d.country ?? ""}</span>
-              <span className="bt-mono text-[13px]">{d.ebay_listings ?? ""}</span>
-              <span className="truncate text-[13px]" style={{ color: "var(--bt-muted)" }}>{d.source ?? ""}</span>
+              <span className="text-xs">{d.country ?? ""}</span>
+              <span className="bt-mono text-xs">{d.ebay_listings ?? ""}</span>
+              <span className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>{d.source ?? ""}</span>
             </div>
           ))}
-          <div className="flex items-center gap-2 px-5 py-3 text-[13px]" style={{ color: "var(--bt-muted)" }}>
+          <div data-table-part="footer" className="flex items-center gap-2 px-5 py-3 text-xs" style={{ color: "var(--bt-muted)" }}>
             {rows.length ? `Showing ${visible.length} of ${rows.length}` : "No matches."}
             {rows.length > visible.length && (
               <button type="button" onClick={() => setShown((count) => count + BACKLOG_PAGE)} className="font-medium hover:underline" style={{ color: "var(--bt-link)" }}>

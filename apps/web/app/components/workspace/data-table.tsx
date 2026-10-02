@@ -44,7 +44,7 @@ import {
 } from "../ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { UrlFavicon } from "./url-favicon";
-import compactStyles from "./compact-table.module.css";
+import tableStyles from "../ui/data-table.module.css";
 import type { TableCellSelectionState, TableSelectionPoint } from "@/lib/table-selection";
 
 /* ─── Types ─── */
@@ -62,8 +62,6 @@ export type DataTableProps<TData, TValue> = {
 	columns: ColumnDef<TData, TValue>[];
 	data: TData[];
 	loading?: boolean;
-	/** Opt-in styling; the host determines canonical object identity. */
-	presentation?: "default" | "compact";
 	// search
 	searchPlaceholder?: string;
 	enableGlobalFilter?: boolean;
@@ -239,7 +237,6 @@ export function DataTable<TData, TValue>({
 	columns,
 	data,
 	loading = false,
-	presentation = "default",
 	searchPlaceholder = "Search...",
 	enableGlobalFilter = true,
 	enableSorting = true,
@@ -280,8 +277,7 @@ export function DataTable<TData, TValue>({
 	stickyFirstColumnValue,
 	onStickyFirstColumnChange,
 }: DataTableProps<TData, TValue>) {
-	const compact = presentation === "compact";
-	const menuClassName = compact ? `bulk-trades ${compactStyles.surface} ${compactStyles.menu}` : undefined;
+	const menuClassName = `bulk-trades ${tableStyles.surface} ${tableStyles.menu}`;
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [internalGlobalFilter, setInternalGlobalFilter] = useState("");
 	const globalFilter = globalFilterProp !== undefined ? globalFilterProp : internalGlobalFilter;
@@ -722,12 +718,12 @@ export function DataTable<TData, TValue>({
 	// ─── Render ───
 
 	return (
-		<div className={cn("w-full h-full flex flex-col overflow-hidden", compact && `bulk-trades ${compactStyles.surface}`)} style={{ overscrollBehavior: "contain" }}>
+		<div className={cn("w-full h-full flex flex-col overflow-hidden", `bulk-trades ${tableStyles.surface}`)} style={{ overscrollBehavior: "contain" }}>
 			{/* Toolbar */}
 			{!hideToolbar && (
 			<div
 				data-table-part="toolbar"
-				className="flex items-center gap-3 px-3 py-2 shrink-0 flex-wrap backdrop-blur-md"
+				className="flex items-center gap-2 px-5 py-3 shrink-0 flex-wrap"
 				style={{ background: "var(--color-glass)", borderBottom: "1px solid var(--color-border)" }}
 			>
 				{title && (
@@ -743,7 +739,7 @@ export function DataTable<TData, TValue>({
 				{enableGlobalFilter && (
 					<div
 						data-table-part="search"
-						className="flex min-w-[140px] max-w-[260px] flex-[1_1_180px] items-center gap-2 h-8 px-3 backdrop-blur-sm rounded-full focus-within:ring-2 focus-within:ring-(--color-accent)/30 transition-shadow shadow-[0_0_21px_0_rgba(0,0,0,0.05)]"
+						className="flex min-w-[140px] max-w-[260px] flex-[1_1_180px] items-center gap-2 h-8 px-3 rounded-none"
 						style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)" }}
 					>
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: "var(--color-text-muted)", opacity: 0.5 }}>
@@ -763,8 +759,9 @@ export function DataTable<TData, TValue>({
 						{globalFilter && (
 							<button
 								type="button"
+								aria-label="Clear search"
 								onClick={() => { setGlobalFilter(""); onServerSearch?.(""); }}
-								className="shrink-0 h-5 w-5 rounded-full flex items-center justify-center cursor-pointer transition-colors"
+								className="shrink-0 h-6 w-6 rounded-none flex items-center justify-center cursor-pointer transition-colors"
 								style={{ color: "var(--color-text-muted)" }}
 							>
 								<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
@@ -789,7 +786,7 @@ export function DataTable<TData, TValue>({
 					{/* Columns menu */}
 					<DropdownMenu>
 						<DropdownMenuTrigger
-							className="h-8 px-3 flex items-center gap-1.5 rounded-full text-xs cursor-pointer transition-colors backdrop-blur-sm shadow-[0_0_21px_0_rgba(0,0,0,0.05)] outline-none focus:outline-none"
+							className="h-8 px-3 flex items-center gap-1.5 rounded-none text-xs cursor-pointer transition-colors"
 							style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)", background: "var(--color-surface)" }}
 						>
 							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -831,7 +828,7 @@ export function DataTable<TData, TValue>({
 							type="button"
 							onClick={onRefresh}
 							aria-label="Refresh"
-							className="h-8 w-8 rounded-full flex items-center justify-center cursor-pointer transition-colors backdrop-blur-sm shadow-[0_0_21px_0_rgba(0,0,0,0.05)]"
+							className="h-8 w-8 rounded-none flex items-center justify-center cursor-pointer transition-colors"
 							style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text-muted)" }}
 						>
 							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 21h5v-5" /></svg>
@@ -843,7 +840,7 @@ export function DataTable<TData, TValue>({
 						<button
 							type="button"
 							onClick={onAdd}
-							className="h-8 px-3 flex items-center gap-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors shadow-[0_0_21px_0_rgba(0,0,0,0.05)]"
+							className="h-8 px-3 flex items-center gap-1.5 rounded-none text-xs font-medium cursor-pointer transition-colors"
 							style={{
 								background: "var(--color-accent-fill)",
 								color: "var(--color-accent-foreground)",
@@ -871,7 +868,7 @@ export function DataTable<TData, TValue>({
 				) : (
 					<DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
 						<table
-							className="w-full caption-bottom text-sm"
+							className={cn("w-full caption-bottom", tableStyles.table)}
 							style={{ ...columnSizeVars, tableLayout: "fixed", minWidth: table.getTotalSize() }}
 						>
 							<thead className="[&_tr]:border-b sticky top-0 z-30" style={{ background: "var(--color-surface)" }}>
@@ -879,7 +876,7 @@ export function DataTable<TData, TValue>({
 									<tr
 										key={headerGroup.id}
 										style={{ borderColor: "var(--color-border)" }}
-										className="border-b backdrop-blur-sm"
+										className="border-b"
 									>
 										<SortableContext items={sortableHeaderIds} strategy={horizontalListSortingStrategy}>
 											{headerGroup.headers.map((header, colIdx) => {
@@ -894,10 +891,9 @@ export function DataTable<TData, TValue>({
 												const isRightSticky = isActionsCol || isAddCol;
 												const canSort = header.column.getCanSort();
 												const isSorted = header.column.getIsSorted();
-												const isLastCol = colIdx === headerGroup.headers.length - 1;
 
 												const headerStyle: React.CSSProperties = {
-													background: "var(--color-surface)",
+													...(isRownumCol ? { textAlign: "right" } : {}),
 													position: "sticky",
 													top: 0,
 													zIndex: isRightSticky ? 32 : isSticky || isSelectCol ? 31 : 30,
@@ -915,10 +911,8 @@ export function DataTable<TData, TValue>({
 													: flexRender(header.column.columnDef.header, header.getContext());
 
 												const thClassName = cn(
-													"h-11 text-left align-middle font-medium text-[12px] whitespace-nowrap p-0 group select-none relative box-border",
+													"h-[34px] text-left align-middle font-medium text-[11px] whitespace-nowrap p-0 group select-none relative box-border",
 													isRownumCol && "text-right",
-													!isLastCol && "border-r",
-													isSticky && isScrolled && "border-r-2!",
 												);
 
 												const innerClassName = cn(
@@ -1030,7 +1024,7 @@ export function DataTable<TData, TValue>({
 			{!loading && data.length > 0 && (
 				<div
 					data-table-part="footer"
-					className="flex items-center justify-between px-3 py-1 text-[11px] shrink-0 backdrop-blur-xl"
+					className="flex items-center justify-between px-5 py-1.5 text-[11px] shrink-0"
 					style={{
 						borderTop: "1px solid var(--color-border)",
 						color: "var(--color-text-muted)",
@@ -1054,7 +1048,7 @@ export function DataTable<TData, TValue>({
 									setPagination((p) => ({ ...p, pageSize: newSize, pageIndex: 0 }));
 								}
 							}}
-							className="h-6 px-1.5 py-0 rounded-md text-[11px] outline-none transition-colors cursor-pointer"
+							className="h-8 px-1.5 py-0 rounded-none text-[11px] outline-none transition-colors cursor-pointer"
 							style={{
 								background: "var(--color-surface)",
 								color: "var(--color-text)",
@@ -1137,9 +1131,6 @@ function TableRowInner({
 }: TableRowProps) {
 	const visibleCells = row.getVisibleCells();
 	const firstDataIdx = 1 + (enableRowSelection ? 1 : 0);
-	const altBg = rowIdx % 2 === 0 ? "var(--color-surface)" : "var(--color-bg)";
-	const baseBg = isActive || isSelected ? "var(--color-accent-light)" : altBg;
-	const stickyBg = baseBg;
 	const selectedCellColumns = useMemo(
 		() => new Set(selectedCellColumnIds ? selectedCellColumnIds.split("|") : []),
 		[selectedCellColumnIds],
@@ -1160,17 +1151,6 @@ function TableRowInner({
 		}
 	}, [onRowClick, row.original, rowIdx]);
 
-	const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLTableRowElement>) => {
-		if (!isSelected && !isActive) {
-			(e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
-		}
-	}, [isSelected, isActive]);
-
-	const handleMouseLeave = useCallback((e: React.MouseEvent<HTMLTableRowElement>) => {
-		if (!isSelected && !isActive) {
-			(e.currentTarget as HTMLElement).style.background = altBg;
-		}
-	}, [isSelected, isActive, altBg]);
 
 	return (
 		<tr
@@ -1179,16 +1159,12 @@ function TableRowInner({
 			className={cn(
 				"border-b transition-colors duration-100 group/row",
 				onRowClick && "cursor-pointer",
-				isSelected && "data-[state=selected]:bg-(--color-accent-light)",
 			)}
 			style={{
 				borderColor: isActive ? "var(--color-accent)" : "var(--color-border)",
-				background: baseBg,
 			}}
 			onClick={handleClick}
 			onKeyDown={handleKeyDown}
-			onMouseEnter={handleMouseEnter}
-			onMouseLeave={handleMouseLeave}
 		>
 			{visibleCells.map((cell, colIdx) => {
 				const isRownumCol = cell.column.id === "__rownum";
@@ -1199,7 +1175,6 @@ function TableRowInner({
 				const isAddCol = cell.column.id === "__add_column";
 				const isDataCell = !isRownumCol && !isSelectCol && !isActionsCol && !isAddCol;
 				const isRightSticky = isActionsCol || isAddCol;
-				const isLastCol = colIdx === visibleCells.length - 1;
 				const cellFaviconUrl = isFirstData && !isSelectCol ? firstColumnFaviconUrl : undefined;
 				const isCellSelected = isDataCell && selectedCellColumns.has(cell.column.id);
 				const isCellActive = isDataCell && activeCellColumnId === cell.column.id;
@@ -1214,16 +1189,12 @@ function TableRowInner({
 
 				const cellStyle: React.CSSProperties = {
 					borderColor: "var(--color-border)",
-					...(isCellSelected
-						? { background: "color-mix(in srgb, var(--color-accent-fill) 10%, var(--color-surface))" }
-						: {}),
 					...((stickyShadow || selectionShadow) ? { boxShadow: [stickyShadow, selectionShadow].filter(Boolean).join(", ") } : {}),
 					...(isSticky
 						? {
 								position: "sticky" as const,
 								left: enableRowSelection ? 40 : 0,
 								zIndex: 2,
-								background: isCellSelected ? "color-mix(in srgb, var(--color-accent-fill) 10%, var(--color-surface))" : stickyBg,
 							}
 						: {}),
 					...(isSelectCol
@@ -1231,7 +1202,6 @@ function TableRowInner({
 								position: "sticky" as const,
 								left: 0,
 								zIndex: 2,
-								background: stickyBg,
 								width: 40,
 							}
 						: {}),
@@ -1240,7 +1210,6 @@ function TableRowInner({
 								position: "sticky" as const,
 								right: 0,
 								zIndex: 2,
-								background: stickyBg,
 							}
 						: {}),
 				};
@@ -1253,14 +1222,8 @@ function TableRowInner({
 						data-row-index={isDataCell ? rowIdx : undefined}
 						data-column-id={isDataCell ? cell.column.id : undefined}
 						className={cn(
-							"align-middle whitespace-nowrap text-[13px] border-b transition-colors box-border",
-							isRownumCol
-								? "px-3 py-3 text-right"
-								: isSelectCol
-									? "px-3 py-3"
-									: "px-4 py-3",
-							!isLastCol && "border-r",
-							isSticky && isScrolled && "border-r-2!",
+							"align-middle whitespace-nowrap text-xs border-b transition-colors box-border px-3 py-2",
+							isRownumCol && "text-right",
 							isDataCell && "cursor-cell select-none",
 						)}
 						style={cellStyle}
@@ -1436,7 +1399,7 @@ function EmptyTableBody({
 					>
 						<div
 							data-table-part="empty-icon"
-							className="rounded-full p-4 mb-2 backdrop-blur-sm"
+							className="rounded-none p-2.5"
 							style={{
 								background: "var(--color-glass)",
 								border: "1px solid var(--color-border)",
@@ -1487,7 +1450,7 @@ function PaginationButton({ onClick, disabled, label }: { onClick: () => void; d
 			type="button"
 			onClick={onClick}
 			disabled={disabled}
-			className="h-6 w-6 rounded-md flex items-center justify-center text-[11px] disabled:opacity-30 cursor-pointer transition-colors"
+			className="h-8 w-8 rounded-none flex items-center justify-center text-[11px] disabled:opacity-30 cursor-pointer transition-colors"
 			style={{ color: "var(--color-text-muted)", border: "1px solid var(--color-border)", background: "var(--color-surface)" }}
 			// biome-ignore lint: using html entity label
 			dangerouslySetInnerHTML={{ __html: label }}
@@ -1502,7 +1465,7 @@ function RowActionsMenu<TData>({ row, actions, className }: { row: TData; action
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				aria-label="Row actions"
-				className="p-1 rounded-md cursor-pointer"
+				className="p-1 rounded-none cursor-pointer"
 				style={{ color: "var(--color-text-muted)" }}
 				onClick={(e) => e.stopPropagation()}
 			>

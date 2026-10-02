@@ -115,6 +115,21 @@ class CampaignTest(unittest.TestCase):
         self.assertNotEqual(approved, campaign.digest(MANIFEST, [{**ROWS[0], "email": "other@example.com"}]))
         self.assertNotEqual(approved, campaign.digest({**MANIFEST, "links": MANIFEST["links"][:1]}, ROWS))
 
+    def test_digest_ignores_cohort_order_but_binds_every_identity(self):
+        rows = [
+            {"person_id": "p1", "company_id": "c1", "email": "a.b@example.com"},
+            {"person_id": "p2", "company_id": "c2", "email": "ab@example.com"},
+        ]
+        approved = campaign.digest(MANIFEST, rows)
+        self.assertEqual(approved, campaign.digest(MANIFEST, list(reversed(rows))))
+        self.assertNotEqual(approved, campaign.digest(MANIFEST, rows[:1]))
+        self.assertNotEqual(approved, campaign.digest(MANIFEST, [
+            rows[0], {**rows[1], "person_id": "different-person"},
+        ]))
+        self.assertNotEqual(approved, campaign.digest(MANIFEST, [
+            rows[0], {**rows[1], "company_id": "different-company"},
+        ]))
+
     def test_manifest_requires_explicit_links_and_unsubscribe_in_both_bodies(self):
         for invalid in (
             {**MANIFEST, "text": MANIFEST["text"].replace("{{{ pm:unsubscribe }}}", "")},

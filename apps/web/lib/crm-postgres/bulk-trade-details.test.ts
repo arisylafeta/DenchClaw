@@ -85,7 +85,7 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     expect(JSON.stringify(last.changes)).toContain("about 200");
   });
 
-  it("shows the latest campaign email for this trade's listing on a linked buyer", async () => {
+  it("attributes multi-lot email clicks only to the matching listing", async () => {
     const suffix = Date.now().toString(36);
     const [person] = await pg.queryPg<{ id: string }>(
       `insert into crm_people (id, full_name, email) values ('p_test_' || $1, 'Tess Buyer', 'tess-' || $1 || '@example.test') returning id`,
@@ -94,10 +94,17 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     await pg.queryPg(`insert into campaigns (id, campaign_name) values ('c_test_' || $1, 'Synthetic teaser')`, [suffix]);
     await pg.queryPg(
       `insert into crm_campaign_sends (id, campaign_id, person_id, listing_id, auction_url, recipient_email, state,
-         accepted_at, delivered_at, provider_opened_at)
+         accepted_at, delivered_at, provider_opened_at, provider_link_clicked_at)
        values ('s_test_' || $1, 'c_test_' || $1, $2, 'lst_' || $1, 'https://example.test/a', 'tess-' || $1 || '@example.test',
-         'accepted', '2026-09-24T09:00:00Z', '2026-09-24T09:01:00Z', '2026-09-25T08:00:00Z')`,
+         'accepted', '2026-09-24T09:00:00Z', '2026-09-24T09:01:00Z', '2026-09-25T08:00:00Z', '2026-09-25T08:10:00Z')`,
       [suffix, person.id],
+    );
+    await pg.queryPg(
+      `insert into crm_campaign_send_links (id, send_id, cta_key, destination_url, listing_id, first_clicked_at) values
+       ('l_primary_' || $1, 's_test_' || $1, 'primary', 'https://example.test/a', 'lst_' || $1, null),
+       ('l_secondary_' || $1, 's_test_' || $1, 'secondary', 'https://example.test/b', 'lst_secondary_' || $1, '2026-09-25T08:15:00Z'),
+       ('l_form_' || $1, 's_test_' || $1, 'sourcing', 'https://example.test/form', null, '2026-09-25T08:10:00Z')`,
+      [suffix],
     );
     const lot = await trades.createBulkTrade({ title: "Tracked synthetic", listing_id: `lst_${suffix}` }, userId);
     const buyer = await db.addBuyer(lot.id, { name: "Tess Buyer", person_id: person.id }, userId);
@@ -106,7 +113,11 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
       person_email: `tess-${suffix}@example.test`,
       email_tracking: { campaign: "Synthetic teaser", clicked_at: null },
     });
-    expect(buyer!.email_tracking!.opened_at).toBeTruthy();
+    expect(new Date(buyer!.email_tracking!.opened_at!).toISOString()).toBe("2026-09-25T08:00:00.000Z");
+
+    const secondaryLot = await trades.createBulkTrade({ title: "Secondary tracked listing", listing_id: `lst_secondary_${suffix}` }, userId);
+    const secondaryBuyer = await db.addBuyer(secondaryLot.id, { name: "Tess Buyer", person_id: person.id }, userId);
+    expect(new Date(secondaryBuyer!.email_tracking!.clicked_at!).toISOString()).toBe("2026-09-25T08:15:00.000Z");
 
     const other = await trades.createBulkTrade({ title: "Different listing", listing_id: "lst_other" }, userId);
     expect((await db.addBuyer(other.id, { name: "Tess Buyer", person_id: person.id }, userId))!.email_tracking).toBeNull();
