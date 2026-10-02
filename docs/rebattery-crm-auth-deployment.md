@@ -136,9 +136,9 @@ separate from email tracking freshness.
 
 ## People table layout
 
-Migration `031_people_column_layout.sql` changes display metadata only. People
-starts with Full Name, Email Address, Company, Job Title, Purpose, Tags, Phone
-Number and LinkedIn URL; First Name and Last Name remain at the end. People no
+Migrations `031_people_column_layout.sql` and `032_people_email_after_tags.sql`
+change display metadata only. People starts with Full Name, Company, Job Title,
+Purpose, Tags, Email Address, Phone Number and LinkedIn URL; First Name and Last Name remain at the end. People no
 longer reorders these columns by fill rate. Company ordering is unchanged.
 Tags uses the existing editable badge renderer; JSON editor values are decoded
 into PostgreSQL arrays on create/update. Saved filters, contact values,

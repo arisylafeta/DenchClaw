@@ -41,6 +41,7 @@ describe.skipIf(!TEST_URL)("People layout and editable tag badges", () => {
         left join crm_objects related on spec.col='company_id' and related.name='company'
         where o.name='people'`);
       await client.query(readFileSync(new URL("./migrations/031_people_column_layout.sql", import.meta.url), "utf8"));
+      await client.query(readFileSync(new URL("./migrations/032_people_email_after_tags.sql", import.meta.url), "utf8"));
     } finally { client.release(); }
     const scoped = new URL(TEST_URL!);
     scoped.searchParams.set("options", `-c search_path=${schema},public`);
@@ -62,7 +63,7 @@ describe.skipIf(!TEST_URL)("People layout and editable tag badges", () => {
   it("keeps primary contact columns first and name components last regardless of fill rates", async () => {
     const data = await objects.getPostgresObjectData("people", new URL("http://test/people"));
     expect(data.fields.slice(0, 8).map((field) => field.name)).toEqual([
-      "Full Name", "Email Address", "Company", "Job Title", "Purpose", "Tags", "Phone Number", "LinkedIn URL",
+      "Full Name", "Company", "Job Title", "Purpose", "Tags", "Email Address", "Phone Number", "LinkedIn URL",
     ]);
     expect(data.fields.slice(-2).map((field) => field.name)).toEqual(["First Name", "Last Name"]);
     expect(data.fields.find((field) => field.name === "Tags")).toMatchObject({ type: "tags", enum_multiple: true });

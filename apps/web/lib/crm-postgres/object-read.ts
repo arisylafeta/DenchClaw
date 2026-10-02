@@ -104,8 +104,8 @@ function resolveObjectTable(object: ObjectRow): string | null {
 
 
 const PEOPLE_FIELD_ORDER: Record<string, number> = {
-  full_name: 0, email: 1, company_id: 2, job_title: 3, Purpose: 4,
-  tags: 5, phone: 6, linkedin_url: 7,
+  full_name: 0, company_id: 1, job_title: 2, Purpose: 3,
+  tags: 4, email: 5, phone: 6, linkedin_url: 7,
   first_name: Number.MAX_SAFE_INTEGER - 1, last_name: Number.MAX_SAFE_INTEGER,
 };
 const FILL_RATE_OBJECTS = new Set(["people", "company", "companies"]);
