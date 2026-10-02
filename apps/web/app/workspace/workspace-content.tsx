@@ -12,7 +12,7 @@ import type {
   FileData,
 } from "./content-state";
 import { ObjectTable, AddEntryModal } from "../components/workspace/object-table";
-import compactTableStyles from "../components/workspace/compact-table.module.css";
+import tableStyles from "../components/ui/data-table.module.css";
 import { ObjectKanban } from "../components/workspace/object-kanban";
 import { ObjectCalendar, type CalendarDateChangePayload } from "../components/workspace/object-calendar";
 import { ObjectTimeline, type TimelineDateChangePayload } from "../components/workspace/object-timeline";
@@ -3885,10 +3885,10 @@ function ObjectView({
     },
     [handleServerSearch],
   );
-  const compactPeopleTable = currentViewType === "table" && isSeedPeopleObjectId(data.object.id);
+  const tableView = currentViewType === "table";
 
   return (
-    <div className={`flex flex-col h-full min-w-0 overflow-hidden${compactPeopleTable ? ` bulk-trades ${compactTableStyles.surface}` : ""}`}>
+    <div className={`flex flex-col h-full min-w-0 overflow-hidden${tableView ? ` bulk-trades ${tableStyles.surface}` : ""}`}>
       {/* Unified toolbar — title + count, view switcher, search, filter, views, settings, refresh, +Add.
           Use `flex-wrap` so when the right panel is narrow the items wrap to
           a second row instead of overlapping each other. `overflow-x-auto`
@@ -3922,7 +3922,7 @@ function ObjectView({
             title={`Change icon for ${displayObjectName(data.object.name)}`}
           />
           <h1
-            className={compactPeopleTable ? "text-lg font-semibold tracking-tight truncate" : "text-sm font-semibold truncate"}
+            className={tableView ? "text-lg font-semibold tracking-tight truncate" : "text-sm font-semibold truncate"}
             style={{ color: "var(--color-text)" }}
             title={data.object.description || displayObjectName(data.object.name)}
           >
@@ -4033,7 +4033,7 @@ function ObjectView({
           <button
             type="button"
             onClick={handleRefresh}
-            className={`flex items-center justify-center w-7 h-7 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer${compactPeopleTable ? " border border-[var(--bt-border)] bg-[var(--bt-surface)]" : ""}`}
+            className={`flex items-center justify-center rounded-md hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer${tableView ? " w-8 h-8 border border-[var(--bt-border)] bg-[var(--bt-surface)]" : " w-7 h-7"}`}
             style={{ color: "var(--color-text-muted)" }}
             title="Refresh"
             aria-label="Refresh"
@@ -4088,7 +4088,6 @@ function ObjectView({
         {currentViewType === "table" && (
           <ObjectTable
             objectName={data.object.name}
-            presentation={compactPeopleTable ? "compact" : "default"}
             fields={data.fields}
             displayField={data.effectiveDisplayField}
             entries={filteredEntries}

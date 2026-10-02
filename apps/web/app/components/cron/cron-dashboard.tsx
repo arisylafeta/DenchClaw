@@ -1,5 +1,6 @@
 "use client";
 
+import tableStyles from "../ui/data-table.module.css";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type {
   CronJob,
@@ -1245,25 +1246,25 @@ function TimelineSection({ jobs }: { jobs: CronJob[] }) {
 
 function JobsTable({ jobs, onSelectJob, onSendCommand }: { jobs: CronJob[]; onSelectJob: (jobId: string) => void; onSendCommand?: (msg: string) => void }) {
   return (
-    <div className="mb-6">
+    <div className={`bulk-trades ${tableStyles.surface} mb-6`}>
       <h2 className="text-sm font-medium uppercase tracking-wider mb-3" style={{ color: "var(--color-text-muted)" }}>Jobs</h2>
       {jobs.length === 0 ? (
-        <div className="p-8 text-center rounded-2xl" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
+        <div data-table-part="empty" className="p-8 text-center rounded-none" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
           <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
             No cron jobs configured.
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+          <table className={tableStyles.table}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--color-border)", color: "var(--color-text-muted)" }}>
-                <th className="text-left px-4 py-2.5 font-medium text-xs uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-2.5 font-medium text-xs uppercase tracking-wider">Schedule</th>
-                <th className="text-left px-4 py-2.5 font-medium text-xs uppercase tracking-wider">Status</th>
-                <th className="text-left px-4 py-2.5 font-medium text-xs uppercase tracking-wider">Next Run</th>
-                <th className="text-left px-4 py-2.5 font-medium text-xs uppercase tracking-wider">Last Run</th>
-                <th className="text-left px-4 py-2.5 font-medium text-xs uppercase tracking-wider w-20"></th>
+                <th className={tableStyles.headerCell}>Name</th>
+                <th className={tableStyles.headerCell}>Schedule</th>
+                <th className={tableStyles.headerCell}>Status</th>
+                <th className={tableStyles.headerCell}>Next Run</th>
+                <th className={tableStyles.headerCell}>Last Run</th>
+                <th className={tableStyles.headerCell}></th>
               </tr>
             </thead>
             <tbody>
@@ -1290,10 +1291,10 @@ function JobRow({ job, onClick, onSendCommand }: { job: CronJob; onClick: () => 
       className="cursor-pointer transition-colors group"
       style={{ borderBottom: "1px solid var(--color-border)" }}
       onClick={onClick}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bt-row-hover)"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
     >
-      <td className="px-4 py-3">
+      <td className={tableStyles.cell}>
         <div className="flex items-center gap-2">
           <div className="font-medium" style={{ color: "var(--color-text)" }}>{job.name}</div>
           {job.state.consecutiveErrors != null && job.state.consecutiveErrors > 0 && (
@@ -1304,17 +1305,17 @@ function JobRow({ job, onClick, onSendCommand }: { job: CronJob; onClick: () => 
         </div>
         {job.description && <div className="text-xs truncate max-w-[200px]" style={{ color: "var(--color-text-muted)" }}>{job.description}</div>}
       </td>
-      <td className="px-4 py-3 text-xs" style={{ color: "var(--color-text-muted)" }}>{formatSchedule(job.schedule)}</td>
-      <td className="px-4 py-3">
+      <td className={tableStyles.cell} style={{ color: "var(--color-text-muted)" }}>{formatSchedule(job.schedule)}</td>
+      <td className={tableStyles.cell}>
         <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full" style={{ background: `color-mix(in srgb, ${statusColor} 12%, transparent)`, color: statusColor }}>
           {status === "running" && <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: statusColor }} />}
           {status}
         </span>
       </td>
-      <td className="px-4 py-3 text-xs" style={{ color: "var(--color-text-muted)" }}>
+      <td className={tableStyles.cell} style={{ color: "var(--color-text-muted)" }}>
         {job.state.nextRunAtMs ? (job.state.nextRunAtMs > now ? `in ${formatCountdown(job.state.nextRunAtMs - now)}` : "overdue") : "-"}
       </td>
-      <td className="px-4 py-3">
+      <td className={tableStyles.cell}>
         <div className="flex items-center gap-1.5">
           {job.state.lastStatus && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: jobStatusColor(job.state.lastStatus) }} />}
           <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -1322,16 +1323,16 @@ function JobRow({ job, onClick, onSendCommand }: { job: CronJob; onClick: () => 
           </span>
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className={tableStyles.cell}>
         <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
           {!job.state.runningAtMs && job.enabled && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onSendCommand?.(`Run cron job "${job.name}" (${job.id}) now with --force`); }}
-              className="p-1 rounded cursor-pointer" style={{ color: "var(--color-accent)" }} title="Run now">
+              className="p-1 rounded-none cursor-pointer" style={{ color: "var(--color-accent)" }} title="Run now">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3" /></svg>
             </button>
           )}
           <button type="button" onClick={(e) => { e.stopPropagation(); onSendCommand?.(`${job.enabled ? "Disable" : "Enable"} cron job "${job.name}" (${job.id})`); }}
-            className="p-1 rounded cursor-pointer" style={{ color: job.enabled ? "var(--color-text-muted)" : "var(--color-success, #22c55e)" }} title={job.enabled ? "Disable" : "Enable"}>
+            className="p-1 rounded-none cursor-pointer" style={{ color: job.enabled ? "var(--color-text-muted)" : "var(--color-success, #22c55e)" }} title={job.enabled ? "Disable" : "Enable"}>
             {job.enabled ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="m4.93 4.93 14.14 14.14" /></svg>
             ) : (

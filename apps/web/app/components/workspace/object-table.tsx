@@ -19,7 +19,7 @@ import { UrlFavicon } from "./url-favicon";
 import { LinkOpenButton } from "./link-open-button";
 import { LinkPreviewWrapper } from "./workspace-link";
 import { RelationLink } from "./relation-link";
-import compactStyles from "./compact-table.module.css";
+import tableStyles from "../ui/data-table.module.css";
 import type { TableCellSelectionState, TableSelectionContext } from "@/lib/table-selection";
 
 /* ─── Types ─── */
@@ -57,8 +57,6 @@ type ServerPaginationProps = {
 
 type ObjectTableProps = {
 	objectName: string;
-	/** Set by the host from canonical CRM object identity, not objectName. */
-	presentation?: "default" | "compact";
 	fields: Field[];
 	/** Field whose value opens the entry detail, independent of column order. */
 	displayField?: string;
@@ -837,7 +835,6 @@ type EnrichmentProgress = {
 
 export function ObjectTable({
 	objectName,
-	presentation = "default",
 	fields,
 	displayField,
 	entries,
@@ -865,8 +862,6 @@ export function ObjectTable({
 	onStickyFirstColumnChange,
 	onSelectionContextChange,
 }: ObjectTableProps) {
-	const compact = presentation === "compact";
-	const popupClassName = compact ? `bulk-trades ${compactStyles.surface} ${compactStyles.menu}` : undefined;
 	const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({});
 	const [cellSelection, setCellSelection] = useState<TableCellSelectionState | null>(null);
 	const [showAddModal, setShowAddModal] = useState(false);
@@ -1337,7 +1332,6 @@ export function ObjectTable({
 							)}
 							<ColumnHeaderMenu
 								field={field}
-								popupClassName={popupClassName}
 								sortDirection={column.getIsSorted()}
 								onSort={(desc) => column.toggleSorting(desc)}
 								onHide={() => column.toggleVisibility(false)}
@@ -1514,7 +1508,7 @@ export function ObjectTable({
 		// `onEntryClick` and `updateLocalEntryField` are read inside the `cell`
 		// closures and were missing from the original deps (stale-closure bug);
 		// they're included now.
-	}, [dataFields, displayFieldName, actionFields, activeReverseRelations, objectName, members, relationLabels, relationFaviconUrls, onNavigateToObject, onNavigateToEntry, onEntryClick, onRefresh, updateLocalEntryField, showToast, renamingFieldId, handleRenameColumn, handleUpdateColumnOptions, handleDeleteColumn, handleMoveColumn, enrichmentProgress, handleReEnrich, enrichedCellIds, openMenuFieldId, popupClassName]);
+	}, [dataFields, displayFieldName, actionFields, activeReverseRelations, objectName, members, relationLabels, relationFaviconUrls, onNavigateToObject, onNavigateToEntry, onEntryClick, onRefresh, updateLocalEntryField, showToast, renamingFieldId, handleRenameColumn, handleUpdateColumnOptions, handleDeleteColumn, handleMoveColumn, enrichmentProgress, handleReEnrich, enrichedCellIds, openMenuFieldId]);
 
 	// Add entry handler — delegates to parent when provided, otherwise opens local modal.
 	const handleAdd = useCallback(() => {
@@ -1732,13 +1726,12 @@ export function ObjectTable({
 	const rowActionsHeader = useMemo(() => (
 		<AddColumnPopover
 			objectName={objectName}
-			popupClassName={popupClassName}
 			onCreated={stableOnCreated}
 			fields={fieldsRef.current}
 			onEnrichmentStart={stableOnEnrichmentStart}
 		/>
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	), [objectName, stableOnCreated, stableOnEnrichmentStart, popupClassName]);
+	), [objectName, stableOnCreated, stableOnEnrichmentStart]);
 
 	// Translate TanStack's internal sort state into the SortRule[] shape
 	// the API expects. The API joins on field NAME (it pivots fields into
@@ -1761,9 +1754,8 @@ export function ObjectTable({
 	}, [onServerSort]);
 
 	return (
-	<div className={compact ? `bulk-trades ${compactStyles.surface} flex h-full min-h-0 flex-col` : "contents"}>
+	<div className={`bulk-trades ${tableStyles.surface} flex h-full min-h-0 flex-col`}>
 		<DataTable
-			presentation={presentation}
 			columns={columns}
 			data={localEntries}
 			enableSorting

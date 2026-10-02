@@ -11,6 +11,7 @@ import { Input } from "@/app/components/platform-admin/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/app/components/platform-admin/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/app/components/platform-admin/ui/table";
 import { TablePagination } from "@/app/components/platform-admin/table-pagination";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 import { getMessageDetail } from "./actions";
 import {
   MESSAGE_STATUSES,
@@ -76,7 +77,7 @@ function MessagePreview({ row }: { row: MessageListRow }) {
   const attachment = row.attachment_file_name;
   return (
     <div className="min-w-[16rem] max-w-[34rem] whitespace-normal">
-      <p className="line-clamp-2 break-words text-sm text-[var(--color-text)]">{body}</p>
+      <p className="line-clamp-2 break-words text-[var(--color-text)]">{body}</p>
       {attachment && (
         <p className="mt-1 flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
           <Paperclip className="size-3" aria-hidden />
@@ -122,7 +123,7 @@ function FilterSelect({
   return (
     <Select value={value || "all"} onValueChange={(next: string) => onChange(next === "all" ? "" : next)}>
       <SelectTrigger aria-label={ariaLabel} className="w-full sm:w-[10.5rem]"><SelectValue placeholder={placeholder} /></SelectTrigger>
-      <SelectContent>
+      <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
         <SelectItem value="all">{placeholder}</SelectItem>
         {options.map((option) => <SelectItem key={option} value={option}>{option.replaceAll("_", " ")}</SelectItem>)}
       </SelectContent>
@@ -173,19 +174,20 @@ export function MessagesClient({ initialPage }: MessagesClientProps) {
           <Badge variant="outline" className="self-start border-[var(--color-border)] sm:self-auto">Newest first · {initialPage.totalCount.toLocaleString()} matched</Badge>
         </header>
 
-        <Card>
+        <Card className={`bulk-trades ${tableStyles.surface} rounded-none shadow-none`}>
           <CardHeader className="pb-0">
             <CardTitle className="text-base">Search and filters</CardTitle>
             <CardDescription>Search spans message text, conversation IDs, account names, listings, and sender names or email. All filters run on the server.</CardDescription>
           </CardHeader>
           <CardContent>
             <form
+              data-table-part="toolbar"
               className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"
               onSubmit={(event) => { event.preventDefault(); navigate(filters); }}
             >
               <label className="md:col-span-2 xl:col-span-4">
                 <span className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">Search all message context</span>
-                <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-muted)]" aria-hidden /><Input value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Search message text, sender, account, listing, or conversation..." className="pl-9" /></div>
+                <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-muted)]" aria-hidden /><Input data-table-part="search" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Search message text, sender, account, listing, or conversation..." className="pl-9" /></div>
               </label>
               <label><span className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">From date</span><Input type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
               <label><span className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">To date</span><Input type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
@@ -198,19 +200,19 @@ export function MessagesClient({ initialPage }: MessagesClientProps) {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b border-[var(--color-border)] pb-4">
+        <Card className={`bulk-trades ${tableStyles.surface} overflow-hidden rounded-none shadow-none`}>
+          <CardHeader data-table-part="toolbar" className="border-b border-[var(--bt-border)] pb-4">
             <div className="flex items-center justify-between gap-3"><div><CardTitle className="text-base">Marketplace messages</CardTitle><CardDescription className="mt-1">Newest activity first. Select a message to inspect its protected thread context.</CardDescription></div>{isPending && <Loader2 className="size-4 animate-spin text-[var(--color-text-muted)]" aria-label="Loading messages" />}</div>
           </CardHeader>
           <CardContent className="p-0">
             {initialPage.rows.length === 0 ? (
-              <div className="flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center"><Search className="size-7 text-[var(--color-text-muted)]" aria-hidden /><p className="font-medium text-[var(--color-text)]">No messages match these filters</p><p className="text-sm text-[var(--color-text-muted)]">Try widening the date range or clearing a filter.</p></div>
+              <div data-table-part="empty" className="mx-auto flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center"><Search className="size-7 text-[var(--color-text-muted)]" aria-hidden /><p className="font-medium text-[var(--color-text)]">No messages match these filters</p><p className="text-sm text-[var(--color-text-muted)]">Try widening the date range or clearing a filter.</p></div>
             ) : (
               <Table className="min-w-[960px]">
                 <TableHeader><TableRow><TableHead className="w-[17rem]">Sender</TableHead><TableHead className="w-[12rem]">Created</TableHead><TableHead className="w-[18rem]">Conversation / listing</TableHead><TableHead>Message</TableHead><TableHead className="w-[13rem]">Moderation</TableHead><TableHead className="w-8" /></TableRow></TableHeader>
                 <TableBody>
                   {initialPage.rows.map((row) => (
-                    <TableRow key={row.id} className="cursor-pointer [&>td]:py-3" onClick={() => void openDetail(row.id)}>
+                    <TableRow key={row.id} className="cursor-pointer" onClick={() => void openDetail(row.id)}>
                       <TableCell>
                         <div className="flex min-w-52 items-center gap-2.5 whitespace-normal">
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)]/10 text-[11px] font-semibold text-[var(--color-accent)]" aria-hidden>{senderInitials(row)}</span>
@@ -221,7 +223,7 @@ export function MessagesClient({ initialPage }: MessagesClientProps) {
                         </div>
                       </TableCell>
                       <TableCell><span className="text-xs text-[var(--color-text-muted)]">{dateTime(row.created_at)}</span></TableCell>
-                      <TableCell><div className="max-w-56 whitespace-normal"><p className="text-sm text-[var(--color-text)]">{conversationLabel(row)}</p><p className="mt-1 text-xs text-[var(--color-text-muted)]">{row.listing?.title ?? "Listing context unavailable"}{row.listing?.reference ? ` · ${row.listing.reference}` : ""}</p></div></TableCell>
+                      <TableCell><div className="max-w-56 whitespace-normal"><p className="text-[var(--color-text)]">{conversationLabel(row)}</p><p className="mt-1 text-xs text-[var(--color-text-muted)]">{row.listing?.title ?? "Listing context unavailable"}{row.listing?.reference ? ` · ${row.listing.reference}` : ""}</p></div></TableCell>
                       <TableCell><MessagePreview row={row} /></TableCell>
                       <TableCell><StatusBadge row={row} /><p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{row.moderation_reason_code ?? (row.moderation_attempt_count ? `${row.moderation_attempt_count} attempt${row.moderation_attempt_count === 1 ? "" : "s"}` : "No decision metadata")}</p></TableCell>
                       <TableCell><ChevronRight className="size-4 text-[var(--color-text-muted)]" aria-hidden /></TableCell>
@@ -231,7 +233,7 @@ export function MessagesClient({ initialPage }: MessagesClientProps) {
               </Table>
             )}
           </CardContent>
-          <div className="border-t border-[var(--color-border)] px-5 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="message" onPageChange={(page) => navigate(filters, page)} /></div>
+          <div data-table-part="footer" className="border-t border-[var(--bt-border)] px-5 py-3"><TablePagination page={initialPage.page} pageSize={initialPage.pageSize} totalCount={initialPage.totalCount} totalPages={initialPage.totalPages} itemLabel="message" onPageChange={(page) => navigate(filters, page)} /></div>
         </Card>
       </div>
 

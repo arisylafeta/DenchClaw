@@ -1,5 +1,6 @@
 "use client";
 
+import tableStyles from "../ui/data-table.module.css";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CampaignDetail, CampaignSummary } from "@/lib/campaigns";
@@ -7,7 +8,7 @@ import { buildEntryLink, buildFileLink } from "@/lib/workspace-links";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import { CampaignPage } from "./campaign-page";
-import { CampaignDate, PAGE_SIZE, Pagination, StatusTag, cellClass, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignDate, PAGE_SIZE, Pagination, StatusTag, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
 export type CampaignsViewProps = {
   campaignId: string | null;
@@ -71,30 +72,30 @@ function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: CampaignSumma
 
   if (!campaigns.length) { return <p className="px-4 py-8 text-[13px] sm:px-8" style={mutedStyle}>No campaigns are recorded yet.</p>; }
   return (
-    <section aria-label="Campaign list">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 sm:px-8">
-        <Input type="search" aria-label="Search campaigns" placeholder="Search campaign, audience or status" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
-        <span className="text-[13px]" style={mutedStyle}>{campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"}</span>
+    <section aria-label="Campaign list" className={`bulk-trades ${tableStyles.surface}`}>
+      <div data-table-part="toolbar" className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 sm:px-8">
+        <Input data-table-part="search" type="search" aria-label="Search campaigns" placeholder="Search campaign, audience or status" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
+        <span data-table-part="count" className="text-[12px]" style={mutedStyle}>{campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"}</span>
       </div>
-      <div className="max-w-full overflow-x-auto">
-        <table ref={table} tabIndex={-1} aria-label="Campaigns" className="w-full min-w-[780px] border-collapse text-left focus:outline-none">
-          <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Campaign", "Sent date / audience", "Status", "Sent", "Delivered", "Tracked opens", "Tracked clicks"].map((label) => <th key={label} scope="col" className="bt-label border-b px-3.5 py-2.5" style={cellStyle}>{label}</th>)}</tr></thead>
+      <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
+        <table ref={table} tabIndex={-1} aria-label="Campaigns" className={`${tableStyles.table} min-w-[780px] focus:outline-none`}>
+          <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Campaign", "Sent date / audience", "Status", "Sent", "Delivered", "Tracked opens", "Tracked clicks"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>
             {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => <tr key={campaign.id} className="hover:bg-[var(--bt-row-hover)]">
-              <td className={`${cellClass} min-w-[190px]`} style={cellStyle}>
-                <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="text-sm font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
+              <td className={`${tableStyles.cell} min-w-[190px]`} style={cellStyle}>
+                <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
                 <div className="mt-0.5 text-xs" style={mutedStyle}>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger"} · {campaign.recipient_count} retained</div>
                 {campaign.tracking_pending > 0 && <div className="mt-0.5 text-xs" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</div>}
               </td>
-              <td className={cellClass} style={cellStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /><div className="mt-0.5" style={mutedStyle}>{humanize(campaign.audience)}</div></td>
-              <td className={cellClass} style={cellStyle}><StatusTag status={campaign.status} /></td>
-              {[campaign.metrics.sent, campaign.metrics.delivered, campaign.metrics.opened, campaign.metrics.clicked].map((value, index) => <td key={index} className={`${cellClass} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</td>)}
+              <td className={tableStyles.cell} style={cellStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /><div className="mt-0.5" style={mutedStyle}>{humanize(campaign.audience)}</div></td>
+              <td className={tableStyles.cell} style={cellStyle}><StatusTag status={campaign.status} /></td>
+              {[campaign.metrics.sent, campaign.metrics.delivered, campaign.metrics.opened, campaign.metrics.clicked].map((value, index) => <td key={index} className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</td>)}
             </tr>)}
             {!rows.length && <tr><td colSpan={7} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your search.</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} />
+      <div data-table-part="footer"><Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} /></div>
     </section>
   );
 }

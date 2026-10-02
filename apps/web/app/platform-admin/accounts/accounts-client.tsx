@@ -12,6 +12,7 @@ import {
   CrmLoadingState,
 } from "@/app/components/crm/crm-list-shell";
 import { DataTable } from "@/app/components/workspace/data-table";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
@@ -178,7 +179,7 @@ function AccountActions({
           <span className="sr-only">Open actions</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className={`bulk-trades ${tableStyles.menu}`}>
         {statusActions.map(({ label, targetStatus }) => (
           <DropdownMenuItem
             key={targetStatus}
@@ -494,7 +495,7 @@ function AccountDetailsView({
         ) : null}
 
         {tab === "members" ? (
-          <div className="h-full min-h-0 p-4" role="tabpanel">
+          <div className={`bulk-trades ${tableStyles.surface} h-full min-h-0 p-4`} role="tabpanel">
             <DataTable
               columns={memberColumns}
               data={details.members}
@@ -511,7 +512,7 @@ function AccountDetailsView({
 
         {tab === "platform" ? (
           profileRows.length > 0 ? (
-            <div className="h-full min-h-0 p-4" role="tabpanel">
+            <div className={`bulk-trades ${tableStyles.surface} h-full min-h-0 p-4`} role="tabpanel">
               <DataTable
                 columns={profileColumns}
                 data={profileRows}
@@ -949,7 +950,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
   return (
     <>
       <CrmListShell title="Accounts" count={accounts.length}>
-        <div className="h-full min-h-0">
+        <div className={`bulk-trades ${tableStyles.surface} h-full min-h-0`}>
           <DataTable
             columns={columns}
             data={filtered}
@@ -975,7 +976,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
                   <SelectTrigger className="h-8 w-32 text-xs" aria-label="Filter by role">
                     <SelectValue placeholder="All roles" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                     <SelectItem value="all">All roles</SelectItem>
                     <SelectItem value="buyer">Buyers</SelectItem>
                     <SelectItem value="supplier">Suppliers</SelectItem>
@@ -992,7 +993,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
                   <SelectTrigger className="h-8 w-36 text-xs" aria-label="Filter by status">
                     <SelectValue placeholder="All statuses" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                     <SelectItem value="all">All statuses</SelectItem>
                     {accountStatuses.map((status) => (
                       <SelectItem key={status} value={status}>{capitalize(status)}</SelectItem>
@@ -1009,7 +1010,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
                   <SelectTrigger className="h-8 w-32 text-xs" aria-label="Filter by type">
                     <SelectValue placeholder="All types" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                     <SelectItem value="all">All types</SelectItem>
                     {accountTypes.map((type) => (
                       <SelectItem key={type} value={type}>{capitalize(type)}</SelectItem>
@@ -1030,7 +1031,7 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
                     Bulk actions
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className={`bulk-trades ${tableStyles.menu}`}>
                   <DropdownMenuItem onSelect={() => handleBulkStatusChange("approved")}>
                     Approve selected
                   </DropdownMenuItem>

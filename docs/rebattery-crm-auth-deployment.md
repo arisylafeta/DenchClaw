@@ -47,20 +47,25 @@ Selecting a view or resizing columns updates only selection/settings; it never
 resubmits stale view definitions from another tab. Computed multi-value Purpose
 cannot be used as an editable Kanban grouping or scalar timeline grouping.
 
-## People interface
+## Shared data tables and People interface
 
-Only the registered CRM People object's table view opts into the compact
-`--bt-*` presentation, using `isSeedPeopleObjectId` at the workspace host.
-`ObjectTable` and `DataTable` keep their existing interaction engine; the
-presentation is explicit and defaults unchanged for Companies and custom
-People-named objects. Scoped table CSS covers the host toolbar, rows, focus,
-selection, pagination and portaled column/action menus.
+`app/components/ui/data-table.module.css` owns the compact, square `--bt-*`
+data-table presentation: headers, cells, hover/selection, focus, toolbars,
+search, pagination, empty/loading states and portaled menus. `DataTable` and
+`ObjectTable` apply it by default for People, Companies and custom objects;
+there is no People-only presentation switch. Campaigns, Company opportunities,
+Cron, database previews, onboarding, platform administration and the operational
+trade/demand/dismantler column grids consume the same contract. Existing sorting,
+filters, edits, selection, resizing and paging stay in their existing engines.
+Email HTML, code diffs, boards, timelines and non-tabular lists are outside this
+scope; badges and avatars keep their meaningful shapes.
 
-`PersonProfile` uses the same square presentation across its header, tabs,
-overview and notes. Its profile-only token bridge and explicit compact thread
-and activity variants leave shared Company surfaces unchanged. Campaign updates
-use compact rows and destination tables; IDs and sync metadata remain collapsed
-under Details. Dates are formatted for reading without changing their meaning.
+`PersonProfile` keeps its square header, tabs, overview and notes. Campaigns
+groups sends by campaign identity into a five-column results table. Each campaign
+starts closed; a keyboard-operable disclosure reveals per-send and destination
+evidence. Lifetime listing engagement is separately collapsed. Raw IDs, CTA keys
+and sync metadata are not shown. Unknown, unobserved and unsent evidence remain
+distinct, and disclosure state resets on person navigation.
 
 `lib/crm-postgres/person-profile.ts` resolves cached listing metadata in one
 batched local `crm_bulk_trade_lots` read. Campaign detail and Person profiles share

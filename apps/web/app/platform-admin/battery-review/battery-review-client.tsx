@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { TablePagination } from "@/app/components/platform-admin/table-pagination";
 import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
+import tableStyles from "@/app/components/ui/data-table.module.css";
 import {
   Card,
   CardContent,
@@ -262,7 +263,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
         </Card>
       ) : null}
 
-      <Card>
+      <Card className={`bulk-trades ${tableStyles.surface} rounded-none shadow-none`}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileSearchIcon className="size-5" /> Evidence queue
@@ -273,6 +274,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
         </CardHeader>
         <CardContent className="space-y-4">
           <form
+            data-table-part="toolbar"
             className="flex flex-col gap-2 sm:flex-row"
             onSubmit={(event) => {
               event.preventDefault();
@@ -280,6 +282,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
             }}
           >
             <Input
+              data-table-part="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search source or evidence hash"
@@ -298,7 +301,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
               <SelectTrigger className="w-full sm:w-44" aria-label="Filter evidence status">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={`bulk-trades ${tableStyles.menu}`}>
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="verified">Verified</SelectItem>
                 <SelectItem value="applied">Applied</SelectItem>
@@ -311,7 +314,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
             </Button>
           </form>
 
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="overflow-x-auto border border-[var(--bt-border)]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -371,6 +374,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
             </Table>
           </div>
 
+          <div data-table-part="footer">
           <TablePagination
             page={pageData.page}
             pageSize={pageData.pageSize}
@@ -379,6 +383,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
             itemLabel="evidence row"
             onPageChange={(page) => load({ page })}
           />
+          </div>
         </CardContent>
       </Card>
 
@@ -453,7 +458,7 @@ export function BatteryReviewClient({ initialPage }: { initialPage: BatteryEvide
                     ? "Applied canonical changes"
                     : "Canonical versus supplier input"}
                 </h3>
-                <div className="overflow-x-auto rounded-lg border">
+                <div className="overflow-x-auto border">
                   <Table>
                     <TableHeader>
                       <TableRow>

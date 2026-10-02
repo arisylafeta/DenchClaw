@@ -1,5 +1,6 @@
 "use client";
 
+import tableStyles from "../ui/data-table.module.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
 import { BuyerTab, type BuyerData } from "./company-buyer-tab";
@@ -554,7 +555,7 @@ function OpportunityFilterDropdown({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="inline-flex h-9 min-w-28 items-center justify-between gap-2 rounded-md border px-3 text-[12px] font-medium capitalize transition-colors"
+        className="inline-flex h-9 min-w-28 items-center justify-between gap-2 rounded-none border px-3 text-[12px] font-medium capitalize transition-colors"
         style={{
           borderColor: selectedValues.length > 0 ? "var(--color-text)" : "var(--color-border)",
           background: "var(--color-background)",
@@ -567,7 +568,7 @@ function OpportunityFilterDropdown({
       {open && (
         <div
           role="menu"
-          className="absolute left-0 z-20 mt-1 min-w-40 rounded-md border p-1 shadow-lg"
+          className="absolute left-0 z-20 mt-1 min-w-40 rounded-none border p-1 shadow-none"
           style={{ borderColor: "var(--color-border)", background: "var(--color-background)" }}
         >
           {group.values.map((value) => {
@@ -579,10 +580,10 @@ function OpportunityFilterDropdown({
                 role="menuitemcheckbox"
                 aria-checked={active}
                 onClick={() => onToggle(group.key, value)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] capitalize hover:bg-[var(--color-surface-hover)]"
+                className="flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left text-[12px] capitalize hover:bg-[var(--color-surface-hover)]"
                 style={{ color: "var(--color-text)" }}
               >
-                <span aria-hidden="true" className="inline-flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px]" style={{ borderColor: active ? "var(--color-text)" : "var(--color-border)" }}>
+                <span aria-hidden="true" className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-none border text-[10px]" style={{ borderColor: active ? "var(--color-text)" : "var(--color-border)" }}>
                   {active ? "✓" : ""}
                 </span>
                 {titleCase(value)}
@@ -626,8 +627,8 @@ function OpportunitiesTab({ data }: { data: CompanyResponse }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-col gap-3 border-b pb-3" style={{ borderColor: "var(--color-border)" }}>
+    <div className={`bulk-trades ${tableStyles.surface} space-y-3`}>
+      <div data-table-part="toolbar" className="flex flex-col gap-3 border-b pb-3" style={{ borderColor: "var(--color-border)" }}>
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -636,7 +637,7 @@ function OpportunitiesTab({ data }: { data: CompanyResponse }) {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search opportunities"
-            className="max-w-sm"
+            className="max-w-sm" data-table-part="search"
           />
             {OPPORTUNITY_FILTERS.map((group) => (
               <OpportunityFilterDropdown
@@ -662,7 +663,7 @@ function OpportunitiesTab({ data }: { data: CompanyResponse }) {
         <CrmEmptyState title="No opportunities match these filters" />
       ) : (
         <div data-testid="opportunities-table-shell" className="w-full overflow-x-auto">
-          <table className="min-w-full text-left text-[13px]">
+          <table className={tableStyles.table}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
                 {[
@@ -674,7 +675,7 @@ function OpportunitiesTab({ data }: { data: CompanyResponse }) {
                   "Urgency",
                   "Deadline",
                 ].map((head) => (
-                  <th key={head} className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--color-text-muted)" }}>
+                  <th key={head} className={tableStyles.headerCell}>
                     {head}
                   </th>
                 ))}
@@ -683,13 +684,13 @@ function OpportunitiesTab({ data }: { data: CompanyResponse }) {
             <tbody>
               {filteredOpportunities.map((opportunity) => (
                 <tr key={opportunity.id} className="hover:bg-[var(--color-surface-hover)]" style={{ borderBottom: "1px solid var(--color-border)" }}>
-                  <td className="px-3 py-2 capitalize">{opportunity.opportunity_type}</td>
-                  <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{opportunity.title}</td>
-                  <td className="px-3 py-2" style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</td>
-                  <td className="px-3 py-2">{opportunity.quantity ?? "—"}</td>
-                  <td className="px-3 py-2">{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</td>
-                  <td className="px-3 py-2 capitalize">{opportunity.urgency}</td>
-                  <td className="px-3 py-2">{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</td>
+                  <td className={`${tableStyles.cell} capitalize`}>{opportunity.opportunity_type}</td>
+                  <td className={tableStyles.cell} style={{ color: "var(--color-text)" }}>{opportunity.title}</td>
+                  <td className={tableStyles.cell} style={{ color: "var(--color-text-muted)" }}>{batteryDisplay(opportunity)}</td>
+                  <td className={tableStyles.cell}>{opportunity.quantity ?? "—"}</td>
+                  <td className={tableStyles.cell}>{[opportunity.location_region, opportunity.location_country].filter(Boolean).join(", ") || "—"}</td>
+                  <td className={`${tableStyles.cell} capitalize`}>{opportunity.urgency}</td>
+                  <td className={tableStyles.cell}>{opportunity.deadline_at ? formatRelativeDate(opportunity.deadline_at) : "—"}</td>
                 </tr>
               ))}
             </tbody>

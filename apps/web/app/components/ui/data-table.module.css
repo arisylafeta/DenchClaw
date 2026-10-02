@@ -1,0 +1,309 @@
+.surface {
+  --color-bg: var(--bt-bg);
+  --color-surface: var(--bt-surface);
+  --color-surface-hover: var(--bt-row-hover);
+  --color-glass: var(--bt-surface);
+  --color-border: var(--bt-border);
+  --color-text: var(--bt-text);
+  --color-text-muted: var(--bt-muted);
+  --color-accent: var(--bt-link);
+  --color-accent-fill: var(--bt-accent);
+  --color-accent-foreground: var(--bt-on-accent);
+  --color-accent-light: var(--bt-blue-bg);
+  --color-error: var(--bt-red);
+  --color-warning: var(--bt-amber);
+  --color-success: var(--bt-green);
+  --color-chip-database: var(--bt-blue-bg);
+  --color-chip-database-text: var(--bt-blue);
+  --color-chat-sidebar-active-bg: var(--bt-segment);
+  color: var(--bt-text);
+  background: var(--bt-surface);
+}
+
+/* Shape and focus belong to table controls, never every surface descendant. */
+:is(.surface:where([data-table-part="toolbar"], [data-table-part="footer"], [data-table-part="bulk-actions"]), .surface :where([data-table-part="toolbar"], [data-table-part="footer"], [data-table-part="bulk-actions"])) :where(button, [role="button"], select, input:not([type="checkbox"])),
+.menu :where(button, input:not([type="checkbox"]), select, textarea) {
+  border-radius: 0 !important;
+  min-height: 32px;
+  box-shadow: none;
+  backdrop-filter: none;
+  font-size: 12px;
+}
+
+:is(.surface:where([data-table-part="toolbar"], [data-table-part="footer"], [data-table-part="bulk-actions"]), .surface :where([data-table-part="toolbar"], [data-table-part="footer"], [data-table-part="bulk-actions"])) :where(button, [role="button"], input, select, a, [tabindex]):focus-visible,
+.table > thead > tr > th :where(button, input, [role="button"]):focus-visible,
+.table > tbody > tr:focus-visible,
+.table > tbody > tr > td :where(button, input, select, [role="button"]):focus-visible,
+.menu :where(button, input, select, textarea, [role="menuitem"], [role="menuitemcheckbox"]):focus-visible,
+.summary:focus-visible {
+  outline: 2px solid var(--bt-link) !important;
+  outline-offset: -2px;
+}
+
+.table :where(input[type="checkbox"]),
+.surface [data-table-part="grid-row"] input[type="checkbox"] {
+  accent-color: var(--bt-link);
+}
+
+.surface[data-table-part="toolbar"],
+.surface [data-table-part="toolbar"] {
+  padding: 12px 20px;
+  gap: 8px;
+  background: var(--bt-surface) !important;
+  border-color: var(--bt-border) !important;
+  backdrop-filter: none;
+}
+
+:is(.surface[data-table-part="toolbar"], .surface [data-table-part="toolbar"]) :where(button, [data-slot="dropdown-menu-trigger"]) {
+  min-height: 32px;
+  box-shadow: none !important;
+}
+
+.surface[data-table-part="search"],
+.surface [data-table-part="search"] {
+  height: 32px;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-color: var(--bt-border) !important;
+  backdrop-filter: none;
+}
+
+:is(.surface[data-table-part="search"], .surface [data-table-part="search"]) input {
+  min-height: 0;
+}
+
+:is(.surface[data-table-part="search"], .surface [data-table-part="search"]) button {
+  min-height: 0;
+  height: 24px;
+  width: 24px;
+}
+
+.surface[data-table-part="search"]:focus-within,
+.surface [data-table-part="search"]:focus-within {
+  outline: 2px solid var(--bt-link);
+  outline-offset: 1px;
+}
+
+.surface[data-table-part="count"],
+.surface [data-table-part="count"] {
+  background: var(--bt-segment) !important;
+  border: 0 !important;
+  border-radius: 0;
+  font-family: "Geist Mono", ui-monospace, monospace;
+}
+
+.surface [data-table-part="table-scroll"]:focus-visible {
+  outline: 2px solid var(--bt-link);
+  outline-offset: -2px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--bt-text);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+:where(.table > thead > tr > th, .headerCell) {
+  text-align: left;
+}
+
+.table > thead > tr > th,
+.headerCell {
+  height: 34px;
+  padding: 6px 12px;
+  background: var(--bt-table-head) !important;
+  color: var(--bt-muted);
+  border-right: 0 !important;
+  border-color: var(--bt-border) !important;
+  border-bottom: 1px solid var(--bt-border);
+  font-size: 11px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.table > thead > tr > th:has(> [data-table-part="header-content"]) {
+  padding: 0;
+}
+
+.surface [data-table-part="header-content"] {
+  padding-inline: 12px;
+}
+
+.table > tbody > tr {
+  background: var(--bt-surface);
+  border-color: var(--bt-divider) !important;
+}
+
+.table > tbody > tr:hover {
+  background: var(--bt-row-hover);
+}
+
+.table > tbody > tr:is([data-state="selected"], [data-state="active"], [aria-selected="true"]) {
+  background: var(--bt-blue-bg);
+}
+
+.table > tbody > tr > td,
+.cell {
+  padding: 8px 12px;
+  border-right: 0 !important;
+  border-color: var(--bt-divider) !important;
+  border-bottom: 1px solid var(--bt-divider);
+  font-size: 12px;
+  line-height: 20px;
+  vertical-align: middle;
+}
+
+/* Sticky cells inherit the same calm hover/selection as the rest of their row. */
+.table > tbody > tr > td {
+  background: inherit;
+}
+
+.table > tbody > tr > td[data-dt-cell-selected="true"] {
+  background: color-mix(in srgb, var(--bt-link) 12%, var(--bt-surface));
+}
+
+.table > tbody > tr > td.detailCell,
+.detailCell {
+  padding: 0;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.summary {
+  min-height: 34px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.surface [data-table-part="empty-cell"] {
+  padding: 0;
+}
+
+.surface[data-table-part="footer"],
+.surface [data-table-part="footer"] {
+  min-height: 40px;
+  padding: 6px 20px;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--bt-surface) !important;
+  border-color: var(--bt-border) !important;
+  backdrop-filter: none;
+  font-family: "Geist Mono", ui-monospace, monospace;
+}
+
+:is(.surface[data-table-part="footer"], .surface [data-table-part="footer"]) :where(button, select) {
+  height: 32px;
+}
+
+:is(.surface[data-table-part="footer"], .surface [data-table-part="footer"]) button {
+  min-width: 32px;
+}
+
+.surface [data-table-part="empty"] {
+  gap: 12px;
+  padding: 48px 20px;
+  max-width: min(360px, 100vw - 32px);
+  white-space: normal;
+}
+
+.surface [data-table-part="empty-icon"] {
+  padding: 10px;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none !important;
+  backdrop-filter: none;
+}
+
+.surface [data-table-part="empty"] :where(h3) {
+  font-size: 14px;
+}
+
+.surface [data-table-part="empty"] :where(p) {
+  font-size: 12px;
+}
+
+.surface [data-table-part="loading-header"] {
+  background: var(--bt-table-head) !important;
+}
+
+.surface [data-table-part="loading-header"] > div {
+  height: 34px;
+  padding-inline: 12px;
+  border-right: 0 !important;
+}
+
+.surface [data-table-part="loading-row"] {
+  border-color: var(--bt-divider) !important;
+}
+
+.surface [data-table-part="loading-row"] > div {
+  padding: 10px 12px;
+  border-right: 0 !important;
+}
+
+.menu {
+  border-radius: 0 !important;
+  border-color: var(--bt-border) !important;
+  background: var(--bt-surface) !important;
+  color: var(--bt-text);
+  backdrop-filter: none !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.menu :where([role="menuitem"], [role="menuitemcheckbox"]) {
+  min-height: 32px;
+  border-radius: 0;
+  font-size: 12px;
+}
+
+.menu :where([role="menuitem"], [role="menuitemcheckbox"]):is(:hover, [data-highlighted]) {
+  background: var(--bt-row-hover);
+}
+
+.surface [data-table-part="bulk-actions"] > div {
+  max-width: calc(100vw - 24px);
+  border-radius: 0;
+  flex-wrap: wrap;
+  box-shadow: var(--shadow-sm);
+  gap: 8px;
+}
+
+/* Div/button grids opt into the same density without changing badges or avatars. */
+.surface [data-table-part="grid-header"] {
+  min-height: 34px;
+  padding: 6px 12px;
+  background: var(--bt-table-head);
+  color: var(--bt-muted);
+  border-color: var(--bt-border) !important;
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.surface [data-table-part="grid-row"] {
+  padding: 8px 12px;
+  border-color: var(--bt-divider) !important;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.surface [data-table-part="grid-row"]:hover {
+  background: var(--bt-row-hover);
+}
+
+.surface [data-table-part="grid-row"]:focus-visible {
+  outline: 2px solid var(--bt-link);
+  outline-offset: -2px;
+}
+
+@media (max-width: 640px) {
+  .surface[data-table-part="toolbar"],
+  .surface[data-table-part="footer"],
+  .surface [data-table-part="toolbar"],
+  .surface [data-table-part="footer"] {
+    padding-inline: 12px;
+  }
+}

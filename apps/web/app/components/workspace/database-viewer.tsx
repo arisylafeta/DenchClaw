@@ -1,5 +1,6 @@
 "use client";
 
+import tableStyles from "../ui/data-table.module.css";
 import { useEffect, useState, useCallback, useMemo } from "react";
 
 // --- Types ---
@@ -601,9 +602,10 @@ function TableDataPanel({
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={`bulk-trades ${tableStyles.surface} flex flex-col h-full`}>
       {/* Table header bar */}
       <div
+        data-table-part="toolbar"
         className="flex items-center gap-3 px-4 py-2.5 border-b flex-shrink-0"
         style={{ borderColor: "var(--color-border)" }}
       >
@@ -617,7 +619,7 @@ function TableDataPanel({
         {/* Stats */}
         <div className="flex items-center gap-2 ml-auto">
           <span
-            className="text-[10px] px-2 py-0.5 rounded-full"
+            className="text-[10px] px-2 py-0.5 rounded-none"
             style={{
               background: "var(--color-surface)",
               color: "var(--color-text-muted)",
@@ -627,7 +629,7 @@ function TableDataPanel({
             {table.estimated_row_count.toLocaleString()} rows
           </span>
           <span
-            className="text-[10px] px-2 py-0.5 rounded-full"
+            className="text-[10px] px-2 py-0.5 rounded-none"
             style={{
               background: "var(--color-surface)",
               color: "var(--color-text-muted)",
@@ -639,7 +641,7 @@ function TableDataPanel({
           <button
             type="button"
             onClick={onToggleSchema}
-            className="text-[10px] px-2 py-0.5 rounded-full cursor-pointer transition-colors duration-100"
+            className="text-[10px] px-2 py-0.5 rounded-none cursor-pointer transition-colors duration-100"
             style={{
               background: showSchema ? "rgba(96, 165, 250, 0.15)" : "var(--color-surface)",
               color: showSchema ? "#60a5fa" : "var(--color-text-muted)",
@@ -696,7 +698,7 @@ function TableDataPanel({
             />
           </div>
         ) : data.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-2">
+          <div data-table-part="empty" className="flex flex-col items-center justify-center py-20 gap-2">
             <span style={{ color: "var(--color-text-muted)", opacity: 0.4 }}>
               <TableIcon />
             </span>
@@ -718,6 +720,7 @@ function TableDataPanel({
       {/* Pagination */}
       {totalRows > pageSize && (
         <div
+          data-table-part="footer"
           className="flex items-center justify-between px-4 py-2 border-t flex-shrink-0"
           style={{ borderColor: "var(--color-border)" }}
         >
@@ -729,7 +732,7 @@ function TableDataPanel({
               type="button"
               disabled={page === 0}
               onClick={() => onPageChange(page - 1)}
-              className="p-1 rounded transition-colors duration-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 rounded-none transition-colors duration-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               style={{ color: "var(--color-text-muted)" }}
             >
               <ChevronIcon direction="left" />
@@ -738,7 +741,7 @@ function TableDataPanel({
               type="button"
               disabled={page >= totalPages - 1}
               onClick={() => onPageChange(page + 1)}
-              className="p-1 rounded transition-colors duration-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 rounded-none transition-colors duration-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               style={{ color: "var(--color-text-muted)" }}
             >
               <ChevronIcon direction="right" />
@@ -898,19 +901,19 @@ function DataTable({
   schemaColumns?: ColumnInfo[];
 }) {
   return (
-    <table
-      className="w-full text-xs"
-      style={{ borderCollapse: "separate", borderSpacing: 0 }}
+    <div className={`bulk-trades ${tableStyles.surface}`}><table
+      className={tableStyles.table}
+      style={{ borderCollapse: "collapse" }}
     >
       <thead>
         <tr>
           {/* Row number column */}
           <th
-            className="text-right px-2 py-2 font-normal whitespace-nowrap border-b sticky top-0 z-[1]"
+            className={`${tableStyles.headerCell} text-right sticky top-0 z-[1]`}
             style={{
               color: "var(--color-text-muted)",
               borderColor: "var(--color-border)",
-              background: "var(--color-surface)",
+              background: "var(--bt-table-head)",
               width: "2.5rem",
               opacity: 0.5,
             }}
@@ -923,11 +926,11 @@ function DataTable({
             return (
               <th
                 key={col}
-                className="text-left px-3 py-2 font-medium whitespace-nowrap border-b cursor-pointer select-none sticky top-0 z-[1]"
+              className={`${tableStyles.headerCell} cursor-pointer select-none sticky top-0 z-[1]`}
                 style={{
                   color: "var(--color-text-muted)",
                   borderColor: "var(--color-border)",
-                  background: "var(--color-surface)",
+                  background: "var(--bt-table-head)",
                 }}
                 onClick={() => onSort(col)}
               >
@@ -960,7 +963,7 @@ function DataTable({
               background: idx % 2 === 0 ? "transparent" : "var(--color-surface)",
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
+              (e.currentTarget as HTMLElement).style.background = "var(--bt-row-hover)";
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.background =
@@ -969,7 +972,7 @@ function DataTable({
           >
             {/* Row number */}
             <td
-              className="text-right px-2 py-1.5 border-b tabular-nums"
+              className={`${tableStyles.cell} text-right tabular-nums`}
               style={{
                 color: "var(--color-text-muted)",
                 borderColor: "var(--color-border)",
@@ -981,7 +984,7 @@ function DataTable({
             {columns.map((col) => (
               <td
                 key={col}
-                className="px-3 py-1.5 border-b whitespace-nowrap"
+                className={`${tableStyles.cell} whitespace-nowrap`}
                 style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
               >
                 <CellContent value={row[col]} />
@@ -990,7 +993,7 @@ function DataTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 

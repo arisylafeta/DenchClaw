@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { BulkTrade } from "@/lib/bulk-trades";
+import tableStyles from "../ui/data-table.module.css";
 import {
   BUYER_STATUSES,
   BUYER_SUBJECT,
@@ -88,17 +89,17 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
   }
 
   return (
-    <Card label="Buyers" className="self-start overflow-hidden">
-      <header className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
+    <Card label="Buyers" className={`bulk-trades ${tableStyles.surface} self-start overflow-hidden`}>
+      <header data-table-part="toolbar" className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
         <h2 className="text-base font-semibold">Buyers</h2>
         <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
           {buyers.length} {buyers.length === 1 ? "buyer" : "buyers"} · {bids} {bids === 1 ? "bid" : "bids"}
         </span>
         <span className="flex-1" />
-        <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setEditing("new")}>Add buyer</button>
+        <button type="button" className={`${buttonClass} !h-8`} style={buttonStyle} onClick={() => setEditing("new")}>Add buyer</button>
         <button
           type="button"
-          className={selected.size ? darkButtonClass : buttonClass}
+          className={`${selected.size ? darkButtonClass : buttonClass} !h-8`}
           style={selected.size ? darkButtonStyle : buttonStyle}
           disabled={!selected.size}
           title={selected.size ? undefined : "Tick buyers first"}
@@ -111,13 +112,14 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
       <div className="overflow-x-auto">
         <div className="min-w-[990px]">
           <div
-            className={`bt-label grid ${COLUMNS} gap-3.5 border-b px-5 py-2.5`}
+            data-table-part="grid-header"
+            className={`grid ${COLUMNS} gap-3.5 border-b px-3 py-2 font-medium`}
             style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)", borderColor: "var(--bt-column)" }}
           >
             <span /><span>Buyer</span><span>Wants</span><span>Status</span><span>Last touch</span><span>Chase on</span><span>Bid</span>
           </div>
           {buyers.map((buyer) => (
-            <div key={buyer.id} className={`group grid ${COLUMNS} items-center gap-3.5 border-b px-5 py-3 text-sm hover:bg-[var(--bt-row-hover)]`} style={{ borderColor: "var(--bt-divider)" }}>
+            <div key={buyer.id} data-table-part="grid-row" className={`group grid ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-xs hover:bg-[var(--bt-row-hover)]`} style={{ borderColor: "var(--bt-divider)" }}>
               <input
                 type="checkbox"
                 aria-label={`Select ${buyer.name}`}
@@ -131,7 +133,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 <TrackingLine buyer={buyer} />
                 <AuctionLine buyer={buyer} />
               </button>
-              <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span>
+              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span>
               <div className="flex flex-col items-start gap-1">
                 <select
                   aria-label={`Status for ${buyer.name}`}
@@ -148,13 +150,13 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                   </button>
                 )}
               </div>
-              <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>
+              <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>
                 {buyer.last_touch_on
                   ? [buyer.last_touch_via, shortDate(buyer.last_touch_on)].filter(Boolean).join(" · ")
                   : ""}
               </span>
               <span
-                className="text-[13px]"
+                className="text-xs"
                 style={{ color: buyer.chase_on && buyer.chase_on <= today ? "var(--bt-red)" : "var(--bt-muted)" }}
               >
                 {buyer.chase_on ? shortDate(buyer.chase_on) : ""}
@@ -164,7 +166,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                   type="button"
                   onClick={() => setBidFor(buyer)}
                   title="Add a newer bid"
-                  className="bt-mono h-7 justify-self-start truncate text-left text-[13px] font-medium hover:underline"
+                  className="bt-mono h-7 justify-self-start truncate text-left text-xs font-medium hover:underline"
                 >
                   {bidLabel(buyer.latest_bid)}
                 </button>

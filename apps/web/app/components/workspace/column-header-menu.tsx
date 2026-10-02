@@ -19,6 +19,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 } from "../ui/dropdown-menu";
+import tableStyles from "../ui/data-table.module.css";
 
 /* ─── Field Type Constants ─── */
 
@@ -100,14 +101,12 @@ export type ColumnHeaderMenuProps = {
 	/** Controlled open state for programmatic opening (e.g. header click). */
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
-	/** Optional scoped presentation for the portaled popup. */
-	popupClassName?: string;
 };
 
 export function ColumnHeaderMenu({
 	field, sortDirection, onSort, onHide, onRename, onDelete,
 	canMoveLeft, canMoveRight, onMoveLeft, onMoveRight, onReEnrich, onOptionsUpdate,
-	open: controlledOpen, onOpenChange, popupClassName,
+	open: controlledOpen, onOpenChange,
 }: ColumnHeaderMenuProps) {
 	const isEnrichment = (() => {
 		if (!field.default_value) return false;
@@ -124,8 +123,9 @@ export function ColumnHeaderMenu({
 	return (
 		<DropdownMenu {...dropdownProps}>
 			<DropdownMenuTrigger
-				className="col-header-menu-trigger shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-60 aria-expanded:opacity-100 hover:!opacity-100 transition-opacity ml-auto"
+				className="col-header-menu-trigger shrink-0 p-0.5 rounded-none opacity-0 group-hover:opacity-60 focus-visible:opacity-100 aria-expanded:opacity-100 hover:!opacity-100 transition-opacity ml-auto"
 				style={{ color: "var(--color-text-muted)" }}
+				aria-label={`Options for ${field.name}`}
 				onClick={(e: React.MouseEvent) => e.stopPropagation()}
 				onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
 			>
@@ -133,7 +133,7 @@ export function ColumnHeaderMenu({
 					<path d="m6 9 6 6 6-6" />
 				</svg>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" sideOffset={6} className={`${field.type === "enum" ? "min-w-[260px]" : "min-w-[180px]"} ${popupClassName ?? ""}`}>
+			<DropdownMenuContent align="start" sideOffset={6} className={`bulk-trades ${tableStyles.surface} ${tableStyles.menu} ${field.type === "enum" ? "min-w-[260px]" : "min-w-[180px]"}`}>
 				<div className="flex items-center gap-2 px-2.5 py-1.5 text-xs normal-case tracking-normal" style={{ color: "var(--color-text-muted)" }}>
 					<FieldTypeIcon type={field.type} size={14} className="shrink-0" />
 					<span className="font-medium">{fieldTypeLabel(field.type)}</span>
@@ -543,14 +543,12 @@ export function AddColumnPopover({
 	fields,
 	enrichmentAvailable: enrichmentAvailableProp,
 	onEnrichmentStart,
-	popupClassName,
 }: {
 	objectName: string;
 	onCreated: () => void;
 	fields?: AddColumnField[];
 	enrichmentAvailable?: boolean;
 	onEnrichmentStart?: (payload: EnrichmentStartPayload) => void;
-	popupClassName?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	const [type, setType] = useState("text");
@@ -801,7 +799,7 @@ export function AddColumnPopover({
 			{open && typeof document !== "undefined" && createPortal(
 				<div
 					ref={panelRef}
-					className={`fixed z-[10000] w-[280px] rounded-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 ${popupClassName ?? ""}`}
+					className={`bulk-trades ${tableStyles.surface} ${tableStyles.menu} fixed z-[10000] w-[280px] overflow-hidden animate-in fade-in-0 zoom-in-95 slide-in-from-top-2`}
 					style={{
 						top: position.top,
 						left: position.left,

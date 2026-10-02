@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LiveStats } from "./preview-workspace-mock";
+import tableStyles from "../ui/data-table.module.css";
 
 /**
  * Right-pane preview for Step 3 (Sync). Mirrors the real `CrmListShell`
@@ -51,11 +52,11 @@ export function PreviewPeopleTable({ liveStats }: { liveStats?: LiveStats }) {
     // to the available height and the <ol> below can scroll inside it.
     <div className="flex h-full min-h-0 w-full items-center justify-center px-8 py-10">
       <div
-        className="flex h-full max-h-[640px] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl"
+        className={`bulk-trades ${tableStyles.surface} flex h-full max-h-[640px] w-full max-w-[620px] flex-col overflow-hidden rounded-none`}
         style={{
-          background: "var(--color-background)",
-          border: "1px solid var(--color-border)",
-          boxShadow: "var(--shadow-lg)",
+          background: "var(--bt-surface)",
+          border: "1px solid var(--bt-border)",
+          boxShadow: "var(--shadow-sm)",
         }}
       >
         <BrowserChrome />
@@ -151,7 +152,7 @@ function BrowserChrome() {
         <span className="block h-2.5 w-2.5 rounded-full" style={{ background: "#28c840" }} />
       </div>
       <div
-        className="ml-2 flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[10.5px]"
+        className="ml-2 flex items-center gap-1.5 rounded-none px-2 py-0.5 text-[10.5px]"
         style={{ background: "var(--color-surface-hover)", color: "var(--color-text-muted)" }}
       >
         <span>ReBattery</span>
@@ -167,17 +168,18 @@ function CrmListHeader({ count }: { count: number }) {
   const display = useAnimatedNumber(count);
   return (
     <header
+      data-table-part="toolbar"
       className="flex shrink-0 items-center justify-between gap-4 px-5 py-3"
       style={{ borderBottom: "1px solid var(--color-border)" }}
     >
       <div className="min-w-0 flex items-baseline gap-3">
         <h2
-          className="font-instrument text-[19px] tracking-tight truncate"
+          className="text-base font-semibold tracking-tight truncate"
           style={{ color: "var(--color-text)" }}
         >
           People
         </h2>
-        <span className="text-[11.5px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>
+        <span data-table-part="count" className="px-1.5 py-0.5 text-xs tabular-nums" style={{ color: "var(--bt-muted)" }}>
           {display.toLocaleString()}
         </span>
       </div>
@@ -192,7 +194,7 @@ function CrmListHeader({ count }: { count: number }) {
 function ToolbarPill({ label }: { label: string }) {
   return (
     <span
-      className="rounded-md px-2 py-1 text-[10.5px]"
+      className="rounded-none px-2 py-1 text-xs"
       style={{
         background: "var(--color-surface-hover)",
         color: "var(--color-text-muted)",
@@ -210,7 +212,8 @@ const GRID_COLS = "minmax(0,1fr) 120px 86px";
 function ColumnHeader() {
   return (
     <div
-      className="grid items-center gap-3 px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]"
+      data-table-part="grid-header"
+      className="grid items-center gap-3 px-3 py-2 text-[11px] font-medium"
       style={{
         gridTemplateColumns: GRID_COLS,
         color: "var(--color-text-muted)",
@@ -235,7 +238,8 @@ function PersonRow({
 }) {
   return (
     <li
-      className="grid items-center gap-3 px-5 py-2.5"
+      data-table-part="grid-row"
+      className="grid items-center gap-3 px-3 py-2 text-xs"
       style={{
         gridTemplateColumns: GRID_COLS,
         borderBottom: "1px solid var(--color-border)",
@@ -258,22 +262,22 @@ function RealPerson({ person }: { person: ApiPerson }) {
   return (
     <>
       <div className="min-w-0">
-        <p className="truncate text-[12.5px] font-medium" style={{ color: "var(--color-text)" }}>
+        <p className="truncate text-xs font-medium" style={{ color: "var(--bt-text)" }}>
           {displayName}
         </p>
         {subtitle && (
-          <p className="truncate text-[10.5px]" style={{ color: "var(--color-text-muted)" }}>
+          <p className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>
             {subtitle}
           </p>
         )}
       </div>
 
-      <p className="truncate text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+      <p className="truncate text-xs" style={{ color: "var(--bt-text-2)" }}>
         {company ?? ""}
       </p>
 
       <p
-        className="text-right text-[11.5px] tabular-nums"
+        className="text-right text-xs tabular-nums"
         style={{ color: "var(--color-text-muted)" }}
       >
         {lastTouch}
