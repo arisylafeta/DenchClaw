@@ -1,6 +1,6 @@
 ---
 name: rebattery-bulk-trades
-description: Read or change ReBattery bulk trades (Bulk Trades v3 in DenchClaw) - next steps, buyers and their statuses, bids, per-field trade data with sources and buyer visibility, files, contacts, email tracking and the trade log. Use for "where are we on <trade>", preparing buyer outreach, or recording an approved update. For Postmark campaigns use rebattery-campaign-cli; for general CRM lookups use using-crm.
+description: Read or change ReBattery bulk trades (Bulk Trades v3 in DenchClaw) - next steps, buyers and their statuses, bids, per-field trade data with sources and buyer visibility, files, contacts, email tracking and the trade log. Use for "where are we on <trade>", preparing buyer outreach, or recording an approved update. For Postmark campaigns use rebattery-email-campaigns; for general CRM lookups use using-crm.
 ---
 
 # ReBattery bulk trades (v3)
@@ -66,7 +66,7 @@ future mail match a trade.
   email draft or an inferred reply. Propose it and let him confirm in the app.
 - **Never send email.** Outreach from a trade is a Gmail draft in the signed-in user's account
   (`POST /api/bulk-trades/<id>/email-draft`, which runs `gog` limited to draft creation with
-  sending blocked). Bulk teasers go through rebattery-campaign-cli with its own approvals.
+  sending blocked). Bulk teasers go through rebattery-email-campaigns with its own approvals.
 - **Teasers and anything buyer-facing** use only fields with visibility `teaser` for the buyer's
   step, and never the seller price, location, local recycler or the seller's identity. Buyer
   subjects are neutral ("Battery batch available"); trade titles often name the seller. Use
