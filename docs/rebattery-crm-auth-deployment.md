@@ -133,3 +133,13 @@ invalid or ambiguous manifests fail closed. Next.js tracing excludes these
 runtime paths; deployment must leave them private and available to the service.
 The page shows the provider's observed refresh/receipt time and queried period,
 separate from email tracking freshness.
+
+## People table layout
+
+Migration `031_people_column_layout.sql` changes display metadata only. People
+starts with Full Name, Email Address, Company, Job Title, Purpose, Tags, Phone
+Number and LinkedIn URL; First Name and Last Name remain at the end. People no
+longer reorders these columns by fill rate. Company ordering is unchanged.
+Tags uses the existing editable badge renderer; JSON editor values are decoded
+into PostgreSQL arrays on create/update. Saved filters, contact values,
+subscriptions and campaign history are unchanged.

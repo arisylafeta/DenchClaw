@@ -18,6 +18,20 @@ describe("ObjectTable selection context", () => {
 		}) as typeof fetch;
 	});
 
+	it("renders separate tag badges and preserves other tags when removing one", async () => {
+		global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, available: false }))) as typeof fetch;
+		render(<ObjectTable objectName="people" hideInternalToolbar
+			fields={[{ id: "tags", name: "Tags", type: "tags", enum_multiple: true }]}
+			entries={[{ entry_id: "p1", Tags: ["Buyer", "Research cohort"] }]} />);
+		const buyer = screen.getByText("Buyer");
+		const cohort = screen.getByText("Research cohort");
+		expect(buyer.closest("td")).toBe(cohort.closest("td"));
+		fireEvent.doubleClick(cohort.closest("div")!);
+		fireEvent.click(screen.getByText("Research cohort").closest("span")!.querySelector("button")!);
+		await waitFor(() => expect(screen.queryByText("Research cohort")).toBeNull());
+		expect(screen.getByText("Buyer")).toBeTruthy();
+	});
+
 	it("emits selected cell values for chat context", async () => {
 		const onSelectionContextChange = vi.fn();
 		render(
