@@ -893,13 +893,21 @@ def start_history(lot_id, args):
 # Demand
 # ---------------------------------------------------------------------------
 
+# Cold inbound mail must say it wants to buy. Short replies ("We'd be interested in cells, not packs") say less,
+# so replies to ReBattery's own outreach skip this phrase check and go straight to the model.
 DEMAND_INTENT = re.compile(
     r"\b(looking for|we (?:are |'re )?(?:looking|searching) for|we (?:need|require)|in need of|"
-    r"interested in (?:buying|purchasing|acquiring|sourcing)|want to (?:buy|purchase)|wish to (?:buy|purchase)|"
-    r"would like to (?:buy|purchase)|wtb|in the market for|rfq|request for quot\w*|can you supply|"
-    r"monthly (?:volume|demand|requirement)|offtake|to source)\b", re.I)
+    r"interested in|want to (?:buy|purchase)|wish to (?:buy|purchase)|would like to (?:buy|purchase)|wtb|"
+    r"in the market for|rfq|request for quot\w*|can you supply|monthly (?:volume|demand|requirement)|offtake|to source|"
+    r"we (?:buy|purchase|use|work with)|working with|do you have|how much|price|quote|send (?:me|us) (?:the )?(?:details|specs?))\b",
+    re.I)
 NEWSLETTER = re.compile(r"unsubscribe|view (?:this email )?in (?:your )?browser|newsletter|webinar", re.I)
-MAX_DEMAND_SOURCES = 30
+# Where the quoted earlier message starts in a reply: Gmail/Apple ("On ... wrote:"), Outlook ("From: ... Sent:"),
+# "-----Original Message-----", an underscore rule, or a line quoted with ">".
+QUOTE_START = re.compile(
+    r"^(?:On .{0,200}?wrote:\s*$|From: .*$\n(?:.*\n){0,3}?(?:Sent|Date): |-{2,}\s*Original Message|_{10,}|>)", re.M)
+OUTREACH_DAYS = 90  # a reply from someone ReBattery emailed (campaign or Gmail) within this many days skips the phrase check
+MAX_DEMAND_SOURCES = 40
 STALE_DAYS = 60  # stated and agreed buy-boxes to reconfirm; matches STALE_DAYS in apps/web/lib/bulk-demand.ts
 WAITING_DAYS = 30  # unanswered buyer email older than this has usually moved to WhatsApp or the phone; matches the app
 
@@ -910,6 +918,11 @@ Include a source only when a person or company OUTSIDE ReBattery says they want 
 (2 or more packs/modules/systems, cells in volume, or recycling feedstock by the tonne), now or on a recurring basis.
 Skip sellers offering stock, ReBattery's own outreach, newsletters, marketing, single-battery retail requests, and
 vague "keep us in mind".
+A source with "reply_to_our_outreach": true answers ReBattery's offer email (quoted after "[They are replying to:]").
+There, what they say they buy or use counts even when short or a narrowing ("We'd be interested in cells, not packs",
+"we only work with Tesla Model S packs"): record it as "standing". A request for prices or details of the offered stock
+is not demand by itself; skip it unless they say what they want. "quote" must come from their own words, not the
+quoted offer.
 - "wants": one plain line in the buyer's terms, e.g. "NMC EV packs 30-70 kWh for storage builds, up to ~EUR 20/kWh".
 - "quantity": the amount in their words, e.g. "100+ packs" or null; "where": delivery country or region, or null.
 - "kind": "request" for a one-off need (a quantity wanted now or by a date), "standing" for ongoing or repeat buying.
@@ -966,18 +979,75 @@ def clean_structured(d):
     return {k: v for k, v in out.items() if v is not None}
 
 
+def split_reply(text):
+    """(new part, quoted part) of an email source: everything before the first quote marker in the body is what the
+    sender wrote. The "Subject:/From:" header that email_sources puts first is kept with the new part."""
+    header, sep, body = text.partition("\n\n")
+    match = QUOTE_START.search(body)
+    if not match:
+        return text, ""
+    return header + sep + body[:match.start()], body[match.start():]
+
+
+def outreach_contacts(cur, sources):
+    """Senders ReBattery emailed in the last OUTREACH_DAYS days: an accepted campaign send (intro, supply update,
+    teaser), or our own message on the same Gmail thread."""
+    senders = sorted({s["from"] for s in sources if s["kind"] == "gmail" and s.get("from")})
+    threads = sorted({s["thread"] for s in sources if s["kind"] == "gmail" and s.get("thread")})
+    if not senders:
+        return set()
+    cur.execute(
+        """select lower(p.email) as email from crm_campaign_sends s join crm_people p on p.id = s.person_id
+           where s.state = 'accepted' and lower(p.email) = any(%(senders)s)
+             and coalesce(s.accepted_at, s.created_at) > now() - make_interval(days => %(days)s)
+           union
+           select distinct lower(their.from_email) from crm_email_messages ours
+           join crm_email_threads t on t.id = ours.thread_id
+           join crm_email_messages their on their.thread_id = ours.thread_id
+           where t.gmail_thread_id = any(%(threads)s) and lower(ours.from_email) like %(own)s
+             and lower(their.from_email) = any(%(senders)s) and ours.sent_at > now() - make_interval(days => %(days)s)""",
+        {"senders": senders, "threads": threads, "own": "%@" + OWN_DOMAIN, "days": OUTREACH_DAYS})
+    return {row["email"] for row in cur.fetchall()}
+
+
+def demand_candidate(source, replied):
+    """Inbound mail or a call worth a model read. Only the sender's own words count: a quoted footer (our
+    broadcasts carry an unsubscribe link) must not hide a reply."""
+    if not source["inbound"]:
+        return False
+    if source["kind"] != "gmail":
+        own = source["text"][:6000]
+        return bool(DEMAND_INTENT.search(own) and DEAL_WORDS.search(own))
+    own, _ = split_reply(source["text"])
+    if NEWSLETTER.search(own):
+        return False
+    if source.get("from") in replied:
+        return True  # a reply to our outreach: let the model judge, however short
+    return bool(DEMAND_INTENT.search(own[:6000]) and DEAL_WORDS.search(own[:6000]))
+
+
+def demand_text(source):
+    """What the model reads: the sender's words, plus the start of what they replied to for context."""
+    if source["kind"] != "gmail":
+        return source["text"][:5000]
+    own, quoted = split_reply(source["text"])
+    if not quoted:
+        return own[:3000]
+    return f"{own[:2500]}\n\n[They are replying to:]\n{quoted[:800]}"
+
+
 def screen_demand(cur, sources, key, report):
-    """Possible-demand cards for new mail and calls that ask to buy in bulk. A buyer who already has
-    an open demand row gets an update card for that row instead."""
-    candidates = [s for s in sources if s["inbound"] and DEMAND_INTENT.search(s["text"][:6000])
-                  and DEAL_WORDS.search(s["text"][:6000]) and not NEWSLETTER.search(s["text"])][-MAX_DEMAND_SOURCES:]
+    """Possible-demand cards for new mail and calls that ask to buy in bulk, or that answer our outreach with what
+    they buy. A buyer who already has an open demand row gets an update card for that row instead."""
+    replied = outreach_contacts(cur, sources)
+    candidates = [s for s in sources if demand_candidate(s, replied)][-MAX_DEMAND_SOURCES:]
     if not candidates:
         return []
     try:
         raw = call_model(DEMAND_SYSTEM, json.dumps({"SOURCES": [
             {"source_id": s["id"], "type": s["kind"], "date": s["at"].date().isoformat() if s["at"] else None,
-             "from": s.get("from"), "text": s["text"][:5000 if s["kind"] == "granola" else 3000]} for s in candidates]},
-            ensure_ascii=False, default=str), key)
+             "from": s.get("from"), "reply_to_our_outreach": s.get("from") in replied, "text": demand_text(s)}
+            for s in candidates]}, ensure_ascii=False, default=str), key)
         report["model_calls"] = report.get("model_calls", 0) + 1
     except Exception as err:
         report["warnings"].append(f"demand screen failed ({type(err).__name__})")

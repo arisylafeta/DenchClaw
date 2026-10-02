@@ -54,6 +54,32 @@ class Helpers(unittest.TestCase):
         self.assertEqual(check.guess_type("inventory.xlsx"), "Stock list")
 
 
+class DemandScreen(unittest.TestCase):
+    REPLY = ("Subject: Re: EV packs available\nFrom: fergal@buyer.test\n\nWe'd be interested in cells, not packs.\n\n"
+             "On Fri, 2 Oct 2026 at 12:56, Alex Polglase <alex@rebattery.io> wrote:\n\n> We have EV packs.\n> Unsubscribe")
+    OUTLOOK = ("Subject: RE: EV packs available\nFrom: pat@buyer.test\n\nWe only work with Tesla Model S packs.\n\n"
+               "From: Alex Polglase <alex@rebattery.io>\nSent: Friday, October 2, 2026 4:57 AM\nTo: pat@buyer.test\n\nUnsubscribe")
+
+    def source(self, text, sender):
+        return {**SOURCE, "text": text, "from": sender, "inbound": True}
+
+    def test_a_quoted_unsubscribe_footer_does_not_hide_a_reply(self):
+        for text in (self.REPLY, self.OUTLOOK):
+            own, quoted = check.split_reply(text)
+            self.assertNotIn("Unsubscribe", own)
+            self.assertIn("Unsubscribe", quoted)
+        self.assertIn("[They are replying to:]", check.demand_text(self.source(self.REPLY, "fergal@buyer.test")))
+
+    def test_replies_to_our_outreach_skip_the_phrase_check_and_cold_mail_needs_it(self):
+        reply = self.source(self.OUTLOOK, "pat@buyer.test")
+        self.assertTrue(check.demand_candidate(reply, {"pat@buyer.test"}))
+        cold = self.source("Subject: Hello\nFrom: x@cold.test\n\nGreat to meet you at the show.", "x@cold.test")
+        self.assertFalse(check.demand_candidate(cold, set()))
+        self.assertTrue(check.demand_candidate(self.source(self.REPLY, "fergal@buyer.test"), set()))  # "interested in" + cells
+        newsletter = self.source("Subject: News\nFrom: n@news.test\n\nOur battery newsletter. Unsubscribe here.", "n@news.test")
+        self.assertFalse(check.demand_candidate(newsletter, {"n@news.test"}))
+
+
 class Schedule(unittest.TestCase):
     def test_due_only_just_after_uk_check_times(self):
         london = check.ZoneInfo("Europe/London")
