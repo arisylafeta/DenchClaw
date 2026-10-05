@@ -16,11 +16,14 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+
+SUPPLY_UPDATE_LIST = "Supply update"
 
 def connection(read_only=False):
     db = psycopg2.connect(os.environ.get("DENCH_CAMPAIGN_DSN", "dbname=denchclaw"))
@@ -74,7 +77,7 @@ def load_manifest(path):
     return manifest
 
 
-def cohort(db, manifest):
+def cohort(db, manifest, suppressions):
     with db.cursor(cursor_factory=RealDictCursor) as cur:
         if manifest.get("person_ids"):
             ids = manifest["person_ids"]
@@ -94,23 +97,34 @@ def cohort(db, manifest):
             ids = [row["person_id"] for row in cur.fetchall()]
             if not ids or len(ids) > 500 or len(ids) != len(set(ids)):
                 raise ValueError("Cohort must contain 1–500 distinct person IDs")
-        cur.execute("""select p.id, p.company_id, p.email, coalesce(p.email_opted_out, false) as opted_out
-                       from crm_people p where p.id = any(%s::text[])""", (ids,))
+        cur.execute("""select p.id, p.company_id, p.email, coalesce(p.email_opted_out, false) as opted_out,
+                              exists (select 1 from crm_subscriptions s where s.person_id=p.id
+                                      and s.list=%s and s.status='Opted out') as list_opted_out
+                       from crm_people p where p.id = any(%s::text[])""", (SUPPLY_UPDATE_LIST, ids))
         found = {row["id"]: row for row in cur.fetchall()}
         if len(found) != len(ids):
             raise ValueError(f"Unknown CRM person IDs: {sorted(set(ids) - set(found))}")
         rows = []
+        exclusions = []
         seen = set()
         for person_id in ids:
             row = found[person_id]
             email = (row["email"] or "").strip().lower()
+            suppression = suppressions.get(email)
+            if row["list_opted_out"] or suppression:
+                exclusions.append({"person_id": person_id, "email": email,
+                                   "list_opted_out": row["list_opted_out"],
+                                   "provider_reason": suppression["SuppressionReason"] if suppression else None})
+                continue
             if not email or "@" not in email or row["opted_out"]:
                 raise ValueError(f"Missing email or opted-out CRM person: {person_id}")
             if email in seen:
                 raise ValueError(f"Duplicate address in cohort: {email}")
             seen.add(email)
             rows.append({"person_id": person_id, "company_id": row["company_id"], "email": email})
-        return sorted(rows, key=lambda row: row["email"])
+        if not rows:
+            raise ValueError("No eligible recipients remain after suppression exclusions")
+        return sorted(rows, key=lambda row: row["email"]), exclusions
 
 
 def digest(manifest, rows):
@@ -143,23 +157,80 @@ def postmark(path, method="GET", payload=None):
         return json.load(response)
 
 
-def provider_preflight(manifest, rows):
-    stream = urllib.parse.quote(manifest["stream"], safe="")
-    details = postmark("/message-streams/" + stream)
+def stream_suppressions(stream):
+    """Read the unfiltered dump: Postmark's dump endpoint is not paginated."""
+    if not isinstance(stream, str) or not stream.strip() or stream == "outbound":
+        raise ValueError("An explicit Broadcast stream is required")
+    path = "/message-streams/" + urllib.parse.quote(stream, safe="")
+    details = postmark(path)
     if details.get("MessageStreamType") != "Broadcasts" or details.get("ArchivedAt"):
         raise ValueError("Selected Postmark stream is not an active Broadcast stream")
     if details.get("SubscriptionManagementConfiguration", {}).get("UnsubscribeHandlingType", "none").lower() == "none":
         raise ValueError("Broadcast stream lacks unsubscribe handling")
+    dump = postmark(path + "/suppressions/dump")
+    if not isinstance(dump, dict) or not isinstance(dump.get("Suppressions"), list):
+        raise ValueError("Incomplete Postmark suppression dump")
+    suppressions = {}
+    for item in dump["Suppressions"]:
+        if not isinstance(item, dict) or any(
+            not isinstance(item.get(key), str) or not item[key].strip()
+            for key in ("EmailAddress", "SuppressionReason", "Origin", "CreatedAt")
+        ):
+            raise ValueError("Incomplete Postmark suppression record")
+        email = item["EmailAddress"].strip().lower()
+        if "@" not in email or email in suppressions:
+            raise ValueError("Invalid or duplicate address in Postmark suppression dump")
+        try:
+            since = datetime.fromisoformat(item["CreatedAt"].replace("Z", "+00:00")).date()
+        except ValueError as exc:
+            raise ValueError("Invalid Postmark suppression date") from exc
+        suppressions[email] = {**item, "since": since}
+    return suppressions
+
+
+def provider_preflight(manifest, rows):
+    suppressions = stream_suppressions(manifest["stream"])
     for row in rows:
-        path = "/message-streams/" + stream + "/suppressions/dump?" + urllib.parse.urlencode({"EmailAddress": row["email"]})
-        suppressed = postmark(path).get("Suppressions", [])
-        if any(item.get("EmailAddress", "").lower() == row["email"] for item in suppressed):
+        if row["email"] in suppressions:
             raise ValueError(f"Recipient is suppressed in Postmark: {row['email']}")
 
 
+def sync_suppressions(stream, suppressions, apply):
+    """Only opt out. Absence from the dump never restores subscription or consent."""
+    results = []
+    with connection(read_only=not apply) as db, db.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("select id, lower(trim(email)) as email from crm_people where lower(trim(email)) = any(%s::text[])",
+                    (list(suppressions),))
+        people = {}
+        for person in cur.fetchall():
+            people.setdefault(person["email"], []).append(person["id"])
+        for email, item in sorted(suppressions.items()):
+            person_ids = sorted(people.get(email, []))
+            global_opt_out = item["SuppressionReason"] in ("SpamComplaint", "HardBounce")
+            how = f"Postmark stream={stream}; reason={item['SuppressionReason']}; origin={item['Origin']}"
+            results.append({"email": email, "person_ids": person_ids, "reason": item["SuppressionReason"],
+                            "origin": item["Origin"], "since": item["since"],
+                            "global_opt_out": global_opt_out, "matched": bool(person_ids)})
+            if not apply:
+                continue
+            for person_id in person_ids:
+                cur.execute("""insert into crm_subscriptions (person_id, list, status, since, how)
+                               values (%s,%s,'Opted out',%s,%s)
+                               on conflict (person_id, list) do update
+                               set status='Opted out', since=excluded.since, how=excluded.how, updated_at=now()
+                               where (crm_subscriptions.status, crm_subscriptions.since, crm_subscriptions.how)
+                                     is distinct from (excluded.status, excluded.since, excluded.how)""",
+                            (person_id, SUPPLY_UPDATE_LIST, item["since"], how))
+                if global_opt_out:
+                    cur.execute("""update crm_people set email_opted_out=true, updated_at=now()
+                                   where id=%s and not coalesce(email_opted_out,false)""", (person_id,))
+    return results
+
+
 def preview(manifest):
+    suppressions = stream_suppressions(manifest["stream"])
     with connection(read_only=True) as db:
-        rows = cohort(db, manifest)
+        rows, exclusions = cohort(db, manifest, suppressions)
         listing_ids = sorted({link["listing_id"] for link in manifest["links"] if link.get("listing_id")})
         with db.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""select s.person_id, l.listing_id, count(distinct s.id)::int as prior_pitches
@@ -171,7 +242,7 @@ def preview(manifest):
             counts = {}
             for pitch in cur.fetchall():
                 counts.setdefault(pitch["person_id"], {})[pitch["listing_id"]] = pitch["prior_pitches"]
-    return rows, counts
+    return rows, counts, exclusions
 
 
 def freeze(manifest, rows, sha):
@@ -283,7 +354,9 @@ def observed_clicks(events, links):
     return clicks
 
 
-def sync(campaign_id, apply):
+def sync(campaign_id, apply, stream):
+    suppressions = stream_suppressions(stream)
+    suppression_results = sync_suppressions(stream, suppressions, apply)
     with connection(read_only=True) as db, db.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""select id, provider_message_id from crm_campaign_sends where campaign_id=%s
                        and provider_message_id is not null""", (campaign_id,))
@@ -315,7 +388,8 @@ def sync(campaign_id, apply):
                 for key, clicked_at in clicks.items():
                     cur.execute("""update crm_campaign_send_links set first_clicked_at=coalesce(first_clicked_at,%s)
                                    where send_id=%s and cta_key=%s""", (clicked_at, send["id"], key))
-    return results
+    return {"receipts": results, "suppressions": suppression_results, "stream": stream,
+            "list": SUPPLY_UPDATE_LIST, "dry_run": not apply}
 
 
 def recover(manifest, apply):
@@ -363,6 +437,7 @@ def main():
     sub.add_argument("--apply", action="store_true")
     sub = commands.add_parser("sync")
     sub.add_argument("--campaign-id", required=True)
+    sub.add_argument("--stream", required=True, help="Explicit Broadcast stream mapped to the Supply update list")
     sub.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
@@ -375,9 +450,10 @@ def main():
             elif args.command == "recover":
                 output = recover(manifest, args.apply)
             else:
-                rows, counts = preview(manifest)
+                rows, counts, exclusions = preview(manifest)
                 sha = digest(manifest, rows)
-                output = {"sha256": sha, "cohort": [{**row, "prior_pitches_by_listing": counts.get(row["person_id"], {})} for row in rows]}
+                output = {"sha256": sha, "cohort": [{**row, "prior_pitches_by_listing": counts.get(row["person_id"], {})} for row in rows],
+                          "exclusions": exclusions}
                 if args.command == "freeze" and args.apply:
                     freeze(manifest, rows, sha)
                 elif args.command == "freeze":
@@ -387,7 +463,7 @@ def main():
                 approve(args.campaign_id, args.sha256, args.approved_by)
             output = {"campaign_id": args.campaign_id, "sha256": args.sha256, "dry_run": not args.apply}
         else:
-            output = sync(args.campaign_id, args.apply)
+            output = sync(args.campaign_id, args.apply, args.stream)
         print(json.dumps(output, indent=2, default=str))
     except (ValueError, psycopg2.Error, urllib.error.URLError) as exc:
         print(f"Campaign stopped: {exc}", file=sys.stderr)
