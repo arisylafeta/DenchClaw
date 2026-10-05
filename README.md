@@ -148,7 +148,45 @@ Counts measure emails with observed activity, not repeated opens/clicks or
 verified human visits. Unsynced sends show pending tracking; each synced update
 shows its last sync time. Email clicks do not establish site visits. This view
 does not add interaction rows or change relationship scores. The campaign
-`sync --campaign-id <id> --apply` command remains the existing data-refresh path.
+`sync --campaign-id <id> --stream <broadcast-stream> --apply` command refreshes
+receipt observations and reconciles that stream's complete suppression set.
+
+### Supply update suppressions (REB-397)
+
+Run `python3 scripts/rebattery/rebattery-campaign.py sync --campaign-id <id>
+--stream <broadcast-stream>` to inspect the proposed CRM changes without writes.
+Add `--apply` only for an approved CRM reconciliation. The explicit stream must
+be an active Broadcast stream with unsubscribe handling and is mapped to the
+existing **Supply update** list, not other CRM lists.
+
+Every matched address becomes `Opted out` on that list, including CRM people
+outside the selected campaign. `how` retains the Postmark stream, exact reason
+and origin; `since` stores the provider's suppression calendar date, not the
+sync date. `SpamComplaint` and `HardBounce` also set global `email_opted_out`.
+An unsubscribe (`ManualSuppression` with `Origin=Recipient`), customer/admin
+manual suppression or unknown reason does not set the global flag. Existing
+global opt-outs are never cleared. Missing provider suppressions never
+resubscribe anyone. Unmatched addresses are reported, not created as contacts.
+Sync JSON now contains `receipts`, `suppressions`, `stream`, `list` and `dry_run`.
+
+Preview and freeze read current stream suppressions and exclude those addresses
+and CRM Supply update opt-outs before hashing or inserting frozen sends, for
+both explicit IDs and SQL candidates. The output includes `exclusions`.
+Failed or incomplete dumps and fully excluded cohorts stop freeze before writes.
+Launch retains its provider guard for suppressions arriving after freeze.
+The candidate cap remains 500; audience selection, tags and reply handling
+are unchanged. No schema migration or provider suppression creation is needed.
+
+The dump API returns the entire unfiltered set without pagination:
+[Postmark suppression API](https://postmarkapp.com/developer/api/suppressions-api).
+Run the campaign regressions against a disposable CRM database:
+
+```bash
+scripts/rebattery/crm-test-db.sh up
+BULK_TRADES_TEST_DATABASE_URL=<printed-url> python3 -m unittest discover \
+  -s scripts/rebattery -p test_rebattery_campaign.py -v
+scripts/rebattery/crm-test-db.sh down
+```
 
 ## Troubleshooting
 
