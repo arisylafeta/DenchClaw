@@ -169,6 +169,29 @@ global opt-outs are never cleared. Missing provider suppressions never
 resubscribe anyone. Unmatched addresses are reported, not created as contacts.
 Sync JSON now contains `receipts`, `suppressions`, `stream`, `list` and `dry_run`.
 
+For suppression-only reconciliation, use `sync-suppressions --stream <broadcast-stream>`
+instead of `sync`. It requires no campaign ID, performs the same opt-out mapping,
+and never reads message details or updates campaign receipts. Omit `--apply` for
+a read-only inspection.
+
+The host scheduler entrypoint is `scripts/rebattery/postmark_suppression_sync.py`,
+installed as `/root/.hermes/scripts/postmark_suppression_sync.py`. It runs against
+the dedicated release checkout at `/root/.hermes/projects/denchclaw-postmark-sync`,
+pins the local `denchclaw` database and the `broadcast` stream, and loads
+`POSTMARK_SERVER_TOKEN` through the default Hermes profile's existing secret
+loader. No credentials are stored in the job. Use Hermes' Python interpreter;
+it delegates the CRM CLI to `/usr/bin/python3` with psycopg2. The scheduler script
+applies by default; pass `--dry-run` for a read-only manual inspection.
+
+Before activation, verify a fresh CRM backup, inspect a live dry run, apply once
+and read back the CRM state. Create the deterministic daily job with
+`hermes cron create "0 6 * * *" --name "ReBattery daily Postmark suppression sync"
+--script postmark_suppression_sync.py --no-agent --deliver local
+--workdir /root/.hermes/projects/denchclaw-postmark-sync`. This runs at 06:00 UTC
+without an agent, email sends, provider mutations or receipt sync. Keep it
+paused until `POSTMARK_SERVER_TOKEN` is available and initial reconciliation
+succeeds; missing credentials stop before CRM writes.
+
 Preview and freeze read current stream suppressions and exclude those addresses
 and CRM Supply update opt-outs before hashing or inserting frozen sends, for
 both explicit IDs and SQL candidates. The output includes `exclusions`.

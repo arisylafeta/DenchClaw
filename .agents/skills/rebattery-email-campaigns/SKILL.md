@@ -32,6 +32,10 @@ Before launching, inspect this campaign's send states in `crm_campaign_sends`. I
 
 Repeat readback on send day and D+1/D+3/D+7 while the reply owner checks the authoritative inbox, handles opt-outs and records human interest and next actions. Provider opens are noisy and a link click is not proof of a site visit. Report sent, delivered, clicked, replied and qualified separately; count pitches from accepted sends for each person/listing. Close with a recorded review before repeating a campaign. Reply handling, audience selection, tags and the 500-candidate cap are unchanged.
 
+For daily suppression-only reconciliation, run `sync-suppressions --stream <broadcast-stream>` (add `--apply` only for an approved CRM write). It needs no campaign ID and does not fetch message details or update receipt timestamps. The mapping and dry-run guarantees match `sync`.
+
+For an approved daily job, use `scripts/rebattery/postmark_suppression_sync.py` and follow the host deployment instructions in the repository README. The deterministic scheduler entrypoint pins the `broadcast` stream and local `denchclaw` database. It loads `POSTMARK_SERVER_TOKEN` through the existing host secret loader; never put credentials in cron prompts or job records. Manual `--dry-run` is read-only; scheduled execution applies. After a verified fresh backup and successful initial dry-run/apply/readback, schedule it with `--no-agent` at `0 6 * * *` (06:00 UTC), local delivery. Keep the job paused if the credential or initial verification is missing. This is suppression reconciliation, never an email launch.
+
 ## Boundaries
 
 - Code/migration files are not permission to apply a production schema, backfill September, change Postmark configuration, deploy or restart a service. Back up and obtain the applicable explicit approval first.

@@ -250,7 +250,7 @@ class SuppressionSyncTest(unittest.TestCase):
             cur.execute("update crm_people set email=%s where id=%s", ("  " + self.emails[2].upper() + "  ", self.ids[7]))
         # Also reconcile people outside the selected campaign; don't create unmatched contacts.
         self.dump.append({**self.suppression(0), "EmailAddress": "unmatched@example.test"})
-        code, output, error = self.run_cli("sync", "--campaign-id", self.campaign_id, "--stream", "broadcasts", "--apply")
+        code, output, error = self.run_cli("sync-suppressions", "--stream", "broadcasts", "--apply")
         self.assertEqual((code, error), (0, ""))
         subscriptions = {row["person_id"]: row for row in self.query(
             "select * from crm_subscriptions where person_id=any(%s::text[]) and list='Supply update'", (self.ids,))}
@@ -274,20 +274,45 @@ class SuppressionSyncTest(unittest.TestCase):
         unmatched = next(row for row in output["suppressions"] if row["email"] == "unmatched@example.test")
         self.assertEqual(unmatched["person_ids"], [])
         before = self.snapshot()
-        self.run_cli("sync", "--campaign-id", self.campaign_id, "--stream", "broadcasts", "--apply")
+        self.run_cli("sync-suppressions", "--stream", "broadcasts", "--apply")
         self.assertEqual(self.snapshot(), before)
         self.dump = []
-        self.run_cli("sync", "--campaign-id", self.campaign_id, "--stream", "broadcasts", "--apply")
+        self.run_cli("sync-suppressions", "--stream", "broadcasts", "--apply")
         self.assertEqual(self.snapshot(), before)
 
     def test_dry_run_reports_changes_without_writing(self):
         self.dump = [self.suppression(0), self.suppression(1, "SpamComplaint")]
         before = self.snapshot()
-        code, output, error = self.run_cli("sync", "--campaign-id", self.campaign_id, "--stream", "broadcasts")
+        code, output, error = self.run_cli("sync-suppressions", "--stream", "broadcasts")
         self.assertEqual((code, error), (0, ""))
         self.assertTrue(output["dry_run"])
         self.assertEqual(next(row for row in output["suppressions"] if row["email"] == self.emails[1])["global_opt_out"], True)
         self.assertEqual(self.snapshot(), before)
+
+    def test_suppression_only_sync_does_not_change_campaign_receipts(self):
+        self.dump = [self.suppression(0, "HardBounce")]
+        with psycopg2.connect(TEST_URL) as db, db.cursor() as cur:
+            cur.execute("insert into campaigns (id,campaign_name) values (%s,'Synthetic receipt')", (self.campaign_id,))
+            cur.execute("""insert into crm_campaign_sends
+                           (id,campaign_id,person_id,listing_id,auction_url,recipient_email,
+                            provider_message_id,state,delivered_at,last_synced_at)
+                           values (%s,%s,%s,'listing-1',%s,%s,%s,'accepted',
+                                   '2026-10-01T12:00:00Z','2026-10-01T13:00:00Z')""",
+                        (self.prefix, self.campaign_id, self.ids[0], MANIFEST["auction_url"], self.emails[0], self.prefix))
+            cur.execute("""insert into crm_campaign_send_links
+                           (id,send_id,cta_key,destination_url,first_clicked_at)
+                           values (%s,%s,'lot',%s,'2026-10-01T14:00:00Z')""",
+                        (self.prefix, self.prefix, MANIFEST["auction_url"]))
+        receipts_sql = """select s.*,l.first_clicked_at from crm_campaign_sends s
+                          join crm_campaign_send_links l on l.send_id=s.id where s.campaign_id=%s"""
+        before = self.query(receipts_sql, (self.campaign_id,))
+        code, _, error = self.run_cli("sync-suppressions", "--stream", "broadcasts", "--apply")
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(self.query(receipts_sql, (self.campaign_id,)), before)
+        state = self.query("""select p.email_opted_out,s.status from crm_people p
+                              join crm_subscriptions s on s.person_id=p.id
+                              where p.id=%s and s.list='Supply update'""", (self.ids[0],))
+        self.assertEqual(state, [{"email_opted_out": True, "status": "Opted out"}])
 
     def test_next_freeze_filters_both_cohort_sources_before_sends_and_digest(self):
         for use_sql in (False, True):
