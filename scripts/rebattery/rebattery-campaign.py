@@ -435,10 +435,12 @@ def main():
     sub.add_argument("--sha256", required=True)
     sub.add_argument("--approved-by", required=True)
     sub.add_argument("--apply", action="store_true")
-    sub = commands.add_parser("sync")
-    sub.add_argument("--campaign-id", required=True)
-    sub.add_argument("--stream", required=True, help="Explicit Broadcast stream mapped to the Supply update list")
-    sub.add_argument("--apply", action="store_true")
+    for name in ("sync", "sync-suppressions"):
+        sub = commands.add_parser(name)
+        if name == "sync":
+            sub.add_argument("--campaign-id", required=True)
+        sub.add_argument("--stream", required=True, help="Explicit Broadcast stream mapped to the Supply update list")
+        sub.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
         if args.command in ("preview", "freeze", "launch", "recover"):
@@ -462,6 +464,10 @@ def main():
             if args.apply:
                 approve(args.campaign_id, args.sha256, args.approved_by)
             output = {"campaign_id": args.campaign_id, "sha256": args.sha256, "dry_run": not args.apply}
+        elif args.command == "sync-suppressions":
+            suppressions = stream_suppressions(args.stream)
+            output = {"suppressions": sync_suppressions(args.stream, suppressions, args.apply),
+                      "stream": args.stream, "list": SUPPLY_UPDATE_LIST, "dry_run": not args.apply}
         else:
             output = sync(args.campaign_id, args.apply, args.stream)
         print(json.dumps(output, indent=2, default=str))
