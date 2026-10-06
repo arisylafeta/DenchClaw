@@ -1,0 +1,13 @@
+{
+  "_comment": "Test and staff accounts left out of Marketplace Pulse. Buyers are left out when they are listed here or have a member matching staff_email_pattern; sellers only when listed here, since ReBattery's own listings are real stock. Read by the page and by scripts/rebattery/marketplace_pulse_collect.py.",
+  "test_account_ids": {
+    "9e9334fc-bda0-536b-a053-5c9164c89758": "Enfield Energy (test counterparty)",
+    "441633dc-5a20-5b91-9cfd-2e5e8a8775d8": "Electric EV (test supplier)",
+    "97052761-e067-4b33-b8bf-cbac46e7f9d2": "Acme (test supplier)",
+    "6e9a593e-0ac2-45dd-9612-3b3935d76188": "Acme (test recycler)",
+    "7f8bafea-87e0-4aa4-aaac-804d9fa58178": "asdf... (junk buyer)",
+    "e83632b8-2c48-4588-beb4-31693bf52546": "Circular Energy Storage (seed supplier, rebattery.invalid)",
+    "dbbbdfd2-ad49-4ee2-84cc-a5af0f0dca4f": "QA Test Buyer Org"
+  },
+  "staff_email_pattern": "@rebattery\\.(io|invalid)$|@example\\.|\\.test$"
+}
