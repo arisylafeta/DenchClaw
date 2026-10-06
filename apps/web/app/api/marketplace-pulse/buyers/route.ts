@@ -14,5 +14,6 @@ export async function POST(req: Request) {
   const email = typeof body?.email === "string" ? body.email.trim() : "";
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!EMAIL.test(email)) return badRequest("A valid email is needed.");
-  return Response.json(await addMarketplaceBuyer(email, name || email), { status: 201 });
+  // The name is a label for a new person (often the buyer's company); it is never used as a first name.
+  return Response.json(await addMarketplaceBuyer(email, name && name.toLowerCase() !== email.toLowerCase() ? name : null), { status: 201 });
 }

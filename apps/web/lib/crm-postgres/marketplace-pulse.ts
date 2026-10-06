@@ -50,7 +50,7 @@ export async function setTarget(metric: MetricKey, value: number | null, userId:
  * Puts a marketplace buyer in the CRM: finds them by email or adds them, tags them
  * marketplace-buyer, and subscribes them to Supply update unless they opted out.
  */
-export async function addMarketplaceBuyer(email: string, name: string): Promise<{ person_id: string; subscribed: boolean }> {
+export async function addMarketplaceBuyer(email: string, name: string | null): Promise<{ person_id: string; subscribed: boolean; opted_out: boolean }> {
   return withPgTransaction(async (tx) => {
     const found = await tx.query<{ id: string; opted_out: boolean }>(
       "select id, coalesce(email_opted_out, false) as opted_out from crm_people where lower(email) = lower($1) order by created_at limit 1",
@@ -84,7 +84,7 @@ export async function addMarketplaceBuyer(email: string, name: string): Promise<
         [id],
       );
     }
-    return { person_id: id, subscribed };
+    return { person_id: id, subscribed, opted_out: !subscribed };
   });
 }
 

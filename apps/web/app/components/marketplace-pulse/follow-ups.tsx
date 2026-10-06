@@ -41,7 +41,9 @@ export function WaitingOnUs({ items }: { items: WaitingItem[] }) {
             {item.seller && <span style={{ color: "var(--bt-muted)" }}>seller {item.seller}</span>}
             <span className="flex-1" />
             <strong style={{ color: "var(--bt-amber)" }}>
-              {item.expires_at ? `Expires ${untilLabel(item.expires_at)}` : `Unpaid since ${sinceLabel(item.at)}`}
+              {item.expires_at
+                ? (Date.parse(item.expires_at) <= Date.now() ? "Expired, no reply" : `Expires ${untilLabel(item.expires_at)}`)
+                : `Unpaid since ${sinceLabel(item.at)}`}
             </strong>
           </li>
         ))}
@@ -68,10 +70,10 @@ export function FollowUps({ list, error, sender, onOpenPerson, onChange }: Follo
     setActionError(null);
     setAdding(f.key);
     try {
-      const saved = await request<{ person_id: string; subscribed: boolean }>("/api/marketplace-pulse/buyers", {
+      const saved = await request<{ person_id: string; subscribed: boolean; opted_out: boolean }>("/api/marketplace-pulse/buyers", {
         method: "POST", body: JSON.stringify({ email: f.email, name: f.name }),
       });
-      onChange({ ...f, person_id: saved.person_id, subscribed: saved.subscribed });
+      onChange({ ...f, person_id: saved.person_id, subscribed: saved.subscribed, opted_out: saved.opted_out });
     } catch (err) {
       setActionError(`Could not add ${f.name}: ${err instanceof Error ? err.message : "unknown error"}`);
     }
@@ -128,12 +130,13 @@ export function FollowUps({ list, error, sender, onOpenPerson, onChange }: Follo
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-right">
                   <div className="flex justify-end gap-1.5">
-                    {f.email && !f.subscribed && (
+                    {f.email && !f.subscribed && !f.opted_out && (
                       <button type="button" disabled={adding === f.key} onClick={() => void addToCrm(f)} className={`${buttonClass} h-7`} style={buttonStyle}>
                         {f.person_id ? "Add to supply updates" : "Add to CRM"}
                       </button>
                     )}
                     {f.subscribed && <span className="self-center text-xs" style={{ color: "var(--bt-green)" }}>On supply updates</span>}
+                    {f.opted_out && <span className="self-center text-xs" style={{ color: "var(--bt-muted)" }}>Opted out of emails</span>}
                     <button type="button" onClick={() => setDrafting(f)} className={`${buttonClass} h-7`} style={buttonStyle}>Draft email</button>
                   </div>
                 </td>

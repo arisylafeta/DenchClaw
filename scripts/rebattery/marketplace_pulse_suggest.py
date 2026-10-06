@@ -19,6 +19,7 @@ import psycopg2
 import psycopg2.extras
 
 OWNERS = ("Alex", "Ari", "Product")
+LIMITS = {"title": 120, "evidence": 600, "action": 400}
 DEFINITIONS = {
     "visitors": "people who saw the marketplace or a listing (PostHog)",
     "browsed": "people on the marketplace page",
@@ -95,8 +96,11 @@ def validate(items, metrics):
         title, evidence, action = (str(item.get(k) or "").strip() for k in ("title", "evidence", "action"))
         if not title or not evidence or not action:
             raise SystemExit(f"Suggestion {i} needs a title, evidence and an action.")
+        for field, value in (("title", title), ("evidence", evidence), ("action", action)):
+            if len(value) > LIMITS[field]:
+                raise SystemExit(f"Suggestion {i}: {field} is over {LIMITS[field]} characters.")
         metric = item.get("metric") or None
-        if metric is not None and metric not in metrics:
+        if metric is not None and (not isinstance(metric, str) or metric not in metrics):
             raise SystemExit(f"Suggestion {i}: unknown metric {metric!r}. Known: {', '.join(sorted(metrics))}.")
         owner = item.get("owner")
         if owner not in OWNERS:
@@ -112,6 +116,10 @@ def save(conn, items, today):
         metrics = {row[0] for row in cur.fetchall()}
         clean = validate(items, metrics)
         cur.execute("delete from crm_pulse_suggestions where batch = %s and status = 'New'", (today,))
+        # A re-run the same day must not repeat a suggestion someone already picked up.
+        cur.execute("select lower(title) from crm_pulse_suggestions where batch = %s", (today,))
+        kept = {row[0] for row in cur.fetchall()}
+        clean = [item for item in clean if item["title"].lower() not in kept]
         for item in clean:
             before = None
             if item["metric"]:

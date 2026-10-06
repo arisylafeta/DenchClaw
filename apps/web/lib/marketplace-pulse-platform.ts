@@ -91,9 +91,12 @@ export async function followUps(now = new Date()): Promise<{ followUps: FollowUp
     ? await queryPg<Person>(
       `select id, lower(email) as email,
               coalesce(nullif(full_name, ''), nullif(concat_ws(' ', first_name, last_name), ''), email) as name,
-              coalesce(nullif(first_name, ''), nullif(split_part(full_name, ' ', 1), '')) as first_name,
+              nullif(first_name, '') as first_name,
               to_char(last_interaction_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as last_contact,
-              exists (select 1 from crm_subscriptions s where s.person_id = p.id and s.list = 'Supply update' and s.status = 'Subscribed') as subscribed
+              not coalesce(email_opted_out, false)
+                and exists (select 1 from crm_subscriptions s where s.person_id = p.id and s.list = 'Supply update' and s.status = 'Subscribed') as subscribed,
+              coalesce(email_opted_out, false)
+                or exists (select 1 from crm_subscriptions s where s.person_id = p.id and s.list = 'Supply update' and s.status = 'Opted out') as opted_out
          from crm_people p where lower(email) = any($1)`,
       [emails],
     )

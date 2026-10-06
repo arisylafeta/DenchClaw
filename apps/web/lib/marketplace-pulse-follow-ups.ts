@@ -17,7 +17,7 @@ const STEP_TEXT: Record<string, string> = {
   payment_pending: "payment pending",
 };
 
-export type Person = { id: string; email: string; name: string; first_name: string | null; last_contact: string | null; subscribed: boolean };
+export type Person = { id: string; email: string; name: string; first_name: string | null; last_contact: string | null; subscribed: boolean; opted_out: boolean };
 export type Specs = { chemistry: string | null; format: string | null; manufacturer: string | null; pack_kwh?: number | null } | null;
 export type Listing = { id: string; title: string; seo_slug: string | null; supplier_account_id: string; created_at?: string; specs: Specs };
 
@@ -81,7 +81,7 @@ export function assembleFollowUps(rows: FollowUpRows, siteUrl: string, now = new
     if (TEST_IDS.has(d.supplier_account_id) || paid(d)) continue;
     const step = STEP_TEXT[d.workflow_step] ?? d.workflow_step.replaceAll("_", " ");
     const text = (d.status === "cancelled" ? `Deal cancelled at ${step}` : `Deal ${step}`) + money(d.agreed_amount, d.agreed_currency);
-    add(d.counterparty_account_id, d.listing_id, { ...base, kind: "deal", text, at: d.created_at });
+    add(d.counterparty_account_id, d.listing_id, { ...base, kind: "deal", status: d.status === "cancelled" ? "cancelled" : d.workflow_step, text, at: d.created_at });
     if (d.status === "open" && UNPAID_STEPS.has(d.workflow_step) && now.getTime() - Date.parse(d.created_at) > STUCK_MS
       && real(d.counterparty_account_id, d.listing_id)) {
       waiting.push({ kind: "deal", text, buyer: buyerName(d.counterparty_account_id!), at: d.created_at, expires_at: null, ...waitingOn(d.listing_id) });
@@ -97,18 +97,18 @@ export function assembleFollowUps(rows: FollowUpRows, siteUrl: string, now = new
       }
       continue;
     }
-    add(o.buyer_account_id, o.listing_id, { ...base, kind: "offer", text: `Offer ${o.status}${money(o.amount, o.currency)}${qty}`, at: o.created_at });
+    add(o.buyer_account_id, o.listing_id, { ...base, kind: "offer", status: o.status, text: `Offer ${o.status}${money(o.amount, o.currency)}${qty}`, at: o.created_at });
   }
   for (const c of rows.chats) {
     if (TEST_IDS.has(c.supplier_account_id)) continue;
-    add(c.counterparty_account_id, c.listing_id, { ...base, kind: "chat", text: "Messaged about a listing", at: c.created_at });
+    add(c.counterparty_account_id, c.listing_id, { ...base, kind: "chat", status: "", text: "Messaged about a listing", at: c.created_at });
   }
   for (const b of rows.bids) {
     if (!b.email) continue;
     const email = b.email.toLowerCase();
     const price = b.price_per_kwh !== null ? ` ${(b.currency ?? "").toUpperCase()} ${b.price_per_kwh}/kWh` : money(b.amount_per_unit, b.currency);
     const kind = b.submission_kind === "buy_now" ? "buy-now" : b.submission_kind;
-    add(accountByEmail.get(email) ?? email, b.listing_id, { ...base, kind: "auction", text: `Auction ${kind}${price}`, at: b.created_at });
+    add(accountByEmail.get(email) ?? email, b.listing_id, { ...base, kind: "auction", status: "", text: `Auction ${kind}${price}`, at: b.created_at });
   }
   for (const s of signals) {
     const listing = s.listing_id ? listingById.get(s.listing_id) : undefined;
@@ -119,12 +119,17 @@ export function assembleFollowUps(rows: FollowUpRows, siteUrl: string, now = new
   }
 
   const live = rows.live.filter((l) => !TEST_IDS.has(l.supplier_account_id)).sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
-  /** Same chemistry and format, half to double the capacity when known, same maker first, newest first. */
+  /**
+   * Same chemistry and format, then half to double the capacity, or the same maker when the size is
+   * unknown. Same maker first, newest first.
+   */
   const similar = (listingId: string | null): ListingLink[] => {
     const specs = listingId ? listingById.get(listingId)?.specs : null;
     if (!specs?.chemistry || !specs.format) return [];
     const kwh = Number(specs.pack_kwh) || 0;
-    const closeSize = (l: Listing) => !kwh || (Number(l.specs?.pack_kwh) >= kwh / 2 && Number(l.specs?.pack_kwh) <= kwh * 2);
+    const closeSize = (l: Listing) => kwh
+      ? Number(l.specs?.pack_kwh) >= kwh / 2 && Number(l.specs?.pack_kwh) <= kwh * 2
+      : same(l.specs?.manufacturer, specs.manufacturer);
     const matches = live.filter((l) => l.id !== listingId && same(l.specs?.chemistry, specs.chemistry) && same(l.specs?.format, specs.format) && closeSize(l));
     const byMaker = [...matches.filter((l) => same(l.specs?.manufacturer, specs.manufacturer)), ...matches.filter((l) => !same(l.specs?.manufacturer, specs.manufacturer))];
     return byMaker.slice(0, 3).map((l) => ({ title: l.title, url: url(l) }));
@@ -145,6 +150,7 @@ export function assembleFollowUps(rows: FollowUpRows, siteUrl: string, now = new
       person_id: person?.id ?? null,
       first_name: person?.first_name ?? null,
       subscribed: person?.subscribed ?? false,
+      opted_out: person?.opted_out ?? false,
       last_contact: person?.last_contact ?? null,
       contacted_since: !!person?.last_contact && Date.parse(person.last_contact) > Date.parse(latest.at),
       latest,

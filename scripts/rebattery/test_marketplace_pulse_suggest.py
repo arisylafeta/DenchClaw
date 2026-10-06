@@ -16,7 +16,8 @@ class Validate(unittest.TestCase):
         self.assertIsNone(out[1]["metric"])
 
     def test_refuses_unknown_metric_owner_missing_text_and_too_many(self):
-        for bad in ([{**GOOD, "metric": "made_up"}], [{**GOOD, "owner": "Bob"}], [{**GOOD, "action": " "}], [GOOD] * 6, []):
+        for bad in ([{**GOOD, "metric": "made_up"}], [{**GOOD, "metric": ["drop_offers_expired"]}], [{**GOOD, "owner": "Bob"}],
+                    [{**GOOD, "action": " "}], [{**GOOD, "title": "x" * 121}], [GOOD] * 6, []):
             with self.assertRaises(SystemExit):
                 suggest.validate(bad, {"drop_offers_expired"})
 

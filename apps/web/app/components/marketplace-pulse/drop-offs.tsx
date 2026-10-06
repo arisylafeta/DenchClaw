@@ -9,9 +9,12 @@ const show = (value: number | undefined) => (value === undefined ? "–" : forma
 
 /** Where buyers drop off, by stage: the selected week and the last four full weeks added up. */
 export function DropOffs({ week, weekLabel, lastFour }: Props) {
+  /** The four weeks added up, saying so when fewer weeks have the number. */
   const four = (key: Parameters<typeof dropValue>[0]) => {
     const values = lastFour.map((w) => dropValue(key, w.values)).filter((v): v is number => v !== undefined);
-    return values.length ? values.reduce((a, b) => a + b, 0) : undefined;
+    if (!values.length) return "–";
+    const total = show(values.reduce((a, b) => a + b, 0));
+    return values.length < 4 ? `${total} (${values.length} wk)` : total;
   };
   return (
     <section aria-label="Where buyers drop off" className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -43,10 +46,10 @@ export function DropOffs({ week, weekLabel, lastFour }: Props) {
                     )}
                   </td>
                   <td className="bt-mono px-3 py-1.5 text-right">{show(dropValue(row.key, week.values))}</td>
-                  <td className="bt-mono px-3 py-1.5 text-right">{show(four(row.key))}</td>
+                  <td className="bt-mono px-3 py-1.5 text-right">{four(row.key)}</td>
                   <td className="whitespace-nowrap px-4 py-1.5 text-right">
-                    {row.event && (
-                      <a href={replayUrl(row.event)} target="_blank" rel="noreferrer" className="text-xs" style={{ color: "var(--bt-link)" }}>
+                    {row.replay && (
+                      <a href={replayUrl(row.replay)} target="_blank" rel="noreferrer" className="text-xs" style={{ color: "var(--bt-link)" }}>
                         Watch sessions
                       </a>
                     )}

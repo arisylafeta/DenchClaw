@@ -90,5 +90,23 @@ class PlatformMetrics(unittest.TestCase):
         self.assertNotIn("listings_live", out[PREVIOUS])
 
 
+class Collect(unittest.TestCase):
+    def test_a_failed_drop_off_read_keeps_the_funnel_numbers(self):
+        def fake_posthog(start, end, template=None, metrics=None, **_):
+            if metrics is pulse.DROP_METRICS:
+                raise RuntimeError("HogQL error")
+            return {WEEK: {metric: 7 for metric in metrics}}
+        saved = (pulse.read_posthog, pulse.read_platform, pulse.Platform, pulse.load_exclusions)
+        pulse.read_posthog, pulse.read_platform = fake_posthog, lambda platform: data()
+        pulse.Platform, pulse.load_exclusions = lambda: None, lambda: EXCLUSIONS
+        try:
+            numbers, error = pulse.collect(type("Args", (), {"since": None})(), dt.date(2026, 10, 1))
+        finally:
+            pulse.read_posthog, pulse.read_platform, pulse.Platform, pulse.load_exclusions = saved
+        self.assertEqual(numbers[WEEK]["visitors"], 7)
+        self.assertNotIn("drop_no_price", numbers[WEEK])
+        self.assertIn("drop-off read failed", error)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,28 +43,33 @@ export const METRICS: Record<MetricKey, Metric> = {
   drop_payment_failed: { label: "Payments failed", hint: "deals whose first payment failed", lowerIsBetter: true },
 };
 
-/** A row in "Where buyers drop off". `event` links to PostHog recordings of people who did it. */
-export type DropRow = { key: MetricKey | "viewed_not_started"; label: string; event?: string };
+/** A PostHog event, optionally narrowed by one event property, for a recordings link. */
+export type ReplayEvent = { event: string; property?: { key: string; values: string[] } };
+
+/** A row in "Where buyers drop off". `replay` links to PostHog recordings of people who did it. */
+export type DropRow = { key: MetricKey | "viewed_not_started"; label: string; replay?: ReplayEvent[] };
+
+const ev = (event: string, key?: string, ...values: string[]): ReplayEvent[] => [{ event, property: key ? { key, values } : undefined }];
 
 export const DROP_STAGES: { stage: string; rows: DropRow[] }[] = [
   {
     stage: "Looking, not starting",
     rows: [
-      { key: "viewed_not_started", label: "Viewed a listing but started nothing", event: "listing_detail_viewed" },
-      { key: "drop_no_price", label: METRICS.drop_no_price.label, event: "listing_detail_viewed" },
-      { key: "drop_search_no_exact", label: METRICS.drop_search_no_exact.label, event: "marketplace_search_outcome" },
+      { key: "viewed_not_started", label: "Viewed a listing but started nothing", replay: ev("listing_detail_viewed") },
+      { key: "drop_no_price", label: METRICS.drop_no_price.label, replay: ev("listing_detail_viewed", "price_visibility", "offer_only") },
+      { key: "drop_search_no_exact", label: METRICS.drop_search_no_exact.label, replay: ev("marketplace_search_outcome", "outcome", "fallback_results", "no_results") },
     ],
   },
   {
     stage: "Started, not sent",
     rows: [
-      { key: "drop_signin_wall", label: METRICS.drop_signin_wall.label, event: "auth_dialog_viewed" },
-      { key: "signup_submitted", label: METRICS.signup_submitted.label, event: "auth_signup_submitted" },
+      { key: "drop_signin_wall", label: METRICS.drop_signin_wall.label, replay: ev("auth_dialog_viewed") },
+      { key: "signup_submitted", label: METRICS.signup_submitted.label, replay: ev("auth_signup_submitted") },
       { key: "buyer_signups", label: METRICS.buyer_signups.label },
-      { key: "drop_signup_captcha", label: METRICS.drop_signup_captcha.label, event: "auth_signup_failed" },
-      { key: "drop_signup_registered", label: METRICS.drop_signup_registered.label, event: "auth_signup_failed" },
-      { key: "drop_signup_other", label: METRICS.drop_signup_other.label, event: "auth_signup_failed" },
-      { key: "drop_contact_error", label: METRICS.drop_contact_error.label, event: "listing_offer_failed" },
+      { key: "drop_signup_captcha", label: METRICS.drop_signup_captcha.label, replay: ev("auth_signup_failed", "reason_code", "turnstile_failed") },
+      { key: "drop_signup_registered", label: METRICS.drop_signup_registered.label, replay: ev("auth_signup_failed", "reason_code", "user_already_registered") },
+      { key: "drop_signup_other", label: METRICS.drop_signup_other.label, replay: ev("auth_signup_failed") },
+      { key: "drop_contact_error", label: METRICS.drop_contact_error.label, replay: [...ev("listing_offer_failed"), ...ev("listing_message_failed"), ...ev("listing_buy_now_failed")] },
     ],
   },
   {
@@ -84,12 +89,22 @@ export function dropValue(key: DropRow["key"], values: Partial<Record<MetricKey,
   return Math.max(0, values.viewed_listing - (values.started_contact ?? 0));
 }
 
-/** PostHog recordings of people who triggered `event` in the last 30 days, test accounts left out. */
-export function replayUrl(event: string): string {
+/** PostHog recordings on the live site from the last 30 days with any of these events, test accounts left out. */
+export function replayUrl(events: ReplayEvent[]): string {
+  const host = { key: "$host", value: ["rebattery.io", "www.rebattery.io"], operator: "exact", type: "event" };
   const filters = {
     date_from: "-30d",
     filter_test_accounts: true,
-    filter_group: { type: "AND", values: [{ type: "AND", values: [{ id: event, name: event, type: "events", order: 0 }] }] },
+    filter_group: {
+      type: "AND",
+      values: [{
+        type: "OR",
+        values: events.map(({ event, property }, order) => ({
+          id: event, name: event, type: "events", order,
+          properties: property ? [host, { key: property.key, value: property.values, operator: "exact", type: "event" }] : [host],
+        })),
+      }],
+    },
   };
   return `https://us.posthog.com/project/375247/replay/home?filters=${encodeURIComponent(JSON.stringify(filters))}`;
 }
@@ -113,6 +128,8 @@ export type PulseWeek = { week_start: string; values: Partial<Record<MetricKey, 
 
 export type FollowUpSignal = {
   kind: "deal" | "offer" | "chat" | "auction";
+  /** Offer status, "cancelled" or the deal's step; empty for chats and bids. */
+  status: string;
   text: string;
   listing_title: string | null;
   listing_url: string | null;
@@ -129,6 +146,8 @@ export type FollowUp = {
   first_name: string | null;
   /** On the Supply update list. */
   subscribed: boolean;
+  /** Opted out of email, or of Supply update. */
+  opted_out: boolean;
   last_contact: string | null;
   contacted_since: boolean;
   latest: FollowUpSignal;
@@ -181,17 +200,34 @@ export type PulseData = {
   suggestions: Suggestion[];
 };
 
-const OPENERS: Record<FollowUpSignal["kind"], (title: string) => string> = {
-  deal: (title) => `I saw your order for the ${title} on ReBattery didn't go through to payment.`,
-  offer: (title) => `I saw your offer on the ${title} on ReBattery didn't get an answer in time.`,
-  chat: (title) => `I saw you messaged about the ${title} on ReBattery.`,
-  auction: (title) => `Thanks for your bid on the ${title} auction on ReBattery.`,
+const OFFER_OPENERS: Record<string, (title: string) => string> = {
+  expired: (title) => `I saw your offer on the ${title} on ReBattery expired before you got an answer.`,
+  rejected: (title) => `I saw your offer on the ${title} on ReBattery wasn't accepted.`,
+  countered: (title) => `I saw the seller came back with a counter-offer on the ${title} on ReBattery.`,
+  withdrawn: (title) => `I saw you withdrew your offer on the ${title} on ReBattery.`,
+  accepted: (title) => `I saw your offer on the ${title} on ReBattery was accepted.`,
 };
+
+/** One factual line on what the buyer did, matched to the offer or deal status. */
+export function opener(signal: FollowUpSignal, title: string): string {
+  switch (signal.kind) {
+    case "deal":
+      return signal.status === "cancelled"
+        ? `I saw your order for the ${title} on ReBattery was cancelled before payment.`
+        : `I saw your order for the ${title} on ReBattery is still waiting on payment.`;
+    case "offer":
+      return (OFFER_OPENERS[signal.status] ?? ((t: string) => `I saw your offer on the ${t} on ReBattery.`))(title);
+    case "chat":
+      return `I saw you messaged about the ${title} on ReBattery.`;
+    case "auction":
+      return `Thanks for your bid on the ${title} auction on ReBattery.`;
+  }
+}
 
 /** A short Gmail draft for a follow-up: one line on what they did, similar listings, one ask. */
 export function draftFor(f: FollowUp, sender: string): { to: string; subject: string; body: string } {
   const title = f.latest.listing_title ?? "listing";
-  const lines = [`Hi ${f.first_name ?? "[first name]"},`, "", OPENERS[f.latest.kind](title)];
+  const lines = [`Hi ${f.first_name ?? "[first name]"},`, "", opener(f.latest, title)];
   if (f.latest.listing_url) lines.push(f.latest.listing_url);
   if (f.similar.length) {
     lines.push("", f.similar.length === 1 ? "We also have this one, in case it fits:" : "We also have these, in case they fit:");

@@ -250,8 +250,12 @@ def platform_metrics(data, weeks, today, exclusions):
         add("paid_value_gbp", payment["captured_at"],
             float(payment["deal_amount"] or 0) * GBP_PER.get((payment["currency"] or "GBP").upper(), 1.0))
 
-    failed = {p["deal_id"]: p for p in data["payments"]
-              if p["deal_id"] in real_deals and p["status"] == "failed" and p["payment_purpose"] == "initial"}
+    # A deal's first failed payment, counted once, unless the deal was paid in the end.
+    failed = {}
+    for payment in sorted(data["payments"], key=lambda p: p["created_at"] or ""):
+        if payment["deal_id"] in real_deals and payment["deal_id"] not in paid and payment["status"] == "failed" \
+                and payment["payment_purpose"] == "initial":
+            failed.setdefault(payment["deal_id"], payment)
     for payment in failed.values():
         add("drop_payment_failed", payment["created_at"])
 
@@ -259,8 +263,10 @@ def platform_metrics(data, weeks, today, exclusions):
     for offer in data["offers"]:
         if not internal_buyer(offer["buyer_account_id"]) and listing_supplier.get(offer["listing_id"]) not in test_ids:
             add("offers_made", offer["created_at"])
-            if offer["status"] == "expired":
-                # Counted in the week it expired, unanswered.
+            # Counted in the week it expired, unanswered, whether or not the platform has marked it yet.
+            lapsed = offer["status"] in ("submitted", "under_review") and offer["expires_at"] \
+                and week_of(offer["expires_at"]) is not None and offer["expires_at"][:10] < today.isoformat()
+            if offer["status"] == "expired" or lapsed:
                 add("drop_offers_expired", offer["expires_at"] or offer["created_at"])
     for chat in data["chats"]:
         if chat["conversation_type"] in CONTACT_TYPES and not internal_buyer(chat["counterparty_account_id"]) \
@@ -311,17 +317,18 @@ def collect(args, today):
     if not weeks:
         raise SystemExit("--since is after today")
     numbers = platform_metrics(read_platform(Platform()), weeks, today, load_exclusions())
-    posthog_error = None
-    try:
-        end = monday(today) + dt.timedelta(days=7)
-        people = read_posthog(weeks[0], end)
-        drops = read_posthog(weeks[0], end, template=DROP_QUERY, metrics=DROP_METRICS)
+    errors = []
+    end = monday(today) + dt.timedelta(days=7)
+    # Each PostHog read stands alone, so a failed drop-off read keeps the funnel numbers.
+    for name, template, metrics in (("funnel", POSTHOG_QUERY, POSTHOG_METRICS), ("drop-off", DROP_QUERY, DROP_METRICS)):
+        try:
+            people = read_posthog(weeks[0], end, template=template, metrics=metrics)
+        except Exception as err:  # noqa: BLE001 - the other numbers are still worth writing
+            errors.append(f"PostHog {name} read failed: {err}")
+            continue
         for week in weeks:
-            numbers[week].update(people.get(week, {metric: 0 for metric in POSTHOG_METRICS}))
-            numbers[week].update(drops.get(week, {metric: 0 for metric in DROP_METRICS}))
-    except Exception as err:  # noqa: BLE001 - the platform numbers are still worth writing
-        posthog_error = f"PostHog read failed: {err}"
-    return numbers, posthog_error
+            numbers[week].update(people.get(week, {metric: 0 for metric in metrics}))
+    return numbers, "; ".join(errors) or None
 
 
 def main():

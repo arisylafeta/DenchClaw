@@ -22,12 +22,12 @@ const DATA: PulseData = {
   collected_at: "2026-10-06T08:40:00Z",
   follow_ups: [
     {
-      key: "acc-2", name: "Waiting Buyer", email: "w@example.org", person_id: null, first_name: null, subscribed: false, last_contact: null, contacted_since: false,
-      latest: { kind: "deal", text: "Deal cancelled at payment pending EUR 4,490", listing_title: null, listing_url: null, at: "2026-09-30T10:00:00Z" }, more: 2, similar: [],
+      key: "acc-2", name: "Waiting Buyer", email: "w@example.org", person_id: null, first_name: null, subscribed: false, opted_out: false, last_contact: null, contacted_since: false,
+      latest: { kind: "deal", status: "cancelled", text: "Deal cancelled at payment pending EUR 4,490", listing_title: null, listing_url: null, at: "2026-09-30T10:00:00Z" }, more: 2, similar: [],
     },
     {
-      key: "acc-1", name: "Answered Buyer", email: "a@example.org", person_id: "p1", first_name: "Sam", subscribed: false, last_contact: "2026-10-03T10:00:00Z", contacted_since: true,
-      latest: { kind: "offer", text: "Offer expired GBP 900", listing_title: "Kia packs", listing_url: "https://rebattery.io/marketplace/kia", at: "2026-10-01T10:00:00Z" }, more: 0,
+      key: "acc-1", name: "Answered Buyer", email: "a@example.org", person_id: "p1", first_name: "Sam", subscribed: false, opted_out: false, last_contact: "2026-10-03T10:00:00Z", contacted_since: true,
+      latest: { kind: "offer", status: "expired", text: "Offer expired GBP 900", listing_title: "Kia packs", listing_url: "https://rebattery.io/marketplace/kia", at: "2026-10-01T10:00:00Z" }, more: 0,
       similar: [{ title: "Kia packs B", url: "https://rebattery.io/marketplace/kia-b" }],
     },
   ],
@@ -139,7 +139,7 @@ describe("MarketplacePulseView", () => {
     const draft = calls.find((c) => c.url === "/api/marketplace-pulse/email-draft")!.body!;
     expect(draft).toMatchObject({ to: "a@example.org", subject: "Kia packs" });
     expect(draft.body).toBe([
-      "Hi Sam,", "", "I saw your offer on the Kia packs on ReBattery didn't get an answer in time.", "https://rebattery.io/marketplace/kia",
+      "Hi Sam,", "", "I saw your offer on the Kia packs on ReBattery expired before you got an answer.", "https://rebattery.io/marketplace/kia",
       "", "We also have this one, in case it fits:", "Kia packs B - https://rebattery.io/marketplace/kia-b",
       "", "Is it still of interest?", "", "Alex",
     ].join("\n"));
@@ -163,6 +163,8 @@ describe("MarketplacePulseView", () => {
     expect(row("Offers expired unanswered")).toHaveTextContent("2");
     const link = within(row("Hit the sign-in box")).getByRole("link", { name: "Watch sessions" });
     expect(decodeURIComponent(link.getAttribute("href")!)).toContain('"id":"auth_dialog_viewed"');
+    const noPrice = decodeURIComponent(within(row("Saw no price (offer only)")).getByRole("link").getAttribute("href")!);
+    expect(noPrice).toContain('"key":"price_visibility","value":["offer_only"]');
     expect(within(row("Offers expired unanswered")).queryByRole("link")).toBeNull();
   });
 

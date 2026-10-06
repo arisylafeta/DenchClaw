@@ -18,7 +18,11 @@ export async function GET() {
   const [{ weeks, collected_at }, targets, suggestions, platform] = await Promise.all([
     listWeeks(12),
     listTargets(),
-    listSuggestions(),
+    // Suggestions are optional: the page still loads if their table is missing or unreadable.
+    listSuggestions().catch((err) => {
+      console.error("[marketplace-pulse] suggestions read failed", err);
+      return [];
+    }),
     followUps().catch((err) => {
       console.error("[marketplace-pulse] ReBattery read failed", err);
       return null;

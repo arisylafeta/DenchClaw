@@ -54,8 +54,8 @@ describe("assembleFollowUps", () => {
         { created_at: "2026-09-24T10:00:00Z", email: "lee@other.example.org", listing_id: "l1", submission_kind: "offer", price_per_kwh: 20, amount_per_unit: null, currency: "eur" },
       ],
       people: [
-        { id: "p1", email: "pat@buyer.example.org", name: "Pat", first_name: "Pat", last_contact: "2026-09-27T09:00:00Z", subscribed: true },
-        { id: "p2", email: "lee@other.example.org", name: "Lee", first_name: "Lee", last_contact: "2026-09-01T09:00:00Z", subscribed: false },
+        { id: "p1", email: "pat@buyer.example.org", name: "Pat", first_name: "Pat", last_contact: "2026-09-27T09:00:00Z", subscribed: true, opted_out: false },
+        { id: "p2", email: "lee@other.example.org", name: "Lee", first_name: "Lee", last_contact: "2026-09-01T09:00:00Z", subscribed: false, opted_out: false },
       ],
     }), "https://rebattery.io/");
 
