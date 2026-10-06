@@ -44,6 +44,30 @@ upstream failure text without turning it into a client schema-validation error.
 The adapter regressions parse the stream through `DefaultChatTransport`, the
 same strict validator used by the chat client.
 
+## CRM sidebar icons
+
+Sidebar icons are profile-local workspace settings, read from the `icon` key in
+`<workspace>/<object>/.object.yaml`. The live workspace files are intentionally
+Git-ignored; keep the non-secret icon choices here rather than committing CRM
+data or complete profile directories.
+
+| Object | Lucide icon |
+| --- | --- |
+| Bulk Trades (`bulk_trade`) | `handshake` |
+| Dismantlers (`dismantler`) | `wrench` |
+| Stocks (`stock`) | `boxes` |
+| Work Tasks (`work_task`) | `clipboard-check` |
+
+These settings are applied to all four objects in the default and outbounder
+workspaces, and to the existing Bulk Trades and Work Tasks objects in the
+the-enricher workspace. Preserve every other YAML key and do not create missing
+objects merely to set an icon.
+
+Use the CRM icon picker or authenticated `PATCH /api/workspace/objects/<name>/icon`
+with `{"icon":"<Lucide icon>"}` for the active profile. The sidebar retains its
+existing 16px outline style. Refresh the CRM after changing metadata; no build
+or redeploy is required.
+
 ## Shared CRM discovery views
 
 Companies and People have shared `Buyers` and `Dismantlers` saved views. Migration
