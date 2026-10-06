@@ -274,13 +274,13 @@ def buyer_intents(data):
     for message in data.get("messages", []):
         if not message["is_system_seeded"]:
             by_chat[message["conversation_id"]].append(message)
+    senders = data.get("sender_account", {})
     intents = {}
     for chat in data["chats"]:
         if chat["conversation_type"] not in CONTACT_TYPES:
             continue
         buyer = chat["counterparty_account_id"]
         messages = sorted(by_chat.get(chat.get("id"), []), key=lambda m: m["created_at"])
-        senders = data.get("sender_account", {})
         first = next((m for m in messages if senders.get(m["sender_membership_id"]) == buyer), None)
         if not first:
             continue
@@ -289,11 +289,17 @@ def buyer_intents(data):
         intents[chat["id"]] = {"buyer": buyer, "seller": chat["supplier_account_id"], "asked": first["created_at"], "reply": reply}
     listing_supplier = {row["id"]: row["supplier_account_id"] for row in data["listings"]}
     for offer in data["offers"]:
+        # The seller's answer: accepting, rejecting or countering (updated_at, which a later change can move
+        # on, so this can only be late, never early), or any message from the seller side in the offer's chat.
         reply = offer.get("updated_at") if offer["status"] in REPLIED_STATUSES else None
+        chat_reply = next((m["created_at"] for m in sorted(by_chat.get(offer.get("conversation_id"), []), key=lambda m: m["created_at"])
+                           if m["created_at"] > offer["created_at"] and senders.get(m["sender_membership_id"]) not in (None, offer["buyer_account_id"])), None)
+        if offer["status"] == "withdrawn" and not reply and not chat_reply:
+            continue  # The buyer took it back before anyone answered: not ours to answer any more.
         key = offer.get("conversation_id") if offer.get("conversation_id") in intents else offer.get("id") or id(offer)
         current = intents.get(key)
         asked = min(offer["created_at"], current["asked"]) if current else offer["created_at"]
-        replies = [r for r in (reply, current["reply"] if current else None) if r and r > asked]
+        replies = [r for r in (reply, chat_reply, current["reply"] if current else None) if r and r > asked]
         intents[key] = {"buyer": offer["buyer_account_id"], "seller": listing_supplier.get(offer["listing_id"]),
                         "asked": asked, "reply": min(replies) if replies else None}
     return list(intents.values())

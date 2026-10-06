@@ -27,7 +27,7 @@ describe("growth plan maths", () => {
   });
 
   it("adds up each fix in order and ends at the plan", () => {
-    const start = baseline({ visitors: 400, viewed: 0.6, started: 0.08, sent: 0.5, deal: 0.3, paid: 0.67 }, LEVERS);
+    const start = baseline({ visitors: 400, viewed: 0.6, started: 0.08, sent: 0.5, deal: 0.3, paid: 0.67 }, LEVERS).rates;
     expect(paidPerMonth(start)).toBeCloseTo(1.93, 2);
     const { steps, final } = waterfall(start, LEVERS);
     // 1.93 → 2.89 when every buyer is answered, → 5.43 with the channels fix.
@@ -39,8 +39,29 @@ describe("growth plan maths", () => {
     expect(s.visitors).toBeCloseTo(paidPerMonth(final) / 10, 5);
   });
 
-  it("fills a step with no data from the first fix that sets it", () => {
-    expect(baseline({ visitors: 100 }, LEVERS)).toMatchObject({ visitors: 100, deal: 0.45, started: 0.1, paid: 0 });
+  it("never lets a fix lower a step", () => {
+    const start = baseline({ visitors: 400, viewed: 0.6, started: 0.08, sent: 0.5, deal: 0.6, paid: 0.67 }, LEVERS).rates;
+    const { steps, final } = waterfall(start, LEVERS);
+    // Deals already at 60%, above the fix's 45%: the fix adds nothing.
+    expect(steps[0].delta).toBe(0);
+    expect(final.deal).toBe(0.6);
+  });
+
+  it("fills a step with no data from the first fix that sets it, and says which are assumed or missing", () => {
+    expect(baseline({ visitors: 100 }, LEVERS)).toEqual({
+      rates: { visitors: 100, viewed: 0, started: 0.1, sent: 0, deal: 0.45, paid: 0 },
+      assumed: ["started", "deal"],
+      missing: ["viewed", "sent", "paid"],
+    });
+  });
+
+  it("flags rates over 100% instead of capping them", () => {
+    const weeks = ["2026-09-01", "2026-09-08", "2026-09-15", "2026-09-22"].map((d) => week(d, { deals_created: 3, deals_paid: 1 }));
+    const rows = weeks.flatMap((w) => [row(w.week_start, "funnel_reached", 10), row(w.week_start, "funnel_viewed", 5),
+      row(w.week_start, "funnel_started", 2), row(w.week_start, "funnel_sent", 1)]);
+    const m = measure(weeks, rows);
+    expect(m.rates.deal).toBe(3);
+    expect(m.over).toEqual(["deal"]);
   });
 
   it("draws a straight path to the target and says how we stand", () => {
@@ -48,12 +69,14 @@ describe("growth plan maths", () => {
     expect(planPath(PLAN, "2026-01-01")).toBe(2);
     expect(planPath(PLAN, "2027-03-01")).toBe(9);
     expect(planPath(PLAN, "2026-11-20")).toBeCloseTo(2 + 7 * (45 / 91), 5);
-    expect([standing(4, 4), standing(3, 4), standing(2, 4)]).toEqual(["On track", "Slightly behind", "Off track"]);
+    expect([standing(4, 4), standing(3, 4), standing(2, 4), standing(null, 4)]).toEqual(["On track", "Slightly behind", "Off track", "Not enough weeks yet"]);
   });
 
-  it("turns weekly paid deals into a rolling four-week monthly rate", () => {
-    const weeks = [1, 0, 0, 1, 2].map((paid, i) => week(`2026-09-0${i + 1}`, { deals_paid: paid }));
+  it("turns weekly paid deals into a rolling four-week monthly rate, skipping windows with a missing week", () => {
+    const weeks = [1, 0, 0, 1, 2].map((paid, i) => week(new Date(Date.UTC(2026, 7, 31 + 7 * i)).toISOString().slice(0, 10), { deals_paid: paid }));
     expect(actualSeries(weeks).map((p) => Math.round(p.paid * 100) / 100)).toEqual([2.17, 3.26]);
+    // Drop the third week: no window of four whole weeks is left.
+    expect(actualSeries(weeks.filter((_, i) => i !== 2))).toEqual([]);
   });
 
   it("refuses plans that cannot be right", () => {
@@ -62,5 +85,11 @@ describe("growth plan maths", () => {
     expect(parsePlan({ ...PLAN, levers: [{ ...LEVERS[0], steps: { deal: 1.5 } }] })).toMatchObject({ error: expect.stringContaining("between 0% and 100%") });
     expect(parsePlan({ ...PLAN, levers: [{ ...LEVERS[0], steps: { price: 0.5 } }] })).toMatchObject({ error: expect.stringContaining("unknown step") });
     expect(parsePlan({ ...PLAN, channels: [{ channel: "TikTok", goal: 1, owner: "", action: "" }] })).toMatchObject({ error: expect.stringContaining("Unknown channel") });
+    expect(parsePlan({ ...PLAN, target_paid: 0 })).toMatchObject({ error: expect.stringContaining("more than 0") });
+    expect(parsePlan({ ...PLAN, target_paid: Number.NaN })).toMatchObject({ error: expect.stringContaining("more than 0") });
+    expect(parsePlan({ ...PLAN, target_date: "2027-02-31" })).toMatchObject({ error: expect.stringContaining("must be a date") });
+    expect(parsePlan({ ...PLAN, target_date: "2099-01-01" })).toMatchObject({ error: expect.stringContaining("three years") });
+    const twins = parsePlan({ ...PLAN, levers: [LEVERS[0], { ...LEVERS[1], id: "a" }] });
+    expect("plan" in twins && twins.plan.levers.map((l) => l.id)).toEqual(["a", "fix-2-1"]);
   });
 });

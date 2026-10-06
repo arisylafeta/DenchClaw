@@ -24,8 +24,8 @@ const deals = (v: number) => (Math.round(v * 10) / 10).toLocaleString("en-GB", {
 const stepValue = (key: StepKey, v: number | undefined) =>
   v === undefined ? "–" : key === "visitors" ? Math.round(v).toLocaleString("en-GB") : `${Math.round(v * 1000) / 10}%`;
 const dateLabel = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-const STANDING_MARK = { "On track": "●", "Slightly behind": "▲", "Off track": "■" } as const;
-const STANDING_COLOR = { "On track": "var(--bt-green)", "Slightly behind": "var(--bt-amber)", "Off track": "var(--bt-red)" } as const;
+const STANDING_MARK = { "On track": "●", "Slightly behind": "▲", "Off track": "■", "Not enough weeks yet": "○" } as const;
+const STANDING_COLOR = { "On track": "var(--bt-green)", "Slightly behind": "var(--bt-amber)", "Off track": "var(--bt-red)", "Not enough weeks yet": "var(--bt-muted)" } as const;
 
 export function PlanTab({ plan: latest, versions, weeks, breakdowns, onSaved }: Props) {
   const [viewing, setViewing] = useState<PlanVersion | null>(null);
@@ -55,13 +55,15 @@ export function PlanTab({ plan: latest, versions, weeks, breakdowns, onSaved }: 
   }
   const plan = shown.plan;
   const measured = measure(weeks, breakdowns);
-  const start = baseline(measured.rates, plan.levers);
+  const base = baseline(measured.rates, plan.levers);
+  const start = base.rates;
   const { steps, final } = waterfall(start, plan.levers);
-  const today = paidPerMonth(start);
+  // With a step that has neither data nor a fix, today's paid deals cannot be worked out.
+  const today = base.missing.length ? null : paidPerMonth(start);
   const planned = paidPerMonth(final);
   const bump = sensitivity(final);
   const series = actualSeries(weeks);
-  const actualNow = series.at(-1)?.paid ?? today;
+  const actualNow = series.at(-1)?.paid ?? null;
   const todayIso = new Date().toISOString().slice(0, 10);
   const expected = planPath(plan, todayIso);
   const where = standing(actualNow, expected);
@@ -79,7 +81,9 @@ export function PlanTab({ plan: latest, versions, weeks, breakdowns, onSaved }: 
         <span className="flex items-center gap-1.5 border px-2.5 py-1 text-[13px]" style={{ borderColor: "var(--bt-border)" }}>
           <span aria-hidden="true" style={{ color: STANDING_COLOR[where] }}>{STANDING_MARK[where]}</span>
           <strong>{where}</strong>
-          <span style={{ color: "var(--bt-muted)" }}>· {deals(actualNow)} a month now, plan says {deals(expected)} by today</span>
+          <span style={{ color: "var(--bt-muted)" }}>
+            · {actualNow === null ? "needs 4 full weeks of paid deals in a row" : `${deals(actualNow)} a month now, plan says ${deals(expected)} by today`}
+          </span>
         </span>
         <span className="flex-1" />
         {versions.length > 1 && (
@@ -100,20 +104,28 @@ export function PlanTab({ plan: latest, versions, weeks, breakdowns, onSaved }: 
       </section>
       <ErrorText error={error} />
 
-      <GrowthModel plan={plan} measured={measured} start={start} final={final} bump={bump} today={today} planned={planned} />
-      <Waterfall steps={steps} today={today} planned={planned} target={plan.target_paid} />
-      <ChannelPlan plan={plan} actual={channelSends(weeks, breakdowns)} needed={sendsPerMonth(final)} />
+      <GrowthModel plan={plan} measured={measured} base={base} final={final} bump={bump} today={today} planned={planned} />
+      {today === null ? (
+        <p className="text-sm">
+          What each fix is worth needs today&apos;s rate for every step. No data and no fix yet for:{" "}
+          {base.missing.map((k) => STEPS.find((s) => s.key === k)!.label).join(", ")}.
+        </p>
+      ) : (
+        <Waterfall steps={steps} today={today} assumed={base.assumed.length > 0} planned={planned} target={plan.target_paid} />
+      )}
+      <ChannelPlan plan={plan} actual={channelSends(weeks, breakdowns, measured.weekIds)} needed={sendsPerMonth(final)} />
       <PlanVsActual plan={plan} series={series} />
 
-      {editing && <PlanEditor plan={plan} start={start} onClose={() => setEditing(false)} onSave={save} />}
+      {editing && <PlanEditor plan={plan} measured={measured.rates} actualNow={actualNow} onClose={() => setEditing(false)} onSave={save} />}
     </div>
   );
 }
 
-function GrowthModel({ plan, measured, start, final, bump, today, planned }: {
-  plan: Plan; measured: ReturnType<typeof measure>; start: Rates; final: Rates; bump: Record<StepKey, number>; today: number; planned: number;
+function GrowthModel({ plan, measured, base, final, bump, today, planned }: {
+  plan: Plan; measured: ReturnType<typeof measure>; base: ReturnType<typeof baseline>; final: Rates; bump: Record<StepKey, number>; today: number | null; planned: number;
 }) {
   const reply = measured.reply;
+  const start = base.rates;
   return (
     <section aria-label="Growth model" className="border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
       <h2 className="text-[15px] font-semibold">Growth model</h2>
@@ -124,22 +136,28 @@ function GrowthModel({ plan, measured, start, final, bump, today, planned }: {
         {STEPS.map(({ key, label, unit }) => {
           const fixes = plan.levers.filter((l) => l.steps[key] !== undefined);
           const hasData = measured.rates[key] !== undefined;
+          const assumed = base.assumed.includes(key);
           return (
             <li key={key} aria-label={label} className="flex flex-col gap-1 border p-2.5 text-xs" style={{ borderColor: "var(--bt-divider)" }}>
               <span className="bt-label">{label}</span>
               <span className="text-[11px]" style={{ color: "var(--bt-muted)" }}>{unit}</span>
               <span className="mt-1 flex items-baseline justify-between gap-1">
                 <span>Today</span>
-                <span className="bt-mono text-[15px] font-semibold" style={{ color: "var(--bt-text)" }}>{hasData ? stepValue(key, start[key]) : "–"}</span>
+                <span className="bt-mono text-[15px] font-semibold" style={{ color: "var(--bt-text)" }}>
+                  {hasData ? stepValue(key, start[key]) : assumed ? `≈ ${stepValue(key, start[key])}` : "–"}
+                </span>
               </span>
               <span className="flex items-baseline justify-between gap-1">
                 <span>Plan</span>
                 <span className="bt-mono font-semibold">{stepValue(key, final[key])}</span>
               </span>
-              <span style={{ color: "var(--bt-muted)" }}>{hasData ? "Today measured" : "No data yet; using the plan"}</span>
+              <span style={{ color: measured.over.includes(key) ? "var(--bt-amber)" : "var(--bt-muted)" }}>
+                {measured.over.includes(key) ? "▲ Over 100%: tracking misses some of the step before"
+                  : hasData ? "Today measured" : assumed ? "Assumed from the first fix: no data yet" : "No data and no fix yet"}
+              </span>
               {fixes.map((f) => <span key={f.id} className="leading-snug">Fix: {f.name}{f.owner ? ` (${f.owner})` : ""}</span>)}
               <span className="mt-auto pt-1" style={{ color: "var(--bt-text-2)" }}>
-                {key === "visitors" ? "+10% visitors" : "+1 point"} = <span className="bt-mono">+{deals(bump[key])}</span> deals
+                On the plan, {key === "visitors" ? "+10% visitors" : "+1 point"} = <span className="bt-mono">+{deals(bump[key])}</span> deals
               </span>
               {key === "deal" && (
                 <span className="border-t pt-1" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
@@ -154,7 +172,11 @@ function GrowthModel({ plan, measured, start, final, bump, today, planned }: {
         <li aria-label="Paid deals a month" className="flex flex-col gap-1 border p-2.5 text-xs" style={{ borderColor: "var(--bt-text)" }}>
           <span className="bt-label">Paid deals</span>
           <span className="text-[11px]" style={{ color: "var(--bt-muted)" }}>per month</span>
-          <span className="mt-1 flex items-baseline justify-between"><span>Today</span><span className="bt-mono text-[15px] font-semibold">{deals(today)}</span></span>
+          <span className="mt-1 flex items-baseline justify-between">
+            <span>Today</span>
+            <span className="bt-mono text-[15px] font-semibold">{today === null ? "–" : `${base.assumed.length ? "≈ " : ""}${deals(today)}`}</span>
+          </span>
+          {base.assumed.length > 0 && today !== null && <span style={{ color: "var(--bt-muted)" }}>Partly assumed: steps with no data use their first fix</span>}
           <span className="flex items-baseline justify-between"><span>Plan</span><span className="bt-mono text-[15px] font-semibold">{deals(planned)}</span></span>
           <span style={{ color: "var(--bt-muted)" }}>Fill rate today: {measured.fill === null ? "–" : `${Math.round(measured.fill * 100)}%`} of sends paid</span>
         </li>
@@ -165,12 +187,15 @@ function GrowthModel({ plan, measured, start, final, bump, today, planned }: {
 
 type WaterBar = { name: string; status: string; base: number; value: number; label: string; total: boolean; done: boolean };
 
-function Waterfall({ steps, today, planned, target }: { steps: ReturnType<typeof waterfall>["steps"]; today: number; planned: number; target: number }) {
+function Waterfall({ steps, today, assumed, planned, target }: {
+  steps: ReturnType<typeof waterfall>["steps"]; today: number; assumed: boolean; planned: number; target: number;
+}) {
   const bars: WaterBar[] = [
-    { name: "Today", status: "", base: 0, value: today, label: deals(today), total: true, done: true },
+    { name: assumed ? "Today (partly assumed)" : "Today", status: "", base: 0, value: today, label: deals(today), total: true, done: true },
     ...steps.map((s) => ({
-      name: s.lever.name, status: s.lever.status, base: Math.min(s.before, s.after), value: Math.abs(s.delta),
-      label: `${s.delta >= 0 ? "+" : "−"}${deals(Math.abs(s.delta))}`, total: false, done: s.lever.status === "Done",
+      // Fixes only raise steps, so a fix adds deals or nothing.
+      name: s.lever.name, status: s.lever.status, base: s.before, value: s.delta,
+      label: `+${deals(s.delta)}`, total: false, done: s.lever.status === "Done",
     })),
     { name: "Plan", status: "", base: 0, value: planned, label: deals(planned), total: true, done: true },
   ];
@@ -189,7 +214,7 @@ function Waterfall({ steps, today, planned, target }: { steps: ReturnType<typeof
     <section aria-label="What each fix is worth" className="border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
       <h2 className="text-[15px] font-semibold">What each fix is worth</h2>
       <p className="mb-2 text-xs" style={{ color: "var(--bt-muted)" }}>
-        Paid deals a month: today, then each fix in order, then the plan. Solid bars are Done; lighter bars are Planned or Doing.
+        Paid deals a month: today, then each fix in order, then the plan. A fix raises its steps to their targets; one already there adds nothing. Solid bars are Done; lighter bars are Planned or Doing.
       </p>
       <div style={{ height: 280 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -197,7 +222,7 @@ function Waterfall({ steps, today, planned, target }: { steps: ReturnType<typeof
             <CartesianGrid vertical={false} stroke="var(--viz-grid)" />
             <XAxis dataKey="name" tick={<Tick />} tickLine={false} axisLine={{ stroke: "var(--viz-grid)" }} interval={0} height={36} />
             <YAxis tick={axis} tickLine={false} axisLine={false} width={32} />
-            <ReferenceLine y={target} stroke="var(--viz-axis)" strokeWidth={1} label={{ value: `Target ${deals(target)}`, position: "insideTopLeft", fontSize: 10, fill: "var(--viz-axis)" }} />
+            <ReferenceLine y={target} ifOverflow="extendDomain" stroke="var(--viz-axis)" strokeWidth={1} label={{ value: `Target ${deals(target)}`, position: "insideTopLeft", fontSize: 10, fill: "var(--viz-axis)" }} />
             <Tooltip cursor={{ fill: "var(--bt-row-hover)" }} content={({ active, payload }) => {
               const bar = active ? (payload?.[0]?.payload as WaterBar | undefined) : undefined;
               if (!bar) return null;
@@ -262,6 +287,10 @@ function PlanVsActual({ plan, series }: { plan: Plan; series: { week_start: stri
   for (let d = new Date(`${first}T00:00:00Z`); d.toISOString().slice(0, 10) <= plan.target_date; d.setUTCDate(d.getUTCDate() + 7)) {
     const iso = d.toISOString().slice(0, 10);
     points.push({ week: weekLabel(iso), actual: actual.get(iso) ?? null, plan: iso >= mondayOf(new Date(`${plan.start.date}T00:00:00Z`)) ? planPath(plan, iso) : null });
+  }
+  // End the plan line on the target date itself, so it reaches the target.
+  if (mondayOf(new Date(`${plan.target_date}T00:00:00Z`)) !== plan.target_date) {
+    points.push({ week: weekLabel(plan.target_date), actual: null, plan: plan.target_paid });
   }
   return (
     <section aria-label="Plan against actual" className="border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>

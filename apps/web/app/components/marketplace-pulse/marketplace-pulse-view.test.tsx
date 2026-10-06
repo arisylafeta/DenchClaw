@@ -14,7 +14,7 @@ const monday = (weeksAgo: number) => {
 };
 
 const PLAN: Plan = {
-  target_paid: 9, target_date: "2099-01-05", start: { date: "2026-10-06", paid: 2 },
+  target_paid: 9, target_date: "2028-01-05", start: { date: "2026-10-06", paid: 2 },
   levers: [
     { id: "answer", name: "Answer every buyer within a day", owner: "Alex", status: "Done", steps: { deal: 0.45 } },
     { id: "channels", name: "Channels pointed at listings", owner: "Ari", status: "Planned", steps: { visitors: 690, started: 0.1 } },
@@ -278,18 +278,19 @@ describe("MarketplacePulseView", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "Plan" }));
 
     const head = screen.getByRole("region", { name: "Plan" });
-    expect(head).toHaveTextContent("Target: 9.0 paid deals a month by 5 Jan 2099");
+    expect(head).toHaveTextContent("Target: 9.0 paid deals a month by 5 Jan 2028");
     expect(head).toHaveTextContent("Plan saved 6 Oct 2026 by Alex");
-    expect(head).toHaveTextContent(/On track|Slightly behind|Off track/);
+    // Two full weeks only, so no rolling 4-week figure yet.
+    expect(head).toHaveTextContent("Not enough weeks yet· needs 4 full weeks of paid deals in a row");
     const model = screen.getByRole("region", { name: "Growth model" });
-    // Today's deal rate is the planned 45%: no week has deals and sends together, so the first fix fills it in.
-    expect(within(model).getByRole("listitem", { name: "Deal agreed" })).toHaveTextContent("Plan45%");
+    // 2 deals from 5 sends over the two full weeks; the fix aims for 45%.
+    expect(within(model).getByRole("listitem", { name: "Deal agreed" })).toHaveTextContent("Today40%Plan45%Today measured");
     expect(within(model).getByRole("listitem", { name: "Deal agreed" })).toHaveTextContent("Fix: Answer every buyer within a day (Alex)");
     expect(within(model).getByRole("listitem", { name: "Visitors" })).toHaveTextContent("Plan690");
-    expect(screen.getByRole("region", { name: "What each fix is worth" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "What each fix is worth" })).toHaveTextContent("A fix raises its steps to their targets");
     const channels = screen.getByRole("region", { name: "Channel plan" });
-    // One week with 1 send is about 4 a month.
-    expect(channels).toHaveTextContent("Organic search4 / 6");
+    // Channel sends use the model's two weeks: 1 send in 2 weeks is about 2 a month.
+    expect(channels).toHaveTextContent("Organic search2 / 6");
     expect(channels).toHaveTextContent("They are more than 20% apart");
     expect(channels).toHaveTextContent(/Channel goals add up to 6 sends a month; the model needs \d+/);
     expect(screen.getByRole("region", { name: "Plan against actual" })).toBeInTheDocument();

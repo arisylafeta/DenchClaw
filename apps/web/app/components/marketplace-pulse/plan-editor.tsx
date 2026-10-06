@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { CHANNELS } from "@/lib/marketplace-pulse";
 import {
-  LEVER_STATUSES, STEPS, paidPerMonth, parsePlan, sendsPerMonth, waterfall,
+  LEVER_STATUSES, STEPS, baseline, paidPerMonth, parsePlan, sendsPerMonth, waterfall,
   type Lever, type LeverStatus, type Plan, type Rates, type StepKey,
 } from "@/lib/marketplace-pulse-plan";
 import { ErrorText, FormField, Modal, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 
-type DraftLever = { id: string; name: string; owner: string; status: LeverStatus; steps: Record<StepKey, string> };
+type DraftLever = { id: string; name: string; owner: string; status: LeverStatus; steps: Record<StepKey, string>; original: Lever["steps"] };
 type DraftChannel = { goal: string; owner: string; action: string };
 
 const blankSteps = () => Object.fromEntries(STEPS.map((s) => [s.key, ""])) as Record<StepKey, string>;
@@ -16,15 +16,23 @@ const blankSteps = () => Object.fromEntries(STEPS.map((s) => [s.key, ""])) as Re
 const toText = (key: StepKey, v: number | undefined) => (v === undefined ? "" : key === "visitors" ? String(Math.round(v)) : String(Math.round(v * 1000) / 10));
 const fromText = (key: StepKey, text: string) => (text.trim() === "" ? undefined : key === "visitors" ? Number(text) : Number(text) / 100);
 
-type Props = { plan: Plan; start: Rates; onClose: () => void; onSave: (plan: Plan) => Promise<void> };
+type Props = {
+  plan: Plan;
+  /** Today's measured rates; the preview fills gaps from the draft's own fixes, as the tab will. */
+  measured: Partial<Rates>;
+  /** Paid deals a month over the last 4 weeks, for restarting the plan path; null without enough weeks. */
+  actualNow: number | null;
+  onClose: () => void;
+  onSave: (plan: Plan) => Promise<void>;
+};
 
 /** Edits the plan: target, fixes in order with the step rates each one should reach, and channel goals. */
-export function PlanEditor({ plan, start, onClose, onSave }: Props) {
+export function PlanEditor({ plan, measured, actualNow, onClose, onSave }: Props) {
   const [target, setTarget] = useState(String(plan.target_paid));
   const [date, setDate] = useState(plan.target_date);
   const [restart, setRestart] = useState(false);
   const [levers, setLevers] = useState<DraftLever[]>(plan.levers.map((l) => ({
-    ...l, steps: { ...blankSteps(), ...Object.fromEntries(Object.entries(l.steps).map(([k, v]) => [k, toText(k as StepKey, v)])) },
+    ...l, original: l.steps, steps: { ...blankSteps(), ...Object.fromEntries(Object.entries(l.steps).map(([k, v]) => [k, toText(k as StepKey, v)])) },
   })));
   const [channels, setChannels] = useState<Record<string, DraftChannel>>(Object.fromEntries(CHANNELS.map((c) => {
     const goal = plan.channels.find((x) => x.channel === c);
@@ -33,17 +41,23 @@ export function PlanEditor({ plan, start, onClose, onSave }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const draftLevers: Lever[] = levers.map((l) => ({
+    id: l.id, name: l.name, owner: l.owner, status: l.status,
+    steps: Object.fromEntries(STEPS.flatMap(({ key }) => {
+      // An untouched value keeps its exact saved number rather than the rounded one shown.
+      if (l.original[key] !== undefined && l.steps[key] === toText(key, l.original[key])) return [[key, l.original[key]]];
+      const v = fromText(key, l.steps[key]);
+      return v === undefined ? [] : [[key, v]];
+    })) as Lever["steps"],
+  }));
+  const start = baseline(measured, draftLevers).rates;
+  // Restarting the path starts it from real paid deals, which is what it is compared with.
+  const restartFrom = actualNow ?? paidPerMonth(start);
   const draft: Plan = {
-    target_paid: Number(target),
+    target_paid: target.trim() === "" ? Number.NaN : Number(target),
     target_date: date,
-    start: restart ? { date: new Date().toISOString().slice(0, 10), paid: Math.round(paidPerMonth(start) * 10) / 10 } : plan.start,
-    levers: levers.map((l) => ({
-      id: l.id, name: l.name, owner: l.owner, status: l.status,
-      steps: Object.fromEntries(STEPS.flatMap(({ key }) => {
-        const v = fromText(key, l.steps[key]);
-        return v === undefined ? [] : [[key, v]];
-      })) as Lever["steps"],
-    })),
+    start: restart ? { date: new Date().toISOString().slice(0, 10), paid: Math.round(restartFrom * 10) / 10 } : plan.start,
+    levers: draftLevers,
     channels: CHANNELS.filter((c) => channels[c].goal.trim() !== "" || channels[c].action.trim() !== "")
       .map((c) => ({ channel: c, goal: Number(channels[c].goal || 0), owner: channels[c].owner, action: channels[c].action })),
   };
@@ -93,7 +107,7 @@ export function PlanEditor({ plan, start, onClose, onSave }: Props) {
       </div>
       <label className="flex items-center gap-2 text-xs" style={{ color: "var(--bt-text-2)" }}>
         <input type="checkbox" checked={restart} onChange={(e) => setRestart(e.target.checked)} />
-        Start the plan path again from today ({Math.round(paidPerMonth(start) * 10) / 10} a month)
+        Start the plan path again from today ({Math.round(restartFrom * 10) / 10} a month{actualNow === null ? ", from the model: not enough weeks of paid deals yet" : ""})
       </label>
 
       <fieldset className="flex flex-col gap-2">
@@ -125,7 +139,7 @@ export function PlanEditor({ plan, start, onClose, onSave }: Props) {
           </div>
         ))}
         <button type="button" className={`${buttonClass} self-start`} style={buttonStyle}
-          onClick={() => setLevers((all) => [...all, { id: `fix-${Date.now()}`, name: "", owner: "", status: "Planned", steps: blankSteps() }])}>
+          onClick={() => setLevers((all) => [...all, { id: `fix-${Date.now()}`, name: "", owner: "", status: "Planned", steps: blankSteps(), original: {} }])}>
           Add a fix
         </button>
       </fieldset>

@@ -116,6 +116,23 @@ class Replies(unittest.TestCase):
         self.assertEqual(out[WEEK]["reply_intents"], 0)
 
 
+class OfferReplies(unittest.TestCase):
+    def test_an_offer_answered_only_in_its_chat_counts_and_a_withdrawn_one_is_left_out(self):
+        rows = data(
+            chats=[{"id": "c9", "created_at": "2026-09-22T09:00:00Z", "conversation_type": "purchase", "supplier_account_id": "seller", "counterparty_account_id": "acc-buyer"}],
+            # The chat has only the seller's reply: no message typed by the buyer.
+            messages=[{"conversation_id": "c9", "created_at": "2026-09-22T11:00:00Z", "sender_membership_id": "ms", "is_system_seeded": False}],
+            sender_account={"ms": "seller"},
+            offers=[{"id": "o1", "created_at": "2026-09-22T09:00:00Z", "updated_at": "2026-09-29T09:00:00Z", "status": "expired", "expires_at": None,
+                     "buyer_account_id": "acc-buyer", "listing_id": "l1", "conversation_id": "c9"},
+                    {"id": "o2", "created_at": "2026-09-23T09:00:00Z", "updated_at": "2026-09-23T10:00:00Z", "status": "withdrawn", "expires_at": None,
+                     "buyer_account_id": "acc-buyer", "listing_id": "l1", "conversation_id": None}],
+            listings=[{"id": "l1", "listing_status": "published", "created_at": "2026-09-01T00:00:00Z", "supplier_account_id": "seller"}],
+        )
+        out = pulse.platform_metrics(rows, [PREVIOUS, WEEK], dt.date(2026, 10, 1), EXCLUSIONS, now=dt.datetime(2026, 10, 1, 12, tzinfo=dt.timezone.utc))
+        self.assertEqual((out[PREVIOUS]["reply_intents"], out[PREVIOUS]["reply_24h"], out[PREVIOUS]["reply_none"]), (1, 1, 0))
+
+
 class Collect(unittest.TestCase):
     def test_a_failed_drop_off_read_keeps_the_funnel_numbers(self):
         def fake_posthog(start, end, template=None, metrics=None, **_):
