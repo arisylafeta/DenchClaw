@@ -1,4 +1,5 @@
-import { queryPg } from "../postgres";
+import { randomUUID } from "node:crypto";
+import { queryPg, withPgTransaction } from "../postgres";
 import { isMetricKey, type MetricKey, type PulseWeek } from "../marketplace-pulse";
 
 /** The last `count` weeks with numbers, oldest first, and when they were last collected. */
@@ -43,4 +44,46 @@ export async function setTarget(metric: MetricKey, value: number | null, userId:
      on conflict (metric) do update set weekly_target = excluded.weekly_target, updated_at = now(), updated_by = excluded.updated_by`,
     [metric, value, userId],
   );
+}
+
+/**
+ * Puts a marketplace buyer in the CRM: finds them by email or adds them, tags them
+ * marketplace-buyer, and subscribes them to Supply update unless they opted out.
+ */
+export async function addMarketplaceBuyer(email: string, name: string): Promise<{ person_id: string; subscribed: boolean }> {
+  return withPgTransaction(async (tx) => {
+    const found = await tx.query<{ id: string; opted_out: boolean }>(
+      "select id, coalesce(email_opted_out, false) as opted_out from crm_people where lower(email) = lower($1) order by created_at limit 1",
+      [email],
+    );
+    let id = found.rows[0]?.id;
+    if (!id) {
+      id = randomUUID();
+      await tx.query("insert into crm_people (id, email, full_name, tags) values ($1, $2, $3, array['marketplace-buyer'])", [id, email.toLowerCase(), name]);
+    } else {
+      await tx.query(
+        `update crm_people set tags = array(select distinct unnest(coalesce(tags, '{}') || array['marketplace-buyer'])), updated_at = now()
+          where id = $1 and not (coalesce(tags, '{}') @> array['marketplace-buyer'])`,
+        [id],
+      );
+    }
+    if (!found.rows[0]?.opted_out) {
+      // An existing Opted out row stays as it is.
+      await tx.query(
+        `insert into crm_subscriptions (person_id, list, status, since, how) values ($1, 'Supply update', 'Subscribed', current_date, 'Marketplace buyer')
+         on conflict (person_id, list) do nothing`,
+        [id],
+      );
+    }
+    const sub = await tx.query<{ status: string }>("select status from crm_subscriptions where person_id = $1 and list = 'Supply update'", [id]);
+    const subscribed = sub.rows[0]?.status === "Subscribed";
+    if (subscribed) {
+      await tx.query(
+        `update crm_people set tags = array(select distinct unnest(coalesce(tags, '{}') || array['Supply Update'])), updated_at = now()
+          where id = $1 and not (coalesce(tags, '{}') @> array['Supply Update'])`,
+        [id],
+      );
+    }
+    return { person_id: id, subscribed };
+  });
 }

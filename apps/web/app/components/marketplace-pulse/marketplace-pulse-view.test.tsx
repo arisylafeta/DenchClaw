@@ -22,15 +22,20 @@ const DATA: PulseData = {
   collected_at: "2026-10-06T08:40:00Z",
   follow_ups: [
     {
-      key: "acc-2", name: "Waiting Buyer", email: "w@example.org", person_id: null, last_contact: null, contacted_since: false,
-      latest: { kind: "deal", text: "Deal cancelled at payment pending EUR 4,490", listing_title: null, listing_url: null, at: "2026-09-30T10:00:00Z" }, more: 2,
+      key: "acc-2", name: "Waiting Buyer", email: "w@example.org", person_id: null, first_name: null, subscribed: false, last_contact: null, contacted_since: false,
+      latest: { kind: "deal", text: "Deal cancelled at payment pending EUR 4,490", listing_title: null, listing_url: null, at: "2026-09-30T10:00:00Z" }, more: 2, similar: [],
     },
     {
-      key: "acc-1", name: "Answered Buyer", email: "a@example.org", person_id: "p1", last_contact: "2026-10-03T10:00:00Z", contacted_since: true,
+      key: "acc-1", name: "Answered Buyer", email: "a@example.org", person_id: "p1", first_name: "Sam", subscribed: false, last_contact: "2026-10-03T10:00:00Z", contacted_since: true,
       latest: { kind: "offer", text: "Offer expired GBP 900", listing_title: "Kia packs", listing_url: "https://rebattery.io/marketplace/kia", at: "2026-10-01T10:00:00Z" }, more: 0,
+      similar: [{ title: "Kia packs B", url: "https://rebattery.io/marketplace/kia-b" }],
     },
   ],
+  waiting: [
+    { kind: "offer", text: "Offer GBP 900 × 2", buyer: "Offer Buyer", seller: "Seller Ltd", listing_title: "Kia packs", listing_url: "https://rebattery.io/marketplace/kia", at: "2026-10-05T10:00:00Z", expires_at: "2099-10-12T10:00:00Z" },
+  ],
   follow_up_error: null,
+  sender: "Alex",
 };
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
@@ -41,6 +46,8 @@ function mockFetch(calls: Call[]) {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     calls.push({ url, method, body });
     if (method === "PUT") return new Response(JSON.stringify(body));
+    if (url === "/api/marketplace-pulse/email-draft") return new Response(JSON.stringify({ url: "https://mail.google.com/x" }), { status: 201 });
+    if (url === "/api/marketplace-pulse/buyers") return new Response(JSON.stringify({ person_id: "p9", subscribed: true }), { status: 201 });
     return new Response(JSON.stringify(DATA));
   });
 }
@@ -102,5 +109,35 @@ describe("MarketplacePulseView", () => {
       url: "/api/marketplace-pulse/targets", body: { metric: "viewed_listing", weekly_target: 90 },
     }));
     expect(await within(scorecard).findByRole("button", { name: /^Target 90/ })).toBeInTheDocument();
+  });
+
+  it("shows offers waiting on us, drafts an email with similar listings, and adds a buyer to the CRM", async () => {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", mockFetch(calls));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+
+    const waiting = await screen.findByRole("region", { name: "Waiting on us" });
+    expect(waiting).toHaveTextContent("Offer Buyer");
+    expect(waiting).toHaveTextContent("seller Seller Ltd");
+    expect(waiting).toHaveTextContent(/Expires in \d+ days/);
+
+    const followUp = screen.getByRole("region", { name: "Follow up" });
+    const rows = within(followUp).getAllByRole("row").slice(1);
+    await userEvent.click(within(rows[1]).getByRole("button", { name: "Draft email" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create Gmail draft" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/marketplace-pulse/email-draft")).toBeDefined());
+    const draft = calls.find((c) => c.url === "/api/marketplace-pulse/email-draft")!.body!;
+    expect(draft).toMatchObject({ to: "a@example.org", subject: "Kia packs" });
+    expect(draft.body).toBe([
+      "Hi Sam,", "", "I saw your offer on the Kia packs on ReBattery didn't get an answer in time.", "https://rebattery.io/marketplace/kia",
+      "", "We also have this one, in case it fits:", "Kia packs B - https://rebattery.io/marketplace/kia-b",
+      "", "Is it still of interest?", "", "Alex",
+    ].join("\n"));
+    expect(await screen.findByText("Draft ready in Gmail")).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
+
+    await userEvent.click(within(rows[0]).getByRole("button", { name: "Add to CRM" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/marketplace-pulse/buyers")?.body).toEqual({ email: "w@example.org", name: "Waiting Buyer" }));
+    expect(await within(rows[0]).findByText("On supply updates")).toBeInTheDocument();
   });
 });

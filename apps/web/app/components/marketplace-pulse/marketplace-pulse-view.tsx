@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   FUNNEL, METRICS, OTHER_METRICS, SCORECARD, change, formatMetric, funnel, mondayOf, totals, weekLabel,
-  type FollowUp, type MetricKey, type PulseData, type PulseWeek,
+  type MetricKey, type PulseData, type PulseWeek,
 } from "@/lib/marketplace-pulse";
+import { FollowUps, WaitingOnUs } from "./follow-ups";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 
 type Range = "last" | "current";
@@ -142,7 +143,12 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
           </section>
         )}
 
-        {data && <FollowUps list={data.follow_ups} error={data.follow_up_error} onOpenPerson={onOpenPerson} />}
+        {data && !!data.waiting.length && <WaitingOnUs items={data.waiting} />}
+
+        {data && (
+          <FollowUps list={data.follow_ups} error={data.follow_up_error} sender={data.sender} onOpenPerson={onOpenPerson}
+            onChange={(next) => setData((current) => current && { ...current, follow_ups: current.follow_ups.map((f) => (f.key === next.key ? next : f)) })} />
+        )}
 
         {selected && <History weeks={history} targets={data?.targets ?? {}} />}
       </main>
@@ -212,63 +218,6 @@ function ScoreCell({ metric, weeks, value, previous, target, showProgress, onSav
         </button>
       )}
     </div>
-  );
-}
-
-function FollowUps({ list, error, onOpenPerson }: { list: FollowUp[]; error: string | null; onOpenPerson: (id: string) => void }) {
-  const waiting = list.filter((f) => !f.contacted_since).length;
-  return (
-    <section aria-label="Follow up" className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-      <div className="flex items-baseline gap-3 border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
-        <h2 className="text-[15px] font-semibold">Follow up</h2>
-        <span className="text-xs" style={{ color: "var(--bt-muted)" }}>
-          Buyers who showed intent in the last 30 days without a paid deal · {waiting} not contacted since
-        </span>
-      </div>
-      {error && <p className="px-4 py-3 text-[13px]" style={{ color: "var(--bt-amber)" }}>{error}</p>}
-      {!error && !list.length && <p className="px-4 py-3 text-[13px]">No buyer activity in the last 30 days.</p>}
-      {!!list.length && (
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="text-left text-xs" style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)" }}>
-              <th className="px-4 py-2 font-medium">Buyer</th>
-              <th className="px-4 py-2 font-medium">Latest</th>
-              <th className="px-4 py-2 font-medium">When</th>
-              <th className="px-4 py-2 font-medium">Last contact</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((f) => (
-              <tr key={f.key} className="border-t align-top" style={{ borderColor: "var(--bt-divider)" }}>
-                <td className="px-4 py-2">
-                  {f.person_id ? (
-                    <button type="button" onClick={() => onOpenPerson(f.person_id!)} className="font-medium hover:underline" style={{ color: "var(--bt-link)" }}>{f.name}</button>
-                  ) : <span className="font-medium">{f.name}</span>}
-                  {f.email && <div className="text-xs" style={{ color: "var(--bt-muted)" }}>{f.email}</div>}
-                </td>
-                <td className="px-4 py-2">
-                  {f.latest.text}
-                  {f.latest.listing_title && (
-                    <div className="text-xs">
-                      {f.latest.listing_url
-                        ? <a href={f.latest.listing_url} target="_blank" rel="noreferrer" style={{ color: "var(--bt-link)" }}>{f.latest.listing_title}</a>
-                        : f.latest.listing_title}
-                    </div>
-                  )}
-                  {f.more > 0 && <div className="text-xs" style={{ color: "var(--bt-muted)" }}>+{f.more} more in 30 days</div>}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2">{dateLabel(f.latest.at)}</td>
-                <td className="whitespace-nowrap px-4 py-2">
-                  {f.contacted_since
-                    ? <span style={{ color: "var(--bt-green)" }}>{dateLabel(f.last_contact!)}</span>
-                    : <span style={{ color: "var(--bt-amber)" }}>{f.last_contact ? `${dateLabel(f.last_contact)}, before this` : f.person_id ? "Never" : "Not in CRM"}</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
   );
 }
 
