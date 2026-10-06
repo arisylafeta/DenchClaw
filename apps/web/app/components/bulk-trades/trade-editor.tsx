@@ -16,6 +16,7 @@ const EMPTY: Draft = {
   title: "", trade_stage: "Needs info", trade_kind: "", fact_line: "", next_step: "", next_step_due: "",
   waiting_on: "us", owner_user_id: "", value: "", last_touched: "", clear_by: "", ship_by: "",
   transport_class: "", tfs_needed: "unknown", listing_id: "", next_step_contact_id: "", next_step_buyer_id: "",
+  hold_until: "", hold_reason: "",
 };
 
 function draftFrom(trade: BulkTrade | null): Draft {
@@ -110,6 +111,10 @@ export function TradeEditor({ trade, owners, today, onClose, onSave, onOpenEvide
             <div className="grid grid-cols-2 gap-3">
               <Field label="Stage">{select("trade_stage", TRADE_STAGES)}</Field>
               <Field label="Kind">{select("trade_kind", ["", ...TRADE_KINDS], { "": "Not set" })}</Field>
+              {draft.trade_stage === "On hold" && (<>
+                <Field label="Resume on">{input("hold_until", "date")}</Field>
+                <Field label="Why it waits">{input("hold_reason")}</Field>
+              </>)}
               <Field label="Value">{input("value")}</Field>
               <Field label="Marketplace listing ID">{input("listing_id")}</Field>
               <Field label="Owner">

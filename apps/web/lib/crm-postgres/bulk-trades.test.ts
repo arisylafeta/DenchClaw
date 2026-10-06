@@ -31,6 +31,31 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
     );
   }
 
+  it("works out the last touch from changes and buyers, and counts buyers and bids", async () => {
+    const trade = await db.createBulkTrade({ title: "Synthetic touch trade" }, userId);
+    const find = async () => (await db.listBulkTrades()).trades.find((t) => t.id === trade.id)!;
+    const [{ today }] = await pg.queryPg<{ today: string }>("select to_char(now()::date, 'YYYY-MM-DD') as today");
+    expect(await find()).toMatchObject({ last_touched: today, buyer_count: 0 }); // the creation is a touch
+    await pg.queryPg(`insert into crm_bulk_trade_buyers (id, lot_id, name, last_touch_on) values ('btb_touch_' || gen_random_uuid(), $1, 'B', '2099-03-10')`, [trade.id]);
+    expect(await find()).toMatchObject({ last_touched: "2099-03-10", buyer_count: 1, bid_count: 0 });
+  });
+
+  it("puts a trade on hold remembering its stage, and clears the hold on resume", async () => {
+    const trade = await db.createBulkTrade({ title: "Synthetic BESS portfolio", trade_stage: "With buyers" }, userId);
+    const held = await db.updateBulkTrade(trade.id,
+      { trade_stage: "On hold", hold_until: "2027-03-01", hold_reason: "Batteries stay on site until removal" }, userId);
+    expect(held).toMatchObject({ trade_stage: "On hold", hold_until: "2027-03-01", hold_from_stage: "With buyers" });
+
+    const changed = await db.updateBulkTrade(trade.id, { hold_until: "2027-04-01" }, userId);
+    expect(changed).toMatchObject({ hold_until: "2027-04-01", hold_from_stage: "With buyers" });
+
+    const resumed = await db.updateBulkTrade(trade.id, { trade_stage: "With buyers" }, userId);
+    expect(resumed).toMatchObject({ trade_stage: "With buyers", hold_until: null, hold_reason: null, hold_from_stage: null });
+
+    await expect(db.updateBulkTrade(trade.id, { hold_until: "2027-05-01" }, userId))
+      .rejects.toMatchObject({ constraint: "crm_bulk_trade_lots_hold_check" });
+  });
+
   it("creates a trade and logs who created it", async () => {
     const trade = await db.createBulkTrade(
       { title: "Synthetic eBS37", trade_stage: "With buyers", next_step: "Call supplier", next_step_due: "2026-09-28" },

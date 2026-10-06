@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { BulkTrade, TradeOwner, TradePatch } from "@/lib/bulk-trades";
+import { HOLD_STAGE, holdLabel, type BulkTrade, type TradeOwner, type TradePatch } from "@/lib/bulk-trades";
 import { shortDate, type Buyer, type Contact, type HistoryStatus, type TradeDetail, type TradeField, type TradeFile } from "@/lib/bulk-trade-details";
 import { TradeData } from "./trade-data";
+import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { TradeOverview } from "./trade-overview";
 import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
@@ -30,6 +31,8 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
   const [detail, setDetail] = useState<TradeDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const [holdError, setHoldError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,8 +92,33 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           </span>
           <span className="flex-1" />
           <HistoryButton tradeId={trade.id} history={detail.history ?? null} onRefresh={load} />
+          {trade.trade_stage !== HOLD_STAGE && !["Done", "Lost"].includes(trade.trade_stage) && (
+            <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setHolding(true)}>Put on hold</button>
+          )}
           <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setEditing(true)}>Edit trade</button>
         </div>
+        {trade.trade_stage === HOLD_STAGE && (
+          <div role="status" className="flex flex-wrap items-center gap-3 rounded-none border px-4 py-2.5"
+            style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-border)" }}>
+            <span className="rounded-none border px-2 py-0.5 text-xs font-medium"
+              style={trade.hold_until && trade.hold_until <= today
+                ? { background: "var(--bt-red-bg)", color: "var(--bt-red)", borderColor: "var(--bt-red-border)" }
+                : { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" }}>
+              {holdLabel(trade, today)}
+            </span>
+            <span className="flex-1 text-sm">{trade.hold_reason}</span>
+            <button type="button" className={`${buttonClass} h-8`} style={buttonStyle} onClick={() => setHolding(true)}>Change</button>
+            <button type="button" className={`${buttonClass} h-8`} style={buttonStyle}
+              onClick={() => {
+                setHoldError(null);
+                patchTrade({ trade_stage: trade.hold_from_stage ?? "With buyers" })
+                  .catch((err) => setHoldError(err instanceof Error ? err.message : "Could not resume."));
+              }}>
+              Resume ({trade.hold_from_stage ?? "With buyers"})
+            </button>
+            <ErrorText error={holdError} />
+          </div>
+        )}
         {trade.fact_line && <p className="text-sm" style={{ color: "var(--bt-text-2)" }}>{trade.fact_line}</p>}
         <div role="tablist" aria-label="Trade sections" className="flex gap-1">
           {tabButton("overview", "Overview")}
@@ -122,6 +150,13 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         )}
       </main>
 
+      {holding && (
+        <HoldDialog trade={trade} today={today} onClose={() => setHolding(false)}
+          onSave={async (hold) => {
+            await patchTrade(trade.trade_stage === HOLD_STAGE ? hold : { trade_stage: HOLD_STAGE, ...hold });
+            setHolding(false);
+          }} />
+      )}
       {editing && (
         <TradeEditor
           trade={trade}

@@ -18,6 +18,8 @@ const STRENGTH = {
   partial: { label: "Partial fit", style: { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" } },
 } as const;
 
+const INTRODUCE_SHOWN = 10;
+
 const GROUPS = [
   { key: "offer", label: "Offer now", hint: "Buyers we deal with, or who told us what they want" },
   { key: "introduce", label: "Introduce", hint: "New buyers matched on our estimate: a reason to introduce ReBattery" },
@@ -29,6 +31,9 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // "Introduce" can run to dozens of research matches: folded until asked for, then the first INTRODUCE_SHOWN.
+  const [introduceOpen, setIntroduceOpen] = useState(false);
+  const [introduceAll, setIntroduceAll] = useState(false);
   if (!suggested.length) return null;
 
   async function act(demandId: string, method: "POST" | "DELETE") {
@@ -60,16 +65,24 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
       </header>
       {error && <div className="px-5 pt-2"><ErrorText error={error} /></div>}
       {GROUPS.map((group) => {
-        const items = suggested.filter((item) => item.group === group.key);
-        if (!items.length) return null;
+        const all = suggested.filter((item) => item.group === group.key);
+        if (!all.length) return null;
+        const folded = group.key === "introduce" && !introduceOpen;
+        const items = group.key === "introduce" && !introduceAll ? all.slice(0, INTRODUCE_SHOWN) : all;
         return (
           <section key={group.key} aria-label={group.label}>
             <h3 className="flex flex-wrap items-baseline gap-2 border-b px-5 py-2 text-[13px] font-semibold"
               style={{ borderColor: "var(--bt-divider)", background: "var(--bt-divider)" }}>
-              {group.label} ({items.length})
+              {group.label} ({all.length})
               <span className="font-normal" style={{ color: "var(--bt-muted)" }}>{group.hint}</span>
+              {group.key === "introduce" && (
+                <button type="button" aria-expanded={!folded} onClick={() => setIntroduceOpen(!introduceOpen)}
+                  className="ml-auto font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
+                  {folded ? "Show" : "Hide"}
+                </button>
+              )}
             </h3>
-            <ul>
+            {!folded && <ul>
               {items.map((item) => (
                 <li key={item.demand_id} className="grid grid-cols-1 items-center gap-3 border-b px-5 py-3 last:border-b-0 md:grid-cols-[minmax(160px,1fr)_minmax(200px,1.3fr)_minmax(220px,1.8fr)_auto_auto]"
                   style={{ borderColor: "var(--bt-divider)" }}>
@@ -110,7 +123,14 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
                   </button>
                 </li>
               ))}
-            </ul>
+            </ul>}
+            {!folded && group.key === "introduce" && all.length > INTRODUCE_SHOWN && (
+              <button type="button" onClick={() => setIntroduceAll(!introduceAll)}
+                className="w-full border-t px-5 py-2 text-left text-[13px] font-medium hover:underline"
+                style={{ borderColor: "var(--bt-divider)", color: "var(--bt-link)" }}>
+                {introduceAll ? `Show the first ${INTRODUCE_SHOWN}` : `Show all ${all.length}`}
+              </button>
+            )}
           </section>
         );
       })}

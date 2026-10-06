@@ -1,16 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction } from "../postgres";
-import { todayInLondon, type BulkTrade, type TradeOwner, type TradePatch } from "../bulk-trades";
+import { LIVE_STAGES, todayInLondon, type BulkTrade, type TradeOwner, type TradePatch } from "../bulk-trades";
 
 const TRADE_COLUMNS = `
   lot.id, lot.title, lot.trade_stage, lot.trade_kind, lot.fact_line, lot.next_step,
   to_char(lot.next_step_due, 'YYYY-MM-DD') as next_step_due, lot.waiting_on,
   to_char(lot.waiting_since, 'YYYY-MM-DD') as waiting_since, lot.owner_user_id,
   owner.display_name as owner_name, lot.value,
-  to_char(lot.last_touched, 'YYYY-MM-DD') as last_touched,
+  -- Last touch: the latest of a date set by hand, any logged change (edits, emails the inbox check applied,
+  -- auction activity) and any buyer's last touch.
+  to_char(greatest(lot.last_touched,
+    (select max(event.occurred_at)::date from crm_bulk_trade_events event where event.lot_id = lot.id),
+    (select max(buyer.last_touch_on) from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id)), 'YYYY-MM-DD') as last_touched,
+  (select count(*)::int from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id) as buyer_count,
+  (select count(*)::int from crm_bulk_trade_bids bid where bid.lot_id = lot.id) as bid_count,
   to_char(lot.clear_by, 'YYYY-MM-DD') as clear_by,
   to_char(lot.ship_by, 'YYYY-MM-DD') as ship_by,
   lot.transport_class, lot.tfs_needed, lot.listing_id, lot.auction_slug, lot.auction_status, lot.auction_closes_at,
+  to_char(lot.hold_until, 'YYYY-MM-DD') as hold_until, lot.hold_reason, lot.hold_from_stage,
   lot.next_step_contact_id, lot.next_step_buyer_id, lot.updated_at,
   (select count(*)::int from crm_bulk_trade_proposals proposal
     where proposal.status = 'new' and (proposal.lot_id = lot.id
@@ -87,6 +94,12 @@ export async function updateBulkTrade(
       if (!value) continue;
       const { rows } = await client.query(`select 1 from ${table} where id = $1 and lot_id = $2`, [value, id]);
       if (!rows.length) throw Object.assign(new Error("That person is not on this trade."), { code: "23503" });
+    }
+    // Going on hold remembers the stage to resume to; leaving the hold clears it.
+    if (patch.trade_stage === "On hold" && before.trade_stage !== "On hold") {
+      patch = { ...patch, hold_from_stage: (LIVE_STAGES as readonly string[]).includes(before.trade_stage) ? before.trade_stage : null } as TradePatch;
+    } else if (patch.trade_stage && patch.trade_stage !== "On hold" && before.trade_stage === "On hold") {
+      patch = { ...patch, hold_until: null, hold_reason: null, hold_from_stage: null } as TradePatch;
     }
     // Picking one side clears the other, so a step is never for two people.
     if (patch.next_step_contact_id) patch = { ...patch, next_step_buyer_id: null };

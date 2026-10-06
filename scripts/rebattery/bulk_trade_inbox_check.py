@@ -66,6 +66,9 @@ HERMES_ENV = Path("/root/.hermes/.env")
 KEYRING_FILE = Path("/root/.hermes/workspace/.secrets/gog-keyring-password")
 
 LIVE_STAGES = ("Needs info", "With buyers", "Closing")
+# On hold is out of the overdue lists, but its email is still read and its buyers still matched.
+WATCHED_STAGES = LIVE_STAGES + ("On hold",)
+HOLD_NOTICE_DAYS = 7  # the 08:05 summary names a hold this long before it ends
 BUYER_STATUSES = [
     "To contact", "Teaser sent", "No reply", "NDA, specs sent", "Bid in", "LOI or deposit", "Won",
     "Declined: price", "Declined: specs", "Declined: logistics", "Declined: timing",
@@ -126,14 +129,14 @@ def read_env_value(path, name):
 # ---------------------------------------------------------------------------
 
 def load_trades(cur, lot_ids=None):
-    """Live trades, or the given trades at any stage."""
+    """Live and on-hold trades, or the given trades at any stage."""
     cur.execute(
         """select id, title, trade_kind, trade_stage, fact_line, next_step,
                   to_char(next_step_due, 'YYYY-MM-DD') as next_step_due, waiting_on,
                   to_char(created_at, 'YYYY-MM-DD') as created_on
            from crm_bulk_trade_lots
            where (%s::text[] is null and trade_stage = any(%s)) or id = any(%s::text[])""",
-        (lot_ids, list(LIVE_STAGES), lot_ids or []),
+        (lot_ids, list(WATCHED_STAGES), lot_ids or []),
     )
     trades = {row["id"]: {**row, "emails": set(), "contact_emails": set(), "threads": set(), "buyers": [], "fields": {},
                           "files": set()}
@@ -1834,6 +1837,11 @@ def summary(conn):
                order by d.basis = 'agreed' desc, d.confirmed_on nulls first, d.buyer""", (today - dt.timedelta(days=STALE_DAYS),))
         reconfirm = cur.fetchall()
         unclassified = unclassified_companies(cur)
+        cur.execute(
+            """select title, hold_until, hold_reason from crm_bulk_trade_lots
+               where trade_stage = 'On hold' and hold_until <= %s order by hold_until, title""",
+            (today + dt.timedelta(days=HOLD_NOTICE_DAYS),))
+        holds = cur.fetchall()
         # What the inbox check did on its own from email since yesterday: buy-boxes added, and replies saying no.
         cur.execute(
             """select summary from crm_bulk_trade_proposals
@@ -1873,6 +1881,10 @@ def summary(conn):
         lines.append(f"- {row['title']}: {row['next_step'] or 'set a next step'} [{when}]{extra}")
     if not rows:
         lines.append("Nothing overdue or due today.")
+    for row in holds:
+        days = (row["hold_until"] - today).days
+        when = "hold ended today" if days == 0 else f"hold ended {-days}d ago" if days < 0 else f"hold ends in {days}d"
+        lines.append(f"- {row['title']}: {when}; resume or extend ({row['hold_reason']})")
     for row in offers:
         lines.append(f"- {row['title']}: {row['n']} new auction offer{'s' if row['n'] != 1 else ''} ({row['offers']})")
     for row in closing:

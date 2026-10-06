@@ -1,7 +1,9 @@
 // Bulk Trades v3: shared types, validation and list grouping. Safe for client and server.
 
-export const TRADE_STAGES = ["Needs info", "With buyers", "Closing", "Done", "Lost"] as const;
+export const TRADE_STAGES = ["Needs info", "With buyers", "Closing", "On hold", "Done", "Lost"] as const;
 export const LIVE_STAGES = ["Needs info", "With buyers", "Closing"] as const;
+/** Paused until a known date: out of the overdue lists, back in play when the hold ends. */
+export const HOLD_STAGE = "On hold" as const;
 export const TRADE_KINDS = ["packs", "cells", "systems", "recycling"] as const;
 export const WAITING_ON = ["us", "them"] as const;
 export const TFS_NEEDED = ["yes", "no", "unknown"] as const;
@@ -35,9 +37,15 @@ export type BulkTrade = {
   /** Who the next step is for: a trade contact or a trade buyer (at most one). */
   next_step_contact_id: string | null;
   next_step_buyer_id: string | null;
+  /** Set while On hold: when to pick it up again, why it waits, and the stage Resume returns to. */
+  hold_until: string | null;
+  hold_reason: string | null;
+  hold_from_stage: "Needs info" | "With buyers" | "Closing" | null;
   updated_at: string;
   /** Open inbox-check proposals for this trade. */
   new_count?: number;
+  buyer_count?: number;
+  bid_count?: number;
 };
 
 export type TradeOwner = { id: string; name: string };
@@ -46,10 +54,11 @@ export type TradePatch = Partial<Pick<BulkTrade,
   | "title" | "trade_stage" | "trade_kind" | "fact_line" | "next_step" | "next_step_due"
   | "waiting_on" | "owner_user_id" | "value" | "last_touched" | "clear_by" | "ship_by"
   | "transport_class" | "tfs_needed" | "listing_id" | "next_step_contact_id" | "next_step_buyer_id"
+  | "hold_until" | "hold_reason"
 >>;
 
-const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class", "listing_id"] as const;
-const DATE_FIELDS = ["next_step_due", "last_touched", "clear_by", "ship_by"] as const;
+const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class", "listing_id", "hold_reason"] as const;
+const DATE_FIELDS = ["next_step_due", "last_touched", "clear_by", "ship_by", "hold_until"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isValidDate(value: string): boolean {
@@ -106,6 +115,9 @@ export function parseTradePatch(body: unknown): { patch: TradePatch } | { error:
     }
   }
   if (patch.next_step_contact_id && patch.next_step_buyer_id) return { error: "A next step is for one person." };
+  if (patch.trade_stage === HOLD_STAGE && (!patch.hold_until || !patch.hold_reason)) {
+    return { error: "Putting a trade on hold needs a resume date and a reason." };
+  }
   return { patch: patch as TradePatch };
 }
 
@@ -125,6 +137,26 @@ export function dueText(
   if (!due) return { text: "No due date", tone: trade.next_step ? "amber" : "grey" };
   if (due === today) return { text: "Due today", tone: "amber" };
   return { text: daysBetween(today, due) === 1 ? "Due tomorrow" : `Due ${dayMonth(due)}`, tone: "grey" };
+}
+
+/** On-hold trades: holds that have ended (to pick up now) and the rest, each soonest first. */
+export function heldTrades(trades: BulkTrade[], today: string): { ended: BulkTrade[]; waiting: BulkTrade[] } {
+  const held = trades.filter((trade) => trade.trade_stage === HOLD_STAGE)
+    .sort((a, b) => String(a.hold_until ?? "9999").localeCompare(String(b.hold_until ?? "9999")) || a.title.localeCompare(b.title));
+  return {
+    ended: held.filter((trade) => trade.hold_until && trade.hold_until <= today),
+    waiting: held.filter((trade) => !trade.hold_until || trade.hold_until > today),
+  };
+}
+
+/** "Until 2 Mar 2027", "Hold ends today" or "Hold ended 3d ago". */
+export function holdLabel(trade: Pick<BulkTrade, "hold_until">, today: string): string {
+  const until = trade.hold_until;
+  if (!until) return "On hold";
+  if (until === today) return "Hold ends today";
+  if (until < today) return `Hold ended ${daysBetween(until, today)}d ago`;
+  const year = until.slice(0, 4) === today.slice(0, 4) ? "" : ` ${until.slice(0, 4)}`;
+  return `Until ${dayMonth(until)}${year}`;
 }
 
 /** Today's date in the UK, as YYYY-MM-DD. */
@@ -156,9 +188,9 @@ export function tradeGroup(trade: BulkTrade, today: string): TradeGroupName {
   return due === today ? "Due today" : "Later";
 }
 
-/** Live trades grouped in list order. Each group is sorted with the most pressing first. */
+/** Live trades grouped in list order (auctions still waiting for a bid are listed apart). Each group is sorted with the most pressing first. */
 export function groupTrades(trades: BulkTrade[], today: string) {
-  const live = trades.filter((trade) => (LIVE_STAGES as readonly string[]).includes(trade.trade_stage));
+  const live = trades.filter((trade) => (LIVE_STAGES as readonly string[]).includes(trade.trade_stage) && !isWaitingAuction(trade));
   const groups = new Map<TradeGroupName, BulkTrade[]>(TRADE_GROUPS.map((name) => [name, []]));
   for (const trade of live) groups.get(tradeGroup(trade, today))!.push(trade);
 
@@ -180,6 +212,22 @@ export function dueLabel(trade: BulkTrade, today: string): string {
   if (trade.waiting_on === "them") return trade.waiting_since ? `since ${dayMonth(trade.waiting_since)}` : "Waiting";
   if (!due) return trade.next_step ? "No date" : "None";
   return due === today ? "Today" : dayMonth(due);
+}
+
+/** Days without a touch before the list shows a trade as gone quiet. */
+export const QUIET_DAYS = 7;
+
+/** A passive auction trade: a published auction with no bids yet. It waits in its own folded group until an offer arrives. */
+export function isWaitingAuction(trade: BulkTrade): boolean {
+  return !!trade.auction_slug && trade.auction_status === "published" && !trade.bid_count
+    && (LIVE_STAGES as readonly string[]).includes(trade.trade_stage);
+}
+
+/** "closes 16 Oct" or "closed 8 Oct" for an auction trade. */
+export function auctionCloseLabel(trade: Pick<BulkTrade, "auction_closes_at">, today: string): string {
+  const day = trade.auction_closes_at?.slice(0, 10);
+  if (!day) return "Auction";
+  return `${day < today ? "closed" : "closes"} ${dayMonth(day)}`;
 }
 
 /** "Today", "5d" or "" when never touched. */

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import {
+  HOLD_STAGE,
   LIVE_STAGES,
   todayInLondon,
   type BulkTrade,
@@ -11,6 +12,7 @@ import {
   type TradeStage,
 } from "@/lib/bulk-trades";
 import { DemandPage } from "./demand-page";
+import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { TradePage } from "./trade-page";
 import { ProposalRow } from "./proposal-row";
@@ -45,6 +47,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [possible, setPossible] = useState<Proposal[]>([]);
   const [showPossible, setShowPossible] = useState(false);
   const [openTradeId, setOpenTradeId] = useState<string | null>(null);
+  const [holding, setHolding] = useState<BulkTrade | null>(null);
   const today = todayInLondon();
 
   useEffect(() => setMode(storedMode()), []);
@@ -80,13 +83,17 @@ export function BulkTradesView({ onOpenEntry }: Props) {
     setOpenTradeId(trade.id);
   }
 
-  async function move(trade: BulkTrade, stage: TradeStage) {
+  async function move(trade: BulkTrade, stage: TradeStage, hold?: { hold_until: string; hold_reason: string }) {
+    if (stage === HOLD_STAGE && !hold) {
+      setHolding(trade); // a hold needs a date and a reason first
+      return;
+    }
     setActionError(null);
-    replace({ ...trade, trade_stage: stage });
+    replace({ ...trade, trade_stage: stage, ...hold });
     try {
       const { trade: saved } = await request<{ trade: BulkTrade }>(`/api/bulk-trades/${encodeURIComponent(trade.id)}`, {
         method: "PATCH",
-        body: JSON.stringify({ trade_stage: stage }),
+        body: JSON.stringify({ trade_stage: stage, ...hold }),
       });
       replace(saved);
     } catch (err) {
@@ -192,6 +199,10 @@ export function BulkTradesView({ onOpenEntry }: Props) {
             : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
 
+      {holding && (
+        <HoldDialog trade={holding} today={today} onClose={() => setHolding(null)}
+          onSave={async (hold) => { const trade = holding; setHolding(null); await move(trade, HOLD_STAGE, hold); }} />
+      )}
       {creating && (
         <TradeEditor trade={null} owners={owners} today={today} onClose={() => setCreating(false)} onSave={create} />
       )}
