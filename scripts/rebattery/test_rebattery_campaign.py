@@ -61,7 +61,7 @@ class FakeCursor:
         elif "state='frozen'" in sql and "order by recipient_email limit" in sql:
             self.result = ROWS[:params[-1]]
         elif "state in ('sending','unknown')" in sql:
-            self.result = (0,)
+            self.result = {"uncertain": 0}
         elif "returning s.id" in sql:
             if self.state["send_state"] == "frozen":
                 self.state["send_state"] = "sending"

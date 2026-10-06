@@ -348,9 +348,9 @@ def launch(manifest, sha, max_recipients):
                             where campaign_id=%s and state='frozen'
                             order by recipient_email limit %s""", (manifest["id"], max_recipients))
             rows = [dict(row) for row in cur.fetchall()]
-            cur.execute("""select count(*) from crm_campaign_sends
+            cur.execute("""select count(*) as uncertain from crm_campaign_sends
                             where campaign_id=%s and state in ('sending','unknown')""", (manifest["id"],))
-            if cur.fetchone()[0]:
+            if cur.fetchone()["uncertain"]:
                 raise ValueError("Campaign has sending/unknown receipts; recover them before launch")
     if not rows:
         raise ValueError("No frozen recipients remain to send")
