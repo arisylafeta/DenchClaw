@@ -14,7 +14,7 @@ EXCLUSIONS = (re.compile(r"@rebattery\.(io|invalid)$", re.I), {"acc-test"}, {"fo
 
 
 def data(**rows):
-    base = {"deals": [], "payments": [], "offers": [], "chats": [], "bids": [], "listings": [], "requests": [],
+    base = {"deals": [], "payments": [], "offers": [], "chats": [], "bids": [], "listings": [], "requests": [], "accounts": [],
             "account_emails": {"acc-buyer": ["buyer@example.org"], "acc-staff": ["ari@rebattery.io"]}}
     return {**base, **rows}
 
@@ -40,24 +40,28 @@ class PlatformMetrics(unittest.TestCase):
                 {"id": "d3", "status": "open", "created_at": "2026-09-29T10:00:00Z", "cancelled_at": None,
                  "supplier_account_id": "acc-test", "counterparty_account_id": "acc-buyer"},
             ],
-            offers=[{"created_at": "2026-09-30T09:00:00Z", "buyer_account_id": "acc-buyer", "listing_id": "l1"},
-                    {"created_at": "2026-09-30T09:00:00Z", "buyer_account_id": "acc-test", "listing_id": "l1"}],
+            offers=[{"created_at": "2026-09-22T09:00:00Z", "status": "expired", "expires_at": "2026-09-29T09:00:00Z", "buyer_account_id": "acc-buyer", "listing_id": "l1"},
+                    {"created_at": "2026-09-30T09:00:00Z", "status": "expired", "expires_at": "2026-10-07T09:00:00Z", "buyer_account_id": "acc-test", "listing_id": "l1"}],
             listings=[{"id": "l1", "listing_status": "published", "created_at": "2026-09-22T00:00:00Z", "supplier_account_id": "acc-staff"},
                       {"id": "l2", "listing_status": "published", "created_at": "2026-09-22T00:00:00Z", "supplier_account_id": "acc-test"},
                       {"id": "l3", "listing_status": "draft", "created_at": "2026-09-22T00:00:00Z", "supplier_account_id": "acc-seller"}],
             bids=[{"created_at": "2026-09-23T00:00:00Z", "email": "ari@rebattery.io"},
                   {"created_at": "2026-09-23T00:00:00Z", "email": "Founder@gmail.com"},
                   {"created_at": "2026-09-23T00:00:00Z", "email": "buyer@example.org"}],
+            accounts=[{"id": "b1", "role": "buyer", "created_at": "2026-09-23T00:00:00Z"}, {"id": "acc-test", "role": "buyer", "created_at": "2026-09-23T00:00:00Z"},
+                      {"id": "s1", "role": "supplier", "created_at": "2026-09-23T00:00:00Z"}],
             requests=[{"created_at": "2026-09-23T00:00:00Z", "status": "test", "contact_email": "x@example.org"},
                       {"created_at": "2026-09-23T00:00:00Z", "status": "refused", "contact_email": "y@example.org"}],
         )
         out = self.count(rows)
         self.assertEqual(out[WEEK]["deals_created"], 1)
-        self.assertEqual(out[WEEK]["offers_made"], 1)
+        self.assertEqual(out[PREVIOUS]["offers_made"], 1)
+        self.assertEqual(out[WEEK]["drop_offers_expired"], 1)
         self.assertEqual(out[PREVIOUS]["listings_new"], 1)
         self.assertEqual(out[WEEK]["listings_live"], 1)
         self.assertEqual(out[PREVIOUS]["auction_bids"], 1)
         self.assertEqual(out[PREVIOUS]["sell_requests"], 1)
+        self.assertEqual(out[PREVIOUS]["buyer_signups"], 1)
 
     def test_paid_counts_the_first_captured_payment_at_the_deal_amount_in_pounds(self):
         rows = data(
@@ -65,11 +69,11 @@ class PlatformMetrics(unittest.TestCase):
                     "supplier_account_id": "acc-seller", "counterparty_account_id": "acc-buyer"},
                    {"id": "d2", "status": "cancelled", "created_at": "2026-09-22T10:00:00Z", "cancelled_at": "2026-09-30T10:00:00Z",
                     "supplier_account_id": "acc-seller", "counterparty_account_id": "acc-buyer"}],
-            payments=[{"deal_id": "d1", "status": "captured", "payment_purpose": "initial", "captured_at": "2026-09-29T15:00:00Z",
+            payments=[{"deal_id": "d1", "status": "captured", "payment_purpose": "initial", "created_at": "2026-09-08T10:00:00Z", "captured_at": "2026-09-29T15:00:00Z",
                        "deal_amount": 4000, "currency": "eur"},
-                      {"deal_id": "d1", "status": "captured", "payment_purpose": "reconciliation", "captured_at": "2026-09-30T15:00:00Z",
+                      {"deal_id": "d1", "status": "captured", "payment_purpose": "reconciliation", "created_at": "2026-09-30T15:00:00Z", "captured_at": "2026-09-30T15:00:00Z",
                        "deal_amount": 0, "currency": "eur"},
-                      {"deal_id": "d2", "status": "failed", "payment_purpose": "initial", "captured_at": None,
+                      {"deal_id": "d2", "status": "failed", "payment_purpose": "initial", "created_at": "2026-09-23T10:00:00Z", "captured_at": None,
                        "deal_amount": 900, "currency": "gbp"}],
         )
         out = self.count(rows)
@@ -77,6 +81,7 @@ class PlatformMetrics(unittest.TestCase):
         self.assertEqual(out[WEEK]["paid_value_gbp"], 3440.0)
         self.assertEqual(out[PREVIOUS]["deals_created"], 1)
         self.assertEqual(out[WEEK]["deals_cancelled"], 1)
+        self.assertEqual(out[PREVIOUS]["drop_payment_failed"], 1)
 
     def test_live_listings_only_for_the_current_week(self):
         rows = data(listings=[{"id": "l1", "listing_status": "published", "created_at": "2026-09-01T00:00:00Z", "supplier_account_id": "s"}])

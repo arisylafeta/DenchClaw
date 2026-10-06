@@ -15,7 +15,7 @@ const monday = (weeksAgo: number) => {
 const DATA: PulseData = {
   weeks: [
     { week_start: monday(2), values: { visitors: 100, viewed_listing: 60, started_contact: 6, sent_contact: 3, deals_created: 1, deals_paid: 0, paid_value_gbp: 0 } },
-    { week_start: monday(1), values: { visitors: 120, viewed_listing: 70, started_contact: 8, sent_contact: 2, deals_created: 1, deals_paid: 1, paid_value_gbp: 3440 } },
+    { week_start: monday(1), values: { visitors: 120, viewed_listing: 70, started_contact: 8, sent_contact: 2, deals_created: 1, deals_paid: 1, paid_value_gbp: 3440, drop_no_price: 30, drop_signin_wall: 5, drop_offers_expired: 2 } },
     { week_start: monday(0), values: { visitors: 20, viewed_listing: 13, started_contact: 0, listings_live: 542 } },
   ],
   targets: { visitors: 150 },
@@ -139,5 +139,20 @@ describe("MarketplacePulseView", () => {
     await userEvent.click(within(rows[0]).getByRole("button", { name: "Add to CRM" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/marketplace-pulse/buyers")?.body).toEqual({ email: "w@example.org", name: "Waiting Buyer" }));
     expect(await within(rows[0]).findByText("On supply updates")).toBeInTheDocument();
+  });
+
+  it("shows where buyers drop off for the week and the last 4 weeks, with recordings", async () => {
+    vi.stubGlobal("fetch", mockFetch([]));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+
+    const drops = await screen.findByRole("region", { name: "Where buyers drop off" });
+    const row = (label: string) => within(drops).getByText(label).closest("tr")!;
+    // 70 viewed, 8 started; over 4 weeks 60 + 70 viewed less 6 + 8 started.
+    expect(row("Viewed a listing but started nothing")).toHaveTextContent(/62\s*116/);
+    expect(row("Saw no price (offer only)")).toHaveTextContent("30");
+    expect(row("Offers expired unanswered")).toHaveTextContent("2");
+    const link = within(row("Hit the sign-in box")).getByRole("link", { name: "Watch sessions" });
+    expect(decodeURIComponent(link.getAttribute("href")!)).toContain('"id":"auth_dialog_viewed"');
+    expect(within(row("Offers expired unanswered")).queryByRole("link")).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import {
   FUNNEL, METRICS, OTHER_METRICS, SCORECARD, change, formatMetric, funnel, mondayOf, totals, weekLabel,
   type MetricKey, type PulseData, type PulseWeek,
 } from "@/lib/marketplace-pulse";
+import { DropOffs } from "./drop-offs";
 import { FollowUps, WaitingOnUs } from "./follow-ups";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 
@@ -142,6 +143,8 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
             </p>
           </section>
         )}
+
+        {selected && <DropOffs week={selected} weekLabel={weekLabel(selected.week_start)} lastFour={complete.slice(-4)} />}
 
         {data && !!data.waiting.length && <WaitingOnUs items={data.waiting} />}
 

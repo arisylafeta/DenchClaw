@@ -5,7 +5,10 @@ export type MetricKey =
   | "visitors" | "browsed" | "clicked_listing" | "viewed_listing" | "started_contact" | "sent_contact"
   | "deals_created" | "deals_paid" | "paid_value_gbp" | "deals_cancelled"
   | "offers_made" | "buyer_chats" | "auction_bids"
-  | "listings_live" | "listings_new" | "sell_requests" | "joules_started";
+  | "listings_live" | "listings_new" | "sell_requests" | "joules_started"
+  | "drop_no_price" | "drop_search_no_exact" | "drop_signin_wall" | "signup_submitted" | "buyer_signups"
+  | "drop_signup_captcha" | "drop_signup_registered" | "drop_signup_other" | "drop_contact_error"
+  | "drop_offers_expired" | "drop_payment_failed";
 
 type Metric = { label: string; hint: string; money?: boolean; lowerIsBetter?: boolean };
 
@@ -27,7 +30,69 @@ export const METRICS: Record<MetricKey, Metric> = {
   listings_new: { label: "New listings", hint: "listings added that week" },
   sell_requests: { label: "Joules sell requests", hint: "saved by Joules, tests left out" },
   joules_started: { label: "Joules chats", hint: "people who started Joules" },
+  drop_no_price: { label: "Saw no price (offer only)", hint: "people on a listing that asks for offers instead of showing a price", lowerIsBetter: true },
+  drop_search_no_exact: { label: "Search found no exact match", hint: "people whose search fell back to looser results", lowerIsBetter: true },
+  drop_signin_wall: { label: "Hit the sign-in box", hint: "people asked to sign in or sign up", lowerIsBetter: true },
+  signup_submitted: { label: "Submitted a sign-up", hint: "people who sent the sign-up form" },
+  buyer_signups: { label: "New buyer accounts", hint: "buyer accounts created on ReBattery" },
+  drop_signup_captcha: { label: "Sign-up failed: captcha", hint: "Turnstile check failed", lowerIsBetter: true },
+  drop_signup_registered: { label: "Sign-up failed: already registered", hint: "they already had an account", lowerIsBetter: true },
+  drop_signup_other: { label: "Sign-up failed: other", hint: "any other sign-up error", lowerIsBetter: true },
+  drop_contact_error: { label: "Message, offer or buy-now errored", hint: "people who hit an error sending", lowerIsBetter: true },
+  drop_offers_expired: { label: "Offers expired unanswered", hint: "offers that ran out before the seller replied", lowerIsBetter: true },
+  drop_payment_failed: { label: "Payments failed", hint: "deals whose first payment failed", lowerIsBetter: true },
 };
+
+/** A row in "Where buyers drop off". `event` links to PostHog recordings of people who did it. */
+export type DropRow = { key: MetricKey | "viewed_not_started"; label: string; event?: string };
+
+export const DROP_STAGES: { stage: string; rows: DropRow[] }[] = [
+  {
+    stage: "Looking, not starting",
+    rows: [
+      { key: "viewed_not_started", label: "Viewed a listing but started nothing", event: "listing_detail_viewed" },
+      { key: "drop_no_price", label: METRICS.drop_no_price.label, event: "listing_detail_viewed" },
+      { key: "drop_search_no_exact", label: METRICS.drop_search_no_exact.label, event: "marketplace_search_outcome" },
+    ],
+  },
+  {
+    stage: "Started, not sent",
+    rows: [
+      { key: "drop_signin_wall", label: METRICS.drop_signin_wall.label, event: "auth_dialog_viewed" },
+      { key: "signup_submitted", label: METRICS.signup_submitted.label, event: "auth_signup_submitted" },
+      { key: "buyer_signups", label: METRICS.buyer_signups.label },
+      { key: "drop_signup_captcha", label: METRICS.drop_signup_captcha.label, event: "auth_signup_failed" },
+      { key: "drop_signup_registered", label: METRICS.drop_signup_registered.label, event: "auth_signup_failed" },
+      { key: "drop_signup_other", label: METRICS.drop_signup_other.label, event: "auth_signup_failed" },
+      { key: "drop_contact_error", label: METRICS.drop_contact_error.label, event: "listing_offer_failed" },
+    ],
+  },
+  {
+    stage: "Sent, not paid",
+    rows: [
+      { key: "drop_offers_expired", label: METRICS.drop_offers_expired.label },
+      { key: "deals_cancelled", label: METRICS.deals_cancelled.label },
+      { key: "drop_payment_failed", label: METRICS.drop_payment_failed.label },
+    ],
+  },
+];
+
+/** A drop row's value for a week: a stored number, or viewed minus started. */
+export function dropValue(key: DropRow["key"], values: Partial<Record<MetricKey, number>>): number | undefined {
+  if (key !== "viewed_not_started") return values[key];
+  if (values.viewed_listing === undefined) return undefined;
+  return Math.max(0, values.viewed_listing - (values.started_contact ?? 0));
+}
+
+/** PostHog recordings of people who triggered `event` in the last 30 days, test accounts left out. */
+export function replayUrl(event: string): string {
+  const filters = {
+    date_from: "-30d",
+    filter_test_accounts: true,
+    filter_group: { type: "AND", values: [{ type: "AND", values: [{ id: event, name: event, type: "events", order: 0 }] }] },
+  };
+  return `https://us.posthog.com/project/375247/replay/home?filters=${encodeURIComponent(JSON.stringify(filters))}`;
+}
 
 /** The headline numbers, in order. */
 export const SCORECARD: MetricKey[] = [

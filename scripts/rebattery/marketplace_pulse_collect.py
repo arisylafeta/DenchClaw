@@ -62,6 +62,27 @@ WHERE timestamp >= toDateTime('{start}', 'UTC') AND timestamp < toDateTime('{end
 GROUP BY week ORDER BY week"""
 POSTHOG_METRICS = ("visitors", "browsed", "clicked_listing", "viewed_listing", "started_contact", "sent_contact", "joules_started")
 
+# Where buyers drop off, as distinct people per week. Names start with drop_ (or are sign-in steps).
+DROP_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(timestamp, 'UTC'), 1)) AS week,
+  uniqIf(person_id, event = 'listing_detail_viewed' AND toString(properties.price_visibility) = 'offer_only') AS drop_no_price,
+  uniqIf(person_id, event = 'marketplace_search_outcome' AND toString(properties.outcome) != 'exact_results') AS drop_search_no_exact,
+  uniqIf(person_id, event = 'auth_dialog_viewed') AS drop_signin_wall,
+  uniqIf(person_id, event = 'auth_signup_submitted') AS signup_submitted,
+  uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) = 'turnstile_failed') AS drop_signup_captcha,
+  uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) = 'user_already_registered') AS drop_signup_registered,
+  uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) NOT IN ('turnstile_failed', 'user_already_registered')) AS drop_signup_other,
+  uniqIf(person_id, event = 'auth_completed') AS signin_completed,
+  uniqIf(person_id, event IN ('listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')) AS drop_contact_error
+FROM events
+WHERE timestamp >= toDateTime('{start}', 'UTC') AND timestamp < toDateTime('{end}', 'UTC')
+  AND toString(properties.$host) IN ('rebattery.io', 'www.rebattery.io')
+  AND event IN ('listing_detail_viewed', 'marketplace_search_outcome', 'auth_dialog_viewed', 'auth_signup_submitted',
+    'auth_signup_failed', 'auth_completed', 'listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')
+  AND {{filters}}
+GROUP BY week ORDER BY week"""
+DROP_METRICS = ("drop_no_price", "drop_search_no_exact", "drop_signin_wall", "signup_submitted", "drop_signup_captcha",
+                "drop_signup_registered", "drop_signup_other", "signin_completed", "drop_contact_error")
+
 
 def monday(day):
     return day - dt.timedelta(days=day.weekday())
@@ -135,13 +156,14 @@ def read_platform(platform):
     data = {
         "deals": platform.get("deals", {"select": "id,status,created_at,cancelled_at,agreed_amount,agreed_currency,"
                                                   "supplier_account_id,counterparty_account_id"}),
-        "payments": platform.get("deal_payment_intents", {"select": "id,deal_id,status,payment_purpose,captured_at,"
+        "payments": platform.get("deal_payment_intents", {"select": "id,deal_id,status,payment_purpose,created_at,captured_at,"
                                                                     "deal_amount,currency"}),
-        "offers": platform.get("purchase_offers", {"select": "created_at,buyer_account_id,listing_id"}),
+        "offers": platform.get("purchase_offers", {"select": "created_at,status,expires_at,buyer_account_id,listing_id"}),
         "chats": platform.get("conversations", {"select": "created_at,conversation_type,supplier_account_id,counterparty_account_id"}),
         "bids": platform.get("auction_submissions", {"select": "created_at,email"}),
         "listings": platform.get("listings", {"select": "id,listing_status,created_at,supplier_account_id"}),
         "requests": platform.get("battery_requests", {"select": "created_at,status,contact_email"}),
+        "accounts": platform.get("accounts", {"select": "id,role,created_at"}),
     }
     # Only buyers are checked against staff emails, so only their members are read.
     ids = {deal["counterparty_account_id"] for deal in data["deals"]}
@@ -165,10 +187,10 @@ def posthog_credentials(path=POSTHOG_CREDENTIALS):
     return value["host"].rstrip("/"), value["token"]
 
 
-def read_posthog(start, end, credentials=None, attempts=3):
+def read_posthog(start, end, credentials=None, attempts=3, template=POSTHOG_QUERY, metrics=POSTHOG_METRICS):
     """{week: {metric: people}} for [start, end), Mondays only."""
     host, token = credentials or posthog_credentials()
-    query = POSTHOG_QUERY.format(start=f"{start} 00:00:00", end=f"{end} 00:00:00").replace("{{filters}}", "{filters}")
+    query = template.format(start=f"{start} 00:00:00", end=f"{end} 00:00:00").replace("{{filters}}", "{filters}")
     body = json.dumps({"query": {"kind": "HogQLQuery", "filters": {"filterTestAccounts": True}, "query": query}}).encode()
     for attempt in range(attempts):
         request = urllib.request.Request(f"{host}/api/projects/{POSTHOG_PROJECT}/query/", data=body, method="POST",
@@ -186,7 +208,7 @@ def read_posthog(start, end, credentials=None, attempts=3):
     weeks = {}
     for row in payload["results"]:
         values = dict(zip(columns, row))
-        weeks[dt.date.fromisoformat(values["week"][:10])] = {metric: int(values[metric]) for metric in POSTHOG_METRICS}
+        weeks[dt.date.fromisoformat(values["week"][:10])] = {metric: int(values[metric]) for metric in metrics}
     return weeks
 
 
@@ -228,10 +250,18 @@ def platform_metrics(data, weeks, today, exclusions):
         add("paid_value_gbp", payment["captured_at"],
             float(payment["deal_amount"] or 0) * GBP_PER.get((payment["currency"] or "GBP").upper(), 1.0))
 
+    failed = {p["deal_id"]: p for p in data["payments"]
+              if p["deal_id"] in real_deals and p["status"] == "failed" and p["payment_purpose"] == "initial"}
+    for payment in failed.values():
+        add("drop_payment_failed", payment["created_at"])
+
     listing_supplier = {row["id"]: row["supplier_account_id"] for row in data["listings"]}
     for offer in data["offers"]:
         if not internal_buyer(offer["buyer_account_id"]) and listing_supplier.get(offer["listing_id"]) not in test_ids:
             add("offers_made", offer["created_at"])
+            if offer["status"] == "expired":
+                # Counted in the week it expired, unanswered.
+                add("drop_offers_expired", offer["expires_at"] or offer["created_at"])
     for chat in data["chats"]:
         if chat["conversation_type"] in CONTACT_TYPES and not internal_buyer(chat["counterparty_account_id"]) \
                 and chat["supplier_account_id"] not in test_ids:
@@ -246,12 +276,15 @@ def platform_metrics(data, weeks, today, exclusions):
     current = monday(today)
     if current in wanted:
         out[current]["listings_live"] = sum(1 for row in real_listings if row["listing_status"] == "published")
+    for account in data["accounts"]:
+        if account["role"] == "buyer" and account["id"] not in test_ids:
+            add("buyer_signups", account["created_at"])
     for request in data["requests"]:
         if request["status"] != "test" and not internal_email(request["contact_email"]):
             add("sell_requests", request["created_at"])
 
     zero = ("deals_created", "deals_paid", "paid_value_gbp", "deals_cancelled", "offers_made", "buyer_chats",
-            "auction_bids", "listings_new", "sell_requests")
+            "auction_bids", "listings_new", "sell_requests", "drop_offers_expired", "drop_payment_failed", "buyer_signups")
     return {week: {**{metric: 0 for metric in zero}, **{k: round(v, 2) for k, v in values.items()}}
             for week, values in out.items()}
 
@@ -280,9 +313,12 @@ def collect(args, today):
     numbers = platform_metrics(read_platform(Platform()), weeks, today, load_exclusions())
     posthog_error = None
     try:
-        people = read_posthog(weeks[0], monday(today) + dt.timedelta(days=7))
+        end = monday(today) + dt.timedelta(days=7)
+        people = read_posthog(weeks[0], end)
+        drops = read_posthog(weeks[0], end, template=DROP_QUERY, metrics=DROP_METRICS)
         for week in weeks:
             numbers[week].update(people.get(week, {metric: 0 for metric in POSTHOG_METRICS}))
+            numbers[week].update(drops.get(week, {metric: 0 for metric in DROP_METRICS}))
     except Exception as err:  # noqa: BLE001 - the platform numbers are still worth writing
         posthog_error = f"PostHog read failed: {err}"
     return numbers, posthog_error
