@@ -1,5 +1,5 @@
 import { guardBulkTrades } from "@/lib/bulk-trades-route";
-import { listBreakdowns, listSuggestions, listTargets, listWeeks } from "@/lib/crm-postgres/marketplace-pulse";
+import { listBreakdowns, listPlans, listSuggestions, listTargets, listWeeks } from "@/lib/crm-postgres/marketplace-pulse";
 import { followUps } from "@/lib/marketplace-pulse-platform";
 import type { PulseData } from "@/lib/marketplace-pulse";
 
@@ -15,7 +15,7 @@ const firstName = (email: string) => {
 export async function GET() {
   const guard = await guardBulkTrades("Marketplace Pulse");
   if ("response" in guard) return guard.response;
-  const [{ weeks, collected_at }, targets, suggestions, breakdowns, platform] = await Promise.all([
+  const [{ weeks, collected_at }, targets, suggestions, breakdowns, plans, platform] = await Promise.all([
     listWeeks(12),
     listTargets(),
     // Suggestions are optional: the page still loads if their table is missing or unreadable.
@@ -24,6 +24,11 @@ export async function GET() {
       return [];
     }),
     listBreakdowns(12),
+    // The plan is optional too: the rest of the page loads without it.
+    listPlans().catch((err) => {
+      console.error("[marketplace-pulse] plan read failed", err);
+      return { plan: null, versions: [] };
+    }),
     followUps().catch((err) => {
       console.error("[marketplace-pulse] ReBattery read failed", err);
       return null;
@@ -37,6 +42,8 @@ export async function GET() {
     sender: firstName(guard.email),
     suggestions,
     breakdowns,
+    plan: plans.plan,
+    plan_versions: plans.versions,
   };
   return Response.json(body);
 }

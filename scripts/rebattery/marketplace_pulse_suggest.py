@@ -50,6 +50,10 @@ DEFINITIONS = {
     "drop_offers_expired": "offers that expired before the seller replied",
     "drop_payment_failed": "deals whose first payment failed",
     "email_clicks": "clicks on campaign email links (those visits show as Direct, not Email)",
+    "reply_intents": "buyer messages and offers at least a day old, by the week asked",
+    "reply_24h": "of those, answered by us or the seller within 24 hours",
+    "reply_none": "of those, never answered on ReBattery",
+    "reply_median_hours": "median hours to the first reply, of those answered",
 }
 MAX_PER_BATCH = 5
 

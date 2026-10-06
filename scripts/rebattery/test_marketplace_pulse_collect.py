@@ -90,6 +90,32 @@ class PlatformMetrics(unittest.TestCase):
         self.assertNotIn("listings_live", out[PREVIOUS])
 
 
+class Replies(unittest.TestCase):
+    def test_replies_count_messages_and_offers_once_and_only_when_a_day_old(self):
+        rows = data(
+            chats=[{"id": "c1", "created_at": "2026-09-22T09:00:00Z", "conversation_type": "purchase", "supplier_account_id": "seller", "counterparty_account_id": "acc-buyer"},
+                   {"id": "c2", "created_at": "2026-09-23T09:00:00Z", "conversation_type": "purchase", "supplier_account_id": "seller", "counterparty_account_id": "acc-buyer"},
+                   {"id": "c3", "created_at": "2026-09-30T20:00:00Z", "conversation_type": "purchase", "supplier_account_id": "seller", "counterparty_account_id": "acc-buyer"}],
+            messages=[{"conversation_id": "c1", "created_at": "2026-09-22T09:00:00Z", "sender_membership_id": "mb", "is_system_seeded": False},
+                      {"conversation_id": "c1", "created_at": "2026-09-22T10:00:00Z", "sender_membership_id": None, "is_system_seeded": True},
+                      {"conversation_id": "c1", "created_at": "2026-09-22T12:00:00Z", "sender_membership_id": "ms", "is_system_seeded": False},
+                      {"conversation_id": "c2", "created_at": "2026-09-23T09:00:00Z", "sender_membership_id": "mb", "is_system_seeded": False},
+                      {"conversation_id": "c3", "created_at": "2026-09-30T20:00:00Z", "sender_membership_id": "mb", "is_system_seeded": False}],
+            sender_account={"mb": "acc-buyer", "ms": "seller"},
+            offers=[{"id": "o1", "created_at": "2026-09-23T09:05:00Z", "updated_at": "2026-09-26T09:05:00Z", "status": "rejected", "expires_at": None,
+                     "buyer_account_id": "acc-buyer", "listing_id": "l1", "conversation_id": "c2"},
+                    {"id": "o2", "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-10-01T09:00:00Z", "status": "expired", "expires_at": "2026-10-01T09:00:00Z",
+                     "buyer_account_id": "acc-buyer", "listing_id": "l1", "conversation_id": None}],
+            listings=[{"id": "l1", "listing_status": "published", "created_at": "2026-09-01T00:00:00Z", "supplier_account_id": "seller"}],
+        )
+        out = pulse.platform_metrics(rows, [PREVIOUS, WEEK], dt.date(2026, 10, 1), EXCLUSIONS,
+                                     now=dt.datetime(2026, 10, 1, 12, tzinfo=dt.timezone.utc))
+        # c1 replied in 3 hours; c2 and its offer count once, replied after 72 hours; o2 never; c3 is under a day old.
+        self.assertEqual((out[PREVIOUS]["reply_intents"], out[PREVIOUS]["reply_24h"], out[PREVIOUS]["reply_none"]), (3, 1, 1))
+        self.assertEqual(out[PREVIOUS]["reply_median_hours"], 37.54)
+        self.assertEqual(out[WEEK]["reply_intents"], 0)
+
+
 class Collect(unittest.TestCase):
     def test_a_failed_drop_off_read_keeps_the_funnel_numbers(self):
         def fake_posthog(start, end, template=None, metrics=None, **_):

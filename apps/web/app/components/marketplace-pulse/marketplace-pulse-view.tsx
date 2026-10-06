@@ -8,14 +8,15 @@ import {
 import { Acquisition } from "./acquisition";
 import { DropOffs } from "./drop-offs";
 import { OrderedFunnel } from "./ordered-funnel";
+import { PlanTab } from "./plan-tab";
 import { Trends } from "./trends";
 import { FollowUps, WaitingOnUs } from "./follow-ups";
 import { Suggestions } from "./suggestions";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 
 type Range = "last" | "current";
-type View = "act" | "funnel" | "acquisition" | "trends";
-const VIEWS: [View, string][] = [["act", "Act"], ["funnel", "Funnel"], ["acquisition", "Acquisition"], ["trends", "Trends"]];
+type View = "act" | "funnel" | "acquisition" | "trends" | "plan";
+const VIEWS: [View, string][] = [["act", "Act"], ["funnel", "Funnel"], ["acquisition", "Acquisition"], ["trends", "Trends"], ["plan", "Plan"]];
 const VIEW_KEY = "marketplace-pulse:view";
 
 const shiftWeek = (weekStart: string, by: number) => {
@@ -155,6 +156,15 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
         )}
 
         {data && view === "acquisition" && <Acquisition breakdowns={data.breakdowns} weeks={complete} />}
+
+        {data && view === "plan" && (
+          <PlanTab plan={data.plan} versions={data.plan_versions} weeks={complete} breakdowns={data.breakdowns}
+            onSaved={(saved) => setData((current) => {
+              if (!current) return current;
+              const { plan: _plan, ...version } = saved;
+              return { ...current, plan: saved, plan_versions: [version, ...current.plan_versions] };
+            })} />
+        )}
 
         {data && view === "trends" && (
           <>

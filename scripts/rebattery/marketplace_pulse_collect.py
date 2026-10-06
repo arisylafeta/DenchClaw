@@ -231,8 +231,8 @@ def read_platform(platform):
                                                   "supplier_account_id,counterparty_account_id"}),
         "payments": platform.get("deal_payment_intents", {"select": "id,deal_id,status,payment_purpose,created_at,captured_at,"
                                                                     "deal_amount,currency"}),
-        "offers": platform.get("purchase_offers", {"select": "created_at,status,expires_at,buyer_account_id,listing_id"}),
-        "chats": platform.get("conversations", {"select": "created_at,conversation_type,supplier_account_id,counterparty_account_id"}),
+        "offers": platform.get("purchase_offers", {"select": "id,created_at,updated_at,status,expires_at,buyer_account_id,listing_id,conversation_id"}),
+        "chats": platform.get("conversations", {"select": "id,created_at,conversation_type,supplier_account_id,counterparty_account_id"}),
         "bids": platform.get("auction_submissions", {"select": "created_at,email"}),
         "listings": platform.get("listings", {"select": "id,listing_status,created_at,supplier_account_id"}),
         "requests": platform.get("battery_requests", {"select": "created_at,status,contact_email"}),
@@ -250,7 +250,58 @@ def read_platform(platform):
     for membership in memberships:
         if membership["user_id"] in email:
             data["account_emails"][membership["account_id"]].append(email[membership["user_id"]])
+    # Messages in buyer chats, and which account sent each, for reply times.
+    chat_ids = [row["id"] for row in data["chats"] if row["conversation_type"] in CONTACT_TYPES]
+    data["messages"] = platform.get_in("conversation_messages", "conversation_id,created_at,sender_membership_id,is_system_seeded",
+                                       "conversation_id", chat_ids)
+    senders = platform.get_in("account_memberships", "id,account_id", "id",
+                              [m["sender_membership_id"] for m in data["messages"] if m["sender_membership_id"]])
+    data["sender_account"] = {row["id"]: row["account_id"] for row in senders}
     return data
+
+
+REPLIED_STATUSES = ("accepted", "rejected", "countered")
+
+
+def buyer_intents(data):
+    """[(buyer account, seller account or listing id, asked at, first reply at or None)] for messages and offers.
+
+    An intent is the buyer's first message in a buyer chat, or an offer. Its reply is the first message
+    from anyone but the buyer afterwards, or the seller accepting, rejecting or countering the offer.
+    An offer and the chat it sits in count once.
+    """
+    by_chat = defaultdict(list)
+    for message in data.get("messages", []):
+        if not message["is_system_seeded"]:
+            by_chat[message["conversation_id"]].append(message)
+    intents = {}
+    for chat in data["chats"]:
+        if chat["conversation_type"] not in CONTACT_TYPES:
+            continue
+        buyer = chat["counterparty_account_id"]
+        messages = sorted(by_chat.get(chat.get("id"), []), key=lambda m: m["created_at"])
+        senders = data.get("sender_account", {})
+        first = next((m for m in messages if senders.get(m["sender_membership_id"]) == buyer), None)
+        if not first:
+            continue
+        reply = next((m["created_at"] for m in messages if m["created_at"] > first["created_at"]
+                      and senders.get(m["sender_membership_id"]) not in (None, buyer)), None)
+        intents[chat["id"]] = {"buyer": buyer, "seller": chat["supplier_account_id"], "asked": first["created_at"], "reply": reply}
+    listing_supplier = {row["id"]: row["supplier_account_id"] for row in data["listings"]}
+    for offer in data["offers"]:
+        reply = offer.get("updated_at") if offer["status"] in REPLIED_STATUSES else None
+        key = offer.get("conversation_id") if offer.get("conversation_id") in intents else offer.get("id") or id(offer)
+        current = intents.get(key)
+        asked = min(offer["created_at"], current["asked"]) if current else offer["created_at"]
+        replies = [r for r in (reply, current["reply"] if current else None) if r and r > asked]
+        intents[key] = {"buyer": offer["buyer_account_id"], "seller": listing_supplier.get(offer["listing_id"]),
+                        "asked": asked, "reply": min(replies) if replies else None}
+    return list(intents.values())
+
+
+def hours_between(start, end):
+    parse = lambda value: dt.datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: E731
+    return (parse(end) - parse(start)).total_seconds() / 3600
 
 
 def posthog_credentials(path=POSTHOG_CREDENTIALS):
@@ -325,8 +376,9 @@ def read_breakdowns(start, end, rows=posthog_rows):
 # Counting
 # ---------------------------------------------------------------------------
 
-def platform_metrics(data, weeks, today, exclusions):
+def platform_metrics(data, weeks, today, exclusions, now=None):
     """{week: {metric: value}} for the given Mondays from platform rows."""
+    now = now or dt.datetime.combine(today, dt.time(23, 59), dt.timezone.utc)
     pattern, test_ids, test_emails = exclusions
 
     def internal_email(address):
@@ -398,8 +450,30 @@ def platform_metrics(data, weeks, today, exclusions):
         if request["status"] != "test" and not internal_email(request["contact_email"]):
             add("sell_requests", request["created_at"])
 
+    # Replies to buyers, by the week they asked. Only intents at least a day old can be judged.
+    waits = defaultdict(list)
+    for intent in buyer_intents(data):
+        week = week_of(intent["asked"])
+        if week not in wanted or internal_buyer(intent["buyer"]) or intent["seller"] in test_ids:
+            continue
+        if hours_between(intent["asked"], now.isoformat()) < 24:
+            continue
+        add("reply_intents", intent["asked"])
+        if intent["reply"] is None:
+            add("reply_none", intent["asked"])
+            continue
+        hours = hours_between(intent["asked"], intent["reply"])
+        waits[week].append(hours)
+        if hours <= 24:
+            add("reply_24h", intent["asked"])
+    for week, hours in waits.items():
+        ordered = sorted(hours)
+        middle = len(ordered) // 2
+        out[week]["reply_median_hours"] = ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
     zero = ("deals_created", "deals_paid", "paid_value_gbp", "deals_cancelled", "offers_made", "buyer_chats",
-            "auction_bids", "listings_new", "sell_requests", "drop_offers_expired", "drop_payment_failed", "buyer_signups")
+            "auction_bids", "listings_new", "sell_requests", "drop_offers_expired", "drop_payment_failed", "buyer_signups",
+            "reply_intents", "reply_24h", "reply_none")
     return {week: {**{metric: 0 for metric in zero}, **{k: round(v, 2) for k, v in values.items()}}
             for week, values in out.items()}
 
@@ -434,7 +508,7 @@ def collect(args, today):
     weeks = weeks_from(first, today)
     if not weeks:
         raise SystemExit("--since is after today")
-    numbers = platform_metrics(read_platform(Platform()), weeks, today, load_exclusions())
+    numbers = platform_metrics(read_platform(Platform()), weeks, today, load_exclusions(), now=dt.datetime.now(dt.timezone.utc))
     errors = []
     end = monday(today) + dt.timedelta(days=7)
     # Each PostHog read stands alone, so a failed drop-off read keeps the funnel numbers.

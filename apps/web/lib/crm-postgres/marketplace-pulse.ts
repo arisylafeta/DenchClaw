@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction } from "../postgres";
 import { isMetricKey, type Breakdown, type MetricKey, type PulseWeek, type Suggestion, type SuggestionStatus } from "../marketplace-pulse";
+import type { Plan, PlanVersion } from "../marketplace-pulse-plan";
 
 /** The last `count` weeks with numbers, oldest first, and when they were last collected. */
 export async function listWeeks(count = 12): Promise<{ weeks: PulseWeek[]; collected_at: string | null }> {
@@ -123,4 +124,29 @@ export async function setSuggestionStatus(id: string, status: SuggestionStatus, 
     [id, status, userId],
   );
   return rows[0] ?? null;
+}
+
+const PLAN_COLUMNS = `p.id, p.plan, to_char(p.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
+  u.display_name as created_by_name`;
+
+/** The latest plan, and the last 20 versions (newest first) without their contents. */
+export async function listPlans(): Promise<{ plan: PlanVersion | null; versions: Omit<PlanVersion, "plan">[] }> {
+  const rows = await queryPg<PlanVersion>(
+    `select ${PLAN_COLUMNS} from crm_pulse_plans p left join crm_users u on u.id::text = p.created_by
+      order by p.created_at desc, p.id desc limit 20`,
+  );
+  return { plan: rows[0] ?? null, versions: rows.map(({ plan: _plan, ...version }) => version) };
+}
+
+export async function getPlan(id: string): Promise<PlanVersion | null> {
+  const rows = await queryPg<PlanVersion>(
+    `select ${PLAN_COLUMNS} from crm_pulse_plans p left join crm_users u on u.id::text = p.created_by where p.id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+/** Saves a plan as a new version; older versions stay as they were. */
+export async function savePlan(plan: Plan, userId: string): Promise<PlanVersion> {
+  const id = randomUUID();
+  await queryPg("insert into crm_pulse_plans (id, plan, created_by) values ($1, $2, $3)", [id, JSON.stringify(plan), userId]);
+  return (await getPlan(id))!;
 }

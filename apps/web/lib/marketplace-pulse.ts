@@ -1,5 +1,6 @@
 // Marketplace Pulse: the weekly marketplace numbers, their targets, and buyers to follow up.
 // The numbers are written by scripts/rebattery/marketplace_pulse_collect.py; weeks start Monday, UTC.
+import type { PlanVersion } from "./marketplace-pulse-plan";
 
 export type MetricKey =
   | "visitors" | "browsed" | "clicked_listing" | "viewed_listing" | "started_contact" | "sent_contact"
@@ -8,7 +9,8 @@ export type MetricKey =
   | "listings_live" | "listings_new" | "sell_requests" | "joules_started"
   | "drop_no_price" | "drop_search_no_exact" | "drop_signin_wall" | "signup_submitted" | "buyer_signups"
   | "drop_signup_captcha" | "drop_signup_registered" | "drop_signup_other" | "drop_contact_error"
-  | "drop_offers_expired" | "drop_payment_failed" | "email_clicks";
+  | "drop_offers_expired" | "drop_payment_failed" | "email_clicks"
+  | "reply_intents" | "reply_24h" | "reply_none" | "reply_median_hours";
 
 type Metric = { label: string; hint: string; money?: boolean; lowerIsBetter?: boolean };
 
@@ -42,6 +44,10 @@ export const METRICS: Record<MetricKey, Metric> = {
   drop_offers_expired: { label: "Offers expired unanswered", hint: "offers that ran out before the seller replied", lowerIsBetter: true },
   drop_payment_failed: { label: "Payments failed", hint: "deals whose first payment failed", lowerIsBetter: true },
   email_clicks: { label: "Email link clicks", hint: "clicks on campaign email links, scanners included" },
+  reply_intents: { label: "Buyer questions and offers", hint: "at least a day old, by the week asked" },
+  reply_24h: { label: "Answered within 24 hours", hint: "by us or the seller" },
+  reply_none: { label: "Never answered", hint: "no reply on ReBattery yet", lowerIsBetter: true },
+  reply_median_hours: { label: "Median hours to first reply", hint: "of those answered", lowerIsBetter: true },
 };
 
 /** A PostHog event, optionally narrowed by one event property, for a recordings link. */
@@ -231,6 +237,8 @@ export type PulseData = {
   /** The latest batch's new suggestions, everything in progress, and the last 60 days of done or dismissed. */
   suggestions: Suggestion[];
   breakdowns: Breakdown[];
+  plan: PlanVersion | null;
+  plan_versions: Omit<PlanVersion, "plan">[];
 };
 
 const OFFER_OPENERS: Record<string, (title: string) => string> = {

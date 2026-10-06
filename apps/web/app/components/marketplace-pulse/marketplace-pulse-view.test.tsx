@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mondayOf, type PulseData } from "@/lib/marketplace-pulse";
+import type { Plan, PlanVersion } from "@/lib/marketplace-pulse-plan";
 import { MarketplacePulseView } from "./marketplace-pulse-view";
 
 const monday = (weeksAgo: number) => {
@@ -11,6 +12,16 @@ const monday = (weeksAgo: number) => {
   day.setUTCDate(day.getUTCDate() - 7 * weeksAgo);
   return day.toISOString().slice(0, 10);
 };
+
+const PLAN: Plan = {
+  target_paid: 9, target_date: "2099-01-05", start: { date: "2026-10-06", paid: 2 },
+  levers: [
+    { id: "answer", name: "Answer every buyer within a day", owner: "Alex", status: "Done", steps: { deal: 0.45 } },
+    { id: "channels", name: "Channels pointed at listings", owner: "Ari", status: "Planned", steps: { visitors: 690, started: 0.1 } },
+  ],
+  channels: [{ channel: "Organic search", goal: 6, owner: "Ari", action: "Model pages" }],
+};
+const OLD: PlanVersion = { id: "v1", plan: { ...PLAN, target_paid: 5 }, created_at: "2026-10-01T10:00:00Z", created_by_name: "Ari" };
 
 const DATA: PulseData = {
   weeks: [
@@ -36,6 +47,8 @@ const DATA: PulseData = {
   ],
   follow_up_error: null,
   sender: "Alex",
+  plan: { id: "v2", plan: PLAN, created_at: "2026-10-06T10:00:00Z", created_by_name: "Alex" },
+  plan_versions: [{ id: "v2", created_at: "2026-10-06T10:00:00Z", created_by_name: "Alex" }, { id: "v1", created_at: OLD.created_at, created_by_name: "Ari" }],
   breakdowns: [
     ...[[2, 100, 60, 6, 3], [1, 120, 70, 8, 2]].flatMap(([ago, reached, viewed, started, sent]) =>
       ([["funnel_reached", reached], ["funnel_viewed", viewed], ["funnel_started", started], ["funnel_sent", sent]] as const).flatMap(([metric, all]) => [
@@ -71,6 +84,10 @@ function mockFetch(calls: Call[]) {
       const one = DATA.suggestions.find((x) => url.endsWith(x.id))!;
       return new Response(JSON.stringify({ suggestion: { ...one, ...body, status_changed_at: "2026-10-06T12:00:00Z" } }));
     }
+    if (url === "/api/marketplace-pulse/plan" && method === "POST") {
+      return new Response(JSON.stringify({ plan: { id: "v3", plan: body!.plan, created_at: "2026-10-07T10:00:00Z", created_by_name: "Alex" } }), { status: 201 });
+    }
+    if (url === "/api/marketplace-pulse/plan/v1") return new Response(JSON.stringify({ plan: OLD }));
     if (url === "/api/marketplace-pulse/buyers") return new Response(JSON.stringify({ person_id: "p9", subscribed: true }), { status: 201 });
     return new Response(JSON.stringify(DATA));
   });
@@ -253,5 +270,72 @@ describe("MarketplacePulseView", () => {
     expect(funnel).toHaveTextContent("Deals createdReBattery1");
     expect(within(funnel).getAllByText(/then, on ReBattery/)).toHaveLength(2);
     expect(within(funnel).getByText(/biggest drop/).parentElement).toHaveTextContent("11% continue");
+  });
+
+  it("shows the plan: target, standing, growth model, what each fix is worth, channels and plan against actual", async () => {
+    vi.stubGlobal("fetch", mockFetch([]));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Plan" }));
+
+    const head = screen.getByRole("region", { name: "Plan" });
+    expect(head).toHaveTextContent("Target: 9.0 paid deals a month by 5 Jan 2099");
+    expect(head).toHaveTextContent("Plan saved 6 Oct 2026 by Alex");
+    expect(head).toHaveTextContent(/On track|Slightly behind|Off track/);
+    const model = screen.getByRole("region", { name: "Growth model" });
+    // Today's deal rate is the planned 45%: no week has deals and sends together, so the first fix fills it in.
+    expect(within(model).getByRole("listitem", { name: "Deal agreed" })).toHaveTextContent("Plan45%");
+    expect(within(model).getByRole("listitem", { name: "Deal agreed" })).toHaveTextContent("Fix: Answer every buyer within a day (Alex)");
+    expect(within(model).getByRole("listitem", { name: "Visitors" })).toHaveTextContent("Plan690");
+    expect(screen.getByRole("region", { name: "What each fix is worth" })).toBeInTheDocument();
+    const channels = screen.getByRole("region", { name: "Channel plan" });
+    // One week with 1 send is about 4 a month.
+    expect(channels).toHaveTextContent("Organic search4 / 6");
+    expect(channels).toHaveTextContent("They are more than 20% apart");
+    expect(channels).toHaveTextContent(/Channel goals add up to 6 sends a month; the model needs \d+/);
+    expect(screen.getByRole("region", { name: "Plan against actual" })).toBeInTheDocument();
+  });
+
+  it("edits the plan into a new version, and restores an older one", async () => {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", mockFetch(calls));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Plan" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit plan" }));
+    const target = screen.getByLabelText("Target paid deals a month");
+    await userEvent.clear(target);
+    await userEvent.type(target, "12");
+    const fix2 = screen.getByRole("group", { name: "Fix 2" });
+    await userEvent.clear(within(fix2).getByLabelText("Started target"));
+    await userEvent.type(within(fix2).getByLabelText("Started target"), "12");
+    await userEvent.click(screen.getByRole("button", { name: "Move fix 2 up" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save as new version" }));
+
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/marketplace-pulse/plan")).toBeDefined());
+    const saved = calls.find((c) => c.url === "/api/marketplace-pulse/plan")!.body!.plan as Plan;
+    expect(saved.target_paid).toBe(12);
+    expect(saved.levers.map((l) => l.id)).toEqual(["channels", "answer"]);
+    expect(saved.levers[0].steps).toEqual({ visitors: 690, started: 0.12 });
+    expect(saved.channels).toEqual(PLAN.channels);
+    expect(await screen.findByText(/Target: 12.0 paid deals a month/)).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Version"), "v1");
+    expect(await screen.findByText(/Viewing an older version, read only/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Plan" })).toHaveTextContent("Target: 5.0");
+    await userEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/marketplace-pulse/plan")).toHaveLength(2));
+    expect((calls.filter((c) => c.url === "/api/marketplace-pulse/plan")[1].body!.plan as Plan).target_paid).toBe(5);
+  });
+
+  it("refuses to save a plan that cannot be right", async () => {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", mockFetch(calls));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit plan" }));
+    await userEvent.type(within(screen.getByRole("group", { name: "Fix 1" })).getByLabelText("Paid target"), "150");
+    await userEvent.click(screen.getByRole("button", { name: "Save as new version" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("between 0% and 100%");
+    expect(calls.some((c) => c.url === "/api/marketplace-pulse/plan")).toBe(false);
   });
 });
