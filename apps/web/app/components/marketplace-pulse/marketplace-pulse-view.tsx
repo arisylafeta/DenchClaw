@@ -10,6 +10,12 @@ import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } 
 type Range = "last" | "current";
 type FunnelRange = "week" | "four";
 
+const shiftWeek = (weekStart: string, by: number) => {
+  const day = new Date(`${weekStart}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + 7 * by);
+  return day.toISOString().slice(0, 10);
+};
+
 const dateLabel = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
 
@@ -46,7 +52,9 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
   const current = weeks.find((w) => w.week_start === thisMonday);
   const selected = range === "current" ? current : complete.at(-1);
   const index = selected ? weeks.indexOf(selected) : -1;
-  const previous = index > 0 ? weeks[index - 1] : undefined;
+  const partial = range === "current";
+  // Compare with the calendar week before, not just the row before, in case a week is missing.
+  const previous = selected ? weeks.find((w) => w.week_start === shiftWeek(selected.week_start, -1)) : undefined;
   const history = index >= 0 ? weeks.slice(Math.max(0, index - 7), index + 1) : [];
   const funnelValues = funnelRange === "four" ? totals(complete.slice(-4), FUNNEL) : selected?.values ?? {};
   const { steps, weakest } = funnel(funnelValues);
@@ -82,15 +90,20 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
       <main className="flex flex-1 flex-col gap-6 overflow-auto px-8 pb-8 pt-6">
         <ErrorText error={loadError} />
         <ErrorText error={saveError} />
-        {data && !weeks.length && (
-          <p className="text-sm">No numbers yet. They arrive after the collector&apos;s first run.</p>
+        {data && !selected && (
+          <p className="text-sm">
+            {weeks.length ? "No numbers for this week yet. They arrive with the collector's next run." : "No numbers yet. They arrive after the collector's first run."}
+          </p>
+        )}
+        {selected && partial && (
+          <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>This week is not over, so there is no comparison or target progress yet.</p>
         )}
 
         {selected && (
           <section aria-label="Scorecard" className="grid grid-cols-2 border md:grid-cols-4" style={{ borderColor: "var(--bt-border)" }}>
             {SCORECARD.map((key) => (
-              <ScoreCell key={key} metric={key} weeks={history} value={selected.values[key]} previous={previous?.values[key]}
-                target={data?.targets[key]} onSaveTarget={(value) => saveTarget(key, value)} />
+              <ScoreCell key={key} metric={key} weeks={history} value={selected.values[key]} previous={partial ? undefined : previous?.values[key]}
+                target={data?.targets[key]} showProgress={!partial} onSaveTarget={(value) => saveTarget(key, value)} />
             ))}
           </section>
         )}
@@ -103,7 +116,7 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
               {(["week", "four"] as const).map((value) => (
                 <button key={value} type="button" aria-pressed={funnelRange === value} onClick={() => setFunnelRange(value)}
                   className={buttonClass} style={funnelRange === value ? { ...buttonStyle, borderColor: "var(--bt-text)" } : buttonStyle}>
-                  {value === "week" ? "This week" : "Last 4 weeks"}
+                  {value === "week" ? `Week of ${weekLabel(selected.week_start)}` : "Last 4 full weeks"}
                 </button>
               ))}
             </div>
@@ -114,7 +127,7 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
                   <span className="h-5" style={{ background: "var(--bt-divider)" }}>
                     <span className="block h-full" style={{ width: `${(step.value / maxStep) * 100}%`, background: i === weakest ? "var(--bt-amber)" : "var(--bt-bar)" }} />
                   </span>
-                  <span className="bt-mono text-right font-semibold">{formatMetric(step.key, step.value)}</span>
+                  <span className="bt-mono text-right font-semibold">{formatMetric(step.key, funnelValues[step.key])}</span>
                   <span style={{ color: i === weakest ? "var(--bt-amber)" : "var(--bt-muted)" }}>
                     {step.rate === null ? "" : `${Math.round(step.rate * 100)}% of the step above`}
                     {i === weakest && <strong> · biggest drop</strong>}
@@ -156,10 +169,11 @@ type ScoreCellProps = {
   value: number | undefined;
   previous: number | undefined;
   target: number | undefined;
+  showProgress: boolean;
   onSaveTarget: (value: number | null) => Promise<void>;
 };
 
-function ScoreCell({ metric, weeks, value, previous, target, onSaveTarget }: ScoreCellProps) {
+function ScoreCell({ metric, weeks, value, previous, target, showProgress, onSaveTarget }: ScoreCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const delta = change(value, previous);
@@ -193,8 +207,8 @@ function ScoreCell({ metric, weeks, value, previous, target, onSaveTarget }: Sco
       ) : (
         <button type="button" onClick={() => { setDraft(target === undefined ? "" : String(target)); setEditing(true); }}
           className="self-start text-xs underline-offset-2 hover:underline"
-          style={{ color: target === undefined ? "var(--bt-muted)" : better ? "var(--bt-green)" : "var(--bt-amber)" }}>
-          {target === undefined ? "Set weekly target" : `Target ${formatMetric(metric, target)}${value !== undefined && target > 0 ? ` · ${Math.round(((value ?? 0) / target) * 100)}%` : ""}`}
+          style={{ color: target === undefined || !showProgress ? "var(--bt-muted)" : better ? "var(--bt-green)" : "var(--bt-amber)" }}>
+          {target === undefined ? "Set weekly target" : `Target ${formatMetric(metric, target)}${showProgress && value !== undefined && target > 0 ? ` · ${Math.round((value / target) * 100)}%` : ""}`}
         </button>
       )}
     </div>

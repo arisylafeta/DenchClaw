@@ -4,7 +4,8 @@ import { isMetricKey, type MetricKey, type PulseWeek } from "../marketplace-puls
 /** The last `count` weeks with numbers, oldest first, and when they were last collected. */
 export async function listWeeks(count = 12): Promise<{ weeks: PulseWeek[]; collected_at: string | null }> {
   const rows = await queryPg<{ week_start: string; metric: string; value: string | null; collected_at: string }>(
-    `select to_char(week_start, 'YYYY-MM-DD') as week_start, metric, value::text, collected_at::text
+    `select to_char(week_start, 'YYYY-MM-DD') as week_start, metric, value::text,
+            to_char(collected_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as collected_at
        from crm_metric_snapshots
       where week_start in (select distinct week_start from crm_metric_snapshots order by week_start desc limit $1)
       order by week_start`,

@@ -44,7 +44,7 @@ POSTHOG_PROJECT = "375247"
 GBP_PER = {"GBP": 1.0, "EUR": 0.86, "USD": 0.75}
 CONTACT_TYPES = ("purchase", "buy_now")
 
-POSTHOG_QUERY = """SELECT toString(toStartOfWeek(timestamp, 1)) AS week,
+POSTHOG_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(timestamp, 'UTC'), 1)) AS week,
   uniqIf(person_id, event IN ('marketplace_page_viewed', 'listing_detail_viewed')) AS visitors,
   uniqIf(person_id, event = 'marketplace_page_viewed') AS browsed,
   uniqIf(person_id, event = 'marketplace_listing_clicked') AS clicked_listing,
@@ -53,7 +53,7 @@ POSTHOG_QUERY = """SELECT toString(toStartOfWeek(timestamp, 1)) AS week,
   uniqIf(person_id, event IN ('listing_message_succeeded', 'listing_offer_succeeded', 'listing_buy_now_succeeded')) AS sent_contact,
   uniqIf(person_id, event = 'jules_started') AS joules_started
 FROM events
-WHERE timestamp >= toDateTime('{start}') AND timestamp < toDateTime('{end}')
+WHERE timestamp >= toDateTime('{start}', 'UTC') AND timestamp < toDateTime('{end}', 'UTC')
   AND toString(properties.$host) IN ('rebattery.io', 'www.rebattery.io')
   AND event IN ('marketplace_page_viewed', 'listing_detail_viewed', 'marketplace_listing_clicked',
     'listing_message_started', 'listing_offer_submitted', 'listing_buy_now_submitted',
@@ -110,10 +110,10 @@ class Platform:
             raise SystemExit(f"platform URL or key missing in {env_path}")
 
     def get(self, table, params):
-        """Every row, a thousand at a time."""
+        """Every row, a thousand at a time, in id order so pages neither repeat nor skip rows."""
         rows, offset = [], 0
         while True:
-            query = urllib.parse.urlencode({**params, "limit": 1000, "offset": offset}, safe="(),.*:!")
+            query = urllib.parse.urlencode({"order": "id", **params, "limit": 1000, "offset": offset}, safe="(),.*:!")
             request = urllib.request.Request(f"{self.url}/rest/v1/{table}?{query}", headers={
                 "apikey": self.key, "Authorization": f"Bearer {self.key}", "Accept": "application/json"})
             with urllib.request.urlopen(request, timeout=60) as response:
@@ -135,10 +135,10 @@ def read_platform(platform):
     data = {
         "deals": platform.get("deals", {"select": "id,status,created_at,cancelled_at,agreed_amount,agreed_currency,"
                                                   "supplier_account_id,counterparty_account_id"}),
-        "payments": platform.get("deal_payment_intents", {"select": "deal_id,status,payment_purpose,captured_at,"
+        "payments": platform.get("deal_payment_intents", {"select": "id,deal_id,status,payment_purpose,captured_at,"
                                                                     "deal_amount,currency"}),
         "offers": platform.get("purchase_offers", {"select": "created_at,buyer_account_id,listing_id"}),
-        "chats": platform.get("conversations", {"select": "created_at,conversation_type,counterparty_account_id"}),
+        "chats": platform.get("conversations", {"select": "created_at,conversation_type,supplier_account_id,counterparty_account_id"}),
         "bids": platform.get("auction_submissions", {"select": "created_at,email"}),
         "listings": platform.get("listings", {"select": "id,listing_status,created_at,supplier_account_id"}),
         "requests": platform.get("battery_requests", {"select": "created_at,status,contact_email"}),
@@ -219,7 +219,8 @@ def platform_metrics(data, weeks, today, exclusions):
         if deal["status"] == "cancelled":
             add("deals_cancelled", deal["cancelled_at"] or deal["created_at"])
     paid = {}
-    for payment in data["payments"]:
+    # The first payment captured for a deal marks it paid.
+    for payment in sorted(data["payments"], key=lambda p: p["captured_at"] or ""):
         if payment["deal_id"] in real_deals and payment["status"] == "captured" and payment["payment_purpose"] == "initial":
             paid.setdefault(payment["deal_id"], payment)
     for payment in paid.values():
@@ -232,7 +233,8 @@ def platform_metrics(data, weeks, today, exclusions):
         if not internal_buyer(offer["buyer_account_id"]) and listing_supplier.get(offer["listing_id"]) not in test_ids:
             add("offers_made", offer["created_at"])
     for chat in data["chats"]:
-        if chat["conversation_type"] in CONTACT_TYPES and not internal_buyer(chat["counterparty_account_id"]):
+        if chat["conversation_type"] in CONTACT_TYPES and not internal_buyer(chat["counterparty_account_id"]) \
+                and chat["supplier_account_id"] not in test_ids:
             add("buyer_chats", chat["created_at"])
     for bid in data["bids"]:
         if not internal_email(bid["email"]):
@@ -273,6 +275,8 @@ def write(conn, numbers):
 def collect(args, today):
     first = dt.date.fromisoformat(args.since) if args.since else monday(today) - dt.timedelta(days=7)
     weeks = weeks_from(first, today)
+    if not weeks:
+        raise SystemExit("--since is after today")
     numbers = platform_metrics(read_platform(Platform()), weeks, today, load_exclusions())
     posthog_error = None
     try:

@@ -61,11 +61,14 @@ describe("MarketplacePulseView", () => {
     const funnel = screen.getByRole("region", { name: "Funnel" });
     expect(within(funnel).getByText(/11% of the step above/)).toHaveTextContent("biggest drop");
 
-    await userEvent.click(within(funnel).getByRole("button", { name: "Last 4 weeks" }));
+    await userEvent.click(within(funnel).getByRole("button", { name: "Last 4 full weeks" }));
     expect(funnel).toHaveTextContent("Visitors220");
 
     await userEvent.click(screen.getByRole("tab", { name: "This week so far" }));
-    expect(screen.getByRole("region", { name: "Scorecard" })).toHaveTextContent("Live listings542");
+    const partial = screen.getByRole("region", { name: "Scorecard" });
+    expect(partial).toHaveTextContent("Live listings542");
+    expect(partial).not.toHaveTextContent("vs week before");
+    expect(within(partial).getByRole("button", { name: "Target 150" })).toBeInTheDocument();
   });
 
   it("lists buyers in the order given, with their latest signal, and opens a CRM person", async () => {

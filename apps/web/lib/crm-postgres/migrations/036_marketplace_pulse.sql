@@ -19,12 +19,19 @@ create table if not exists crm_metric_targets (
   updated_by text
 );
 
+-- One row per week, for the workspace's generic object loader, which needs id, created_at and
+-- updated_at before it hands over to the Marketplace Pulse screen.
+create or replace view crm_marketplace_pulse_weeks as
+  select week_start::text as id, week_start, min(collected_at) as created_at, max(collected_at) as updated_at
+    from crm_metric_snapshots
+   group by week_start;
+
 -- Sidebar entry. The workspace shows the Marketplace Pulse screen for this object instead of the
 -- generic table, and generic edits are refused (immutable).
 insert into crm_objects
   (id, name, entity_table, description, default_view, immutable, hidden_in_sidebar, sort_order)
 values
-  ('reb_marketplace_pulse_object', 'marketplace_pulse', 'crm_metric_snapshots',
+  ('reb_marketplace_pulse_object', 'marketplace_pulse', 'crm_marketplace_pulse_weeks',
    'Weekly marketplace funnel, targets, and buyers to follow up',
    'table', true, false, 4)
 on conflict (name) do update set
