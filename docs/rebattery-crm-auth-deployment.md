@@ -32,6 +32,12 @@ return `404 Unknown or unconfigured profile`. Inspect
 `hermes gateway migrate --multiplex --dry-run`, back up affected settings, and
 resolve credential ownership before an authorized migration/restart.
 
+Each named profile also needs an explicitly provisioned `API_SERVER_KEY` that
+authorizes the trusted DenchClaw service's `HERMES_API_KEY`. Hermes deliberately
+does not inherit the gateway owner's API key for `/p/<profile>/` requests.
+This local API authorization is separate from Discord or provider credentials;
+do not copy those credentials to resolve an API authentication failure.
+
 The Hermes adapter emits AI SDK `UIMessageChunk` events. An error chunk contains
 `type: "error"` and `errorText`, not an HTTP `status` property. Preserve the
 upstream failure text without turning it into a client schema-validation error.
