@@ -200,6 +200,24 @@ Launch retains its provider guard for suppressions arriving after freeze.
 The candidate cap remains 500; audience selection, tags and reply handling
 are unchanged. No schema migration or provider suppression creation is needed.
 
+### Personalised sends and the launch cap
+
+A manifest may map template variables to the People columns `first_name`,
+`last_name` and `opening` with `"personalization": {"first_name": "first_name"}`.
+`freeze` renders each recipient's subject, HTML and text from those columns and
+`campaign_variables`, stores them in `crm_campaign_sends` (migration
+`035_campaign_personalization.sql`) and binds them into the approval digest.
+A missing value stops the freeze; recipients without a name belong in a separate
+campaign whose template has no name variable. `launch` sends the frozen bodies,
+never re-rendering, and requires `--max-recipients <n>`, which caps one invocation
+in recipient-email order. A pilot is the same approved campaign launched with a
+small cap first; a second launch sends the rest. `launch` refuses to run while any
+send is `sending` or `unknown`.
+
+`scripts/rebattery/postmark_suppression_sync.py` runs the CLI from the release
+checkout named above, so after a CLI change merges, fast-forward that checkout to
+`origin/main` or the scheduled job keeps the old code.
+
 The dump API returns the entire unfiltered set without pagination:
 [Postmark suppression API](https://postmarkapp.com/developer/api/suppressions-api).
 Run the campaign regressions against a disposable CRM database:
