@@ -8,7 +8,7 @@ export type MetricKey =
   | "listings_live" | "listings_new" | "sell_requests" | "joules_started"
   | "drop_no_price" | "drop_search_no_exact" | "drop_signin_wall" | "signup_submitted" | "buyer_signups"
   | "drop_signup_captcha" | "drop_signup_registered" | "drop_signup_other" | "drop_contact_error"
-  | "drop_offers_expired" | "drop_payment_failed";
+  | "drop_offers_expired" | "drop_payment_failed" | "email_clicks";
 
 type Metric = { label: string; hint: string; money?: boolean; lowerIsBetter?: boolean };
 
@@ -41,6 +41,7 @@ export const METRICS: Record<MetricKey, Metric> = {
   drop_contact_error: { label: "Message, offer or buy-now errored", hint: "people who hit an error sending", lowerIsBetter: true },
   drop_offers_expired: { label: "Offers expired unanswered", hint: "offers that ran out before the seller replied", lowerIsBetter: true },
   drop_payment_failed: { label: "Payments failed", hint: "deals whose first payment failed", lowerIsBetter: true },
+  email_clicks: { label: "Email link clicks", hint: "clicks on campaign email links, scanners included" },
 };
 
 /** A PostHog event, optionally narrowed by one event property, for a recordings link. */
@@ -187,6 +188,27 @@ export type Suggestion = {
   status_changed_at: string | null;
 };
 
+/** A weekly number split by a dimension: a channel, a landing page type, a referring site. */
+export type Breakdown = { week_start: string; metric: string; dimension: string; value: number };
+
+/** Acquisition channels in their fixed colour order (slot 1 to 7); colour follows the channel, never its rank. */
+export const CHANNELS = ["Organic search", "Direct", "AI chat", "Referral", "Paid", "Email", "Other"] as const;
+export const channelColor = (channel: string) => `var(--viz-${Math.max(0, CHANNELS.indexOf(channel as (typeof CHANNELS)[number])) + 1})`;
+
+export const LANDING_PAGES = [
+  "Listing page", "Catalogue", "Auction page", "Home", "Sell or recycle pages", "Quotes and Joules", "Signed-in app", "Guides", "Other", "Unknown",
+] as const;
+
+/** Adds up a breakdown metric by dimension over the given weeks. */
+export function sumBy(rows: Breakdown[], metric: string, weeks: string[]): Map<string, number> {
+  const wanted = new Set(weeks);
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    if (row.metric === metric && wanted.has(row.week_start)) out.set(row.dimension, (out.get(row.dimension) ?? 0) + row.value);
+  }
+  return out;
+}
+
 export type PulseData = {
   weeks: PulseWeek[];
   targets: Partial<Record<MetricKey, number>>;
@@ -198,6 +220,7 @@ export type PulseData = {
   sender: string;
   /** The latest batch's new suggestions, everything in progress, and the last 60 days of done or dismissed. */
   suggestions: Suggestion[];
+  breakdowns: Breakdown[];
 };
 
 const OFFER_OPENERS: Record<string, (title: string) => string> = {

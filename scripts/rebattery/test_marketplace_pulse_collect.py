@@ -96,16 +96,41 @@ class Collect(unittest.TestCase):
             if metrics is pulse.DROP_METRICS:
                 raise RuntimeError("HogQL error")
             return {WEEK: {metric: 7 for metric in metrics}}
-        saved = (pulse.read_posthog, pulse.read_platform, pulse.Platform, pulse.load_exclusions)
+        saved = (pulse.read_posthog, pulse.read_platform, pulse.Platform, pulse.load_exclusions, pulse.read_breakdowns)
         pulse.read_posthog, pulse.read_platform = fake_posthog, lambda platform: data()
         pulse.Platform, pulse.load_exclusions = lambda: None, lambda: EXCLUSIONS
+        pulse.read_breakdowns = lambda start, end: [(WEEK, "channel_visitors", "Direct", 3), (dt.date(2020, 1, 6), "channel_visitors", "Direct", 9)]
         try:
-            numbers, error = pulse.collect(type("Args", (), {"since": None})(), dt.date(2026, 10, 1))
+            numbers, breakdowns, error = pulse.collect(type("Args", (), {"since": None})(), dt.date(2026, 10, 1))
         finally:
-            pulse.read_posthog, pulse.read_platform, pulse.Platform, pulse.load_exclusions = saved
+            pulse.read_posthog, pulse.read_platform, pulse.Platform, pulse.load_exclusions, pulse.read_breakdowns = saved
         self.assertEqual(numbers[WEEK]["visitors"], 7)
         self.assertNotIn("drop_no_price", numbers[WEEK])
         self.assertIn("drop-off read failed", error)
+        # Only breakdowns for the weeks being written are kept.
+        self.assertEqual(breakdowns, [(WEEK, "channel_visitors", "Direct", 3)])
+
+    def test_breakdowns_make_the_ordered_funnel_cumulative_and_keep_the_top_referrers(self):
+        def rows(template, start, end):
+            if template is pulse.ORDERED_QUERY:
+                return [{"week": "2026-09-28", "dimension": "Direct", "level": 4, "people": 1},
+                        {"week": "2026-09-28", "dimension": "Direct", "level": 2, "people": 5},
+                        {"week": "2026-09-28", "dimension": "AI chat", "level": 1, "people": 3},
+                        {"week": "2026-09-28", "dimension": "AI chat", "level": 0, "people": 9}]
+            if template is pulse.REFERRER_QUERY:
+                return [{"week": "2026-09-28", "dimension": f"site{i}.com", "visitors": i} for i in range(20)] + \
+                       [{"week": "2026-09-28", "dimension": None, "visitors": 50}]
+            return [{"week": "2026-09-28", "dimension": "Direct", "visitors": 10, "viewed": 4, "started": 2, "sent": 1}]
+        out = {(m, d): v for _, m, d, v in pulse.read_breakdowns(WEEK, WEEK, rows=rows)}
+        self.assertEqual([out.get((step, "All")) for step in pulse.FUNNEL_STEPS], [9, 6, 1, 1])
+        self.assertEqual([out.get((step, "Direct")) for step in pulse.FUNNEL_STEPS], [6, 6, 1, 1])
+        self.assertEqual(out[("funnel_reached", "AI chat")], 3)
+        self.assertNotIn(("funnel_viewed", "AI chat"), out)
+        self.assertEqual(out[("channel_viewed", "Direct")], 4)
+        self.assertEqual(out[("landing_sent", "Direct")], 1)
+        referrers = sorted(d for m, d in out if m == "referrer_visitors")
+        self.assertEqual(len(referrers), pulse.TOP_REFERRERS)
+        self.assertNotIn("site0.com", referrers)
 
 
 if __name__ == "__main__":

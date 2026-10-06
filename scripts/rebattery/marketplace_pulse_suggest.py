@@ -49,6 +49,7 @@ DEFINITIONS = {
     "drop_contact_error": "people who hit an error sending a message, offer or buy-now",
     "drop_offers_expired": "offers that expired before the seller replied",
     "drop_payment_failed": "deals whose first payment failed",
+    "email_clicks": "clicks on campaign email links (those visits show as Direct, not Email)",
 }
 MAX_PER_BATCH = 5
 
@@ -60,10 +61,19 @@ def last_full_week(today):
 def context(conn, today):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""select to_char(week_start, 'YYYY-MM-DD') as week, metric, value::float as value
-                         from crm_metric_snapshots where week_start >= %s order by week_start, metric""",
+                         from crm_metric_snapshots where dimension = '' and week_start >= %s order by week_start, metric""",
                     (today - dt.timedelta(days=63),))
-        weeks = {}
+        weekly = cur.fetchall()
+        # The last four full weeks by acquisition channel and landing page type, people added up per week.
+        cur.execute("""select metric, dimension, sum(value)::float as value from crm_metric_snapshots
+                        where dimension <> '' and metric similar to '(channel|landing)\\_%%' and week_start between %s and %s
+                        group by metric, dimension order by metric, dimension""",
+                    (last_full_week(today) - dt.timedelta(days=21), last_full_week(today)))
+        splits = {}
         for row in cur.fetchall():
+            splits.setdefault(row["metric"], {})[row["dimension"]] = row["value"]
+        weeks = {}
+        for row in weekly:
             weeks.setdefault(row["week"], {})[row["metric"]] = row["value"]
         cur.execute("select metric, weekly_target::float as target from crm_metric_targets order by metric")
         targets = {row["metric"]: row["target"] for row in cur.fetchall()}
@@ -81,6 +91,7 @@ def context(conn, today):
         "note": "Weeks start Monday (UTC). The current week is partial. People are counted once per week.",
         "definitions": DEFINITIONS,
         "weeks": weeks,
+        "last_4_weeks_by_channel_and_landing_page": splits,
         "targets": targets,
         "past_suggestions": past,
     }
@@ -112,7 +123,7 @@ def validate(items, metrics):
 def save(conn, items, today):
     week = last_full_week(today)
     with conn.cursor() as cur:
-        cur.execute("select distinct metric from crm_metric_snapshots")
+        cur.execute("select distinct metric from crm_metric_snapshots where dimension = ''")
         metrics = {row[0] for row in cur.fetchall()}
         clean = validate(items, metrics)
         cur.execute("delete from crm_pulse_suggestions where batch = %s and status = 'New'", (today,))
@@ -123,7 +134,7 @@ def save(conn, items, today):
         for item in clean:
             before = None
             if item["metric"]:
-                cur.execute("select value from crm_metric_snapshots where week_start = %s and metric = %s", (week, item["metric"]))
+                cur.execute("select value from crm_metric_snapshots where week_start = %s and metric = %s and dimension = ''", (week, item["metric"]))
                 row = cur.fetchone()
                 before = row[0] if row else None
             cur.execute(

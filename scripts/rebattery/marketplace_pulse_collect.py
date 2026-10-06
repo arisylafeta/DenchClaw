@@ -15,7 +15,8 @@ Weeks start on Monday, UTC. Sources, both read-only:
   are left out using apps/web/lib/marketplace-pulse-exclusions.json. ReBattery's own listings count.
   Paid value is the deal amount (what the goods sold for), not the payer total with fees.
 
-Writes crm_metric_snapshots (aggregates only, no people). listings_live is a count at collection
+Writes crm_metric_snapshots (aggregates only, no people): weekly numbers with dimension '', and
+breakdowns by acquisition channel, landing page type, referring site, and an ordered funnel by channel. listings_live is a count at collection
 time, so it is written for the current week only. When PostHog cannot be read, the platform numbers
 are still written and the script exits 1.
 """
@@ -64,6 +65,8 @@ POSTHOG_METRICS = ("visitors", "browsed", "clicked_listing", "viewed_listing", "
 
 # Where buyers drop off, as distinct people per week. Names start with drop_ (or are sign-in steps).
 # PostHog's auth_completed under-fires, so new buyer accounts come from the platform instead.
+# email_clicks counts clicks through campaign links (/c/...), which redirect without a referrer, so
+# those visits land as Direct.
 DROP_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(timestamp, 'UTC'), 1)) AS week,
   uniqIf(person_id, event = 'listing_detail_viewed' AND toString(properties.price_visibility) = 'offer_only') AS drop_no_price,
   uniqIf(person_id, event = 'marketplace_search_outcome' AND toString(properties.outcome) != 'exact_results') AS drop_search_no_exact,
@@ -72,16 +75,82 @@ DROP_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(timestamp, 'UTC'), 1)) 
   uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) = 'turnstile_failed') AS drop_signup_captcha,
   uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) = 'user_already_registered') AS drop_signup_registered,
   uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) NOT IN ('turnstile_failed', 'user_already_registered')) AS drop_signup_other,
-  uniqIf(person_id, event IN ('listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')) AS drop_contact_error
+  uniqIf(person_id, event IN ('listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')) AS drop_contact_error,
+  countIf(event = 'campaign_link_clicked') AS email_clicks
 FROM events
 WHERE timestamp >= toDateTime('{start}', 'UTC') AND timestamp < toDateTime('{end}', 'UTC')
-  AND toString(properties.$host) IN ('rebattery.io', 'www.rebattery.io')
-  AND event IN ('listing_detail_viewed', 'marketplace_search_outcome', 'auth_dialog_viewed', 'auth_signup_submitted',
+  AND (toString(properties.$host) IN ('rebattery.io', 'www.rebattery.io') OR event = 'campaign_link_clicked')
+  AND event IN ('campaign_link_clicked', 'listing_detail_viewed', 'marketplace_search_outcome', 'auth_dialog_viewed', 'auth_signup_submitted',
     'auth_signup_failed', 'listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')
   AND {{filters}}
 GROUP BY week ORDER BY week"""
+# Breakdowns, stored with a dimension. Channels and landing pages come from the PostHog session.
+CHANNEL = """multiIf(
+    e.session.$entry_referring_domain LIKE '%pstmrk.it' OR e.session.$entry_referring_domain LIKE '%mail.%'
+      OR e.session.$entry_referring_domain LIKE '%titan.email' OR e.session.$entry_referring_domain LIKE '%outlook.%', 'Email',
+    e.session.$channel_type = 'Referral' AND e.session.$entry_referring_domain LIKE '%rebattery.io', 'Direct',
+    e.session.$channel_type = 'Organic Search', 'Organic search',
+    e.session.$channel_type = 'Direct', 'Direct',
+    e.session.$channel_type = 'AI', 'AI chat',
+    e.session.$channel_type = 'Referral', 'Referral',
+    e.session.$channel_type LIKE 'Paid%' OR e.session.$channel_type = 'Cross Network', 'Paid',
+    e.session.$channel_type = 'Email', 'Email',
+    'Other')"""
+LANDING = """multiIf(
+    e.session.$entry_pathname IS NULL, 'Unknown',
+    e.session.$entry_pathname = '/', 'Home',
+    e.session.$entry_pathname LIKE '/marketplace/auctions%', 'Auction page',
+    e.session.$entry_pathname = '/marketplace' OR e.session.$entry_pathname LIKE '/marketplace/listings%', 'Catalogue',
+    e.session.$entry_pathname LIKE '/marketplace/%', 'Listing page',
+    e.session.$entry_pathname LIKE '/sell%' OR e.session.$entry_pathname LIKE '/recycl%', 'Sell or recycle pages',
+    e.session.$entry_pathname LIKE '/joules%' OR e.session.$entry_pathname LIKE '/get-quote%' OR e.session.$entry_pathname LIKE '/request-quote%', 'Quotes and Joules',
+    match(e.session.$entry_pathname, '^/(onboarding|buyer|supplier|deals|checkout|conversations|account|dashboard)'), 'Signed-in app',
+    match(e.session.$entry_pathname, '^/(guides|blog|learn)'), 'Guides',
+    'Other')"""
+STARTED = "('listing_message_started', 'listing_offer_submitted', 'listing_buy_now_submitted')"
+SENT = "('listing_message_succeeded', 'listing_offer_succeeded', 'listing_buy_now_succeeded')"
+SPLIT_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(e.timestamp, 'UTC'), 1)) AS week, {dimension} AS dimension,
+  uniq(e.person_id) AS visitors,
+  uniqIf(e.person_id, e.event = 'listing_detail_viewed') AS viewed,
+  uniqIf(e.person_id, e.event IN """ + STARTED + """) AS started,
+  uniqIf(e.person_id, e.event IN """ + SENT + """) AS sent
+FROM events e
+WHERE e.timestamp >= toDateTime('{start}', 'UTC') AND e.timestamp < toDateTime('{end}', 'UTC')
+  AND toString(e.properties.$host) IN ('rebattery.io', 'www.rebattery.io')
+  AND {{filters}}
+GROUP BY week, dimension"""
+# A true ordered funnel per person and week (steps in order within the week), with the channel of
+# the person's first marketplace event that week. Each person-week is counted once.
+ORDERED_QUERY = """SELECT week, dimension, level, count() AS people FROM (
+  SELECT e.person_id, toString(toStartOfWeek(toTimeZone(e.timestamp, 'UTC'), 1)) AS week,
+    argMin(""" + CHANNEL + """, e.timestamp) AS dimension,
+    windowFunnel(604800)(toDateTime(e.timestamp),
+      e.event IN ('marketplace_page_viewed', 'listing_detail_viewed'),
+      e.event = 'listing_detail_viewed',
+      e.event IN """ + STARTED + """,
+      e.event IN """ + SENT + """) AS level
+  FROM events e
+  WHERE e.timestamp >= toDateTime('{start}', 'UTC') AND e.timestamp < toDateTime('{end}', 'UTC')
+    AND toString(e.properties.$host) IN ('rebattery.io', 'www.rebattery.io')
+    AND e.event IN ('marketplace_page_viewed', 'listing_detail_viewed', 'listing_message_started', 'listing_offer_submitted',
+      'listing_buy_now_submitted', 'listing_message_succeeded', 'listing_offer_succeeded', 'listing_buy_now_succeeded')
+    AND {{filters}}
+  GROUP BY e.person_id, week)
+GROUP BY week, dimension, level"""
+REFERRER_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(e.timestamp, 'UTC'), 1)) AS week,
+  e.session.$entry_referring_domain AS dimension, uniq(e.person_id) AS visitors
+FROM events e
+WHERE e.timestamp >= toDateTime('{start}', 'UTC') AND e.timestamp < toDateTime('{end}', 'UTC')
+  AND toString(e.properties.$host) IN ('rebattery.io', 'www.rebattery.io')
+  AND e.session.$channel_type IN ('Referral', 'AI') AND e.session.$entry_referring_domain NOT LIKE '%rebattery.io'
+  AND e.session.$entry_referring_domain != '$direct'
+  AND {{filters}}
+GROUP BY week, dimension"""
+FUNNEL_STEPS = ("funnel_reached", "funnel_viewed", "funnel_started", "funnel_sent")
+TOP_REFERRERS = 15
+
 DROP_METRICS = ("drop_no_price", "drop_search_no_exact", "drop_signin_wall", "signup_submitted", "drop_signup_captcha",
-                "drop_signup_registered", "drop_signup_other", "drop_contact_error")
+                "drop_signup_registered", "drop_signup_other", "drop_contact_error", "email_clicks")
 
 
 def monday(day):
@@ -189,6 +258,14 @@ def posthog_credentials(path=POSTHOG_CREDENTIALS):
 
 def read_posthog(start, end, credentials=None, attempts=3, template=POSTHOG_QUERY, metrics=POSTHOG_METRICS):
     """{week: {metric: people}} for [start, end), Mondays only."""
+    weeks = {}
+    for values in posthog_rows(template, start, end, credentials, attempts):
+        weeks[dt.date.fromisoformat(values["week"][:10])] = {metric: int(values[metric]) for metric in metrics}
+    return weeks
+
+
+def posthog_rows(template, start, end, credentials=None, attempts=3):
+    """The rows of a HogQL query over [start, end), as dicts."""
     host, token = credentials or posthog_credentials()
     query = template.format(start=f"{start} 00:00:00", end=f"{end} 00:00:00").replace("{{filters}}", "{filters}")
     body = json.dumps({"query": {"kind": "HogQLQuery", "filters": {"filterTestAccounts": True}, "query": query}}).encode()
@@ -204,12 +281,38 @@ def read_posthog(start, end, credentials=None, attempts=3, template=POSTHOG_QUER
             if err.code < 500 or attempt == attempts - 1:
                 raise
             time.sleep(10 * (attempt + 1))
-    columns = payload["columns"]
-    weeks = {}
-    for row in payload["results"]:
-        values = dict(zip(columns, row))
-        weeks[dt.date.fromisoformat(values["week"][:10])] = {metric: int(values[metric]) for metric in metrics}
-    return weeks
+    return [dict(zip(payload["columns"], row)) for row in payload["results"]]
+
+
+def read_breakdowns(start, end, rows=posthog_rows):
+    """[(week, metric, dimension, value)] for channels, landing pages, the ordered funnel and referrers."""
+    out = []
+    week_of_row = lambda row: dt.date.fromisoformat(row["week"][:10])  # noqa: E731
+    for prefix, dimension in (("channel", CHANNEL), ("landing", LANDING)):
+        for row in rows(SPLIT_QUERY.replace("{dimension}", dimension), start, end):
+            for step in ("visitors", "viewed", "started", "sent"):
+                out.append((week_of_row(row), f"{prefix}_{step}", row["dimension"], int(row[step])))
+    # Level n means the person reached step n; a step counts everyone at that level or beyond.
+    levels = defaultdict(int)
+    for row in rows(ORDERED_QUERY, start, end):
+        if int(row["level"]) > 0:
+            levels[(week_of_row(row), row["dimension"], int(row["level"]))] += int(row["people"])
+    for (week, channel, level), people in levels.items():
+        for step in range(level):
+            for dimension in (channel, "All"):
+                out.append((week, FUNNEL_STEPS[step], dimension, people))
+    referrers = defaultdict(list)
+    for row in rows(REFERRER_QUERY, start, end):
+        if row["dimension"]:
+            referrers[week_of_row(row)].append((int(row["visitors"]), row["dimension"]))
+    for week, domains in referrers.items():
+        for visitors, domain in sorted(domains, reverse=True)[:TOP_REFERRERS]:
+            out.append((week, "referrer_visitors", domain, visitors))
+    # The funnel steps were added once per level; fold them into one number each.
+    totals = defaultdict(int)
+    for week, metric, dimension, value in out:
+        totals[(week, metric, dimension)] += value
+    return [(week, metric, dimension, value) for (week, metric, dimension), value in totals.items()]
 
 
 # ---------------------------------------------------------------------------
@@ -299,15 +402,24 @@ def platform_metrics(data, weeks, today, exclusions):
 # Writing
 # ---------------------------------------------------------------------------
 
-def write(conn, numbers):
+def write(conn, numbers, breakdowns=None):
+    """Upserts weekly numbers. Breakdowns, when read, replace those weeks' breakdown rows."""
     with conn.cursor() as cur:
         for week, metrics in numbers.items():
             for metric, value in metrics.items():
                 cur.execute(
-                    """insert into crm_metric_snapshots (week_start, metric, value, collected_at)
-                       values (%s, %s, %s, now())
-                       on conflict (week_start, metric) do update set value = excluded.value, collected_at = now()""",
+                    """insert into crm_metric_snapshots (week_start, metric, dimension, value, collected_at)
+                       values (%s, %s, '', %s, now())
+                       on conflict (week_start, metric, dimension) do update set value = excluded.value, collected_at = now()""",
                     (week, metric, value))
+        if breakdowns is not None:
+            # A channel that drops to nothing must not linger with last run's number.
+            cur.execute("delete from crm_metric_snapshots where week_start = any(%s) and dimension <> ''", (list(numbers),))
+            for week, metric, dimension, value in breakdowns:
+                cur.execute(
+                    """insert into crm_metric_snapshots (week_start, metric, dimension, value, collected_at)
+                       values (%s, %s, %s, %s, now())""",
+                    (week, metric, dimension, value))
     conn.commit()
 
 
@@ -328,7 +440,12 @@ def collect(args, today):
             continue
         for week in weeks:
             numbers[week].update(people.get(week, {metric: 0 for metric in metrics}))
-    return numbers, "; ".join(errors) or None
+    breakdowns = None
+    try:
+        breakdowns = [row for row in read_breakdowns(weeks[0], end) if row[0] in numbers]
+    except Exception as err:  # noqa: BLE001 - the weekly numbers are still worth writing
+        errors.append(f"PostHog breakdown read failed: {err}")
+    return numbers, breakdowns, "; ".join(errors) or None
 
 
 def main():
@@ -338,17 +455,19 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="print the numbers and write nothing")
     args = parser.parse_args()
     today = dt.datetime.now(dt.timezone.utc).date()
-    numbers, posthog_error = collect(args, today)
+    numbers, breakdowns, posthog_error = collect(args, today)
     if args.dry_run:
         for week, metrics in numbers.items():
             print(week, json.dumps(metrics, sort_keys=True))
+        for row in breakdowns or []:
+            print(*row)
     else:
         conn = psycopg2.connect(args.dsn)
         try:
-            write(conn, numbers)
+            write(conn, numbers, breakdowns)
         finally:
             conn.close()
-        print(f"Wrote {sum(len(m) for m in numbers.values())} numbers for {len(numbers)} weeks.")
+        print(f"Wrote {sum(len(m) for m in numbers.values())} numbers and {len(breakdowns or [])} breakdowns for {len(numbers)} weeks.")
     if posthog_error:
         print(posthog_error, file=sys.stderr)
         return 1

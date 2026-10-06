@@ -2,16 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  FUNNEL, METRICS, OTHER_METRICS, SCORECARD, change, formatMetric, funnel, mondayOf, totals, weekLabel,
+  METRICS, OTHER_METRICS, SCORECARD, change, formatMetric, mondayOf, weekLabel,
   type MetricKey, type PulseData, type PulseWeek,
 } from "@/lib/marketplace-pulse";
+import { Acquisition } from "./acquisition";
 import { DropOffs } from "./drop-offs";
+import { OrderedFunnel } from "./ordered-funnel";
+import { Trends } from "./trends";
 import { FollowUps, WaitingOnUs } from "./follow-ups";
 import { Suggestions } from "./suggestions";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 
 type Range = "last" | "current";
-type FunnelRange = "week" | "four";
+type View = "act" | "funnel" | "acquisition" | "trends";
+const VIEWS: [View, string][] = [["act", "Act"], ["funnel", "Funnel"], ["acquisition", "Acquisition"], ["trends", "Trends"]];
+const VIEW_KEY = "marketplace-pulse:view";
 
 const shiftWeek = (weekStart: string, by: number) => {
   const day = new Date(`${weekStart}T00:00:00Z`);
@@ -27,7 +32,19 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [range, setRange] = useState<Range>("last");
-  const [funnelRange, setFunnelRange] = useState<FunnelRange>("week");
+  const [view, setView] = useState<View>("act");
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(VIEW_KEY);
+      if (VIEWS.some(([value]) => value === stored)) setView(stored as View);
+    } catch { /* per-viewer convenience only */ }
+  }, []);
+
+  function switchView(next: View) {
+    setView(next);
+    try { window.localStorage.setItem(VIEW_KEY, next); } catch { /* per-viewer convenience only */ }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -59,9 +76,6 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
   // Compare with the calendar week before, not just the row before, in case a week is missing.
   const previous = selected ? weeks.find((w) => w.week_start === shiftWeek(selected.week_start, -1)) : undefined;
   const history = index >= 0 ? weeks.slice(Math.max(0, index - 7), index + 1) : [];
-  const funnelValues = funnelRange === "four" ? totals(complete.slice(-4), FUNNEL) : selected?.values ?? {};
-  const { steps, weakest } = funnel(funnelValues);
-  const maxStep = Math.max(1, ...steps.map((s) => s.value));
 
   const tab = (value: Range, label: string) => (
     <button type="button" role="tab" aria-selected={range === value} onClick={() => setRange(value)}
@@ -111,55 +125,43 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
           </section>
         )}
 
-        {selected && (
-          <section aria-label="Funnel" className="border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-            <div className="mb-3 flex items-center gap-3">
-              <h2 className="text-[15px] font-semibold">Funnel</h2>
-              <span className="flex-1" />
-              {(["week", "four"] as const).map((value) => (
-                <button key={value} type="button" aria-pressed={funnelRange === value} onClick={() => setFunnelRange(value)}
-                  className={buttonClass} style={funnelRange === value ? { ...buttonStyle, borderColor: "var(--bt-text)" } : buttonStyle}>
-                  {value === "week" ? `Week of ${weekLabel(selected.week_start)}` : "Last 4 full weeks"}
-                </button>
-              ))}
-            </div>
-            <ol className="flex flex-col gap-1.5">
-              {steps.map((step, i) => (
-                <li key={step.key} className="grid grid-cols-[200px_1fr_70px_150px] items-center gap-3 text-[13px]">
-                  <span>{METRICS[step.key].label}</span>
-                  <span className="h-5" style={{ background: "var(--bt-divider)" }}>
-                    <span className="block h-full" style={{ width: `${(step.value / maxStep) * 100}%`, background: i === weakest ? "var(--bt-amber)" : "var(--bt-bar)" }} />
-                  </span>
-                  <span className="bt-mono text-right font-semibold">{formatMetric(step.key, funnelValues[step.key])}</span>
-                  <span style={{ color: i === weakest ? "var(--bt-amber)" : "var(--bt-muted)" }}>
-                    {step.rate === null ? "" : `${Math.round(step.rate * 100)}% of the step above`}
-                    {i === weakest && <strong> · biggest drop</strong>}
-                  </span>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-3 text-xs" style={{ color: "var(--bt-muted)" }}>
-              People are counted once a week, so 4 weeks adds up weekly counts. Deals and paid deals come from ReBattery, not PostHog.
-              PostHog has no bot filter yet, so visitors may include some bots.
-            </p>
-          </section>
+        <div role="tablist" aria-label="Sections" className="flex items-center gap-1 border-b" style={{ borderColor: "var(--bt-border)" }}>
+          {VIEWS.map(([value, label]) => (
+            <button key={value} type="button" role="tab" aria-selected={view === value} onClick={() => switchView(value)}
+              className="-mb-px border-b-2 px-3.5 py-2.5 text-sm"
+              style={view === value
+                ? { borderColor: "var(--bt-text)", color: "var(--bt-text)", fontWeight: 600 }
+                : { borderColor: "transparent", color: "var(--bt-muted)", fontWeight: 500 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {data && view === "act" && (
+          <>
+            <Suggestions suggestions={data.suggestions} latest={complete.at(-1)}
+              onChange={(next) => setData((current) => current && { ...current, suggestions: current.suggestions.map((s) => (s.id === next.id ? next : s)) })} />
+            {!!data.waiting.length && <WaitingOnUs items={data.waiting} />}
+            <FollowUps list={data.follow_ups} error={data.follow_up_error} sender={data.sender} onOpenPerson={onOpenPerson}
+              onChange={(next) => setData((current) => current && { ...current, follow_ups: current.follow_ups.map((f) => (f.key === next.key ? next : f)) })} />
+          </>
         )}
 
-        {data && (
-          <Suggestions suggestions={data.suggestions} latest={complete.at(-1)}
-            onChange={(next) => setData((current) => current && { ...current, suggestions: current.suggestions.map((s) => (s.id === next.id ? next : s)) })} />
+        {data && view === "funnel" && (
+          <>
+            <OrderedFunnel breakdowns={data.breakdowns} weeks={complete} />
+            {selected && <DropOffs week={selected} weekLabel={weekLabel(selected.week_start)} lastFour={complete.slice(-4)} />}
+          </>
         )}
 
-        {selected && <DropOffs week={selected} weekLabel={weekLabel(selected.week_start)} lastFour={complete.slice(-4)} />}
+        {data && view === "acquisition" && <Acquisition breakdowns={data.breakdowns} weeks={complete} />}
 
-        {data && !!data.waiting.length && <WaitingOnUs items={data.waiting} />}
-
-        {data && (
-          <FollowUps list={data.follow_ups} error={data.follow_up_error} sender={data.sender} onOpenPerson={onOpenPerson}
-            onChange={(next) => setData((current) => current && { ...current, follow_ups: current.follow_ups.map((f) => (f.key === next.key ? next : f)) })} />
+        {data && view === "trends" && (
+          <>
+            <Trends weeks={complete} targets={data.targets} />
+            {selected && <History weeks={history} targets={data.targets} />}
+          </>
         )}
-
-        {selected && <History weeks={history} targets={data?.targets ?? {}} />}
       </main>
     </div>
   );

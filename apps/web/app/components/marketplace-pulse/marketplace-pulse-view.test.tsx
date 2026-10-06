@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mondayOf, type PulseData } from "@/lib/marketplace-pulse";
@@ -36,6 +36,20 @@ const DATA: PulseData = {
   ],
   follow_up_error: null,
   sender: "Alex",
+  breakdowns: [
+    ...[[2, 100, 60, 6, 3], [1, 120, 70, 8, 2]].flatMap(([ago, reached, viewed, started, sent]) =>
+      ([["funnel_reached", reached], ["funnel_viewed", viewed], ["funnel_started", started], ["funnel_sent", sent]] as const).flatMap(([metric, all]) => [
+        { week_start: monday(ago), metric, dimension: "All", value: all },
+        { week_start: monday(ago), metric, dimension: "Direct", value: Math.round(all / 2) },
+      ])),
+    { week_start: monday(1), metric: "channel_visitors", dimension: "Organic search", value: 80 },
+    { week_start: monday(1), metric: "channel_viewed", dimension: "Organic search", value: 40 },
+    { week_start: monday(1), metric: "channel_sent", dimension: "Organic search", value: 1 },
+    { week_start: monday(1), metric: "channel_visitors", dimension: "Paid", value: 13 },
+    { week_start: monday(1), metric: "landing_visitors", dimension: "Listing page", value: 40 },
+    { week_start: monday(1), metric: "landing_sent", dimension: "Listing page", value: 2 },
+    { week_start: monday(1), metric: "referrer_visitors", dimension: "chatgpt.com", value: 11 },
+  ],
   suggestions: [
     { id: "s1", batch: "2026-10-06", title: "Answer offers within a day", evidence: "2 offers expired unanswered", action: "Check Waiting on us every morning",
       metric: "drop_offers_expired", owner: "Alex", status: "New", before_week: monday(1), before_value: 2, status_changed_at: null },
@@ -63,6 +77,7 @@ function mockFetch(calls: Call[]) {
 }
 
 describe("MarketplacePulseView", () => {
+  beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows last full week against the week before, its target, and the biggest funnel drop", async () => {
@@ -73,13 +88,6 @@ describe("MarketplacePulseView", () => {
     expect(scorecard).toHaveTextContent("Visitors120+20% vs week before");
     expect(within(scorecard).getByRole("button", { name: "Target 150 · 80%" })).toBeInTheDocument();
     expect(scorecard).toHaveTextContent("£3,440");
-
-    // 8 of 70 started, the lowest step rate of the week.
-    const funnel = screen.getByRole("region", { name: "Funnel" });
-    expect(within(funnel).getByText(/11% of the step above/)).toHaveTextContent("biggest drop");
-
-    await userEvent.click(within(funnel).getByRole("button", { name: "Last 4 full weeks" }));
-    expect(funnel).toHaveTextContent("Visitors220");
 
     await userEvent.click(screen.getByRole("tab", { name: "This week so far" }));
     const partial = screen.getByRole("region", { name: "Scorecard" });
@@ -154,6 +162,7 @@ describe("MarketplacePulseView", () => {
   it("shows where buyers drop off for the week and the last 4 weeks, with recordings", async () => {
     vi.stubGlobal("fetch", mockFetch([]));
     render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Funnel" }));
 
     const drops = await screen.findByRole("region", { name: "Where buyers drop off" });
     const row = (label: string) => within(drops).getByText(label).closest("tr")!;
@@ -184,5 +193,49 @@ describe("MarketplacePulseView", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toMatchObject({ url: "/api/marketplace-pulse/suggestions/s1", body: { status: "Doing" } }));
     expect(await within(box).findByRole("button", { name: "Done: Answer offers within a day" })).toBeInTheDocument();
     expect(within(box).queryByRole("button", { name: "Doing: Answer offers within a day" })).toBeNull();
+  });
+
+  it("shows the ordered funnel with its biggest drop and reasons, by channel", async () => {
+    vi.stubGlobal("fetch", mockFetch([]));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Funnel" }));
+
+    const funnel = screen.getByRole("region", { name: "Funnel" });
+    // Last 4 weeks: 220 reached, 130 viewed, 14 started, 5 sent; 14 of 130 is the weakest step.
+    expect(funnel).toHaveTextContent("Reached the marketplace220");
+    expect(within(funnel).getByText(/11% continue/)).toHaveTextContent("biggest drop");
+    expect(within(funnel).getByText(/11% continue/)).toHaveTextContent("30 saw a listing with no price");
+    expect(funnel).toHaveTextContent("Deals created");
+
+    await userEvent.click(within(funnel).getByRole("button", { name: "Direct" }));
+    expect(funnel).toHaveTextContent("Reached the marketplace110");
+    expect(funnel).not.toHaveTextContent("Deals created");
+  });
+
+  it("shows where visitors come from and which channels and landing pages convert", async () => {
+    vi.stubGlobal("fetch", mockFetch([]));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Acquisition" }));
+
+    const channels = screen.getByRole("table", { name: "Channel" });
+    const organic = within(channels).getByText("Organic search").closest("tr")!;
+    expect(organic).toHaveTextContent("8050%");
+    expect(organic).toHaveTextContent("1 (1.3%)");
+    expect(organic).toHaveTextContent(/80$/);
+    expect(within(channels).getByText("Paid").closest("tr")).toHaveTextContent("No paid visitor viewed a listing.");
+    expect(within(screen.getByRole("table", { name: "Landed on" })).getByText("Listing page").closest("tr")).toHaveTextContent("2 (5%)");
+    expect(screen.getByRole("region", { name: "Referring sites" })).toHaveTextContent("chatgpt.com11");
+  });
+
+  it("remembers the chosen section and shows trends with targets", async () => {
+    vi.stubGlobal("fetch", mockFetch([]));
+    const { unmount } = render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Trends" }));
+    expect(screen.getByRole("region", { name: "Conversion rates" })).toHaveTextContent("Viewed a listing, of visitors 58.3%");
+    expect(screen.getByRole("region", { name: "Weekly history" })).toBeInTheDocument();
+    unmount();
+
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    expect(await screen.findByRole("region", { name: "Conversion rates" })).toBeInTheDocument();
   });
 });

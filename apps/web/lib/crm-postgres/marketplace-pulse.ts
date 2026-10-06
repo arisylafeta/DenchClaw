@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction } from "../postgres";
-import { isMetricKey, type MetricKey, type PulseWeek, type Suggestion, type SuggestionStatus } from "../marketplace-pulse";
+import { isMetricKey, type Breakdown, type MetricKey, type PulseWeek, type Suggestion, type SuggestionStatus } from "../marketplace-pulse";
 
 /** The last `count` weeks with numbers, oldest first, and when they were last collected. */
 export async function listWeeks(count = 12): Promise<{ weeks: PulseWeek[]; collected_at: string | null }> {
@@ -8,7 +8,8 @@ export async function listWeeks(count = 12): Promise<{ weeks: PulseWeek[]; colle
     `select to_char(week_start, 'YYYY-MM-DD') as week_start, metric, value::text,
             to_char(collected_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as collected_at
        from crm_metric_snapshots
-      where week_start in (select distinct week_start from crm_metric_snapshots order by week_start desc limit $1)
+      where dimension = ''
+        and week_start in (select distinct week_start from crm_metric_snapshots order by week_start desc limit $1)
       order by week_start`,
     [count],
   );
@@ -22,6 +23,18 @@ export async function listWeeks(count = 12): Promise<{ weeks: PulseWeek[]; colle
     if (!collected || row.collected_at > collected) collected = row.collected_at;
   }
   return { weeks: [...weeks.values()], collected_at: collected };
+}
+
+/** Breakdowns (channel, landing page, referrer, ordered funnel) for the last `count` weeks. */
+export async function listBreakdowns(count = 12): Promise<Breakdown[]> {
+  return queryPg<Breakdown>(
+    `select to_char(week_start, 'YYYY-MM-DD') as week_start, metric, dimension, value::float as value
+       from crm_metric_snapshots
+      where dimension <> ''
+        and week_start in (select distinct week_start from crm_metric_snapshots order by week_start desc limit $1)
+      order by week_start, metric, dimension`,
+    [count],
+  );
 }
 
 export async function listTargets(): Promise<Partial<Record<MetricKey, number>>> {
