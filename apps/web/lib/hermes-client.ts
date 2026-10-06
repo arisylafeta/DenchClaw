@@ -1,3 +1,4 @@
+import type { UIMessageChunk } from "ai";
 import type { HermesConfig } from "./agent-backend";
 import { readActiveProfileName } from "./workspace";
 
@@ -8,14 +9,14 @@ export type HermesChatStreamParams = {
   config: HermesConfig;
 };
 
-export function encodeSse(data: Record<string, unknown>): Uint8Array {
+export function encodeSse(data: UIMessageChunk): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-export function errorStream(message: string, status?: number): ReadableStream<Uint8Array> {
+export function errorStream(message: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
     start(controller) {
-      controller.enqueue(encodeSse({ type: "error", errorText: message, status }));
+      controller.enqueue(encodeSse({ type: "error", errorText: message }));
       controller.close();
     },
   });
@@ -53,7 +54,7 @@ export async function createHermesChatStream(
       let finished = false;
       let receivedText = false;
 
-      function emit(data: Record<string, unknown>) {
+      function emit(data: UIMessageChunk) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       }
 
@@ -85,7 +86,7 @@ export async function createHermesChatStream(
             }
           }
           if (!alreadyExists) {
-            emit({ type: "error", errorText: body, status: sessionRes.status });
+            emit({ type: "error", errorText: body });
             controller.close();
             return;
           }
@@ -105,7 +106,6 @@ export async function createHermesChatStream(
           emit({
             type: "error",
             errorText: `Events stream failed: ${body}`,
-            status: eventsRes.status,
           });
           controller.close();
           return;

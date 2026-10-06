@@ -17,6 +17,27 @@ The application must keep every non-public page and API route behind its databas
 
 Keep the exact `/api/formbricks-buyer-sourcing-webhook` nginx route public and proxied to its dedicated loopback service. Keep Tailscale Serve as a private operational fallback to the loopback-only CRM runtime; it is not the canonical public hostname. Never restore shared nginx credentials or enable public signup.
 
+## Hermes chat profiles
+
+DenchClaw selects the active Hermes profile with the `/p/<profile>/api/sessions`
+prefix for both session creation and chat. The host gateway must serve that
+profile; never fall back to the default profile when routing fails, because it
+would change the chat's identity and history.
+
+Keep messaging credentials on their owning profile. In this deployment, default
+owns the Discord bot; named CRM profiles must not contain copies of its
+`DISCORD_BOT_TOKEN`. Duplicate bot credentials can make Hermes' startup guard
+leave the gateway in single-profile mode, causing named-profile requests to
+return `404 Unknown or unconfigured profile`. Inspect
+`hermes gateway migrate --multiplex --dry-run`, back up affected settings, and
+resolve credential ownership before an authorized migration/restart.
+
+The Hermes adapter emits AI SDK `UIMessageChunk` events. An error chunk contains
+`type: "error"` and `errorText`, not an HTTP `status` property. Preserve the
+upstream failure text without turning it into a client schema-validation error.
+The adapter regressions parse the stream through `DefaultChatTransport`, the
+same strict validator used by the chat client.
+
 ## Shared CRM discovery views
 
 Companies and People have shared `Buyers` and `Dismantlers` saved views. Migration
