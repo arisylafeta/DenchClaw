@@ -231,11 +231,27 @@ describe("MarketplacePulseView", () => {
     vi.stubGlobal("fetch", mockFetch([]));
     const { unmount } = render(<MarketplacePulseView onOpenPerson={() => {}} />);
     await userEvent.click(await screen.findByRole("tab", { name: "Trends" }));
-    expect(screen.getByRole("region", { name: "Conversion rates" })).toHaveTextContent("Viewed a listing, of visitors 58.3%");
+    expect(within(screen.getByRole("region", { name: "Conversion rates" })).getByText("Viewed a listing, of visitors").closest("figure")).toHaveTextContent("58.3%");
     expect(screen.getByRole("region", { name: "Weekly history" })).toBeInTheDocument();
     unmount();
 
     render(<MarketplacePulseView onOpenPerson={() => {}} />);
     expect(await screen.findByRole("region", { name: "Conversion rates" })).toBeInTheDocument();
+  });
+
+  it("sums only weeks that have funnel rows and never calls the ReBattery deal steps the biggest drop", async () => {
+    const older = { week_start: monday(3), values: { visitors: 500, viewed_listing: 300, started_contact: 30, sent_contact: 20, deals_created: 9, deals_paid: 0 } };
+    const data = { ...DATA, weeks: [older, ...DATA.weeks], breakdowns: DATA.breakdowns.filter((b) => b.week_start === monday(1)) };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(data))));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Funnel" }));
+
+    const funnel = screen.getByRole("region", { name: "Funnel" });
+    // Only the week of monday(1) has funnel rows: 120 reached, 1 deal, 1 paid; not 500 or 9 from older weeks.
+    expect(funnel).toHaveTextContent("in the week of");
+    expect(funnel).toHaveTextContent("Reached the marketplace120");
+    expect(funnel).toHaveTextContent("Deals createdReBattery1");
+    expect(within(funnel).getAllByText(/then, on ReBattery/)).toHaveLength(2);
+    expect(within(funnel).getByText(/biggest drop/).parentElement).toHaveTextContent("11% continue");
   });
 });

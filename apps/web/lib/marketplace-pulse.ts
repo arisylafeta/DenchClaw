@@ -193,7 +193,17 @@ export type Breakdown = { week_start: string; metric: string; dimension: string;
 
 /** Acquisition channels in their fixed colour order (slot 1 to 7); colour follows the channel, never its rank. */
 export const CHANNELS = ["Organic search", "Direct", "AI chat", "Referral", "Paid", "Email", "Other"] as const;
-export const channelColor = (channel: string) => `var(--viz-${Math.max(0, CHANNELS.indexOf(channel as (typeof CHANNELS)[number])) + 1})`;
+/** A channel's fixed colour; anything unrecognised is shown as Other. */
+export const channelColor = (channel: string) => {
+  const slot = CHANNELS.indexOf(channel as (typeof CHANNELS)[number]);
+  return `var(--viz-${(slot < 0 ? CHANNELS.length - 1 : slot) + 1})`;
+};
+
+/** Weeks, oldest first, that have rows for a breakdown metric; older weeks predate breakdowns. */
+export function weeksWith(rows: Breakdown[], metric: string, weeks: string[]): string[] {
+  const present = new Set(rows.filter((r) => r.metric === metric).map((r) => r.week_start));
+  return weeks.filter((w) => present.has(w));
+}
 
 export const LANDING_PAGES = [
   "Listing page", "Catalogue", "Auction page", "Home", "Sell or recycle pages", "Quotes and Joules", "Signed-in app", "Guides", "Other", "Unknown",

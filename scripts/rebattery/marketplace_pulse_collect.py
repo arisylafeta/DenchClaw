@@ -118,7 +118,8 @@ FROM events e
 WHERE e.timestamp >= toDateTime('{start}', 'UTC') AND e.timestamp < toDateTime('{end}', 'UTC')
   AND toString(e.properties.$host) IN ('rebattery.io', 'www.rebattery.io')
   AND {{filters}}
-GROUP BY week, dimension"""
+GROUP BY week, dimension
+LIMIT {limit}"""
 # A true ordered funnel per person and week (steps in order within the week), with the channel of
 # the person's first marketplace event that week. Each person-week is counted once.
 ORDERED_QUERY = """SELECT week, dimension, level, count() AS people FROM (
@@ -136,18 +137,21 @@ ORDERED_QUERY = """SELECT week, dimension, level, count() AS people FROM (
       'listing_buy_now_submitted', 'listing_message_succeeded', 'listing_offer_succeeded', 'listing_buy_now_succeeded')
     AND {{filters}}
   GROUP BY e.person_id, week)
-GROUP BY week, dimension, level"""
+GROUP BY week, dimension, level
+LIMIT {limit}"""
 REFERRER_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(e.timestamp, 'UTC'), 1)) AS week,
   e.session.$entry_referring_domain AS dimension, uniq(e.person_id) AS visitors
 FROM events e
 WHERE e.timestamp >= toDateTime('{start}', 'UTC') AND e.timestamp < toDateTime('{end}', 'UTC')
   AND toString(e.properties.$host) IN ('rebattery.io', 'www.rebattery.io')
-  AND e.session.$channel_type IN ('Referral', 'AI') AND e.session.$entry_referring_domain NOT LIKE '%rebattery.io'
-  AND e.session.$entry_referring_domain != '$direct'
+  AND """ + CHANNEL + """ IN ('Referral', 'AI chat') AND e.session.$entry_referring_domain != '$direct'
   AND {{filters}}
-GROUP BY week, dimension"""
+GROUP BY week, dimension
+LIMIT {limit}"""
 FUNNEL_STEPS = ("funnel_reached", "funnel_viewed", "funnel_started", "funnel_sent")
-TOP_REFERRERS = 15
+TOP_REFERRERS = 50
+# PostHog returns 100 rows unless told otherwise; breakdown queries ask for this many and fail if they hit it.
+ROW_LIMIT = 10000
 
 DROP_METRICS = ("drop_no_price", "drop_search_no_exact", "drop_signin_wall", "signup_submitted", "drop_signup_captcha",
                 "drop_signup_registered", "drop_signup_other", "drop_contact_error", "email_clicks")
@@ -265,9 +269,9 @@ def read_posthog(start, end, credentials=None, attempts=3, template=POSTHOG_QUER
 
 
 def posthog_rows(template, start, end, credentials=None, attempts=3):
-    """The rows of a HogQL query over [start, end), as dicts."""
+    """The rows of a HogQL query over [start, end), as dicts. Refuses a result cut off at the row limit."""
     host, token = credentials or posthog_credentials()
-    query = template.format(start=f"{start} 00:00:00", end=f"{end} 00:00:00").replace("{{filters}}", "{filters}")
+    query = template.format(start=f"{start} 00:00:00", end=f"{end} 00:00:00", limit=ROW_LIMIT).replace("{{filters}}", "{filters}")
     body = json.dumps({"query": {"kind": "HogQLQuery", "filters": {"filterTestAccounts": True}, "query": query}}).encode()
     for attempt in range(attempts):
         request = urllib.request.Request(f"{host}/api/projects/{POSTHOG_PROJECT}/query/", data=body, method="POST",
@@ -281,6 +285,8 @@ def posthog_rows(template, start, end, credentials=None, attempts=3):
             if err.code < 500 or attempt == attempts - 1:
                 raise
             time.sleep(10 * (attempt + 1))
+    if len(payload["results"]) >= ROW_LIMIT:
+        raise RuntimeError(f"PostHog returned {ROW_LIMIT} rows, the limit; the result may be cut off")
     return [dict(zip(payload["columns"], row)) for row in payload["results"]]
 
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CHANNELS, LANDING_PAGES, channelColor, sumBy, weekLabel, type Breakdown, type PulseWeek } from "@/lib/marketplace-pulse";
+import { CHANNELS, LANDING_PAGES, channelColor, sumBy, weekLabel, weeksWith, type Breakdown, type PulseWeek } from "@/lib/marketplace-pulse";
 
 type Props = {
   breakdowns: Breakdown[];
@@ -21,7 +21,7 @@ function Swatch({ color }: { color: string }) {
 function InlineBar({ share }: { share: number }) {
   return (
     <span aria-hidden="true" className="inline-block h-1.5 w-16 rounded-[2px] align-middle" style={{ background: "var(--viz-grid)" }}>
-      <span className="block h-full rounded-[2px]" style={{ width: `${Math.min(100, share * 100)}%`, background: "var(--viz-1)" }} />
+      <span className="block h-full rounded-[2px]" style={{ width: `${Math.min(100, share * 100)}%`, background: "var(--viz-neutral)" }} />
     </span>
   );
 }
@@ -41,7 +41,7 @@ function SplitTable({ label, names, rows, notes, colorOf }: {
       <thead>
         <tr className="text-xs" style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)" }}>
           <th className="px-4 py-2 text-left font-medium">{label}</th>
-          <th className="px-3 py-2 text-right font-medium">Visitors</th>
+          <th className="px-3 py-2 text-right font-medium">Site visitors</th>
           <th className="px-3 py-2 text-right font-medium">Viewed a listing</th>
           <th className="px-3 py-2 text-right font-medium">Started</th>
           <th className="px-3 py-2 text-right font-medium">Sent</th>
@@ -95,8 +95,10 @@ function ChannelTooltip({ active, payload, label }: { active?: boolean; payload?
 
 /** Where visitors come from, which routes turn into contacts, and where tracking hides them. */
 export function Acquisition({ breakdowns, weeks }: Props) {
-  const all = weeks.map((w) => w.week_start);
+  const all = weeksWith(breakdowns, "channel_visitors", weeks.map((w) => w.week_start));
+  // Only weeks with breakdowns, so the tables never mix a short history with a 4-week label.
   const lastFour = all.slice(-4);
+  const span = lastFour.length === 1 ? "The last full week" : `The last ${lastFour.length} full weeks`;
   const series = CHANNELS.filter((c) => breakdowns.some((b) => b.metric === "channel_visitors" && b.dimension === c && b.value > 0));
   const chart = all.map((week) => {
     const row: Record<string, string | number> = { week: weekLabel(week) };
@@ -110,9 +112,9 @@ export function Acquisition({ breakdowns, weeks }: Props) {
     sent: sumBy(breakdowns, `${prefix}_sent`, lastFour),
   });
   const channels = split("channel");
-  const emailClicks = weeks.slice(-4).reduce((sum, w) => sum + (w.values.email_clicks ?? 0), 0);
+  const emailClicks = weeks.filter((w) => lastFour.includes(w.week_start)).reduce((sum, w) => sum + (w.values.email_clicks ?? 0), 0);
   const notes: Record<string, string> = {
-    Email: `Campaign links redirect without a referrer or UTM tags, so email visits count as Direct. Link clicks in these weeks: ${n(emailClicks)}, scanners included.`,
+    Email: `Campaign links redirect without a referrer or UTM tags, so most email visits count as Direct. Campaign link clicks in these weeks: ${n(emailClicks)}, scanners included.`,
   };
   if ((channels.visitors.get("Paid") ?? 0) > 0 && !(channels.viewed.get("Paid") ?? 0)) notes.Paid = "No paid visitor viewed a listing.";
   const referrers = [...sumBy(breakdowns, "referrer_visitors", lastFour).entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
@@ -126,7 +128,7 @@ export function Acquisition({ breakdowns, weeks }: Props) {
       <section aria-label="Where visitors come from" className="border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <h2 className="text-[15px] font-semibold">Where visitors come from</h2>
         <p className="mb-3 text-xs" style={{ color: "var(--bt-muted)" }}>
-          People on rebattery.io each week by channel. Someone who came by two channels in a week counts in both.
+          People on rebattery.io each week by channel, any page. Someone who came by two channels in a week counts in both.
         </p>
         <ul aria-label="Channels" className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "var(--bt-text-2)" }}>
           {series.map((c) => <li key={c} className="flex items-center gap-1.5"><Swatch color={channelColor(c)} />{c}</li>)}
@@ -150,7 +152,9 @@ export function Acquisition({ breakdowns, weeks }: Props) {
       <section aria-label="Which channels convert" className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <div className="border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
           <h2 className="text-[15px] font-semibold">Which channels convert</h2>
-          <p className="text-xs" style={{ color: "var(--bt-muted)" }}>Last 4 full weeks. Bars compare each rate with the best channel.</p>
+          <p className="text-xs" style={{ color: "var(--bt-muted)" }}>
+            {span}. Site visitors are people on any page; each step counts under the channel of the visit it happened in. Bars compare each rate with the best channel.
+          </p>
         </div>
         <SplitTable label="Channel" names={CHANNELS} rows={channels} notes={notes} colorOf={channelColor} />
       </section>
@@ -158,7 +162,7 @@ export function Acquisition({ breakdowns, weeks }: Props) {
       <section aria-label="Which landing pages convert" className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <div className="border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
           <h2 className="text-[15px] font-semibold">Which landing pages convert</h2>
-          <p className="text-xs" style={{ color: "var(--bt-muted)" }}>The first page of each visit, last 4 full weeks.</p>
+          <p className="text-xs" style={{ color: "var(--bt-muted)" }}>The first page of each visit. {span}.</p>
         </div>
         <SplitTable label="Landed on" names={LANDING_PAGES} rows={split("landing")} />
       </section>
@@ -166,12 +170,12 @@ export function Acquisition({ breakdowns, weeks }: Props) {
       {!!referrers.length && (
         <section aria-label="Referring sites" className="border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           <h2 className="text-[15px] font-semibold">Referring sites and AI chats</h2>
-          <p className="mb-3 text-xs" style={{ color: "var(--bt-muted)" }}>Visitors by the site that sent them, last 4 full weeks.</p>
+          <p className="mb-3 text-xs" style={{ color: "var(--bt-muted)" }}>Visitors by the site that sent them. {span}.</p>
           <ul className="flex flex-col gap-1.5 text-[13px]">
             {referrers.map(([domain, visitors]) => (
               <li key={domain} className="grid grid-cols-[minmax(0,240px)_1fr_40px] items-center gap-3">
                 <span className="truncate" title={domain}>{domain}</span>
-                <span className="h-3 rounded-r-[4px]" style={{ width: `${(visitors / maxReferrer) * 100}%`, background: "var(--viz-1)" }} />
+                <span className="h-3 rounded-r-[4px]" style={{ width: `${(visitors / maxReferrer) * 100}%`, background: "var(--viz-neutral)" }} />
                 <span className="bt-mono text-right">{n(visitors)}</span>
               </li>
             ))}

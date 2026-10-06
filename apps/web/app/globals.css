@@ -2606,6 +2606,8 @@ td:has(> div > :empty) {
   --viz-grid: #f0f0f0;
   --viz-axis: #5c5c5c;
   --viz-muted-bar: #c4c4c4;
+  /* Marks that are not a channel (all channels, rates, referrers) never borrow a channel colour. */
+  --viz-neutral: #6b6a65;
 }
 .dark .pulse-viz {
   --viz-1: #3987e5;
@@ -2618,4 +2620,5 @@ td:has(> div > :empty) {
   --viz-grid: #2e2e2e;
   --viz-axis: #a3a3a3;
   --viz-muted-bar: #5c5c5c;
+  --viz-neutral: #c3c2b7;
 }

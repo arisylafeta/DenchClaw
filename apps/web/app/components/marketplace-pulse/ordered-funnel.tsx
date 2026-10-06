@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CHANNELS, channelColor, dropValue, sumBy, weekLabel, type Breakdown, type MetricKey, type PulseWeek } from "@/lib/marketplace-pulse";
+import { CHANNELS, channelColor, dropValue, sumBy, weekLabel, weeksWith, type Breakdown, type MetricKey, type PulseWeek } from "@/lib/marketplace-pulse";
 
 type Props = {
   breakdowns: Breakdown[];
@@ -35,21 +35,33 @@ const n = (value: number) => Math.round(value).toLocaleString("en-GB");
  * their first visit that week. Deals and payments come from ReBattery and are not the same people.
  */
 export function OrderedFunnel({ breakdowns, weeks }: Props) {
-  const [channel, setChannel] = useState<string>("All");
+  const [picked, setChannel] = useState<string>("All");
   const [range, setRange] = useState<"week" | "four">("four");
-  const chosen = range === "four" ? weeks.slice(-4) : weeks.slice(-1);
-  const ids = chosen.map((w) => w.week_start);
+  // Only weeks with funnel rows, so the steps and the deals cover the same weeks.
+  const withData = weeksWith(breakdowns, "funnel_reached", weeks.map((w) => w.week_start));
+  const ids = range === "four" ? withData.slice(-4) : withData.slice(-1);
+  const chosen = weeks.filter((w) => ids.includes(w.week_start));
+  const channels = ["All", ...CHANNELS.filter((c) => breakdowns.some((b) => b.metric === "funnel_reached" && b.dimension === c && withData.includes(b.week_start)))];
+  const channel = channels.includes(picked) ? picked : "All";
   const steps: Step[] = STEPS.map((s) => ({ label: s.label, value: sumBy(breakdowns, s.metric, ids).get(channel) ?? 0 }));
   if (channel === "All") {
     const total = (key: MetricKey) => chosen.reduce((sum, w) => sum + (w.values[key] ?? 0), 0);
     steps.push({ label: "Deals created", value: total("deals_created"), platform: true }, { label: "Paid", value: total("deals_paid"), platform: true });
   }
-  const max = Math.max(1, steps[0]?.value ?? 1);
-  const rates = steps.map((s, i) => (i && steps[i - 1].value > 0 ? s.value / steps[i - 1].value : null));
+  const max = Math.max(1, ...steps.map((s) => s.value));
+  const rates = steps.map((s, i) => (i && steps[i - 1].value > 0 && !s.platform ? s.value / steps[i - 1].value : null));
+  // Deals and payments are different people from the steps above, so they never count as the biggest drop.
   const weakest = rates.reduce<number | null>((w, r, i) => (r !== null && (w === null || r < rates[w]!) ? i : w), null);
   const reasonTotal = (key: Reason["key"]) => chosen.reduce((sum, w) => sum + (dropValue(key, w.values) ?? 0), 0);
-  const channels = ["All", ...CHANNELS.filter((c) => breakdowns.some((b) => b.metric === "funnel_reached" && b.dimension === c && ids.includes(b.week_start)))];
-  const period = range === "four" ? `the 4 weeks to ${weekLabel(ids.at(-1) ?? "")}` : `the week of ${weekLabel(ids[0] ?? "")}`;
+  const period = ids.length > 1 ? `the ${ids.length} weeks to ${weekLabel(ids.at(-1)!)}` : `the week of ${weekLabel(ids[0] ?? "")}`;
+
+  if (!ids.length) {
+    return (
+      <section aria-label="Funnel" className="border p-4 text-sm" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+        No funnel numbers for a full week yet. They arrive with the collector&apos;s next run.
+      </section>
+    );
+  }
 
   const toggle = (active: boolean) => ({
     background: active ? "var(--bt-badge)" : "var(--bt-surface)",
@@ -64,7 +76,7 @@ export function OrderedFunnel({ breakdowns, weeks }: Props) {
         <span className="flex-1" />
         {(["four", "week"] as const).map((r) => (
           <button key={r} type="button" aria-pressed={range === r} onClick={() => setRange(r)} className="h-7 border px-2.5 text-xs" style={toggle(range === r)}>
-            {r === "four" ? "Last 4 weeks" : "Last full week"}
+            {r === "four" ? "Last 4 full weeks" : "Last full week"}
           </button>
         ))}
       </div>
@@ -87,7 +99,7 @@ export function OrderedFunnel({ breakdowns, weeks }: Props) {
               <div className="grid grid-cols-[220px_1fr] gap-3 py-1.5 text-xs">
                 <span />
                 <span style={{ color: i === weakest ? "var(--bt-amber)" : "var(--bt-muted)" }}>
-                  ↓ {rates[i] === null ? "–" : `${Math.round(rates[i]! * 100)}% continue`}
+                  ↓ {step.platform ? "then, on ReBattery" : rates[i] === null ? "–" : `${Math.round(rates[i]! * 100)}% continue`}
                   {steps[i - 1].value > step.value && !step.platform && ` · ${n(steps[i - 1].value - step.value)} stopped`}
                   {i === weakest && <strong> · biggest drop</strong>}
                   {channel === "All" && GAP_REASONS[i - 1]?.map((r) => {
@@ -104,8 +116,8 @@ export function OrderedFunnel({ breakdowns, weeks }: Props) {
               </span>
               <span className="flex items-center gap-2">
                 <span className="h-5 rounded-r-[4px]" style={{
-                  width: `${Math.max(step.value ? 0.5 : 0, (step.value / max) * 100)}%`,
-                  background: step.platform ? "var(--viz-muted-bar)" : channel === "All" ? "var(--viz-1)" : channelColor(channel),
+                  width: `${Math.min(100, Math.max(step.value ? 0.5 : 0, (step.value / max) * 100))}%`,
+                  background: step.platform ? "var(--viz-muted-bar)" : channel === "All" ? "var(--viz-neutral)" : channelColor(channel),
                 }} />
                 <span className="bt-mono font-semibold">{n(step.value)}</span>
               </span>

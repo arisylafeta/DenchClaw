@@ -118,7 +118,7 @@ class Collect(unittest.TestCase):
                         {"week": "2026-09-28", "dimension": "AI chat", "level": 1, "people": 3},
                         {"week": "2026-09-28", "dimension": "AI chat", "level": 0, "people": 9}]
             if template is pulse.REFERRER_QUERY:
-                return [{"week": "2026-09-28", "dimension": f"site{i}.com", "visitors": i} for i in range(20)] + \
+                return [{"week": "2026-09-28", "dimension": f"site{i}.com", "visitors": i} for i in range(pulse.TOP_REFERRERS + 5)] + \
                        [{"week": "2026-09-28", "dimension": None, "visitors": 50}]
             return [{"week": "2026-09-28", "dimension": "Direct", "visitors": 10, "viewed": 4, "started": 2, "sent": 1}]
         out = {(m, d): v for _, m, d, v in pulse.read_breakdowns(WEEK, WEEK, rows=rows)}
