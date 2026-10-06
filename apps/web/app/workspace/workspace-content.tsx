@@ -41,6 +41,7 @@ import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../comp
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
+import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { CampaignsView } from "../components/campaigns/campaigns-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
@@ -2968,6 +2969,9 @@ function ContentRenderer({
       }
       if (content.data.object.name === "dismantler") {
         return <DismantlersView />;
+      }
+      if (content.data.object.name === "marketplace_pulse") {
+        return <MarketplacePulseView onOpenPerson={(id) => onOpenEntry("people", id)} />;
       }
       return (
         <ObjectView

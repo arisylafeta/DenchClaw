@@ -10,7 +10,7 @@ spec.loader.exec_module(pulse)
 
 WEEK = dt.date(2026, 9, 28)
 PREVIOUS = dt.date(2026, 9, 21)
-EXCLUSIONS = (re.compile(r"@rebattery\.(io|invalid)$", re.I), {"acc-test"})
+EXCLUSIONS = (re.compile(r"@rebattery\.(io|invalid)$", re.I), {"acc-test"}, {"founder@gmail.com"})
 
 
 def data(**rows):
@@ -46,6 +46,7 @@ class PlatformMetrics(unittest.TestCase):
                       {"id": "l2", "listing_status": "published", "created_at": "2026-09-22T00:00:00Z", "supplier_account_id": "acc-test"},
                       {"id": "l3", "listing_status": "draft", "created_at": "2026-09-22T00:00:00Z", "supplier_account_id": "acc-seller"}],
             bids=[{"created_at": "2026-09-23T00:00:00Z", "email": "ari@rebattery.io"},
+                  {"created_at": "2026-09-23T00:00:00Z", "email": "Founder@gmail.com"},
                   {"created_at": "2026-09-23T00:00:00Z", "email": "buyer@example.org"}],
             requests=[{"created_at": "2026-09-23T00:00:00Z", "status": "test", "contact_email": "x@example.org"},
                       {"created_at": "2026-09-23T00:00:00Z", "status": "refused", "contact_email": "y@example.org"}],

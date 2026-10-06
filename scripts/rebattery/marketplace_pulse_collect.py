@@ -85,7 +85,7 @@ def weeks_from(first, last):
 
 def load_exclusions(path=EXCLUSIONS):
     data = json.loads(path.read_text())
-    return re.compile(data["staff_email_pattern"], re.I), set(data["test_account_ids"])
+    return re.compile(data["staff_email_pattern"], re.I), set(data["test_account_ids"]), {e.lower() for e in data.get("test_emails", [])}
 
 
 def read_env_value(path, name):
@@ -196,10 +196,10 @@ def read_posthog(start, end, credentials=None, attempts=3):
 
 def platform_metrics(data, weeks, today, exclusions):
     """{week: {metric: value}} for the given Mondays from platform rows."""
-    pattern, test_ids = exclusions
+    pattern, test_ids, test_emails = exclusions
 
     def internal_email(address):
-        return bool(address) and bool(pattern.search(address))
+        return bool(address) and (bool(pattern.search(address)) or address.lower() in test_emails)
 
     def internal_buyer(account_id):
         return account_id in test_ids or any(internal_email(e) for e in data["account_emails"].get(account_id, ()))
