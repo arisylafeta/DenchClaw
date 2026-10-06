@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DefaultChatTransport } from "ai";
 import type { HermesConfig } from "./agent-backend";
 import { createHermesChatStream, type HermesChatStreamParams } from "./hermes-client";
 import { readActiveProfileName } from "./workspace";
@@ -51,11 +52,23 @@ async function chat(overrides: Partial<HermesChatStreamParams> = {}) {
     config,
     ...overrides,
   });
-  const text = await new Response(stream).text();
-  return text
-    .split("\n")
-    .filter((line) => line.startsWith("data: "))
-    .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
+  const transport = new DefaultChatTransport({
+    fetch: async () => new Response(stream),
+  });
+  const parsed = await transport.sendMessages({
+    trigger: "submit-message",
+    chatId: sessionKey,
+    messages: [],
+    abortSignal: undefined,
+  });
+  const events: Record<string, unknown>[] = [];
+  const reader = parsed.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    events.push(value);
+  }
+  return events;
 }
 function answer(events: Record<string, unknown>[]): string {
   return events
@@ -118,7 +131,8 @@ describe("createHermesChatStream persisted sessions", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(body, { status }));
-    expect(await chat()).toEqual([{ type: "error", errorText: body, status }]);
+    const events = await chat();
+    expect(events).toEqual([{ type: "error", errorText: body }]);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -130,7 +144,7 @@ describe("createHermesChatStream persisted sessions", () => {
         .mockResolvedValueOnce(exists())
         .mockResolvedValueOnce(new Response("Chat rejected", { status }));
       expect(await chat()).toEqual([
-        { type: "error", errorText: "Events stream failed: Chat rejected", status },
+        { type: "error", errorText: "Events stream failed: Chat rejected" },
       ]);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       expect(fetchSpy.mock.calls[1][0]).toBe(chatUrl);
