@@ -36,6 +36,12 @@ const DATA: PulseData = {
   ],
   follow_up_error: null,
   sender: "Alex",
+  suggestions: [
+    { id: "s1", batch: "2026-10-06", title: "Answer offers within a day", evidence: "2 offers expired unanswered", action: "Check Waiting on us every morning",
+      metric: "drop_offers_expired", owner: "Alex", status: "New", before_week: monday(1), before_value: 2, status_changed_at: null },
+    { id: "s2", batch: "2026-10-03", title: "Show prices on offer-only listings", evidence: "30 people saw no price", action: "Ask sellers for a guide price",
+      metric: "drop_no_price", owner: "Product", status: "Done", before_week: monday(2), before_value: 40, status_changed_at: "2026-10-05T10:00:00Z" },
+  ],
 };
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
@@ -47,6 +53,10 @@ function mockFetch(calls: Call[]) {
     calls.push({ url, method, body });
     if (method === "PUT") return new Response(JSON.stringify(body));
     if (url === "/api/marketplace-pulse/email-draft") return new Response(JSON.stringify({ url: "https://mail.google.com/x" }), { status: 201 });
+    if (method === "PATCH" && url.startsWith("/api/marketplace-pulse/suggestions/")) {
+      const one = DATA.suggestions.find((x) => url.endsWith(x.id))!;
+      return new Response(JSON.stringify({ suggestion: { ...one, ...body, status_changed_at: "2026-10-06T12:00:00Z" } }));
+    }
     if (url === "/api/marketplace-pulse/buyers") return new Response(JSON.stringify({ person_id: "p9", subscribed: true }), { status: 201 });
     return new Response(JSON.stringify(DATA));
   });
@@ -154,5 +164,23 @@ describe("MarketplacePulseView", () => {
     const link = within(row("Hit the sign-in box")).getByRole("link", { name: "Watch sessions" });
     expect(decodeURIComponent(link.getAttribute("href")!)).toContain('"id":"auth_dialog_viewed"');
     expect(within(row("Offers expired unanswered")).queryByRole("link")).toBeNull();
+  });
+
+  it("shows open suggestions, moves one to Doing, and keeps done ones in the learning log", async () => {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", mockFetch(calls));
+    render(<MarketplacePulseView onOpenPerson={() => {}} />);
+
+    const box = await screen.findByRole("region", { name: "Suggestions" });
+    expect(box).toHaveTextContent("Answer offers within a day");
+    expect(box).toHaveTextContent("Should move Offers expired unanswered, 2 in the week of");
+    const log = within(box).getByRole("region", { name: "Learning log" });
+    // 40 people saw no price when suggested; 30 in the last full week.
+    expect(log).toHaveTextContent("Saw no price (offer only): 40 → 30");
+
+    await userEvent.click(within(box).getByRole("button", { name: "Doing: Answer offers within a day" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toMatchObject({ url: "/api/marketplace-pulse/suggestions/s1", body: { status: "Doing" } }));
+    expect(await within(box).findByRole("button", { name: "Done: Answer offers within a day" })).toBeInTheDocument();
+    expect(within(box).queryByRole("button", { name: "Doing: Answer offers within a day" })).toBeNull();
   });
 });

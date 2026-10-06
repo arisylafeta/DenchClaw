@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction } from "../postgres";
-import { isMetricKey, type MetricKey, type PulseWeek } from "../marketplace-pulse";
+import { isMetricKey, type MetricKey, type PulseWeek, type Suggestion, type SuggestionStatus } from "../marketplace-pulse";
 
 /** The last `count` weeks with numbers, oldest first, and when they were last collected. */
 export async function listWeeks(count = 12): Promise<{ weeks: PulseWeek[]; collected_at: string | null }> {
@@ -86,4 +86,28 @@ export async function addMarketplaceBuyer(email: string, name: string): Promise<
     }
     return { person_id: id, subscribed };
   });
+}
+
+const SUGGESTION_COLUMNS = `id, to_char(batch, 'YYYY-MM-DD') as batch, title, evidence, action, metric, owner, status,
+  to_char(before_week, 'YYYY-MM-DD') as before_week, before_value::float as before_value,
+  to_char(status_changed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as status_changed_at`;
+
+/** New suggestions from the latest batch, everything in progress, and the last 60 days of finished ones. */
+export async function listSuggestions(): Promise<Suggestion[]> {
+  return queryPg<Suggestion>(
+    `select ${SUGGESTION_COLUMNS} from crm_pulse_suggestions
+      where (status = 'New' and batch = (select max(batch) from crm_pulse_suggestions))
+         or status = 'Doing'
+         or (status in ('Done', 'Dismissed') and status_changed_at > now() - interval '60 days')
+      order by case status when 'Doing' then 0 when 'New' then 1 else 2 end, coalesce(status_changed_at, created_at) desc`,
+  );
+}
+
+export async function setSuggestionStatus(id: string, status: SuggestionStatus, userId: string): Promise<Suggestion | null> {
+  const rows = await queryPg<Suggestion>(
+    `update crm_pulse_suggestions set status = $2, status_changed_at = now(), status_changed_by = $3
+      where id = $1 returning ${SUGGESTION_COLUMNS}`,
+    [id, status, userId],
+  );
+  return rows[0] ?? null;
 }

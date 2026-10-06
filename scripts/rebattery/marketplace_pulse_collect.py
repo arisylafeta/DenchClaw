@@ -63,6 +63,7 @@ GROUP BY week ORDER BY week"""
 POSTHOG_METRICS = ("visitors", "browsed", "clicked_listing", "viewed_listing", "started_contact", "sent_contact", "joules_started")
 
 # Where buyers drop off, as distinct people per week. Names start with drop_ (or are sign-in steps).
+# PostHog's auth_completed under-fires, so new buyer accounts come from the platform instead.
 DROP_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(timestamp, 'UTC'), 1)) AS week,
   uniqIf(person_id, event = 'listing_detail_viewed' AND toString(properties.price_visibility) = 'offer_only') AS drop_no_price,
   uniqIf(person_id, event = 'marketplace_search_outcome' AND toString(properties.outcome) != 'exact_results') AS drop_search_no_exact,
@@ -71,17 +72,16 @@ DROP_QUERY = """SELECT toString(toStartOfWeek(toTimeZone(timestamp, 'UTC'), 1)) 
   uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) = 'turnstile_failed') AS drop_signup_captcha,
   uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) = 'user_already_registered') AS drop_signup_registered,
   uniqIf(person_id, event = 'auth_signup_failed' AND toString(properties.reason_code) NOT IN ('turnstile_failed', 'user_already_registered')) AS drop_signup_other,
-  uniqIf(person_id, event = 'auth_completed') AS signin_completed,
   uniqIf(person_id, event IN ('listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')) AS drop_contact_error
 FROM events
 WHERE timestamp >= toDateTime('{start}', 'UTC') AND timestamp < toDateTime('{end}', 'UTC')
   AND toString(properties.$host) IN ('rebattery.io', 'www.rebattery.io')
   AND event IN ('listing_detail_viewed', 'marketplace_search_outcome', 'auth_dialog_viewed', 'auth_signup_submitted',
-    'auth_signup_failed', 'auth_completed', 'listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')
+    'auth_signup_failed', 'listing_offer_failed', 'listing_message_failed', 'listing_buy_now_failed')
   AND {{filters}}
 GROUP BY week ORDER BY week"""
 DROP_METRICS = ("drop_no_price", "drop_search_no_exact", "drop_signin_wall", "signup_submitted", "drop_signup_captcha",
-                "drop_signup_registered", "drop_signup_other", "signin_completed", "drop_contact_error")
+                "drop_signup_registered", "drop_signup_other", "drop_contact_error")
 
 
 def monday(day):

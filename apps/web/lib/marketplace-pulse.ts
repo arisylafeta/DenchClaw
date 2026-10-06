@@ -150,6 +150,24 @@ export type WaitingItem = {
   expires_at: string | null;
 };
 
+export const SUGGESTION_STATUSES = ["New", "Doing", "Done", "Dismissed"] as const;
+export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
+
+export type Suggestion = {
+  id: string;
+  batch: string;
+  title: string;
+  evidence: string;
+  action: string;
+  metric: string | null;
+  owner: "Alex" | "Ari" | "Product";
+  status: SuggestionStatus;
+  /** The metric in the last full week when it was suggested. */
+  before_week: string | null;
+  before_value: number | null;
+  status_changed_at: string | null;
+};
+
 export type PulseData = {
   weeks: PulseWeek[];
   targets: Partial<Record<MetricKey, number>>;
@@ -159,6 +177,8 @@ export type PulseData = {
   follow_up_error: string | null;
   /** First name of the signed-in user, for signing drafts. */
   sender: string;
+  /** The latest batch's new suggestions, everything in progress, and the last 60 days of done or dismissed. */
+  suggestions: Suggestion[];
 };
 
 const OPENERS: Record<FollowUpSignal["kind"], (title: string) => string> = {

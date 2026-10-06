@@ -1,5 +1,5 @@
 import { guardBulkTrades } from "@/lib/bulk-trades-route";
-import { listTargets, listWeeks } from "@/lib/crm-postgres/marketplace-pulse";
+import { listSuggestions, listTargets, listWeeks } from "@/lib/crm-postgres/marketplace-pulse";
 import { followUps } from "@/lib/marketplace-pulse-platform";
 import type { PulseData } from "@/lib/marketplace-pulse";
 
@@ -15,9 +15,10 @@ const firstName = (email: string) => {
 export async function GET() {
   const guard = await guardBulkTrades("Marketplace Pulse");
   if ("response" in guard) return guard.response;
-  const [{ weeks, collected_at }, targets, platform] = await Promise.all([
+  const [{ weeks, collected_at }, targets, suggestions, platform] = await Promise.all([
     listWeeks(12),
     listTargets(),
+    listSuggestions(),
     followUps().catch((err) => {
       console.error("[marketplace-pulse] ReBattery read failed", err);
       return null;
@@ -29,6 +30,7 @@ export async function GET() {
     waiting: platform?.waiting ?? [],
     follow_up_error: platform ? null : "Could not read ReBattery just now, so there is no follow-up list.",
     sender: firstName(guard.email),
+    suggestions,
   };
   return Response.json(body);
 }

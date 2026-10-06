@@ -7,6 +7,7 @@ import {
 } from "@/lib/marketplace-pulse";
 import { DropOffs } from "./drop-offs";
 import { FollowUps, WaitingOnUs } from "./follow-ups";
+import { Suggestions } from "./suggestions";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 
 type Range = "last" | "current";
@@ -142,6 +143,11 @@ export function MarketplacePulseView({ onOpenPerson }: { onOpenPerson: (id: stri
               PostHog has no bot filter yet, so visitors may include some bots.
             </p>
           </section>
+        )}
+
+        {data && (
+          <Suggestions suggestions={data.suggestions} latest={complete.at(-1)}
+            onChange={(next) => setData((current) => current && { ...current, suggestions: current.suggestions.map((s) => (s.id === next.id ? next : s)) })} />
         )}
 
         {selected && <DropOffs week={selected} weekLabel={weekLabel(selected.week_start)} lastFour={complete.slice(-4)} />}
