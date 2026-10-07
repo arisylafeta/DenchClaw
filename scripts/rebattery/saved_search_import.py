@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Imports marketplace saved searches into Bulk Trades demand as stated standing buy-boxes.
+"""Imports marketplace saved searches and sourcing requests into Bulk Trades demand.
 
   saved_search_import.py                     # show what the platform's saved searches would add or close
   saved_search_import.py --apply             # write them
@@ -12,6 +12,10 @@ apps/web/lib/buy-box-spec.json go into the spec; the rest (brands outside the li
 search words) go into the note. When the buyer unsubscribes, the buy-box closes as no longer needed.
 Unconfirmed guest saves and ReBattery staff or QA emails are skipped. Each row is linked to the CRM
 person by email and to that person's company, exactly as the survey import does.
+
+A buyer who asks us to source a battery the marketplace doesn't have ("Ask us to source ..." under the
+search box, or "Find it for me" on an empty search) becomes a request buy-box keyed by
+("import", "sourcing_request:<id>"), with their words, quantity, timing, country and target price.
 """
 import argparse
 import datetime as dt
@@ -70,12 +74,8 @@ def country_name(code):
         return code
 
 
-def map_saved_search(search):
-    """One platform saved search as a demand row, or None when it should not be imported."""
-    email = (search.get("email") or "").strip().lower()
-    if not email or survey.internal(email) or not search.get("confirmed_at"):
-        return None
-    filters = search.get("filters") or {}
+def filter_spec(filters):
+    """(spec, note lines) for marketplace catalogue filters: what maps onto the shared lists goes in the spec."""
     spec, notes, brands = {}, [], []
 
     for value in as_list(filters.get("chemistry")):
@@ -127,6 +127,15 @@ def map_saved_search(search):
         notes.append("Buy-now price only")
     if filters.get("verified_data_only"):
         notes.append("Verified specs only")
+    return spec, notes
+
+
+def map_saved_search(search):
+    """One platform saved search as a demand row, or None when it should not be imported."""
+    email = (search.get("email") or "").strip().lower()
+    if not email or survey.internal(email) or not search.get("confirmed_at"):
+        return None
+    spec, notes = filter_spec(search.get("filters") or {})
     cadence = "daily" if search.get("frequency") == "daily" else "weekly"
     notes.append(f"Saved search on rebattery.io, alerts {cadence}.")
 
@@ -141,6 +150,48 @@ def map_saved_search(search):
     }
 
 
+QUANTITIES = {"one": "1 unit", "few": "2 to 10 units", "many": "More than 10 units"}
+TIMINGS = {"now": "Now", "three_months": "Within 3 months", "browsing": "Just looking"}
+REQUEST_SOURCES = {"search_suggestion": "the search box", "no_results": "an empty search"}
+PRICE_UNITS = {"pack": "pack", "cell": "cell"}
+
+
+def map_sourcing_request(request):
+    """One platform sourcing request as a request buy-box, or None when it should not be imported."""
+    email = (request.get("email") or "").strip().lower()
+    if not email or survey.internal(email):
+        return None
+    filters = request.get("filters") or {}
+    spec, notes = filter_spec(filters)
+    notes = [line for line in notes if not line.startswith("Searched for: ")]
+    if filters.get("q") and filters["q"].strip().lower() != (request.get("wants") or "").strip().lower():
+        notes.insert(0, f"Searched for: {filters['q']}")
+    notes.append(f"When: {TIMINGS.get(request.get('timing'), request.get('timing'))}")
+
+    # A per-unit price fits the buy-box when the unit is clear (one format: packs or cells); else it goes in the note.
+    price, currency = request.get("target_price"), request.get("target_currency")
+    formats = as_list(filters.get("format"))
+    unit = PRICE_UNITS.get(formats[0]) if len(formats) == 1 else None
+    structured = {}
+    if price is not None and currency in survey.BUY_BOX["currencies"]:
+        if unit:
+            structured = {"max_price": float(price), "price_currency": currency, "price_unit": unit}
+        else:
+            notes.append(f"Target price: {currency} {float(price):,.2f} per unit")
+    asked_from = REQUEST_SOURCES.get(request.get("source"), "the marketplace")
+    notes.append(f"Asked us to source it from {asked_from} on rebattery.io.")
+
+    return {
+        "kind": "request", "basis": None, "email": email, "contact": None,
+        "wants": (request.get("wants") or "Battery").strip(),
+        "quantity": QUANTITIES.get(request.get("quantity"), request.get("quantity")),
+        "location": request.get("country"), "spec": spec, **structured,
+        "note": "\n".join(notes), "observed_on": str(request["created_at"])[:10],
+        "source_kind": "import", "source_id": f"sourcing_request:{request['id']}", "source_label": "Sourcing request",
+        "source_url": f"{SITE}{request.get('catalog_path') or '/marketplace/listings'}",
+    }
+
+
 def read_env_value(path, name):
     for line in Path(path).read_text().splitlines():
         if line.startswith(f"{name}="):
@@ -148,28 +199,40 @@ def read_env_value(path, name):
     return None
 
 
-def fetch_saved_searches(env_path=PLATFORM_ENV):
-    """Confirmed saved searches from the platform's REST API with the service key (read-only)."""
+def fetch_platform(table, select, extra, env_path=PLATFORM_ENV):
+    """Rows of a platform table from its REST API with the service key (read-only); [] before the table exists."""
     url = read_env_value(env_path, "NEXT_PUBLIC_SUPABASE_URL")
     key = read_env_value(env_path, "SUPABASE_SECRET_KEY")
     if not url or not key:
         raise SystemExit(f"platform URL or key missing in {env_path}")
-    query = urllib.parse.urlencode({
-        "select": "id,email,filters,label,catalog_path,frequency,status,confirmed_at,unsubscribed_at,created_at",
-        "confirmed_at": "not.is.null",
-        "order": "created_at.asc",
-    })
-    request = urllib.request.Request(f"{url}/rest/v1/saved_searches?{query}", headers={
+    query = urllib.parse.urlencode({"select": select, **extra, "order": "created_at.asc"})
+    request = urllib.request.Request(f"{url}/rest/v1/{table}?{query}", headers={
         "apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return json.loads(response.read())
     except urllib.error.HTTPError as error:
-        # Before the platform release that adds saved searches, the table isn't there yet.
+        # Before the platform release that adds the table, it isn't there yet.
         if error.code == 404:
-            print("platform has no saved_searches table yet; nothing to import")
+            print(f"platform has no {table} table yet; nothing to import")
             return []
         raise
+
+
+def fetch_saved_searches(env_path=PLATFORM_ENV):
+    """Confirmed saved searches from the platform."""
+    return fetch_platform(
+        "saved_searches",
+        "id,email,filters,label,catalog_path,frequency,status,confirmed_at,unsubscribed_at,created_at",
+        {"confirmed_at": "not.is.null"}, env_path)
+
+
+def fetch_sourcing_requests(env_path=PLATFORM_ENV):
+    """Every sourcing request from the platform."""
+    return fetch_platform(
+        "sourcing_requests",
+        "id,email,wants,filters,catalog_path,quantity,timing,target_price,target_currency,country,source,status,created_at",
+        {}, env_path)
 
 
 def close_unsubscribed(cur, row):
@@ -188,6 +251,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dsn", default="host=/var/run/postgresql dbname=denchclaw")
     parser.add_argument("--json", help="read saved searches from a JSON file instead of the platform")
+    parser.add_argument("--requests-json", help="read sourcing requests from a JSON file instead of the platform")
     parser.add_argument("--platform-env", default=str(PLATFORM_ENV), help="env file with the platform URL and key")
     parser.add_argument("--apply", action="store_true", help="write; without it nothing is saved")
     parser.add_argument("--quiet", action="store_true", help="print only the totals (for scheduled runs)")
@@ -198,14 +262,24 @@ def main():
             searches = json.load(handle)
     else:
         searches = fetch_saved_searches(args.platform_env)
-    rows = [row for row in (map_saved_search(search) for search in searches) if row]
-    skipped = len(searches) - len(rows)
+    if args.requests_json:
+        with open(args.requests_json) as handle:
+            requests = json.load(handle)
+    elif args.json:
+        requests = []
+    else:
+        requests = fetch_sourcing_requests(args.platform_env)
+    search_rows = [row for row in (map_saved_search(search) for search in searches) if row]
+    request_rows = [row for row in (map_sourcing_request(request) for request in requests) if row]
+    rows = search_rows + request_rows
+    skipped = len(searches) - len(search_rows)
+    skipped_requests = len(requests) - len(request_rows)
 
     conn = psycopg2.connect(args.dsn)
     added = closed = 0
     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         for row in rows:
-            unsubscribed = row.pop("unsubscribed")
+            unsubscribed = row.pop("unsubscribed", False)
             survey.link(cur, row)
             new = survey.insert(cur, row)
             added += new
@@ -221,8 +295,9 @@ def main():
             conn.rollback()
     conn.close()
     verb = "added" if args.apply else "would add"
-    print(f"{verb} {added} and {'closed' if args.apply else 'would close'} {closed} of {len(rows)} saved searches"
-          f" ({skipped} skipped: unconfirmed, internal or test)")
+    print(f"{verb} {added} and {'closed' if args.apply else 'would close'} {closed} of {len(search_rows)} saved searches"
+          f" and {len(request_rows)} sourcing requests ({skipped} searches and {skipped_requests} requests skipped:"
+          f" unconfirmed, internal or test)")
     return 0
 
 

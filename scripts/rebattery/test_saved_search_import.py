@@ -62,5 +62,47 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertFalse(saved.map_saved_search(search(status="paused"))["unsubscribed"])
 
 
+def request(**overrides):
+    base = {
+        "id": "2b7e0000-0000-4000-8000-000000000009", "email": "Jan@SolarBau.de", "wants": "Nissan Leaf 40kWh",
+        "filters": {"q": "leaf", "chemistry": "nmc", "format": "pack", "soh_min": 80},
+        "catalog_path": "/marketplace/listings?chemistry=nmc&format=pack&q=leaf&soh_min=80",
+        "quantity": "few", "timing": "three_months", "target_price": 3000, "target_currency": "EUR",
+        "country": "DE", "source": "search_suggestion", "status": "new", "created_at": "2026-10-08T12:00:00+00:00",
+    }
+    base.update(overrides)
+    return base
+
+
+class SourcingRequestImportTest(unittest.TestCase):
+    def test_a_request_becomes_a_request_buy_box(self):
+        row = saved.map_sourcing_request(request())
+        self.assertEqual(row["kind"], "request")
+        self.assertIsNone(row["basis"])
+        self.assertEqual(row["email"], "jan@solarbau.de")
+        self.assertEqual(row["wants"], "Nissan Leaf 40kWh")
+        self.assertEqual(row["quantity"], "2 to 10 units")
+        self.assertEqual(row["location"], "DE")
+        self.assertEqual(row["spec"], {"chemistries": ["NMC"], "formats": ["Packs"], "min_soh": 80})
+        # One format makes the per-unit price a per-pack price.
+        self.assertEqual((row["max_price"], row["price_currency"], row["price_unit"]), (3000.0, "EUR", "pack"))
+        self.assertEqual(row["source_id"], "sourcing_request:2b7e0000-0000-4000-8000-000000000009")
+        self.assertEqual(row["source_label"], "Sourcing request")
+        self.assertEqual(row["observed_on"], "2026-10-08")
+        self.assertIn("Searched for: leaf", row["note"])
+        self.assertIn("When: Within 3 months", row["note"])
+        self.assertIn("from the search box", row["note"])
+
+    def test_an_unclear_unit_keeps_the_price_in_the_note(self):
+        row = saved.map_sourcing_request(request(filters={"q": "nissan leaf 40kwh"}, wants="nissan leaf 40kwh"))
+        self.assertNotIn("max_price", row)
+        self.assertIn("Target price: EUR 3,000.00 per unit", row["note"])
+        # The search words are the request itself, so they aren't repeated.
+        self.assertNotIn("Searched for", row["note"])
+
+    def test_skips_staff_and_test_emails(self):
+        self.assertIsNone(saved.map_sourcing_request(request(email="alex@rebattery.io")))
+
+
 if __name__ == "__main__":
     unittest.main()
