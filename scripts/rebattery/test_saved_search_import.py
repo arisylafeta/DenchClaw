@@ -65,6 +65,7 @@ class SavedSearchImportTest(unittest.TestCase):
 def request(**overrides):
     base = {
         "id": "2b7e0000-0000-4000-8000-000000000009", "email": "Jan@SolarBau.de", "wants": "Nissan Leaf 40kWh",
+        "details": "For a home storage build.\nOpen to other brands.",
         "filters": {"q": "leaf", "chemistry": "nmc", "format": "pack", "soh_min": 80},
         "catalog_path": "/marketplace/listings?chemistry=nmc&format=pack&q=leaf&soh_min=80",
         "quantity": "few", "timing": "three_months", "target_price": 3000, "target_currency": "EUR",
@@ -92,6 +93,7 @@ class SourcingRequestImportTest(unittest.TestCase):
         self.assertIn("Searched for: leaf", row["note"])
         self.assertIn("When: Within 3 months", row["note"])
         self.assertIn("from the search box", row["note"])
+        self.assertTrue(row["note"].startswith("In their words: For a home storage build.\nOpen to other brands."))
 
     def test_an_unclear_unit_keeps_the_price_in_the_note(self):
         row = saved.map_sourcing_request(request(filters={"q": "nissan leaf 40kwh"}, wants="nissan leaf 40kwh"))

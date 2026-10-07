@@ -166,6 +166,8 @@ def map_sourcing_request(request):
     notes = [line for line in notes if not line.startswith("Searched for: ")]
     if filters.get("q") and filters["q"].strip().lower() != (request.get("wants") or "").strip().lower():
         notes.insert(0, f"Searched for: {filters['q']}")
+    if (request.get("details") or "").strip():
+        notes.insert(0, f"In their words: {request['details'].strip()}")
     notes.append(f"When: {TIMINGS.get(request.get('timing'), request.get('timing'))}")
 
     # A per-unit price fits the buy-box when the unit is clear (one format: packs or cells); else it goes in the note.
@@ -231,7 +233,7 @@ def fetch_sourcing_requests(env_path=PLATFORM_ENV):
     """Every sourcing request from the platform."""
     return fetch_platform(
         "sourcing_requests",
-        "id,email,wants,filters,catalog_path,quantity,timing,target_price,target_currency,country,source,status,created_at",
+        "id,email,wants,details,filters,catalog_path,quantity,timing,target_price,target_currency,country,source,status,created_at",
         {}, env_path)
 
 
