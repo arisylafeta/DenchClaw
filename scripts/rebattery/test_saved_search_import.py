@@ -14,7 +14,8 @@ def search(**overrides):
         "status": "active", "confirmed_at": "2026-10-07T06:00:00+00:00",
         "filters": {"manufacturer": ["Tesla", "Kokam"], "chemistry": "nmc", "format": ["pack", "module"],
                     "condition": ["new", "great"], "soh_min": 80, "kwh_min": 30, "year_from": 2020,
-                    "location_country": "DE", "q": "model 3", "buy_now_only": True},
+                    "location_country": "DE", "q": "model 3", "buy_now_only": True,
+                    "ppkwh_max": 60},
     }
     base.update(overrides)
     return base
@@ -44,6 +45,7 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertIn("Made: 2020 to now", note)
         self.assertIn("Located in:", note)
         self.assertIn("Buy-now price only", note)
+        self.assertIn("Price per kWh: up to 60", note)
         self.assertIn("alerts daily", note)
 
     def test_cell_makers_land_in_their_own_list(self):

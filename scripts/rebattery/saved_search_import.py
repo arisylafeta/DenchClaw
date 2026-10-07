@@ -111,6 +111,10 @@ def map_saved_search(search):
         notes.append(f"Brands: {', '.join(brands)}")
     if grades:
         notes.append(f"Condition grade: {', '.join(grades)}")
+    if filters.get("ppkwh_min") is not None or filters.get("ppkwh_max") is not None:
+        low, high = filters.get("ppkwh_min"), filters.get("ppkwh_max")
+        band = f"{low}-{high}" if low is not None and high is not None else (f"{low}+" if low is not None else f"up to {high}")
+        notes.append(f"Price per kWh: {band} (in the listing's currency)")
     if filters.get("year_from") or filters.get("year_to"):
         notes.append(f"Made: {filters.get('year_from') or 'any'} to {filters.get('year_to') or 'now'}")
     countries = as_list(filters.get("location_country"))
