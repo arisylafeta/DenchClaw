@@ -1,6 +1,10 @@
+import datetime as dt
 import importlib.util
+import io
+import json
 import unittest
 from pathlib import Path
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location("saved_search_import", Path(__file__).with_name("saved_search_import.py"))
 saved = importlib.util.module_from_spec(spec)
@@ -104,6 +108,58 @@ class SourcingRequestImportTest(unittest.TestCase):
 
     def test_skips_staff_and_test_emails(self):
         self.assertIsNone(saved.map_sourcing_request(request(email="alex@rebattery.io")))
+
+
+class AnnouncementTest(unittest.TestCase):
+    def row(self, **overrides):
+        row = saved.map_sourcing_request(request(**overrides))
+        row.update({"buyer": "ELG Battery", "company_id": "c1"})
+        return row
+
+    def test_tells_the_team_what_was_asked_for(self):
+        note = saved.announcement(request(), self.row())
+        lines = note.splitlines()
+        self.assertEqual(lines[0], "**New sourcing request** · 2 to 10 units · Within 3 months · Germany")
+        self.assertEqual(lines[1], "**Nissan Leaf 40kWh**")
+        self.assertIn("> For a home storage build.", lines)
+        self.assertIn("> Open to other brands.", lines)
+        self.assertIn("Target: EUR 3,000 per pack", lines)
+        self.assertIn("Buyer: jan@solarbau.de · ELG Battery (in CRM)", lines)
+        # Angle brackets stop Discord from unfurling the link.
+        self.assertTrue(lines[-1].startswith("<https://www.rebattery.io/marketplace/listings?"))
+
+    def test_buyer_words_cannot_ping_the_channel(self):
+        note = saved.announcement(request(wants="@everyone cheap", details="hi @here <@123>"),
+                                  self.row(wants="@everyone cheap"))
+        self.assertNotIn("@everyone", note)
+        self.assertNotIn("@here", note)
+        self.assertNotIn("<@123>", note)
+
+    def test_long_details_are_cut(self):
+        note = saved.announcement(request(details="x" * 900), self.row())
+        self.assertIn("x" * 600 + "…", note)
+        self.assertNotIn("x" * 601, note)
+
+    def test_only_recent_requests_are_announced(self):
+        now = dt.datetime(2026, 10, 8, 12, tzinfo=dt.timezone.utc)
+        self.assertTrue(saved.is_recent(request(created_at="2026-10-08T00:00:00+00:00"), now))
+        self.assertFalse(saved.is_recent(request(created_at="2026-10-06T00:00:00+00:00"), now))
+
+
+class FetchTest(unittest.TestCase):
+    def test_reads_every_page(self):
+        pages = [[{"id": i} for i in range(1000)], [{"id": 1000}, {"id": 1001}]]
+        offsets = []
+
+        def fake_open(req, timeout):
+            offsets.append(int(dict(p.split("=") for p in req.full_url.split("?")[1].split("&"))["offset"]))
+            return io.BytesIO(json.dumps(pages[len(offsets) - 1]).encode())
+
+        with mock.patch.object(saved, "read_env_value", return_value="https://platform.example"), \
+                mock.patch.object(saved.urllib.request, "urlopen", side_effect=fake_open):
+            rows = saved.fetch_platform("sourcing_requests", "id", {})
+        self.assertEqual(len(rows), 1002)
+        self.assertEqual(offsets, [0, 1000])
 
 
 if __name__ == "__main__":

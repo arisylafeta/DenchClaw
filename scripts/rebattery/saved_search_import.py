@@ -4,6 +4,7 @@
   saved_search_import.py                     # show what the platform's saved searches would add or close
   saved_search_import.py --apply             # write them
   saved_search_import.py --json FILE.json    # read saved searches from a file instead of the platform
+  saved_search_import.py --apply --announce  # scheduled run: print only a Discord note per new request
 
 A buyer who saves a catalogue search on rebattery.io ("Tesla · NMC · 80%+ health", emailed daily) has told
 us what they want to buy. Each confirmed saved search becomes one buy-box keyed by
@@ -65,7 +66,20 @@ def as_list(value):
     return value if isinstance(value, list) else [value]
 
 
+# The marketplace's country picker; anything else falls back to pycountry, then the code.
+COUNTRY_NAMES = {
+    "GB": "United Kingdom", "IE": "Ireland", "DE": "Germany", "FR": "France", "NL": "Netherlands",
+    "BE": "Belgium", "LU": "Luxembourg", "PL": "Poland", "LT": "Lithuania", "LV": "Latvia", "EE": "Estonia",
+    "CZ": "Czechia", "SK": "Slovakia", "AT": "Austria", "CH": "Switzerland", "IT": "Italy", "ES": "Spain",
+    "PT": "Portugal", "DK": "Denmark", "SE": "Sweden", "NO": "Norway", "FI": "Finland", "HU": "Hungary",
+    "RO": "Romania", "BG": "Bulgaria", "HR": "Croatia", "SI": "Slovenia", "GR": "Greece", "TR": "Turkey",
+    "US": "United States", "CA": "Canada",
+}
+
+
 def country_name(code):
+    if code in COUNTRY_NAMES:
+        return COUNTRY_NAMES[code]
     try:
         import pycountry  # optional; the ISO code reads fine without it
         country = pycountry.countries.get(alpha_2=code)
@@ -194,6 +208,40 @@ def map_sourcing_request(request):
     }
 
 
+ANNOUNCE_WITHIN = dt.timedelta(hours=24)  # older requests are imported quietly (backfills, re-imports)
+ANNOUNCE_MAX = 5                          # per run; the rest are summed up in one line
+DETAILS_MAX = 600
+
+
+def quiet_mentions(text):
+    """The buyer's own words, unable to ping anyone in Discord (@everyone, @here, <@id>)."""
+    return (text or "").replace("@", "@\u200b")
+
+
+def announcement(request, row):
+    """A short Discord note for one new sourcing request, written for the team."""
+    heading = " · ".join(x for x in (QUANTITIES.get(request.get("quantity")), TIMINGS.get(request.get("timing")),
+                                     country_name(request["country"]) if request.get("country") else None) if x)
+    lines = [f"**New sourcing request** · {heading}", f"**{quiet_mentions(row['wants'])}**"]
+    details = (request.get("details") or "").strip()
+    if details:
+        if len(details) > DETAILS_MAX:
+            details = details[:DETAILS_MAX].rstrip() + "…"
+        lines += [f"> {quiet_mentions(line)}" if line else ">" for line in details.splitlines()]
+    if request.get("target_price") is not None and request.get("target_currency"):
+        unit = row.get("price_unit") or "unit"
+        lines.append(f"Target: {request['target_currency']} {float(request['target_price']):,.0f} per {unit}")
+    company = row.get("buyer") if row.get("company_id") else None
+    lines.append(f"Buyer: {row['email']}" + (f" · {company} (in CRM)" if company else " · not in CRM yet"))
+    lines.append(f"<{row['source_url']}>")
+    return "\n".join(lines)
+
+
+def is_recent(request, now=None):
+    created = dt.datetime.fromisoformat(str(request["created_at"]).replace("Z", "+00:00"))
+    return (now or dt.datetime.now(dt.timezone.utc)) - created <= ANNOUNCE_WITHIN
+
+
 def read_env_value(path, name):
     for line in Path(path).read_text().splitlines():
         if line.startswith(f"{name}="):
@@ -201,24 +249,34 @@ def read_env_value(path, name):
     return None
 
 
+PAGE = 1000  # PostgREST returns at most this many rows per request
+
+
 def fetch_platform(table, select, extra, env_path=PLATFORM_ENV):
-    """Rows of a platform table from its REST API with the service key (read-only); [] before the table exists."""
+    """Every row of a platform table from its REST API with the service key (read-only), page by page;
+    [] before the table exists."""
     url = read_env_value(env_path, "NEXT_PUBLIC_SUPABASE_URL")
     key = read_env_value(env_path, "SUPABASE_SECRET_KEY")
     if not url or not key:
         raise SystemExit(f"platform URL or key missing in {env_path}")
-    query = urllib.parse.urlencode({"select": select, **extra, "order": "created_at.asc"})
-    request = urllib.request.Request(f"{url}/rest/v1/{table}?{query}", headers={
-        "apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as error:
-        # Before the platform release that adds the table, it isn't there yet.
-        if error.code == 404:
-            print(f"platform has no {table} table yet; nothing to import")
-            return []
-        raise
+    rows = []
+    while True:
+        query = urllib.parse.urlencode({"select": select, **extra, "order": "created_at.asc,id.asc",
+                                        "limit": PAGE, "offset": len(rows)})
+        request = urllib.request.Request(f"{url}/rest/v1/{table}?{query}", headers={
+            "apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                page = json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            # Before the platform release that adds the table, it isn't there yet.
+            if error.code == 404 and not rows:
+                print(f"platform has no {table} table yet; nothing to import", file=sys.stderr)
+                return []
+            raise
+        rows.extend(page)
+        if len(page) < PAGE:
+            return rows
 
 
 def fetch_saved_searches(env_path=PLATFORM_ENV):
@@ -257,6 +315,8 @@ def main():
     parser.add_argument("--platform-env", default=str(PLATFORM_ENV), help="env file with the platform URL and key")
     parser.add_argument("--apply", action="store_true", help="write; without it nothing is saved")
     parser.add_argument("--quiet", action="store_true", help="print only the totals (for scheduled runs)")
+    parser.add_argument("--announce", action="store_true",
+                        help="print nothing but a Discord note per newly added request from the last day (Hermes posts it)")
     args = parser.parse_args()
 
     if args.json:
@@ -273,6 +333,8 @@ def main():
         requests = fetch_sourcing_requests(args.platform_env)
     search_rows = [row for row in (map_saved_search(search) for search in searches) if row]
     request_rows = [row for row in (map_sourcing_request(request) for request in requests) if row]
+    requests_by_source = {f"sourcing_request:{request['id']}": request for request in requests}
+    notes = []
     rows = search_rows + request_rows
     skipped = len(searches) - len(search_rows)
     skipped_requests = len(requests) - len(request_rows)
@@ -285,9 +347,12 @@ def main():
             survey.link(cur, row)
             new = survey.insert(cur, row)
             added += new
+            request = requests_by_source.get(row["source_id"])
+            if new and request and is_recent(request):
+                notes.append(announcement(request, row))
             gone = close_unsubscribed(cur, row) if unsubscribed else False
             closed += gone
-            if not args.quiet:
+            if not args.quiet and not args.announce:
                 state = "add" if new else "already in"
                 print(f"{state}{' and close' if gone else ''}: {row['buyer']} | {row['wants'][:70]} | {row['source_id']}"
                       f" | company {'linked' if row.get('company_id') else 'not in CRM'}")
@@ -297,9 +362,18 @@ def main():
             conn.rollback()
     conn.close()
     verb = "added" if args.apply else "would add"
-    print(f"{verb} {added} and {'closed' if args.apply else 'would close'} {closed} of {len(search_rows)} saved searches"
-          f" and {len(request_rows)} sourcing requests ({skipped} searches and {skipped_requests} requests skipped:"
-          f" unconfirmed, internal or test)")
+    summary = (f"{verb} {added} and {'closed' if args.apply else 'would close'} {closed} of {len(search_rows)} saved"
+               f" searches and {len(request_rows)} sourcing requests ({skipped} searches and {skipped_requests}"
+               f" requests skipped: unconfirmed, internal or test)")
+    if args.announce:
+        # stdout is the Discord message: only new requests, and nothing at all on a quiet run.
+        print(summary, file=sys.stderr)
+        if notes:
+            shown = notes[:ANNOUNCE_MAX]
+            more = len(notes) - len(shown)
+            print("\n\n".join(shown + ([f"…and {more} more new requests in Bulk Trades."] if more else [])))
+    else:
+        print(summary)
     return 0
 
 
