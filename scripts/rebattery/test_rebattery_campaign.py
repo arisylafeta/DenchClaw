@@ -170,6 +170,24 @@ class CampaignTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     campaign.load_manifest(path)
 
+    def test_supply_update_must_use_supply_mailbox_for_sender_and_replies(self):
+        supply = "ReBattery <supply@rebattery.io>"
+        base = {**MANIFEST, "id": "supply-update-20261008", "name": "Supply Update: 8 Oct 2026"}
+
+        def load(manifest):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "manifest.json"
+                path.write_text(json.dumps(manifest))
+                return campaign.load_manifest(path)
+
+        self.assertEqual(load({**base, "sender": supply, "reply_to": "supply@rebattery.io"})["id"], base["id"])
+        for wrong in ({"sender": "Alex <alex@rebattery.io>", "reply_to": "supply@rebattery.io"},
+                      {"sender": supply, "reply_to": "alex@rebattery.io"}):
+            with self.assertRaises(ValueError):
+                load({**base, **wrong})
+        # Other campaign types keep their own sender.
+        self.assertEqual(load({**MANIFEST, "sender": "Alex <alex@rebattery.io>"})["id"], MANIFEST["id"])
+
     def test_unknown_send_stops_and_cannot_be_retried(self):
         state = {"send_state": "frozen"}
         sha = campaign.digest(MANIFEST, ROWS)
