@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import email.utils
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from psycopg2.extras import RealDictCursor
 
 
 SUPPLY_UPDATE_LIST = "Supply update"
+SUPPLY_UPDATE_SENDER = "supply@rebattery.io"
 PERSONALIZATION_COLUMNS = {"first_name", "last_name", "opening"}
 VARIABLE = re.compile(r"(?<!\{)\{\{([a-z][a-z0-9_]*)\}\}(?!\})")
 
@@ -43,6 +45,11 @@ def load_manifest(path):
         raise ValueError(f"Missing campaign inputs: {', '.join(missing)}")
     if manifest["stream"] == "outbound":
         raise ValueError("Campaigns require an explicitly configured Broadcast stream")
+    if re.match(r"(?i)supply[\s_-]*update", manifest["name"]) or re.match(r"(?i)supply-update", manifest["id"]):
+        # Supply Updates are always sent from, and answered at, the supply mailbox.
+        sender = email.utils.parseaddr(manifest["sender"])[1].lower()
+        if sender != SUPPLY_UPDATE_SENDER or manifest["reply_to"].strip().lower() != SUPPLY_UPDATE_SENDER:
+            raise ValueError(f"Supply Update campaigns must use {SUPPLY_UPDATE_SENDER} as sender and reply_to")
     url = urllib.parse.urlparse(manifest["auction_url"])
     if url.scheme != "https" or not url.netloc or not url.path.startswith("/marketplace/auctions/"):
         raise ValueError("auction_url must be a public HTTPS auction detail URL")

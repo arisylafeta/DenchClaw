@@ -42,6 +42,7 @@ For an approved daily job, use `scripts/rebattery/postmark_suppression_sync.py` 
 
 ## Boundaries
 
+- **Supply Updates are always sent from and replied to at `supply@rebattery.io`** (`sender` and `reply_to`), never a founder address. The CLI rejects a manifest whose id or name starts with "supply update" if either differs. Founder-signed intro outreach is a different campaign type.
 - Code/migration files are not permission to apply a production schema, backfill September, change Postmark configuration, deploy or restart a service. Back up and obtain the applicable explicit approval first.
 - Do not use the old `Supply Update` tag as a sent cohort, the existing Gmail message table as a Postmark receipt, or Gmail 1:1 as a campaign channel.
 - The current CLI does not implement provider webhooks, site-visit attribution, automatic replies, or trade attachment. Check those separately instead of reporting them as measured outcomes.
