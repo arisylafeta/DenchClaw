@@ -161,3 +161,19 @@ This cohort is not a subscription, contact Stage, qualification or send approval
 Creating it does not change Tags, opt-outs, company classifications, subscriptions
 or campaign ledgers. Personalization columns and AI enrichment require their
 separate agreed field plan.
+
+### Recipient opening drafts
+
+Migration `034_people_opening.sql` adds the nullable `crm_people.opening` text
+column and maps the editable People field `opening` to it. Creating field metadata
+alone does not create storage; this field must retain its canonical column mapping.
+
+The approved audience-view update places `opening` immediately after Company.
+It does not change the 484-person membership filter. Initial candidate selection
+and paragraph values remain private campaign artifacts outside Git; populate only
+the explicitly selected person IDs after a current backup and review. A populated
+opening is a draft introduction paragraph, not a verified mailbox, frozen cohort,
+creative approval or permission to send. Paragraphs may be drafted from existing
+company research without new web verification; retain source provenance and any
+unresolved company or identity issues in the private review ledger. Do not infer
+that a populated paragraph clears those review issues.

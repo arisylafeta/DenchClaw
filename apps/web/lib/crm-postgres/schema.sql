@@ -45,6 +45,9 @@ create table if not exists crm_people (
 alter table crm_people
   add column if not exists last_interaction_at timestamptz;
 
+alter table crm_people
+  add column if not exists opening text;
+
 create table if not exists crm_email_threads (
   id text primary key,
   subject text,
