@@ -174,7 +174,10 @@ export async function makeStanding(id: string): Promise<Demand | null> {
 /** "Still wanted": confirmed today, and reopened if it was closed. */
 export async function confirmDemand(id: string): Promise<Demand | null> {
   const rows = await queryPg(
-    `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now()
+    // A reopened row lost its suggestions when it closed, so the next matching passes judge it again.
+    `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now(),
+       match_hash = case when status = 'closed' then null else match_hash end,
+       supply_match_hash = case when status = 'closed' then null else supply_match_hash end
      where id = $1 returning id`,
     [id, todayInLondon()],
   );

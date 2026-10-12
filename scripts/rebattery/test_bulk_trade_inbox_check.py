@@ -120,6 +120,23 @@ class PossibleScreen(unittest.TestCase):
                                              "carded_threads": ["follow@seller.test offers: MEB packs"]})
 
 
+class SizeNumbers(unittest.TestCase):
+    def test_numeric_strings_count_and_junk_or_infinite_values_do_not(self):
+        self.assertEqual([check.size_number(v) for v in (11.7, "11.7", "~12,000", "$900", 0)], [11.7, 11.7, 12000.0, 900.0, 0.0])
+        self.assertEqual([check.size_number(v) for v in (None, True, "n/a", -1, float("inf"), [3])], [None] * 6)
+
+    def test_an_odd_model_answer_is_skipped_not_fatal(self):
+        sources = [{**SOURCE, "id": "ok", "thread": "t1", "text": "Offer: 3 hybrid packs to sell"}]
+        batches = ["not a dict", {"source_id": "ok", "title": "x", "quote": ["a list"]},
+                   {"source_id": "ok", "title": "Packs", "existing_trade_id": ["bt_1"], "side": "supply", "use": "reuse",
+                    "est_tonnes": "0.1", "quote": "3 hybrid packs to sell"}]
+        report = {"model_calls": 0, "warnings": []}
+        with patch.object(check, "call_model", lambda system, user, key: {"batches": batches}):
+            out = check.screen_possible(PossibleScreen.Cursor(carded=set()), sources, "k", report)
+        self.assertEqual([o["kind"] for o in out], ["possible_supply"])
+        self.assertEqual(out[0]["proposed"]["est_tonnes"], 0.1)
+
+
 class Schedule(unittest.TestCase):
     def test_due_only_just_after_uk_check_times(self):
         london = check.ZoneInfo("Europe/London")
@@ -715,6 +732,24 @@ class DemandRun(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute("select status from crm_bulk_trade_check_runs where kind = 'supply_match' order by id desc limit 1")
             self.assertEqual(cur.fetchone(), ("ok",))
+
+    def test_a_follow_up_on_the_same_thread_refreshes_the_supply_batch(self):
+        def item(i, offers, day):
+            src = {**SOURCE, "id": i, "thread": "thr-supply-dedupe", "from": "pat@smallseller.example",
+                   "at": dt.datetime(2026, 10, day, 9, tzinfo=dt.timezone.utc), "text": f"About the packs: {offers}"}
+            return {"kind": "possible_supply", "target": None, "quote": offers, "source": src, "summary": f"Pat offers: {offers}",
+                    "proposed": {"seller": "Small Seller", "contact": "Pat", "email": "pat@smallseller.example", "offers": offers,
+                                 "trade_kind": "packs", "quantity": None, "location": None, "est_tonnes": None,
+                                 "est_value_usd": None, "size_note": None}}
+        report = {"applied": [], "cards": [], "warnings": []}
+        with self.conn, self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            check.settle_all(cur, None, None, [item("sd1", "3 Prius hybrid packs", 7)], None, {"warnings": []}, report, False)
+            check.settle_all(cur, None, None, [item("sd2", "Photos of the 3 Prius packs attached", 9)], None, {"warnings": []}, report, False)
+            cur.execute("""select offers, to_char(observed_on, 'YYYY-MM-DD') as seen, source_thread from crm_bulk_trade_supply
+                           where email = 'pat@smallseller.example'""")
+            rows = cur.fetchall()
+        self.assertEqual([(r["offers"], r["seen"], r["source_thread"]) for r in rows],
+                         [("3 Prius hybrid packs", "2026-10-09", "thr-supply-dedupe")])
 
     def test_judge_keeps_the_first_of_a_repeated_pair(self):
         reply = {"matches": [{"row": "R1", "buyer": "Acme Energy", "strength": "strong", "reason": "first"},

@@ -34,9 +34,11 @@ export async function closeSupply(id: string, reason: SupplyClosedReason): Promi
   return rows.length ? getSupply(id) : null;
 }
 
+/** Reopens a closed batch; the next matching pass finds its buyers again. */
 export async function reopenSupply(id: string): Promise<Supply | null> {
   const rows = await queryPg(
-    "update crm_bulk_trade_supply set status = 'open', closed_reason = null, updated_at = now() where id = $1 returning id",
+    // Closing dropped its suggestions; clearing the hash has the next matching pass judge it again.
+    "update crm_bulk_trade_supply set status = 'open', closed_reason = null, match_hash = null, updated_at = now() where id = $1 returning id",
     [id],
   );
   return rows.length ? getSupply(id) : null;

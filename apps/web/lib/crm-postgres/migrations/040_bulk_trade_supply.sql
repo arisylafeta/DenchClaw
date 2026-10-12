@@ -20,6 +20,7 @@ create table if not exists crm_bulk_trade_supply (
   size_note text,
   source_kind text check (source_kind in ('email', 'call', 'manual')),
   source_id text,
+  source_thread text,
   source_label text,
   source_url text,
   source_quote text,
@@ -34,6 +35,8 @@ create table if not exists crm_bulk_trade_supply (
 
 create unique index if not exists crm_bulk_trade_supply_source_idx on crm_bulk_trade_supply (source_kind, source_id)
   where source_id is not null;
+create index if not exists crm_bulk_trade_supply_thread_idx on crm_bulk_trade_supply (source_thread)
+  where source_thread is not null and status = 'open';
 create index if not exists crm_bulk_trade_supply_open_idx on crm_bulk_trade_supply (observed_on desc) where status = 'open';
 
 comment on table crm_bulk_trade_supply is

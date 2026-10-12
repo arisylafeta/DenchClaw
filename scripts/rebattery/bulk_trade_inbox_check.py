@@ -46,6 +46,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import re
@@ -971,15 +972,19 @@ def apply_demand(cur, lot_id, p, trade, ctx):
 
 def apply_supply(cur, lot_id, p, trade, ctx):
     """Adds a small reuse batch someone offered to the Supply list, quoting the email; the seller becomes a supplier
-    lead. The same offer already open from that seller is only re-dated."""
+    lead. The same offer already open from that seller, or an open batch from the same thread (a follow-up), is only
+    re-dated."""
     d, source = p["proposed"], p["source"]
     on = source_date(p)
     person_id, company_id = ensure_lead(cur, d.get("email"), d.get("contact"), d.get("seller"), "Supplier",
                                         f"Inbox check {on}: offered {d['offers']}")
     cur.execute(
-        """select id from crm_bulk_trade_supply where status = 'open' and lower(offers) = lower(%s)
-             and ((%s::text is not null and company_id = %s) or (%s::text is not null and email = %s))""",
-        (d["offers"], company_id, company_id, d.get("email"), d.get("email")))
+        """select id from crm_bulk_trade_supply where status = 'open'
+             and ((%s::text is not null and source_thread = %s)
+                  or (lower(offers) = lower(%s)
+                      and ((%s::text is not null and company_id = %s) or (%s::text is not null and email = %s))))
+           order by created_at limit 1""",
+        (source.get("thread"), source.get("thread"), d["offers"], company_id, company_id, d.get("email"), d.get("email")))
     same = cur.fetchone()
     if same:
         cur.execute("update crm_bulk_trade_supply set observed_on = greatest(observed_on, %s::date), updated_at = now() where id = %s",
@@ -988,14 +993,14 @@ def apply_supply(cur, lot_id, p, trade, ctx):
     supply_id = "bts_" + str(uuid.uuid4())
     cur.execute(
         """insert into crm_bulk_trade_supply (id, seller, company_id, person_id, contact, email, offers, trade_kind, quantity,
-             location, est_tonnes, est_value_usd, size_note, source_kind, source_id, source_label, source_url, source_quote,
-             observed_on)
-           values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             location, est_tonnes, est_value_usd, size_note, source_kind, source_id, source_thread, source_label, source_url,
+             source_quote, observed_on)
+           values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            on conflict do nothing returning id""",
         (supply_id, d["seller"], company_id, person_id, d.get("contact"), d.get("email"), d["offers"], d.get("trade_kind"),
          d.get("quantity"), d.get("location"), d.get("est_tonnes"), d.get("est_value_usd"), d.get("size_note"),
          "call" if source["kind"] == "granola" else "email",
-         f"{source['id']}:{hashlib.md5(d['offers'].lower().encode()).hexdigest()[:8]}",
+         f"{source['id']}:{hashlib.md5(d['offers'].lower().encode()).hexdigest()[:8]}", source.get("thread"),
          f"{'Call' if source['kind'] == 'granola' else 'Email'} (added automatically)", source.get("url"), p["quote"], on))
     row = cur.fetchone()
     return {"supply_id": row["id"]} if row else None
@@ -1362,7 +1367,7 @@ def same_buyer(said, actual):
     return bool(a) and (a in b or b in a)
 
 
-def judge(trades, rows, key, report):
+def judge(trades, rows, key, report, what="demand"):
     """Asks the model which (trade, row) pairs fit, in calls of at most MATCH_ROWS_PER_CALL rows. Trades and rows go
     out under short labels (T1, R1), because the model mixes up long ids, and each answer must name its row's buyer.
     Returns the valid pairs, or None when a call failed (so nothing is recorded as judged)."""
@@ -1376,7 +1381,7 @@ def judge(trades, rows, key, report):
             raw = call_model(MATCH_SYSTEM, json.dumps(payload, ensure_ascii=False, default=str), key)
             report["model_calls"] += 1
         except Exception as err:
-            report["warnings"].append(f"demand matching failed ({type(err).__name__})")
+            report["warnings"].append(f"{what} matching failed ({type(err).__name__})")
             return None
         only = next(iter(trade_by_label.values())) if len(trade_by_label) == 1 else None
         for m in raw.get("matches") or []:
@@ -1562,7 +1567,7 @@ def match_supply(conn, key, report=None, dry_run=False):
             every_batch_judged = True
 
             for supply_id in changed:  # 1. a changed batch against every open row
-                pairs = judge([(supply_id, facts[supply_id])], list(rows.values()), key, out) if rows else []
+                pairs = judge([(supply_id, facts[supply_id])], list(rows.values()), key, out, "supply") if rows else []
                 if pairs is None:
                     every_batch_judged = False
                     continue
@@ -1575,7 +1580,7 @@ def match_supply(conn, key, report=None, dry_run=False):
 
             judged_rows = changed_rows if every_batch_judged else []
             if changed_rows and steady:  # 2. changed rows against the batches that did not change
-                pairs = judge([(i, facts[i]) for i in steady], [rows[i] for i in changed_rows], key, out)
+                pairs = judge([(i, facts[i]) for i in steady], [rows[i] for i in changed_rows], key, out, "supply")
                 if pairs is None:
                     judged_rows = []
                 else:
@@ -1764,8 +1769,14 @@ def run(conn, args):
 
 
 def size_number(value):
-    """A model-estimated size: a non-negative number, else None."""
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
+    """A model-estimated size: a finite, non-negative number (a numeric string such as "~12,000" counts), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = float(str(value).replace(",", "").strip().lstrip("~$").strip())
+    except ValueError:
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
 
 
 def card_sized(tonnes, value_usd):
@@ -1798,58 +1809,69 @@ def screen_possible(cur, unmatched, key, report):
     by_id = {s["id"]: s for s in unmatched}
     report.setdefault("skipped", {"recycling": [], "small_requests": [], "carded_threads": []})
     # A thread that already has a card stays on the card: a follow-up there is not a separate Supply batch.
-    cur.execute("select distinct source_thread from crm_bulk_trade_proposals where kind = 'possible_trade' and source_thread is not null")
+    cur.execute("""select distinct source_thread from crm_bulk_trade_proposals
+                   where kind = 'possible_trade' and status in ('new', 'accepted') and source_thread is not null""")
     carded = {row["source_thread"] for row in cur.fetchall()}
     supply = []
     for t in raw.get("batches") or []:
-        source = by_id.get(str(t.get("source_id")))
-        title = str(t.get("title") or "").strip()
-        if not source or not quote_ok(t.get("quote"), source["text"]) or not title:
-            continue
-        existing_id = t.get("existing_trade_id")
-        if existing_id in existing and source.get("from"):
-            # Settled against its own trade below; the contact makes the rest of their mail match.
-            out.append({"kind": "link_contact", "target": None, "lot_id": existing_id,
-                        "proposed": {"name": source["from"], "email": source["from"]},
-                        "summary": f"{source['from']} wrote about {existing[existing_id]}; added as a contact.",
-                        "quote": str(t["quote"]).strip()[:300], "source": source})
-            continue
-        if t.get("use") == "recycling" or t.get("trade_kind") == "recycling":
-            report["skipped"]["recycling"].append(title[:120])
-            continue
-        side = "demand" if t.get("side") == "demand" else "supply"
-        kind = t.get("trade_kind") if t.get("trade_kind") in ("packs", "cells", "systems") else None
-        tonnes, value = size_number(t.get("est_tonnes")), size_number(t.get("est_value_usd"))
-        size = {"est_tonnes": round(tonnes, 2) if tonnes is not None else None,
-                "est_value_usd": round(value) if value is not None else None,
-                "size_note": str(t.get("size_note") or "").strip()[:120] or None}
-        quote = str(t["quote"]).strip()[:300]
-        if card_sized(tonnes, value):
-            if source.get("thread"):
-                carded.add(source["thread"])
-            summary = str(t.get("summary") or "").strip()[:260] or "Possible new trade"
-            out.append({"kind": "possible_trade", "target": None,
-                        "proposed": {"title": title[:120], "trade_kind": kind, "email": source.get("from"), "side": side, **size},
-                        "summary": f"{summary} ({size_text(tonnes, value)})"[:300], "quote": quote, "source": source})
-        elif side == "supply":
-            email = str(source.get("from") or "").strip().lower() or None
-            company = str(t.get("company") or "").strip() or None
-            contact = str(t.get("contact_name") or "").strip()[:120] or None
-            seller = company or contact or email or "Unknown seller"
-            offers = str(t.get("offers") or "").strip()[:300] or title
-            supply.append({"kind": "possible_supply", "target": None,
-                        "proposed": {"seller": seller[:120], "contact": contact, "email": email, "offers": offers,
-                                     "trade_kind": kind, "quantity": str(t.get("quantity") or "").strip()[:80] or None,
-                                     "location": str(t.get("where") or "").strip()[:80] or None, **size},
-                        "summary": f"{seller} offers: {offers}"[:300], "quote": quote, "source": source})
-        else:
-            report["skipped"]["small_requests"].append(title[:120])
+        try:
+            screen_batch(t, by_id, existing, carded, out, supply, report)
+        except Exception as err:  # one odd answer must not fail the run (the cursor would not move on)
+            report["warnings"].append(f"possible-trade screen skipped an entry ({type(err).__name__})")
     for item in supply:
         if item["source"].get("thread") in carded:
             report["skipped"]["carded_threads"].append(item["summary"][:120])
         else:
             out.append(item)
     return out
+
+
+def screen_batch(t, by_id, existing, carded, out, supply, report):
+    """Routes one screened batch: a contact on its trade, a card, a Supply entry, or a skip (see screen_possible)."""
+    if not isinstance(t, dict):
+        return
+    source = by_id.get(str(t.get("source_id")))
+    title = str(t.get("title") or "").strip()
+    if not source or not isinstance(t.get("quote"), str) or not quote_ok(t["quote"], source["text"]) or not title:
+        return
+    existing_id = str(t.get("existing_trade_id") or "")
+    if existing_id in existing and source.get("from"):
+        # Settled against its own trade below; the contact makes the rest of their mail match.
+        out.append({"kind": "link_contact", "target": None, "lot_id": existing_id,
+                    "proposed": {"name": source["from"], "email": source["from"]},
+                    "summary": f"{source['from']} wrote about {existing[existing_id]}; added as a contact.",
+                    "quote": str(t["quote"]).strip()[:300], "source": source})
+        return
+    if t.get("use") == "recycling" or t.get("trade_kind") == "recycling":
+        report["skipped"]["recycling"].append(title[:120])
+        return
+    side = "demand" if t.get("side") == "demand" else "supply"
+    kind = t.get("trade_kind") if t.get("trade_kind") in ("packs", "cells", "systems") else None
+    tonnes, value = size_number(t.get("est_tonnes")), size_number(t.get("est_value_usd"))
+    size = {"est_tonnes": round(tonnes, 2) if tonnes is not None else None,
+            "est_value_usd": round(value) if value is not None else None,
+            "size_note": str(t.get("size_note") or "").strip()[:120] or None}
+    quote = str(t["quote"]).strip()[:300]
+    if card_sized(tonnes, value):
+        if source.get("thread"):
+            carded.add(source["thread"])
+        summary = str(t.get("summary") or "").strip()[:260] or "Possible new trade"
+        out.append({"kind": "possible_trade", "target": None,
+                    "proposed": {"title": title[:120], "trade_kind": kind, "email": source.get("from"), "side": side, **size},
+                    "summary": f"{summary} ({size_text(tonnes, value)})"[:300], "quote": quote, "source": source})
+    elif side == "supply":
+        email = str(source.get("from") or "").strip().lower() or None
+        company = str(t.get("company") or "").strip() or None
+        contact = str(t.get("contact_name") or "").strip()[:120] or None
+        seller = company or contact or email or "Unknown seller"
+        offers = str(t.get("offers") or "").strip()[:300] or title
+        supply.append({"kind": "possible_supply", "target": None,
+                    "proposed": {"seller": seller[:120], "contact": contact, "email": email, "offers": offers,
+                                 "trade_kind": kind, "quantity": str(t.get("quantity") or "").strip()[:80] or None,
+                                 "location": str(t.get("where") or "").strip()[:80] or None, **size},
+                    "summary": f"{seller} offers: {offers}"[:300], "quote": quote, "source": source})
+    else:
+        report["skipped"]["small_requests"].append(title[:120])
 
 
 EPOCH = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
@@ -2167,8 +2189,8 @@ def main():
         if args.history:
             return history(conn, args)
         if args.match:
-            key = gateway_key()
-            report = match_demand(conn, key, dry_run=args.dry_run)
+            key, report = gateway_key(), {}
+            match_demand(conn, key, report, dry_run=args.dry_run)
             match_supply(conn, key, report, dry_run=args.dry_run)
             json.dump(report, sys.stdout, indent=2, ensure_ascii=False, default=str)
             print()

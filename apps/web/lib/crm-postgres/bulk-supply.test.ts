@@ -6,11 +6,13 @@ const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 describe.skipIf(!TEST_URL)("supply list", () => {
   let pg: typeof import("../postgres");
   let supply: typeof import("./bulk-supply");
+  let demand: typeof import("./bulk-demand");
 
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_URL;
     pg = await import("../postgres");
     supply = await import("./bulk-supply");
+    demand = await import("./bulk-demand");
     await pg.queryPg(`
       delete from crm_bulk_trade_supply where id like 'bts_sup_%';
       delete from crm_bulk_trade_demand where id like 'btd_sup_%';
@@ -46,7 +48,24 @@ describe.skipIf(!TEST_URL)("supply list", () => {
     expect(await supply.closeSupply("bts_sup_1", "sold")).toMatchObject({ status: "closed", closed_reason: "sold" });
     const rows = (await supply.listSupply()).filter((row) => row.id.startsWith("bts_sup_"));
     expect(rows.map((row) => row.id)).toEqual(["bts_sup_2", "bts_sup_1"]); // open first
+    await pg.queryPg("update crm_bulk_trade_supply set match_hash = 'judged' where id = 'bts_sup_1'");
     expect(await supply.reopenSupply("bts_sup_1")).toMatchObject({ status: "open", closed_reason: null });
+    // Closing dropped its suggestions, so reopening has the next matching pass judge it again.
+    const [hash] = await pg.queryPg<{ match_hash: string | null }>("select match_hash from crm_bulk_trade_supply where id = 'bts_sup_1'");
+    expect(hash.match_hash).toBeNull();
     expect(await supply.closeSupply("bts_missing", "sold")).toBeNull();
+  });
+
+  it("clears a reopened demand row's matching hashes, but not on a plain Still wanted", async () => {
+    await pg.queryPg("update crm_bulk_trade_demand set match_hash = 'm', supply_match_hash = 's' where id in ('btd_sup_b', 'btd_sup_c')");
+    await demand.confirmDemand("btd_sup_c"); // was closed
+    await demand.confirmDemand("btd_sup_b"); // was open
+    const rows = await pg.queryPg<{ id: string; match_hash: string | null; supply_match_hash: string | null }>(
+      "select id, match_hash, supply_match_hash from crm_bulk_trade_demand where id in ('btd_sup_b', 'btd_sup_c') order by id",
+    );
+    expect(rows).toEqual([
+      { id: "btd_sup_b", match_hash: "m", supply_match_hash: "s" },
+      { id: "btd_sup_c", match_hash: null, supply_match_hash: null },
+    ]);
   });
 });
