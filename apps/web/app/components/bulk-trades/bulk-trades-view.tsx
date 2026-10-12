@@ -12,6 +12,7 @@ import {
   type TradeStage,
 } from "@/lib/bulk-trades";
 import { DemandPage } from "./demand-page";
+import { SupplyPage } from "./supply-page";
 import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { TradePage } from "./trade-page";
@@ -20,13 +21,13 @@ import { ErrorText, request } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
 import { TradesList } from "./trades-list";
 
-type Mode = "list" | "board" | "demand";
+type Mode = "list" | "board" | "demand" | "supply";
 const MODE_KEY = "bulk-trades:view";
 
 function storedMode(): Mode {
   try {
     const stored = window.localStorage.getItem(MODE_KEY);
-    return stored === "board" || stored === "demand" ? stored : "list";
+    return stored === "board" || stored === "demand" || stored === "supply" ? stored : "list";
   } catch {
     return "list";
   }
@@ -142,9 +143,11 @@ export function BulkTradesView({ onOpenEntry }: Props) {
           {tab("list", "List")}
           {tab("board", "Board")}
           {tab("demand", "Demand")}
+          {tab("supply", "Supply")}
         </nav>
         <span className="text-sm" style={{ color: "var(--bt-muted)" }}>
           {mode === "demand" ? "who wants what, matched to live trades"
+            : mode === "supply" ? "small reuse batches, matched to open demand"
             : `${liveCount} live · ${mode === "list" ? "sorted by what needs you first" : "drag to change stage"}`}
         </span>
         <div className="flex-1" />
@@ -165,7 +168,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       <main className={`flex-1 overflow-auto px-8 pb-8 ${mode === "list" ? "pt-5" : "pt-6"}`}>
         <ErrorText error={loadError} />
         <ErrorText error={actionError} />
-        {mode !== "demand" && !!possible.length && (
+        {mode !== "demand" && mode !== "supply" && !!possible.length && (
           <section aria-label="Possible new trades" className="mb-5 overflow-hidden rounded-none border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             <button type="button" aria-expanded={showPossible} onClick={() => setShowPossible((open) => !open)}
               className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold">
@@ -194,6 +197,8 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         )}
         {mode === "demand"
           ? <DemandPage today={today} onOpenTrade={setOpenTradeId} />
+          : mode === "supply"
+            ? <SupplyPage />
           : mode === "list"
             ? <TradesList trades={trades} today={today} onOpen={open} />
             : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}

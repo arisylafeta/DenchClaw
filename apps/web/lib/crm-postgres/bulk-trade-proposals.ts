@@ -198,6 +198,8 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       return lotId; // Acknowledged; Alex handles the thread by hand.
     case "bid":
       throw new Error("Bids from email are added automatically.");
+    case "possible_supply":
+      throw new Error("Supply batches from email are added automatically.");
     case "possible_demand": {
       const wants = text(proposed.wants);
       const source = {
