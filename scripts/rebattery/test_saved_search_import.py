@@ -99,6 +99,14 @@ class SourcingRequestImportTest(unittest.TestCase):
         self.assertIn("from the search box", row["note"])
         self.assertTrue(row["note"].startswith("In their words: For a home storage build.\nOpen to other brands."))
 
+    def test_names_where_the_request_came_from(self):
+        page = saved.map_sourcing_request(request(source="pack_page", catalog_path="/marketplace/listings/nissan/leaf/40-kwh"))
+        self.assertIn("from a battery pack page", page["note"])
+        nav = saved.map_sourcing_request(request(source="marketplace_nav"))
+        self.assertIn("from the marketplace menu", nav["note"])
+        unknown = saved.map_sourcing_request(request(source="something_new"))
+        self.assertIn("from the marketplace on rebattery.io", unknown["note"])
+
     def test_an_unclear_unit_keeps_the_price_in_the_note(self):
         row = saved.map_sourcing_request(request(filters={"q": "nissan leaf 40kwh"}, wants="nissan leaf 40kwh"))
         self.assertNotIn("max_price", row)

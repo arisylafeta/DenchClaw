@@ -166,7 +166,10 @@ def map_saved_search(search):
 
 QUANTITIES = {"one": "1 unit", "few": "2 to 10 units", "many": "More than 10 units"}
 TIMINGS = {"now": "Now", "three_months": "Within 3 months", "browsing": "Just looking"}
-REQUEST_SOURCES = {"search_suggestion": "the search box", "no_results": "an empty search"}
+REQUEST_SOURCES = {
+    "search_suggestion": "the search box", "no_results": "an empty search",
+    "pack_page": "a battery pack page", "marketplace_nav": "the marketplace menu",
+}
 PRICE_UNITS = {"pack": "pack", "cell": "cell"}
 
 
