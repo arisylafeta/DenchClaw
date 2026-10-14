@@ -199,7 +199,7 @@ subscriptions and campaign history are unchanged.
 
 ## Platform account identity links
 
-Migration `036_crm_platform_accounts.sql` adds `crm_platform_accounts`, keyed by
+Migration `041_crm_platform_accounts.sql` adds `crm_platform_accounts`, keyed by
 Supabase `auth.users.id` (UUID), without importing or changing CRM people.
 `person_id` is a nullable **text** foreign key to the existing `crm_people.id`,
 with `ON DELETE SET NULL`; platform `account_id` is a UUID. Role, account status,
