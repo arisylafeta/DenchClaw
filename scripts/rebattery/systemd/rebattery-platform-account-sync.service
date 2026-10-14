@@ -1,0 +1,15 @@
+# Template only: not installed or enabled by the repository.
+# Set WorkingDirectory and ExecStart to the reviewed checkout before installation.
+[Unit]
+Description=ReBattery platform auth to CRM person link sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/.hermes/projects/denchclaw-leaderboard
+ExecStart=/usr/bin/python3 scripts/rebattery/platform_account_sync.py --apply
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

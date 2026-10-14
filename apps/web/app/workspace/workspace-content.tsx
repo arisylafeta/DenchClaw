@@ -43,6 +43,7 @@ import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { CampaignsView } from "../components/campaigns/campaigns-view";
+import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
@@ -395,6 +396,7 @@ function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   if (path === "~cloud") return "cloud";
   if (path.startsWith("~platform-admin/")) return "platform-admin";
   if (path === "~crm/inbox") return "crm-inbox";
+  if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   switch (nodeType) {
     case "object": return "object";
@@ -1312,6 +1314,7 @@ function WorkspacePageInner() {
         | "crm-people"
         | "crm-companies"
         | "crm-campaigns"
+        | "crm-leaderboard"
         | "crm-inbox"
         | "crm-calendar"
         | "platform-proposals"
@@ -1348,6 +1351,7 @@ function WorkspacePageInner() {
         skills: { path: "~skills", name: "Skills" },
         cron: { path: "~cron", name: "Cron" },
         "crm-inbox": { path: "~crm/inbox", name: "Inbox" },
+        "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-listings": { path: "~platform-admin/listings", name: "Listings" },
@@ -2364,6 +2368,8 @@ function WorkspacePageInner() {
           ? "companies" as const
           : activeContentTab?.kind === "campaigns"
             ? "campaigns" as const
+          : activeContentTab?.kind === "crm-leaderboard"
+            ? "leaderboard" as const
           : activeContentTab?.kind === "crm-inbox"
             ? "inbox" as const
             : activeContentTab?.kind === "crm-calendar"
@@ -3177,6 +3183,9 @@ function ContentRenderer({
           onDirty={() => onMakeTabPermanent(content.filePath)}
         />
       );
+
+    case "crm-leaderboard":
+      return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
     case "crm-inbox":
       return <InboxView onOpenPerson={(id) => onOpenEntry("people", id)} />;

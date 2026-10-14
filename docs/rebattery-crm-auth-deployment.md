@@ -17,6 +17,15 @@ The application must keep every non-public page and API route behind its databas
 
 Keep the exact `/api/formbricks-buyer-sourcing-webhook` nginx route public and proxied to its dedicated loopback service. Keep Tailscale Serve as a private operational fallback to the loopback-only CRM runtime; it is not the canonical public hostname. Never restore shared nginx credentials or enable public signup.
 
+## User activity leaderboard
+
+The authenticated CRM Leaderboard requires `CRM_DB_BACKEND=postgres` and server-only `POSTHOG_HOST`, `POSTHOG_PROJECT_ID=375247`, and `POSTHOG_API_KEY` (a personal API key with query read access). Allowed hosts are `https://us.posthog.com`, `https://eu.posthog.com`, and `https://app.posthog.com`. Missing environment values may fall back to the runtime user's `~/.posthog/credentials.json`; production should explicitly provision the environment. Never expose the API key to browser code or commit it.
+
+Activity aggregates are cached in memory for 15 minutes per 7/30/90-day window. Names and emails are joined only inside the CRM, never sent to PostHog. Missing account-link tables show PostHog-only rows with “Link pending”; a failed or partial activity query shows an error rather than zero activity. The health endpoint `/api/leaderboard/health` requires a CRM session and returns connection status and latency, not credentials.
+
+Scoring version 1 weights submitted offers, buy-now and auction bids highest; sourcing requests and submitted messages next; saved searches/listings, quote starts and documentation clicks next; listing clicks lowest. Submitted and succeeded events are not double-counted. The score applies a 14-day recency half-life to window intent; engagement breaks ties. “No offer yet” means no submitted offer/buy-now/bid ever recorded. Never active means no eligible PostHog events ever; dormant means last activity at least 30 days ago; cooling means 7–29 days ago. Active accounts created within seven days are new; rising means at least three events in the latest week and over 1.5 times the preceding week. Counts honor role/search/CRM/no-offer filters but precede the segment filter and pagination.
+
+
 ## Hermes chat profiles
 
 DenchClaw selects the active Hermes profile with the `/p/<profile>/api/sessions`
@@ -187,3 +196,44 @@ longer reorders these columns by fill rate. Company ordering is unchanged.
 Tags uses the existing editable badge renderer; JSON editor values are decoded
 into PostgreSQL arrays on create/update. Saved filters, contact values,
 subscriptions and campaign history are unchanged.
+
+## Platform account identity links
+
+Migration `036_crm_platform_accounts.sql` adds `crm_platform_accounts`, keyed by
+Supabase `auth.users.id` (UUID), without importing or changing CRM people.
+`person_id` is a nullable **text** foreign key to the existing `crm_people.id`,
+with `ON DELETE SET NULL`; platform `account_id` is a UUID. Role, account status,
+email, auth creation and last sign-in are a private CRM-side snapshot, not
+PostHog person properties. `linked_at` tracks the link decision and `updated_at`
+changes only when stored values change.
+
+Take a current `pg_dump -Fc denchclaw` backup before applying this migration in
+a transaction. The standard schema runner discovers it automatically. Run
+`python3 scripts/rebattery/platform_account_sync.py --dry-run` for aggregate
+counts, then `--apply` only when ready to update local link records. The default
+is dry-run. Supabase reads use the approved
+`/root/.hermes/workspace/secrets/dench-platform-admin.env`; production requests
+are GET-only and must verify the production project host. The script reads every
+auth-user and PostgREST page before local writes and commits atomically.
+
+Email matching trims and lowercases only; dots and plus-tags are significant.
+Duplicate CRM emails and unmatched auth users remain unlinked with
+`needs_review`; no CRM people are created. Multiple platform account memberships
+are not arbitrarily collapsed into a role: the account fields stay null and
+the row requires review. `unknown` role counts include accounts without a unique
+platform account. Match counts describe email-match candidates, not subsequent
+manual overrides. Sync preserves manual links and confirmed/rejected decisions
+while refreshing platform metadata. Identical syncs do not change timestamps.
+
+`lib/crm-postgres/platform-accounts.ts` supports authenticated callers listing,
+reading, reviewing and manually linking/unlinking identities. Unlinking records
+a protected rejection, so a later email match cannot silently restore it.
+Never expose these email-bearing records publicly or send their emails to
+PostHog. Tests use temporary tables only; run
+`PLATFORM_ACCOUNT_TEST_DSN='dbname=denchclaw' python3 -m pytest scripts/rebattery/test_platform_account_sync.py`
+and the focused Vitest file `lib/crm-postgres/platform-accounts.test.ts`.
+
+Hourly service/timer templates live in `scripts/rebattery/systemd/`. They are
+**not installed or enabled**. Review the checkout and Python interpreter paths
+(including `psycopg2` availability) before separately authorizing installation.
+The timer invokes `--apply`; its journal contains aggregate counts only.

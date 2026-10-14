@@ -1,0 +1,12 @@
+# Template only: installation/enabling requires separate approval.
+[Unit]
+Description=Refresh ReBattery platform account links hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+Unit=rebattery-platform-account-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -121,6 +121,7 @@ type WorkspaceSidebarProps = {
       | "crm-people"
       | "crm-companies"
       | "crm-campaigns"
+      | "crm-leaderboard"
       | "crm-inbox"
       | "crm-calendar"
       | "platform-proposals"
@@ -133,7 +134,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "people" | "companies" | "campaigns" | "inbox" | "calendar" | null;
+  activeCrmTarget?: "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "stock" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -397,6 +398,12 @@ export function WorkspaceSidebar({
 				</svg>
 			),
 		},
+    {
+      id: "crm-leaderboard" as const,
+      label: "Leaderboard",
+      target: "leaderboard" as const,
+      icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M4 20V12h4v8M10 20V4h4v16M16 20V8h4v12" /></svg>,
+    },
 		{
 			id: "crm-inbox" as const,
 			label: "Inbox",

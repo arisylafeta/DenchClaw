@@ -117,6 +117,7 @@ export type ContentState =
   | { kind: "richDocument"; html: string; filePath: string; mode: "docx" | "txt" }
   | { kind: "app"; appPath: string; manifest: DenchAppManifest; filename: string }
   | { kind: "crm-inbox" }
+  | { kind: "crm-leaderboard" }
   | { kind: "crm-calendar" }
   | { kind: "crm-person"; entryId: string; profileTab?: string }
   | { kind: "crm-company"; entryId: string; profileTab?: string };
