@@ -148,7 +148,86 @@ Counts measure emails with observed activity, not repeated opens/clicks or
 verified human visits. Unsynced sends show pending tracking; each synced update
 shows its last sync time. Email clicks do not establish site visits. This view
 does not add interaction rows or change relationship scores. The campaign
-`sync --campaign-id <id> --apply` command remains the existing data-refresh path.
+`sync --campaign-id <id> --stream <broadcast-stream> --apply` command refreshes
+receipt observations and reconciles that stream's complete suppression set.
+
+### Supply update suppressions (REB-397)
+
+Run `python3 scripts/rebattery/rebattery-campaign.py sync --campaign-id <id>
+--stream <broadcast-stream>` to inspect the proposed CRM changes without writes.
+Add `--apply` only for an approved CRM reconciliation. The explicit stream must
+be an active Broadcast stream with unsubscribe handling and is mapped to the
+existing **Supply update** list, not other CRM lists.
+
+Every matched address becomes `Opted out` on that list, including CRM people
+outside the selected campaign. `how` retains the Postmark stream, exact reason
+and origin; `since` stores the provider's suppression calendar date, not the
+sync date. `SpamComplaint` and `HardBounce` also set global `email_opted_out`.
+An unsubscribe (`ManualSuppression` with `Origin=Recipient`), customer/admin
+manual suppression or unknown reason does not set the global flag. Existing
+global opt-outs are never cleared. Missing provider suppressions never
+resubscribe anyone. Unmatched addresses are reported, not created as contacts.
+Sync JSON now contains `receipts`, `suppressions`, `stream`, `list` and `dry_run`.
+
+For suppression-only reconciliation, use `sync-suppressions --stream <broadcast-stream>`
+instead of `sync`. It requires no campaign ID, performs the same opt-out mapping,
+and never reads message details or updates campaign receipts. Omit `--apply` for
+a read-only inspection.
+
+The host scheduler entrypoint is `scripts/rebattery/postmark_suppression_sync.py`,
+installed as `/root/.hermes/scripts/postmark_suppression_sync.py`. It runs against
+the dedicated release checkout at `/root/.hermes/projects/denchclaw-postmark-sync`,
+pins the local `denchclaw` database and the `broadcast` stream, and loads
+`POSTMARK_SERVER_TOKEN` through the default Hermes profile's existing secret
+loader. No credentials are stored in the job. Use Hermes' Python interpreter;
+it delegates the CRM CLI to `/usr/bin/python3` with psycopg2. The scheduler script
+applies by default; pass `--dry-run` for a read-only manual inspection.
+
+Before activation, verify a fresh CRM backup, inspect a live dry run, apply once
+and read back the CRM state. Create the deterministic daily job with
+`hermes cron create "0 6 * * *" --name "ReBattery daily Postmark suppression sync"
+--script postmark_suppression_sync.py --no-agent --deliver local
+--workdir /root/.hermes/projects/denchclaw-postmark-sync`. This runs at 06:00 UTC
+without an agent, email sends, provider mutations or receipt sync. Keep it
+paused until `POSTMARK_SERVER_TOKEN` is available and initial reconciliation
+succeeds; missing credentials stop before CRM writes.
+
+Preview and freeze read current stream suppressions and exclude those addresses
+and CRM Supply update opt-outs before hashing or inserting frozen sends, for
+both explicit IDs and SQL candidates. The output includes `exclusions`.
+Failed or incomplete dumps and fully excluded cohorts stop freeze before writes.
+Launch retains its provider guard for suppressions arriving after freeze.
+The candidate cap remains 500; audience selection, tags and reply handling
+are unchanged. No schema migration or provider suppression creation is needed.
+
+### Personalised sends and the launch cap
+
+A manifest may map template variables to the People columns `first_name`,
+`last_name` and `opening` with `"personalization": {"first_name": "first_name"}`.
+`freeze` renders each recipient's subject, HTML and text from those columns and
+`campaign_variables`, stores them in `crm_campaign_sends` (migration
+`035_campaign_personalization.sql`) and binds them into the approval digest.
+A missing value stops the freeze; recipients without a name belong in a separate
+campaign whose template has no name variable. `launch` sends the frozen bodies,
+never re-rendering, and requires `--max-recipients <n>`, which caps one invocation
+in recipient-email order. A pilot is the same approved campaign launched with a
+small cap first; a second launch sends the rest. `launch` refuses to run while any
+send is `sending` or `unknown`.
+
+`scripts/rebattery/postmark_suppression_sync.py` runs the CLI from the release
+checkout named above, so after a CLI change merges, fast-forward that checkout to
+`origin/main` or the scheduled job keeps the old code.
+
+The dump API returns the entire unfiltered set without pagination:
+[Postmark suppression API](https://postmarkapp.com/developer/api/suppressions-api).
+Run the campaign regressions against a disposable CRM database:
+
+```bash
+scripts/rebattery/crm-test-db.sh up
+BULK_TRADES_TEST_DATABASE_URL=<printed-url> python3 -m unittest discover \
+  -s scripts/rebattery -p test_rebattery_campaign.py -v
+scripts/rebattery/crm-test-db.sh down
+```
 
 ## Troubleshooting
 
