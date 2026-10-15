@@ -17,7 +17,7 @@ const D = (o: Partial<Dismantler>): Dismantler => ({
   id: o.name!, company_id: "c", name: "", stage: "Talking", saved_stage: "Talking", stage_since: "2026-09-01", parked_from: null,
   park_reason: null, revisit_on: null, next_step: null, next_step_due: null, next_step_person_id: null, next_step_person_name: null,
   owner_user_id: null, owner_name: null, goal: false, country: null, ebay_username: null, ebay_listings: null,
-  platform_account_id: null, platform: null, source: null, notes: null, last_contact: null, updated_at: "", ...o,
+  platform_account_id: null, platform: null, source: null, notes: null, last_contact: null, campaign_emailed_on: null, campaign_replied_on: null, updated_at: "", ...o,
 });
 
 const P = (o: Partial<PlatformFacts>): PlatformFacts => ({

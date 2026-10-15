@@ -5,6 +5,8 @@ export type CampaignMetrics = {
   clicked: number | null;
   bounced: number | null;
   opted_out: number | null;
+  /** Recipients who emailed us back after the send (any synced mailbox). Ledger campaigns only. */
+  replied: number | null;
 };
 
 export type CampaignSummary = {
@@ -39,6 +41,11 @@ export type CampaignRecipient = {
   clicked_at: string | null;
   last_synced_at: string | null;
   tracking_pending: boolean;
+  /** First email back from the recipient or their company after the send. */
+  replied_at: string | null;
+  subject: string | null;
+  dismantler_id: string | null;
+  dismantler_stage: string | null;
   listing_clicks: Array<{
     listing_id: string;
     label: string;
@@ -64,6 +71,8 @@ export type CampaignDetail = {
   recipients: CampaignRecipient[];
   listings: CampaignListing[];
   other_destinations: Array<{ cta_key: string; label: string }>;
+  /** Where the emailed dismantlers are now, for dismantler outreach campaigns. */
+  dismantler_funnel: { emailed: number; replied: number; stages: Record<string, number> } | null;
   details: {
     auction_slug: string | null;
     source_system: string | null;

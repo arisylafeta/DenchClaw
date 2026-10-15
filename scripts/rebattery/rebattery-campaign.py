@@ -28,6 +28,9 @@ from psycopg2.extras import RealDictCursor
 SUPPLY_UPDATE_LIST = "Supply update"
 SUPPLY_UPDATE_SENDER = "supply@rebattery.io"
 PERSONALIZATION_COLUMNS = {"first_name", "last_name", "opening"}
+# An auction campaign promotes one auction to buyers. A sourcing campaign asks suppliers for stock: it has no
+# listing or auction, its links are optional, and each recipient may carry reviewed lines of their own.
+CAMPAIGN_KINDS = {"auction": {"supply_update", "intro"}, "sourcing": {"dismantler_outreach"}}
 VARIABLE = re.compile(r"(?<!\{)\{\{([a-z][a-z0-9_]*)\}\}(?!\})")
 
 def connection(read_only=False):
@@ -38,11 +41,21 @@ def connection(read_only=False):
 
 def load_manifest(path):
     manifest = json.loads(Path(path).read_text())
-    required = ("id", "name", "objective", "success_measure", "listing_id", "auction_url", "stock_snapshot_ref",
+    kind = manifest.get("kind", "auction")
+    if kind not in CAMPAIGN_KINDS:
+        raise ValueError(f"kind must be one of: {', '.join(sorted(CAMPAIGN_KINDS))}")
+    campaign_type = manifest.get("campaign_type", "supply_update" if kind == "auction" else "dismantler_outreach")
+    if campaign_type not in CAMPAIGN_KINDS[kind]:
+        raise ValueError(f"A {kind} campaign_type must be one of: {', '.join(sorted(CAMPAIGN_KINDS[kind]))}")
+    required = ("id", "name", "objective", "success_measure", "stock_snapshot_ref",
                 "message_version", "sender", "reply_to", "reply_owner", "subject", "html", "text", "stream")
+    if kind == "auction":
+        required += ("listing_id", "auction_url")
     missing = [key for key in required if not isinstance(manifest.get(key), str) or not manifest[key].strip()]
     if missing:
         raise ValueError(f"Missing campaign inputs: {', '.join(missing)}")
+    if kind == "sourcing" and (manifest.get("listing_id") or manifest.get("auction_url") or manifest.get("auction_slug")):
+        raise ValueError("A sourcing campaign has no listing_id, auction_url or auction_slug")
     if manifest["stream"] == "outbound":
         raise ValueError("Campaigns require an explicitly configured Broadcast stream")
     if re.match(r"(?i)supply[\s_-]*update", manifest["name"]) or re.match(r"(?i)supply-update", manifest["id"]):
@@ -50,14 +63,16 @@ def load_manifest(path):
         sender = email.utils.parseaddr(manifest["sender"])[1].lower()
         if sender != SUPPLY_UPDATE_SENDER or manifest["reply_to"].strip().lower() != SUPPLY_UPDATE_SENDER:
             raise ValueError(f"Supply Update campaigns must use {SUPPLY_UPDATE_SENDER} as sender and reply_to")
-    url = urllib.parse.urlparse(manifest["auction_url"])
-    if url.scheme != "https" or not url.netloc or not url.path.startswith("/marketplace/auctions/"):
-        raise ValueError("auction_url must be a public HTTPS auction detail URL")
-    if manifest["auction_url"] not in manifest["html"] or manifest["auction_url"] not in manifest["text"]:
-        raise ValueError("The approved HTML and text must both link to this auction")
-    links = manifest.get("links")
-    if not isinstance(links, list) or not links:
+    if kind == "auction":
+        url = urllib.parse.urlparse(manifest["auction_url"])
+        if url.scheme != "https" or not url.netloc or not url.path.startswith("/marketplace/auctions/"):
+            raise ValueError("auction_url must be a public HTTPS auction detail URL")
+        if manifest["auction_url"] not in manifest["html"] or manifest["auction_url"] not in manifest["text"]:
+            raise ValueError("The approved HTML and text must both link to this auction")
+    links = manifest.get("links", [] if kind == "sourcing" else None)
+    if not isinstance(links, list) or (kind == "auction" and not links):
         raise ValueError("Provide the campaign's tracked CTA links")
+    manifest["links"] = links
     keys, urls = set(), set()
     for link in links:
         if not isinstance(link, dict) or not isinstance(link.get("key"), str) or not re.fullmatch(r"[a-z0-9_-]{1,40}", link["key"]):
@@ -72,7 +87,7 @@ def load_manifest(path):
             raise ValueError("CTA keys and URLs must be unique and present in HTML and text")
         keys.add(link["key"])
         urls.add(target)
-    if manifest["auction_url"] not in urls:
+    if kind == "auction" and manifest["auction_url"] not in urls:
         raise ValueError("Primary auction URL must be a tracked CTA")
     html_urls = set(re.findall(r'''href=["'](https://[^"']+)''', manifest["html"]))
     text_urls = set(re.findall(r"https://[^\s<>]+", manifest["text"]))
@@ -87,10 +102,30 @@ def load_manifest(path):
         for variable, column in personalization.items()
     ):
         raise ValueError("Personalization must map variable names to approved CRM person columns")
+    recipient_variables = manifest.get("recipient_variables", {})
+    if recipient_variables and kind != "sourcing":
+        raise ValueError("recipient_variables are for sourcing campaigns only")
+    if not isinstance(recipient_variables, dict) or any(
+        not isinstance(values, dict) or not values
+        or any(not re.fullmatch(r"[a-z][a-z0-9_]*", name) or not isinstance(value, str) or not value.strip()
+               for name, value in values.items())
+        for values in recipient_variables.values()
+    ):
+        raise ValueError("recipient_variables must map CRM person IDs to nonempty text variables")
+    names = {frozenset(values) for values in recipient_variables.values()}
+    if len(names) > 1:
+        raise ValueError("Every recipient must have the same recipient_variables")
+    shared = set().union(*names) & (set(personalization) | set(manifest.get("campaign_variables", {})))
+    if shared:
+        raise ValueError(f"recipient_variables reuse personalization or campaign variable names: {sorted(shared)}")
+    manifest["kind"] = kind
+    manifest["campaign_type"] = campaign_type
     if not manifest.get("person_ids") and not manifest.get("cohort_sql"):
         raise ValueError("Provide person_ids or cohort_sql (path to a read-only SELECT returning person_id)")
     if manifest.get("person_ids") and manifest.get("cohort_sql"):
         raise ValueError("Use only one cohort source")
+    if recipient_variables and set(recipient_variables) != set(manifest.get("person_ids") or []):
+        raise ValueError("recipient_variables need person_ids, with exactly one entry per person")
     return manifest
 
 
@@ -144,11 +179,13 @@ def cohort(db, manifest, suppressions):
             template_vars.update({name: row[column] for name, column in personalization.items()})
             if any(value is None or not str(value).strip() for name, value in template_vars.items() if name in personalization):
                 raise ValueError(f"Missing required personalization for CRM person: {person_id}")
+            own = manifest.get("recipient_variables", {}).get(person_id, {})
+            template_vars.update(own)
             rows.append({
                 "person_id": person_id,
                 "company_id": row["company_id"],
                 "email": email,
-                "personalization": {name: row[column] for name, column in personalization.items()},
+                "personalization": {**{name: row[column] for name, column in personalization.items()}, **own},
                 "subject": render_template(manifest["subject"], template_vars),
                 "html": render_template(manifest["html"], template_vars, html_mode=True),
                 "text": render_template(manifest["text"], template_vars),
@@ -172,13 +209,18 @@ def render_template(template, variables, html_mode=False):
 
 
 def digest(manifest, rows):
-    contents = {key: manifest[key] for key in ("id", "name", "objective", "success_measure", "listing_id", "auction_url",
+    contents = {key: manifest.get(key) for key in ("id", "name", "objective", "success_measure", "listing_id", "auction_url",
         "stock_snapshot_ref", "message_version", "sender", "reply_to", "reply_owner", "subject", "html", "text", "stream")}
     contents["auction_slug"] = manifest.get("auction_slug")
     contents["links"] = manifest["links"]
     # Approval binds identities, not the database's locale-dependent row order.
     contents["personalization"] = manifest.get("personalization", {})
     contents["campaign_variables"] = manifest.get("campaign_variables", {})
+    if manifest.get("kind", "auction") != "auction" or manifest.get("campaign_type", "supply_update") != "supply_update":
+        # Only added when used, so digests of earlier auction manifests are unchanged.
+        contents["kind"] = manifest.get("kind", "auction")
+        contents["campaign_type"] = manifest.get("campaign_type", "supply_update")
+        contents["notes"] = manifest.get("notes")
     contents["cohort"] = sorted(rows, key=lambda row: row["email"])
     contents["track_opens"] = True
     contents["track_links"] = "HtmlAndText"
@@ -301,12 +343,14 @@ def freeze(manifest, rows, sha):
                        source_system, audience, audience_size, objective, success_measure,
                        stock_snapshot_ref, message_version, sender_identity, reply_owner, reply_mailbox, notes,
                        emails_opened, emails_clicked)
-                       values (%s,%s,%s,'supply_update','email-postmark','frozen','dench-campaign',%s,%s,
+                       values (%s,%s,%s,%s,'email-postmark','frozen','dench-campaign',%s,%s,
                                %s,%s,%s,%s,%s,%s,%s,%s,null,null)""",
                     (manifest["id"], manifest["name"], manifest.get("auction_slug"),
+                     manifest.get("campaign_type", "supply_update"),
                      f"Frozen {len(rows)} recipients; SHA256 {sha}", len(rows), manifest["objective"],
                      manifest["success_measure"], manifest["stock_snapshot_ref"], manifest["message_version"],
-                     manifest["sender"], manifest["reply_owner"], manifest["reply_to"], "Internal pilot"))
+                     manifest["sender"], manifest["reply_owner"], manifest["reply_to"],
+                     manifest.get("notes") or "Internal pilot"))
         for row in rows:
             send_id = hashlib.sha256(f"{manifest['id']}\0{row['person_id']}".encode()).hexdigest()[:32]
             cur.execute("""insert into crm_campaign_sends
@@ -314,7 +358,7 @@ def freeze(manifest, rows, sha):
                             personalization, rendered_subject, rendered_html, rendered_text)
                            values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
                         (send_id, manifest["id"], row["person_id"], row["company_id"],
-                         manifest["listing_id"], manifest["auction_url"], row["email"],
+                         manifest.get("listing_id"), manifest.get("auction_url"), row["email"],
                          json.dumps(row.get("personalization", {})), row["subject"], row["html"], row["text"]))
             for link in manifest["links"]:
                 link_id = hashlib.sha256(f"{send_id}\0{link['key']}".encode()).hexdigest()[:32]

@@ -14,7 +14,7 @@ import {
   type DismantlerPatch,
   type JourneyStage,
 } from "@/lib/dismantlers";
-import type { Activity, DismantlerDetail } from "@/lib/crm-postgres/dismantlers";
+import type { Activity, DismantlerDetail, OutreachSend } from "@/lib/crm-postgres/dismantlers";
 import { firstName, greeting } from "@/lib/bulk-trade-details";
 import { Card, ErrorText, buttonClass, buttonStyle, darkButtonStyle, request } from "../bulk-trades/trade-ui";
 import { EditDismantlerDialog, EmailDialog, ParkDialog, SetNextDialog } from "./dismantler-dialogs";
@@ -108,6 +108,7 @@ export function DismantlerPage({ id, owners, today, onBack, onSaved }: Props) {
           <OnReBattery d={d} error={detail.platform_error ?? null} onEdit={() => setEditing(true)} />
           <ActivityCard activity={detail.activity} />
         </div>
+        {detail.outreach.length > 0 && <OutreachCard sends={detail.outreach} />}
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
           <Card label="Contacts" className="flex flex-col gap-2 px-5 py-[18px]">
             <h2 className="text-base font-semibold">Contacts</h2>
@@ -335,6 +336,10 @@ function eventText(item: Extract<Activity, { kind: "event" }>): string {
   if (item.event === "created") return "Added to Dismantlers";
   if (item.event === "imported") return "Added from an imported list";
   if (item.event === "email_draft") return `Gmail draft: ${String(changes.subject ?? "")}`;
+  if (item.event === "campaign_email") {
+    const moved = pair("stage");
+    return `${String(changes.subject ?? changes.campaign ?? "Campaign email")}${moved ? ` (${String(moved[0])} → ${String(moved[1])})` : ""}`;
+  }
   const stage = pair("stage");
   if (stage) {
     const note = item.event === "outreach" ? " (outreach started)" : item.event === "simplified" ? " (stages simplified)" : "";
@@ -344,6 +349,44 @@ function eventText(item: Extract<Activity, { kind: "event" }>): string {
   if (step?.[1]) return `Next step: ${String(step[1])}`;
   const fields = Object.keys(changes).map((key) => FIELD_NAMES[key]).filter(Boolean);
   return fields.length ? `Changed ${fields.join(", ").toLowerCase()}` : "Updated";
+}
+
+/** Campaign emails to the company: what was asked, and whether it landed, was opened and got a reply. */
+function OutreachCard({ sends }: { sends: OutreachSend[] }) {
+  const day = (at: string | null) => (at ? dayMonth(at.slice(0, 10)) : null);
+  return (
+    <Card label="Outreach">
+      <header className="flex items-center border-b px-5 py-4" style={{ borderColor: "var(--bt-divider)" }}>
+        <h2 className="flex-1 text-base font-semibold">Outreach</h2>
+        <span className="text-xs" style={{ color: "var(--bt-muted)" }}>campaign emails · opens can be automated</span>
+      </header>
+      {sends.map((send, index) => {
+        const status = [
+          send.bounced_at ? `Bounced ${day(send.bounced_at)}` : send.delivered_at ? `Delivered ${day(send.delivered_at)}`
+            : send.accepted_at ? `Sent ${day(send.accepted_at)}` : send.state === "frozen" ? "Not sent yet" : send.state,
+          send.opened_at ? `opened ${day(send.opened_at)}` : null,
+          send.clicked_at ? `clicked ${day(send.clicked_at)}` : null,
+        ].filter(Boolean).join(" · ");
+        return (
+          <div key={index} className="flex flex-col gap-1 border-b px-5 py-3 text-sm last:border-b-0" style={{ borderColor: "var(--bt-divider)" }}>
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <span className="font-medium">{send.subject ?? "(no subject)"}</span>
+              <span className="text-xs" style={{ color: send.replied_at ? "var(--bt-green)" : "var(--bt-muted)" }}>
+                {send.replied_at ? `Replied ${day(send.replied_at)}` : send.accepted_at ? "No reply yet" : ""}
+              </span>
+            </div>
+            <div className="text-xs" style={{ color: "var(--bt-muted)" }}>{send.campaign} · to {send.recipient} · {status}</div>
+            {send.text && (
+              <details className="text-xs">
+                <summary className="cursor-pointer" style={{ color: "var(--bt-muted)" }}>Email as sent</summary>
+                <p className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">{send.text}</p>
+              </details>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+  );
 }
 
 function ActivityCard({ activity }: { activity: Activity[] }) {
@@ -358,7 +401,7 @@ function ActivityCard({ activity }: { activity: Activity[] }) {
           <span className="pt-0.5 text-xs" style={{ color: "var(--bt-muted)" }}>{dayMonth(item.at.slice(0, 10))}</span>
           <div className="min-w-0">
             <span className="bt-label !text-[10px]">
-              {item.kind === "email" ? (item.outgoing ? "Email sent" : "Email received") : item.event === "email_draft" ? "Draft" : "Change"}
+              {item.kind === "email" ? (item.outgoing ? "Email sent" : "Email received") : item.event === "email_draft" ? "Draft" : item.event === "campaign_email" ? "Campaign email" : "Change"}
             </span>
             <div className="mt-0.5 truncate">
               {item.kind === "email" ? (item.subject ?? "(no subject)") : eventText(item)}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CampaignActivity } from "@/lib/campaign-activity";
 import type { CampaignDetail } from "@/lib/campaigns";
+import { JOURNEY } from "@/lib/dismantlers";
 import { buildFileLink } from "@/lib/workspace-links";
 import { request } from "../bulk-trades/trade-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../platform-admin/ui/tabs";
@@ -56,6 +57,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
           <span>Sent: <CampaignDate value={campaign.launched_at || campaign.last_invite_at} /></span>
         </div>
         <MetricsStrip campaign={campaign} />
+        {detail.dismantler_funnel && <DismantlerFunnel funnel={detail.dismantler_funnel} />}
         <p className="text-[13px]" style={mutedStyle}>Bounced: {campaign.metrics.bounced ?? "Unknown"} · Opted out: {campaign.metrics.opted_out ?? "Unknown"}</p>
         <section aria-label="Metrics provenance" className="flex flex-col gap-1 text-xs" style={mutedStyle}>
           <p>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger totals"} · {campaign.metrics_basis === "snapshot" ? `Original sent: ${campaign.metrics.sent ?? "Unknown"} · ` : ""}Retained recipients: {campaign.recipient_count.toLocaleString("en-GB")}</p>
@@ -72,7 +74,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
             {[["recipients", "Recipients"], ["listings", "Listings"], ["details", "Details"]].map(([value, label]) => <TabsTrigger key={value} value={value} className="h-auto flex-none rounded-none border-0 px-3.5 py-3 text-[13px] shadow-none hover:text-[var(--bt-text)] focus-visible:ring-[var(--bt-text)] data-[state=active]:bg-transparent data-[state=active]:text-[var(--bt-text)] data-[state=active]:font-semibold after:bg-[var(--bt-text)] group-data-[orientation=horizontal]/tabs:after:bottom-0" style={{ color: tab === value ? "var(--bt-text)" : "var(--bt-muted)" }}>{label}</TabsTrigger>)}
           </TabsList>
           <TabsContent value="recipients" forceMount hidden={tab !== "recipients"} className="data-[state=inactive]:hidden">
-            <CampaignRecipients recipients={detail.recipients} onNavigatePerson={onNavigatePerson} />
+            <CampaignRecipients recipients={detail.recipients} onNavigatePerson={onNavigatePerson} outreach={!!detail.dismantler_funnel} />
           </TabsContent>
           <TabsContent value="listings">
             <CampaignListings detail={detail} activity={activity} loading={activityLoading} onNavigatePerson={onNavigatePerson} />
@@ -83,6 +85,20 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
         </Tabs>
       </main>
     </div>
+  );
+}
+
+/** Where the emailed dismantlers are now. Stages move on the Dismantlers page; a send moves Found to Talking. */
+function DismantlerFunnel({ funnel }: { funnel: NonNullable<CampaignDetail["dismantler_funnel"]> }) {
+  const steps: Array<[string, number]> = [["Emailed", funnel.emailed], ["Replied", funnel.replied],
+    ...JOURNEY.map((stage): [string, number] => [stage, funnel.stages[stage] ?? 0]), ["Parked", funnel.stages.Parked ?? 0]];
+  return (
+    <section aria-label="Dismantler progress" className="flex flex-col gap-1.5">
+      <span className="bt-label">Dismantlers from this campaign</span>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+        {steps.map(([label, count]) => <span key={label}><span style={mutedStyle}>{label}</span> <span className="bt-mono font-semibold">{count.toLocaleString("en-GB")}</span></span>)}
+      </div>
+    </section>
   );
 }
 

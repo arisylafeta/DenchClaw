@@ -235,6 +235,65 @@ class CampaignTest(unittest.TestCase):
             "test-lot": "2026-09-23T10:01:00Z", "sourcing": "2026-09-23T10:02:00Z"})
 
 
+SOURCING = {
+    "kind": "sourcing", "id": "test-sourcing", "name": "Dismantler outreach test", "objective": "Ask for stock",
+    "success_measure": "Replies", "stock_snapshot_ref": "demand@2026-10-15", "message_version": "v1",
+    "sender": "Alex <alex@rebattery.io>", "reply_to": "alex@rebattery.io", "reply_owner": "Alex",
+    "subject": "Your {{packs_short}}",
+    "html": "<div>Hi {{first_name}},</div><div>{{ask}}</div><a href='https://www.rebattery.io/'>rebattery.io</a> <a href='{{{ pm:unsubscribe }}}'>Unsubscribe</a>",
+    "text": "Hi {{first_name}},\n{{ask}}\nhttps://www.rebattery.io/\nUnsubscribe {{{ pm:unsubscribe }}}",
+    "links": [{"key": "website", "url": "https://www.rebattery.io/"}],
+    "stream": "broadcasts", "person_ids": ["p1", "p2"],
+    "personalization": {"first_name": "first_name"},
+    "recipient_variables": {"p1": {"ask": "Could you price the 4 Kona packs?", "packs_short": "Kona packs"},
+                            "p2": {"ask": "Are the 2 Leaf packs still free?", "packs_short": "Leaf packs"}},
+}
+
+
+def load(manifest):
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "manifest.json"
+        path.write_text(json.dumps(manifest))
+        return campaign.load_manifest(path)
+
+
+class SourcingManifestTest(unittest.TestCase):
+    def test_sourcing_needs_no_auction_and_defaults_to_dismantler_type(self):
+        manifest = load(SOURCING)
+        self.assertEqual((manifest["kind"], manifest["campaign_type"]), ("sourcing", "dismantler_outreach"))
+        self.assertEqual(load({**SOURCING, "links": [], "html": SOURCING["html"].replace(
+            "<a href='https://www.rebattery.io/'>rebattery.io</a>", ""), "text": SOURCING["text"].replace(
+            "https://www.rebattery.io/\n", "")})["links"], [])
+
+    def test_sourcing_rejects_auction_fields_wrong_type_and_bad_recipient_variables(self):
+        variables = SOURCING["recipient_variables"]
+        for invalid in (
+            {**SOURCING, "auction_url": MANIFEST["auction_url"]},
+            {**SOURCING, "listing_id": "listing-1"},
+            {**SOURCING, "campaign_type": "supply_update"},
+            {**SOURCING, "kind": "newsletter"},
+            {**SOURCING, "recipient_variables": {"p1": variables["p1"]}},
+            {**SOURCING, "recipient_variables": {**variables, "p2": {"ask": "Only one"}}},
+            {**SOURCING, "recipient_variables": {**variables, "p2": {**variables["p2"], "ask": "  "}}},
+            {**SOURCING, "recipient_variables": {p: {**v, "first_name": "Clash"} for p, v in variables.items()}},
+            {**SOURCING, "person_ids": None, "cohort_sql": "cohort.sql"},
+            {**SOURCING, "html": SOURCING["html"].replace("{{{ pm:unsubscribe }}}", "")},
+        ):
+            with self.assertRaises(ValueError):
+                load(invalid)
+        with self.assertRaises(ValueError):
+            load({**MANIFEST, "recipient_variables": {"p1": {"ask": "x"}}})
+        with self.assertRaises(ValueError):
+            load({**MANIFEST, "campaign_type": "dismantler_outreach"})
+
+    def test_auction_digest_is_unchanged_and_sourcing_digest_binds_type(self):
+        self.assertEqual(campaign.digest(MANIFEST, ROWS),
+                         campaign.digest(load(MANIFEST), ROWS))
+        sourcing = load(SOURCING)
+        self.assertNotEqual(campaign.digest(sourcing, ROWS),
+                            campaign.digest({**sourcing, "notes": "Changed"}, ROWS))
+
+
 TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 
@@ -454,3 +513,100 @@ class SuppressionSyncTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+class SourcingCampaignDbTest(unittest.TestCase):
+    def setUp(self):
+        self.prefix = "sourcing_" + uuid4().hex
+        self.people = [self.prefix + "_p1", self.prefix + "_p2"]
+        self.companies = [self.prefix + "_c1", self.prefix + "_c2"]
+        self.campaign_id = self.prefix + "_campaign"
+        variables = SOURCING["recipient_variables"]
+        self.manifest = {**SOURCING, "id": self.campaign_id, "person_ids": self.people,
+                         "recipient_variables": {self.people[0]: {**variables["p1"], "ask": "4 Kona & 2 Niro <packs>?"},
+                                                 self.people[1]: variables["p2"]}}
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.env = patch.dict(os.environ, {"DENCH_CAMPAIGN_DSN": TEST_URL})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.addCleanup(self.cleanup_rows)
+        with psycopg2.connect(TEST_URL) as db, db.cursor() as cur:
+            for index, (person, company) in enumerate(zip(self.people, self.companies)):
+                cur.execute("insert into crm_companies (id, name, relationship_stage) values (%s,%s,'New')",
+                            (company, f"{self.prefix} scrap {index}"))
+                cur.execute("""insert into crm_people (id, company_id, first_name, email)
+                               values (%s,%s,%s,%s)""", (person, company, f"Name{index}", f"{person}@example.test"))
+            cur.execute("insert into crm_dismantlers (company_id, stage) values (%s,'Found')", (self.companies[0],))
+            cur.execute("""insert into crm_dismantlers (company_id, stage, next_step, next_step_due)
+                           values (%s,'Talking','Call them','2026-11-02')""", (self.companies[1],))
+
+    def cleanup_rows(self):
+        with psycopg2.connect(TEST_URL) as db, db.cursor() as cur:
+            cur.execute("delete from crm_dismantlers where company_id=any(%s::text[])", (self.companies,))
+            cur.execute("""delete from crm_campaign_send_links where send_id in
+                           (select id from crm_campaign_sends where campaign_id=%s)""", (self.campaign_id,))
+            cur.execute("delete from crm_campaign_sends where campaign_id=%s", (self.campaign_id,))
+            cur.execute("delete from campaigns where id=%s", (self.campaign_id,))
+            cur.execute("delete from crm_subscriptions where person_id=any(%s::text[])", (self.people,))
+            cur.execute("delete from crm_people where id=any(%s::text[])", (self.people,))
+            cur.execute("delete from crm_companies where id=any(%s::text[])", (self.companies,))
+
+    def provider(self, path, method="GET", payload=None):
+        self.assertEqual(method, "GET")
+        if path == "/message-streams/broadcasts":
+            return {"MessageStreamType": "Broadcasts", "ArchivedAt": None,
+                    "SubscriptionManagementConfiguration": {"UnsubscribeHandlingType": "Postmark"}}
+        if path == "/message-streams/broadcasts/suppressions/dump":
+            return {"Suppressions": []}
+        self.fail(f"Unexpected provider request: {path}")
+
+    def query(self, sql, params=()):
+        with psycopg2.connect(TEST_URL) as db, db.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+
+    def test_freeze_stores_recipient_lines_and_accepted_send_moves_the_dismantler(self):
+        path = Path(self.directory.name) / "manifest.json"
+        path.write_text(json.dumps(self.manifest))
+        stdout = io.StringIO()
+        with patch("sys.argv", ["rebattery-campaign.py", "freeze", "--manifest", str(path), "--apply"]), \
+             patch.object(campaign, "postmark", side_effect=self.provider), redirect_stdout(stdout):
+            self.assertEqual(campaign.main(), 0)
+        sha = json.loads(stdout.getvalue())["sha256"]
+        [row] = self.query("select type, auction_slug from campaigns where id=%s", (self.campaign_id,))
+        self.assertEqual(row, {"type": "dismantler_outreach", "auction_slug": None})
+        sends = {row["person_id"]: row for row in self.query(
+            """select id, person_id, listing_id, auction_url, personalization, rendered_subject, rendered_html,
+                      rendered_text from crm_campaign_sends where campaign_id=%s""", (self.campaign_id,))}
+        first = sends[self.people[0]]
+        self.assertIsNone(first["listing_id"])
+        self.assertIsNone(first["auction_url"])
+        self.assertEqual(first["rendered_subject"], "Your Kona packs")
+        self.assertIn("4 Kona &amp; 2 Niro &lt;packs&gt;?", first["rendered_html"])
+        self.assertIn("4 Kona & 2 Niro <packs>?", first["rendered_text"])
+        self.assertEqual(first["personalization"]["ask"], "4 Kona & 2 Niro <packs>?")
+        self.assertEqual(sends[self.people[1]]["rendered_subject"], "Your Leaf packs")
+        # The frozen rows reproduce the approved digest.
+        with campaign.connection(read_only=True) as db:
+            self.assertEqual(campaign.digest(campaign.load_manifest(path), campaign.frozen_rows(db, self.campaign_id)), sha)
+
+        with psycopg2.connect(TEST_URL) as db, db.cursor() as cur:
+            cur.execute("update crm_campaign_sends set state='sending' where campaign_id=%s", (self.campaign_id,))
+            cur.execute("update crm_campaign_sends set state='accepted', accepted_at=now() where campaign_id=%s",
+                        (self.campaign_id,))
+        dismantlers = {row["company_id"]: row for row in self.query(
+            """select company_id, stage, next_step, next_step_person_id from crm_dismantlers
+                where company_id=any(%s::text[])""", (self.companies,))}
+        self.assertEqual(dismantlers[self.companies[0]]["stage"], "Talking")
+        self.assertEqual(dismantlers[self.companies[0]]["next_step"], "Follow up if no reply")
+        self.assertEqual(dismantlers[self.companies[0]]["next_step_person_id"], self.people[0])
+        self.assertEqual(dismantlers[self.companies[1]]["next_step"], "Call them")
+        events = self.query(
+            """select e.changes from crm_dismantler_events e join crm_dismantlers d on d.id=e.dismantler_id
+                where d.company_id=any(%s::text[]) and e.kind='campaign_email'""", (self.companies,))
+        self.assertEqual(sorted(event["changes"]["subject"] for event in events), ["Your Kona packs", "Your Leaf packs"])
+        self.assertEqual(self.query("select 1 from crm_subscriptions where person_id=any(%s::text[])", (self.people,)), [])
+        self.assertEqual({row["relationship_stage"] for row in self.query(
+            "select relationship_stage from crm_companies where id=any(%s::text[])", (self.companies,))}, {"Contacted"})

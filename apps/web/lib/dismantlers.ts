@@ -72,6 +72,10 @@ export type Dismantler = {
   notes: string | null;
   /** Latest email or meeting with anyone at the company, from the CRM sync. Shared by everyone. */
   last_contact: string | null;
+  /** London date of the latest campaign email accepted for anyone at the company. */
+  campaign_emailed_on: string | null;
+  /** London date of the first email back from the company after that campaign email. */
+  campaign_replied_on: string | null;
   updated_at: string;
 };
 
@@ -233,6 +237,13 @@ export function contactTone(d: Pick<Dismantler, "last_contact" | "stage">, today
 }
 
 /** "14 listed · 3 sold", "Signed up, nothing listed yet", or "" with no account. */
+/** "Campaign 15 Oct · replied 16 Oct", or "" when no campaign email has gone. */
+export function campaignLabel(d: Pick<Dismantler, "campaign_emailed_on" | "campaign_replied_on">): string {
+  if (!d.campaign_emailed_on) return "";
+  const reply = d.campaign_replied_on ? `replied ${dayMonth(d.campaign_replied_on)}` : "no reply";
+  return `Campaign ${dayMonth(d.campaign_emailed_on)} · ${reply}`;
+}
+
 export function platformLabel(platform: PlatformFacts | null): string {
   if (!platform) return "";
   if (!platform.listed_ever && !platform.sold) return "Signed up, nothing listed yet";
