@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   GROUPS,
   GROUP_TONE,
+  campaignLabel,
   dismantlerGroup,
   dueLabel,
   nextStage,
@@ -159,6 +160,7 @@ function Column({ stage, dismantlers, today, onOpen, onMove }: Omit<Props, "onSh
                 {d.goal && <GoalTag />}
               </div>
               <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{[d.country, platformLabel(d.platform)].filter(Boolean).join(" · ")}</div>
+              {d.campaign_emailed_on && <div className="mt-0.5 truncate text-xs" style={{ color: d.campaign_replied_on ? "var(--bt-text)" : "var(--bt-muted)" }}>{campaignLabel(d)}</div>}
             </div>
             <div className="border-t pt-2 text-[13px] leading-[1.35]" style={{ borderColor: "var(--bt-divider)", color: d.next_step ? undefined : "var(--bt-muted)" }}>
               {d.next_step ?? "Set a next step"}

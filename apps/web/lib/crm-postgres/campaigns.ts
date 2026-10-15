@@ -35,6 +35,7 @@ type SendRow = {
   provider_link_clicked_at: Timestamp;
   link_clicked_at: Timestamp;
   last_synced_at: Timestamp;
+  replied_at?: Timestamp;
   person_id?: string;
   person_name?: string | null;
   company_id?: string | null;
@@ -42,6 +43,9 @@ type SendRow = {
   recipient_email?: string;
   listing_id?: string | null;
   auction_url?: string | null;
+  rendered_subject?: string | null;
+  dismantler_id?: string | null;
+  dismantler_stage?: string | null;
 };
 
 type LinkRow = {
@@ -103,6 +107,7 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
       opened: observedCount((send) => !!send.provider_opened_at),
       clicked: observedCount((send) => !!earliest(send.provider_link_clicked_at, send.link_clicked_at)),
       bounced: observedCount((send) => !!send.bounced_at),
+      replied: ledgerAvailable ? acceptedSends.filter((send) => !!send.replied_at).length : null,
       // Suppressions are not recorded in the send ledger; retain the campaign's
       // explicit opt-out snapshot rather than inventing per-recipient evidence.
       opted_out: number(campaign.opted_out),
@@ -115,6 +120,7 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
       clicked: number(campaign.emails_clicked),
       bounced: number(campaign.emails_bounced),
       opted_out: number(campaign.opted_out),
+      replied: null,
     };
   }
   let observedAt = isLedger ? null : iso(campaign.metrics_refreshed_at);
@@ -156,12 +162,22 @@ async function readSends(ids: string[], ledger: Ledger, withRecipients = false):
   return queryPg<SendRow>(`
     select s.id as send_id, s.campaign_id, s.state, s.accepted_at, s.delivered_at,
            s.bounced_at, s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
-           ${ledger.links_available ? `(select min(l.first_clicked_at) from crm_campaign_send_links l where l.send_id = s.id)` : "null::timestamptz"} as link_clicked_at
+           ${ledger.links_available ? `(select min(l.first_clicked_at) from crm_campaign_send_links l where l.send_id = s.id)` : "null::timestamptz"} as link_clicked_at,
+           -- A reply is any synced email from the recipient, or someone at their company, after the send.
+           (select min(m.sent_at) from crm_email_messages m
+             where s.accepted_at is not null and m.sent_at > s.accepted_at
+               and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
+               and (lower(m.from_email) = s.recipient_email or m.from_person_id = s.person_id
+                 or exists (select 1 from crm_people fp where fp.id = m.from_person_id
+                             and fp.company_id = coalesce(s.company_id, (select sp.company_id from crm_people sp where sp.id = s.person_id))))
+           ) as replied_at
            ${withRecipients ? `, s.person_id, p.full_name as person_name, coalesce(s.company_id, p.company_id) as company_id,
-             company.name as company_name, s.recipient_email, s.listing_id, s.auction_url` : ""}
+             company.name as company_name, s.recipient_email, s.listing_id, s.auction_url, s.rendered_subject,
+             d.id as dismantler_id, d.stage as dismantler_stage` : ""}
       from crm_campaign_sends s
       ${withRecipients ? `left join crm_people p on p.id = s.person_id
-        left join crm_companies company on company.id = coalesce(s.company_id, p.company_id)` : ""}
+        left join crm_companies company on company.id = coalesce(s.company_id, p.company_id)
+        left join crm_dismantlers d on d.company_id = coalesce(s.company_id, p.company_id)` : ""}
      where s.campaign_id = any($1::text[])
      order by s.created_at, s.id
   `, [ids]);
@@ -326,13 +342,27 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       clicked_at: firstClick,
       last_synced_at: iso(send.last_synced_at),
       tracking_pending: pending(send),
+      replied_at: iso(send.replied_at),
+      subject: send.rendered_subject ?? null,
+      dismantler_id: send.dismantler_id ?? null,
+      dismantler_stage: send.dismantler_stage ?? null,
       listing_clicks: [...listingClicks.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
       other_clicks: [...otherClicks.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
     };
   });
+  const emailedDismantlers = recipients.filter((recipient) => recipient.dismantler_id && recipient.accepted_at);
+  const stages: Record<string, number> = {};
+  for (const recipient of emailedDismantlers) {
+    stages[recipient.dismantler_stage!] = (stages[recipient.dismantler_stage!] ?? 0) + 1;
+  }
   return {
     campaign: summarize(campaign, sends, ledger.available),
     recipients,
+    dismantler_funnel: campaign.type === "dismantler_outreach" ? {
+      emailed: emailedDismantlers.length,
+      replied: emailedDismantlers.filter((recipient) => recipient.replied_at).length,
+      stages,
+    } : null,
     other_destinations: [...otherDestinations.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
     listings: [...listings.values()].map(({ listing, included, clicked }) => ({
       ...listing,

@@ -51,7 +51,7 @@ describe("campaign projections", () => {
       Array.from({ length: 113 }, (_, index) => send(`retained-${index}`, { delivered_at: AT, provider_opened_at: AT })));
 
     const detail = await getCampaignDetail("campaign-1");
-    expect(detail?.campaign.metrics).toEqual({ sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 2 });
+    expect(detail?.campaign.metrics).toEqual({ sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 2, replied: null });
     expect(detail?.campaign.metrics_basis).toBe("snapshot");
     expect(detail?.campaign.recipient_count).toBe(113);
     expect(detail?.campaign.audience).toBe("115 Supply Update contacts");
@@ -328,7 +328,7 @@ describe("campaign projections", () => {
     queryPgMock.mockResolvedValueOnce([campaign()])
       .mockResolvedValueOnce([{ available: false, links_available: false }]);
     const ledger = await getCampaignDetail("campaign-1");
-    expect(ledger?.campaign.metrics).toEqual({ sent: null, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 2 });
+    expect(ledger?.campaign.metrics).toEqual({ sent: null, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 2, replied: null });
     expect(ledger?.other_destinations).toEqual([]);
   });
 

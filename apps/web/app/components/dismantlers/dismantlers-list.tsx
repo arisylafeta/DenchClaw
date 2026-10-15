@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   GROUP_TONE,
+  campaignLabel,
   contactLabel,
   contactTone,
   dueLabel,
@@ -89,7 +90,8 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                     </TableCellContent>
                     <TableCellContent><span><DueChip label={dueLabel(d, today)} tone={GROUP_TONE[group.name]} /></span></TableCellContent>
                     <TableCellContent><span className="truncate text-xs" style={{ color: d.platform ? "var(--bt-text)" : "var(--bt-muted)" }}>{platformLabel(d.platform) || "No account yet"}</span></TableCellContent>
-                    <TableCellContent><span className="text-xs" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span></TableCellContent>
+                    <TableCellContent><span className="text-xs" style={{ color: toneText(contactTone(d, today)) }}>{contactLabel(d, today)}</span>
+                    {d.campaign_emailed_on && <div className="mt-0.5 text-[11px] leading-[1.3]" style={{ color: d.campaign_replied_on ? "var(--bt-text)" : "var(--bt-muted)" }}>{campaignLabel(d)}</div>}</TableCellContent>
                   </div>
                 ))}
               </div>

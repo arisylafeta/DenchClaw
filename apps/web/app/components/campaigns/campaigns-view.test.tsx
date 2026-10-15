@@ -13,14 +13,15 @@ const AT = "2026-09-29T10:30:00.000Z";
 const summary: CampaignSummary = {
   id: "historical", name: "Battery offer", status: "sent", type: "bulk_trade", channel: "email", audience: "battery_buyers",
   launched_at: AT, last_invite_at: AT, audience_size: 115,
-  metrics: { sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 0 },
+  metrics: { sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 0, replied: null },
   metrics_basis: "snapshot", metrics_observed_at: AT, recipient_count: 113, tracking_pending: 1,
 };
 
 function recipient(overrides: Partial<CampaignRecipient>): CampaignRecipient {
   return { send_id: "send", person_id: "person", person_name: "Contact", company_id: null, company_name: null,
     recipient_email: "contact@example.test", state: "accepted", accepted_at: AT, delivered_at: null, bounced_at: null,
-    opened_at: null, clicked_at: null, last_synced_at: AT, tracking_pending: false, listing_clicks: [], other_clicks: [], ...overrides };
+    opened_at: null, clicked_at: null, last_synced_at: AT, tracking_pending: false, replied_at: null, subject: null,
+    dismantler_id: null, dismantler_stage: null, listing_clicks: [], other_clicks: [], ...overrides };
 }
 const recipients = [
   recipient({ send_id: "a", person_id: "person:a", person_name: "Ada", company_name: "North Batteries", recipient_email: "ada@example.test", delivered_at: AT, opened_at: AT,
@@ -36,6 +37,7 @@ const detail: CampaignDetail = {
     { listing_id: "internal-listing-2", label: "Renault Zoe 52 kWh", url: null, recipients: 2, clicked_recipients: 0 },
   ],
   other_destinations: [],
+  dismantler_funnel: null,
   details: { auction_slug: null, source_system: "reconciled", audience_raw: "battery_buyers", notes: "Approved historical outreach.",
     created_at: AT, updated_at: AT, objective: null, success_measure: null, message_version: "offer-v2", stock_snapshot_ref: null,
     sender_identity: null, reply_owner: null, reply_mailbox: null, approved_manifest_sha256: null, approved_by: null, approved_at: null, reviewed_at: null },
@@ -115,8 +117,30 @@ describe("CampaignsView", () => {
     expect(within(table).getByRole("link", { name: "Ada" })).toHaveAttribute("href", buildEntryLink("people", "person:a"));
   });
 
+  it("shows replies, dismantler stages and the progress of a dismantler outreach campaign", async () => {
+    mockDetail({ ...detail,
+      campaign: { ...summary, type: "dismantler_outreach", metrics_basis: "ledger", metrics: { sent: 2, delivered: 2, opened: 1, clicked: 0, bounced: 0, opted_out: 0, replied: 1 } },
+      dismantler_funnel: { emailed: 2, replied: 1, stages: { Talking: 2 } },
+      recipients: [
+        recipient({ send_id: "x", person_id: "p-x", person_name: "Reply Yard", replied_at: AT, subject: "Your Kona packs", dismantler_id: "dm_x", dismantler_stage: "Talking" }),
+        recipient({ send_id: "y", person_id: "p-y", person_name: "Quiet Yard", subject: "Your Leaf packs", dismantler_id: "dm_y", dismantler_stage: "Talking" }),
+      ] });
+    const user = userEvent.setup();
+    render(<CampaignsView {...props} />);
+    const progress = await screen.findByRole("region", { name: "Dismantler progress" });
+    expect(progress).toHaveTextContent("Emailed 2");
+    expect(progress).toHaveTextContent("Replied 1");
+    expect(progress).toHaveTextContent("Talking 2");
+    expect(within(screen.getByRole("region", { name: "Campaign metrics" })).getByText("Replied")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Dismantler" })).toBeInTheDocument();
+    expect(screen.getByText("Your Kona packs")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Replied" }));
+    expect(screen.getByRole("link", { name: "Reply Yard" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Quiet Yard" })).not.toBeInTheDocument();
+  });
+
   it("renders unknown ledger totals without losing available observations on pending recipients", async () => {
-    mockDetail({ ...detail, campaign: { ...summary, metrics_basis: "ledger", metrics: { sent: 1, delivered: null, opened: 1, clicked: 1, bounced: null, opted_out: null } },
+    mockDetail({ ...detail, campaign: { ...summary, metrics_basis: "ledger", metrics: { sent: 1, delivered: null, opened: 1, clicked: 1, bounced: null, opted_out: null, replied: 0 } },
       recipients: [recipient({ person_name: "Observed while pending", tracking_pending: true, last_synced_at: null, opened_at: AT,
         listing_clicks: [{ listing_id: "internal-listing-1", label: "Nissan Leaf 40 kWh", first_clicked_at: AT }] })] });
     render(<CampaignsView {...props} />);
@@ -125,8 +149,9 @@ describe("CampaignsView", () => {
     expect(within(metrics).getByText("Unknown", { exact: true })).toBeInTheDocument();
     const row = screen.getByRole("link", { name: "Observed while pending" }).closest("tr")!;
     const cells = within(row).getAllByRole("cell");
-    expect(cells[2].querySelector("time")).toHaveAttribute("datetime", AT);
+    expect(cells[2]).toHaveTextContent("No reply yet");
     expect(cells[3].querySelector("time")).toHaveAttribute("datetime", AT);
+    expect(cells[4].querySelector("time")).toHaveAttribute("datetime", AT);
     expect(within(row).queryByText("Not observed")).not.toBeInTheDocument();
     expect(within(row).getByText("Nissan Leaf 40 kWh")).toBeInTheDocument();
   });
