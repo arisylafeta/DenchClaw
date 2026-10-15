@@ -4,7 +4,7 @@ import { assignSegment, scoreActivity, SEGMENTS, type Activity, type Segment } f
 import exclusions from '../marketplace-pulse-exclusions.json';
 const STAFF = new RegExp(exclusions.staff_email_pattern, 'i');
 const TEST_EMAILS: Record<string, true> = Object.fromEntries(exclusions.test_emails.map(e => [e.toLowerCase(), true] as const));
-const isStaff = (email: string | null | undefined) => !!email && (STAFF.test(email) || TEST_EMAILS[email.toLowerCase()] === true);
+const isStaff = (email: string | null | undefined) => !!email && (STAFF.test(email) || Object.hasOwn(TEST_EMAILS, email.toLowerCase()));
 export type LeaderboardRow = {
   authUserId: string; personId: string | null; name: string | null; email: string | null; company: string | null;
   role: string | null; accountStatus: string | null; score: number; intentScore: number; engagementScore: number;
@@ -18,7 +18,7 @@ type Link = {auth_user_id: string; person_id: string | null; name: string | null
 type Snapshot = {asOf: string; activity: Activity[]};
 async function activityFor(window: 7 | 30 | 90): Promise<Snapshot> {
   const [row] = await queryPg<{as_of: string | Date; activity: Activity[]}>('select as_of, activity from crm_user_activity_snapshots where window_days = $1', [window]);
-  if (!row) throw new Error('No activity snapshot yet. Run scripts/rebattery/leaderboard_snapshot.py.');
+  if (!row) {throw new Error('No activity snapshot yet. Run scripts/rebattery/leaderboard_snapshot.py.');}
   return {asOf: new Date(row.as_of).toISOString(), activity: row.activity};
 }
 export function filterLeaderboard(rows: LeaderboardRow[], options: LeaderboardOptions) {
@@ -55,7 +55,7 @@ export async function getLeaderboard(options: LeaderboardOptions): Promise<Leade
     try { links = await queryPg<Link>(`select a.auth_user_id, a.person_id, p.full_name as name, coalesce(p.email,a.email) as email, a.email as auth_email,
       c.name as company, a.account_role, a.account_status, a.auth_created_at, a.review_status, p.email_opted_out
       from crm_platform_accounts a left join crm_people p on p.id = a.person_id left join crm_companies c on c.id = p.company_id`); }
-    catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === '42P01') linkPending = true; else throw new Error('CRM account links unavailable'); }
+    catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === '42P01') {linkPending = true;} else {throw new Error('CRM account links unavailable', {cause: error});} }
     const snapshot = await activityFor(options.window);
     const activity = new Map(snapshot.activity.map(a => [a.authUserId, a]));
     const identities = new Map(links.map(link => [link.auth_user_id, link]));
@@ -68,7 +68,7 @@ export async function getLeaderboard(options: LeaderboardOptions): Promise<Leade
         ...(observed ? scoreActivity(observed, now) : {score: 0, intentScore: 0, engagementScore: 0}),
         sessions: observed?.sessions ?? 0, activeDays: observed?.activeDays ?? 0, lastSeen: observed?.lastSeen ?? null,
         segment: assignSegment(observed, link?.auth_created_at ? new Date(link.auth_created_at).toISOString() : null, now),
-        topActions: [...(observed?.actions ?? [])].sort((a,b) => b.count-a.count), inCrm: !!link?.person_id,
+        topActions: [...(observed?.actions ?? [])].toSorted((a,b) => b.count-a.count), inCrm: !!link?.person_id,
         reviewStatus: linkPending ? 'link_pending' : link?.review_status ?? 'needs_review', emailOptedOut: !!link?.email_opted_out, hasOffer: observed?.hasOffer ?? false};
     });
     return {...filterLeaderboard(rows, options), asOf: snapshot.asOf, source: 'ok', linkPending};

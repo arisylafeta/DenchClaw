@@ -32,11 +32,11 @@ function SegmentTag({ segment }: { segment: string }) {
 }
 
 function lastSeen(iso: string | null) {
-  if (!iso) return "Never";
+  if (!iso) {return "Never";}
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 60) return `${days} days ago`;
+  if (days <= 0) {return "Today";}
+  if (days === 1) {return "Yesterday";}
+  if (days < 60) {return `${days} days ago`;}
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
@@ -62,18 +62,18 @@ export function LeaderboardView({ onOpenPerson }: { onOpenPerson?: (id: string) 
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ q, window: String(window), sort, limit: String(PAGE_SIZE), offset: String(offset) });
-    if (role) params.set("role", role);
-    if (segment) params.set("segment", segment);
-    if (inCrm) params.set("inCrm", "true");
-    if (noOffer) params.set("noOffer", "true");
+    if (role) {params.set("role", role);}
+    if (segment) {params.set("segment", segment);}
+    if (inCrm) {params.set("inCrm", "true");}
+    if (noOffer) {params.set("noOffer", "true");}
     fetch(`/api/leaderboard?${params}`, { signal: abort.signal, cache: "no-store" })
       .then(async (response) => {
         const payload: LeaderboardResult = await response.json();
-        if (!response.ok || payload.source === "error") throw new Error(payload.error || "Leaderboard unavailable");
-        if (!abort.signal.aborted) setData(payload);
+        if (!response.ok || payload.source === "error") {throw new Error(payload.error || "Leaderboard unavailable");}
+        if (!abort.signal.aborted) {setData(payload);}
       })
-      .catch((err) => { if (!abort.signal.aborted) setError(err instanceof Error ? err.message : "Leaderboard unavailable"); })
-      .finally(() => { if (!abort.signal.aborted) setLoading(false); });
+      .catch((err) => { if (!abort.signal.aborted) {setError(err instanceof Error ? err.message : "Leaderboard unavailable");} })
+      .finally(() => { if (!abort.signal.aborted) {setLoading(false);} });
     return () => abort.abort();
   }, [q, role, window, segment, inCrm, noOffer, sort, offset, attempt]);
 
