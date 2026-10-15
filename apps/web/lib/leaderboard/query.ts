@@ -1,7 +1,10 @@
 import 'server-only';
 import { queryPg } from '../postgres';
-import { getPostHogActivity } from './posthog';
 import { assignSegment, scoreActivity, SEGMENTS, type Activity, type Segment } from './scoring';
+import exclusions from '../marketplace-pulse-exclusions.json';
+const STAFF = new RegExp(exclusions.staff_email_pattern, 'i');
+const TEST_EMAILS: Record<string, true> = Object.fromEntries(exclusions.test_emails.map(e => [e.toLowerCase(), true] as const));
+const isStaff = (email: string | null | undefined) => !!email && (STAFF.test(email) || TEST_EMAILS[email.toLowerCase()] === true);
 export type LeaderboardRow = {
   authUserId: string; personId: string | null; name: string | null; email: string | null; company: string | null;
   role: string | null; accountStatus: string | null; score: number; intentScore: number; engagementScore: number;
@@ -11,20 +14,12 @@ export type LeaderboardRow = {
 };
 export type LeaderboardOptions = {window: 7 | 30 | 90; role?: string; segment?: string; q?: string; inCrm?: boolean; noOffer?: boolean; sort?: string; limit: number; offset: number};
 export type LeaderboardResult = {rows: LeaderboardRow[]; total: number; asOf: string; source: 'ok' | 'error'; error?: string; linkPending?: boolean; counts: Record<Segment, number>};
-type Link = {auth_user_id: string; person_id: string | null; name: string | null; email: string | null; company: string | null; account_role: string | null; account_status: string | null; auth_created_at: string | Date | null; review_status: string; email_opted_out: boolean | null};
-const cache = new Map<number, {expires: number; asOf: string; activity: Activity[]}>();
-const inflight = new Map<number, Promise<{expires: number; asOf: string; activity: Activity[]}>>();
-async function activityFor(window: 7 | 30 | 90, authIds?: string[]) {
-  const cached = cache.get(window);
-  if (cached && cached.expires > Date.now()) return cached;
-  let pending = inflight.get(window);
-  if (!pending) {
-    pending = getPostHogActivity(window, authIds).then(activity => {
-      const value = {activity, asOf: new Date().toISOString(), expires: Date.now() + 900000}; cache.set(window, value); return value;
-    }).finally(() => inflight.delete(window));
-    inflight.set(window, pending);
-  }
-  return pending;
+type Link = {auth_user_id: string; person_id: string | null; name: string | null; email: string | null; auth_email: string | null; company: string | null; account_role: string | null; account_status: string | null; auth_created_at: string | Date | null; review_status: string; email_opted_out: boolean | null};
+type Snapshot = {asOf: string; activity: Activity[]};
+async function activityFor(window: 7 | 30 | 90): Promise<Snapshot> {
+  const [row] = await queryPg<{as_of: string | Date; activity: Activity[]}>('select as_of, activity from crm_user_activity_snapshots where window_days = $1', [window]);
+  if (!row) throw new Error('No activity snapshot yet. Run scripts/rebattery/leaderboard_snapshot.py.');
+  return {asOf: new Date(row.as_of).toISOString(), activity: row.activity};
 }
 export function filterLeaderboard(rows: LeaderboardRow[], options: LeaderboardOptions) {
   const search = options.q?.trim().toLocaleLowerCase();
@@ -57,16 +52,16 @@ export async function getLeaderboard(options: LeaderboardOptions): Promise<Leade
   const counts = Object.fromEntries(SEGMENTS.map(s => [s, 0])) as Record<Segment, number>;
   try {
     let links: Link[] = [], linkPending = false;
-    try { links = await queryPg<Link>(`select a.auth_user_id, a.person_id, p.full_name as name, coalesce(p.email,a.email) as email,
+    try { links = await queryPg<Link>(`select a.auth_user_id, a.person_id, p.full_name as name, coalesce(p.email,a.email) as email, a.email as auth_email,
       c.name as company, a.account_role, a.account_status, a.auth_created_at, a.review_status, p.email_opted_out
       from crm_platform_accounts a left join crm_people p on p.id = a.person_id left join crm_companies c on c.id = p.company_id`); }
     catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === '42P01') linkPending = true; else throw new Error('CRM account links unavailable'); }
-    const snapshot = await activityFor(options.window, linkPending ? undefined : links.map(link => link.auth_user_id));
+    const snapshot = await activityFor(options.window);
     const activity = new Map(snapshot.activity.map(a => [a.authUserId, a]));
     const identities = new Map(links.map(link => [link.auth_user_id, link]));
     const ids = new Set([...activity.keys(), ...identities.keys()]);
     const now = Date.parse(snapshot.asOf);
-    const rows = [...ids].map(authUserId => {
+    const rows = [...ids].filter(authUserId => !isStaff(identities.get(authUserId)?.email) && !isStaff(identities.get(authUserId)?.auth_email)).map(authUserId => {
       const observed = activity.get(authUserId), link = identities.get(authUserId);
       return {authUserId, personId: link?.person_id ?? null, name: link?.name ?? null, email: link?.email ?? null, company: link?.company ?? null,
         role: link?.account_role ?? observed?.role ?? null, accountStatus: link?.account_status ?? observed?.accountStatus ?? null,

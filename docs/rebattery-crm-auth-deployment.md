@@ -19,7 +19,7 @@ Keep the exact `/api/formbricks-buyer-sourcing-webhook` nginx route public and p
 
 ## User activity leaderboard
 
-The authenticated CRM Leaderboard requires `CRM_DB_BACKEND=postgres` and server-only `POSTHOG_HOST`, `POSTHOG_PROJECT_ID=375247`, and `POSTHOG_API_KEY` (a personal API key with query read access). Allowed hosts are `https://us.posthog.com`, `https://eu.posthog.com`, and `https://app.posthog.com`. Missing environment values may fall back to the runtime user's `~/.posthog/credentials.json`; production should explicitly provision the environment. Never expose the API key to browser code or commit it.
+The authenticated CRM Leaderboard requires `CRM_DB_BACKEND=postgres`. It reads `crm_user_activity_snapshots` (migration `042`), never PostHog, on request. `scripts/rebattery/leaderboard_snapshot.py` fetches PostHog once daily (05:30 UTC via `rebattery-leaderboard-snapshot.timer`, templates under `scripts/rebattery/systemd/`) using `~/.posthog/credentials.json`, retries 5xx/429, and replaces the 7/30/90-day snapshots in one transaction only on success. `/api/leaderboard/health` reports snapshot age (`stale` after 36 hours).
 
 Activity aggregates are cached in memory for 15 minutes per 7/30/90-day window. Names and emails are joined only inside the CRM, never sent to PostHog. Missing account-link tables show PostHog-only rows with “Link pending”; a failed or partial activity query shows an error rather than zero activity. The health endpoint `/api/leaderboard/health` requires a CRM session and returns connection status and latency, not credentials.
 

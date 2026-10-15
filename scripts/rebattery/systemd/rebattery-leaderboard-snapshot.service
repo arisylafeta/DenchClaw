@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily PostHog activity snapshot for the CRM Leaderboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/.hermes/projects/denchclaw-leaderboard
+ExecStart=/usr/bin/python3 scripts/rebattery/leaderboard_snapshot.py
+Environment=PATH=/root/.bun/bin:/usr/bin:/usr/local/bin:/bin
+UMask=0077
