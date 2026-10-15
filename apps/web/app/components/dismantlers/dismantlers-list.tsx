@@ -34,9 +34,11 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
   const parked = dismantlers.filter((d) => d.stage === "Parked").length;
 
   return (
-    <div className={`bulk-trades ${tableStyles.surface} flex min-w-[960px] flex-col gap-5`}>
+    <div className={`bulk-trades ${tableStyles.surface} flex flex-col gap-5`}>
       {groups.length ? (
         <>
+          <div className="overflow-x-auto">
+            <div className="flex min-w-[960px] flex-col gap-5">
           <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-4 border-b px-3 py-2 font-medium`}>
             <span>Dismantler</span><span>Stage</span><span>Next step</span><span>Due</span><span>On ReBattery</span><span>Last contact</span>
           </div>
@@ -93,6 +95,8 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
               </div>
             </section>
           ))}
+            </div>
+          </div>
         </>
       ) : (
         <p className="px-1 text-sm" style={{ color: "var(--bt-muted)" }}>
@@ -194,6 +198,8 @@ function Backlog({ found, onOpen, onStartOutreach }: {
               Start outreach
             </button>
           </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[960px]">
           <div data-table-part="grid-header" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-3 py-2 font-medium`} style={{ borderColor: "var(--bt-divider)" }}>
             <input type="checkbox" aria-label="Select all shown" checked={allVisiblePicked} onChange={toggleVisible} className="h-4 w-4 accent-[var(--bt-text)]" />
             <span>Dismantler</span><span>Country</span><span>eBay battery listings</span><span>Found via</span>
@@ -213,6 +219,8 @@ function Backlog({ found, onOpen, onStartOutreach }: {
               <TableCellContent><span className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>{d.source ?? ""}</span></TableCellContent>
             </div>
           ))}
+            </div>
+          </div>
           <div data-table-part="footer" className="flex items-center gap-2 px-5 py-3 text-xs" style={{ color: "var(--bt-muted)" }}>
             {rows.length ? `Showing ${visible.length} of ${rows.length}` : "No matches."}
             {rows.length > visible.length && (

@@ -37,6 +37,7 @@ function SplitTable({ label, names, rows, notes, colorOf }: {
   const best = Math.max(0.0001, ...present.map((name) => (rows.sent.get(name) ?? 0) / (rows.visitors.get(name) || 1)));
   const bestView = Math.max(0.0001, ...present.map((name) => (rows.viewed.get(name) ?? 0) / (rows.visitors.get(name) || 1)));
   return (
+    <div className="overflow-x-auto">
     <table className="w-full text-[13px]" aria-label={label}>
       <thead>
         <tr className="text-xs" style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)" }}>
@@ -73,6 +74,7 @@ function SplitTable({ label, names, rows, notes, colorOf }: {
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 

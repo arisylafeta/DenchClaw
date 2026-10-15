@@ -145,6 +145,7 @@ export function TradesList({ trades, today, onOpen }: Props) {
   }
 
   return (
+    <div className="overflow-x-auto">
     <div className={`bulk-trades ${tableStyles.surface} flex min-w-[860px] flex-col gap-5`}>
       <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-4 border-b px-3 py-2 font-medium`}>
         <span>Trade</span><span>Stage</span><span>Value</span><span>Next step</span><span>Due</span><span>Touched</span>
@@ -177,6 +178,7 @@ export function TradesList({ trades, today, onOpen }: Props) {
           {held.waiting.map((trade) => holdRow(trade, "grey"))}
         </Group>
       )}
+    </div>
     </div>
   );
 }

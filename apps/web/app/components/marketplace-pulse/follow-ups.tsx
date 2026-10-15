@@ -92,6 +92,7 @@ export function FollowUps({ list, error, sender, onOpenPerson, onChange }: Follo
       {actionError && <div className="px-4 pt-3"><ErrorText error={actionError} /></div>}
       {!error && !list.length && <p className="px-4 py-3 text-[13px]">No buyer activity in the last 30 days.</p>}
       {!!list.length && (
+        <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-left text-xs" style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)" }}>
@@ -144,6 +145,7 @@ export function FollowUps({ list, error, sender, onOpenPerson, onChange }: Follo
             ))}
           </tbody>
         </table>
+        </div>
       )}
       {drafting && <DraftDialog followUp={drafting} sender={sender} onClose={() => setDrafting(null)} />}
     </section>

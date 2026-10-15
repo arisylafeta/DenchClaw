@@ -79,6 +79,7 @@ export function Suggestions({ suggestions, latest, onChange }: Props) {
       {!!done.length && (
         <div aria-label="Learning log" role="region" className="border-t" style={{ borderColor: "var(--bt-divider)" }}>
           <h3 className="bt-label px-4 pb-1 pt-3">Learning log</h3>
+          <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <tbody>
               {done.map((s) => (
@@ -96,6 +97,7 @@ export function Suggestions({ suggestions, latest, onChange }: Props) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </section>

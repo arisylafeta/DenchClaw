@@ -22,6 +22,7 @@ export function DropOffs({ week, weekLabel, lastFour }: Props) {
         <h2 className="text-[15px] font-semibold">Where buyers drop off</h2>
         <span className="text-xs" style={{ color: "var(--bt-muted)" }}>People counted once a week · recordings cover the last 30 days</span>
       </div>
+      <div className="overflow-x-auto">
       <table className="w-full text-[13px]">
         <thead>
           <tr className="text-xs" style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)" }}>
@@ -60,6 +61,7 @@ export function DropOffs({ week, weekLabel, lastFour }: Props) {
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }
