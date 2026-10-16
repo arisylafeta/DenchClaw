@@ -164,7 +164,7 @@ async function ledgerAvailability(): Promise<Ledger> {
   return ledger ?? { available: false, links_available: false, listings_available: false };
 }
 
-async function readSends(ids: string[], ledger: Ledger, withRecipients = false): Promise<SendRow[]> {
+async function readSends(ids: string[], ledger: Ledger, withRecipients = false, messageIds?: string[]): Promise<SendRow[]> {
   if (!ledger.available || !ids.length) { return []; }
   return queryPg<SendRow>(`
     select s.id as send_id, s.campaign_id, s.provider_message_id, s.state, s.accepted_at, s.delivered_at,
@@ -185,9 +185,9 @@ async function readSends(ids: string[], ledger: Ledger, withRecipients = false):
       ${withRecipients ? `left join crm_people p on p.id = s.person_id
         left join crm_companies company on company.id = coalesce(s.company_id, p.company_id)
         left join crm_dismantlers d on d.company_id = coalesce(s.company_id, p.company_id)` : ""}
-     where s.direction = 'outbound' and s.campaign_id = any($1::text[])
+     where s.direction = 'outbound' and s.campaign_id = any($1::text[]) ${messageIds ? 'and s.id = any($2::text[])' : ''}
      order by s.created_at, s.id
-  `, [ids]);
+  `, messageIds ? [ids,messageIds] : [ids]);
 }
 
 /** All campaigns, including historical campaigns whose saved metrics outlive the retained ledger. */
@@ -237,18 +237,18 @@ export function cachedListingMetadata(
   return { title: cached.title?.trim() || null, url };
 }
 
-export async function getCampaignDetail(id: string): Promise<CampaignDetail | null> {
+export async function getCampaignDetail(id: string, messageIds?: string[]): Promise<CampaignDetail | null> {
   const [campaign] = await queryPg<CampaignRow>("select c.* from campaigns c where c.id = $1", [id]);
   if (!campaign) { return null; }
   const ledger = await ledgerAvailability();
-  const sends = await readSends([id], ledger, true);
+  const sends = await readSends([id], ledger, true, messageIds);
   const links = ledger.available && ledger.links_available ? await queryPg<LinkRow>(`
     select l.message_id as send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
       from mail_message_link l
       join mail_message s on s.id = l.message_id
-     where s.campaign_id = $1
+     where s.campaign_id = $1 ${messageIds ? 'and s.id = any($2::text[])' : ''}
      order by l.cta_key, l.id
-  `, [id]) : [];
+  `, messageIds ? [id,messageIds] : [id]) : [];
   const listingIds = new Set<string>();
   for (const link of links) { if (link.listing_id) { listingIds.add(link.listing_id); } }
   for (const send of sends) { if (send.listing_id) { listingIds.add(send.listing_id); } }

@@ -450,6 +450,23 @@ export const TOOLS = [
 
 // ─── Tool execution ──────────────────────────────────────────────────────────
 
+async function runAgentSql(sql, params) {
+  if (/U&[\"\']/i.test(sql) || /;\s*\S/.test(sql.trim().replace(/;$/, ""))) throw new Error("Agent SQL requires one statement without Unicode-escaped identifiers");
+  if (!/^\s*(select|insert|update|delete)\b/i.test(sql)) throw new Error("Agent SQL supports SELECT, INSERT, UPDATE and DELETE only");
+  if (/(^|;)\s*(set|reset|commit|rollback|begin|end|savepoint|release)\b|\bset_config\s*\(/i.test(sql)) throw new Error("Agent SQL cannot change transaction or role settings");
+  const client = await resolvePgPool().connect();
+  try {
+    await client.query("begin");
+    await client.query("set local role crm_agent_sql");
+    const result = await client.query(sql, params);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
+}
+
 async function runQuery(sql, params) {
   const client = await resolvePgPool().connect();
   try {
@@ -840,7 +857,7 @@ export async function executeTool(name, args) {
         break;
       }
       const params = Array.isArray(args.params) ? args.params : [];
-      const res = await runQuery(sql, params);
+      const res = await runAgentSql(sql, params);
       result = { command: res.command, rowCount: res.rowCount, oid: res.oid };
       break;
     }

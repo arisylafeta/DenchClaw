@@ -144,8 +144,8 @@ async function buildPostgresEntryItems(
     if (!tableName) {continue;}
     const existingColumns = await getTableColumns(tableName);
     const rowScope =
-      obj.name === "email_thread" || obj.name === "email_message"
-        ? "where mailbox_owner_id = $1::uuid"
+      ["mail_thread", "mail_message", "crm_email_threads", "crm_email_messages"].includes(tableName)
+        ? "where crm_visible = true and mailbox_owner_id = $1::uuid"
         : obj.name === "work_task"
           ? "where assignee_id = $1::uuid"
           : obj.name === "interaction"

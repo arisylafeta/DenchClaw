@@ -575,8 +575,8 @@ export async function getPostgresObjectData(
     object.name === "work_task"
       ? (params.push(userId || null),
         buildWorkTaskReadScope("e.assignee_id", `$${params.length}`))
-      : object.name === "email_thread" || object.name === "email_message"
-        ? (params.push(userId || null), `e.mailbox_owner_id = $${params.length}::uuid`)
+      : ["mail_thread", "mail_message", "crm_email_threads", "crm_email_messages"].includes(tableName ?? "")
+        ? (params.push(userId || null), `e.crm_visible = true and e.mailbox_owner_id = $${params.length}::uuid`)
         : object.name === "interaction"
           ? (params.push(userId || null),
             `(e.email_message_id is null or exists (

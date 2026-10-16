@@ -2,6 +2,8 @@ import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 vi.hoisted(() => { if (process.env.BULK_TRADES_TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.BULK_TRADES_TEST_DATABASE_URL; });
 import { queryPg, pgPool } from '../postgres';
 import { searchMail, readMailThread, listMailFollowups, mailCampaignCounts, readMailCampaign } from './mail';
+import { getPostgresObjectData } from './object-read';
+import { getPostgresEntryData } from './entry-read';
 import { getPostgresInbox } from './inbox';
 import { getPostgresInboxThread } from './inbox-thread';
 const enabled = Boolean(process.env.BULK_TRADES_TEST_DATABASE_URL);
@@ -56,6 +58,36 @@ describe.skipIf(!enabled)('unified mail log', () => {
   expect((await listMailFollowups(owner,false,{crmOnly:true,identity:'alex'})).map(f=>f.id)).not.toContain(`${prefix}_thread`);
   expect((await listMailFollowups('00000000-0000-0000-0000-000000000000',false,{crmOnly:true,identity:'ari'}))).toEqual([]);
   await queryPg('delete from mail_followup where id=$1',[`${prefix}_thread`]);
+ });
+ it('isolates generic mail objects by backing table and CRM visibility',async () => {
+  await expect(getPostgresEntryData('mail_message',`${prefix}_b`,owner)).rejects.toThrow('Entry not found');
+  await expect(getPostgresEntryData('mail_message',`${prefix}_a`,'00000000-0000-0000-0000-000000000000')).rejects.toThrow('Entry not found');
+  const result=await getPostgresObjectData('mail_message',new URL('http://localhost/api/objects/mail_message'),owner);
+  const payload=JSON.stringify(result);
+  expect(payload).toContain(`${prefix}_a`);expect(payload).not.toContain(`${prefix}_b`);
+ });
+ it('preserves microseconds in pagination cursors',async () => {
+  await queryPg(`update mail_message set sent_at=case when id=$1||'_b' then '2026-01-01T10:00:00.123900Z'::timestamptz else '2026-01-01T10:00:00.123800Z'::timestamptz end where id in ($1||'_a',$1||'_b')`,[prefix]);
+  const first=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});
+  expect(Buffer.from(first.nextCursor!,'base64url').toString()).toContain('.1239');
+  expect((await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1,cursor:first.nextCursor!})).items[0].id).toBe(`${prefix}_a`);
+  await queryPg(`update mail_message set sent_at='2026-01-01T10:00:00Z' where id in ($1||'_a',$1||'_b')`,[prefix]);
+ });
+ it('filters campaign counts, recipients, links and scanner evidence together',async () => {
+  const detail=await readMailCampaign(prefix,{crmOnly:true,event:'bounced'});
+  expect(detail?.counts.total).toBe(0); expect(detail?.delivery_rows).toEqual([]); expect(detail?.recipients).toEqual([]); expect(detail?.links).toEqual([]); expect(detail?.scanner_evidence).toBe(false);
+ });
+ it('enforces mail ownership with database permissions even for Unicode identifiers',async () => {
+  const client=await pgPool.connect();
+  try {
+   await client.query('begin'); await client.query('set local role crm_agent_sql');
+   expect((await client.query('select id from mail_message limit 1')).rows).toHaveLength(1);
+   await client.query(`update crm_people set full_name=full_name where false`);
+   await expect(client.query(String.raw`update U&"ma\0069l_identity" set active=false where key='ari'`)).rejects.toThrow(/permission denied/);
+   await client.query('rollback');
+   await client.query('begin'); await client.query('set local role crm_web_sql');
+   await expect(client.query(String.raw`select * from U&"ma\0069l_message"`)).rejects.toThrow(/permission denied/);
+  } finally { await client.query('rollback');client.release(); }
  });
  it('paginates tied timestamps deterministically without repeats',async () => {
   const first=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});

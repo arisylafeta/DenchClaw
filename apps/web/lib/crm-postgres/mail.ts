@@ -34,10 +34,10 @@ export async function searchMail(filters: MailFilters = {}): Promise<MailPage<Ma
     where.push(`(coalesce(m.sent_at,m.created_at),m.id) < (${bind(cursor[0])}::timestamptz,${bind(cursor[1])})`);
   }
   const limit = Math.max(1, Math.min(200, filters.limit || 50));
-  const rows = await queryPg<MailMessageRow>(`select m.*, coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events from mail_message m ${where.length ? `where ${where.join(' and ')}` : ''} order by coalesce(m.sent_at,m.created_at) desc,m.id desc limit ${bind(limit + 1)}`, values);
+  const rows = await queryPg<MailMessageRow & {cursor_timestamp:string}>(`select m.*, coalesce(m.sent_at,m.created_at)::text as cursor_timestamp, coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events from mail_message m ${where.length ? `where ${where.join(' and ')}` : ''} order by coalesce(m.sent_at,m.created_at) desc,m.id desc limit ${bind(limit + 1)}`, values);
   const items = rows.slice(0, limit);
   const last = items.at(-1);
-  return { items, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.sent_at || last.created_at, last.id])).toString('base64url') : null };
+  return { items, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.cursor_timestamp, last.id])).toString('base64url') : null };
 }
 
 export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnly = false) {
@@ -85,12 +85,15 @@ export async function listMailCampaigns(filters: MailFilters = {}) {
   const [legacy, counts] = await Promise.all([listCampaigns(), mailCampaignCounts(undefined,filters)]);
   return legacy.filter(c => counts.some(n => n.id === c.id)).map(c => ({ ...c, ...counts.find(n => n.id === c.id) }));
 }
-export async function readMailCampaign(id: string) {
-  const legacy = await getCampaignDetail(id);
+export async function readMailCampaign(id: string, filters: MailFilters = {}) {
+  const { values, where, bind } = mailWhere({...filters,campaign:id,direction:'outbound'});
+  const predicate = where.join(' and ');
+  const recipients = await queryPg<MailMessageRow>(`select m.* from mail_message m where ${predicate} order by m.recipient_email,m.id`,values);
+  const legacy = await getCampaignDetail(id,recipients.map(row => row.id));
   if (!legacy) return null;
-  const [counts] = await mailCampaignCounts(id);
-  const recipients = await queryPg<MailMessageRow>("select * from mail_message where campaign_id = $1 and direction = 'outbound' order by recipient_email,id", [id]);
-  const links = await queryPg('select l.* from mail_message_link l join mail_message m on m.id = l.message_id where m.campaign_id = $1 order by l.id', [id]);
-  const [evidence] = await queryPg<{ scanner_evidence: boolean; proxy_evidence: boolean }>(`select coalesce(bool_or(e.detail->>'scanner' = 'true' or e.detail->>'scanner_evidence' = 'true' or (e.type = 'clicked' and m.delivered_at is not null and e.occurred_at between m.delivered_at and m.delivered_at + interval '10 seconds')),false) as scanner_evidence, coalesce(bool_or(e.detail->>'proxy' = 'true' or e.detail->>'proxy_evidence' = 'true' or e.detail::text ilike '%GoogleImageProxy%'),false) as proxy_evidence from mail_event e join mail_message m on m.id = e.message_id where m.campaign_id = $1`, [id]);
-  return { ...legacy, ...counts, counts, delivery_rows: recipients, links, ...evidence };
+  const [summary] = await mailCampaignCounts(id,filters);
+  const counts = summary ?? {id,campaign_name:legacy.campaign.name,identity_key:null,purpose:null,mail_state:'legacy',total:0,sent:0,delivered:0,bounced:0,opened:0,clicked:0,unsubscribed:0,replied:0};
+  const links = await queryPg(`select l.* from mail_message_link l join mail_message m on m.id = l.message_id where ${predicate} order by l.id`,values);
+  const [evidence] = await queryPg<{scanner_evidence:boolean;proxy_evidence:boolean}>(`select coalesce(bool_or(e.detail->>'scanner' = 'true' or e.detail->>'scanner_evidence' = 'true' or (e.type = 'clicked' and m.delivered_at is not null and e.occurred_at between m.delivered_at and m.delivered_at + interval '10 seconds')),false) as scanner_evidence, coalesce(bool_or(e.detail->>'proxy' = 'true' or e.detail->>'proxy_evidence' = 'true' or e.detail::text ilike '%GoogleImageProxy%'),false) as proxy_evidence from mail_event e join mail_message m on m.id=e.message_id where ${predicate}`,values);
+  return {...legacy,...counts,counts,delivery_rows:recipients,links,...evidence};
 }
