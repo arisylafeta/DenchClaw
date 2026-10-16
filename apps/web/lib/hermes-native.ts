@@ -169,6 +169,7 @@ export async function readConversation(key: string, sinceSeq = 0) {
   let offset = 0;
   for (;;) {
     for (const m of page.data) {
+      if (m.display_kind === "hidden") continue;
       if (m.role === "tool") {
         const tool = tools.get(m.tool_call_id);
         if (tool) { tool.result = m.content; delete tool.state; }

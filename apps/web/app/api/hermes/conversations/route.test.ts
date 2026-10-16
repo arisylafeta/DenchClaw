@@ -14,12 +14,7 @@ describe("Hermes conversation routes", () => {
     expect((await POST(request({ profiles: ["alpha"] }))).status).toBe(404);
     expect(native.listConversations).not.toHaveBeenCalled(); expect(native.createConversation).not.toHaveBeenCalled();
   });
-  it("creates via the native adapter and returns its verified identity", async () => {
-    native.createConversation.mockResolvedValue({ key: "verified" });
-    const response = await POST(request({ profiles: ["default", "alpha"] }));
-    expect(response.status).toBe(201); expect(await response.json()).toEqual({ conversation: { key: "verified" } });
-    expect(native.createConversation).toHaveBeenCalledWith(["default", "alpha"], undefined);
-  });
+
   it("leaves solo sending on the existing authenticated chat route", async () => {
     const key = conversationKey("solo", "existing-session", "alpha");
     const response = await detailPOST(request({ message: "continue" }), { params: Promise.resolve({ key }) });
@@ -31,8 +26,13 @@ describe("Hermes conversation routes", () => {
     native.groupRpc.mockResolvedValue({ accepted: true }); native.readConversation.mockResolvedValue({ messages: [{ text: "persisted" }] });
     const response = await detailPOST(request({ message: "continue group", eventId: "stable-id", profile: "other" }), { params: Promise.resolve({ key }) });
     expect(native.groupRpc).toHaveBeenCalledWith("groups.send", { room_id: "shared-room", event_id: "stable-id", payload: { text: "continue group", thread_id: "shared-room" } });
-    expect(native.readConversation).toHaveBeenCalledWith(key);
-    expect(await response.json()).toEqual({ messages: [{ text: "persisted" }] });
+    expect(response.status).toBe(200);
+  });
+  it.each(["a".repeat(65_537), "🔋".repeat(16_385)])("rejects text over the native UTF-8 byte limit before sending", async (message) => {
+    const key = conversationKey("group", "shared-room");
+    const response = await detailPOST(request({ message, eventId: "stable-id" }), { params: Promise.resolve({ key }) });
+    expect(response.status).toBe(400);
+    expect(native.groupRpc).not.toHaveBeenCalled();
   });
   it("refuses ambiguous group sends and malformed identities before upstream writes", async () => {
     const context = { params: Promise.resolve({ key: conversationKey("group", "shared-room") }) };

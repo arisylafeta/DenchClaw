@@ -51,8 +51,8 @@ export async function POST(req: Request, context: Context) {
       await groupRpc("groups.stop", { room_id: identity.id, cancel_id: body.eventId || "denchclaw-stop" });
       return Response.json(await readConversation(key));
     }
-    if (typeof body.message !== "string" || !body.message.trim() || body.message.length > 100_000) {
-      return Response.json({ error: "A message of at most 100000 characters is required" }, { status: 400 });
+    if (typeof body.message !== "string" || !body.message.trim() || Buffer.byteLength(body.message, "utf8") > 65_536) {
+      return Response.json({ error: "A message of at most 64 KiB of UTF-8 text is required" }, { status: 400 });
     }
     if (identity.kind === "group") {
       if (typeof body.eventId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.eventId)) return Response.json({ error: "A stable event ID is required" }, { status: 400 });

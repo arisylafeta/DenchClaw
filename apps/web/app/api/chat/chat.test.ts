@@ -166,6 +166,19 @@ describe("Chat API routes", () => {
       expect(persistUserMessage).not.toHaveBeenCalled();
     });
 
+    it("keeps selected file context in its source workspace when another bot owns the chat", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      const { resolveAgentWorkspacePrefix } = await import("@/lib/workspace");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+      vi.mocked(resolveAgentWorkspacePrefix).mockReturnValue("/fixtures/source-workspace");
+      const { POST } = await import("./route.js");
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "alpha", workspaceContext: { filePath: "doc.md", isDirectory: false }, messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Read this" }] }] }) }));
+      expect(response.status).toBe(200); await response.text();
+      expect(createHermesChatStream).toHaveBeenCalledWith(expect.objectContaining({ profile: "alpha", message: expect.stringContaining("/fixtures/source-workspace/doc.md") }));
+      expect(vi.mocked(createHermesChatStream).mock.calls.at(-1)?.[0].message).not.toContain("/fixtures/alpha/workspace/doc.md");
+    });
+
     it("rejects an unknown pinned Hermes profile before opening a provider stream", async () => {
       const { resolveAgentBackend } = await import("@/lib/agent-backend");
       const { createHermesChatStream } = await import("@/lib/hermes-client");

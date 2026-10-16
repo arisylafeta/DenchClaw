@@ -82,6 +82,8 @@ describe("native Hermes conversations", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/messages") ? Response.json({ data: [
       { id: "assistant", role: "assistant", content: "Looking", reasoning_content: "Thinking", tool_calls: [{ id: "call1", function: { name: "terminal", arguments: '{"command":"fixture"}' } }] },
       { id: "tool", role: "tool", tool_call_id: "call1", content: "Tool result" },
+      { id: "handoff", role: "assistant", display_kind: "hidden", content: "" },
+      { id: "diagnostic", role: "user", display_kind: "hidden", content: "" },
       { id: "answer", role: "assistant", content: "Done" },
     ] }) : Response.json({ session: { id: "rich", title: "Rich fixture" } })));
     const detail = await readConversation(conversationKey("solo", "rich", "alpha"));

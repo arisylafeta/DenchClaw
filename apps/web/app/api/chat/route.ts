@@ -203,7 +203,7 @@ export async function POST(req: Request) {
 	// reconstructed here rather than parsed back out of userText. Legacy
 	// callers without workspaceContext still work because buildAgentMessage
 	// returns userText unchanged when no context is supplied.
-	const wsPrefix = nativeHermesSession ? assertProfile(hermesProfile).workspaceDir : resolveAgentWorkspacePrefix();
+	const wsPrefix = resolveAgentWorkspacePrefix();
 	const agentMessage = buildAgentMessage({
 		userText,
 		workspaceContext,

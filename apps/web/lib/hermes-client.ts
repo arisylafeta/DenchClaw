@@ -36,7 +36,9 @@ type HermesSseEvent = {
 };
 
 // Transport state only; Hermes owns history and execution.
-const nativeStreams = new Map<string, { controller: AbortController; working: boolean | null; observedAt: number }>();
+type NativeStreams = Map<string, { controller: AbortController; working: boolean | null; observedAt: number }>;
+const streamGlobal = globalThis as typeof globalThis & { __denchHermesStreams?: NativeStreams };
+const nativeStreams = streamGlobal.__denchHermesStreams ??= new Map();
 const streamKey = (profile: string, id: string) => JSON.stringify([profile, id]);
 export function nativeHermesWorking(profile: string, id: string): boolean | null {
   const key = streamKey(profile, id);
