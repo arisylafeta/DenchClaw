@@ -12,6 +12,20 @@ const DEMAND_SELECT = `
     demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.source_kind,
     demand.source_label, demand.source_url, demand.source_quote, to_char(demand.observed_on, 'YYYY-MM-DD') as observed_on,
     demand.status, demand.closed_reason, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on, demand.updated_at,
+    demand.product_family, demand.fee_eur::float8 as fee_eur, demand.price_basis, demand.reputation,
+    demand.qualify_question, demand.moved_to,
+    to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on,
+    bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
+      greatest(demand.observed_on, demand.confirmed_on)) as score,
+    bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
+      greatest(demand.observed_on, demand.confirmed_on))::float8 as expected_fee,
+    (demand.product_family is not null and (
+      exists(select 1 from crm_stock_items stock where stock.stock_status not in ('sold', 'unavailable')
+        and concat_ws(' ', stock.make, stock.model, stock.description) ilike '%' || demand.product_family || '%')
+      or exists(select 1 from crm_bulk_trade_lots stock where stock.lot_kind = 'supply'
+        and stock.trade_stage in ('Needs info', 'With buyers', 'Closing')
+        and stock.title ilike '%' || demand.product_family || '%')
+    )) as has_stock,
     coalesce((
       select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'strength', m.strength, 'reason', m.reason,
         'buyer_id', m.buyer_id) order by m.strength desc, lot.title)
@@ -33,11 +47,11 @@ const RANK = `case when demand.kind = 'request' then 0 when demand.basis = 'agre
 const TIER_RANK = `case (select company.buyer_tier from crm_companies company where company.id = demand.company_id)
   when 'A' then 0 when 'B' then 1 when 'C' then 2 else 3 end`;
 
-/** Every demand row: open first, then requests by date, then buy-boxes by basis and buyer. */
+/** Open shortlist by expected-fee score, then qualification and closed history. */
 export async function listDemand(): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
-    `${DEMAND_SELECT} order by demand.status = 'closed', ${RANK}, demand.needed_by nulls last, demand.buyer,
-       demand.confirmed_on desc nulls last`,
+    `${DEMAND_SELECT} order by case demand.status when 'open' then 0 when 'qualifying' then 1 else 2 end,
+       score desc nulls last, demand.buyer, demand.id`,
   ));
 }
 
@@ -45,7 +59,8 @@ export async function listDemand(): Promise<Demand[]> {
 export async function listDemandForCompany(companyId: string): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
     `${DEMAND_SELECT} where demand.company_id = $1
-     order by demand.status = 'closed', ${RANK}, demand.needed_by nulls last, demand.observed_on desc nulls last`,
+     order by case demand.status when 'open' then 0 when 'qualifying' then 1 else 2 end,
+       score desc nulls last, demand.buyer, demand.id`,
     [companyId],
   ));
 }
@@ -107,6 +122,7 @@ type Source = {
 const INSERT_KEYS = [
   "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
   "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
+  "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question",
 ] as const;
 
 export async function addDemand(input: DemandInput & { buyer: string; wants: string }, userId: string | null, source: Source = {}) {
@@ -121,6 +137,7 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
     observed_on: input.observed_on ?? input.confirmed_on ?? todayInLondon(),
     // Our own estimate is not a confirmation from the buyer.
     confirmed_on: input.confirmed_on ?? (input.basis === "estimated" ? null : todayInLondon()),
+    status: input.status ?? "open",
   };
   const values = INSERT_KEYS.map((key) => row[key] ?? null);
   const sourceKeys = ["source_kind", "source_id", "source_label", "source_url", "source_quote"] as const;
