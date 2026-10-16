@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import {
   HOLD_STAGE,
-  LIVE_STAGES,
   todayInLondon,
   type BulkTrade,
   type TradeOwner,
@@ -17,19 +17,18 @@ import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { TradePage } from "./trade-page";
 import { ProposalRow } from "./proposal-row";
-import { ErrorText, request } from "./trade-ui";
+import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
-import { TradesList } from "./trades-list";
 
-type Mode = "list" | "board" | "demand" | "supply";
+type Mode = "board" | "demand" | "supply";
 const MODE_KEY = "bulk-trades:view";
 
 function storedMode(): Mode {
   try {
     const stored = window.localStorage.getItem(MODE_KEY);
-    return stored === "board" || stored === "demand" || stored === "supply" ? stored : "list";
+    return stored === "demand" || stored === "supply" ? stored : "board";
   } catch {
-    return "list";
+    return "board";
   }
 }
 
@@ -38,7 +37,7 @@ type Props = {
 };
 
 export function BulkTradesView({ onOpenEntry }: Props) {
-  const [mode, setMode] = useState<Mode>("list");
+  const [mode, setMode] = useState<Mode>("board");
   const [trades, setTrades] = useState<BulkTrade[]>([]);
   const [owners, setOwners] = useState<TradeOwner[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,18 +47,27 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [possible, setPossible] = useState<Proposal[]>([]);
   const [showPossible, setShowPossible] = useState(false);
   const [openTradeId, setOpenTradeId] = useState<string | null>(null);
+  const [openDemandId, setOpenDemandId] = useState<string | null>(null);
+  const [openSupplyId, setOpenSupplyId] = useState<string | null>(null);
   const [holding, setHolding] = useState<BulkTrade | null>(null);
   const today = todayInLondon();
 
-  useEffect(() => setMode(storedMode()), []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("supply")) { setOpenSupplyId(params.get("supply")); setMode("supply"); }
+    else setMode(storedMode());
+  }, []);
 
   const load = useCallback(async () => {
     try {
-      const data = await request<{ trades: BulkTrade[]; owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades");
+      const [data, inbox] = await Promise.all([
+        request<{ trades: BulkTrade[]; owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades"),
+        request<{ possible?: Proposal[] }>("/api/bulk-trades/demand"),
+      ]);
       setTrades(data.trades);
       setOwners(data.owners);
       setCheck(data.check ?? null);
-      setPossible(data.possible ?? []);
+      setPossible([...new Map([...(data.possible ?? []), ...(inbox.possible ?? [])].map((item) => [item.id, item])).values()]);
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Could not load trades.");
@@ -120,7 +128,6 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   }
 
   const open = (trade: BulkTrade) => setOpenTradeId(trade.id);
-  const liveCount = trades.filter((trade) => (LIVE_STAGES as readonly string[]).includes(trade.trade_stage)).length;
   const tab = (value: Mode, label: string) => (
     <button
       type="button"
@@ -140,18 +147,14 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       <header className="flex flex-wrap items-center gap-4 border-b px-8 py-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
         <nav aria-label="View" className="ml-2 flex rounded-none p-[3px]" style={{ background: "var(--bt-segment)" }}>
-          {tab("list", "List")}
-          {tab("board", "Board")}
+          {tab("board", "Trades")}
           {tab("demand", "Demand")}
           {tab("supply", "Supply")}
         </nav>
-        <span className="text-sm" style={{ color: "var(--bt-muted)" }}>
-          {mode === "demand" ? "who wants what, matched to live trades"
-            : mode === "supply" ? "small reuse batches, matched to open demand"
-            : `${liveCount} live · ${mode === "list" ? "sorted by what needs you first" : "drag to change stage"}`}
-        </span>
         <div className="flex-1" />
-        {check && <CheckLine check={check} />}
+        <button type="button" onClick={() => setShowPossible(true)} className={`${buttonClass} h-9`} style={buttonStyle}>
+          {check && <CheckLine check={check} />}Inbox · {possible.length}
+        </button>
         <button
           type="button"
           onClick={() => setCreating(true)}
@@ -165,44 +168,25 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         </button>
       </header>
 
-      <main className={`flex-1 overflow-auto px-8 pb-8 ${mode === "list" ? "pt-5" : "pt-6"}`}>
+      <main className="flex-1 overflow-auto px-8 pb-8 pt-5">
         <ErrorText error={loadError} />
         <ErrorText error={actionError} />
-        {mode !== "demand" && mode !== "supply" && !!possible.length && (
-          <section aria-label="Possible new trades" className="mb-5 overflow-hidden rounded-none border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-            <button type="button" aria-expanded={showPossible} onClick={() => setShowPossible((open) => !open)}
-              className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold">
-              <span className="rounded-none px-[7px] py-px text-[11px]" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>{possible.length}</span>
-              Possible new {possible.length === 1 ? "trade" : "trades"} from your inbox
-              <span className="flex-1" />
-              <span className="text-[13px] font-medium" style={{ color: "var(--bt-muted)" }}>{showPossible ? "Hide" : "Review"}</span>
-            </button>
-            {showPossible && (
-              <div className="border-t" style={{ borderColor: "var(--bt-divider)" }}>
-                {possible.map((proposal) => (
-                  <div key={proposal.id} className="border-b last:border-b-0" style={{ borderColor: "var(--bt-divider)" }}>
-                    <div className="px-5 pt-3 text-sm font-semibold">{String(proposal.proposed.title)}</div>
-                    <ProposalRow
-                      proposal={proposal}
-                      onDecided={(decided, action, lotId) => {
-                        setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
-                        if (action === "accept" && lotId) { void load(); setOpenTradeId(lotId); }
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
         {mode === "demand"
-          ? <DemandPage today={today} onOpenTrade={setOpenTradeId} />
+          ? <DemandPage today={today} onOpenTrade={setOpenTradeId} initialDemandId={openDemandId} onOpenSupply={(id) => { setOpenSupplyId(id); switchMode("supply"); }} />
           : mode === "supply"
-            ? <SupplyPage />
-          : mode === "list"
-            ? <TradesList trades={trades} today={today} onOpen={open} />
+            ? <SupplyPage initialSupplyId={openSupplyId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} />
             : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
+      <Dialog open={showPossible} onOpenChange={setShowPossible}>
+        <DialogContent aria-describedby={undefined} showCloseButton={false} className="bulk-trades top-0 left-auto right-0 h-full max-w-2xl translate-x-0 translate-y-0 overflow-auto rounded-none sm:max-w-2xl block" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          <header className="mb-4 flex items-center justify-between"><DialogTitle>Inbox · {possible.length}</DialogTitle><button type="button" onClick={() => setShowPossible(false)}>Close</button></header>
+          {!possible.length && <p className="text-sm">Inbox clear.</p>}
+          {possible.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={(decided, action, lotId) => {
+            setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
+            if (action === "accept") { void load(); if (lotId) { setOpenTradeId(lotId); setShowPossible(false); } }
+          }} />)}
+        </DialogContent>
+      </Dialog>
 
       {holding && (
         <HoldDialog trade={holding} today={today} onClose={() => setHolding(null)}
@@ -215,14 +199,11 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   );
 }
 
-/** "Gmail and Granola checked 13:00 · next 15:30", with a red dot when the last check failed. */
+/** Inbox-check health stays visible without competing with the work. */
 function CheckLine({ check }: { check: NonNullable<CheckStatus> }) {
   const failed = check.status === "failed";
+  const title = `${failed ? "Check failed" : "Checked"} ${ukTime(check.last_run_at)} · next ${nextCheckTime()}${check.error ? ` · ${check.error}` : ""}`;
   return (
-    <span className="flex items-center gap-2 text-[13px]" style={{ color: failed ? "var(--bt-red)" : "var(--bt-text-2)" }} title={check.error ?? undefined}>
-      <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: failed ? "var(--bt-red)" : "var(--bt-ok)" }} />
-      {failed ? `Gmail and Granola check failed ${ukTime(check.last_run_at)}` : `Gmail and Granola checked ${ukTime(check.last_run_at)}`}
-      {" · "}next {nextCheckTime()}
-    </span>
+    <span role="img" aria-label={title} title={title} className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: failed ? "var(--bt-red)" : "var(--bt-ok)" }} />
   );
 }

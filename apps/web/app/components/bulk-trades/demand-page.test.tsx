@@ -16,7 +16,8 @@ function row(overrides: Partial<Demand>): Demand {
     needed_by: null, volume: null, volume_unit: null, max_price: null, price_currency: null, price_unit: null, spec: {},
     source_kind: "email", source_label: "Gmail · adam@gv.example", source_url: null, source_quote: "Can you supply matched packs?",
     observed_on: "2026-09-18", status: "open", closed_reason: null, confirmed_on: "2026-09-18",
-    product_family: "VW MEB", fee_eur: 10000, price_basis: "buyer", reputation: "active", qualify_question: null,
+    product_family: "VW MEB", fee_eur: 10000, price_basis: "buyer", reputation: "active", qualify_question: null, qualify_asked_on: null,
+    qualify_entered_on: null, activity_count: 0, last_activity_at: null,
     moved_to: null, asked_on: "2026-09-18", score: null, expected_fee: null, has_stock: false,
     updated_at: "2026-09-18T10:00:00Z", fits: [], trades: [], waiting: null, tier: null, ...overrides,
   };
@@ -38,6 +39,7 @@ const ROWS = [
 function mockFetch() {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === "/api/bulk-trades/demand" && !init?.method) {
+      // List proposals are reviewed in the shared Inbox, not inline here.
       return new Response(JSON.stringify({ demand: ROWS, possible: [{
         id: "7", lot_id: null, kind: "possible_demand", target: null, proposed: { buyer: "Revoxa buyer" }, summary: "Revoxa buyer wants: LFP packs",
         quote: "We are looking for LFP batteries", source_kind: "gmail", source_url: null, source_label: "Gmail · dawid@revoxa.example",
@@ -47,6 +49,7 @@ function mockFetch() {
     if (url === "/api/bulk-trades/demand" && init?.method === "POST") {
       return new Response(JSON.stringify({ demand: row({ id: "btd_new", ...JSON.parse(String(init.body)) }) }), { status: 201 });
     }
+    if (url.endsWith("/activity")) return new Response(JSON.stringify({ activity: [] }));
     return new Response(JSON.stringify({ demand: ROWS[0] }));
   });
 }
@@ -54,28 +57,20 @@ function mockFetch() {
 describe("DemandPage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("ranks open demand, shows score arithmetic and stock warnings, and separates qualifying and closed", async () => {
+  it("ranks demand and separates qualifying and closed", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<DemandPage today={TODAY} onOpenTrade={() => {}} />);
     const table = await screen.findByRole("region", { name: "Demand" });
     expect(screen.getByRole("button", { name: "Demand 5" })).toHaveAttribute("aria-pressed", "true");
     expect(within(table).getByText("Exigo Recycling")).toBeInTheDocument();
-    expect(within(table).getByText("Chemistry: LFP · Format: Cells · max EUR 30/kWh")).toBeInTheDocument();
     expect(within(table).getByText("Green Voltage")).toBeInTheDocument();
-    expect(within(table).getAllByText("No stock on file")).toHaveLength(5);
-    expect(within(table).getAllByText("Active buyer")).toHaveLength(5);
     expect(within(table).getAllByTitle(/buyer budget.*expected/)).toHaveLength(5);
-    expect(screen.getByLabelText("Product families")).toHaveTextContent("VW MEB · 5 buyers");
     expect(within(table).getAllByRole("button")[0]).toHaveTextContent("Gridturn");
-    const possible = screen.getByRole("region", { name: "Possible demand" });
-    expect(within(possible).getByText("Revoxa buyer wants: LFP packs")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Qualifying 1" }));
     expect(within(table).getByText("How many packs?")).toBeInTheDocument();
-    expect(within(table).getByText("Needs quantity")).toBeInTheDocument();
     expect(within(table).queryByText("Green Voltage")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Closed 1" }));
     expect(within(table).getByText("Old buyer")).toBeInTheDocument();
-    expect(within(table).getByText("Bought elsewhere")).toBeInTheDocument();
   });
   it("edits ranking fields and qualifying question, and reconfirms freshness", async () => {
     const fetchMock = mockFetch();
@@ -121,51 +116,42 @@ describe("DemandPage", () => {
     expect(JSON.parse(call![1]!.body as string)).not.toHaveProperty("status");
   });
 
-  it("moves a buy-box to agreed, turns a request into a standing buy-box, and shows the trades it was offered on", async () => {
+
+  it("pins suggested supply to activity and opens its trade", async () => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
     const onOpenTrade = vi.fn();
     render(<DemandPage today={TODAY} onOpenTrade={onOpenTrade} />);
-    await userEvent.click(await screen.findByRole("button", { name: /Exigo Recycling/ }));
-    let panel = screen.getByRole("complementary", { name: "Demand detail" });
-    expect(within(panel).getByText("EUR 30/kWh")).toBeInTheDocument();
-    expect(within(panel).getByRole("list", { name: "Spec" })).toHaveTextContent("Chemistry: LFPFormat: Cells");
-    expect(within(panel).queryByRole("button", { name: "Agreed with buyer" })).not.toBeInTheDocument();
-    await userEvent.click(within(panel).getByRole("button", { name: "Make standing" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_4", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ action: "make_standing" }) }));
-
-    await userEvent.click(screen.getByRole("button", { name: "Demand 5" }));
-    await userEvent.click(screen.getByRole("button", { name: /Gridturn/ }));
-    panel = screen.getByRole("complementary", { name: "Demand detail" });
-    expect(within(panel).getByRole("button", { name: "Still wanted" })).toBeInTheDocument();
-    await userEvent.click(within(panel).getByRole("button", { name: "Agreed with buyer" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_6", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ action: "basis", basis: "agreed" }) }));
-    await userEvent.click(within(panel).getByRole("button", { name: /Iveco FPT eBS69\s*Won/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Green Voltage/ }));
+    const panel = screen.getByRole("complementary", { name: "Demand detail" });
+    await userEvent.click(within(panel).getByText("Suggested supply · 1"));
+    await userEvent.click(within(panel).getByRole("button", { name: "Pin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_1/activity", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ kind: "supply", title: "Iveco FPT eBS69", body: "A matched 41-pack lot.", refKind: "lot", refId: "bt_69" }),
+    }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Iveco FPT eBS69" }));
     expect(onOpenTrade).toHaveBeenCalledWith("bt_69");
   });
 
-  it("opens a row's panel with the trades it fits, and adds the buyer to one", async () => {
+  it("adds work to the activity log", async () => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
-    const onOpenTrade = vi.fn();
-    render(<DemandPage today={TODAY} onOpenTrade={onOpenTrade} />);
-    await screen.findByRole("button", { name: "Demand 5" });
-    await userEvent.click(screen.getByRole("button", { name: /Green Voltage/ }));
+    render(<DemandPage today={TODAY} onOpenTrade={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: /Green Voltage/ }));
     const panel = screen.getByRole("complementary", { name: "Demand detail" });
-    expect(within(panel).getByText("A matched 41-pack lot.")).toBeInTheDocument();
-    await userEvent.click(within(panel).getByRole("button", { name: "Add as buyer on this trade" }));
-    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_69/suggested/btd_1", expect.objectContaining({ method: "POST" }));
-    await userEvent.click(within(panel).getByRole("button", { name: "Iveco FPT eBS69" }));
-    expect(onOpenTrade).toHaveBeenCalledWith("bt_69");
+    await userEvent.selectOptions(within(panel).getByLabelText("Activity kind"), "call");
+    await userEvent.type(within(panel).getByLabelText("Activity title"), "Confirmed volume");
+    await userEvent.click(within(panel).getByRole("button", { name: "Add" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_1/activity", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ kind: "call", title: "Confirmed volume" }),
+    }));
   });
 
   it("adds a request with its date, volume, price and spec from the form", async () => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
     render(<DemandPage today={TODAY} onOpenTrade={() => {}} />);
-    await screen.findByRole("region", { name: "Possible demand" });
-    const [, headerButton] = screen.getAllByRole("button", { name: "Add demand" }); // the first is the card's
-    await userEvent.click(headerButton);
+    await userEvent.click(await screen.findByRole("button", { name: "Add demand" }));
     const dialog = screen.getByRole("dialog", { name: "Add demand" });
     await userEvent.type(within(dialog).getByLabelText("Buyer"), "Somerset EV");
     await userEvent.type(within(dialog).getByLabelText("Wants"), "MEB modules for tractor conversions");
@@ -191,8 +177,7 @@ describe("DemandPage", () => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
     render(<DemandPage today={TODAY} onOpenTrade={() => {}} />);
-    await screen.findByRole("region", { name: "Possible demand" });
-    await userEvent.click(screen.getAllByRole("button", { name: "Add demand" })[1]);
+    await userEvent.click(await screen.findByRole("button", { name: "Add demand" }));
     const dialog = screen.getByRole("dialog", { name: "Add demand" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Standing: ongoing buy-box" }));
     expect(within(dialog).queryByLabelText("Needed by")).not.toBeInTheDocument();
@@ -229,10 +214,7 @@ describe("SuggestedBuyers", () => {
     expect(introduce).not.toHaveTextContent("Volt Repair Kft"); // research matches stay folded until asked for
     await userEvent.click(within(introduce).getByRole("button", { name: "Show" }));
     expect(introduce).toHaveTextContent("Volt Repair Kft");
-    expect(screen.getByText("One line per buyer · 1 offer now, 1 introduce")).toBeInTheDocument();
     expect(screen.getByText("Strong fit")).toBeInTheDocument();
-    expect(screen.getByText("Request")).toBeInTheDocument();
-    expect(screen.getByText("Tier A")).toBeInTheDocument();
     expect(screen.getByText("· needed by 15 Oct", { exact: false })).toBeInTheDocument();
     await userEvent.click(within(screen.getByRole("region", { name: "Offer now" })).getByRole("button", { name: "Add to buyers" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_69/suggested/btd_1", expect.objectContaining({ method: "POST" }));

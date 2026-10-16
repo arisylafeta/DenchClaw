@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ukTime, type Proposal } from "@/lib/bulk-trade-details";
+import { type Proposal } from "@/lib/bulk-trade-details";
 import { ErrorText, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request } from "./trade-ui";
 
 const ACCEPT_LABEL: Record<Proposal["kind"], string> = {
@@ -57,19 +57,12 @@ export function ProposalRow({ proposal, onDecided, compact, acceptLabel }: Props
       className={`flex flex-wrap items-start gap-2.5 ${compact ? "py-2" : "px-5 py-3"}`}
       style={compact ? undefined : { background: "var(--bt-table-head)" }}
     >
-      <span className="mt-0.5 rounded-none px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
-        New
-      </span>
-      <div className="min-w-[220px] flex-1">
-        <div className="text-sm">
-          {proposal.summary} <span style={{ color: "var(--bt-muted)" }}>· {ukTime(proposal.created_at)} check</span>
-        </div>
-        <div className="mt-0.5 text-[13px]" style={{ color: "var(--bt-muted)" }}>
-          “{proposal.quote}” ·{" "}
-          {proposal.source_url
-            ? <a href={proposal.source_url} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: "var(--bt-link)" }}>{source}</a>
-            : source}
-        </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm" title={proposal.summary}>{proposal.summary}</div>
+        <details className="text-xs" style={{ color: "var(--bt-muted)" }}>
+          <summary className="cursor-pointer">{source} · Quote</summary>
+          <p className="py-2">“{proposal.quote}” {proposal.source_url && <a href={proposal.source_url} target="_blank" rel="noreferrer" className="underline">Source</a>}</p>
+        </details>
         <ErrorText error={error} />
       </div>
       <button type="button" disabled={saving} onClick={() => decide("accept")} className={`${darkButtonClass} h-8`} style={darkButtonStyle}>

@@ -43,16 +43,13 @@ describe("BulkTradesView", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.unstubAllGlobals());
 
-  it("lists live trades by group and hides closed ones", async () => {
+  it("starts on Trades and keeps closed trades off the board", async () => {
     vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
-
-    const dueToday = await screen.findByRole("region", { name: "Due today" });
-    expect(within(dueToday).getByText("Synthetic eBS37")).toBeInTheDocument();
-    expect(within(dueToday).getByText("161 packs")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "No next step" })).getByText("Synthetic cells")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Trades" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("Synthetic eBS37")).toBeInTheDocument();
     expect(screen.queryByText("Old lot")).not.toBeInTheDocument();
-    expect(screen.getByText(/2 live/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "List" })).not.toBeInTheDocument();
   });
 
   it("moves a card to the dropped stage and saves it", async () => {
@@ -60,7 +57,7 @@ describe("BulkTradesView", () => {
       new Response(JSON.stringify({ trade: { ...TRADES[0], ...body } })));
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
-    await userEvent.click(await screen.findByRole("button", { name: "Board" }));
+    await screen.findByText("Synthetic eBS37");
 
     const transfer = dataTransfer();
     fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic eBS37/ }), { dataTransfer: transfer });
@@ -77,7 +74,7 @@ describe("BulkTradesView", () => {
   it("puts the card back and says so when the save fails", async () => {
     vi.stubGlobal("fetch", mockFetch(() => new Response(JSON.stringify({ error: "Unknown stage." }), { status: 400 })));
     render(<BulkTradesView />);
-    await userEvent.click(await screen.findByRole("button", { name: "Board" }));
+    await screen.findByText("Synthetic eBS37");
 
     const transfer = dataTransfer();
     fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic eBS37/ }), { dataTransfer: transfer });
@@ -93,10 +90,9 @@ describe("BulkTradesView", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
     await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
-    expect(await screen.findByRole("region", { name: "Due today" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "With buyers" })).toBeInTheDocument();
   });
 
   it("sends only the changed fields when a trade is edited", async () => {
@@ -125,10 +121,9 @@ describe("BulkTradesView", () => {
       : { trade: TRADES[0], buyers: [], contacts: [], fields: [], files: [] }))));
     render(<BulkTradesView />);
 
-    expect(await screen.findByText("2 new")).toBeInTheDocument();
-    expect(screen.getByText(/Gmail and Granola check failed 13:00/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Possible new trade from your inbox/ }));
-    expect(screen.getByText("Leaf packs, Leeds")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /Check failed/ })).toHaveAttribute("title", expect.stringContaining("boom"));
+    await userEvent.click(screen.getByRole("button", { name: /Inbox · 1/ }));
+    expect(screen.getByText("400 Leaf packs offered")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create trade" })).toBeInTheDocument();
   });
 
@@ -142,15 +137,7 @@ describe("BulkTradesView", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
 
-    const group = await screen.findByRole("region", { name: "On hold" });
-    expect(within(group).queryByText("Synthetic BESS portfolio")).not.toBeInTheDocument();
-    await userEvent.click(within(group).getByRole("button", { name: /On hold/ }));
-    expect(within(group).getByText("Synthetic BESS portfolio")).toBeInTheDocument();
-    expect(within(group).getByText("Until 1 Mar 2099")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Board" }));
-    const column = screen.getByRole("region", { name: "On hold" });
-    expect(within(column).getByText("Batteries stay on site until removal")).toBeInTheDocument();
+    const column = await screen.findByRole("region", { name: "On hold" });
     const transfer = dataTransfer();
     fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic packs/ }), { dataTransfer: transfer });
     fireEvent.drop(column, { dataTransfer: transfer });

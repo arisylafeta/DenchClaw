@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
 import { formatFee, REPUTATION_LABEL, scoreDemand } from "@/lib/bulk-demand-score";
 import {
   BASES,
-  CHECK_LABEL,
   CLOSED_REASONS,
   CLOSED_REASON_LABEL,
   CURRENCIES,
@@ -15,23 +13,20 @@ import {
   SPEC_NUMBERS,
   SPEC_NUMBER_KEYS,
   VOLUME_UNITS,
-  checkReason,
   priceLabel,
   specLines,
   volumeLabel,
-  waitingLabel,
   type ClosedReason,
   type Demand,
   type DemandInput,
   type Spec,
   type SpecListKey,
 } from "@/lib/bulk-demand";
-import { shortDate, ukTime, type Proposal } from "@/lib/bulk-trade-details";
+import { shortDate } from "@/lib/bulk-trade-details";
+import type { DemandActivity as Activity } from "@/lib/crm-postgres/bulk-demand-activity";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
 import { CrmSearch } from "./buyer-dialogs";
-import { DemandBadge } from "./demand-badge";
-import { ProposalRow } from "./proposal-row";
 import {
   Card,
   ErrorText,
@@ -42,38 +37,33 @@ import {
   darkButtonClass,
   darkButtonStyle,
   request,
-  tradeUrl,
   useForm,
 } from "./trade-ui";
 
-/** The latest demand-matching pass. */
-type MatchRun = { at: string; status: "running" | "ok" | "failed" };
 
 type Filter = "open" | "qualifying" | "closed";
 
 type Props = {
   today: string;
   onOpenTrade: (lotId: string) => void;
+  onOpenSupply?: (id: string) => void;
+  initialDemandId?: string | null;
 };
 
-const COLUMNS = "grid-cols-[100px_minmax(160px,1fr)_minmax(260px,2fr)_minmax(240px,1.5fr)]";
-export function DemandPage({ today, onOpenTrade }: Props) {
+const COLUMNS = "grid-cols-[52px_minmax(120px,1fr)_minmax(180px,2fr)_100px]";
+export function DemandPage({ today, onOpenTrade, onOpenSupply, initialDemandId }: Props) {
   const [demand, setDemand] = useState<Demand[]>([]);
-  const [possible, setPossible] = useState<Proposal[]>([]);
-  const [matched, setMatched] = useState<MatchRun | null>(null);
   const [filter, setFilter] = useState<Filter>("open");
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialDemandId ?? null);
   const [editing, setEditing] = useState<Demand | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const data = await request<{ demand: Demand[]; possible: Proposal[]; matched?: MatchRun | null }>("/api/bulk-trades/demand");
+      const data = await request<{ demand: Demand[] }>("/api/bulk-trades/demand");
       setDemand(data.demand);
-      setPossible(data.possible);
-      setMatched(data.matched ?? null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load demand.");
@@ -85,13 +75,6 @@ export function DemandPage({ today, onOpenTrade }: Props) {
 
   const open = demand.filter((row) => row.status === "open");
   const qualifying = demand.filter((row) => row.status === "qualifying");
-  const families = new Map<string, Set<string>>();
-  for (const row of open) {
-    if (!row.product_family) { continue; }
-    const buyers = families.get(row.product_family) ?? new Set<string>();
-    buyers.add(row.company_id ?? row.person_id ?? row.buyer);
-    families.set(row.product_family, buyers);
-  }
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return demand.filter((row) => row.status === filter)
@@ -109,36 +92,9 @@ export function DemandPage({ today, onOpenTrade }: Props) {
   );
 
   return (
-    <div className="flex min-h-0 gap-6">
+    <div className="flex min-h-0 flex-col gap-5 xl:flex-row">
       <div className="flex min-w-0 flex-1 flex-col gap-5">
         <ErrorText error={error} />
-        {!!possible.length && (
-          <Card label="Possible demand">
-            <header className="flex items-center gap-2.5 border-b px-5 py-3" style={{ borderColor: "var(--bt-divider)" }}>
-              <span className="rounded-none px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>New</span>
-              <h2 className="text-[15px] font-semibold">Possible demand from your inbox</h2>
-              <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{possible.length} found</span>
-            </header>
-            {possible.map((proposal) => (
-              <div key={proposal.id} className="border-b last:border-b-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <ProposalRow
-                  proposal={proposal}
-                  acceptLabel={proposal.target ? "Update demand" : "Add demand"}
-                  onDecided={(decided, action) => {
-                    setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
-                    if (action === "accept") void load();
-                  }}
-                />
-              </div>
-            ))}
-          </Card>
-        )}
-
-        {!!families.size && <div aria-label="Product families" className="flex flex-wrap gap-3 text-xs" style={{ color: "var(--bt-muted)" }}>
-          {[...families].toSorted(([a], [b]) => a.localeCompare(b)).map(([family, buyers]) => (
-            <span key={family}>{family} · {buyers.size} {buyers.size === 1 ? "buyer" : "buyers"}</span>
-          ))}
-        </div>}
         <div data-table-part="toolbar" className={`bulk-trades ${tableStyles.surface} flex flex-wrap items-center gap-3 border`}>
           <div role="group" aria-label="Filter" className="flex border" style={{ borderColor: "var(--bt-border)" }}>
             {segment("open", `Demand ${open.length}`)}
@@ -149,12 +105,6 @@ export function DemandPage({ today, onOpenTrade }: Props) {
             placeholder="Search buyers or wants" className="h-8 w-full max-w-[340px] rounded-none border px-2.5 text-xs"
             style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }} />
           <span className="flex-1" />
-          <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Bulk only, 2+ units</span>
-          {matched && (
-            <span className="text-[13px]" style={{ color: matched.status === "failed" ? "var(--bt-red)" : "var(--bt-muted)" }}>
-              {matched.status === "failed" ? "Matching failed" : matched.status === "running" ? "Matching now" : "Matched"} {ukTime(matched.at)}
-            </span>
-          )}
           <button type="button" onClick={() => setEditing("new")} className="h-8 rounded-none bg-[var(--bt-accent)] px-3.5 text-xs font-semibold hover:bg-[var(--bt-accent-hover)]"
             style={{ color: "var(--bt-on-accent)" }}>
             Add demand
@@ -164,11 +114,10 @@ export function DemandPage({ today, onOpenTrade }: Props) {
         <Card label="Demand" className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
           <div className="min-w-[760px]">
             <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-3.5 border-b px-3 py-2 font-medium`} style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
-              <span>Score ↓</span><span>Buyer</span><span>Ask</span><span>Fee · freshness · relationship</span>
+              <span>Score</span><span>Buyer</span><span>Ask</span><span>Activity</span>
             </div>
             {shown.map((row) => {
               const scored = ranking(row, today);
-              const summary = [...specLines(row.spec).slice(0, 3), priceLabel(row) && `max ${priceLabel(row)}`].filter(Boolean).join(" · ");
               return (
                 <div key={row.id} data-table-part="grid-row" role="button" tabIndex={0} onClick={() => setSelectedId(row.id)} aria-pressed={row.id === selectedId}
                   onKeyDown={(event) => {
@@ -180,32 +129,15 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                   className={`grid w-full ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)]`}
                   style={{ borderColor: "var(--bt-divider)", color: row.status === "closed" ? "var(--bt-muted)" : "var(--bt-text)",
                     background: row.id === selectedId ? "var(--bt-row-hover)" : undefined }}>
-                  <TableCellContent><DemandScore demand={row} today={today} /></TableCellContent>
-                  <TableCellContent>
-                  <div className="flex min-w-0 flex-col items-start gap-1">
-                    <div className="max-w-full truncate text-xs font-semibold">{row.buyer}</div>
-                    {row.contact && <div className="max-w-full truncate text-xs" style={{ color: "var(--bt-muted)" }}>{row.contact}</div>}
-                    {row.product_family && <span style={{ color: "var(--bt-muted)" }}>{row.product_family}</span>}
-                  </div>
-                  </TableCellContent>
-                  <TableCellContent>
-                  <span className="flex flex-col gap-0.5 text-xs leading-snug">
-                    {row.wants}
-                    {summary && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{summary}</span>}
-                    {row.status === "qualifying" && row.qualify_question && <span className="font-medium" style={{ color: "var(--bt-amber)" }}>{row.qualify_question}</span>}
-                    {row.status === "closed" && <span style={{ color: "var(--bt-muted)" }}>
-                      {row.closed_reason ? CLOSED_REASON_LABEL[row.closed_reason] : "Closed"}{row.moved_to ? ` · ${row.moved_to}` : ""}
-                    </span>}
-                  </span>
-                  </TableCellContent>
-                  <TableCellContent>
-                    <div className="flex flex-wrap gap-1.5">
-                      <DemandChip>{row.fee_eur == null ? "Fee unknown" : `${formatFee(row.fee_eur)} fee · ${row.price_basis === "buyer" ? "buyer budget" : "our estimate"}`}</DemandChip>
-                      <DemandChip>Asked {scored.daysAgo}d ago</DemandChip>
-                      <DemandChip>{REPUTATION_LABEL[row.reputation ?? "anon"]}</DemandChip>
-                      {!row.has_stock && row.status !== "closed" && <DemandChip warning><AlertTriangle size={12} aria-hidden="true" />No stock on file</DemandChip>}
+                  <TableCellContent>{row.status === "qualifying" ? <span style={{ color: "var(--bt-amber)" }}>?</span> : <DemandScore demand={row} today={today} />}</TableCellContent>
+                  <TableCellContent><span className="truncate font-semibold">{row.buyer}</span></TableCellContent>
+                  <TableCellContent><div className="min-w-0">
+                    <div className="truncate" title={row.wants}>{row.wants}</div>
+                    <div className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>
+                      {row.status === "qualifying" ? row.qualify_question ?? "What do they need?" : `${row.fee_eur == null ? "—" : formatFee(row.fee_eur)} · ${scored.daysAgo}d · ${REPUTATION_LABEL[row.reputation ?? "anon"].replace(/ buyer$/i, "")}`}
                     </div>
-                  </TableCellContent>
+                  </div></TableCellContent>
+                  <TableCellContent><div className="text-xs" style={{ color: "var(--bt-muted)" }}>{row.activity_count ?? 0}<br />{row.last_activity_at ? shortDate(row.last_activity_at) : "—"}</div></TableCellContent>
                 </div>
               );
             })}
@@ -218,7 +150,7 @@ export function DemandPage({ today, onOpenTrade }: Props) {
 
       {selected && (
         <DemandPanel key={selected.id} demand={selected} today={today} onClose={() => setSelectedId(null)} onChanged={load}
-          onEdit={() => setEditing(selected)} onOpenTrade={onOpenTrade} />
+          onEdit={() => setEditing(selected)} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
       )}
       {editing && (
         <DemandDialog demand={editing === "new" ? null : editing} onClose={() => setEditing(null)}
@@ -228,157 +160,127 @@ export function DemandPage({ today, onOpenTrade }: Props) {
   );
 }
 
-function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade }: {
-  demand: Demand;
-  today: string;
-  onClose: () => void;
-  onChanged: () => void;
-  onEdit: () => void;
-  onOpenTrade: (lotId: string) => void;
+const ACTIVITY_KINDS = ["note", "research", "outreach", "call", "quote", "supply"] as const;
+
+function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade, onOpenSupply }: {
+  demand: Demand; today: string; onClose: () => void; onChanged: () => void;
+  onEdit: () => void; onOpenTrade: (lotId: string) => void; onOpenSupply?: (id: string) => void;
 }) {
+  const [activity, setActivity] = useState<Activity[]>([]);
+  const [kind, setKind] = useState<string>("note");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [link, setLink] = useState("");
+  const [refKind, setRefKind] = useState("url");
+  const [choices, setChoices] = useState<{ id: string; label: string; kind: string }[]>([]);
   const [closing, setClosing] = useState(false);
+  const [qualifying, setQualifying] = useState(false);
+  const [question, setQuestion] = useState(demand.qualify_question ?? "");
   const [reason, setReason] = useState<ClosedReason>("no_longer_needed");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true);
-    setError(null);
+  const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
+  const loadActivity = useCallback(async () => {
     try {
-      await action();
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-    } finally {
-      setBusy(false);
-    }
+      const result = await request<{ activity: Activity[] }>(`${endpoint}/activity`);
+      setActivity(result.activity);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load activity."); }
+  }, [endpoint]);
+  useEffect(() => { void loadActivity(); }, [loadActivity]);
+  useEffect(() => {
+    if (refKind !== "lot" && refKind !== "supply") return;
+    let cancelled = false;
+    void request<{ trades?: { id: string; title: string }[]; supply?: { id: string; seller: string; offers: string }[] }>(refKind === "lot" ? "/api/bulk-trades" : "/api/bulk-trades/supply")
+      .then((result) => { if (!cancelled) setChoices(refKind === "lot"
+        ? (result.trades ?? []).map((item) => ({ id: item.id, label: item.title, kind: "lot" }))
+        : (result.supply ?? []).map((item) => ({ id: item.id, label: `${item.seller} · ${item.offers}`, kind: "supply" }))); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Could not load links."); });
+    return () => { cancelled = true; };
+  }, [refKind]);
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true); setError(null);
+    try { await action(); await loadActivity(); onChanged(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not save."); }
+    finally { setBusy(false); }
   }
-  const patch = (body: object) => request(`/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`, { method: "PATCH", body: JSON.stringify(body) });
-
-  return (
-    <aside aria-label="Demand detail" className="flex w-[380px] shrink-0 flex-col gap-4 self-start rounded-none border p-5"
-      style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="bt-label">{demand.kind === "request" ? "Request" : "Standing buy-box"}</span>
-            <DemandBadge kind={demand.kind} basis={demand.basis} />
-          </div>
-          <h2 className="mt-1 text-lg font-semibold">{demand.buyer}</h2>
-          {(demand.contact || demand.email) && (
-            <div className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{[demand.contact, demand.email].filter(Boolean).join(" · ")}</div>
-          )}
+  const patch = (value: object) => request(endpoint, { method: "PATCH", body: JSON.stringify(value) });
+  const add = (value: object) => request(`${endpoint}/activity`, { method: "POST", body: JSON.stringify(value) });
+  return <aside aria-label="Demand detail" className="flex w-full max-w-[480px] shrink-0 flex-col gap-4 self-start border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+    <header className="flex items-start gap-3">
+      <DemandScore demand={demand} today={today} />
+      <div className="min-w-0 flex-1"><h2 className="font-semibold">{demand.buyer}</h2><p className="text-sm">{demand.wants}</p></div>
+      <button type="button" aria-label="Dismiss demand detail" onClick={onClose}>×</button>
+    </header>
+    <div className="flex flex-wrap gap-2">
+      <button disabled={busy} className={buttonClass} style={buttonStyle} onClick={() => run(() => patch({ action: "confirm" }))}>{demand.status === "closed" ? "Reopen" : "Still wanted"}</button>
+      <button disabled={busy} className={buttonClass} style={buttonStyle} onClick={() => setQualifying(!qualifying)}>Qualify</button>
+      {demand.status !== "closed" && <button className={buttonClass} style={buttonStyle} onClick={() => setClosing(!closing)}>Close</button>}
+      <button className={buttonClass} style={buttonStyle} onClick={onEdit}>Edit</button>
+    </div>
+    {qualifying && <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void run(async () => { await patch({ status: "qualifying", qualify_question: question }); setQualifying(false); }); }}>
+      <input required aria-label="Qualification question" className="min-w-0 flex-1 border p-2 text-sm" value={question} onChange={(event) => setQuestion(event.target.value)} />
+      <button disabled={busy} className={buttonClass} style={buttonStyle}>Save</button>
+    </form>}
+    {demand.status === "qualifying" && <div className="text-sm">
+      <p>{demand.qualify_question}</p>
+      <button disabled={busy} className="mt-1 text-xs underline" onClick={() => run(() => patch({ qualify_asked_on: today }))}>{demand.qualify_asked_on ? `Sent ${shortDate(demand.qualify_asked_on)} · send again` : "Question sent today"}</button>
+    </div>}
+    {closing && <div className="flex gap-2">
+      <select aria-label="Why" className="min-w-0 flex-1 border text-sm" value={reason} onChange={(event) => setReason(event.target.value as ClosedReason)}>{CLOSED_REASONS.map((value) => <option key={value} value={value}>{CLOSED_REASON_LABEL[value]}</option>)}</select>
+      <button disabled={busy} className={buttonClass} style={buttonStyle} onClick={() => run(async () => { await patch({ action: "close", reason }); setClosing(false); })}>Close demand</button>
+    </div>}
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs" style={{ color: "var(--bt-muted)" }}>
+      <span>{volumeLabel(demand) ?? demand.quantity ?? "Qty —"}</span><span>{priceLabel(demand) ?? "Price —"}</span><span>{demand.location ?? "Location —"}</span>
+      {demand.needed_by && <span>By {shortDate(demand.needed_by)}</span>}
+      {demand.source_url && <a href={demand.source_url} target="_blank" rel="noreferrer" className="underline">{demand.source_label ?? "Source"}</a>}
+    </div>
+    {(demand.note || demand.source_quote || specLines(demand.spec).length > 0) && <details className="text-xs" style={{ color: "var(--bt-muted)" }}>
+      <summary className="cursor-pointer">Context</summary>
+      {demand.note && <p className="mt-2 whitespace-pre-wrap">{demand.note}</p>}
+      {specLines(demand.spec).map((line) => <p key={line}>{line}</p>)}
+      {demand.source_quote && <p className="mt-2">“{demand.source_quote}”</p>}
+    </details>}
+    <details className="border-t pt-3 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
+      <summary className="cursor-pointer">Suggested supply · {demand.fits.length}</summary>
+      {demand.fits.map((fit) => <div key={fit.lot_id} className="flex items-center gap-2 py-2">
+        <button type="button" className="min-w-0 flex-1 truncate text-left hover:underline" title={fit.reason} onClick={() => onOpenTrade(fit.lot_id)}>{fit.title}</button>
+        <button disabled={busy || activity.some((entry) => entry.kind === "supply" && entry.ref_kind === "lot" && entry.ref_id === fit.lot_id)} className={buttonClass} style={buttonStyle} onClick={() => run(() => add({ kind: "supply", title: fit.title, body: fit.reason, refKind: "lot", refId: fit.lot_id }))}>Pin</button>
+      </div>)}
+    </details>
+    <section aria-label="Activity" className="border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
+      <h3 className="mb-2 text-sm font-semibold">Activity</h3>
+      <form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void run(async () => {
+        await add({ kind, title, body: body || undefined, ...(link ? { refKind, refId: link } : {}) });
+        setTitle(""); setBody(""); setLink("");
+      }); }}>
+        <div className="flex gap-2">
+          <select aria-label="Activity kind" className="border p-1 text-xs" value={kind} onChange={(event) => setKind(event.target.value)}>{ACTIVITY_KINDS.map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select>
+          <input required aria-label="Activity title" placeholder="What did we do?" className="min-w-0 flex-1 border p-2 text-sm" value={title} onChange={(event) => setTitle(event.target.value)} />
+          <button disabled={busy || !title.trim()} className={buttonClass} style={buttonStyle}>Add</button>
         </div>
-        <button type="button" onClick={onClose} className="text-sm" style={{ color: "var(--bt-muted)" }}>Close</button>
-      </div>
-      {demand.waiting && (
-        <p className="rounded-none border px-3 py-2 text-[13px]" style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" }}>
-          {waitingLabel(demand.waiting.since)} on your reply{demand.waiting.who ? ` to ${demand.waiting.who}` : ""}
-          {demand.waiting.subject ? `: “${demand.waiting.subject}”` : ""}
-        </p>
-      )}
-      <p className="text-[15px] leading-snug">{demand.wants}</p>
-      <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
-        <dt style={{ color: "var(--bt-muted)" }}>Volume</dt><dd>{volumeLabel(demand) ?? "—"}</dd>
-        {demand.quantity && demand.volume != null && (<>
-          <dt style={{ color: "var(--bt-muted)" }}>In their words</dt><dd>{demand.quantity}</dd>
-        </>)}
-        <dt style={{ color: "var(--bt-muted)" }}>Max price</dt><dd>{priceLabel(demand) ?? "—"}</dd>
-        <dt style={{ color: "var(--bt-muted)" }}>Where</dt><dd>{demand.location ?? "—"}</dd>
-        {demand.kind === "request" && (<>
-          <dt style={{ color: "var(--bt-muted)" }}>Needed by</dt><dd>{demand.needed_by ? shortDate(demand.needed_by) : "—"}</dd>
-        </>)}
-        <dt style={{ color: "var(--bt-muted)" }}>Confirmed</dt>
-        <dd>{demand.confirmed_on ? shortDate(demand.confirmed_on) : "Never"}
-          {checkReason(demand, today) ? ` · ${CHECK_LABEL[checkReason(demand, today)!].toLowerCase()}` : ""}</dd>
-        {demand.source_label && (<>
-          <dt style={{ color: "var(--bt-muted)" }}>Source</dt>
-          <dd>{demand.source_url
-            ? <a href={demand.source_url} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: "var(--bt-link)" }}>{demand.source_label}</a>
-            : demand.source_label}{demand.observed_on ? `, ${shortDate(demand.observed_on)}` : ""}</dd>
-        </>)}
-      </dl>
-      {!!specLines(demand.spec).length && (
-        <ul aria-label="Spec" className="flex flex-col gap-1 border-t pt-3 text-[13px]" style={{ borderColor: "var(--bt-divider)" }}>
-          {specLines(demand.spec).map((line) => <li key={line}>{line}</li>)}
-        </ul>
-      )}
-      {!!demand.trades.length && (
-        <div className="flex flex-col gap-1.5 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
-          <h3 className="text-sm font-semibold">Offered on</h3>
-          {demand.trades.map((trade) => (
-            <button key={trade.lot_id} type="button" onClick={() => onOpenTrade(trade.lot_id)}
-              className="flex items-center gap-2 text-left text-[13px] hover:underline">
-              <span className="flex-1">{trade.title}</span>
-              <span style={{ color: trade.status === "Won" ? "var(--bt-green)" : "var(--bt-muted)" }}>{trade.status}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {demand.note && <p className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{demand.note}</p>}
-      {demand.source_quote && (
-        <p className="border-t pt-3 text-[13px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>“{demand.source_quote}”</p>
-      )}
-      <div className="flex flex-col gap-2.5 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
-        <h3 className="text-sm font-semibold">Fits these trades</h3>
-        {!demand.fits.length && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No live trade fits yet. Matching runs with each inbox check.</p>}
-        {demand.fits.map((fit) => (
-          <div key={fit.lot_id} className="flex flex-col gap-1.5 rounded-none border px-3 py-2.5" style={{ borderColor: "var(--bt-border)" }}>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => onOpenTrade(fit.lot_id)} className="flex-1 text-left text-sm font-semibold hover:underline">{fit.title}</button>
-              <span className="rounded-none border px-1.5 py-px text-xs font-medium"
-                style={fit.strength === "strong"
-                  ? { background: "var(--bt-green-bg)", color: "var(--bt-green)", borderColor: "var(--bt-green-border)" }
-                  : { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" }}>
-                {fit.strength === "strong" ? "Strong" : "Partial"}
-              </span>
-            </div>
-            <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>{fit.reason}</span>
-            {fit.buyer_id
-              ? <span className="text-xs" style={{ color: "var(--bt-muted)" }}>On this trade’s buyers</span>
-              : (
-                <button type="button" disabled={busy} className={`${buttonClass} h-8 self-start`} style={buttonStyle}
-                  onClick={() => run(() => request(tradeUrl(fit.lot_id, `/suggested/${encodeURIComponent(demand.id)}`), { method: "POST" }))}>
-                  Add as buyer on this trade
-                </button>
-              )}
+        <details><summary className="cursor-pointer text-xs" style={{ color: "var(--bt-muted)" }}>Details / link</summary>
+          <textarea aria-label="Activity body" placeholder="Note" className="mt-2 w-full border p-2 text-sm" value={body} onChange={(event) => setBody(event.target.value)} />
+          <div className="flex gap-2">
+            <select aria-label="Link type" className="border text-xs" value={refKind} onChange={(event) => setRefKind(event.target.value)}><option value="url">URL</option><option value="lot">Lot</option><option value="supply">Supply</option><option value="stock">Stock item</option></select>
+            <input aria-label="Activity link" type={refKind === "url" || refKind === "stock" ? "url" : "text"} role={refKind === "lot" || refKind === "supply" ? "combobox" : undefined} list={refKind === "lot" || refKind === "supply" ? `activity-links-${demand.id}` : undefined} placeholder={refKind === "url" || refKind === "stock" ? "Paste URL" : "Pick an item"} className="min-w-0 flex-1 border p-2 text-sm" value={link} onChange={(event) => setLink(event.target.value)} />
+            <datalist id={`activity-links-${demand.id}`}>{choices.filter((item) => item.kind === refKind).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</datalist>
           </div>
-        ))}
-      </div>
+        </details>
+      </form>
       <ErrorText error={error} />
-      {closing ? (
-        <div className="flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
-          <label className="sr-only" htmlFor={`close-${demand.id}`}>Why</label>
-          <select id={`close-${demand.id}`} value={reason} onChange={(event) => setReason(event.target.value as ClosedReason)}
-            className="h-9 rounded-none border px-2 text-sm" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
-            {CLOSED_REASONS.map((value) => <option key={value} value={value}>{CLOSED_REASON_LABEL[value]}</option>)}
-          </select>
-          <button type="button" disabled={busy} className={`${darkButtonClass} h-9`} style={darkButtonStyle}
-            onClick={() => run(async () => { await patch({ action: "close", reason }); setClosing(false); })}>Close demand</button>
-          <button type="button" onClick={() => setClosing(false)} className={`${buttonClass} h-9`} style={buttonStyle}>Cancel</button>
+      {!activity.length && <p className="py-4 text-xs" style={{ color: "var(--bt-muted)" }}>No activity yet.</p>}
+      <ol className="mt-3">{activity.map((entry) => <li key={entry.id} className="border-t py-3 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
+        <div className="flex items-center gap-2"><span className="text-xs capitalize" style={{ color: "var(--bt-muted)" }}>{entry.kind}</span><time className="ml-auto text-xs" dateTime={entry.occurred_at}>{shortDate(entry.occurred_at)}</time>
+          <button type="button" disabled={busy} aria-label={`Delete ${entry.title}`} onClick={() => run(() => request(`${endpoint}/activity/${entry.id}`, { method: "DELETE" }))}>×</button>
         </div>
-      ) : (
-        <div className="flex flex-wrap gap-2 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
-          <button type="button" disabled={busy} className={`${darkButtonClass} h-9`} style={darkButtonStyle}
-            onClick={() => run(() => patch({ action: "confirm" }))}>
-            {demand.status === "closed" ? "Reopen" : "Still wanted"}
-          </button>
-          <button type="button" onClick={onEdit} className={`${buttonClass} h-9`} style={buttonStyle}>Edit</button>
-          {demand.status === "open" && demand.kind === "standing" && BASES.filter((basis) => basis !== demand.basis && basis !== "estimated").map((basis) => (
-            <button key={basis} type="button" disabled={busy} className={`${buttonClass} h-9`} style={buttonStyle}
-              onClick={() => run(() => patch({ action: "basis", basis }))}>
-              {basis === "agreed" ? "Agreed with buyer" : "Buyer stated it"}
-            </button>
-          ))}
-          {demand.status === "open" && demand.kind === "request" && (
-            <button type="button" disabled={busy} className={`${buttonClass} h-9`} style={buttonStyle}
-              onClick={() => run(() => patch({ action: "make_standing" }))}>Make standing</button>
-          )}
-          {demand.status !== "closed" && <button type="button" onClick={() => setClosing(true)} className={`${buttonClass} h-9`} style={buttonStyle}>Close…</button>}
-        </div>
-      )}
-    </aside>
-  );
+        {entry.ref_kind === "lot" && entry.ref_id ? <button className="text-left font-medium underline" onClick={() => onOpenTrade(entry.ref_id!)}>{entry.title}</button>
+          : entry.ref_kind === "supply" && entry.ref_id ? <button className="text-left font-medium underline" onClick={() => onOpenSupply?.(entry.ref_id!)}>{entry.title}</button>
+          : entry.ref_id && /^https?:\/\//i.test(entry.ref_id) ? <a className="font-medium underline" href={entry.ref_id} target="_blank" rel="noreferrer">{entry.title}</a>
+          : <p className="font-medium">{entry.title}</p>}
+        {entry.body && <p className="mt-1 whitespace-pre-wrap text-xs" style={{ color: "var(--bt-muted)" }}>{entry.body}</p>}
+      </li>)}</ol>
+    </section>
+  </aside>;
 }
 
 function ranking(demand: Demand, today: string) {
@@ -388,11 +290,6 @@ function ranking(demand: Demand, today: string) {
       : demand.observed_on ?? demand.confirmed_on }, today);
 }
 
-function DemandChip({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
-  return <span className="inline-flex items-center gap-1 border px-1.5 py-0.5 text-xs"
-    style={{ borderColor: warning ? "var(--bt-amber-border)" : "var(--bt-border)", color: warning ? "var(--bt-amber)" : "var(--bt-text-2)",
-      background: warning ? "var(--bt-amber-bg)" : "var(--bt-surface)" }}>{children}</span>;
-}
 
 function DemandScore({ demand, today }: { demand: Demand; today: string }) {
   const result = ranking(demand, today);
@@ -405,7 +302,7 @@ function DemandScore({ demand, today }: { demand: Demand; today: string }) {
         <circle cx="20" cy="20" r="17" fill="none" stroke="var(--bt-divider)" strokeWidth="3" />
         <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3" pathLength="100" strokeDasharray={`${result.score} 100`} />
       </svg>{result.score}
-    </span><span className="text-xs" style={{ color }}>{result.band}</span>
+    </span>
   </span>;
 }
 

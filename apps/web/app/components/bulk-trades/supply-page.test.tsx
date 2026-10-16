@@ -38,7 +38,7 @@ describe("SupplyPage", () => {
 
     await userEvent.click(within(table).getByText("Jacksons Car Dismantlers"));
     const panel = screen.getByRole("complementary", { name: "Supply detail" });
-    expect(within(panel).getByText("Packs for testing, but hybrid not 60 kWh.")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Spagnesi Lab" })).toHaveAttribute("title", "Packs for testing, but hybrid not 60 kWh.");
     await userEvent.click(within(panel).getByRole("button", { name: "Not a fit" }));
     const patch = fetch.mock.calls.find(([, init]) => init?.method === "PATCH");
     expect(patch?.[0]).toBe("/api/bulk-trades/supply/bts_1");
