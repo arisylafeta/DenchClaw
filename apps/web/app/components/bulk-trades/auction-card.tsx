@@ -1,125 +1,34 @@
 "use client";
 
-import tableStyles from "../ui/data-table.module.css";
-import { TableCell } from "../ui/table-cell";
 import { useState } from "react";
-import { auctionOfferLabel, shortDate, type AuctionActivity, type TradeAuction } from "@/lib/bulk-trade-details";
-import { Card, ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
+import { auctionOfferLabel, type AuctionActivity } from "@/lib/bulk-trade-details";
+import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
 
-type Props = {
-  tradeId: string;
-  auction: TradeAuction;
-  today: string;
-  onChanged: () => void;
-};
-
-const day = (iso: string | null) => (iso ? shortDate(iso.slice(0, 10)) : "");
-
-/** Buyer name for someone added from the auction list: the email's company part. */
-function nameFromEmail(email: string) {
-  const company = email.split("@")[1]?.split(".")[0] ?? email;
-  return company.charAt(0).toUpperCase() + company.slice(1);
+export function auctionStatus(person: AuctionActivity): string {
+  return person.last_offer ? "Offer" : person.view_count ? "Viewed" : person.message_count ? "Messaged" : person.clicked_at ? "Clicked" : person.invited_at ? "Invited" : "—";
 }
 
-/**
- * The trade's marketplace auction: when it closes, how many people were invited, looked and bid,
- * and the full list behind "See everyone". People who engaged are on the buyer list already.
- */
-export function AuctionCard({ tradeId, auction, today, onChanged }: Props) {
-  const [open, setOpen] = useState(false);
-  const [adding, setAdding] = useState<string | null>(null);
+export function AuctionRow({ tradeId, person, columns, onChanged }: {
+  tradeId: string; person: AuctionActivity; columns: string; onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { people } = auction;
-  const closes = auction.closes_at.slice(0, 10);
-  const state = auction.status === "withdrawn" ? "Withdrawn" : closes < today ? `Closed ${day(closes)}` : `Open · closes ${day(closes)}`;
-  const offers = people.filter((person) => person.last_offer);
-  const best = offers
-    .map((person) => person.last_offer!)
-    .filter((offer) => offer.kind === "offer" && offer.price_per_kwh)
-    .sort((a, b) => b.price_per_kwh! - a.price_per_kwh!)[0];
-  const counts: [string, number][] = [
-    ["Invited", people.filter((person) => person.invited_at).length],
-    ["Clicked", people.filter((person) => person.clicked_at).length],
-    ["Viewed", people.filter((person) => person.view_count).length],
-    ["Offers", offers.length],
-  ];
-
-  async function addBuyer(person: AuctionActivity) {
-    setAdding(person.email);
+  async function add() {
+    setBusy(true);
     setError(null);
     try {
-      await request(tradeUrl(tradeId, "/buyers"), {
-        method: "POST",
-        body: JSON.stringify({ name: nameFromEmail(person.email), contact: person.email }),
-      });
+      const company = person.email.split("@")[1]?.split(".")[0] ?? person.email;
+      await request(tradeUrl(tradeId, "/buyers"), { method: "POST", body: JSON.stringify({ name: company, contact: person.email }) });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add.");
-    } finally {
-      setAdding(null);
-    }
+      setError(err instanceof Error ? err.message : "Could not add buyer.");
+    } finally { setBusy(false); }
   }
-
-  return (
-    <Card label="Auction">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
-        <h2 className="text-[15px] font-semibold">Auction</h2>
-        <span className="rounded-none border px-[7px] py-px text-xs font-medium"
-          style={closes >= today && auction.status === "published"
-            ? { background: "var(--bt-green-bg)", color: "var(--bt-green)", borderColor: "var(--bt-green-border)" }
-            : { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" }}>
-          {state}
-        </span>
-        <span className="bt-mono text-[13px]" style={{ color: "var(--bt-text-2)" }}>
-          {counts.map(([label, n]) => `${label} ${n}`).join(" · ")}
-          {best && ` · Best ${auctionOfferLabel(best)}`}
-        </span>
-        <span className="flex-1" />
-        <a href={auction.url} target="_blank" rel="noreferrer" className={`${buttonClass} inline-flex h-8 items-center`} style={buttonStyle}>
-          Open auction page
-        </a>
-        {people.length > 0 && (
-          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={`${buttonClass} h-8`} style={buttonStyle}>
-            {open ? "Hide people" : `See everyone (${people.length})`}
-          </button>
-        )}
-      </div>
-      {error && <div className="px-5 pb-2"><ErrorText error={error} /></div>}
-      {open && (
-        <div className={`bulk-trades ${tableStyles.surface} overflow-x-auto border-t`} style={{ borderColor: "var(--bt-divider)" }}>
-          <table className={`${tableStyles.table} min-w-[720px]`}>
-            <thead style={{ background: "var(--bt-table-head)" }}>
-              <tr className="bt-label text-left">
-                <th className={tableStyles.headerCell}>Email</th>
-                <th className={tableStyles.headerCell}>Invited</th>
-                <th className={tableStyles.headerCell}>Clicked</th>
-                <th className={tableStyles.headerCell}>Viewed</th>
-                <th className={tableStyles.headerCell}>Offer</th>
-                <th className={tableStyles.headerCell} />
-              </tr>
-            </thead>
-            <tbody>
-              {people.map((person) => (
-                <tr key={person.email} className="border-t" style={{ borderColor: "var(--bt-divider)" }}>
-                  <TableCell className={tableStyles.cell} >{person.email}</TableCell>
-                  <TableCell className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.invited_at)}</TableCell>
-                  <TableCell className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{day(person.clicked_at)}</TableCell>
-                  <TableCell className={tableStyles.cell} style={{ color: "var(--bt-muted)" }}>{person.view_count ? `${person.view_count}× · ${day(person.last_viewed_at)}` : ""}</TableCell>
-                  <TableCell className={`${tableStyles.cell} bt-mono`} >{person.last_offer ? auctionOfferLabel(person.last_offer) : person.message_count ? "Message" : ""}</TableCell>
-                  <TableCell className={`${tableStyles.cell} text-right`} >{person.buyer_id
-                    ? <span className="text-xs" style={{ color: "var(--bt-muted)" }}>On buyers</span>
-                    : (
-                      <button type="button" disabled={adding === person.email} onClick={() => addBuyer(person)}
-                        className={`${buttonClass} h-7 text-xs`} style={buttonStyle}>
-                        Add to buyers
-                      </button>
-                    )}</TableCell>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
-  );
+  return <div data-table-part="grid-row" className={`grid ${columns} items-center gap-3.5 border-b px-3 py-2 text-xs`} style={{ borderColor: "var(--bt-divider)" }}>
+    <span /><span className="truncate" title={person.email}>{person.email}</span><span>—</span>
+    <span>{auctionStatus(person)}</span><span>—</span><span>—</span>
+    <span>{person.last_offer ? auctionOfferLabel(person.last_offer) : "—"}</span>
+    <button type="button" disabled={busy} onClick={add} className={`${buttonClass} !h-7`} style={buttonStyle}>Add buyer</button>
+    {error && <ErrorText error={error} />}
+  </div>;
 }

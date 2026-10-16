@@ -6,25 +6,18 @@ import {
   BUYER_SUBJECT,
   firstName,
   greeting,
-  isImage,
-  missingItems,
   shortDate,
   type Buyer,
   type Contact,
   type TradeDetail,
-  type TradeFile,
 } from "@/lib/bulk-trade-details";
-import { AuctionCard } from "./auction-card";
 import { BuyersTable } from "./buyers-table";
 import { EmailDialog } from "./email-dialog";
-import { FileLink, FileThumb } from "./file-preview";
-import { InboxUpdates } from "./inbox-updates";
 import { SuggestedBuyers } from "./suggested-buyers";
 import {
   Card,
   ErrorText,
   FormField,
-  KindPicker,
   Modal,
   buttonClass,
   buttonStyle,
@@ -44,8 +37,6 @@ type Props = {
   onProposalDecided: () => void;
 };
 
-/** Waiting findings shown on the Overview; field and file ones live on Data and files. */
-const OVERVIEW_KINDS = new Set(["buyer_update", "new_buyer", "next_step", "needs_triage", "link_contact", "trade_kind", "link_auction"]);
 
 /** First contact with an email address, else the first contact. */
 function emailContact(contacts: Contact[]) {
@@ -58,32 +49,21 @@ function addDays(date: string, days: number) {
   return next.toISOString().slice(0, 10);
 }
 
-export function TradeOverview({ detail, today, onTradePatch, onBuyer, onContacts, onProposalDecided }: Props) {
-  const { trade, contacts } = detail;
+export function TradeOverview({ detail, today, onBuyer, onProposalDecided }: Props) {
+  const [suggesting, setSuggesting] = useState(false);
   return (
-    <div className="flex flex-col gap-6">
-      <NextStepStrip detail={detail} today={today} linkTracking={!!detail.link_tracking} onTradePatch={onTradePatch} />
-      <InboxUpdates tradeId={trade.id} applied={detail.applied ?? []} onChanged={onProposalDecided} />
-      <BuyersTable
-        trade={trade}
-        buyers={detail.buyers}
-        fields={detail.fields}
-        today={today}
-        linkTracking={!!detail.link_tracking}
-        proposals={(detail.proposals ?? []).filter((proposal) => OVERVIEW_KINDS.has(proposal.kind))}
-        onProposalDecided={onProposalDecided}
-        onBuyer={onBuyer}
-      />
-      <SuggestedBuyers tradeId={trade.id} suggested={detail.suggested ?? []} onChanged={onProposalDecided} />
-      {detail.auction && <AuctionCard tradeId={trade.id} auction={detail.auction} today={today} onChanged={onProposalDecided} />}
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-        <MissingCard detail={detail} onTradePatch={onTradePatch} />
-        <ShippingCard trade={trade} />
+    <div className="flex flex-col gap-3">
+      <div className="flex justify-end gap-2">
+        {detail.auction && <a href={detail.auction.url} target="_blank" rel="noreferrer" className={buttonClass} style={buttonStyle}>Auction</a>}
+        <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setSuggesting(true)}>Suggest buyers</button>
       </div>
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-        <ContactsCard trade={trade} contacts={contacts} onContacts={onContacts} />
-        <FilesCard trade={trade} files={detail.files} />
-      </div>
+      <BuyersTable trade={detail.trade} buyers={detail.buyers} auction={detail.auction} fields={detail.fields}
+        today={today} linkTracking={!!detail.link_tracking} proposals={[]} onProposalDecided={onProposalDecided} onBuyer={onBuyer} />
+      {suggesting && <Modal title="Suggest buyers" onClose={() => setSuggesting(false)} footer={null}>
+        {detail.suggested?.length
+          ? <SuggestedBuyers tradeId={detail.trade.id} suggested={detail.suggested} onChanged={onProposalDecided} />
+          : <p className="text-sm">No suggestions.</p>}
+      </Modal>}
     </div>
   );
 }
@@ -109,7 +89,7 @@ const TONE_STYLE = {
 } as const;
 
 /** One quiet line: when, what, for whom, and the actions. Colour only when it is due or late. */
-function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
+export function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
   detail: TradeDetail;
   today: string;
   linkTracking: boolean;
@@ -155,7 +135,7 @@ function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
   return (
     <section
       aria-label="Next step"
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 border px-4 py-3"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2"
       style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}
     >
       <span className="shrink-0 whitespace-nowrap border px-2 py-0.5 text-xs font-medium" style={TONE_STYLE[due.tone]}>
@@ -163,7 +143,7 @@ function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
       </span>
       <div className="min-w-[220px] flex-1">
         <div className="text-[15px] font-medium leading-snug">
-          {trade.next_step ?? "Set one so this trade comes back at the right time."}
+          {trade.next_step ?? "No next step"}
         </div>
         {who && (
           <div className="mt-0.5 text-[13px]" style={{ color: "var(--bt-muted)" }}>
@@ -180,7 +160,7 @@ function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
       )}
       <button type="button" onClick={() => setSetting(true)} className={small}
         style={trade.next_step ? buttonStyle : darkButtonStyle}>
-        {trade.next_step ? "Done, set next" : "Set next step"}
+        {trade.next_step ? "Done" : "Set next step"}
       </button>
       {trade.next_step && (
         <div ref={snoozeMenu} className="relative">
@@ -262,53 +242,8 @@ function SetNextDialog({ detail, today, onClose, onTradePatch }: {
   );
 }
 
-function MissingCard({ detail, onTradePatch }: { detail: TradeDetail; onTradePatch: Props["onTradePatch"] }) {
-  const { trade, fields, files, contacts } = detail;
-  const contact = emailContact(contacts);
-  const [asking, setAsking] = useState(false);
-  const items = trade.trade_kind ? missingItems(trade.trade_kind, fields, files) : [];
-  const ask = [
-    greeting(contact?.name),
-    "",
-    `For the ${trade.title} batch, could you send:`,
-    ...items.map((item) => `- ${item.label}`),
-    "",
-    "Thanks",
-  ].join("\n");
 
-  return (
-    <Card label="Missing" className="flex flex-col gap-1 px-5 py-[18px]">
-      <div className="mb-1.5 flex items-center">
-        <h2 className="flex-1 text-base font-semibold">Missing</h2>
-        {!!items.length && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>needed for</span>}
-      </div>
-      {!trade.trade_kind ? (
-        <KindPicker label="Pick the trade kind to see what data it needs" onPick={(kind) => void onTradePatch({ trade_kind: kind })} />
-      ) : items.length ? (
-        <>
-          {items.map((item) => (
-            <div key={item.key} className="flex items-center gap-2.5 border-t py-2 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--bt-red)" }} aria-hidden="true" />
-              <span className="flex-1">{item.label}</span>
-              <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{item.neededFor}</span>
-            </div>
-          ))}
-          <button type="button" onClick={() => setAsking(true)} className={`${buttonClass} mt-2`} style={buttonStyle}>
-            {firstName(contact?.name) ? `Ask ${firstName(contact?.name)}` : "Ask"} for all {items.length}
-          </button>
-          {asking && (
-            <EmailDialog trade={trade} to={contact?.email ?? ""} subject={trade.title} body={ask}
-              linkTracking={!!detail.link_tracking} onClose={() => setAsking(false)} />
-          )}
-        </>
-      ) : (
-        <p className="text-sm" style={{ color: "var(--bt-muted)" }}>Nothing missing.</p>
-      )}
-    </Card>
-  );
-}
-
-function ShippingCard({ trade }: { trade: BulkTrade }) {
+export function ShippingCard({ trade }: { trade: BulkTrade }) {
   const row = (label: string, value: React.ReactNode, color?: string) => (
     <div className="flex justify-between gap-3 text-sm">
       <span style={{ color: "var(--bt-muted)" }}>{label}</span>
@@ -327,7 +262,7 @@ function ShippingCard({ trade }: { trade: BulkTrade }) {
   );
 }
 
-function ContactsCard({ trade, contacts, onContacts }: {
+export function ContactsCard({ trade, contacts, onContacts }: {
   trade: BulkTrade;
   contacts: Contact[];
   onContacts: (contacts: Contact[]) => void;
@@ -403,34 +338,3 @@ function ContactDialog({ trade, contact, onClose, onSaved }: {
   );
 }
 
-/** Files at a glance: photos as thumbnails, documents as badges. PDFs and images open in a new tab. */
-function FilesCard({ trade, files }: { trade: BulkTrade; files: TradeFile[] }) {
-  const photos = files.filter((file) => isImage(file.file_name));
-  const documents = files.filter((file) => !isImage(file.file_name));
-  return (
-    <Card label="Files" className="flex flex-col gap-3 px-5 py-[18px]">
-      <div className="flex items-center">
-        <h2 className="flex-1 text-base font-semibold">Files</h2>
-        <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{files.length} · manage in Data and files</span>
-      </div>
-      {!!photos.length && (
-        <div className="flex flex-wrap gap-2">
-          {photos.map((file) => (
-            <FileLink key={file.id} trade={trade} file={file} className="rounded-none hover:opacity-80">
-              <FileThumb trade={trade} file={file} size={64} />
-              <span className="sr-only">{file.file_name}</span>
-            </FileLink>
-          ))}
-        </div>
-      )}
-      {documents.map((file) => (
-        <FileLink key={file.id} trade={trade} file={file} className="flex min-w-0 items-center gap-2.5 text-sm hover:underline">
-          <FileThumb trade={trade} file={file} size={28} />
-          <span className="flex-1 truncate">{file.file_name}</span>
-          <span className="shrink-0 text-xs" style={{ color: "var(--bt-muted)" }}>{file.file_type}</span>
-        </FileLink>
-      ))}
-      {!files.length && <p className="text-sm" style={{ color: "var(--bt-muted)" }}>No files yet.</p>}
-    </Card>
-  );
-}

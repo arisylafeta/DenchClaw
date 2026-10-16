@@ -78,21 +78,14 @@ function Source({ source }: { source: FieldSource }) {
 const clip = (text: string, length = 28) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);
 
 export function TradeData({ detail, onField, onFile, onTradePatch, onProposalDecided }: Props) {
-  const proposals = detail.proposals ?? [];
   const { trade } = detail;
-  if (!trade.trade_kind) {
-    return (
-      <Card label="Data" className="max-w-[480px] px-5 py-5">
-        <KindPicker label="Pick the trade kind. Each kind has its own fixed list of fields." onPick={(kind) => void onTradePatch({ trade_kind: kind })} />
-      </Card>
-    );
-  }
   return (
     <div className="flex flex-col gap-6">
-      <FieldsCard trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField}
-        proposals={proposals.filter((proposal) => proposal.kind === "field")} onProposalDecided={onProposalDecided} />
+      {trade.trade_kind ? <FieldsCard trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField}
+        proposals={[]} onProposalDecided={onProposalDecided} />
+        : <Card label="Data" className="px-5 py-4"><KindPicker label="Trade kind" onPick={(kind) => void onTradePatch({ trade_kind: kind })} /></Card>}
       <FilesCard trade={trade} files={detail.files} onFile={onFile}
-        proposals={proposals.filter((proposal) => proposal.kind === "file")} onProposalDecided={onProposalDecided} />
+        proposals={[]} onProposalDecided={onProposalDecided} />
     </div>
   );
 }
@@ -130,9 +123,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
     <Card label="Data" className={`bulk-trades ${tableStyles.surface} overflow-hidden`}>
       <header data-table-part="toolbar" className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
         <h2 className="text-base font-semibold">Data</h2>
-        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Click a row to fill it in or change who sees it</span>
         <span className="flex-1" />
-        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Private to ReBattery unless marked</span>
       </header>
       <div className="overflow-x-auto">
         <div className="min-w-[860px]">
@@ -371,7 +362,6 @@ function UploadDialog({ trade, onClose, onSaved }: { trade: BulkTrade; onClose: 
         <FormField label="Type">{form.select("file_type", FILE_TYPES)}</FormField>
         <FormField label="Source">{form.input("source_label", { placeholder: "Gmail · Fabio Papa" })}</FormField>
       </div>
-      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Buyers see it at Never until you change it.</p>
       <ErrorText error={form.error} />
     </Modal>
   );

@@ -54,9 +54,6 @@ export function HoldDialog({ trade, today, onClose, onSave }: Props) {
       <FormField label="Why it waits">
         {form.input("hold_reason", { placeholder: "e.g. Batteries can't leave site until removal in March", required: true })}
       </FormField>
-      <p className="text-xs" style={{ color: "var(--bt-muted)" }}>
-        It leaves the overdue lists and comes back in the 08:05 summary a week before the date. Emails about it are still read.
-      </p>
       <ErrorText error={form.error} />
     </Modal>
   );

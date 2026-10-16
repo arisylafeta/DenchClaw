@@ -60,6 +60,13 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     });
   });
 
+  it("returns persisted event history newest first with the trade details", async () => {
+    const detail = await db.getTradeDetail(lotId);
+    expect(detail?.events?.length).toBeGreaterThan(0);
+    expect(detail?.events?.at(-1)).toMatchObject({ kind: "trade_created", changes: { title: "Synthetic eBS37" } });
+    expect(detail?.events?.[0]).toMatchObject({ id: expect.any(String), occurred_at: expect.anything() });
+  });
+
   it("rejects a buyer from another trade", async () => {
     const other = await trades.createBulkTrade({ title: "Other synthetic" }, userId);
     const buyer = await db.addBuyer(other.id, { name: "Elsewhere" }, userId);

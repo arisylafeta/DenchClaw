@@ -246,6 +246,7 @@ export type TradeDetail = {
   contacts: Contact[];
   fields: TradeField[];
   files: TradeFile[];
+  events?: { id: string; kind: string; changes: Record<string, unknown>; occurred_at: string }[];
   /** True when Gmail drafts get tracked links (a public link address is configured). */
   link_tracking?: boolean;
   /** Findings from the inbox check waiting for Alex. */

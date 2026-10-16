@@ -79,13 +79,15 @@ const FILE_SELECT = `
 export async function getTradeDetail(lotId: string): Promise<TradeDetail | null> {
   const trade = await getBulkTrade(lotId);
   if (!trade) return null;
-  const [buyers, contacts, fields, files] = await Promise.all([
+  const [buyers, contacts, fields, files, events] = await Promise.all([
     queryPg<Buyer>(`${BUYER_SELECT} where buyer.lot_id = $1 order by buyer.created_at, buyer.id`, [lotId]),
     queryPg<Contact>(`${CONTACT_SELECT} where lot_id = $1 order by sort_order, created_at`, [lotId]),
     queryPg<TradeField>(`${FIELD_SELECT} where lot_id = $1`, [lotId]),
     queryPg<TradeFile>(`${FILE_SELECT} where lot_id = $1 order by created_at`, [lotId]),
+    queryPg<NonNullable<TradeDetail["events"]>[number]>(
+      `select id::text, kind, changes, occurred_at from crm_bulk_trade_events where lot_id = $1 order by occurred_at desc, id desc`, [lotId]),
   ]);
-  return { trade, buyers, contacts, fields, files, auction: await tradeAuction(trade) };
+  return { trade, buyers, contacts, fields, files, events, auction: await tradeAuction(trade) };
 }
 
 /** Marketplace site the auction pages live on. */

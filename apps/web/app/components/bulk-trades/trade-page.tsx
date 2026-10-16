@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { HOLD_STAGE, holdLabel, type BulkTrade, type TradeOwner, type TradePatch } from "@/lib/bulk-trades";
+import { HOLD_STAGE, TRADE_STAGES, holdLabel, type BulkTrade, type TradeOwner, type TradePatch, type TradeStage } from "@/lib/bulk-trades";
 import { shortDate, type Buyer, type Contact, type HistoryStatus, type TradeDetail, type TradeField, type TradeFile } from "@/lib/bulk-trade-details";
 import { TradeData } from "./trade-data";
 import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
-import { TradeOverview } from "./trade-overview";
+import { ContactsCard, NextStepStrip, ShippingCard, TradeOverview } from "./trade-overview";
+import { InboxUpdates } from "./inbox-updates";
 import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
 
-type Tab = "overview" | "data";
+type Tab = "buyers" | "details" | "activity";
 
 type Props = {
   tradeId: string;
@@ -27,7 +28,7 @@ const upsert = <T extends { id: string }>(items: T[], item: T) =>
     : [...items, item];
 
 export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpenEvidence }: Props) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("buyers");
   const [detail, setDetail] = useState<TradeDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -87,11 +88,16 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         </nav>
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-[26px] font-semibold tracking-[-0.01em]">{trade.title}</h1>
-          <span className="rounded-none px-[9px] py-[3px] text-xs font-semibold" style={{ background: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
-            {trade.trade_stage}
-          </span>
+          <select aria-label="Trade stage" value={trade.trade_stage} className="border px-2 py-1 text-sm" style={buttonStyle}
+            onChange={(event) => {
+              const stage = event.target.value as TradeStage;
+              if (stage === HOLD_STAGE) setHolding(true);
+              else patchTrade({ trade_stage: stage }).catch((err) => setHoldError(err instanceof Error ? err.message : "Could not change stage."));
+            }}>
+            {TRADE_STAGES.map((stage) => <option key={stage}>{stage}</option>)}
+          </select>
+          {trade.value && <span className="bt-mono text-sm font-semibold">{trade.value}</span>}
           <span className="flex-1" />
-          <HistoryButton tradeId={trade.id} history={detail.history ?? null} onRefresh={load} />
           {trade.trade_stage !== HOLD_STAGE && !["Done", "Lost"].includes(trade.trade_stage) && (
             <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setHolding(true)}>Put on hold</button>
           )}
@@ -119,15 +125,16 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             <ErrorText error={holdError} />
           </div>
         )}
-        {trade.fact_line && <p className="text-sm" style={{ color: "var(--bt-text-2)" }}>{trade.fact_line}</p>}
+        <NextStepStrip detail={detail} today={today} linkTracking={!!detail.link_tracking} onTradePatch={patchTrade} />
         <div role="tablist" aria-label="Trade sections" className="flex gap-1">
-          {tabButton("overview", "Overview")}
-          {tabButton("data", "Data and files")}
+          {tabButton("buyers", "Buyers")}
+          {tabButton("details", "Details")}
+          {tabButton("activity", "Activity")}
         </div>
       </header>
 
       <main className="flex-1 overflow-auto px-8 pb-8 pt-6">
-        {tab === "overview" ? (
+        {tab === "buyers" ? (
           <TradeOverview
             detail={detail}
             today={today}
@@ -136,7 +143,8 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             onBuyer={(buyer: Buyer) => update((current) => ({ ...current, buyers: upsert(current.buyers, buyer) }))}
             onContacts={(contacts: Contact[]) => update((current) => ({ ...current, contacts }))}
           />
-        ) : (
+        ) : tab === "details" ? (
+          <div className="flex flex-col gap-4">
           <TradeData
             detail={detail}
             onProposalDecided={() => void load()}
@@ -147,6 +155,29 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             onFile={(file: TradeFile) => update((current) => ({ ...current, files: upsert(current.files, file) }))}
             onTradePatch={patchTrade}
           />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ShippingCard trade={trade} />
+            <ContactsCard trade={trade} contacts={detail.contacts} onContacts={(contacts) => update((current) => ({ ...current, contacts }))} />
+          </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <HistoryButton tradeId={trade.id} history={detail.history ?? null} onRefresh={load} />
+            <InboxUpdates tradeId={trade.id} applied={detail.applied ?? []} onChanged={() => void load()} />
+            <section aria-label="Event history" className="border" style={{ borderColor: "var(--bt-border)" }}>
+              <h2 className="px-4 py-2 text-sm font-semibold">History</h2>
+              {!detail.events?.length && <p className="px-4 py-2 text-sm" style={{ color: "var(--bt-muted)" }}>No events.</p>}
+              {detail.events?.map((event) => (
+                <div key={event.id} className="flex items-center gap-3 border-t px-4 py-2 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
+                  <time className="shrink-0 text-xs" style={{ color: "var(--bt-muted)" }}>{shortDate(event.occurred_at.slice(0, 10))}</time>
+                  <span className="shrink-0">{event.kind.replaceAll("_", " ")}</span>
+                  <span className="truncate" title={JSON.stringify(event.changes)} style={{ color: "var(--bt-muted)" }}>
+                    {Object.keys(event.changes).filter((key) => !["stage", "observed_outcome", "reconciliation_note", "confidence", "people_sent_count"].includes(key)).map((key) => key.replaceAll("_", " ")).join(" · ")}
+                  </span>
+                </div>
+              ))}
+            </section>
+          </div>
         )}
       </main>
 
