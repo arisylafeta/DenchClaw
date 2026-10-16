@@ -121,6 +121,21 @@ def wants_line(use, spec):
     return f"{line}, for {use[0].lower() + use[1:]}" if use else line
 
 
+def preserve_timing(row, needed_by=None):
+    """Keep timing verbatim; explicit ISO deadlines turn a survey answer into a request."""
+    timing = str(row.get("timing") or "").strip()
+    if timing:
+        row["note"] = "\n".join(part for part in (row.get("note"), f"When: {timing}") if part)
+    match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", str(needed_by or timing))
+    if match:
+        try:
+            deadline = dt.date.fromisoformat(match.group())
+        except ValueError:
+            return row
+        row.update(kind="request", basis=None, needed_by=deadline.isoformat())
+    return row
+
+
 def map_typeform_row(header, row):
     """One Typeform demand survey response (CSV header and row) as a demand row, or None to skip."""
     first = {}  # the first column wins for repeated headers ("Other", "No preference")
@@ -186,7 +201,7 @@ def map_typeform_row(header, row):
     price = number(stem("What's the most you'd pay per kWh?"))
     currency = stem("Currency").upper()
     submitted = stem("Submit Date (UTC)")[:10] or None
-    return {
+    mapped = {
         "kind": "standing", "basis": "stated", "email": email,
         "contact": stem("What's your name?") or None, "company": stem("company") or None,
         "wants": wants_line(use, spec), "location": stem("Which country will they be delivered to?") or None,
@@ -200,6 +215,7 @@ def map_typeform_row(header, row):
         "spec": spec, "note": "\n".join(notes) or None, "observed_on": submitted,
         "source_kind": "survey", "source_id": f"typeform:{stem('#')}", "source_label": "Typeform demand survey",
     }
+    return preserve_timing(mapped)
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +294,7 @@ def map_formbricks(response, now=None):
         notes.append(f"Also: {str(data['notes']).strip()}")
     lot = str(data.get("lot_size") or "").strip()
     created = str(response.get("created_at") or "")[:10] or None
-    return {
+    mapped = {
         "kind": "standing", "basis": "stated", "email": email, "contact": None,
         "company": str(hidden.get("company") or data.get("company") or "").strip() or None,
         "wants": wants_line(use, spec), "quantity": f"Lots of {lot}" if lot else None, "location": None,
@@ -286,6 +302,7 @@ def map_formbricks(response, now=None):
         "spec": spec, "note": "\n".join(notes) or None, "observed_on": created,
         "source_kind": "survey", "source_id": f"formbricks:{response['id']}", "source_label": "Formbricks buyer survey",
     }
+    return preserve_timing(mapped, data.get("needed_by"))
 
 
 def fetch_formbricks():
@@ -409,8 +426,10 @@ def insert(cur, row):
         return merge_profile(cur, row, "researched" if row.get("source_kind") == "research" else "stated")
     row = {**row, "status": "qualifying", "product_family": family_key(row.get("product_family") or row["wants"]),
            "reputation": reputation_for(cur, row.get("company_id"), row.get("person_id"), row.get("email"))}
-    duplicate = existing_demand(cur, row, row["product_family"])
-    if duplicate:
+    cur.execute("select id from crm_bulk_trade_demand where source_kind = %s and source_id = %s",
+                (row.get("source_kind"), row.get("source_id")))
+    same_source = cur.fetchone()
+    if not same_source and existing_demand(cur, row, row["product_family"]):
         return False
     # A buyer's own answer confirms the buy-box on that date; our estimate confirms nothing.
     observed = row.get("observed_on") or dt.date.today().isoformat()
@@ -423,10 +442,12 @@ def insert(cur, row):
             on conflict (source_kind, source_id) where source_id is not null do update set
               wants = excluded.wants, spec = excluded.spec, note = excluded.note, quantity = excluded.quantity,
               location = excluded.location, observed_on = excluded.observed_on, confirmed_on = excluded.confirmed_on,
+              kind = excluded.kind, basis = excluded.basis, needed_by = excluded.needed_by,
               updated_at = now()
             -- Only an unfinished survey answer that nobody has touched since is replaced by the finished one.
             where crm_bulk_trade_demand.note like 'Unfinished survey.%%' and excluded.note is distinct from crm_bulk_trade_demand.note
-              and crm_bulk_trade_demand.basis = 'stated' and crm_bulk_trade_demand.updated_at = crm_bulk_trade_demand.created_at
+              and (crm_bulk_trade_demand.basis = 'stated' or crm_bulk_trade_demand.kind = 'request')
+              and crm_bulk_trade_demand.updated_at = crm_bulk_trade_demand.created_at
             returning id""",
         [f"btd_{uuid.uuid4()}", *values])
     return cur.fetchone() is not None

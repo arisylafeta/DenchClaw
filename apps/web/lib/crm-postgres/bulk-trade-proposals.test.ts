@@ -82,7 +82,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     const email = `demand-${crypto.randomUUID()}@example.test`;
     const initial = await propose("possible_demand", null, {
       buyer: "Demand Buyer", email, wants: "Leaf packs", product_family: "nissan leaf", kind: "request",
-      reputation: "inbound",
+      reputation: "inbound", volume: 20, volume_unit: "packs", quantity: "20 packs",
     }, null);
     expect(await proposals.decideProposal(initial, "accept", user)).toMatchObject({ ok: true });
     const [first] = await pg.queryPg<{ id: string; status: string }>(
@@ -90,12 +90,24 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(first.status).toBe("qualifying");
     const followup = await propose("possible_demand", null, {
       buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf", kind: "request",
-      quantity: "20 packs", max_price: 1000, price_currency: "EUR", price_unit: "pack",
-      fee_eur: 2000, price_basis: "buyer", reputation: "email", existing_demand_id: first.id,
+      max_price: 1000, price_currency: "EUR", price_unit: "pack",
+      price_basis: "buyer", reputation: "email", existing_demand_id: first.id,
     }, null);
     expect(await proposals.decideProposal(followup, "accept", user)).toMatchObject({ ok: true });
     expect(await pg.queryPg("select id, status, wants, fee_eur::float8 from crm_bulk_trade_demand where email = $1", [email]))
       .toEqual([{ id: first.id, status: "open", wants: "Another Leaf batch", fee_eur: 2000 }]);
+    const changed = await propose("possible_demand", null, {
+      buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf",
+      volume: 10, volume_unit: "packs", existing_demand_id: first.id,
+    }, null);
+    expect(await proposals.decideProposal(changed, "accept", user)).toMatchObject({ ok: true });
+    expect((await pg.queryPg<{ fee: number }>("select fee_eur::float8 as fee from crm_bulk_trade_demand where id = $1", [first.id]))[0].fee).toBe(1000);
+    const foreignCurrency = await propose("possible_demand", null, {
+      buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf",
+      max_price: 1000, price_currency: "USD", price_unit: "pack", existing_demand_id: first.id,
+    }, null);
+    expect(await proposals.decideProposal(foreignCurrency, "accept", user)).toMatchObject({ ok: true });
+    expect((await pg.queryPg("select fee_eur from crm_bulk_trade_demand where id = $1", [first.id]))[0].fee_eur).toBeNull();
   });
 
   it("puts a proposal back to new when it can no longer apply", async () => {

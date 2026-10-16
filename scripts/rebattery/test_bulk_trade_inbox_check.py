@@ -99,6 +99,14 @@ class DemandScreen(unittest.TestCase):
                     "quote": "We have EV packs."}
         self.assertEqual(self.screen(source, response)[0], [])
 
+    def test_call_markdown_is_not_treated_as_quoted_email_history(self):
+        source = {**self.source("Meeting: Buyer\n\n> We need twenty Leaf packs.\n\nTranscript:\nBuyer: twenty Leaf packs.", "call@buyer.test"),
+                  "kind": "granola"}
+        response = {"source_id": source["id"], "wants": "Leaf packs", "product_family": "leaf",
+                    "quote": "We need twenty Leaf packs."}
+        [card], _ = self.screen(source, response)
+        self.assertEqual(card["kind"], "possible_demand")
+
     def test_offered_stock_reply_routes_to_lot_buyer_and_bid(self):
         source = self.source("Subject: Stock\n\nWe bid EUR 30 per kWh for your offered packs.", "sam@supplier.test")
         response = {"source_id": source["id"], "buyer_company": "New Bidder", "wants": "Offered packs",
@@ -560,6 +568,24 @@ class HistoryRun(unittest.TestCase):
 
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
 class DemandRun(unittest.TestCase):
+    def test_new_sender_with_matching_name_does_not_reuse_another_buyer(self):
+        from demand_lifecycle import resolve_entity
+        try:
+            with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""insert into crm_companies (id, name) values ('co_original_name', 'Original Name Co');
+                    insert into crm_people (id, full_name, first_name, email, company_id)
+                    values ('p_original_name', 'Unique Buyer Name', 'Unique', 'original@name.test', 'co_original_name')""")
+                stranger = resolve_entity(cur, 'new@other.test', 'Unique Buyer Name', 'Other Co')
+                self.assertIsNone(stranger['person_id'])
+                self.assertIsNone(stranger['company_id'])
+                known = resolve_entity(cur, None, 'Unique Buyer Name', 'Original Name Co')
+                self.assertEqual(known['person_id'], 'p_original_name')
+                person_id, company_id = check.ensure_lead(cur, 'new@other.test', 'Unique Buyer Name', 'Other Co', 'Buyer', 'Test')
+                self.assertNotEqual(person_id, 'p_original_name')
+                self.assertNotEqual(company_id, 'co_original_name')
+        finally:
+            self.conn.rollback()
+
     def test_lifecycle_merges_old_standing_asks_and_dedupes_by_family(self):
         from demand_lifecycle import expire_demand, existing_demand, reputation_for
         today = dt.date(2026, 10, 16)
@@ -574,12 +600,15 @@ class DemandRun(unittest.TestCase):
                 self.assertEqual(existing_demand(cur, {"company_id": "co_age"}, " LEAF "), "btd_age_old")
                 self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com"), "anon")
                 self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com", two_way=True), "email")
+                cur.execute("update crm_bulk_trade_demand set match_hash = 'old', supply_match_hash = 'old' where id = 'btd_age_confirm'")
                 expire_demand(cur, today)
                 cur.execute("select id, status, closed_reason, qualify_question from crm_bulk_trade_demand where company_id = 'co_age' order by id")
                 rows = {r["id"]: r for r in cur.fetchall()}
                 self.assertEqual(rows["btd_age_old"]["closed_reason"], "moved_to_profile")
                 self.assertEqual(rows["btd_age_confirm"]["status"], "qualifying")
                 self.assertEqual(rows["btd_age_confirm"]["qualify_question"], "Still buying?")
+                cur.execute("select match_hash, supply_match_hash from crm_bulk_trade_demand where id = 'btd_age_confirm'")
+                self.assertEqual(dict(cur.fetchone()), {'match_hash': None, 'supply_match_hash': None})
                 self.assertEqual(rows["btd_age_request"]["closed_reason"], "expired")
                 cur.execute("select buyer_profile from crm_companies where id = 'co_age'")
                 self.assertEqual(cur.fetchone()["buyer_profile"], {"formats": ["Packs"], "wants": "Leaf packs"})

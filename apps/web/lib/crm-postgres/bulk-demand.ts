@@ -156,9 +156,11 @@ export async function updateDemand(id: string, input: DemandInput, source: Sourc
   const keys = Object.keys(patch);
   // Turning a request into a standing buy-box keeps any basis it has, else it becomes stated.
   const basisFix = input.kind === "standing" && !("basis" in input) ? ", basis = coalesce(basis, 'stated')" : "";
+  const matchingFix = input.status === "qualifying" ? ", match_hash = null, supply_match_hash = null"
+    : input.status === "open" ? ", match_hash = case when status <> 'open' then null else match_hash end, supply_match_hash = case when status <> 'open' then null else supply_match_hash end" : "";
   if (keys.length) {
     const rows = await queryPg(
-      `update crm_bulk_trade_demand set ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")}${basisFix}, updated_at = now()
+      `update crm_bulk_trade_demand set ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")}${basisFix}${matchingFix}, updated_at = now()
        where id = $1 returning id`,
       [id, ...keys.map((key) => patch[key])],
     );
@@ -193,8 +195,8 @@ export async function confirmDemand(id: string): Promise<Demand | null> {
   const rows = await queryPg(
     // A reopened row lost its suggestions when it closed, so the next matching passes judge it again.
     `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now(),
-       match_hash = case when status = 'closed' then null else match_hash end,
-       supply_match_hash = case when status = 'closed' then null else supply_match_hash end
+       match_hash = case when status <> 'open' then null else match_hash end,
+       supply_match_hash = case when status <> 'open' then null else supply_match_hash end
      where id = $1 returning id`,
     [id, todayInLondon()],
   );

@@ -1273,7 +1273,8 @@ def screen_demand(cur, sources, key, report):
     for d in raw.get("demands") or []:
         source = by_id.get(str(d.get("source_id")))
         wants = str(d.get("wants") or "").strip()
-        if not source or not wants or not quote_ok(d.get("quote"), split_reply(source["text"])[0]):
+        evidence = split_reply(source["text"])[0] if source and source["kind"] == "gmail" else source["text"] if source else ""
+        if not source or not wants or not quote_ok(d.get("quote"), evidence):
             continue
         email = str(d.get("contact_email") or source.get("from") or "").strip().lower() or None
         if email and email.endswith("@" + OWN_DOMAIN):

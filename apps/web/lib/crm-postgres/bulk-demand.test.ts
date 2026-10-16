@@ -46,6 +46,22 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.updateDemand("btd_missing", { note: "x" })).toBeNull();
   });
 
+  it("invalidates matching when qualifying and when reopening through edits or confirmation", async () => {
+    const row = await demand.addDemand({ buyer: "Reconfirm Buyer", wants: "Leaf packs", status: "open" }, user.id);
+    const seed = () => pg.queryPg("update crm_bulk_trade_demand set match_hash = 'matched', supply_match_hash = 'matched' where id = $1", [row.id]);
+    const hashes = async () => (await pg.queryPg("select match_hash, supply_match_hash from crm_bulk_trade_demand where id = $1", [row.id]))[0];
+    await seed();
+    await demand.updateDemand(row.id, { status: "qualifying" });
+    expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
+    await seed();
+    await demand.updateDemand(row.id, { status: "open" });
+    expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
+    await demand.updateDemand(row.id, { status: "qualifying" });
+    await seed();
+    expect(await demand.confirmDemand(row.id)).toMatchObject({ status: "open" });
+    expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
+  });
+
   it("suggests matched open demand, adds it as a buyer once, and keeps Not a fit hidden", async () => {
     const nolden = await demand.addDemand({ buyer: "H. Nolden Investment", contact: "Markus", email: "markus@nolden.example", wants: "Tested EV packs 50 kWh+" }, user.id);
     const other = await demand.addDemand({ buyer: "Somerset EV", wants: "MEB modules" }, user.id);

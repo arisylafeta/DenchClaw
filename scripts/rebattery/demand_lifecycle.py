@@ -10,8 +10,9 @@ def resolve_entity(cur, email=None, contact=None, company=None):
     """Reuse exact email/name identities; ambiguous names must not pick an arbitrary person."""
     cur.execute("""select p.id as person_id, p.company_id, p.email from crm_people p
         where (%s::text is not null and lower(p.email) = lower(%s))
-           or (%s::text is not null and (lower(p.full_name) = lower(%s) or lower(p.first_name) = lower(%s)))
-        order by (lower(p.email) = lower(%s)) desc nulls last""", (email, email, contact, contact, contact, email))
+           or (%s::text is null and %s::text is not null
+               and (lower(p.full_name) = lower(%s) or lower(p.first_name) = lower(%s)))
+        order by (lower(p.email) = lower(%s)) desc nulls last""", (email, email, email, contact, contact, contact, email))
     rows = cur.fetchall()
     exact = [r for r in rows if email and (r.get('email') or '').lower() == email.lower()]
     if exact or len(rows) == 1:
@@ -91,6 +92,8 @@ def merge_profile(cur, row, basis='stated'):
     if not current:
         return False
     existing = current.get("buyer_profile") or {}
+    if basis == 'researched' and current.get('buyer_profile_basis') == 'stated':
+        return False
     if current.get("buyer_profile_basis") == "stated":
         basis = "stated"
     profile = dict(existing)
@@ -100,6 +103,12 @@ def merge_profile(cur, row, basis='stated'):
     profile['wants'] = '\n'.join(wants)
     if row.get('source_url'):
         profile['evidence_url'] = row['source_url']
+    if row.get('note'):
+        evidence = list(existing.get('criteria_evidence') or [])
+        item = {key: row[key] for key in ('source_kind', 'source_id', 'source_label', 'source_url', 'note') if row.get(key)}
+        if item not in evidence:
+            evidence.append(item)
+        profile['criteria_evidence'] = evidence
     cur.execute("""update crm_companies set buyer_profile = %s::jsonb,
       buyer_profile_basis = %s, buyer_profiled_at = %s, updated_at = now()
       where id = %s and (buyer_profile is distinct from buyer_profile || %s::jsonb
@@ -132,7 +141,8 @@ def expire_demand(cur, today=None):
                     cur.execute("update crm_people set company_id = coalesce(company_id, %s) where id = %s", (company_id, person_id))
             merge_profile(cur, row)
         if action == 'qualifying':
-            cur.execute("update crm_bulk_trade_demand set status = 'qualifying', qualify_question = 'Still buying?', updated_at = now() where id = %s", (row['id'],))
+            cur.execute("""update crm_bulk_trade_demand set status = 'qualifying', qualify_question = 'Still buying?',
+                           match_hash = null, supply_match_hash = null, updated_at = now() where id = %s""", (row['id'],))
         else:
             cur.execute("""update crm_bulk_trade_demand set status = 'closed', closed_reason = %s,
               moved_to = %s, updated_at = now() where id = %s""",

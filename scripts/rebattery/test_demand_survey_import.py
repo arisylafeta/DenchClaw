@@ -50,6 +50,11 @@ CONNECTED = typeform_row(**{
 
 
 class TypeformMapping(unittest.TestCase):
+    def test_explicit_typeform_deadline_is_saved_as_request_and_note(self):
+        row = survey.map_typeform_row([*HEADER, "When do you need them?"], [*CONNECTED, "By 2026-11-15"])
+        self.assertEqual((row["kind"], row["basis"], row["needed_by"]), ("request", None, "2026-11-15"))
+        self.assertIn("When: By 2026-11-15", row["note"])
+
     def test_maps_a_demand_survey_response_onto_a_stated_buy_box(self):
         row = survey.map_typeform_row(HEADER, CONNECTED)
         self.assertEqual(row["spec"], {
@@ -159,6 +164,50 @@ TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
 class Writing(unittest.TestCase):
+    def test_stated_profile_preserves_constraints_and_attributed_note_criteria(self):
+        import psycopg2
+        import psycopg2.extras
+        from demand_lifecycle import merge_profile
+        conn = psycopg2.connect(TEST_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("insert into crm_companies (id, name) values ('co_profile_criteria', 'Profile Criteria')")
+                row = {'company_id': 'co_profile_criteria', 'wants': 'Leaf ZE1', 'spec': {'min_soh': 80},
+                       'note': '400V; delivery to Germany; max EUR 20/kWh', 'source_kind': 'survey', 'source_id': 'criteria:1'}
+                self.assertTrue(merge_profile(cur, row))
+                self.assertFalse(merge_profile(cur, row))
+                self.assertFalse(merge_profile(cur, {**row, 'spec': {'min_soh': 60}, 'wants': 'All EV packs'}, 'researched'))
+                cur.execute("select buyer_profile from crm_companies where id = 'co_profile_criteria'")
+                profile = cur.fetchone()['buyer_profile']
+                self.assertEqual(profile['min_soh'], 80)
+                self.assertEqual(profile['wants'], 'Leaf ZE1')
+                self.assertEqual(profile['criteria_evidence'], [{'note': row['note'], 'source_kind': 'survey', 'source_id': 'criteria:1'}])
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_completed_quantity_survey_refreshes_same_source_and_keeps_deadline(self):
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(TEST_URL)
+        old = {'id': 'fb_refresh_timing', 'created_at': '2026-06-01T10:00:00Z', 'finished': False,
+               'data': {'email': 'timing@synthetic.test', 'formats': ['Packs'], 'lot_size': '20', 'timing': 'This month'}}
+        done = {**old, 'finished': True, 'data': {**old['data'], 'notes': '400V only', 'needed_by': '2026-11-15'}}
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                self.assertTrue(survey.insert(cur, survey.link(cur, survey.map_formbricks(old))))
+                self.assertTrue(survey.insert(cur, survey.link(cur, survey.map_formbricks(done))))
+                cur.execute("select kind, basis, needed_by::text, note from crm_bulk_trade_demand where source_id = 'formbricks:fb_refresh_timing'")
+                row = cur.fetchone()
+                self.assertEqual((row['kind'], row['basis'], row['needed_by']), ('request', None, '2026-11-15'))
+                self.assertIn('400V only', row['note'])
+                self.assertIn('When: This month', row['note'])
+                self.assertNotIn('Unfinished survey.', row['note'])
+                self.assertFalse(survey.insert(cur, survey.link(cur, survey.map_formbricks(done))))
+        finally:
+            conn.rollback()
+            conn.close()
+
     def test_saved_search_is_profile_and_sourcing_request_is_qualifying(self):
         import psycopg2
         import psycopg2.extras

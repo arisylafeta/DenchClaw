@@ -75,6 +75,18 @@ export type Decision = { ok: true; lot_id: string | null } | { ok: false; status
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 const date = (value: unknown) => (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null);
 
+/** Only compute a euro fee when amount, currency and compatible units are known. */
+function demandFee(input: DemandInput): number | null {
+  if (input.price_currency !== "EUR" || !input.max_price || !input.price_unit) return null;
+  const quantity = text(input.quantity)?.match(/^(\d+(?:[.,]\d+)?)\s*(packs?|cells?|modules?|systems?|kwh|mwh)$/i);
+  const amount = input.volume ?? (quantity ? Number(quantity[1].replace(",", ".")) : null);
+  const unit = (input.volume_unit ?? quantity?.[2])?.toLowerCase().replace(/s$/, "");
+  const priced = input.price_unit.toLowerCase().replace(/s$/, "");
+  if (!amount || !unit) return null;
+  const factor = unit === priced ? 1 : unit === "mwh" && priced === "kwh" ? 1000 : null;
+  return factor === null ? null : amount * factor * input.max_price * 0.1;
+}
+
 /**
  * Accepts or ignores a proposal. Accepting applies it through the same functions the app uses for
  * a manual edit, so it is validated and logged like one. The proposal is claimed first, so two
@@ -245,6 +257,7 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
         if (structured.spec && typeof structured.spec === "object") structured.spec = { ...existing.spec, ...structured.spec };
         const parsed = parseDemandInput({ ...details, ...structured }, false);
         if ("error" in parsed) throw new Error(parsed.error);
+        parsed.value.fee_eur = demandFee({ ...existing, ...parsed.value });
         await updateDemand(demandId, parsed.value, source);
         return null;
       }
@@ -256,6 +269,7 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
           ? (!family ? "What product family, quantity and unit price?" : "What quantity and unit price?") : null };
       const parsed = parseDemandInput({ ...base, ...structured }, true);
       if ("error" in parsed) throw new Error(parsed.error);
+      parsed.value.fee_eur = demandFee(parsed.value);
       await addDemand(parsed.value as DemandInput & { buyer: string; wants: string }, user.id, source);
       return null;
     }
