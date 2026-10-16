@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MessageSquare, Search, Send, Phone, FileText, Package, Pencil, Trash2, Link2, Plus } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { Tooltip as TooltipPrimitive } from "radix-ui";
+import styles from "./bulk-detail.module.css";
+import { buildEntryLink } from "@/lib/workspace-links";
 import { formatFee, REPUTATION_LABEL, scoreDemand } from "@/lib/bulk-demand-score";
 import {
   BASES,
@@ -31,7 +36,7 @@ import {
   Card,
   ErrorText,
   FormField,
-  Modal,
+  DetailSheet,
   buttonClass,
   buttonStyle,
   darkButtonClass,
@@ -42,6 +47,7 @@ import {
 
 
 type Filter = "open" | "qualifying" | "closed";
+const HISTORY_OUTCOMES: Partial<Record<ClosedReason, string>> = { bought_from_us: "Sold", bought_elsewhere: "Lost", no_longer_needed: "Dropped" };
 
 type Props = {
   today: string;
@@ -75,11 +81,12 @@ export function DemandPage({ today, onOpenTrade, onOpenSupply, initialDemandId }
 
   const open = demand.filter((row) => row.status === "open");
   const qualifying = demand.filter((row) => row.status === "qualifying");
+  const history = demand.filter((row) => row.status === "closed" && row.closed_reason && HISTORY_OUTCOMES[row.closed_reason]);
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return demand.filter((row) => row.status === filter)
+    return demand.filter((row) => row.status === filter && (filter !== "closed" || (row.closed_reason && HISTORY_OUTCOMES[row.closed_reason])))
       .filter((row) => !needle || `${row.buyer} ${row.contact ?? ""} ${row.wants} ${row.product_family ?? ""} ${specLines(row.spec).join(" ")}`.toLowerCase().includes(needle))
-      .toSorted((a, b) => (ranking(b, today).score ?? -1) - (ranking(a, today).score ?? -1) || a.buyer.localeCompare(b.buyer));
+      .toSorted((a, b) => filter === "closed" ? b.updated_at.localeCompare(a.updated_at) : (ranking(b, today).score ?? -1) - (ranking(a, today).score ?? -1) || a.buyer.localeCompare(b.buyer));
   }, [demand, filter, query, today]);
   const selected = demand.find((row) => row.id === selectedId) ?? null;
 
@@ -99,7 +106,7 @@ export function DemandPage({ today, onOpenTrade, onOpenSupply, initialDemandId }
           <div role="group" aria-label="Filter" className="flex border" style={{ borderColor: "var(--bt-border)" }}>
             {segment("open", `Demand ${open.length}`)}
             {segment("qualifying", `Qualifying ${qualifying.length}`)}
-            {segment("closed", `Closed ${demand.filter((row) => row.status === "closed").length}`)}
+            {segment("closed", `History ${history.length}`)}
           </div>
           <input data-table-part="search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search demand"
             placeholder="Search buyers or wants" className="h-8 w-full max-w-[340px] rounded-none border px-2.5 text-xs"
@@ -114,7 +121,7 @@ export function DemandPage({ today, onOpenTrade, onOpenSupply, initialDemandId }
         <Card label="Demand" className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
           <div className="min-w-[760px]">
             <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-3.5 border-b px-3 py-2 font-medium`} style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
-              <span>Score</span><span>Buyer</span><span>Ask</span><span>Activity</span>
+              <span>{filter === "closed" ? "Outcome" : "Score"}</span><span>Buyer</span><span>Ask</span><span>{filter === "closed" ? "Date" : "Activity"}</span>
             </div>
             {shown.map((row) => {
               const scored = ranking(row, today);
@@ -129,26 +136,26 @@ export function DemandPage({ today, onOpenTrade, onOpenSupply, initialDemandId }
                   className={`grid w-full ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)]`}
                   style={{ borderColor: "var(--bt-divider)", color: row.status === "closed" ? "var(--bt-muted)" : "var(--bt-text)",
                     background: row.id === selectedId ? "var(--bt-row-hover)" : undefined }}>
-                  <TableCellContent>{row.status === "qualifying" ? <span style={{ color: "var(--bt-amber)" }}>?</span> : <DemandScore demand={row} today={today} />}</TableCellContent>
+                  <TableCellContent>{row.status === "closed" ? <span className="text-[11px] font-medium" style={{ color: row.closed_reason === "bought_from_us" ? "var(--bt-green)" : "var(--bt-muted)" }}>{row.closed_reason ? HISTORY_OUTCOMES[row.closed_reason] : "—"}</span> : row.status === "qualifying" ? <span style={{ color: "var(--bt-amber)" }}>?</span> : <DemandScore demand={row} today={today} />}</TableCellContent>
                   <TableCellContent><span className="truncate font-semibold">{row.buyer}</span></TableCellContent>
                   <TableCellContent><div className="min-w-0">
                     <div className="truncate" title={row.wants}>{row.wants}</div>
-                    <div className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>
+                    {row.status !== "closed" && <div className="truncate text-xs" style={{ color: "var(--bt-muted)" }}>
                       {row.status === "qualifying" ? row.qualify_question ?? "What do they need?" : `${row.fee_eur == null ? "—" : formatFee(row.fee_eur)} · ${scored.daysAgo}d · ${REPUTATION_LABEL[row.reputation ?? "anon"].replace(/ buyer$/i, "")}`}
-                    </div>
+                    </div>}
                   </div></TableCellContent>
-                  <TableCellContent><div className="text-xs" style={{ color: "var(--bt-muted)" }}>{row.activity_count ?? 0}<br />{row.last_activity_at ? shortDate(row.last_activity_at) : "—"}</div></TableCellContent>
+                  <TableCellContent><div className="text-xs" style={{ color: "var(--bt-muted)" }}>{row.status === "closed" ? <time dateTime={row.updated_at}>{shortDate(row.updated_at.slice(0, 10))}</time> : <>{row.activity_count ?? 0}<br />{row.last_activity_at ? shortDate(row.last_activity_at.slice(0, 10)) : "—"}</>}</div></TableCellContent>
                 </div>
               );
             })}
             {!shown.length && <p role="status" className="px-5 py-8 text-center text-sm" style={{ color: "var(--bt-muted)" }}>
-              {loading ? "Loading demand…" : error ? "Demand unavailable." : query ? "No demand matches your search." : `No ${filter === "open" ? "open demand" : filter === "qualifying" ? "demand to qualify" : "closed demand"}.`}
+              {loading ? "Loading demand…" : error ? "Demand unavailable." : query ? "No demand matches your search." : filter === "closed" ? "No history yet." : `No ${filter === "open" ? "open demand" : "demand to qualify"}.`}
             </p>}
           </div>
         </Card>
       </div>
 
-      {selected && (
+      {selected && !editing && (
         <DemandPanel key={selected.id} demand={selected} today={today} onClose={() => setSelectedId(null)} onChanged={load}
           onEdit={() => setEditing(selected)} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
       )}
@@ -161,6 +168,7 @@ export function DemandPage({ today, onOpenTrade, onOpenSupply, initialDemandId }
 }
 
 const ACTIVITY_KINDS = ["note", "research", "outreach", "call", "quote", "supply"] as const;
+const ACTIVITY_ICONS = { note: MessageSquare, research: Search, outreach: Send, call: Phone, quote: FileText, supply: Package };
 
 function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade, onOpenSupply }: {
   demand: Demand; today: string; onClose: () => void; onChanged: () => void;
@@ -205,82 +213,108 @@ function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade, o
   }
   const patch = (value: object) => request(endpoint, { method: "PATCH", body: JSON.stringify(value) });
   const add = (value: object) => request(`${endpoint}/activity`, { method: "POST", body: JSON.stringify(value) });
-  return <aside aria-label="Demand detail" className="flex w-full max-w-[480px] shrink-0 flex-col gap-4 self-start border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-    <header className="flex items-start gap-3">
+  return <DetailSheet title="Demand detail" onClose={onClose}>
+    <header className="flex items-start gap-4 pr-5">
       <DemandScore demand={demand} today={today} />
-      <div className="min-w-0 flex-1"><h2 className="font-semibold">{demand.buyer}</h2><p className="text-sm">{demand.wants}</p></div>
-      <button type="button" aria-label="Dismiss demand detail" onClick={onClose}>×</button>
+      <div className="min-w-0 flex-1">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-lg font-semibold tracking-tight">{demand.company_id || demand.person_id
+            ? <a className="hover:underline" href={buildEntryLink(demand.company_id ? "company" : "people", demand.company_id ?? demand.person_id!)}>{demand.buyer}</a>
+            : demand.buyer}</h2>
+          <span className={styles.status}>{demand.status === "open" ? "Demand" : demand.status}</span>
+        </div>
+        <p className="text-sm leading-relaxed" style={{ color: "var(--bt-muted)" }}>{demand.wants}</p>
+      </div>
     </header>
-    <div className="flex flex-wrap gap-2">
-      <button disabled={busy} className={buttonClass} style={buttonStyle} onClick={() => run(() => patch({ action: "confirm" }))}>{demand.status === "closed" ? "Reopen" : "Still wanted"}</button>
+    <div className="flex flex-wrap items-center gap-2">
+      <button disabled={busy} className={darkButtonClass} style={darkButtonStyle} onClick={() => run(() => patch({ action: "confirm" }))}>{demand.status === "closed" ? "Reopen" : "Still wanted"}</button>
       <button disabled={busy} className={buttonClass} style={buttonStyle} onClick={() => setQualifying(!qualifying)}>Qualify</button>
       {demand.status !== "closed" && <button className={buttonClass} style={buttonStyle} onClick={() => setClosing(!closing)}>Close</button>}
-      <button className={buttonClass} style={buttonStyle} onClick={onEdit}>Edit</button>
+      <button aria-label="Edit demand" className={`${buttonClass} ml-auto px-2.5`} style={buttonStyle} onClick={onEdit}><Pencil size={14} /></button>
     </div>
-    {qualifying && <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void run(async () => { await patch({ status: "qualifying", qualify_question: question }); setQualifying(false); }); }}>
-      <input required aria-label="Qualification question" className="min-w-0 flex-1 border p-2 text-sm" value={question} onChange={(event) => setQuestion(event.target.value)} />
-      <button disabled={busy} className={buttonClass} style={buttonStyle}>Save</button>
+    {qualifying && <form className={styles.callout} onSubmit={(event) => { event.preventDefault(); void run(async () => { await patch({ status: "qualifying", qualify_question: question }); setQualifying(false); }); }}>
+      <FormField label="Qualification question"><input required className="w-full" value={question} onChange={(event) => setQuestion(event.target.value)} /></FormField>
+      <button disabled={busy} className={`${buttonClass} mt-3`} style={buttonStyle}>Save question</button>
     </form>}
-    {demand.status === "qualifying" && <div className="text-sm">
-      <p>{demand.qualify_question}</p>
-      <button disabled={busy} className="mt-1 text-xs underline" onClick={() => run(() => patch({ qualify_asked_on: today }))}>{demand.qualify_asked_on ? `Sent ${shortDate(demand.qualify_asked_on)} · send again` : "Question sent today"}</button>
+    {demand.status === "qualifying" && !qualifying && <div className={styles.callout}>
+      <p className="mb-2 text-xs font-medium" style={{ color: "var(--bt-muted)" }}>To qualify</p>
+      <p className="text-sm leading-relaxed">{demand.qualify_question ?? "What do they need?"}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button disabled={busy} className={`${buttonClass} h-8 text-xs`} style={buttonStyle} onClick={() => run(() => patch({ qualify_asked_on: today }))}><Send size={12} />Mark question sent</button>
+        {demand.qualify_asked_on && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>Sent {shortDate(demand.qualify_asked_on)}</span>}
+      </div>
     </div>}
     {closing && <div className="flex gap-2">
-      <select aria-label="Why" className="min-w-0 flex-1 border text-sm" value={reason} onChange={(event) => setReason(event.target.value as ClosedReason)}>{CLOSED_REASONS.map((value) => <option key={value} value={value}>{CLOSED_REASON_LABEL[value]}</option>)}</select>
+      <select aria-label="Why" className="min-w-0 flex-1" value={reason} onChange={(event) => setReason(event.target.value as ClosedReason)}>{CLOSED_REASONS.map((value) => <option key={value} value={value}>{CLOSED_REASON_LABEL[value]}</option>)}</select>
       <button disabled={busy} className={buttonClass} style={buttonStyle} onClick={() => run(async () => { await patch({ action: "close", reason }); setClosing(false); })}>Close demand</button>
     </div>}
-    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs" style={{ color: "var(--bt-muted)" }}>
-      <span>{volumeLabel(demand) ?? demand.quantity ?? "Qty —"}</span><span>{priceLabel(demand) ?? "Price —"}</span><span>{demand.location ?? "Location —"}</span>
-      {demand.needed_by && <span>By {shortDate(demand.needed_by)}</span>}
-      {demand.source_url && <a href={demand.source_url} target="_blank" rel="noreferrer" className="underline">{demand.source_label ?? "Source"}</a>}
-    </div>
-    {(demand.note || demand.source_quote || specLines(demand.spec).length > 0) && <details className="text-xs" style={{ color: "var(--bt-muted)" }}>
-      <summary className="cursor-pointer">Context</summary>
-      {demand.note && <p className="mt-2 whitespace-pre-wrap">{demand.note}</p>}
-      {specLines(demand.spec).map((line) => <p key={line}>{line}</p>)}
-      {demand.source_quote && <p className="mt-2">“{demand.source_quote}”</p>}
-    </details>}
-    <details className="border-t pt-3 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
-      <summary className="cursor-pointer">Suggested supply · {demand.fits.length}</summary>
-      {demand.fits.map((fit) => <div key={fit.lot_id} className="flex items-center gap-2 py-2">
-        <button type="button" className="min-w-0 flex-1 truncate text-left hover:underline" title={fit.reason} onClick={() => onOpenTrade(fit.lot_id)}>{fit.title}</button>
-        <button disabled={busy || activity.some((entry) => entry.kind === "supply" && entry.ref_kind === "lot" && entry.ref_id === fit.lot_id)} className={buttonClass} style={buttonStyle} onClick={() => run(() => add({ kind: "supply", title: fit.title, body: fit.reason, refKind: "lot", refId: fit.lot_id }))}>Pin</button>
-      </div>)}
-    </details>
-    <section aria-label="Activity" className="border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
-      <h3 className="mb-2 text-sm font-semibold">Activity</h3>
-      <form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void run(async () => {
+    <dl className={styles.facts}>
+      {[
+        ["Quantity", volumeLabel(demand) ?? demand.quantity],
+        ["Price", priceLabel(demand)],
+        ["Fee", demand.fee_eur == null ? null : formatFee(demand.fee_eur)],
+        ["Location", demand.location],
+        ["Needed by", demand.needed_by ? shortDate(demand.needed_by) : null],
+        ["Source", demand.source_url ? <a key="source" href={demand.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-4">{demand.source_label ?? "Source"}<Link2 size={12} /></a> : null],
+        ["Asked", demand.asked_on ? shortDate(demand.asked_on) : null],
+        ["Reputation", REPUTATION_LABEL[demand.reputation ?? "anon"]],
+      ].map(([label, value]) => <div key={String(label)}><dt>{label}</dt><dd>{value || <span style={{ color: "var(--bt-muted)" }}>—</span>}</dd></div>)}
+    </dl>
+    <section aria-label="Activity">
+      <h3 className="mb-3 text-sm font-semibold">Activity <span className="ml-1 font-normal" style={{ color: "var(--bt-muted)" }}>{activity.length}</span></h3>
+      <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void run(async () => {
         await add({ kind, title, body: body || undefined, ...(link ? { refKind, refId: link } : {}) });
         setTitle(""); setBody(""); setLink("");
       }); }}>
-        <div className="flex gap-2">
-          <select aria-label="Activity kind" className="border p-1 text-xs" value={kind} onChange={(event) => setKind(event.target.value)}>{ACTIVITY_KINDS.map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select>
-          <input required aria-label="Activity title" placeholder="What did we do?" className="min-w-0 flex-1 border p-2 text-sm" value={title} onChange={(event) => setTitle(event.target.value)} />
-          <button disabled={busy || !title.trim()} className={buttonClass} style={buttonStyle}>Add</button>
+        <div role="group" aria-label="Activity kind" className={styles.kinds}>
+          {ACTIVITY_KINDS.map((value) => { const Icon = ACTIVITY_ICONS[value]; return <button key={value} type="button" aria-pressed={kind === value} className={styles.kind} onClick={() => setKind(value)}><Icon size={14} />{value[0].toUpperCase() + value.slice(1)}</button>; })}
         </div>
-        <details><summary className="cursor-pointer text-xs" style={{ color: "var(--bt-muted)" }}>Details / link</summary>
-          <textarea aria-label="Activity body" placeholder="Note" className="mt-2 w-full border p-2 text-sm" value={body} onChange={(event) => setBody(event.target.value)} />
+        <input required aria-label="Activity title" placeholder="What happened?" className="w-full" value={title} onChange={(event) => setTitle(event.target.value)} />
+        <details>
+          <summary className="cursor-pointer text-xs" style={{ color: "var(--bt-muted)" }}>Add details or a link</summary>
+          <textarea aria-label="Activity body" placeholder="Details" rows={3} className="my-3 w-full resize-y" value={body} onChange={(event) => setBody(event.target.value)} />
           <div className="flex gap-2">
-            <select aria-label="Link type" className="border text-xs" value={refKind} onChange={(event) => setRefKind(event.target.value)}><option value="url">URL</option><option value="lot">Lot</option><option value="supply">Supply</option><option value="stock">Stock item</option></select>
-            <input aria-label="Activity link" type={refKind === "url" || refKind === "stock" ? "url" : "text"} role={refKind === "lot" || refKind === "supply" ? "combobox" : undefined} list={refKind === "lot" || refKind === "supply" ? `activity-links-${demand.id}` : undefined} placeholder={refKind === "url" || refKind === "stock" ? "Paste URL" : "Pick an item"} className="min-w-0 flex-1 border p-2 text-sm" value={link} onChange={(event) => setLink(event.target.value)} />
+            <select aria-label="Link type" value={refKind} onChange={(event) => { setRefKind(event.target.value); setLink(""); }}><option value="url">URL</option><option value="lot">Lot</option><option value="supply">Supply</option><option value="stock">Stock item</option></select>
+            <input aria-label="Activity link" type={refKind === "url" || refKind === "stock" ? "url" : "text"} role={refKind === "lot" || refKind === "supply" ? "combobox" : undefined} aria-expanded={refKind === "lot" || refKind === "supply" ? false : undefined} aria-controls={refKind === "lot" || refKind === "supply" ? `activity-links-${demand.id}` : undefined} list={refKind === "lot" || refKind === "supply" ? `activity-links-${demand.id}` : undefined} placeholder={refKind === "url" || refKind === "stock" ? "https://" : "Choose an item"} className="min-w-0 flex-1" value={link} onChange={(event) => setLink(event.target.value)} />
             <datalist id={`activity-links-${demand.id}`}>{choices.filter((item) => item.kind === refKind).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</datalist>
           </div>
         </details>
+        <button disabled={busy || !title.trim()} className={`${darkButtonClass} self-end`} style={darkButtonStyle}><Plus size={14} className="mr-1" />Add activity</button>
       </form>
       <ErrorText error={error} />
-      {!activity.length && <p className="py-4 text-xs" style={{ color: "var(--bt-muted)" }}>No activity yet.</p>}
-      <ol className="mt-3">{activity.map((entry) => <li key={entry.id} className="border-t py-3 text-sm" style={{ borderColor: "var(--bt-divider)" }}>
-        <div className="flex items-center gap-2"><span className="text-xs capitalize" style={{ color: "var(--bt-muted)" }}>{entry.kind}</span><time className="ml-auto text-xs" dateTime={entry.occurred_at}>{shortDate(entry.occurred_at)}</time>
-          <button type="button" disabled={busy} aria-label={`Delete ${entry.title}`} onClick={() => run(() => request(`${endpoint}/activity/${entry.id}`, { method: "DELETE" }))}>×</button>
-        </div>
-        {entry.ref_kind === "lot" && entry.ref_id ? <button className="text-left font-medium underline" onClick={() => onOpenTrade(entry.ref_id!)}>{entry.title}</button>
-          : entry.ref_kind === "supply" && entry.ref_id ? <button className="text-left font-medium underline" onClick={() => onOpenSupply?.(entry.ref_id!)}>{entry.title}</button>
-          : entry.ref_id && /^https?:\/\//i.test(entry.ref_id) ? <a className="font-medium underline" href={entry.ref_id} target="_blank" rel="noreferrer">{entry.title}</a>
-          : <p className="font-medium">{entry.title}</p>}
-        {entry.body && <p className="mt-1 whitespace-pre-wrap text-xs" style={{ color: "var(--bt-muted)" }}>{entry.body}</p>}
-      </li>)}</ol>
+      {!activity.length && <p className="py-5 text-center text-xs" style={{ color: "var(--bt-muted)" }}>No activity yet</p>}
+      <ol className={styles.timeline}>{activity.map((entry) => {
+        const Icon = ACTIVITY_ICONS[entry.kind as keyof typeof ACTIVITY_ICONS] ?? MessageSquare;
+        const linked = entry.ref_id && (entry.ref_kind === "lot" || entry.ref_kind === "supply" || /^https?:\/\//i.test(entry.ref_id));
+        return <li key={entry.id} className={styles.entry}>
+          <span className={styles.entryIcon}><Icon size={14} /></span>
+          <div className="min-w-0 flex-1 pt-1">
+            <div className="flex items-start gap-2"><p className="flex-1 text-[13px] font-medium">{entry.title}</p>
+              <button type="button" className={styles.delete} disabled={busy} aria-label={`Delete ${entry.title}`} onClick={() => run(() => request(`${endpoint}/activity/${entry.id}`, { method: "DELETE" }))}><Trash2 size={13} /></button>
+            </div>
+            <time className="mt-1 block text-[11px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at} title={shortDate(entry.occurred_at.slice(0, 10))}>{formatDistanceToNow(new Date(entry.occurred_at), { addSuffix: true })}</time>
+            {entry.body && <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed" style={{ color: "var(--bt-muted)" }}>{entry.body}</p>}
+            {linked && (entry.ref_kind === "lot" || entry.ref_kind === "supply"
+              ? <button className={styles.chip} onClick={() => entry.ref_kind === "lot" ? onOpenTrade(entry.ref_id!) : onOpenSupply?.(entry.ref_id!)}><Link2 size={11} />View {entry.ref_kind}</button>
+              : <a className={styles.chip} href={entry.ref_id!} target="_blank" rel="noreferrer"><Link2 size={11} />Open link</a>)}
+          </div>
+        </li>;
+      })}</ol>
     </section>
-  </aside>;
+    <details className={`${styles.section} text-sm`}>
+      <summary className="cursor-pointer font-medium">Suggested supply <span style={{ color: "var(--bt-muted)" }}>· {demand.fits.length}</span></summary>
+      {demand.fits.map((fit) => <div key={fit.lot_id} className="flex items-center gap-3 border-b py-3" style={{ borderColor: "var(--bt-divider)" }}>
+        <button type="button" className="min-w-0 flex-1 truncate text-left text-xs hover:underline" title={fit.reason} onClick={() => onOpenTrade(fit.lot_id)}>{fit.title}</button>
+        <button disabled={busy || activity.some((entry) => entry.kind === "supply" && entry.ref_kind === "lot" && entry.ref_id === fit.lot_id)} className={`${buttonClass} h-8 text-xs`} style={buttonStyle} onClick={() => run(() => add({ kind: "supply", title: fit.title, body: fit.reason, refKind: "lot", refId: fit.lot_id }))}>Pin</button>
+      </div>)}
+    </details>
+    {(demand.note || demand.source_quote || specLines(demand.spec).length > 0) && <details className={`${styles.section} text-xs`} style={{ color: "var(--bt-muted)" }}>
+      <summary className="cursor-pointer font-medium">Context</summary>
+      {demand.note && <p className="mt-3 whitespace-pre-wrap leading-relaxed">{demand.note}</p>}
+      {specLines(demand.spec).map((line) => <p className="mt-2" key={line}>{line}</p>)}
+      {demand.source_quote && <blockquote className="mt-3 border-l-2 pl-3 leading-relaxed" style={{ borderColor: "var(--bt-border)" }}>{demand.source_quote}</blockquote>}
+    </details>}
+  </DetailSheet>;
 }
 
 function ranking(demand: Demand, today: string) {
@@ -293,17 +327,17 @@ function ranking(demand: Demand, today: string) {
 
 function DemandScore({ demand, today }: { demand: Demand; today: string }) {
   const result = ranking(demand, today);
-  if (result.score == null) { return <span className="text-xs" style={{ color: "var(--bt-amber)" }}>Needs quantity</span>; }
-  const color = result.score >= 80 ? "var(--bt-red)" : result.score >= 60 ? "var(--bt-amber)" : result.score >= 40 ? "var(--bt-green)" : "var(--bt-muted)";
+  if (result.score == null) { return <span title="Needs quantity" aria-label="Needs quantity" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-[3px] text-sm font-semibold" style={{ color: "var(--bt-muted)", borderColor: "var(--bt-divider)" }}>?</span>; }
+  const color = result.score >= 80 ? "var(--bt-green)" : result.score >= 60 ? "var(--bt-amber)" : "var(--bt-muted)";
   const arithmetic = `${formatFee(demand.fee_eur)} × ${demand.price_basis === "buyer" ? "1 (buyer budget)" : "½ (our estimate)"} × ${Math.round(result.closeChance * 100)}% × ${result.freshness.toFixed(2)} = ${formatFee(result.expectedFee ?? 0)} expected`;
-  return <span tabIndex={0} title={arithmetic} aria-label={`${result.score} ${result.band}. ${arithmetic}`} className="inline-flex flex-col items-center gap-1">
+  return <TooltipPrimitive.Provider><TooltipPrimitive.Root><TooltipPrimitive.Trigger asChild><span tabIndex={0} aria-label={`${result.score} ${result.band}. ${arithmetic}`} className="inline-flex flex-col items-center gap-1">
     <span className="relative inline-flex h-11 w-11 items-center justify-center font-semibold" style={{ color }}>
       <svg aria-hidden="true" viewBox="0 0 40 40" className="absolute inset-0 h-full w-full -rotate-90">
         <circle cx="20" cy="20" r="17" fill="none" stroke="var(--bt-divider)" strokeWidth="3" />
         <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3" pathLength="100" strokeDasharray={`${result.score} 100`} />
       </svg>{result.score}
     </span>
-  </span>;
+  </span></TooltipPrimitive.Trigger><TooltipPrimitive.Portal><TooltipPrimitive.Content side="left" sideOffset={8} className="bulk-trades z-[10002] max-w-64 rounded-lg border p-3 text-xs shadow-lg" style={{ background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" }}>{arithmetic}</TooltipPrimitive.Content></TooltipPrimitive.Portal></TooltipPrimitive.Root></TooltipPrimitive.Provider>;
 }
 
 const MAIN_LISTS: SpecListKey[] = ["chemistries", "formats", "conditions", "origins"];
@@ -341,6 +375,7 @@ function DemandDialog({ demand, onClose, onSaved }: {
   onSaved: (demand: Demand) => void;
 }) {
   const [paste, setPaste] = useState("");
+  const [showRequired, setShowRequired] = useState(false);
   const [filling, setFilling] = useState(false);
   const [link, setLink] = useState<{ person_id?: string | null; company_id?: string | null }>({});
   const [lists, setLists] = useState<Partial<Record<SpecListKey, string[]>>>(() =>
@@ -408,11 +443,12 @@ function DemandDialog({ demand, onClose, onSaved }: {
   const setList = (key: SpecListKey) => (values: string[]) => setLists((current) => ({ ...current, [key]: values }));
 
   return (
-    <Modal title={demand ? "Edit demand" : "Add demand"} onClose={onClose} onSubmit={form.submit} wide
+    <DetailSheet title={demand ? "Edit demand" : "Add demand"} onClose={onClose} onSubmit={form.submit}
       footer={<>
         <button type="button" onClick={onClose} className={`${buttonClass} h-9`} style={buttonStyle}>Cancel</button>
         <button type="submit" disabled={form.saving} className={`${darkButtonClass} h-9`} style={darkButtonStyle}>{demand ? "Save" : "Add demand"}</button>
       </>}>
+      <h2 className="pr-6 text-lg font-semibold">{demand ? "Edit demand" : "Add demand"}</h2>
       {!demand && (
         <FormField label="Paste from an email (optional)">
           <textarea value={paste} onChange={(event) => setPaste(event.target.value)} rows={3}
@@ -429,7 +465,7 @@ function DemandDialog({ demand, onClose, onSaved }: {
             onClick={() => form.setDraft((current) => ({ ...current, kind }))}
             className="h-8 px-3 text-[13px] font-medium"
             style={form.draft.kind === kind ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)" } : { background: "var(--bt-surface)", color: "var(--bt-text)" }}>
-            {kind === "request" ? "Request: one-off, by a date" : "Standing: ongoing buy-box"}
+            {kind === "request" ? "One-off request" : "Standing demand"}
           </button>
         ))}
       </div>
@@ -440,25 +476,29 @@ function DemandDialog({ demand, onClose, onSaved }: {
           setLink({ person_id: person.id });
         }}
       />
-      <FormField label="Buyer">{form.input("buyer", { required: true })}</FormField>
+      <FormField label="Buyer">{form.input("buyer", { required: true, onInvalid: () => setShowRequired(true), "aria-invalid": showRequired && !form.draft.buyer.trim(), "aria-describedby": showRequired && !form.draft.buyer.trim() ? "demand-buyer-error" : undefined })}
+        {showRequired && !form.draft.buyer.trim() && <span id="demand-buyer-error" className="text-xs" style={{ color: "var(--bt-red)" }}>Enter a buyer.</span>}
+      </FormField>
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Contact">{form.input("contact")}</FormField>
         <FormField label="Email">{form.input("email", { type: "email" })}</FormField>
       </div>
-      <FormField label="Wants">{form.input("wants", { required: true, placeholder: "One line, the way the buyer would say it" })}</FormField>
+      <FormField label="Ask">{form.textarea("wants", { required: true, rows: 2, onInvalid: () => setShowRequired(true), "aria-invalid": showRequired && !form.draft.wants.trim(), "aria-describedby": showRequired && !form.draft.wants.trim() ? "demand-ask-error" : undefined })}
+        {showRequired && !form.draft.wants.trim() && <span id="demand-ask-error" className="text-xs" style={{ color: "var(--bt-red)" }}>Enter what they want.</span>}
+      </FormField>
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Product family">{form.input("product_family", { placeholder: "e.g. VW MEB" })}</FormField>
         {demand?.status !== "closed" && <FormField label="Status">{form.select("status", ["open", "qualifying"], { open: "Demand", qualifying: "Qualifying" })}</FormField>}
-        <FormField label="Expected fee (EUR)">{form.input("fee_eur", { type: "number", min: 0, step: "any" })}</FormField>
+        <FormField label="Fee override (EUR)">{form.input("fee_eur", { type: "number", min: 0, step: "any" })}</FormField>
         <FormField label="Price basis">{form.select("price_basis", ["buyer", "estimate"], { buyer: "Buyer budget", estimate: "Our estimate" })}</FormField>
         <FormField label="Reputation">{form.select("reputation", ["paid", "active", "email", "inbound", "anon"], REPUTATION_LABEL)}</FormField>
       </div>
-      {form.draft.status === "qualifying" && <FormField label="Qualification question">{form.input("qualify_question")}</FormField>}
+      <FormField label="Qualification question">{form.textarea("qualify_question", { rows: 2 })}</FormField>
       <div className="grid grid-cols-3 gap-3">
         {isRequest
           ? <FormField label="Needed by">{form.input("needed_by", { type: "date" })}</FormField>
           : <FormField label="Basis">{form.select("basis", BASES, { estimated: "Estimated (our research)", stated: "Stated (buyer said)", agreed: "Agreed (confirmed)" })}</FormField>}
-        <FormField label={isRequest ? "Volume in total" : "Volume a month"}>{form.input("volume", { type: "number", min: 0, step: "any" })}</FormField>
+        <FormField label={isRequest ? "Quantity" : "Quantity / month"}>{form.input("volume", { type: "number", min: 0, step: "any" })}</FormField>
         <FormField label="Unit">{form.select("volume_unit", VOLUME_UNITS)}</FormField>
       </div>
       <div className="grid grid-cols-3 gap-3">
@@ -468,9 +508,11 @@ function DemandDialog({ demand, onClose, onSaved }: {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Quantity in their words">{form.input("quantity", { placeholder: "e.g. 100+ packs, 7–8 a month" })}</FormField>
-        <FormField label="Where">{form.input("location")}</FormField>
+        <FormField label="Location">{form.input("location")}</FormField>
       </div>
-      <fieldset className="flex flex-col gap-3 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
+      <details className="border-t pt-4" style={{ borderColor: "var(--bt-divider)" }}>
+        <summary className="cursor-pointer text-sm font-medium">Specification</summary>
+      <fieldset className="mt-3 flex flex-col gap-3">
         <legend className="text-sm font-semibold">Spec</legend>
         {MAIN_LISTS.map((key) => <SpecChips key={key} name={key} selected={lists[key] ?? []} onChange={setList(key)} />)}
         <div className="grid grid-cols-4 gap-3">
@@ -486,9 +528,9 @@ function DemandDialog({ demand, onClose, onSaved }: {
           </div>
         </details>
       </fieldset>
-      <FormField label="Note">{form.input("note")}</FormField>
-      <p className="text-xs" style={{ color: "var(--bt-muted)" }}>Bulk only: 2 or more units.</p>
+      </details>
+      <FormField label="Note">{form.textarea("note", { rows: 3 })}</FormField>
       <ErrorText error={form.error} />
-    </Modal>
+    </DetailSheet>
   );
 }

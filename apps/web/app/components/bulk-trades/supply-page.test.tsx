@@ -37,13 +37,15 @@ describe("SupplyPage", () => {
     expect(within(table).queryByText("Old Seller")).not.toBeInTheDocument();
 
     await userEvent.click(within(table).getByText("Jacksons Car Dismantlers"));
-    const panel = screen.getByRole("complementary", { name: "Supply detail" });
+    const panel = screen.getByRole("dialog", { name: "Supply detail" });
     expect(within(panel).getByRole("button", { name: "Spagnesi Lab" })).toHaveAttribute("title", "Packs for testing, but hybrid not 60 kWh.");
     await userEvent.click(within(panel).getByRole("button", { name: "Not a fit" }));
     const patch = fetch.mock.calls.find(([, init]) => init?.method === "PATCH");
     expect(patch?.[0]).toBe("/api/bulk-trades/supply/bts_1");
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ action: "hide_fit", demand_id: "btd_1" });
 
+    await userEvent.click(within(panel).getByRole("button", { name: /^Close$/ }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Closed" }));
     expect(within(table).getByText("Old Seller")).toBeInTheDocument();
     expect(within(table).getByText("Unknown")).toBeInTheDocument();

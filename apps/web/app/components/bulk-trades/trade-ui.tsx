@@ -1,7 +1,32 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { TRADE_KINDS, type TradeKind } from "@/lib/bulk-trades";
+import { Sheet, SheetContent, SheetTitle } from "../platform-admin/ui/sheet";
+import detailStyles from "./bulk-detail.module.css";
+
+export function DetailSheet({ title, onClose, children, onSubmit, footer }: {
+  title: string; onClose: () => void; children: React.ReactNode;
+  onSubmit?: (event: React.FormEvent) => void; footer?: React.ReactNode;
+}) {
+  const returnFocus = useRef(typeof document !== "undefined" ? document.activeElement as HTMLElement | null : null);
+  const Body = onSubmit ? "form" : "div";
+  return <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <SheetContent aria-describedby={undefined} className={`bulk-trades ${detailStyles.sheet}`} showCloseButton
+      onOpenAutoFocus={(event) => { event.preventDefault(); (event.currentTarget as HTMLElement).querySelector<HTMLElement>("input, textarea, button")?.focus(); }}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        const target = returnFocus.current?.isConnected ? returnFocus.current : document.querySelector<HTMLElement>('[data-table-part="grid-row"][aria-pressed="true"]');
+        target?.focus();
+      }}>
+      <SheetTitle className="sr-only">{title}</SheetTitle>
+      <Body onSubmit={onSubmit} className={detailStyles.frame}>
+        <div className={detailStyles.content}>{children}</div>
+        {footer && <footer className={detailStyles.footer}>{footer}</footer>}
+      </Body>
+    </SheetContent>
+  </Sheet>;
+}
 
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = init?.body instanceof FormData ? undefined : { "content-type": "application/json" };

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowUpRight } from "lucide-react";
+import styles from "./bulk-detail.module.css";
 import {
   SUPPLY_CLOSED_LABEL,
   SUPPLY_CLOSED_REASONS,
@@ -11,7 +13,7 @@ import {
 import { shortDate } from "@/lib/bulk-trade-details";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
-import { Card, ErrorText, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request } from "./trade-ui";
+import { Card, DetailSheet, ErrorText, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request } from "./trade-ui";
 
 
 type Filter = "open" | "closed";
@@ -122,29 +124,33 @@ function SupplyPanel({ supply, onClose, onChanged, onOpenDemand }: { supply: Sup
   }
 
   return (
-    <aside aria-label="Supply detail" className="flex w-[380px] shrink-0 flex-col gap-4 self-start rounded-none border p-5"
-      style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+    <DetailSheet title="Supply detail" onClose={onClose}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="mt-1 text-lg font-semibold">{supply.seller}</h2>
+          <div className="flex items-center gap-2 pr-6"><h2 className="text-lg font-semibold tracking-tight">{supply.seller}</h2><span className={styles.status}>{supply.status}</span></div>
           {(supply.contact || supply.email) && (
             <div className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{[supply.contact, supply.email].filter(Boolean).join(" · ")}</div>
           )}
         </div>
-        <button type="button" onClick={onClose} className="text-sm" style={{ color: "var(--bt-muted)" }}>Close</button>
       </div>
-      <p className="text-[15px] leading-snug">{supply.offers}</p>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs" style={{ color: "var(--bt-muted)" }}>
-        <span>{supply.quantity ?? "Qty —"}</span><span title={supply.size_note ?? undefined}>{sizeLabel(supply) ?? "Size —"}</span><span>{supply.location ?? "Location —"}</span>
-        {supply.source_url && <a href={supply.source_url} target="_blank" rel="noreferrer" className="underline">{supply.source_label ?? "Source"}</a>}
-      </div>
+      <p className="-mt-3 text-sm leading-relaxed" style={{ color: "var(--bt-muted)" }}>{supply.offers}</p>
+      <dl className={styles.facts}>
+        {[
+          ["Quantity", supply.quantity],
+          ["Size", sizeLabel(supply)],
+          ["Location", supply.location],
+          ["Seen", supply.observed_on ? shortDate(supply.observed_on) : null],
+          ["Source", supply.source_url ? <a key="source" href={supply.source_url} target="_blank" rel="noreferrer" className="underline underline-offset-4">{supply.source_label ?? "Source"}</a> : null],
+          ["Size note", supply.size_note],
+        ].map(([label, value]) => <div key={String(label)}><dt>{label}</dt><dd>{value || <span style={{ color: "var(--bt-muted)" }}>—</span>}</dd></div>)}
+      </dl>
       {supply.source_quote && <details className="text-xs"><summary className="cursor-pointer">Source quote</summary><p className="mt-2">{supply.source_quote}</p></details>}
       <div className="flex flex-col gap-2.5 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
         <h3 className="text-sm font-semibold">Buyers who fit · {supply.fits.length}</h3>
         {!supply.fits.length && <p className="text-xs" style={{ color: "var(--bt-muted)" }}>No matching buyers.</p>}
         {supply.fits.map((fit) => (
           <div key={fit.demand_id} className="flex items-center gap-2 border-b py-2" style={{ borderColor: "var(--bt-border)" }}>
-            <button type="button" className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline" title={fit.reason} onClick={() => onOpenDemand?.(fit.demand_id)}>{fit.buyer}</button>
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium hover:underline" title={fit.reason} onClick={() => onOpenDemand?.(fit.demand_id)}><span className="truncate">{fit.buyer}</span><ArrowUpRight size={14} /></button>
             <button type="button" disabled={busy} className={`${buttonClass} h-8 self-start`} style={buttonStyle}
               onClick={() => patch({ action: "hide_fit", demand_id: fit.demand_id })}>
               Not a fit
@@ -174,6 +180,6 @@ function SupplyPanel({ supply, onClose, onChanged, onOpenDemand }: { supply: Sup
           <button type="button" onClick={() => setClosing(true)} className={`${buttonClass} h-9`} style={buttonStyle}>Close…</button>
         </div>
       )}
-    </aside>
+    </DetailSheet>
   );
 }

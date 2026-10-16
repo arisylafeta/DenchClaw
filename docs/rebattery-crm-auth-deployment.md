@@ -90,6 +90,15 @@ filters, edits, selection, resizing and paging stay in their existing engines.
 Email HTML, code diffs, boards, timelines and non-tabular lists are outside this
 scope; badges and avatars keep their meaningful shapes.
 
+Bulk Trades Demand and Supply details open in a right-hand modal sheet, preserving
+the full-width list and its filters. The shared Radix Sheet handles focus trapping,
+Escape, overlay dismissal and return focus. Demand edits use a scrolling form with
+a fixed Save/Cancel footer; activity uses kind segments and a linked timeline.
+Demand History includes only Sold (`bought_from_us`), Lost (`bought_elsewhere`)
+and Dropped (`no_longer_needed`) outcomes, newest update first. Its date is the
+record's last update timestamp; there is no separate closure timestamp.
+
+
 `ui/table-cell.tsx` owns leaf-cell disclosure. Cells—including Notes, tags and
 relations—start on one line. Overflowed values expose a keyboard-operable
 chevron and expand on a plain content click; repeat click or Escape collapses
