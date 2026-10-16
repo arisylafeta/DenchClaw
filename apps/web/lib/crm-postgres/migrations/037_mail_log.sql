@@ -1,6 +1,6 @@
 -- Mail log: one authoritative store for every message ReBattery sends or receives, both directions,
--- all transports (Gmail, Postmark broadcast, Postmark transactional). Replaces crm_email_* and
--- crm_campaign_sends / crm_campaign_send_links (dropped in 038 after the one-time load).
+-- all transports (Gmail, Postmark broadcast, Postmark transactional). Replaces the legacy
+-- inbox and campaign ledgers (dropped in 038 after the one-time load).
 -- Apply only after a current verified pg_dump and explicit schema approval.
 --
 -- Ownership:
