@@ -147,8 +147,88 @@ once per update. General CTAs are not listing engagement.
 Counts measure emails with observed activity, not repeated opens/clicks or
 verified human visits. Unsynced sends show pending tracking; each synced update
 shows its last sync time. Email clicks do not establish site visits. This view
-does not add interaction rows or change relationship scores. The campaign
-`sync --campaign-id <id> --apply` command remains the existing data-refresh path.
+does not add interaction rows or change relationship scores. The shared
+`rebattery-mail sync postmark --campaign <id> --account <stream> --apply`
+refreshes receipts and reconciles the complete stream suppression set.
+
+### Mail preparation, approvals and sends
+
+Use `python3 scripts/rebattery/rebattery-mail.py` for every mail operation.
+Preparation and execution are dry-run unless `--apply` is present. Output is JSON;
+named refusals go to stdout and human diagnostics go to stderr.
+
+Create a one-off with `draft --identity alex --to buyer@example.test --subject
+"Subject" --body "Copy" --verification '{"buyer@example.test":{"status":"valid"}}'
+--apply`. Use `--template <name> --vars <json>` instead of raw copy for a versioned
+template. Verification is an explicit imported ZeroBounce result per address;
+only `status=valid` is eligible, including role-based addresses. Invalid,
+inconclusive and missing results are reported with reasons and cannot be sent.
+No verification API is called implicitly.
+
+Use `campaign create --id <id> --name <name> --identity <key> --template <name>
+--person-ids <comma-separated-ids> --verification <json> --apply`, or
+`--cohort-sql <read-only-select-file>` for the audience. The SELECT must return
+exactly `person_id`, with 1 to 500 distinct candidates. `--personalization
+'{"first_name":"first_name"}'` maps variables to `first_name`, `last_name` or
+`opening`. `--vars` supplies shared values. `--links` is a JSON array of
+`{"key":"stock","url":"https://www.rebattery.io/stock","listing_id":"optional"}`.
+Every HTTPS CTA in HTML and text must match a tracked destination exactly;
+approved hosts are `www.rebattery.io` and `form.typeform.com`. Auction URLs are
+optional. Supply Updates must use the supply identity and reply mailbox.
+
+`campaign freeze <id> --apply` renders each recipient once into `mail_message`
+and `mail_message_link`, excluding suppressed, opted-out, bounced or unverified
+addresses before the digest is computed. Failed or incomplete suppression dumps
+and fully excluded audiences stop the freeze. Freeze never changes consent.
+`preview <message-or-campaign-id>` shows frozen copy, signatures, recipients,
+exclusions and the exact SHA256. Identity signatures are stored in the copy;
+sender and reply-mailbox settings are also bound to the digest.
+
+`approve <id> --sha256 <digest> --approved-by "Named human" --apply` records
+approval for the exact content, recipients and identity. Agent names, blank
+approvers, stale content and changed recipients are refused. `send <message-id>
+--apply` requires the same approval, including personal one-offs.
+
+`launch <campaign-id> --approved-sha256 <digest> --max-recipients 5 --apply`
+sends a capped pilot and stops with `next_gate=pilot_review`. Sending the remainder
+requires a separate `launch` invocation with the exact approved digest. Every
+send rechecks suppressions and replies, claims its idempotency key before the
+provider call and records acceptance in the mail log. Any `sending` or `unknown`
+row blocks the whole audience; ambiguous sends exit with code 4 and are never
+retried automatically. `recover <campaign-id> --apply` reconciles exact provider
+receipts, leaving missing receipts unresolved.
+
+Real Gmail and Postmark sends additionally require `DENCH_MAIL_LIVE_SEND=1`.
+Gmail's no-send restriction remains effective. Marketing requires an unsubscribe
+path on both transports; Postmark marketing requires an explicit Broadcast
+stream, with `{{{ pm:unsubscribe }}}` in both bodies. `followup draft` prepares a
+threaded draft only. A reply pauses it instead of sending another chase.
+
+### Postmark suppressions and scheduling
+
+`sync postmark --account <stream>` inspects changes without writes; add `--apply`
+only for an approved reconciliation. With no campaign filter it reconciles all
+logged receipts for the stream as well as suppressions. The complete, unpaginated
+[Postmark suppression dump](https://postmarkapp.com/developer/api/suppressions-api)
+is mapped to the **Supply update** list. Every matched address is opted out on
+that list; `SpamComplaint` and `HardBounce` also set global `email_opted_out`.
+Provider reason, origin and calendar date are retained. Other lists are unchanged,
+missing suppressions never restore consent, and unmatched addresses never create
+contacts.
+
+Schedulers must invoke the shared CLI directly with `sync postmark --account
+broadcast --apply`, not the retired suppression wrapper. Configure the database
+DSN explicitly and load credentials through the approved Hermes secret loader
+or `POSTMARK_SERVER_TOKEN`; never store them in a job definition. Existing jobs
+need their entrypoint changed before reactivation. Verify a fresh backup and
+inspect an approved dry run before enabling a real scheduler.
+
+Focused fake-provider regressions:
+
+```bash
+cd scripts/rebattery
+DENCH_MAIL_DSN=<disposable-mail-w2-dsn> python3 -m pytest rebattery_mail/tests/test_w2_*.py -q
+```
 
 ## Troubleshooting
 
