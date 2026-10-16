@@ -9,6 +9,8 @@ export type HermesConversation = {
   updatedAt: number;
   participants: HermesParticipant[];
   working: boolean | null;
+  /** Group needs attention in Hermes (approval, retry or cancellation). */
+  blocked?: boolean;
 };
 export type HermesMessage = { id: string; role: string; text: string; content?: string; parts?: Record<string, unknown>[]; profile?: string; name?: string };
 export function conversationKey(kind: "solo" | "group", id: string, profile = ""): string {

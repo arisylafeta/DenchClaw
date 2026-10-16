@@ -10,10 +10,10 @@ export async function PATCH(req: Request, context: Context) {
   try {
     const key = (await context.params).key;
     const identity = parseConversationKey(key);
-    if (identity.kind !== "solo") return Response.json({ error: "Use Hermes to manage group rooms" }, { status: 405 });
     const { title } = await req.json();
-    if (typeof title !== "string" || !title.trim()) return Response.json({ error: "A title is required" }, { status: 400 });
-    await nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+    if (typeof title !== "string" || !title.trim() || title.length > 200) return Response.json({ error: "A title of at most 200 characters is required" }, { status: 400 });
+    if (identity.kind === "group") await groupRpc("groups.rename", { room_id: identity.id, event_id: crypto.randomUUID(), name: title.trim() });
+    else await nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, { method: "PATCH", body: JSON.stringify({ title: title.trim() }) });
     return Response.json(await readConversation(key));
   } catch { return Response.json({ error: "Could not rename native chat" }, { status: 502 }); }
 }

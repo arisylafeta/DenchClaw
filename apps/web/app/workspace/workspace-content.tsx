@@ -97,7 +97,7 @@ import {
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
-import { useHermesConversations, HermesConversationList, HermesConversationPanel } from "../components/workspace/hermes-conversations";
+import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog } from "../components/workspace/hermes-conversations";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
@@ -728,7 +728,7 @@ function WorkspacePageInner() {
     const tab = tabsState.chatTabs.find((entry) => entry.id === activeChatTabId);
     const row = hermesChats.listing?.sessions.find((entry) => entry.key === tab?.sessionId);
     if (row && row.key !== hermesChats.selected?.key) hermesChats.select(row);
-    else if (!tab?.sessionId && hermesChats.selected?.kind === "solo") hermesChats.newChat();
+    else if (!tab?.sessionId && hermesChats.selected?.kind === "solo") hermesChats.clear();
   }, [activeChatTabId, tabsState.chatTabs, hermesChats]);
 
   const openSubagentChatTab = useCallback((params: {
@@ -1240,15 +1240,6 @@ function WorkspacePageInner() {
 
   const handleRenameSession = useCallback(
     async (sessionId: string, newTitle: string) => {
-      if (hermesChats.enabled) {
-        const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(sessionId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (hermesChats.selected?.key === sessionId) hermesChats.select(data.conversation);
-        dispatch({ type: "syncChatTitles", sessions: (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.key === sessionId ? data.conversation.title : row.title })), subagents: [] });
-        void hermesChats.reload();
-        return;
-      }
       await fetch(`/api/web-sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2237,8 +2228,9 @@ function WorkspacePageInner() {
   }, [activeSessionId, sessions]);
 
   useEffect(() => {
-    dispatch({ type: "syncChatTitles", sessions, subagents });
-  }, [sessions, subagents]);
+    if (hermesChats.enabled) dispatch({ type: "syncChatTitles", sessions: (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.title })), subagents: [] });
+    else dispatch({ type: "syncChatTitles", sessions, subagents });
+  }, [hermesChats.enabled, hermesChats.listing, sessions, subagents]);
 
   // Promote the active draft chat tab's title to the (newly named) active
   // session title once the backend assigns one.
@@ -2419,6 +2411,10 @@ function WorkspacePageInner() {
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
     onNavigateToCrmObject: handleNavigateToObject,
     onNewChatSession: () => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(),
+    newChatOptions: hermesChats.enabled ? [
+      { label: "Solo chat…", onSelect: () => hermesChats.newChat("solo") },
+      { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
+    ] : undefined,
     chatsPanel: (
       hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
         embedded
@@ -2696,7 +2692,8 @@ function WorkspacePageInner() {
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
-          {hermesChats.enabled && (hermesChats.composerOpen || !hermesChats.selected || hermesChats.selected.kind === "group") && <HermesConversationPanel chats={hermesChats} />}
+          {hermesChats.enabled && (!hermesChats.selected || hermesChats.selected.kind === "group") && <HermesConversationPanel chats={hermesChats} />}
+          {hermesChats.enabled && <HermesNewChatDialog chats={hermesChats} />}
           {mainChatTabs.map((tab) => {
             let nativeKey: string | undefined;
             if (hermesChats.enabled) {
@@ -2707,7 +2704,7 @@ function WorkspacePageInner() {
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
               : null;
-            const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || (!hermesChats.composerOpen && hermesChats.selected?.key === nativeKey));
+            const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || hermesChats.selected?.key === nativeKey);
             const showLeftToggle = !isMobile && leftSidebarCollapsed;
             const showRightToggle = !isMobile && rightPanelCollapsed;
             const headerLeftSlot = showLeftToggle ? (

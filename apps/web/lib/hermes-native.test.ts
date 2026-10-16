@@ -40,24 +40,29 @@ describe("native Hermes conversations", () => {
     expect(key).not.toBe(conversationKey("solo", "same/id", "default"));
     expect(() => parseConversationKey("bogus")).toThrow();
   });
-  it("paginates all profiles, deduplicates pins and rooms, hides execution sessions, and uses actual working not worker presence", async () => {
+  it("lists the newest page per profile, hides execution sessions, and uses actual working not worker presence", async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = new URL(input); const alpha = url.pathname.includes("/alpha/");
       if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2 }], has_more: false });
-      const offset = url.searchParams.get("offset");
-      return Response.json({ data: offset === "0" ? [{ id: "shared-id", title: "Sol chat", last_active: 3 }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }] : [{ id: "shared-id", title: "Sol chat", last_active: 3 }, { id: "older", started_at: 1 }], has_more: offset === "0" });
+      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3 }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
     });
     vi.stubGlobal("fetch", fetchMock);
-    handler = (method, params) => method === "groups.list" ? { rooms: [room], next_offset: params.offset === 0 ? 100 : null } : { room, driver_status: { running: true, working: false } };
+    handler = (method, params) => method === "groups.list" ? { rooms: [room], next_offset: params.offset === 0 ? 100 : null } : { room, driver_status: { running: true, working: false, blocked: true } };
     await startGateway();
     const data = await listConversations();
-    expect(data.sessions).toHaveLength(4);
+    expect(data.sessions).toHaveLength(3);
     expect(data.sessions.filter((r) => r.id === "shared-id")).toHaveLength(2);
-    expect(data.sessions.find((r) => r.kind === "group")?.working).toBe(false);
+    expect(data.sessions.find((r) => r.kind === "group")).toMatchObject({ working: false, blocked: true });
     expect(data.sessions.find((r) => r.kind === "solo")?.working).toBeNull();
     expect(data.warnings).toEqual([]);
     expect(filterConversations(data.sessions, "alpha").map((r) => r.title)).toEqual(["Alpha and Sol", "Alpha chat"]);
-    expect(fetchMock.mock.calls.some(([url]) => url.includes("offset=200"))).toBe(true);
+    expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=100&offset=0"))).toBe(true);
+  });
+  it("keeps other profiles' chats when one profile's sessions cannot be read", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => input.includes("/alpha/") ? new Response("{}", { status: 401 }) : Response.json({ data: [{ id: "sol", title: "Sol chat" }] })));
+    const result = await listConversations();
+    expect(result.sessions.map((r) => r.title)).toEqual(["Sol chat"]);
+    expect(result.warnings).toContain("Could not load chats for alpha");
   });
   it("reports unavailable group transport without hiding solo chats", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "solo" }], has_more: false })));

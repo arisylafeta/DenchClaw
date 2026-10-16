@@ -127,19 +127,11 @@ export async function listConversations() {
   const warnings: string[] = [];
   const profiles = hermesProfiles();
   const soloLists = await Promise.all(profiles.map(async (profile) => {
-    const rows = new Map<string, HermesConversation>();
+    // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
-      for (let offset = 0; ; offset += 200) {
-        const page = await (await nativeFetch(profile, `/api/sessions?limit=200&offset=${offset}`)).json() as { data: NativeSession[]; has_more: boolean };
-        for (const row of page.data) {
-          if (row.source === "bot_room" || row.hidden || row.is_internal_child) continue;
-          rows.set(row.id, soloConversation(profile, row));
-        }
-        if (!page.has_more) break;
-        if (offset >= 1_000_000) throw new Error("Hermes session pagination exceeded its limit");
-      }
-    } catch { warnings.push(`Could not load all chats for ${profile}`); }
-    return [...rows.values()];
+      const page = await (await nativeFetch(profile, "/api/sessions?limit=100&offset=0")).json() as { data: NativeSession[] };
+      return page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
+    } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
   const rooms = new Map<string, HermesConversation>();
   if (groupsConfigured()) {
@@ -155,6 +147,7 @@ export async function listConversations() {
         try {
           const state = await groupRpc<RoomState>("groups.state", { room_id: row.id });
           row.working = state.driver_status?.working ?? null;
+          row.blocked = state.driver_status?.blocked ?? false;
         } catch { /* Unknown status must not be mistaken for idle or working. */ }
       }));
     } catch { warnings.push("Could not load all Hermes group chats"); }
