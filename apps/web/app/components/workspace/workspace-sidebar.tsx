@@ -79,6 +79,7 @@ function indexItemToSuggestItem(item: SearchIndexItem): SuggestItem {
 }
 
 type WorkspaceSidebarProps = {
+  conversationFilter?: { value: string | null; profiles: string[]; onChange: (profile: string | null) => void };
 	// NOTE: v3 three-column refactor — file tree lives in the right panel now.
 	// `tree`, `activePath`, `onSelect`, etc. are accepted for API compatibility but unused here.
 	tree?: TreeNode[];
@@ -313,6 +314,7 @@ export function WorkspaceSidebar({
 	onToggleCompact,
   activeWorkspace,
   onWorkspaceChanged,
+  conversationFilter,
   onNavigate,
   activeCrmTarget = null,
   activePlatformTarget = null,
@@ -557,6 +559,7 @@ export function WorkspaceSidebar({
 			{/* Header: workspace switcher (icon-only). Click opens dropdown to switch workspaces. */}
 			<div className="flex items-center justify-center pb-0.5 shrink-0">
 				<ProfileSwitcher
+					conversationFilter={conversationFilter}
 					activeWorkspaceHint={activeWorkspace ?? null}
 					onWorkspaceSwitch={() => { onWorkspaceChanged?.(); }}
 					onWorkspaceDelete={() => { onWorkspaceChanged?.(); }}
@@ -569,7 +572,7 @@ export function WorkspaceSidebar({
 							className="w-7 h-7 mx-auto rounded-lg overflow-hidden flex items-center justify-center transition-opacity hover:opacity-90"
 							title={`${orgName || "Workspace"}${workspaceName ? ` — ${workspaceName}` : ""}`}
 						>
-							{workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-7 w-7" />}
+							{workspaceName ? <ProfileAvatar key={workspaceName} name={workspaceName} className="h-7 w-7" /> : <span aria-label="All chats">∀</span>}
 						</button>
 					)}
 				/>
@@ -656,6 +659,7 @@ export function WorkspaceSidebar({
 			>
 				<div className="flex-1 min-w-0">
 					<ProfileSwitcher
+						conversationFilter={conversationFilter}
 						activeWorkspaceHint={activeWorkspace ?? null}
 						onWorkspaceSwitch={() => { onWorkspaceChanged?.(); }}
 						onWorkspaceDelete={() => { onWorkspaceChanged?.(); }}

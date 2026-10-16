@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProfileSwitcher } from "./profile-switcher";
+import { bundledProfileAvatar } from "@/lib/profile-avatars";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -32,7 +33,7 @@ describe("ProfileSwitcher workspace delete action", () => {
     expect(menu.textContent).not.toContain("/profiles/");
     expect(screen.getAllByText("default").find((node) => menu.contains(node))?.closest(".group")).toHaveTextContent("Active");
     expect(screen.getByText("the-enricher").closest(".group")).not.toHaveTextContent("Active");
-    const avatar = menu.querySelector('img[src="/api/workspace/avatar?name=the-enricher"]')!;
+    const avatar = menu.querySelector(`img[src="${bundledProfileAvatar("the-enricher")}"]`)!;
     expect(avatar).toBeTruthy();
     const fallback = avatar.parentElement!;
     fireEvent.error(avatar);

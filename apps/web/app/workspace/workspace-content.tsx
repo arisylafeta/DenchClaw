@@ -97,6 +97,7 @@ import {
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
+import { useHermesConversations, HermesConversationList, HermesConversationPanel } from "../components/workspace/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
   DropdownMenu,
@@ -537,6 +538,7 @@ function WorkspacePageInner() {
   const [context, setContext] = useState<WorkspaceContext | null>(null);
 
   // Chat session state
+  const hermesChats = useHermesConversations();
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<WebSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -2348,6 +2350,7 @@ function WorkspacePageInner() {
   const customCrmObjects = useMemo(() => collectCrmObjectNodes(sidebarNavTree), [sidebarNavTree]);
 
   const sidebarCommonProps = {
+    conversationFilter: hermesChats.enabled ? { value: hermesChats.filter, profiles: hermesChats.listing?.profiles ?? [], onChange: hermesChats.setFilter } : undefined,
     activePath: null,
     loading: treeLoading,
     orgName: context?.organization?.name,
@@ -2382,9 +2385,9 @@ function WorkspacePageInner() {
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
     onNavigateToCrmObject: handleNavigateToObject,
-    onNewChatSession: () => openPermanentBlankChatTab(),
+    onNewChatSession: () => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(),
     chatsPanel: (
-      <ChatSessionsSidebar
+      hermesChats.enabled ? <HermesConversationList chats={hermesChats} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2640,7 +2643,7 @@ function WorkspacePageInner() {
               </button>
               <button
                 type="button"
-                onClick={() => openPermanentBlankChatTab()}
+                onClick={() => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab()}
                 className="p-1.5 rounded-lg flex-shrink-0"
                 style={{ color: "var(--color-text-muted)" }}
                 title="New chat"
@@ -2655,7 +2658,7 @@ function WorkspacePageInner() {
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
-          {mainChatTabs.map((tab) => {
+          {hermesChats.enabled ? <HermesConversationPanel chats={hermesChats} /> : mainChatTabs.map((tab) => {
             const isGateway = tab.variant === "gateway";
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
