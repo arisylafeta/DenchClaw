@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { ProfileAvatar } from "./profile-avatar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -41,13 +42,6 @@ type ProfileSwitcherProps = {
   /** When set, this renders instead of the default button; dropdown still opens below. */
   trigger?: (props: ProfileSwitcherTriggerProps) => React.ReactNode;
 };
-
-function shortenPath(p: string): string {
-  return p
-    .replace(/^\/Users\/[^/]+/, "~")
-    .replace(/^\/home\/[^/]+/, "~")
-    .replace(/^[A-Za-z]:[/\\]Users[/\\][^/\\]+/, "~");
-}
 
 export function ProfileSwitcher({
   onWorkspaceSwitch,
@@ -210,10 +204,7 @@ export function ProfileSwitcher({
           style={{ color: "var(--color-text-secondary)" }}
           title="Switch workspace"
         >
-          {/* Workspace icon */}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-          </svg>
+          {activeWorkspace && <ProfileAvatar key={activeWorkspace} name={activeWorkspace} className="h-6 w-6" />}
           <span className="truncate max-w-[120px]">
             {activeWorkspace ?? "No workspace"}
           </span>
@@ -252,24 +243,10 @@ export function ProfileSwitcher({
                   style={{ color: "var(--color-text)" }}
                 >
                   <div className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-1.5">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{
-                        background: isCurrent ? "var(--color-success)" : "transparent",
-                        border: isCurrent ? "none" : "1px solid var(--color-border-strong)",
-                      }}
-                    />
+                    <ProfileAvatar name={workspace.name} />
                     <div className="flex-1 min-w-0">
                       <span className="truncate font-medium text-[13px] block">
                         {workspace.name}
-                      </span>
-                      <span
-                        className="text-[11px] truncate block mt-0.5"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        {workspace.workspaceDir
-                          ? shortenPath(workspace.workspaceDir)
-                          : "No workspace yet"}
                       </span>
                     </div>
                     {isCurrent && (
