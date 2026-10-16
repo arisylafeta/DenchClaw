@@ -1,6 +1,11 @@
 import importlib.util
+import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from contextlib import closing
 
 MODULE_PATH = Path(__file__).with_name("load_bulk_trade_manifest.py")
 SPEC = importlib.util.spec_from_file_location("bulk_trade_manifest", MODULE_PATH)
@@ -56,6 +61,39 @@ class BulkTradeManifestTest(unittest.TestCase):
         manifest["lots"][0]["source_manifest"] = {"marketplace_status": "accepted"}
         with self.assertRaisesRegex(ValueError, "marketplace transaction state"):
             MODULE.validate_manifest(manifest)
+
+    def test_rejects_unknown_origin(self):
+        manifest = self.valid_manifest()
+        manifest["lots"][0]["origin"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "invalid origin"):
+            MODULE.validate_manifest(manifest)
+
+    @unittest.skipUnless(os.environ.get("BULK_TRADES_TEST_DATABASE_URL"), "requires disposable Postgres")
+    def test_loads_and_updates_the_origin_of_demand_lots(self):
+        import psycopg2
+
+        url = os.environ["BULK_TRADES_TEST_DATABASE_URL"]
+        if "_test" not in url:
+            self.fail("Use a disposable test database")
+        connect = psycopg2.connect
+        manifest = self.valid_manifest()
+        manifest["lots"][0]["id"] = "manifest_origin_regression"
+        manifest["parties"] = []
+        manifest["evidence_links"] = []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            for kind, origin in (("demand", None), ("supply", None), ("supply", "demand")):
+                lot = manifest["lots"][0]
+                lot["lot_kind"] = kind
+                if origin is not None:
+                    lot["origin"] = origin
+                path.write_text(json.dumps(manifest))
+                # Redirect only the loader's connection; it must never reach the live hardcoded database.
+                with patch("psycopg2.connect", side_effect=lambda **kwargs: connect(url)):
+                    MODULE.load_manifest(path)
+                with closing(connect(url)) as connection, connection.cursor() as cursor:
+                    cursor.execute("select origin from crm_bulk_trade_lots where id = %s", (lot["id"],))
+                    self.assertEqual(cursor.fetchone()[0], origin or kind)
 
 
 if __name__ == "__main__":

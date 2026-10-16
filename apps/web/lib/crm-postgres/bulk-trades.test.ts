@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
@@ -59,6 +60,15 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
     expect(await db.getBulkTrade(trade.id)).toMatchObject({ last_touched: "2099-04-01", has_buyer: true });
     const unrelated = await db.createBulkTrade({ title: "Unrelated trade" }, userId);
     expect((await db.getBulkTrade(unrelated.id))?.last_touched).not.toBe("2099-04-01");
+    // The same company participates in both trades: explicit attribution must win over participants.
+    await pg.queryPg("insert into crm_bulk_trade_buyers (id, lot_id, name, person_id) values ('btb_' || gen_random_uuid(), $1, 'Synthetic STN Link Buyer', $2)", [unrelated.id, person.id]);
+    await pg.queryPg("insert into crm_bulk_trade_threads (thread_key, lot_id, verdict) values ($1, $2, 'trade')",
+      [`gmail:${thread.gmail_thread_id}`, trade.id]);
+    expect((await db.getBulkTrade(unrelated.id))?.last_touched).not.toBe("2099-04-01");
+    expect((await db.getBulkTrade(trade.id))?.last_touched).toBe("2099-04-01");
+    await pg.queryPg("update crm_bulk_trade_threads set lot_id = null, verdict = 'none' where thread_key = $1", [`gmail:${thread.gmail_thread_id}`]);
+    expect((await db.getBulkTrade(trade.id))?.last_touched).not.toBe("2099-04-01");
+    expect((await db.getBulkTrade(unrelated.id))?.last_touched).not.toBe("2099-04-01");
   });
 
   it("keeps origin independent from whether each counterparty is known", async () => {
@@ -66,6 +76,35 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
     expect(trade).toMatchObject({ origin: "demand", has_seller: false, has_buyer: false });
     expect(await db.updateBulkTrade(trade.id, { seller_name: "Known supplier" }, userId))
       .toMatchObject({ origin: "demand", seller_name: "Known supplier", has_seller: true });
+  });
+
+  it("preserves manually curated sellers when the historical repair is replayed", async () => {
+    const migration = readFileSync(new URL("./migrations/047_bulk_trade_seller_evidence.sql", import.meta.url), "utf8");
+    await pg.queryPg(migration);
+    const manual = await db.createBulkTrade({ title: "Manual seller replay regression", seller_name: "Curated supplier" }, userId);
+    const supply = await db.createBulkTrade({ title: "Supply seller replay regression", seller_ref: "supply:curated", seller_name: "Curated supply" }, userId);
+    const stock = await db.createBulkTrade({ title: "Stock seller replay regression", seller_ref: "stock:curated", seller_name: "Curated stock" }, userId);
+    await pg.queryPg(migration);
+    expect(await db.getBulkTrade(manual.id)).toMatchObject({ seller_name: "Curated supplier", seller_ref: null });
+    expect(await db.getBulkTrade(supply.id)).toMatchObject({ seller_name: "Curated supply", seller_ref: "supply:curated" });
+    expect(await db.getBulkTrade(stock.id)).toMatchObject({ seller_name: "Curated stock", seller_ref: "stock:curated" });
+  });
+
+  it("resolves gmail_thread and gmail_message evidence without incidental participants", async () => {
+    const trade = await db.createBulkTrade({ title: "Explicit Gmail evidence regression" }, userId);
+    const [thread] = await pg.queryPg<{ id: string; gmail_thread_id: string }>(
+      `insert into crm_email_threads (id, gmail_thread_id, last_message_at)
+       values ('thread_' || gen_random_uuid(), gen_random_uuid()::text, '2099-05-01') returning id, gmail_thread_id`);
+    await pg.queryPg(`insert into crm_bulk_trade_evidence_links (lot_id, evidence_kind, evidence_id, relationship)
+      values ($1, 'gmail_thread', $2, 'supports')`, [trade.id, thread.gmail_thread_id]);
+    expect((await db.getBulkTrade(trade.id))?.last_touched).toBe("2099-05-01");
+    await pg.queryPg("delete from crm_bulk_trade_evidence_links where lot_id = $1", [trade.id]);
+    const [message] = await pg.queryPg<{ gmail_message_id: string }>(
+      `insert into crm_email_messages (id, thread_id, gmail_message_id, sent_at)
+       values ('message_' || gen_random_uuid(), $1, gen_random_uuid()::text, '2099-05-01') returning gmail_message_id`, [thread.id]);
+    await pg.queryPg(`insert into crm_bulk_trade_evidence_links (lot_id, evidence_kind, evidence_id, relationship)
+      values ($1, 'gmail_message', $2, 'supports')`, [trade.id, message.gmail_message_id]);
+    expect((await db.getBulkTrade(trade.id))?.last_touched).toBe("2099-05-01");
   });
 
   it("backfills sellers from supplier evidence, never buyer contacts or auction participants", async () => {

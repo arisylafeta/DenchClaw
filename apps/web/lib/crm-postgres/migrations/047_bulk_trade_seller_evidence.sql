@@ -83,10 +83,19 @@ select distinct on (lot_id) lot_id, display_name as seller_name,
 from safe where display_name is not null
 order by lot_id, rank, company_id nulls last, display_name;
 
--- Repeatable repair: only evidence-supported candidates survive, never arbitrary first contacts.
+-- Historical repair only. Later API/manual attribution is authoritative even without a candidate.
+create table if not exists crm_data_migrations (
+  id text primary key,
+  applied_at timestamptz not null default now()
+);
+do $$ begin
+  insert into crm_data_migrations (id) values ('047_bulk_trade_seller_evidence') on conflict do nothing;
+  if found then
 update crm_bulk_trade_lots lot set seller_name = candidate.seller_name, seller_ref = candidate.seller_ref
 from (select source.id, picked.seller_name, picked.seller_ref
   from crm_bulk_trade_lots source left join crm_bulk_trade_seller_candidates picked on picked.lot_id = source.id
 ) candidate
 where lot.id = candidate.id
   and (lot.seller_name is distinct from candidate.seller_name or lot.seller_ref is distinct from candidate.seller_ref);
+  end if;
+end $$;
