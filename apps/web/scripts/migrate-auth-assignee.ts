@@ -10,6 +10,12 @@ async function main() {
     "004_stock_commercial_fields.sql",
     "005_stock_enrichment_state.sql",
   ]) {
+    if (migration === "002_user_data_isolation.sql") {
+      const [state] = await queryPg<{ legacy: string | null }>(
+        "select to_regclass('public.crm_email_messages')::text as legacy",
+      );
+      if (!state?.legacy) continue; // Mail cutover already replaced the mailbox tables.
+    }
     const sql = readFileSync(
       join(import.meta.dirname, "../lib/crm-postgres/migrations", migration),
       "utf8",
@@ -37,11 +43,11 @@ async function main() {
       (select count(*)::text from crm_fields f join crm_objects o on o.id = f.object_id
         where o.name = 'crm_user' and f.name = 'Name' and f.canonical_column = 'display_name') as user_name_field,
       (select count(*)::text from information_schema.columns
-        where table_schema = 'public' and table_name = 'crm_email_threads' and column_name = 'mailbox_owner_id') as thread_owner_column,
+        where table_schema = 'public' and table_name = 'mail_thread' and column_name = 'mailbox_owner_id') as thread_owner_column,
       (select count(*)::text from information_schema.columns
-        where table_schema = 'public' and table_name = 'crm_email_messages' and column_name = 'mailbox_owner_id') as message_owner_column,
-      to_regclass('public.crm_email_threads_owner_gmail_uidx')::text as thread_owner_index,
-      to_regclass('public.crm_email_messages_owner_gmail_uidx')::text as message_owner_index
+        where table_schema = 'public' and table_name = 'mail_message' and column_name = 'mailbox_owner_id') as message_owner_column,
+      to_regclass('public.mail_thread_owner_gmail_uidx')::text as thread_owner_index,
+      to_regclass('public.mail_message_owner_gmail_uidx')::text as message_owner_index
   `);
   const verification = rows[0];
   if (
@@ -52,8 +58,8 @@ async function main() {
     verification.user_name_field !== "1" ||
     verification.thread_owner_column !== "1" ||
     verification.message_owner_column !== "1" ||
-    verification.thread_owner_index !== "crm_email_threads_owner_gmail_uidx" ||
-    verification.message_owner_index !== "crm_email_messages_owner_gmail_uidx"
+    verification.thread_owner_index !== "mail_thread_owner_gmail_uidx" ||
+    verification.message_owner_index !== "mail_message_owner_gmail_uidx"
   ) {
     throw new Error("auth/assignee migration verification failed");
   }

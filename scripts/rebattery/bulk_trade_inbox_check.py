@@ -13,7 +13,7 @@ Hermes cron runs on UTC, so the jobs fire every half hour and --only-at keeps th
 across daylight-saving changes. Outside those times the script exits silently.
 
 Sources:
-  Gmail   crm_email_messages for Alex's mailbox, synced hourly by gog_crm_sync.py.
+  Gmail   CRM-visible mail_message rows for Alex's mailbox, synced by rebattery-mail.
   Granola raw notes saved by granola-ingestion, refreshed at the start of each run.
 
 1. Candidates. A thread or call is a candidate for a trade when a participant is one of its
@@ -179,7 +179,7 @@ def load_trades(cur, lot_ids=None):
     cur.execute(
         """select link.lot_id, coalesce(thread.gmail_thread_id, link.evidence_id) as thread
            from crm_bulk_trade_evidence_links link
-           left join crm_email_threads thread on thread.id = link.evidence_id
+           left join mail_thread thread on thread.id = link.evidence_id and thread.crm_visible
            where link.evidence_kind = 'gmail_thread' and link.lot_id = any(%s)""", (ids,))
     for row in cur.fetchall():
         trades[row["lot_id"]]["threads"].add(f"gmail:{row['thread']}")
@@ -194,14 +194,14 @@ def load_trades(cur, lot_ids=None):
 
 EMAIL_SELECT = """
     select m.id, m.gmail_message_id, thread.gmail_thread_id, m.subject, m.sent_at, m.created_at,
-           m.from_email, coalesce(m.body, m.body_preview, '') as body, coalesce(m.has_attachments, false) as has_attachments,
+           m.from_email, coalesce(m.body_text, m.body_preview, '') as body, coalesce(m.has_attachments, false) as has_attachments,
            array_remove(array_agg(distinct p.email), null) as recipients
-    from crm_email_messages m
+    from mail_message m
     join crm_users owner on owner.id = m.mailbox_owner_id and lower(owner.email) = lower(%(mailbox)s)
-    left join crm_email_threads thread on thread.id = m.thread_id
-    left join crm_email_message_recipients r on r.message_id = m.id
+    left join mail_thread thread on thread.id = m.thread_id
+    left join mail_message_recipient r on r.message_id = m.id
     left join crm_people p on p.id = r.person_id
-    where {where}
+    where m.crm_visible and ({where})
     group by m.id, thread.gmail_thread_id
     order by coalesce(m.sent_at, m.created_at)"""
 
@@ -217,7 +217,7 @@ def load_trade_emails(cur, mailbox, emails, threads):
     cur.execute(EMAIL_SELECT.format(where="""
         lower(m.from_email) = any(%(emails)s)
         or thread.gmail_thread_id = any(%(threads)s)
-        or exists (select 1 from crm_email_message_recipients r2 join crm_people p2 on p2.id = r2.person_id
+        or exists (select 1 from mail_message_recipient r2 join crm_people p2 on p2.id = r2.person_id
                    where r2.message_id = m.id and lower(p2.email) = any(%(emails)s))"""),
         {"mailbox": mailbox, "emails": sorted(emails), "threads": sorted(t for t in threads if t)})
     return email_sources(cur.fetchall(), mailbox)
@@ -1196,14 +1196,14 @@ def outreach_contacts(cur, sources):
     if not senders:
         return set()
     cur.execute(
-        """select lower(p.email) as email from crm_campaign_sends s join crm_people p on p.id = s.person_id
-           where s.state = 'accepted' and lower(p.email) = any(%(senders)s)
+        """select lower(p.email) as email from mail_message s join crm_people p on p.id = s.person_id
+           where s.campaign_id is not null and s.state = 'accepted' and lower(p.email) = any(%(senders)s)
              and coalesce(s.accepted_at, s.created_at) > now() - make_interval(days => %(days)s)
            union
-           select distinct lower(their.from_email) from crm_email_messages ours
-           join crm_email_threads t on t.id = ours.thread_id
-           join crm_email_messages their on their.thread_id = ours.thread_id
-           where t.gmail_thread_id = any(%(threads)s) and lower(ours.from_email) like %(own)s
+           select distinct lower(their.from_email) from mail_message ours
+           join mail_thread t on t.id = ours.thread_id
+           join mail_message their on their.thread_id = ours.thread_id
+           where ours.crm_visible and their.crm_visible and t.gmail_thread_id = any(%(threads)s) and lower(ours.from_email) like %(own)s
              and lower(their.from_email) = any(%(senders)s) and ours.sent_at > now() - make_interval(days => %(days)s)""",
         {"senders": senders, "threads": threads, "own": "%@" + OWN_DOMAIN, "days": OUTREACH_DAYS})
     return {row["email"] for row in cur.fetchall()}

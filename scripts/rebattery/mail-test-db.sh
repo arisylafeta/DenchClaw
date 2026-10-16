@@ -4,8 +4,7 @@
 #   scripts/rebattery/mail-test-db.sh up     # start, load schema.sql and every migration, print the DSN
 #   scripts/rebattery/mail-test-db.sh down   # stop and delete it
 #
-# crm-test-db.sh cannot load an empty database past 034 because that migration expects the
-# production 'people' object to exist. This wrapper seeds it first.
+# Like crm-test-db.sh, seed the people object before 034 for a clean schema bootstrap.
 set -euo pipefail
 
 NAME="${MAIL_TEST_DB_NAME:-crm-test-mail}"
