@@ -219,7 +219,8 @@ export class HermesChatService {
         const unsubscribe = this.manager.subscribe(retained, event => {
           const payload = event.payload as { status?: string; error?: unknown } | undefined;
           if (!claimed && (event.type === "error" || (event.type === "message.complete" && (payload?.status === "error" || payload?.error)))) rejectDisconnected(new ChatServiceError(502, "prompt_failed"));
-          else if (["message.start", "message.delta", "tool.start", "tool.result", "message.complete"].includes(event.type)) { claimed = true; settle(); }
+          else if (!claimed && event.type === "message.complete" && payload?.status === "interrupted") rejectDisconnected(new ChatServiceError(409, "prompt_cancelled"));
+          else if (["message.start", "message.delta", "message.interim", "reasoning.delta", "reasoning.available", "tool.start", "tool.complete", "message.complete"].includes(event.type)) { claimed = true; settle(); }
         });
         try {
           const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text, queued: true });

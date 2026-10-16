@@ -278,6 +278,27 @@ describe("gateway chat service", () => {
     socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 100 } });
     await pending;
   });
+  it.each([
+    ["reasoning.delta", { text: "thinking" }],
+    ["tool.start", { tool_id: "call-1", name: "terminal", args: { command: "pwd" } }],
+    ["tool.complete", { tool_id: "call-1", name: "terminal", result: "/workspace" }],
+  ])("accepts a real %s event as media claim when start was missed", async (type, payload) => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    await flush(); await flush();
+    socket.receive({ method: "event", params: { type, session_id: "runtime-one", seq: 100, payload } });
+    await pending;
+    expect(socket.frames.some(frame => frame.method === "image.detach")).toBe(false);
+  });
+  it("detaches unclaimed images on an interrupted terminal event", async () => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    const rejected = expect(pending).rejects.toMatchObject({ status: 409, message: "prompt_cancelled" });
+    await flush(); await flush();
+    socket.receive({ method: "event", params: { type: "message.complete", session_id: "runtime-one", seq: 100, payload: { text: "", status: "interrupted" } } });
+    await rejected;
+    expect(socket.frames.filter(frame => frame.method === "image.detach")).toHaveLength(1);
+  });
   it("replays deltas arriving while subagent.list awaits after activation", async () => {
     socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
     socket.snapshot = { running: true, inflight: { user: "hello", assistant: "before" } };
