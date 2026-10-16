@@ -12,7 +12,7 @@ export type HermesConversation = {
   /** Hermes session source for solo chats (cron, webhook, discord, desktop, …). */
   source?: string;
   /** Group needs attention in Hermes (approval, retry or cancellation). */
-  blocked?: boolean;
+  blocked?: boolean | null;
 };
 export type HermesMessage = { id: string; role: string; text: string; content?: string; parts?: Record<string, unknown>[]; profile?: string; name?: string };
 export function conversationKey(kind: "solo" | "group", id: string, profile = ""): string {
