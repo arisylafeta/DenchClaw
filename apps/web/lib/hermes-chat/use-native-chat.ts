@@ -1,0 +1,160 @@
+'use client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { WorkspaceContext } from '../agent-message'
+import type { HermesConversation } from '../hermes-conversations'
+import { getHermesEventsClient, type ConnectionState } from './events-client'
+import { applyLive, applySnapshot, beginHydration, initialReconcileState, submitOptimistic, type ReconcileState } from './reconcile'
+import { messageText, reduce, type PendingRequest } from './reducer'
+import { mapMessageHtml, type MessageHtmlRow } from './html-map'
+
+export interface NativePrompt { text: string; images?: { content: string; mimeType: string; fileName?: string }[]; context?: WorkspaceContext; html?: string }
+export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
+const context = { now: () => Date.now(), id: () => crypto.randomUUID() }
+export interface NativeHermesChat {
+  state: ReconcileState
+  subagents: ReconcileState['subagents']
+  todos: ReconcileState['todos']
+  tails: Record<string, string>
+  connection: ConnectionState
+  readOnly: { source: string } | null
+  html: Map<string, string>
+  queuedMessageIds: string[]
+  send(prompt: NativePrompt): Promise<void>
+  interrupt(): Promise<void>
+  steer(text: string): Promise<void>
+  approve(request: PendingRequest, choice: 'once' | 'session' | 'always' | 'deny'): Promise<void>
+  answerClarify(request: PendingRequest, answers: Record<string, string | null>): Promise<void>
+  subagentTail(id: string): Promise<void>
+  subagentSteer(id: string, text: string): Promise<void>
+  subagentInterrupt(id: string): Promise<void>
+  retry(): Promise<void>
+  branch(): Promise<HermesConversation | null>
+}
+export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOptions): NativeHermesChat {
+  const [state, setState] = useState(() => initialReconcileState(null, conversationKey))
+  const current = useRef(state)
+  const [connection, setConnection] = useState<ConnectionState>('reconnecting')
+  const [readOnly, setReadOnly] = useState<{ source: string } | null>(null)
+  const [tails, setTails] = useState<Record<string, string>>({})
+  const [htmlRows, setHtmlRows] = useState<MessageHtmlRow[]>([])
+  const optimisticHtml = useRef(new Map<string, string>())
+  const queued = useRef(new Set<string>())
+  const activeKey = useRef(conversationKey)
+  activeKey.current = conversationKey
+  const update = useCallback((fn: (previous: ReconcileState) => ReconcileState) => {
+    current.current = fn(current.current)
+    setState(current.current)
+  }, [])
+  const surface = useCallback((message: string) => update(previous => ({ ...previous, ...reduce(previous, { type: 'error', payload: { message } }, context) })), [update])
+  const resync = useCallback(() => {
+    if (!conversationKey || !enabled) return
+    update(previous => beginHydration(previous))
+    getHermesEventsClient().resubscribe(conversationKey)
+  }, [conversationKey, enabled, update])
+  useEffect(() => {
+    setReadOnly(null); setTails({}); setHtmlRows([]); optimisticHtml.current.clear(); queued.current.clear()
+    update(previous => beginHydration(previous, conversationKey ?? null, conversationKey ?? null))
+    if (!enabled || !conversationKey) return
+    return getHermesEventsClient().subscribe(conversationKey, {
+      snapshot(snapshot) {
+        if (activeKey.current !== conversationKey) return
+        update(previous => applySnapshot(previous, snapshot, previous.loadToken, context))
+        setHtmlRows(snapshot.html ?? [])
+        const source = snapshot.conversation.source
+        setReadOnly(source === 'cron' || source === 'webhook' ? { source } : null)
+        if (!snapshot.running) queued.current.clear()
+      },
+      event(event) {
+        if (activeKey.current !== conversationKey) return
+        update(previous => applyLive(previous, [event], context))
+        if (current.current.resyncRequired || event.type === 'message.complete') resync()
+        if (!current.current.busy) queued.current.clear()
+      },
+      request(request) {
+        if (activeKey.current !== conversationKey) return
+        update(previous => ({ ...previous, ...reduce(previous, { type: request.method === 'approval' ? 'approval.request' : 'clarify.request', requestId: request.id, payload: request.params }, context) }))
+      },
+      error: surface,
+      connection: setConnection,
+    })
+  }, [conversationKey, enabled, resync, surface, update])
+  const post = useCallback(async (action: string, body: unknown): Promise<Record<string, unknown>> => {
+    const key = conversationKey
+    if (!key || !enabled) throw new Error('No active gateway conversation')
+    try {
+      const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const result = await response.json()
+      if (!response.ok) {
+        if (result.error === 'automation_read_only' && activeKey.current === key) setReadOnly({ source: 'automation' })
+        throw new Error(result.error || `Gateway ${action} failed (${response.status})`)
+      }
+      return result
+    } catch (error) {
+      if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  }, [conversationKey, enabled, surface])
+  const send = useCallback(async (prompt: NativePrompt) => {
+    if (readOnly) { surface('automation_read_only'); return }
+    const key = conversationKey
+    const clientMessageId = crypto.randomUUID()
+    const wasBusy = current.current.busy
+    if (current.current.busy) queued.current.add(clientMessageId)
+    if (prompt.html) optimisticHtml.current.set(clientMessageId, prompt.html)
+    update(previous => submitOptimistic(wasBusy ? previous : { ...previous, interrupted: false, optimisticSentAt: Date.now(), streamId: null, heartbeatSettledStreamId: null, sawAssistantPayload: false, interimBoundaryPending: false }, { clientId: clientMessageId, text: prompt.text }))
+    try {
+      const result = await post('prompt', { ...prompt, clientMessageId })
+      if (activeKey.current !== key) return
+      if (result.autoContinue) update(previous => ({ ...previous, status: 'Hermes is continuing an interrupted turn; your message is queued' }))
+    } catch {
+      // Failed/ambiguous submissions remain visible, but are never submitted automatically again.
+      if (activeKey.current !== key) return
+      queued.current.delete(clientMessageId)
+      update(previous => ({ ...previous, busy: wasBusy, awaitingResponse: false,
+        messages: previous.messages.map(message => message.id === clientMessageId ? { ...message, pending: false } : message) }))
+    }
+  }, [post, readOnly, surface, update, conversationKey])
+  const resolveRequest = useCallback(async (request: PendingRequest, action: string, body: unknown) => {
+    const key = conversationKey
+    await post(action, body)
+    if (activeKey.current !== key) return
+    update(previous => ({ ...previous, ...reduce(previous, { type: 'request.cancel', payload: { id: String(request.id) } }, context) }))
+  }, [post, update, conversationKey])
+  const html = mapMessageHtml(state.messages, htmlRows)
+  for (const message of state.messages) {
+    const ids = message.clientIds ?? (message.source === 'optimistic' ? [message.id] : [])
+    if (ids.length === 1 && optimisticHtml.current.has(ids[0])) html.set(message.id, optimisticHtml.current.get(ids[0])!)
+  }
+  return {
+    state, subagents: state.subagents, todos: state.todos, tails, connection, send, readOnly, html,
+    retry: async () => {
+      const lastUser = current.current.messages.findLast(message => message.role === 'user')
+      if (lastUser) await send({ text: messageText(lastUser), html: html.get(lastUser.id) })
+      else resync()
+    },
+    queuedMessageIds: state.messages.filter(message => queued.current.has(message.id) || message.source === 'queued').map(message => message.id),
+    interrupt: async () => {
+      const key = conversationKey
+      try {
+        await post('interrupt', {})
+        if (activeKey.current !== key) return
+        const removed = new Set(queued.current)
+        queued.current.clear()
+        update(previous => ({ ...previous,
+          optimistic: previous.optimistic.filter(submission => !removed.has(submission.clientId)),
+          messages: previous.messages.filter(message => !removed.has(message.id) && message.source !== 'queued') }))
+      } catch { /* surfaced */ }
+    },
+    steer: async (text: string) => { try { await post('steer', { text }) } catch { /* surfaced */ } },
+    approve: (request: PendingRequest, choice: 'once' | 'session' | 'always' | 'deny') => resolveRequest(request, 'approval', { request_id: request.requestId ?? request.payload.request_id ?? request.id, choice }),
+    answerClarify: (request: PendingRequest, answers: Record<string, string | null>) => resolveRequest(request, 'clarify', { request_id: request.id, answers }),
+    subagentTail: async (id: string) => {
+      const key = conversationKey
+      const result = await post('subagent', { action: 'tail', subagent_id: id })
+      if (activeKey.current === key) setTails(previous => ({ ...previous, [id]: typeof result.tail === 'string' ? result.tail : JSON.stringify(result.tail ?? result) }))
+    },
+    subagentSteer: async (id: string, text: string) => { await post('subagent', { action: 'steer', subagent_id: id, text }) },
+    subagentInterrupt: async (id: string) => { await post('subagent', { action: 'interrupt', subagent_id: id }) },
+    branch: async (): Promise<HermesConversation | null> => { try { return (await post('branch', {})).conversation as HermesConversation } catch { return null } },
+  }
+}
