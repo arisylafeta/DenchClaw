@@ -1,0 +1,21 @@
+import { currentUser } from "@/lib/auth";
+import { resolveAgentBackend } from "@/lib/agent-backend";
+import { authorizeConversation, ChatServiceError, getHermesChatService, parseGatewayPrompt } from "@/lib/hermes-gateway/chat-service";
+export type GatewayRouteContext = { params: Promise<{ key: string }> };
+export async function gatewayCommand(req: Request, context: GatewayRouteContext, action: string) {
+  if (!(await currentUser())) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (resolveAgentBackend() !== "hermes") return Response.json({ error: "Hermes is not enabled" }, { status: 404 });
+  try {
+    const { key } = await context.params;
+    authorizeConversation(key);
+    const body = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new ChatServiceError(400, "invalid_body");
+    const service = getHermesChatService();
+    const result = action === "prompt" ? await service.sendPrompt(key, parseGatewayPrompt(body))
+      : action === "branch" ? { conversation: await service.branchConversation(key) }
+      : await service.command(key, action, body);
+    return Response.json(result);
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "gateway_failed" }, { status: error instanceof ChatServiceError ? error.status : error instanceof SyntaxError ? 400 : 502 });
+  }
+}
