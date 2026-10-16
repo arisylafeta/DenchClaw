@@ -20,6 +20,7 @@ export interface PendingServerRequest {
   replayed?: boolean;
 }
 export interface ReplayResult { generation: number; latestSeq: number; events: GatewaySessionEvent[]; truncated: boolean }
+export type LiveSessionSnapshot = SessionResumeResult & { replayBoundary: { generation: number; seq: number } };
 export interface GatewayClock {
   now(): number;
   setTimeout(callback: () => void, delay: number): unknown;
@@ -57,6 +58,7 @@ interface SessionState extends RetainedSession {
   bytes: number;
   operations: number;
   children: Set<string>;
+  verifiedRuntimes: Set<string>;
 }
 const defaultClock: GatewayClock = {
   now: () => Date.now(),
@@ -229,6 +231,7 @@ export class HermesGatewayManager {
       if (error instanceof JsonRpcGatewayError && error.code === 4001) {
         session.runtimeId = undefined;
         session.active = false;
+        session.children.clear();
         this.resync(session, "session_reclaimed");
         throw new Error("session_not_live: runtime reclaimed; send a new prompt to resume");
       }
@@ -245,12 +248,12 @@ export class HermesGatewayManager {
         if (!idle) throw new Error("gateway_session_capacity");
         this.releaseSession(idle.key);
       }
-      session = { key, profile, storedSessionId, generation: 1, events: [], seq: 0, truncated: false, subscribers: new Set(), requests: new Map(), tail: Promise.resolve(), touched: this.clock.now(), active: false, bytes: 0, operations: 0, children: new Set() };
+      session = { key, profile, storedSessionId, generation: 1, events: [], seq: 0, truncated: false, subscribers: new Set(), requests: new Map(), tail: Promise.resolve(), touched: this.clock.now(), active: false, bytes: 0, operations: 0, children: new Set(), verifiedRuntimes: new Set() };
       this.sessions.set(key, session);
       this.retireIdle();
     }
     session.touched = this.clock.now();
-    if (runtimeId) this.adoptRuntime(session, runtimeId);
+    if (runtimeId) { session.verifiedRuntimes.add(runtimeId); this.adoptRuntime(session, runtimeId); }
     return key;
   }
   session(key: string): RetainedSession | undefined {
@@ -271,7 +274,7 @@ export class HermesGatewayManager {
     if (!this.stopped && this.retirementTimer === undefined) this.retirementTimer = this.later(() => { this.retirementTimer = undefined; this.retireIdle(); }, this.options.idleMs ?? 300_000);
   }
   private requireSession(key: string): SessionState { const session = this.sessions.get(key); if (!session) throw new Error("Unknown retained Hermes session"); session.touched = this.clock.now(); return session; }
-  private bump(session: SessionState): void { session.generation++; session.seq = 0; session.events = []; session.bytes = 0; session.truncated = true; session.requests.clear(); this.resync(session, "generation_change"); }
+  private bump(session: SessionState): void { session.generation++; session.seq = 0; session.events = []; session.bytes = 0; session.truncated = true; session.requests.clear(); session.children.clear(); this.resync(session, "generation_change"); }
   private adoptRuntime(session: SessionState, runtime: string): void {
     if (session.runtimeId && session.runtimeId !== runtime) this.bump(session);
     session.runtimeId = runtime;
@@ -279,20 +282,22 @@ export class HermesGatewayManager {
       if (request.params.session_id === runtime) session.requests.set(request.id, request);
     }
   }
-  async attachLive(key: string, runtimeId: string): Promise<SessionResumeResult | undefined> {
+  async attachLive(key: string, runtimeId: string): Promise<LiveSessionSnapshot | undefined> {
     const session = this.requireSession(key);
     try {
       const result = await this.call("session.activate", { profile: session.profile, session_id: runtimeId, omit_messages: true });
-      // Lazy runtimes have no agent, so Hermes omits info.profile_name.
-      // Keep the retained request's profile and reject positive identity mismatches.
-      if ((result.info.profile_name && result.info.profile_name !== session.profile)
-        || (result.session_key && result.session_key !== session.storedSessionId)
+      // active_list is cross-profile, and lazy activation omits profile_name.
+      // A stored-id match (even in both profile stores) cannot prove runtime ownership.
+      if ((result.info.profile_name ? result.info.profile_name !== session.profile : !session.verifiedRuntimes.has(runtimeId))
+        || (result.session_key ?? result.stored_session_id) !== session.storedSessionId
         || (result.stored_session_id && result.stored_session_id !== session.storedSessionId)
         || result.session_id !== runtimeId) return undefined;
+      session.verifiedRuntimes.add(runtimeId);
       this.adoptRuntime(session, runtimeId);
       session.active = Boolean(result.running);
+      const replayBoundary = { generation: session.generation, seq: session.seq };
       await this.refreshChildren(session);
-      return result;
+      return { ...result, replayBoundary };
     } catch (error) {
       if (error instanceof JsonRpcGatewayError && [4001, 4007, 4009].includes(error.code ?? 0)) return undefined;
       throw error;
@@ -311,6 +316,7 @@ export class HermesGatewayManager {
       try {
         const result = await this.call("session.resume", { profile: session.profile, session_id: session.storedSessionId, source: "crm", close_on_disconnect: false, omit_messages: true });
         if (this.sessions.get(session.key) !== session) throw new Error("Session released while resuming");
+        session.verifiedRuntimes.add(result.session_id);
         this.adoptRuntime(session, result.session_id);
         session.active = Boolean(result.running || result.auto_continue);
         await this.refreshChildren(session);
@@ -370,7 +376,7 @@ export class HermesGatewayManager {
   private onEvent(event: GatewayEvent): void {
     if (event.type === "gateway.ready") {
       const epoch = (event.payload as { replay_epoch?: string } | undefined)?.replay_epoch;
-      if (epoch && this.epoch && epoch !== this.epoch) for (const session of this.sessions.values()) this.bump(session);
+      if (epoch && this.epoch && epoch !== this.epoch) for (const session of this.sessions.values()) { session.verifiedRuntimes.clear(); this.bump(session); }
       if (epoch) this.epoch = epoch;
       this.ready = true;
       this.reconnectAttempt = 0;
@@ -386,7 +392,7 @@ export class HermesGatewayManager {
     if (event.type === "session.reclaimed") {
       const runtime = (event.payload as { session_id?: string } | undefined)?.session_id;
       for (const session of this.sessions.values()) if (runtime && session.runtimeId === runtime) {
-        session.runtimeId = undefined; session.active = false; session.requests.clear();
+        session.runtimeId = undefined; session.active = false; session.requests.clear(); session.children.clear();
         this.resync(session, "session_reclaimed");
       }
       return;
@@ -421,14 +427,14 @@ export class HermesGatewayManager {
     session.held = held;
     try {
       if (!session.runtimeId || !(await this.attachLive(session.key, session.runtimeId))) {
-        session.runtimeId = undefined; session.active = false; this.resync(session, "session_reclaimed"); return;
+        session.runtimeId = undefined; session.active = false; session.children.clear(); this.resync(session, "session_reclaimed"); return;
       }
       if (!session.runtimeId || this.socket !== socket) return;
       const result = await this.call("session.events.since", { session_id: session.runtimeId, profile: session.profile, last_seen: session.seq });
       if (this.socket !== socket) return;
       if (result.epoch && result.epoch !== this.epoch) {
         this.epoch = result.epoch;
-        for (const retained of this.sessions.values()) this.bump(retained);
+        for (const retained of this.sessions.values()) { retained.verifiedRuntimes.clear(); this.bump(retained); }
         return;
       }
       if (result.truncated) {
@@ -451,7 +457,11 @@ export class HermesGatewayManager {
   }
 
   private onRequest(request: ServerRequest): boolean {
-    if (request.method !== "approval" && request.method !== "clarify") return false;
+    if (request.method !== "approval" && request.method !== "clarify") {
+      // Returning false sends -32601, which settles the shared request before Desktop.
+      request.decline?.("This client does not own a Desktop window");
+      return true;
+    }
     this.openRequests.set(request.id, request);
     for (const session of this.sessions.values()) {
       if (session.runtimeId !== request.params.session_id) continue;

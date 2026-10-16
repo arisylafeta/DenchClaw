@@ -27,19 +27,23 @@ class FakeSocket implements GatewaySocket {
   deferConsumption = false;
   activeRows: { id: string; session_key: string; status: string }[] = [];
   snapshot: Record<string, unknown> = {};
+  replayEvents: unknown[] = [];
+  onChildren?: () => void;
   emit(type: string, event: unknown = {}) { for (const handler of this.listeners[type] ?? []) handler(event); }
   receive(frame: Frame) { this.emit("message", { data: JSON.stringify({ jsonrpc: "2.0", ...frame }) }); }
   send(text: string) {
     const frame = JSON.parse(text) as Frame; this.frames.push(frame);
     if (!frame.method || frame.method === "event") return;
+    if (frame.method === "subagent.list") this.onChildren?.();
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
-      : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { lazy: true, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
+      : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { profile_name: "ari", lazy: false, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
       : frame.method === "image.attach_bytes" ? { attached: true, path: "/image" }
       : frame.method === "session.create" ? { session_id: "runtime-one", stored_session_id: "one" }
+      : frame.method === "session.interrupt" ? { status: "interrupted" }
       : frame.method === "prompt.submit" ? { status: this.busy ? "queued" : "streaming" }
-      : frame.method === "session.events.since" ? { events: [], latest_seq: 0, epoch: "e" } : {};
+      : frame.method === "session.events.since" ? { events: this.replayEvents, latest_seq: 100, epoch: "e" } : {};
     this.receive({ id: frame.id, result });
     if (frame.method === "prompt.submit" && !this.busy && !this.deferConsumption) this.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: this.frames.length, payload: {} } });
   }
@@ -223,5 +227,68 @@ describe("gateway chat service", () => {
     await service.command(key, "interrupt", {});
     await rejected;
     expect(socket.frames.find(frame => frame.method === "image.detach")?.params).toMatchObject({ session_id: "runtime-one", path: "/image" });
+  });
+  it.each(["message.complete", "error"])("rejects initialization %s before media admission", async type => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    const rejected = expect(pending).rejects.toMatchObject({ status: 502, message: "prompt_failed" });
+    await flush(); await flush();
+    socket.receive({ method: "event", params: { type, session_id: "runtime-one", seq: 100, payload: type === "error" ? { message: "Agent initialization failed" } : { text: "", status: "error", error: "Agent initialization failed", recoverable: true, error_surface: { layer: "runtime", code: "agent_init_failed", retryable: true } } } });
+    await rejected;
+    expect(socket.frames.filter(frame => frame.method === "image.detach")).toHaveLength(1);
+  });
+  it("keeps accepted media through disconnect and reconciles the claim via events.since", async () => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    await flush(); await flush();
+    const oldSocket = socket;
+    oldSocket.emit("close", { code: 1006 });
+    socket = new FakeSocket();
+    socket.replayEvents = [{ type: "message.start", session_id: "runtime-one", seq: 100 }];
+    const connected = manager.connect(); await flush();
+    socket.emit("open"); socket.receive({ method: "event", params: { type: "gateway.ready", payload: { replay_epoch: "e" } } });
+    await connected; await pending;
+    expect([...oldSocket.frames, ...socket.frames].filter(frame => frame.method === "image.detach")).toHaveLength(0);
+    expect(socket.frames.some(frame => frame.method === "session.events.since")).toBe(true);
+    expect(socket.frames.some(frame => frame.method === "prompt.submit")).toBe(false);
+  });
+  it("cleans up accepted media only after reconnect confirms a retained initialization failure", async () => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    const rejected = expect(pending).rejects.toMatchObject({ status: 502, message: "prompt_failed" });
+    await flush(); await flush();
+    const oldSocket = socket;
+    oldSocket.emit("close", { code: 1006 });
+    socket = new FakeSocket();
+    socket.snapshot = { running: false, inflight: { user: "first", assistant: "", status: "error", error: "Agent initialization failed", recoverable: true, error_surface: { layer: "runtime", code: "agent_init_failed", retryable: true } } };
+    const connected = manager.connect(); await flush();
+    socket.emit("open"); socket.receive({ method: "event", params: { type: "gateway.ready", payload: { replay_epoch: "e" } } });
+    await connected; await rejected;
+    expect(oldSocket.frames.some(frame => frame.method === "image.detach")).toBe(false);
+    expect(socket.frames.filter(frame => frame.method === "image.detach")).toHaveLength(1);
+  });
+  it("does not detach accepted media when interrupt reports not_interrupted", async () => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    await flush(); await flush();
+    const call = vi.spyOn(manager, "callSession").mockResolvedValueOnce({ status: "not_interrupted", interrupted: false } as never);
+    await service.command(key, "interrupt", {}); await flush();
+    expect(socket.frames.some(frame => frame.method === "image.detach")).toBe(false);
+    call.mockRestore();
+    socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 100 } });
+    await pending;
+  });
+  it("replays deltas arriving while subagent.list awaits after activation", async () => {
+    socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
+    socket.snapshot = { running: true, inflight: { user: "hello", assistant: "before" } };
+    socket.onChildren = () => socket.receive({ method: "event", params: { type: "message.delta", session_id: "runtime-one", seq: 42, payload: { text: " after" } } });
+    const snapshot = await service.openForView("ari", "one");
+    expect(snapshot.seq).toBe(0);
+    expect(snapshot.inflight?.assistant).toBe("before");
+    expect(manager.eventsSince(service.retainedKey(key), snapshot.generation, snapshot.seq).events).toMatchObject([{ type: "message.delta", seq: 42 }]);
+  });
+  it.each(["send", "command"])("reports gateway_unavailable as 503 for %s", async action => {
+    vi.spyOn(manager, "connect").mockRejectedValue(new Error("offline"));
+    await expect(action === "send" ? service.sendPrompt(key, { text: "hello" }) : service.command(key, "interrupt", {})).rejects.toMatchObject({ status: 503, message: "gateway_unavailable" });
   });
 });

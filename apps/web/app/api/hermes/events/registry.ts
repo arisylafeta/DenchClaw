@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { authorizeConversation, getHermesChatService, type HermesChatService } from "@/lib/hermes-gateway/chat-service";
+import { authorizeConversation, ChatServiceError, getHermesChatService, type HermesChatService } from "@/lib/hermes-gateway/chat-service";
 import type { GatewaySessionEvent } from "@/lib/hermes-gateway/manager";
+import { MAX_SUBSCRIPTIONS } from "./subscription-limits";
 
 export class EventConnection {
   readonly id = randomUUID();
@@ -25,6 +26,10 @@ export class EventConnection {
   update(add: string[], remove: string[], cursor?: { generation: number; seq: number }, subscriptionIds: Record<string, string> = {}): Promise<void> {
     const operation = this.tail.then(async () => {
       if (this.closed) return;
+      const nextKeys = new Set(this.subscriptions.keys());
+      for (const key of remove) nextKeys.delete(key);
+      for (const key of add) nextKeys.add(key);
+      if (nextKeys.size > MAX_SUBSCRIPTIONS) throw new ChatServiceError(400, "invalid_subscriptions");
       for (const key of remove) { this.subscriptions.get(key)?.(); this.subscriptions.delete(key); this.subscriptionIds.delete(key); }
       for (const key of add) {
         const subscriptionId = subscriptionIds[key];

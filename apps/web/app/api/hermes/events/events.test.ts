@@ -4,7 +4,7 @@ vi.mock("@/lib/agent-backend", () => ({ resolveAgentBackend: () => "hermes" }));
 vi.mock("@/lib/hermes-native", () => ({ assertProfile: vi.fn(), nativeFetch: vi.fn(), readConversation: vi.fn(), soloConversation: vi.fn() }));
 vi.mock("@/lib/hermes-gateway/manager", () => ({ getHermesGatewayManager: vi.fn(() => ({ onServerRequest: vi.fn(), subscribeNotices: () => () => {}, connectionState: () => "connected" })) }));
 import { currentUser, type AuthenticatedUser } from "@/lib/auth";
-import { HermesChatService, type GatewayChatSnapshot } from "@/lib/hermes-gateway/chat-service";
+import { ChatServiceError, HermesChatService, type GatewayChatSnapshot } from "@/lib/hermes-gateway/chat-service";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { EventConnection, eventConnections } from "./registry";
 import type { GatewayNotice } from "@/lib/hermes-gateway/manager";
@@ -41,6 +41,47 @@ describe("multiplexed gateway endpoints", () => {
     vi.mocked(currentUser).mockResolvedValue(null);
     expect((await GET(new Request("http://local/api/hermes/events"))).status).toBe(401);
     expect((await prompt(new Request("http://local", { method: "POST", body: "{}" }), { params: Promise.resolve({ key }) })).status).toBe(401);
+  });
+  it.each([
+    { keys: Array(65).fill(key).join(",") },
+    { keys: "x".repeat(2049) },
+    { subscriptionIds: JSON.stringify(Object.fromEntries(Array.from({ length: 65 }, (_, i) => [String(i), "s"]))) },
+    { subscriptionIds: JSON.stringify({ [key]: "s".repeat(257) }) },
+    { subscriptionIds: JSON.stringify({ ["k".repeat(2049)]: "s" }) },
+  ])("caps SSE subscription input %j", async query => {
+    const params = new URLSearchParams();
+    for (const [name, value] of Object.entries(query)) if (typeof value === "string") params.set(name, value);
+    const response = await GET(new Request(`http://local/api/hermes/events?${params}`));
+    expect(response.status).toBe(400);
+    expect(eventConnections.size).toBe(0);
+  });
+  it.each([
+    { add: Array(65).fill(key) },
+    { remove: Array(65).fill(key) },
+    { add: ["k".repeat(2049)] },
+    { subscriptionIds: Object.fromEntries(Array.from({ length: 65 }, (_, i) => [String(i), "s"])) },
+    { subscriptionIds: { [key]: "s".repeat(257) } },
+    { subscriptionIds: { ["k".repeat(2049)]: "s" } },
+  ])("caps POST subscription input %j", async excess => {
+    const f = fixture(); eventConnections.set(f.connection.id, f.connection);
+    const response = await subscribe(new Request("http://local", { method: "POST", body: JSON.stringify({ connectionId: f.connection.id, add: [], remove: [], ...excess }) }));
+    expect(response.status).toBe(400);
+    expect(f.manager.subscribe).not.toHaveBeenCalled();
+  });
+  it("caps the aggregate connection subscriptions across POST requests", async () => {
+    const f = fixture(); eventConnections.set(f.connection.id, f.connection);
+    await f.connection.update(Array.from({ length: 64 }, (_, i) => conversationKey("solo", String(i), "ari")), []);
+    const response = await subscribe(new Request("http://local", { method: "POST", body: JSON.stringify({ connectionId: f.connection.id, add: [key], remove: [] }) }));
+    expect(response.status).toBe(400);
+    expect(f.manager.subscribe).toHaveBeenCalledTimes(64);
+  });
+  it("returns gateway_unavailable with HTTP 503, not conflict", async () => {
+    process.env.HERMES_CHAT_TRANSPORT = "gateway";
+    const send = vi.spyOn(HermesChatService.prototype, "sendPrompt").mockRejectedValueOnce(new ChatServiceError(503, "gateway_unavailable"));
+    const response = await prompt(new Request("http://local", { method: "POST", body: JSON.stringify({ text: "hello" }) }), { params: Promise.resolve({ key }) });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "gateway_unavailable" });
+    send.mockRestore();
   });
   it("replays a single-key cursor and snapshots truncated replay", async () => {
     const f = fixture();

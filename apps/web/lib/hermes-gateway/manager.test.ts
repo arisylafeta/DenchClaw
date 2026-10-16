@@ -32,6 +32,7 @@ function harness(extra: { ringSize?: number; ringBytes?: number; maxSessions?: n
         if (frame.method === "session.resume") peer.receive({ id: frame.id, result: { session_id: `runtime-${frame.params?.session_id}`, open_requests: [] } });
         else if (frame.method === "session.activate") peer.receive({ id: frame.id, result: { session_id: frame.params?.session_id, session_key: String(frame.params?.session_id).replace(/^runtime-/, ""), info: { lazy: true, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, open_requests: [] } });
         else if (frame.method === "session.events.since") peer.receive({ id: frame.id, result: { epoch: "epoch-a", events: [], latest_seq: 0, truncated: false, open_requests: [] } });
+        else if (frame.method === "client.capabilities") peer.receive({ id: frame.id, result: { declines_not_shown: true } });
         else peer.receive({ id: frame.id, result: {} });
       });
       sockets.push(socket);
@@ -101,14 +102,15 @@ describe("process gateway manager", () => {
     expect(h.sockets[0].frames.filter(frame => frame.method === "session.resume")).toHaveLength(2);
     expect(h.sockets[0].frames.some(frame => frame.method === "prompt.submit")).toBe(false);
   });
-  it("rejects unknown server requests and restores approval/clarify ownership", async () => {
+  it("declines Desktop requests without settling them and restores approval/clarify ownership", async () => {
     const h = harness();
     const key = h.manager.retainSession("ari", "one", "runtime-one");
     const other = h.manager.retainSession("ari", "two", "runtime-two");
     await start(h);
     const socket = h.sockets[0];
-    socket.receive({ id: "srq-unknown", method: "desktop.open", params: { session_id: "runtime-one" } });
-    expect(socket.frames.at(-1)).toMatchObject({ id: "srq-unknown", error: { code: -32601 } });
+    socket.receive({ id: "srq-preview", method: "preview.read", params: { session_id: "runtime-one", path: "/workspace" } });
+    expect(socket.frames.at(-1)).toMatchObject({ id: "srq-preview", error: { code: 4404 } });
+    expect(h.manager.pendingRequests(key)).toEqual([]);
     socket.receive({ id: "srq-approval", method: "approval", params: { session_id: "runtime-one", request_id: "approval-payload-id" } });
     expect(h.manager.pendingRequests(key)).toHaveLength(1);
     expect(() => h.manager.respondToRequest(other, "srq-approval", {} as never)).toThrow("does not belong");
@@ -226,7 +228,7 @@ describe("process gateway manager", () => {
   });
   it("restores lazy warm runtimes without profile_name and keeps routing after reconnect", async () => {
     const h = harness(); await start(h);
-    const key = h.manager.retainSession("ari", "one");
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
     expect(await h.manager.attachLive(key, "runtime-one")).toBeDefined();
     const received = vi.fn(); h.manager.subscribe(key, received);
     h.sockets[0].close();
@@ -256,9 +258,35 @@ describe("process gateway manager", () => {
       socket.receive({ id: frame.id, result: { subagents: [{ subagent_id: "child", status: "running" }] } }); return true;
     } });
     await start(h);
-    const key = h.manager.retainSession("ari", "one");
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
     await h.manager.attachLive(key, "runtime-one");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(h.manager.session(key)).toBeDefined();
+  });
+  it("rejects an unfamiliar lazy runtime even when two profiles share its stored id", async () => {
+    const h = harness(); await start(h);
+    const ari = h.manager.retainSession("ari", "one");
+    const alex = h.manager.retainSession("alex", "one", "runtime-one");
+    expect(await h.manager.attachLive(ari, "runtime-one")).toBeUndefined();
+    expect(await h.manager.attachLive(alex, "runtime-one")).toBeDefined();
+    expect(h.manager.session(ari)?.runtimeId).toBeUndefined();
+  });
+  it.each(["reclaimed", "epoch", "restore"])("retires runtime children after definitive %s loss", async loss => {
+    let missing = false;
+    const h = harness({ idleMs: 1_000, responder: (frame, peer) => {
+      if (missing && frame.method === "session.activate") {
+        peer.receive({ id: frame.id, error: { code: 4001, message: "gone" } }); return true;
+      }
+      return false;
+    } }); await start(h);
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
+    h.sockets[0].event("runtime-one", 1, "subagent.start", { subagent_id: "child-1", delegation_id: "d", task_index: 0, goal: "work" });
+    if (loss === "reclaimed") h.sockets[0].receive({ method: "event", params: { type: "session.reclaimed", payload: { session_id: "runtime-one" } } });
+    else {
+      missing = true; h.sockets[0].close(); await vi.advanceTimersByTimeAsync(250);
+      h.sockets[1].ready(loss === "epoch" ? "epoch-b" : "epoch-a"); await flush();
+    }
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(h.manager.session(key)).toBeUndefined();
   });
 });

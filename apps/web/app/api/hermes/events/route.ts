@@ -2,6 +2,7 @@ import { currentUser } from "@/lib/auth";
 import { resolveAgentBackend } from "@/lib/agent-backend";
 import { authorizeConversation, ChatServiceError } from "@/lib/hermes-gateway/chat-service";
 import { EventConnection, eventConnections } from "./registry";
+import { validSubscriptionIds, validSubscriptionKeys } from "./subscription-limits";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export async function GET(req: Request) {
   if (resolveAgentBackend() !== "hermes") return Response.json({ error: "Hermes is not enabled" }, { status: 404 });
   // Canonical keys contain encoded commas; decode the list only after splitting it.
   const keys = new URL(req.url).searchParams.get("keys")?.split(",").filter(Boolean) ?? [];
+  if (!validSubscriptionKeys(keys)) return Response.json({ error: "invalid_subscriptions" }, { status: 400 });
   try { keys.forEach(authorizeConversation); } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "invalid_key" }, { status: error instanceof ChatServiceError ? error.status : 400 });
   }
@@ -21,7 +23,7 @@ export async function GET(req: Request) {
   let subscriptionIds: Record<string, string> = {};
   try {
     subscriptionIds = JSON.parse(new URL(req.url).searchParams.get("subscriptionIds") ?? "{}");
-    if (!subscriptionIds || Array.isArray(subscriptionIds) || typeof subscriptionIds !== "object" || !Object.values(subscriptionIds).every(id => typeof id === "string")) throw new Error();
+    if (!validSubscriptionIds(subscriptionIds)) throw new Error();
   } catch { return Response.json({ error: "invalid_subscription_ids" }, { status: 400 }); }
   let close = () => {};
   let pump = () => {};
