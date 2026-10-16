@@ -285,6 +285,86 @@ describe("TradePage overview", () => {
     })));
   });
 
+  it("reviews pending trade updates in Activity and refreshes after accepting", async () => {
+    const proposal = {
+      id: "42", lot_id: TRADE.id, kind: "buyer_update", target: BUYER.id, proposed: { status: "Bid in" },
+      summary: "Buyer sent an offer", quote: "We offer 22 per kWh", source_kind: "gmail",
+      source_url: "https://mail.google.com/x", source_label: "Gmail", source_at: today, created_at: today,
+    };
+    let accepted = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/bulk-trades/proposals/42" && init?.method === "POST") {
+        accepted = true;
+        return new Response(JSON.stringify({ lot_id: TRADE.id }));
+      }
+      return new Response(JSON.stringify({ ...DETAIL, proposals: accepted ? [] : [proposal] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await userEvent.click(await screen.findByRole("tab", { name: "Activity 1" }));
+    const row = screen.getByRole("group", { name: "New: Buyer sent an offer" });
+    expect(within(row).getByRole("button", { name: "Ignore" })).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Update buyer" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Pending updates" })).not.toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "Activity" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/42", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ action: "accept" }),
+    }));
+  });
+
+  it("can record a CRM bid even when the buyer has an auction offer", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...DETAIL, buyers: [{ ...BUYER, auction: {
+        email: "buyer@example.test", buyer_id: BUYER.id, invited_at: today, clicked_at: null,
+        last_viewed_at: null, view_count: 0, offer_count: 1, message_count: 0, last_activity_at: today,
+        last_offer: { kind: "offer", price_per_kwh: 20, amount_per_unit: null, currency: "EUR", quantity: 2, incoterm: null },
+      } }],
+    }))));
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Add bid for Synthetic Storage" }));
+    expect(screen.getByLabelText("Amount")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save bid" })).toBeInTheDocument();
+  });
+
+  it("refreshes event history when entering Activity after a local edit", async () => {
+    let changed = false;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        changed = true;
+        return new Response(JSON.stringify({ trade: { ...TRADE, trade_stage: "Closing" } }));
+      }
+      return new Response(JSON.stringify({
+        ...DETAIL, trade: { ...TRADE, trade_stage: changed ? "Closing" : TRADE.trade_stage },
+        events: changed ? [{ id: "new", kind: "trade_updated", changes: { trade_stage: ["With buyers", "Closing"] }, occurred_at: today }] : [],
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await userEvent.selectOptions(await screen.findByLabelText("Trade stage"), "Closing");
+    await userEvent.click(screen.getByRole("tab", { name: "Activity" }));
+    expect(await screen.findByText("trade updated")).toBeInTheDocument();
+    expect(screen.getByText("trade stage")).toBeInTheDocument();
+  });
+
+  it("shows stage-save failures outside the hold banner and clears them on retry", async () => {
+    let fail = true;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        if (fail) return new Response(JSON.stringify({ error: "Stage could not be saved" }), { status: 500 });
+        return new Response(JSON.stringify({ trade: { ...TRADE, trade_stage: "Closing" } }));
+      }
+      return new Response(JSON.stringify(DETAIL));
+    }));
+    renderPage();
+    await userEvent.selectOptions(await screen.findByLabelText("Trade stage"), "Closing");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Stage could not be saved");
+    expect(screen.getByLabelText("Trade stage")).toHaveValue("With buyers");
+    fail = false;
+    await userEvent.selectOptions(screen.getByLabelText("Trade stage"), "Closing");
+    await waitFor(() => expect(screen.getByLabelText("Trade stage")).toHaveValue("Closing"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
 
   it("adds a buyer by picking a CRM company or person", async () => {
     const fetchMock = mockFetch();

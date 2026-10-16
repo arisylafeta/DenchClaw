@@ -177,7 +177,10 @@ export function BuyersTable({ trade, buyers, auction, fields, today, linkTrackin
                   {bidLabel(buyer.latest_bid)}
                 </button>
               ) : buyer.auction?.last_offer ? (
-                <span className="bt-mono">{auctionOfferLabel(buyer.auction.last_offer)}</span>
+                <button type="button" aria-label={`Add bid for ${buyer.name}`} title="Record a newer bid"
+                  onClick={() => setBidFor(buyer)} className="bt-mono h-7 text-left hover:underline">
+                  {auctionOfferLabel(buyer.auction.last_offer)}
+                </button>
               ) : (
                 <button
                   type="button"

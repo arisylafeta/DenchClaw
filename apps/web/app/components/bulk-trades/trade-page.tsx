@@ -8,6 +8,7 @@ import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { ContactsCard, NextStepStrip, ShippingCard, TradeOverview } from "./trade-overview";
 import { InboxUpdates } from "./inbox-updates";
+import { ProposalRow } from "./proposal-row";
 import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
 
 type Tab = "buyers" | "details" | "activity";
@@ -69,14 +70,23 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
     <button
       type="button"
       role="tab"
+      aria-label={value === "activity" && detail.proposals?.length ? `${label} ${detail.proposals.length}` : label}
       aria-selected={tab === value}
-      onClick={() => setTab(value)}
+      onClick={() => {
+        setTab(value);
+        if (value === "activity") void load();
+      }}
       className="border-b-2 px-3.5 py-3 text-sm"
       style={tab === value
         ? { borderColor: "var(--bt-text)", color: "var(--bt-text)", fontWeight: 600 }
         : { borderColor: "transparent", color: "var(--bt-muted)", fontWeight: 500 }}
     >
       {label}
+      {value === "activity" && !!detail.proposals?.length && (
+        <span className="ml-2 px-1.5 py-0.5 text-xs" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
+          {detail.proposals.length}
+        </span>
+      )}
     </button>
   );
 
@@ -91,6 +101,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           <select aria-label="Trade stage" value={trade.trade_stage} className="border px-2 py-1 text-sm" style={buttonStyle}
             onChange={(event) => {
               const stage = event.target.value as TradeStage;
+              setHoldError(null);
               if (stage === HOLD_STAGE) setHolding(true);
               else patchTrade({ trade_stage: stage }).catch((err) => setHoldError(err instanceof Error ? err.message : "Could not change stage."));
             }}>
@@ -103,6 +114,8 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           )}
           <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setEditing(true)}>Edit trade</button>
         </div>
+        <ErrorText error={holdError} />
+        <ErrorText error={loadError} />
         {trade.trade_stage === HOLD_STAGE && (
           <div role="status" className="flex flex-wrap items-center gap-3 rounded-none border px-4 py-2.5"
             style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-border)" }}>
@@ -122,7 +135,6 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
               }}>
               Resume ({trade.hold_from_stage ?? "With buyers"})
             </button>
-            <ErrorText error={holdError} />
           </div>
         )}
         <NextStepStrip detail={detail} today={today} linkTracking={!!detail.link_tracking} onTradePatch={patchTrade} />
@@ -162,6 +174,9 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           </div>
         ) : (
           <div className="flex flex-col gap-3">
+            {!!detail.proposals?.length && <section aria-label="Pending updates" className="border" style={{ borderColor: "var(--bt-border)" }}>
+              {detail.proposals.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={() => void load()} />)}
+            </section>}
             <HistoryButton tradeId={trade.id} history={detail.history ?? null} onRefresh={load} />
             <InboxUpdates tradeId={trade.id} applied={detail.applied ?? []} onChanged={() => void load()} />
             <section aria-label="Event history" className="border" style={{ borderColor: "var(--bt-border)" }}>
