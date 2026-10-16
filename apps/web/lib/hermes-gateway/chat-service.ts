@@ -27,6 +27,8 @@ export interface GatewayChatSnapshot {
   todo_state: SessionResumeResult["todo_state"];
   html: MessageHtmlRecord[];
   gateway: "connected" | "unavailable";
+  /** Opaque cursor for GET conversations/[key]/history?before=...&limit=200. */
+  olderCursor?: string;
 }
 export interface GatewayPrompt {
   text: string;
@@ -69,6 +71,7 @@ export function authorizeConversation(key: string) {
 export class HermesChatService {
   // session.create mints a runtime before Hermes persists the first user row.
   private readonly newConversations = new Map<string, HermesConversation>();
+  private readonly mediaWaits = new Map<string, (error: Error) => void>();
   private readonly requestListeners = new Map<string, Set<(request: PendingServerRequest) => void>>();
   constructor(readonly manager: HermesGatewayManager = getHermesGatewayManager()) {
     for (const method of ["approval", "clarify"] as const) manager.onServerRequest(method, request => {
@@ -104,16 +107,13 @@ export class HermesChatService {
     const source = await this.source(key);
     if (source === "cron" || source === "webhook") throw new ChatServiceError(409, "automation_read_only");
   }
-  async openForView(profile: string, storedId: string): Promise<GatewayChatSnapshot> {
+  async openForView(profile: string, storedId: string, pageOptions?: { before: number; limit: number }): Promise<GatewayChatSnapshot> {
     const key = conversationKey("solo", storedId, profile);
     authorizeConversation(key);
     const pending = this.newConversations.get(key);
     const source = await this.source(key);
     const retained = this.retainedKey(key);
     let resume: SessionResumeResult | undefined;
-    const history = pending && this.newConversations.has(key)
-      ? { conversation: pending, messages: [] }
-      : await readConversation(key);
     let gateway: GatewayChatSnapshot["gateway"] = "connected";
     try {
       if (source !== "cron" && source !== "webhook") {
@@ -124,7 +124,11 @@ export class HermesChatService {
         }
       }
     } catch { gateway = "unavailable"; }
+    // Frames received while REST is reading must remain replayable after this snapshot.
     const replay = this.manager.eventsSince(retained);
+    const history = pending && this.newConversations.has(key)
+      ? { conversation: pending, messages: [] }
+      : await readConversation(key);
     history.conversation.source = source;
     const inflight = resume?.inflight ? { ...resume.inflight, user: stripAgentMessageContext(resume.inflight.user ?? "") } : resume?.inflight;
     const queued = resume?.queued ? { ...resume.queued, user: stripAgentMessageContext(resume.queued.user) } : resume?.queued;
@@ -133,15 +137,29 @@ export class HermesChatService {
       ...(row.content ? { content: stripAgentMessageContext(row.content) } : {}),
       ...(row.parts ? { parts: row.parts.map(part => part.type === "text" && typeof part.text === "string" ? { ...part, text: stripAgentMessageContext(part.text) } : part) } : {}),
     } : row);
-    for (const [kind, text] of [["queued", queued?.user], ["inflight", inflight?.user]] as const) {
-      if (!text) continue;
-      const row = [...messages].reverse().find(row => row.role === "user" && !row.pending && row.text === text);
-      if (row) row.pending = kind;
+    const queueHead = queued?.user && [...messages].reverse().find(row => row.role === "user" && row.text === queued.user);
+    const queueIndex = queueHead ? messages.indexOf(queueHead) : -1;
+    if (queueIndex >= 0) {
+      for (const row of messages.slice(queueIndex)) if (row.role === "user") row.pending = "queued";
     }
-    return { ...history, messages, gateway, generation: replay.generation, seq: replay.latestSeq,
+    const inflightRow = inflight?.user && [...messages].reverse().find(row => row.role === "user" && !row.pending && row.text === inflight.user);
+    if (inflightRow) inflightRow.pending = "inflight";
+    const page = this.pageMessages(messages, pageOptions ? Math.min(pageOptions.before, messages.length) : messages.length, pageOptions?.limit);
+    return { ...history, ...page, gateway, generation: replay.generation, seq: replay.latestSeq,
       running: Boolean(resume?.running), inflight, queued,
       pendingRequests: gateway === "connected" ? this.manager.pendingRequests(retained) : [], todo_state: resume?.todo_state,
       html: await lookupMessageHtml(profile, storedId) };
+  }
+  private pageMessages(messages: GatewayChatSnapshot["messages"], before = messages.length, limit = 200) {
+    const start = Math.max(0, before - limit);
+    return { messages: messages.slice(start, before), ...(start ? { olderCursor: String(start) } : {}) };
+  }
+  async historyPage(key: string, before: string, limit = 200) {
+    const identity = authorizeConversation(key);
+    if (!/^\d+$/.test(before) || !Number.isSafeInteger(Number(before)) || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new ChatServiceError(400, "invalid_history_cursor");
+    // Reuse exactly the snapshot mapper and pending classification, without paging twice.
+    const snapshot = await this.openForView(identity.profile, identity.id, { before: Number(before), limit });
+    return { messages: snapshot.messages, olderCursor: snapshot.olderCursor };
   }
   async sendPrompt(key: string, prompt: GatewayPrompt) {
     const identity = authorizeConversation(key);
@@ -182,20 +200,28 @@ export class HermesChatService {
         let claimed = false;
         let settle = () => {};
         const started = new Promise<void>(resolve => { settle = resolve; });
+        let rejectDisconnected = (_error: Error) => {};
+        const disconnected = new Promise<never>((_resolve, reject) => { rejectDisconnected = reject; });
+        // Install the rejection handler even for queued/no-image submissions.
+        void disconnected.catch(() => {});
+        if (attached.length) this.mediaWaits.set(retained, rejectDisconnected);
+        const stopNotices = this.manager.subscribeNotices(notice => {
+          if (notice.type === "gateway" && notice.state !== "connected") rejectDisconnected(new ChatServiceError(503, "gateway_disconnected"));
+          if (notice.type === "resync" && notice.key === retained && notice.reason === "session_reclaimed") rejectDisconnected(new ChatServiceError(409, "session_not_live"));
+        });
         const unsubscribe = this.manager.subscribe(retained, event => {
-          if (event.type === "message.start" || event.type === "message.complete" || event.type === "error") { claimed = true; settle(); }
+          if (event.type === "error") rejectDisconnected(new ChatServiceError(502, "prompt_failed"));
+          else if (event.type === "message.start" || event.type === "message.complete") { claimed = true; settle(); }
         });
         try {
           const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text, queued: true });
           if (attached.length && result.status === "streaming" && !claimed) {
-            // Do not permit later staging unless Hermes has claimed this prompt's media.
-            let timer: NodeJS.Timeout | undefined;
-            try {
-              await Promise.race([started, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ChatServiceError(503, "media_claim_timeout")), 120_000); timer.unref?.(); })]);
-            } finally { clearTimeout(timer); }
+            // Accepted prompts may wait 600s for agent construction. Ownership has no
+            // local deadline: later staging waits until claim or a transport failure.
+            await Promise.race([started, disconnected]);
           }
           return { ...result, autoContinue: Boolean(resume?.auto_continue) };
-        } finally { unsubscribe(); }
+        } finally { unsubscribe(); stopNotices(); this.mediaWaits.delete(retained); }
       } catch (error) {
         // Use the captured runtime directly; a stale mutation must never detach in a new runtime.
         await Promise.allSettled(attached.map(path => this.manager.call("image.detach", { session_id: runtime!, profile: identity.profile, path })));
@@ -226,7 +252,11 @@ export class HermesChatService {
     try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
     // Commands act only on an existing runtime; viewing/interrupting must not cold-resume.
     if (!this.manager.session(retained)?.runtimeId) throw new ChatServiceError(409, "session_not_live");
-    if (action === "interrupt") return this.manager.callSession(retained, "session.interrupt", { session_id: "" });
+    if (action === "interrupt") {
+      const result = await this.manager.callSession(retained, "session.interrupt", { session_id: "" });
+      this.mediaWaits.get(retained)?.(new ChatServiceError(409, "prompt_cancelled"));
+      return result;
+    }
     if (action === "steer") {
       if (typeof body.text !== "string" || !body.text.trim() || Buffer.byteLength(body.text) > 65_536) throw new ChatServiceError(400, "invalid_text");
       return this.manager.callSession(retained, body.mode === "redirect" ? "session.redirect" : "session.steer", { session_id: "", text: body.text });

@@ -6,7 +6,7 @@ import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
 import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
 import { hermesChatTransport } from "./hermes-gateway/transport-flag";
-import { getHermesGatewayManager } from "./hermes-gateway/manager";
+import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
 type NativeSession = { id: string; source?: string; title?: string; last_active?: number; started_at?: number; hidden?: boolean; is_internal_child?: boolean };
 type Member = { profile: string; member_id: string; display_name?: string; handle?: string };
@@ -130,6 +130,36 @@ export function roomConversation(room: Room, working: boolean | null = null): He
     title: room.name, updatedAt: room.updated_at * 1000, working,
     participants: room.members.map((m) => ({ profile: m.profile, memberId: m.member_id, name: m.display_name || m.handle || m.profile, handle: m.handle })) };
 }
+const gatewayListCache = new WeakMap<HermesGatewayManager, { expires: number; pending: Promise<Record<string, { working: boolean | null; blocked: boolean | null }>> }>();
+function gatewayListStatus(rows: HermesConversation[]) {
+  const manager = getHermesGatewayManager();
+  const cached = gatewayListCache.get(manager);
+  if (cached && cached.expires > Date.now()) return cached.pending;
+  const pending = (async () => {
+    const result: Record<string, { working: boolean | null; blocked: boolean | null }> = {};
+    const active = await manager.call("session.active_list", {});
+    for (const row of rows) result[row.key] = { working: false, blocked: false };
+    const candidates = rows.flatMap(row => active.sessions.filter(live => live.session_key === row.id).map(live => ({ row, live })));
+    // A list poll must not attach the entire runtime pool. Four workers, eight
+    // warm activations maximum, with excess candidates explicitly unknown.
+    for (const { row } of candidates) result[row.key] = { working: null, blocked: null };
+    const selected = candidates.slice(0, 8);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, selected.length) }, async () => {
+      while (next < selected.length) {
+        const { row, live } = selected[next++];
+        const retained = manager.retainSession(row.participants[0].profile, row.id);
+        const snapshot = await manager.attachLive(retained, live.id);
+        if (snapshot) result[row.key] = { working: Boolean(snapshot.running || live.status !== "idle"), blocked: Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval) };
+        else if (result[row.key].working === null) result[row.key] = { working: false, blocked: false };
+      }
+    }));
+    return result;
+  })();
+  gatewayListCache.set(manager, { expires: Date.now() + 5_000, pending });
+  void pending.catch(() => gatewayListCache.delete(manager));
+  return pending;
+}
 export async function listConversations() {
   const warnings: string[] = [];
   const profiles = hermesProfiles();
@@ -141,28 +171,15 @@ export async function listConversations() {
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
   if (hermesChatTransport() === "gateway") {
-    const manager = getHermesGatewayManager();
     const rows = soloLists.flat();
     for (const row of rows) { row.working = null; row.blocked = null; }
     try {
-      const active = await manager.call("session.active_list", {});
+      const statuses = await gatewayListStatus(rows);
       for (const row of rows) {
-        const profile = row.participants[0].profile;
-        const candidates = active.sessions.filter(live => live.session_key === row.id);
-        row.working = false;
-        row.blocked = false;
-        for (const live of candidates) {
-          // active_list is global and omits profile identity; activate is warm-only,
-          // and its info.profile_name is authoritative even for colliding stored ids.
-          const retained = manager.retainSession(profile, row.id);
-          const snapshot = await manager.attachLive(retained, live.id);
-          if (!snapshot) continue;
-          row.working = Boolean(snapshot.running || live.status !== "idle");
-          row.blocked = Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval);
-          break;
-        }
+        const status = statuses[row.key];
+        if (status) { row.working = status.working; row.blocked = status.blocked; }
       }
-    } catch { for (const row of rows) { row.working = null; row.blocked = null; } }
+    } catch { /* Unknown status is not idle. */ }
   }
   const rooms = new Map<string, HermesConversation>();
   if (groupsConfigured()) {

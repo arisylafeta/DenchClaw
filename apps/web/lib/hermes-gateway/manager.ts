@@ -56,6 +56,7 @@ interface SessionState extends RetainedSession {
   active: boolean;
   bytes: number;
   operations: number;
+  children: Set<string>;
 }
 const defaultClock: GatewayClock = {
   now: () => Date.now(),
@@ -240,11 +241,11 @@ export class HermesGatewayManager {
     let session = this.sessions.get(key);
     if (!session) {
       if (this.sessions.size >= (this.options.maxSessions ?? 128)) {
-        const idle = [...this.sessions.values()].filter(candidate => !candidate.active && !candidate.operations && !candidate.subscribers.size && !candidate.requests.size && !candidate.resume).sort((a, b) => a.touched - b.touched)[0];
+        const idle = [...this.sessions.values()].filter(candidate => !candidate.active && !candidate.children.size && !candidate.operations && !candidate.subscribers.size && !candidate.requests.size && !candidate.resume).sort((a, b) => a.touched - b.touched)[0];
         if (!idle) throw new Error("gateway_session_capacity");
         this.releaseSession(idle.key);
       }
-      session = { key, profile, storedSessionId, generation: 1, events: [], seq: 0, truncated: false, subscribers: new Set(), requests: new Map(), tail: Promise.resolve(), touched: this.clock.now(), active: false, bytes: 0, operations: 0 };
+      session = { key, profile, storedSessionId, generation: 1, events: [], seq: 0, truncated: false, subscribers: new Set(), requests: new Map(), tail: Promise.resolve(), touched: this.clock.now(), active: false, bytes: 0, operations: 0, children: new Set() };
       this.sessions.set(key, session);
       this.retireIdle();
     }
@@ -258,11 +259,11 @@ export class HermesGatewayManager {
   }
   releaseSession(key: string): void {
     const session = this.sessions.get(key);
-    if (!session || session.active || session.operations || session.subscribers.size || session.requests.size || session.resume) return;
+    if (!session || session.active || session.children.size || session.operations || session.subscribers.size || session.requests.size || session.resume) return;
     this.sessions.delete(key);
   }
   private retireIdle(): void {
-    const idle = [...this.sessions.values()].filter(session => !session.active && !session.operations && !session.subscribers.size && !session.requests.size && !session.resume).sort((a, b) => a.touched - b.touched);
+    const idle = [...this.sessions.values()].filter(session => !session.active && !session.children.size && !session.operations && !session.subscribers.size && !session.requests.size && !session.resume).sort((a, b) => a.touched - b.touched);
     for (const session of idle) {
       if (this.clock.now() - session.touched < (this.options.idleMs ?? 300_000) && this.sessions.size <= (this.options.maxSessions ?? 128)) continue;
       this.releaseSession(session.key);
@@ -282,9 +283,15 @@ export class HermesGatewayManager {
     const session = this.requireSession(key);
     try {
       const result = await this.call("session.activate", { profile: session.profile, session_id: runtimeId, omit_messages: true });
-      if (result.info.profile_name !== session.profile) return undefined;
+      // Lazy runtimes have no agent, so Hermes omits info.profile_name.
+      // Keep the retained request's profile and reject positive identity mismatches.
+      if ((result.info.profile_name && result.info.profile_name !== session.profile)
+        || (result.session_key && result.session_key !== session.storedSessionId)
+        || (result.stored_session_id && result.stored_session_id !== session.storedSessionId)
+        || result.session_id !== runtimeId) return undefined;
       this.adoptRuntime(session, runtimeId);
       session.active = Boolean(result.running);
+      await this.refreshChildren(session);
       return result;
     } catch (error) {
       if (error instanceof JsonRpcGatewayError && [4001, 4007, 4009].includes(error.code ?? 0)) return undefined;
@@ -306,6 +313,7 @@ export class HermesGatewayManager {
         if (this.sessions.get(session.key) !== session) throw new Error("Session released while resuming");
         this.adoptRuntime(session, result.session_id);
         session.active = Boolean(result.running || result.auto_continue);
+        await this.refreshChildren(session);
         // Channel restores open_requests before the resume response resolves.
         return result;
       } catch (error) {
@@ -313,6 +321,24 @@ export class HermesGatewayManager {
         await this.pause(this.backoff(attempt));
       }
     }
+  }
+  private async refreshChildren(session: SessionState): Promise<void> {
+    const changes: GatewaySessionEvent[] = [];
+    const stop = this.subscribe(session.key, event => {
+      if (event.type === "subagent.start" || event.type === "subagent.complete") changes.push(event);
+    });
+    try {
+      const result = await this.callSession(session.key, "subagent.list", { session_id: "" });
+      session.children = new Set((result.subagents ?? []).filter(child => !child.status || ["queued", "running"].includes(child.status)).map(child => child.subagent_id));
+      for (const event of changes) this.trackChild(session, event);
+    } finally { stop(); }
+  }
+  private trackChild(session: SessionState, event: GatewayEvent): void {
+    if (event.type !== "subagent.start" && event.type !== "subagent.complete") return;
+    const payload = event.payload as { subagent_id?: string; delegation_id?: string; task_index?: number; goal?: string };
+    const child = payload.subagent_id ?? `${payload.delegation_id ?? payload.goal}:${payload.task_index ?? 0}`;
+    if (event.type === "subagent.complete") session.children.delete(child);
+    else session.children.add(child);
   }
   private pause(delay: number): Promise<void> {
     // The application's ES library predates Promise.withResolvers.
@@ -378,6 +404,7 @@ export class HermesGatewayManager {
       session.touched = this.clock.now();
       if (event.type === "message.start") session.active = true;
       if (event.type === "message.complete" || event.type === "error") session.active = false;
+      this.trackChild(session, event);
       session.bytes += Buffer.byteLength(JSON.stringify(frame));
       session.events.push(frame);
       while (session.events.length > (this.options.ringSize ?? 512) || session.bytes > (this.options.ringBytes ?? 2_097_152)) {

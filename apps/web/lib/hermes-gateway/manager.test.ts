@@ -18,7 +18,7 @@ class FakeSocket implements GatewaySocket {
   close() { this.closed = true; this.emit("close", { code: 1006 }); }
 }
 const managers: HermesGatewayManager[] = [];
-async function flush() { for (let index = 0; index < 20; index++) await Promise.resolve(); }
+async function flush() { for (let index = 0; index < 60; index++) await Promise.resolve(); }
 function harness(extra: { ringSize?: number; ringBytes?: number; maxSessions?: number; idleMs?: number; responder?: (frame: Frame, socket: FakeSocket) => boolean } = {}) {
   const sockets: FakeSocket[] = [];
   const tokens = vi.fn(async () => "token");
@@ -30,7 +30,7 @@ function harness(extra: { ringSize?: number; ringBytes?: number; maxSessions?: n
       const socket = new FakeSocket((frame, peer) => {
         if (!frame.method || extra.responder?.(frame, peer)) return;
         if (frame.method === "session.resume") peer.receive({ id: frame.id, result: { session_id: `runtime-${frame.params?.session_id}`, open_requests: [] } });
-        else if (frame.method === "session.activate") peer.receive({ id: frame.id, result: { session_id: frame.params?.session_id, info: { profile_name: frame.params?.profile }, open_requests: [] } });
+        else if (frame.method === "session.activate") peer.receive({ id: frame.id, result: { session_id: frame.params?.session_id, session_key: String(frame.params?.session_id).replace(/^runtime-/, ""), info: { lazy: true, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, open_requests: [] } });
         else if (frame.method === "session.events.since") peer.receive({ id: frame.id, result: { epoch: "epoch-a", events: [], latest_seq: 0, truncated: false, open_requests: [] } });
         else peer.receive({ id: frame.id, result: {} });
       });
@@ -223,5 +223,42 @@ describe("process gateway manager", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(h.manager.session(newKey)).toBeUndefined();
     expect(h.manager.session(active)).toBeDefined();
+  });
+  it("restores lazy warm runtimes without profile_name and keeps routing after reconnect", async () => {
+    const h = harness(); await start(h);
+    const key = h.manager.retainSession("ari", "one");
+    expect(await h.manager.attachLive(key, "runtime-one")).toBeDefined();
+    const received = vi.fn(); h.manager.subscribe(key, received);
+    h.sockets[0].close();
+    await vi.advanceTimersByTimeAsync(250);
+    h.sockets[1].ready(); await flush();
+    h.sockets[1].event("runtime-one", 1, "message.start", {});
+    expect(h.manager.session(key)?.runtimeId).toBe("runtime-one");
+    expect(received).toHaveBeenCalledWith(expect.objectContaining({ type: "message.start" }));
+    expect(h.sockets.flatMap(socket => socket.frames).some(frame => frame.method === "session.resume")).toBe(false);
+  });
+  it("protects children after parent completion until the last child completes", async () => {
+    const h = harness({ idleMs: 1_000 }); await start(h);
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
+    h.sockets[0].event("runtime-one", 1, "message.start", {});
+    h.sockets[0].event("runtime-one", 2, "subagent.start", { goal: "research", task_count: 1, task_index: 0, subagent_id: "child" });
+    h.sockets[0].event("runtime-one", 3, "message.complete", {});
+    h.manager.releaseSession(key);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.manager.session(key)).toBeDefined();
+    h.sockets[0].event("runtime-one", 4, "subagent.complete", { goal: "research", task_count: 1, task_index: 0, subagent_id: "child", status: "completed" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.manager.session(key)).toBeUndefined();
+  });
+  it("protects children discovered by subagent.list when attaching a quiet parent", async () => {
+    const h = harness({ idleMs: 1_000, responder: (frame, socket) => {
+      if (frame.method !== "subagent.list") return false;
+      socket.receive({ id: frame.id, result: { subagents: [{ subagent_id: "child", status: "running" }] } }); return true;
+    } });
+    await start(h);
+    const key = h.manager.retainSession("ari", "one");
+    await h.manager.attachLive(key, "runtime-one");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.manager.session(key)).toBeDefined();
   });
 });

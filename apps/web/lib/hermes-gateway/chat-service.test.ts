@@ -35,7 +35,7 @@ class FakeSocket implements GatewaySocket {
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
-      : frame.method === "session.activate" ? { session_id: frame.params?.session_id, info: { profile_name: "ari" }, ...this.snapshot }
+      : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { lazy: true, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
       : frame.method === "image.attach_bytes" ? { attached: true, path: "/image" }
       : frame.method === "session.create" ? { session_id: "runtime-one", stored_session_id: "one" }
       : frame.method === "prompt.submit" ? { status: this.busy ? "queued" : "streaming" }
@@ -58,7 +58,7 @@ beforeEach(async () => {
   const connected = manager.connect(); await flush(); socket.emit("open"); socket.receive({ method: "event", params: { type: "gateway.ready", payload: { replay_epoch: "e" } } }); await connected; await flush();
   service = new HermesChatService(manager);
 });
-afterEach(() => manager.shutdown());
+afterEach(() => { manager.shutdown(); vi.useRealTimers(); });
 describe("gateway chat service", () => {
   it("does not resume an idle history view", async () => {
     await service.openForView("ari", "one");
@@ -152,14 +152,14 @@ describe("gateway chat service", () => {
   it("uses warm-only activation and strips context on durable, inflight and merged queued rows", async () => {
     const context = { filePath: "doc.md", tableSelection: { objectName: "companies", kind: "rows" as const, rowCount: 1, columnCount: 1, columns: ["name"], updatedAt: 1, rows: [{ rowIndex: 0, entryId: "a", values: { name: "Acme" } }] } };
     const inflight = buildAgentMessage({ userText: "first", workspaceContext: context });
-    const queued = buildAgentMessage({ userText: "second", workspaceContext: context }) + "\n\n" + buildAgentMessage({ userText: "third", workspaceContext: context });
+    const queued = buildAgentMessage({ userText: "second", workspaceContext: context });
     socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
     socket.snapshot = { running: true, inflight: { user: inflight }, queued: { user: queued } };
-    vi.mocked(readConversation).mockResolvedValueOnce({ conversation: { key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: true, source: "crm" }, messages: [{ id: "1", role: "user", text: inflight }, { id: "2", role: "user", text: queued }] });
+    vi.mocked(readConversation).mockResolvedValueOnce({ conversation: { key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: true, source: "crm" }, messages: [{ id: "1", role: "user", text: inflight }, { id: "2", role: "user", text: queued }, { id: "3", role: "user", text: buildAgentMessage({ userText: "[Attached files: photo.png]\n\nthird", workspaceContext: context }) }, { id: "4", role: "user", text: "fourth" }] });
     const snapshot = await service.openForView("ari", "one");
-    expect(snapshot.messages).toMatchObject([{ text: "first", pending: "inflight" }, { text: "second\n\nthird", pending: "queued" }]);
+    expect(snapshot.messages).toMatchObject([{ text: "first", pending: "inflight" }, { text: "second", pending: "queued" }, { text: "[Attached files: photo.png]\n\nthird", pending: "queued" }, { text: "fourth", pending: "queued" }]);
     expect(snapshot.inflight?.user).toBe("first");
-    expect(snapshot.queued?.user).toBe("second\n\nthird");
+    expect(snapshot.queued?.user).toBe("second");
     expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
   });
   it("ignores a different profile's identical stored id and tolerates a vanished runtime", async () => {
@@ -170,5 +170,58 @@ describe("gateway chat service", () => {
     vi.spyOn(manager, "attachLive").mockResolvedValue(undefined);
     expect((await service.openForView("ari", "one")).messages).toEqual([]);
     expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
+  });
+  it("retains accepted media beyond the former deadline and serializes the next image", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    socket.deferConsumption = true;
+    const image = { content: "aGVsbG8=", mimeType: "image/png" };
+    const first = service.sendPrompt(key, { text: "first", images: [image] });
+    await flush(); await flush();
+    const second = service.sendPrompt(key, { text: "second", images: [image] });
+    await flush();
+    // Keep the manager transport alive while Hermes spends >120s constructing.
+    for (let i = 0; i < 9; i++) {
+      socket.receive({ method: "event", params: { type: "gateway.pong", payload: {} } });
+      await vi.advanceTimersByTimeAsync(15_000);
+    }
+    expect(socket.frames.filter(frame => frame.method === "image.detach")).toHaveLength(0);
+    expect(socket.frames.filter(frame => frame.method === "image.attach_bytes")).toHaveLength(1);
+    socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 100, payload: {} } });
+    await first; await flush(); await flush();
+    expect(socket.frames.filter(frame => frame.method === "image.attach_bytes")).toHaveLength(2);
+    socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 101, payload: {} } });
+    await second;
+  });
+  it("keeps history-read concurrent completion after the snapshot watermark", async () => {
+    const retained = manager.retainSession("ari", "one", "runtime-one");
+    vi.mocked(readConversation).mockImplementationOnce(async () => {
+      socket.receive({ method: "event", params: { type: "message.complete", session_id: "runtime-one", seq: 42, payload: { text: "done" } } });
+      return { conversation: { key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: false }, messages: [] };
+    });
+    const snapshot = await service.openForView("ari", "one");
+    expect(snapshot.seq).toBe(0);
+    expect(manager.eventsSince(retained, snapshot.generation, snapshot.seq).events).toMatchObject([{ type: "message.complete", seq: 42 }]);
+  });
+  it("pages large history and uses the same context mapping on older pages", async () => {
+    const messages = Array.from({ length: 450 }, (_, id) => ({ id: String(id), role: "user" as const, text: buildAgentMessage({ userText: `row ${id}`, workspaceContext: { filePath: "doc.md" } }) }));
+    vi.mocked(readConversation).mockResolvedValue({ conversation: { key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: false }, messages });
+    const snapshot = await service.openForView("ari", "one");
+    expect(snapshot.messages).toHaveLength(200);
+    expect(snapshot.messages[0].text).toBe("row 250");
+    expect(snapshot.olderCursor).toBe("250");
+    const older = await service.historyPage(key, snapshot.olderCursor!);
+    expect(older.messages).toHaveLength(200);
+    expect(older.messages[0].text).toBe("row 50");
+    expect(older.olderCursor).toBe("50");
+    expect((await service.historyPage(key, older.olderCursor!)).messages).toHaveLength(50);
+  });
+  it("releases unclaimed media on a confirmed cancellation", async () => {
+    socket.deferConsumption = true;
+    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    const rejected = expect(pending).rejects.toThrow("prompt_cancelled");
+    await flush(); await flush();
+    await service.command(key, "interrupt", {});
+    await rejected;
+    expect(socket.frames.find(frame => frame.method === "image.detach")?.params).toMatchObject({ session_id: "runtime-one", path: "/image" });
   });
 });

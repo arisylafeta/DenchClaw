@@ -73,8 +73,8 @@ describe("multiplexed gateway endpoints", () => {
     const abort = new AbortController();
     const response = await GET(new Request("http://local/api/hermes/events", { signal: abort.signal }));
     const reader = response.body!.getReader();
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: gateway");
     expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: connection");
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: gateway");
     await vi.advanceTimersByTimeAsync(15_000);
     expect(new TextDecoder().decode((await reader.read()).value)).toBe(": heartbeat\n\n");
     abort.abort(); expect(eventConnections.size).toBe(0);
@@ -105,8 +105,46 @@ describe("multiplexed gateway endpoints", () => {
     await f.connection.update([], []);
     await f.connection.update([], []);
     expect(f.emitted).toContainEqual({ event: "gateway", payload: { state: "reconnecting" }, id: undefined });
-    expect(f.emitted).toContainEqual({ event: "resync", payload: { key, reason: "connection_restored" }, id: undefined });
+    expect(f.emitted).toContainEqual({ event: "resync", payload: { key, reason: "connection_restored", subscriptionId: undefined }, id: undefined });
     expect(f.snapshot.mock.calls.length).toBeGreaterThan(1);
+    f.connection.close();
+  });
+  it("echoes the subscription id that requested each snapshot", async () => {
+    const f = fixture();
+    await f.connection.update([key], [], undefined, { [key]: "first" });
+    await f.connection.update([key], [], undefined, { [key]: "second" });
+    expect(f.emitted.filter(event => event.event === "snapshot").map(event => {
+      const payload = event.payload;
+      return payload && typeof payload === "object" && "subscriptionId" in payload ? payload.subscriptionId : undefined;
+    })).toEqual(["first", "second"]);
+    f.connection.close();
+  });
+  it("delivers a snapshot larger than the live backlog cap without a reconnect loop", async () => {
+    const abort = new AbortController();
+    const response = await GET(new Request("http://local/api/hermes/events", { signal: abort.signal }));
+    const connection = [...eventConnections.values()][0];
+    const emitter = connection as unknown as { emit(event: string, payload: unknown): void };
+    emitter.emit("snapshot", { key, messages: [{ id: "huge", role: "assistant", text: "x".repeat(4_300_000) }] });
+    const reader = response.body!.getReader();
+    let text = "";
+    while (!text.includes('"}]}\n\n')) {
+      const result = await reader.read();
+      expect(result.done).toBe(false);
+      text += new TextDecoder().decode(result.value);
+    }
+    expect(text).toContain("event: snapshot");
+    expect(eventConnections.size).toBe(1);
+    abort.abort();
+  });
+  it("publishes frames arriving during hydration after its covered watermark", async () => {
+    const f = fixture();
+    f.snapshot.mockImplementationOnce(async () => {
+      f.listeners.get("one")?.({ type: "message.delta", generation: 1, seq: 3, session_id: "runtime-one", payload: { text: "done" } });
+      return { generation: 1, seq: 2, messages: [] } as unknown as GatewayChatSnapshot;
+    });
+    await f.connection.update([key], []);
+    expect(f.emitted.map(event => event.event)).toEqual(["snapshot", "gw"]);
+    expect(f.emitted[1]).toMatchObject({ event: "gw", id: "1:3" });
     f.connection.close();
   });
 });
