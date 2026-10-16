@@ -273,10 +273,21 @@ creating a new ask; evidence must come from the new message, not quoted history.
 Resolve the buyer identity and deduplicate by entity plus normalized product
 family across open and qualifying rows, not by wording.
 
-Standing asks become qualifying at 60 days ("Still buying?") and move to the
-company profile after 120 days. Requests expire after `needed_by`, or after
-90 days without a deadline. Expiry uses the latest observation/confirmation;
-it is an explicit lifecycle transition, not a score-based closure.
+Standing asks become qualifying at 60 days ("Still buying?"). Entry into
+qualification stamps `qualify_entered_on` across UI, proposal and import writers.
+`qualify_asked_on` is the date the question was actually sent: null means not
+sent, so the row stays qualifying and the lifecycle reports `question_not_sent`.
+Only 21 days after sending, without reconfirmation, does a qualifying standing
+ask move to the company profile or a qualifying request expire. Old buyer
+observations never age a qualifying row. Open requests still expire after
+`needed_by`, or after 90 days without a deadline, using their latest observation
+or confirmation. Closure is an explicit lifecycle transition, not score-based.
+
+Demand activity (`045_demand_activity.sql`) records notes, research, outreach,
+calls, quotes, supply candidates and status changes. Status transitions are
+logged atomically by a database trigger, including script-originated changes.
+The activity API is `/api/bulk-trades/demand/[demandId]/activity`; deletion is
+scoped to the demand and activity IDs.
 
 Saved searches feed company profiles, never open demand. Sourcing requests
 enter as qualifying demand. Surveys are profile evidence unless they state

@@ -71,14 +71,25 @@ def existing_demand(cur, entity, family):
 
 
 def expiry_transition(row, today):
-    asked = max(d for d in (row.get('observed_on'), row.get('confirmed_on')) if d is not None)
-    age = (today - asked).days
+    if row['status'] == 'qualifying':
+        # Entry date explains the wait; only actually sending the question starts expiry.
+        asked = row.get('qualify_asked_on') or row.get('qualify_entered_on')
+        if row.get('qualify_asked_on') is None:
+            return 'question_not_sent'
+        confirmed = row.get('confirmed_on')
+        if confirmed is not None and confirmed >= asked:
+            return None
+        if (today - asked).days >= 21:
+            return 'expired' if row['kind'] == 'request' else 'moved_to_profile'
+        return None
+    dates = [d for d in (row.get('observed_on'), row.get('confirmed_on')) if d is not None]
+    if not dates:
+        return None
+    age = (today - max(dates)).days
     if row['kind'] == 'request':
         if (row.get('needed_by') and row['needed_by'] < today) or (not row.get('needed_by') and age > 90):
             return 'expired'
-    elif age > 120:
-        return 'moved_to_profile'
-    elif age >= 60 and row['status'] == 'open':
+    elif age >= 60:
         return 'qualifying'
     return None
 
@@ -119,11 +130,13 @@ def merge_profile(cur, row, basis='stated'):
 
 def expire_demand(cur, today=None):
     today = today or dt.date.today()
-    cur.execute("""select * from crm_bulk_trade_demand where status in ('open', 'qualifying')
-      and greatest(observed_on, confirmed_on) is not null for update""")
+    cur.execute("""select * from crm_bulk_trade_demand where status in ('open', 'qualifying') for update""")
     changes = []
     for row in cur.fetchall():
         action = expiry_transition(row, today)
+        if action == 'question_not_sent':
+            changes.append({'id': row['id'], 'action': action})
+            continue
         if not action:
             continue
         if action == 'moved_to_profile':
@@ -142,7 +155,8 @@ def expire_demand(cur, today=None):
             merge_profile(cur, row)
         if action == 'qualifying':
             cur.execute("""update crm_bulk_trade_demand set status = 'qualifying', qualify_question = 'Still buying?',
-                           match_hash = null, supply_match_hash = null, updated_at = now() where id = %s""", (row['id'],))
+                           qualify_entered_on = %s, qualify_asked_on = null,
+                           match_hash = null, supply_match_hash = null, updated_at = now() where id = %s""", (today, row['id']))
         else:
             cur.execute("""update crm_bulk_trade_demand set status = 'closed', closed_reason = %s,
               moved_to = %s, updated_at = now() where id = %s""",

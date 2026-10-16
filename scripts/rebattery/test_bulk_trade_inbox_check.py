@@ -137,7 +137,16 @@ class DemandAgeing(unittest.TestCase):
         self.assertIsNone(expiry_transition(row(59), today))
         self.assertEqual(expiry_transition(row(60), today), "qualifying")
         self.assertEqual(expiry_transition(row(120), today), "qualifying")
-        self.assertEqual(expiry_transition(row(121, status="qualifying"), today), "moved_to_profile")
+        self.assertEqual(expiry_transition(row(121, status="qualifying"), today), "question_not_sent")
+        for kind, outcome in (("standing", "moved_to_profile"), ("request", "expired")):
+            qualifying = row(300, status="qualifying", kind=kind, qualify_entered_on=today-dt.timedelta(days=40))
+            self.assertEqual(expiry_transition(qualifying, today), "question_not_sent")
+            qualifying["qualify_asked_on"] = today-dt.timedelta(days=20)
+            self.assertIsNone(expiry_transition(qualifying, today))
+            qualifying["qualify_asked_on"] = today-dt.timedelta(days=21)
+            self.assertEqual(expiry_transition(qualifying, today), outcome)
+            qualifying["confirmed_on"] = today
+            self.assertIsNone(expiry_transition(qualifying, today))
         self.assertIsNone(expiry_transition(row(121, confirmed_on=today), today))
         self.assertIsNone(expiry_transition(row(90, kind="request"), today))
         self.assertEqual(expiry_transition(row(91, kind="request"), today), "expired")
@@ -598,6 +607,8 @@ class DemandRun(unittest.TestCase):
                     ('btd_age_confirm', 'Ageing Buyer', 'co_age', 'Cells', 'standing', '21700', '2026-08-01', 'open', '{}', 'stated'),
                     ('btd_age_request', 'Ageing Buyer', 'co_age', 'Modules', 'request', 'meb', '2026-06-01', 'qualifying', '{}', null)""")
                 self.assertEqual(existing_demand(cur, {"company_id": "co_age"}, " LEAF "), "btd_age_old")
+                cur.execute("""update crm_bulk_trade_demand set status = 'qualifying' where id = 'btd_age_old';
+                  update crm_bulk_trade_demand set qualify_asked_on = '2026-09-25' where id in ('btd_age_old', 'btd_age_request')""")
                 self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com"), "anon")
                 self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com", two_way=True), "email")
                 cur.execute("update crm_bulk_trade_demand set match_hash = 'old', supply_match_hash = 'old' where id = 'btd_age_confirm'")
