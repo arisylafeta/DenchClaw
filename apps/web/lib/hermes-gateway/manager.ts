@@ -3,7 +3,7 @@ import { dashboardToken, invalidateDashboardToken } from "../hermes-native";
 import { JsonRpcRequestChannel, JsonRpcGatewayError, wireFrameText, type ServerRequest } from "../../vendor/hermes-gateway/json-rpc-channel";
 import type { GatewayEvent, RpcMethods, SessionResumeResult, ServerRequestMap } from "../../vendor/hermes-gateway/gateway-events";
 
-export type GatewaySessionEvent = GatewayEvent & { generation: number };
+export type GatewaySessionEvent = GatewayEvent & { generation: number; session_id: string; seq: number };
 export interface RetainedSession {
   key: string;
   profile: string;
@@ -291,7 +291,7 @@ export class HermesGatewayManager {
         if (id) { session.requests.delete(id); this.openRequests.delete(id); }
       }
       if (typeof event.seq !== "number" || event.seq <= session.seq) continue;
-      const frame: GatewaySessionEvent = { ...event, generation: session.generation };
+      const frame: GatewaySessionEvent = { ...event, session_id: event.session_id, seq: event.seq, generation: session.generation };
       session.seq = event.seq;
       session.events.push(frame);
       if (session.events.length > (this.options.ringSize ?? 512)) { session.events.shift(); session.truncated = true; }
