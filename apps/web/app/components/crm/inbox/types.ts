@@ -22,6 +22,8 @@ export type Thread = {
 
 export type Message = {
   id: string;
+  direction?: "inbound" | "outbound";
+  to_emails?: string[];
   subject: string | null;
   sent_at: string | null;
   preview: string | null;

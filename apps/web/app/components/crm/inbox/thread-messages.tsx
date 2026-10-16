@@ -135,6 +135,8 @@ export function ThreadMessages({
   if (!detail) {return null;}
 
   const lastMessageId = detail.messages.at(-1)?.id;
+  const replyMessage = detail.messages.findLast((message) => message.direction === "inbound") ?? detail.messages.at(-1);
+  const replyEmail = replyMessage?.direction === "inbound" ? replyMessage.from_email ?? null : replyMessage?.to_emails?.[0] ?? null;
 
   return (
     <div ref={containerRef} className="space-y-3">
@@ -150,7 +152,7 @@ export function ThreadMessages({
       ))}
       {showReply && (
         <div className="pt-3">
-          <QuickReply key={threadId} threadId={threadId} recipientName={recipientName ?? null} />
+          <QuickReply key={threadId} threadId={threadId} recipientName={recipientName ?? null} recipientEmail={replyEmail} subject={replyMessage?.subject ?? null} />
         </div>
       )}
     </div>

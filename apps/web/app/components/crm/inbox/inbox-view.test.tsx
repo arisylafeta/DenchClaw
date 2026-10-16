@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { MailMessageRow } from "@/lib/mail-types";
 import { InboxView, mailQuery } from "./inbox-view";
-import { QuickReply } from "./quick-reply";
+import { QuickReply, draftCommand } from "./quick-reply";
 import InboxPage from "../../../inbox/page";
 import CampaignsPage from "../../../campaigns/page";
 import CampaignPage from "../../../campaigns/[id]/page";
@@ -72,13 +72,24 @@ describe("merged mail", () => {
     InboxPage(); CampaignsPage(); await CampaignPage({ params: Promise.resolve({ id: "campaign/one" }) });
     expect(navigation.redirect.mock.calls.map(([url]) => url)).toEqual(["/?crm=inbox&view=conversations", "/?crm=inbox&view=campaigns", "/?crm=inbox&view=campaigns&campaignDetail=campaign%2Fone"]);
   });
-  it("creates a draft and never invokes a send endpoint", async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ id: "draft-synthetic", state: "draft" })));
-    render(<QuickReply threadId="thread-synthetic" recipientName="Synthetic Buyer" />);
-    fireEvent.click(screen.getByRole("button", { name: /Create draft to/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Draft reply" }), { target: { value: "Thanks for your reply." } });
-    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Not sent");
-    expect(fetch).toHaveBeenCalledExactlyOnceWith("/api/mail/threads/thread-synthetic/draft", expect.objectContaining({ method: "POST", body: JSON.stringify({ body_text: "Thanks for your reply.", identity: "alex" }) }));
+  it("copies a shell-quoted draft command without writing or sending", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    render(<QuickReply threadId="thread-synthetic" recipientName="Synthetic Buyer" recipientEmail="buyer@example.test" subject="Battery enquiry" />);
+    fireEvent.click(screen.getByRole("button", { name: /Prepare draft to/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Draft reply" }), { target: { value: "Buyer's reply\n$(touch /tmp/not-run)" } });
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("No draft has been saved or sent");
+    expect(writeText).toHaveBeenCalledWith(`rebattery-mail draft --thread 'thread-synthetic' --identity 'alex' --to 'buyer@example.test' --subject 'Battery enquiry' --body 'Buyer'\"'\"'s reply\n$(touch /tmp/not-run)'`);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByText("Prepare this draft with rebattery-mail; approval and send happen in the CLI")).toBeInTheDocument();
+  });
+  it("quotes every shell argument and does not invent a missing reply address", () => {
+    expect(draftCommand("thread'unsafe", "ari", "buyer@example.test", "Subject", "`id`")).toContain(`--thread 'thread'\"'\"'unsafe'`);
+    render(<QuickReply threadId="thread" recipientEmail={null} subject={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /Prepare draft reply/ }));
+    expect(screen.getByRole("button", { name: "Copy" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("No reply address");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
