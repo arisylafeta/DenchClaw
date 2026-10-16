@@ -8,7 +8,7 @@ export function ProfileAvatar({ name, className = "h-8 w-8" }: { name: string; c
   return (
     <span
       aria-hidden="true"
-      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-neutral-400/15 text-xs font-semibold ${className}`}
+      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-400/15 text-xs font-semibold ${className}`}
     >
       {initialsFromName(name.replace(/[-_]/g, " "))}
       {failedName !== name && (
