@@ -48,6 +48,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [showPossible, setShowPossible] = useState(false);
   const [openTradeId, setOpenTradeId] = useState<string | null>(null);
   const [openDemandId, setOpenDemandId] = useState<string | null>(null);
+  const [demandRevision, setDemandRevision] = useState(0);
   const [openSupplyId, setOpenSupplyId] = useState<string | null>(null);
   const [holding, setHolding] = useState<BulkTrade | null>(null);
   const today = todayInLondon();
@@ -172,7 +173,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         <ErrorText error={loadError} />
         <ErrorText error={actionError} />
         {mode === "demand"
-          ? <DemandPage today={today} onOpenTrade={setOpenTradeId} initialDemandId={openDemandId} onOpenSupply={(id) => { setOpenSupplyId(id); switchMode("supply"); }} />
+          ? <DemandPage key={demandRevision} today={today} onOpenTrade={setOpenTradeId} initialDemandId={openDemandId} onOpenSupply={(id) => { setOpenSupplyId(id); switchMode("supply"); }} />
           : mode === "supply"
             ? <SupplyPage initialSupplyId={openSupplyId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} />
             : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
@@ -183,7 +184,11 @@ export function BulkTradesView({ onOpenEntry }: Props) {
           {!possible.length && <p className="text-sm">Inbox clear.</p>}
           {possible.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={(decided, action, lotId) => {
             setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
-            if (action === "accept") { void load(); if (lotId) { setOpenTradeId(lotId); setShowPossible(false); } }
+            if (action === "accept") {
+              if (decided.kind === "possible_demand") setDemandRevision((revision) => revision + 1);
+              void load();
+              if (lotId) { setOpenTradeId(lotId); setShowPossible(false); }
+            }
           }} />)}
         </DialogContent>
       </Dialog>

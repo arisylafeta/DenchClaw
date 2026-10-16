@@ -127,6 +127,38 @@ describe("BulkTradesView", () => {
     expect(screen.getByRole("button", { name: "Create trade" })).toBeInTheDocument();
   });
 
+  it("refreshes mounted demand after accepting an inbox proposal", async () => {
+    let accepted = false;
+    const proposal = {
+      id: "demand-proposal", kind: "possible_demand", lot_id: null, target: null,
+      proposed: { buyer: "New buyer" }, summary: "New buyer wants packs", quote: "We need packs",
+      source_kind: "gmail", source_label: "Gmail", source_url: null, source_at: null, created_at: "2026-10-16T09:00:00Z",
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/bulk-trades/proposals/demand-proposal" && init?.method === "POST") {
+        accepted = true;
+        return new Response(JSON.stringify({ lot_id: null }));
+      }
+      if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({
+        demand: accepted ? [{ id: "new-demand", buyer: "New buyer", wants: "Tested packs", status: "open", spec: {},
+          fee_eur: null, price_basis: null, reputation: null, observed_on: today, confirmed_on: null,
+          activity_count: 0, last_activity_at: null }] : [],
+        possible: accepted ? [] : [proposal],
+      }));
+      return new Response(JSON.stringify({ trades: TRADES, owners: [], possible: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<BulkTradesView />);
+    await userEvent.click(await screen.findByRole("button", { name: "Demand" }));
+    expect(await screen.findByText("No open demand.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Inbox · 1/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Add demand" }));
+    await waitFor(() => expect(screen.getByText("Inbox clear.")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("button", { name: /New buyer/ })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/demand-proposal", expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "accept" }) }));
+  });
+
   it("folds on-hold trades at the bottom of the list, and asks for a date and reason when a card is dropped on hold", async () => {
     const held = trade({ id: "bt_h", title: "Synthetic BESS portfolio", trade_stage: "On hold", hold_until: "2099-03-01",
       hold_reason: "Batteries stay on site until removal", hold_from_stage: "With buyers" });
