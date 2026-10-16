@@ -77,7 +77,7 @@ def expiry_transition(row, today):
         if row.get('qualify_asked_on') is None:
             return 'question_not_sent'
         confirmed = row.get('confirmed_on')
-        if confirmed is not None and confirmed >= asked:
+        if confirmed is not None and confirmed > asked:
             return None
         if (today - asked).days >= 21:
             return 'expired' if row['kind'] == 'request' else 'moved_to_profile'

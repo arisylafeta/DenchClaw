@@ -145,6 +145,10 @@ class DemandAgeing(unittest.TestCase):
             self.assertIsNone(expiry_transition(qualifying, today))
             qualifying["qualify_asked_on"] = today-dt.timedelta(days=21)
             self.assertEqual(expiry_transition(qualifying, today), outcome)
+            # Creation/acceptance and sending on the same date is not a buyer response.
+            qualifying["observed_on"] = qualifying["qualify_asked_on"]
+            qualifying["confirmed_on"] = qualifying["qualify_asked_on"]
+            self.assertEqual(expiry_transition(qualifying, today), outcome)
             qualifying["confirmed_on"] = today
             self.assertIsNone(expiry_transition(qualifying, today))
         self.assertIsNone(expiry_transition(row(121, confirmed_on=today), today))

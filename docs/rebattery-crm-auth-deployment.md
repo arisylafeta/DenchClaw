@@ -278,8 +278,10 @@ qualification stamps `qualify_entered_on` across UI, proposal and import writers
 `qualify_asked_on` is the date the question was actually sent: null means not
 sent, so the row stays qualifying and the lifecycle reports `question_not_sent`.
 Only 21 days after sending, without reconfirmation, does a qualifying standing
-ask move to the company profile or a qualifying request expire. Old buyer
-observations never age a qualifying row. Open requests still expire after
+ask move to the company profile or a qualifying request expire. Reconfirmation
+must be dated strictly after the question was sent; same-day creation or
+acceptance is not a response. Old buyer observations never age a qualifying row.
+Open requests still expire after
 `needed_by`, or after 90 days without a deadline, using their latest observation
 or confirmation. Closure is an explicit lifecycle transition, not score-based.
 
