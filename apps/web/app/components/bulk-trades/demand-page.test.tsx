@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Demand } from "@/lib/bulk-demand";
@@ -8,6 +8,24 @@ import { DemandPage } from "./demand-page";
 import { SuggestedBuyers } from "./suggested-buyers";
 
 const TODAY = "2026-09-30";
+
+const browserMethods = ["hasPointerCapture", "setPointerCapture", "releasePointerCapture", "scrollIntoView"] as const;
+const browserDescriptors = browserMethods.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+beforeAll(() => {
+  for (const name of browserMethods) Object.defineProperty(HTMLElement.prototype, name, { configurable: true, value: name === "hasPointerCapture" ? () => false : () => {} });
+});
+afterAll(() => {
+  browserMethods.forEach((name, index) => {
+    const descriptor = browserDescriptors[index];
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+  });
+});
+
+async function choose(label: string, option: string) {
+  await userEvent.click(screen.getByRole("combobox", { name: label }));
+  await userEvent.click(await screen.findByRole("option", { name: option }));
+}
 
 function row(overrides: Partial<Demand>): Demand {
   return {
@@ -113,9 +131,9 @@ describe("DemandPage", () => {
     expect(within(within(dialog).getByLabelText("Status")).queryByRole("option", { name: "Closed" })).not.toBeInTheDocument();
     await userEvent.clear(within(dialog).getByLabelText("Fee override (EUR)"));
     await userEvent.type(within(dialog).getByLabelText("Fee override (EUR)"), "2500");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Price basis"), "estimate");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Reputation"), "paid");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Status"), "qualifying");
+    await choose("Price basis", "Our estimate");
+    await choose("Reputation", "Paid us before");
+    await choose("Status", "Qualifying");
     await userEvent.type(within(dialog).getByLabelText("Qualification question"), "Still buying?");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_1",
@@ -186,7 +204,7 @@ describe("DemandPage", () => {
     await userEvent.type(within(dialog).getByLabelText("Ask"), "MEB modules for tractor conversions");
     await userEvent.type(within(dialog).getByLabelText("Needed by"), "2026-10-31");
     await userEvent.type(within(dialog).getByLabelText("Quantity", { exact: true }), "40");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Unit"), "modules");
+    await choose("Unit", "modules");
     await userEvent.type(within(dialog).getByLabelText("Max price"), "25");
     await userEvent.click(within(dialog).getByText("Specification"));
     await userEvent.click(within(within(dialog).getByRole("group", { name: "Chemistry" })).getByRole("button", { name: "NMC" }));
@@ -213,7 +231,7 @@ describe("DemandPage", () => {
     expect(within(dialog).queryByLabelText("Needed by")).not.toBeInTheDocument();
     await userEvent.type(within(dialog).getByLabelText("Buyer"), "STN Power Systems");
     await userEvent.type(within(dialog).getByLabelText("Ask"), "Tested EV packs on a steady basis");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Basis"), "agreed");
+    await choose("Basis", "Agreed");
     await userEvent.type(within(dialog).getByLabelText("Quantity / month"), "8");
     await userEvent.click(within(dialog).getByRole("button", { name: "Add demand" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand", expect.objectContaining({ method: "POST" })));

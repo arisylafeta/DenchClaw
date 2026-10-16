@@ -131,6 +131,19 @@ export type DemandInput = Partial<Pick<Demand,
   "kind" | "basis" | "buyer" | "company_id" | "person_id" | "contact" | "email" | "wants" | "quantity" | "location" | "note"
   | "confirmed_on" | "needed_by" | "volume" | "volume_unit" | "max_price" | "price_currency" | "price_unit" | "spec"
   | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to">>;
+
+/** Only compute a euro fee when amount, currency and compatible units are known. */
+export function demandFee(input: DemandInput): number | null {
+  if (input.price_currency !== "EUR" || !input.max_price || !input.price_unit) return null;
+  const quantity = input.quantity?.trim().match(/^(\d+(?:[.,]\d+)?)\s*(packs?|cells?|modules?|systems?|kwh|mwh)$/i);
+  const amount = input.volume ?? (quantity ? Number(quantity[1].replace(",", ".")) : null);
+  const unit = (input.volume_unit ?? quantity?.[2])?.toLowerCase().replace(/s$/, "");
+  const priced = input.price_unit.toLowerCase().replace(/s$/, "");
+  if (!amount || !unit) return null;
+  const factor = unit === priced ? 1 : unit === "mwh" && priced === "kwh" ? 1000 : null;
+  return factor === null ? null : amount * factor * input.max_price * 0.1;
+}
+
 const DEMAND_RULES: Record<string, Rule> = {
   kind: KINDS, basis: BASES, buyer: "text", company_id: "text", person_id: "text", contact: "text", email: "text", wants: "text",
   quantity: "text", location: "text", note: "text", confirmed_on: "date", needed_by: "date", observed_on: "date",

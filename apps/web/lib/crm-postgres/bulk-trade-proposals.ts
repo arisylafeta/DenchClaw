@@ -6,7 +6,7 @@ import { fetchGmailAttachment } from "../gmail-drafts";
 import { createBulkTrade, updateBulkTrade } from "./bulk-trades";
 import { addBuyer, addContact, recordFile, setField, updateBuyer } from "./bulk-trade-details";
 import { addDemand, crmIdsForEmail, getDemand, updateDemand } from "./bulk-demand";
-import { cleanSpec, parseDemandInput, type DemandInput } from "../bulk-demand";
+import { cleanSpec, demandFee, parseDemandInput, type DemandInput } from "../bulk-demand";
 
 const PROPOSAL_SELECT = `
   select id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url, source_label,
@@ -75,17 +75,6 @@ export type Decision = { ok: true; lot_id: string | null } | { ok: false; status
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 const date = (value: unknown) => (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null);
 
-/** Only compute a euro fee when amount, currency and compatible units are known. */
-function demandFee(input: DemandInput): number | null {
-  if (input.price_currency !== "EUR" || !input.max_price || !input.price_unit) return null;
-  const quantity = text(input.quantity)?.match(/^(\d+(?:[.,]\d+)?)\s*(packs?|cells?|modules?|systems?|kwh|mwh)$/i);
-  const amount = input.volume ?? (quantity ? Number(quantity[1].replace(",", ".")) : null);
-  const unit = (input.volume_unit ?? quantity?.[2])?.toLowerCase().replace(/s$/, "");
-  const priced = input.price_unit.toLowerCase().replace(/s$/, "");
-  if (!amount || !unit) return null;
-  const factor = unit === priced ? 1 : unit === "mwh" && priced === "kwh" ? 1000 : null;
-  return factor === null ? null : amount * factor * input.max_price * 0.1;
-}
 
 /**
  * Accepts or ignores a proposal. Accepting applies it through the same functions the app uses for

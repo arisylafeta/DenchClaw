@@ -93,7 +93,10 @@ scope; badges and avatars keep their meaningful shapes.
 Bulk Trades Demand and Supply details open in a right-hand modal sheet, preserving
 the full-width list and its filters. The shared Radix Sheet handles focus trapping,
 Escape, overlay dismissal and return focus. Demand edits use a scrolling form with
-a fixed Save/Cancel footer; activity uses kind segments and a linked timeline.
+a fixed Save/Cancel footer, titled field groups and shared Radix Select controls.
+The fee hint and inbox proposal writer share `lib/bulk-demand.ts:demandFee`;
+the hint does not change the saved override. Qualification appears only for
+qualifying demand. Activity uses compact kind segments and a linked timeline.
 Demand History includes only Sold (`bought_from_us`), Lost (`bought_elsewhere`)
 and Dropped (`no_longer_needed`) outcomes, newest update first. Its date is the
 record's last update timestamp; there is no separate closure timestamp.
