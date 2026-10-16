@@ -237,3 +237,51 @@ Hourly service/timer templates live in `scripts/rebattery/systemd/`. They are
 **not installed or enabled**. Review the checkout and Python interpreter paths
 (including `psycopg2` availability) before separately authorizing installation.
 The timer invokes `--apply`; its journal contains aggregate counts only.
+
+## Bulk-trade demand shortlist (16 October 2026)
+
+Migration `044` separates current sourcing work from buyer discovery. **Demand**
+is a buyer's own dated, actionable request or standing ask with an identified
+buyer, product family and quantity. **Qualifying** holds a specific need that
+still needs a quantity, identity or reconfirmation; keep its next question
+explicit. **Buyer profiles** describe general buying capabilities or buy-boxes,
+with `researched` or `stated` basis, evidence and a profile date on the company.
+They suggest whom to introduce, not what to source today. **Lot interest** is a
+reply or bid to stock we offered and belongs to that lot's buyer/bid records,
+not to standalone demand. Recycling intake remains a separate pipeline.
+
+The shortlist orders open rows by expected-fee score, then qualifying rows and
+closed history. Fee is quantity × unit price × 10%. Buyer-stated prices count
+in full; our estimates count at half weight:
+
+```
+asked_on = latest(observed_on, confirmed_on)
+freshness = 0.5 ^ (days_since_asked_on / 30)
+expected_fee = fee_eur × price_weight × close_chance × freshness
+score = min(100, round(25 × log10(1 + expected_fee)))
+```
+
+`price_weight` is 1 for `buyer`, otherwise 0.5. Reputation priors are `paid`
+0.60, `active` 0.35, `email` 0.20, `inbound` 0.10 and `anon` 0.03. Bands are
+Hot ≥80, Warm 60–79, Low 40–59 and Cold <40. Missing fee inputs produce no
+score ("Needs quantity"), not zero. Reconfirmation resets freshness.
+Stock availability and product-family grouping are context, not score factors.
+
+Inbox/call demand extraction is proposal-only: approval is required before a
+new ask becomes demand. Offer replies route to the existing lot rather than
+creating a new ask; evidence must come from the new message, not quoted history.
+Resolve the buyer identity and deduplicate by entity plus normalized product
+family across open and qualifying rows, not by wording.
+
+Standing asks become qualifying at 60 days ("Still buying?") and move to the
+company profile after 120 days. Requests expire after `needed_by`, or after
+90 days without a deadline. Expiry uses the latest observation/confirmation;
+it is an explicit lifecycle transition, not a score-based closure.
+
+Saved searches feed company profiles, never open demand. Sourcing requests
+enter as qualifying demand. Surveys are profile evidence unless they state
+both quantity and timing; specific incomplete needs belong in qualification.
+The scheduled importer and inbox checker use the detached
+`/root/denchclaw/scripts-live` worktree. `saved_search_import.py` defaults to a
+rollback-only dry run; `--apply` is reserved for the scheduled gate or an
+explicitly authorized import.
