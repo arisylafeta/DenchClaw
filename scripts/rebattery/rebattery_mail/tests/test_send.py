@@ -29,9 +29,8 @@ class Fake:
 
 
 @pytest.fixture
-def env():
-    assert 'dbname=mail_w2 ' in os.environ['DENCH_MAIL_DSN']
-    prefix='w2_'+uuid4().hex
+def env(db_after_cutover):
+    prefix='send_'+uuid4().hex
     with connection() as db,db.cursor() as cur:
         for i in range(3):
             cur.execute("insert into crm_people(id,full_name,email,first_name) values (%s,'Synthetic',%s,'Buyer')",(prefix+str(i),prefix+str(i)+'@example.test'))

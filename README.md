@@ -223,11 +223,15 @@ or `POSTMARK_SERVER_TOKEN`; never store them in a job definition. Existing jobs
 need their entrypoint changed before reactivation. Verify a fresh backup and
 inspect an approved dry run before enabling a real scheduler.
 
-Focused fake-provider regressions:
+Focused fake-provider regressions create and drop an isolated `mail_test_*`
+database per module, cloned from the migrated synthetic `denchclaw` template.
+The harness defaults to test Postgres on `127.0.0.1:55470`; override
+`DENCH_MAIL_TEST_ADMIN_DSN` for another local, non-5432 test endpoint.
+No `DENCH_MAIL_DSN` is needed, and production-looking targets are refused.
 
 ```bash
 cd scripts/rebattery
-DENCH_MAIL_DSN=<disposable-mail-w2-dsn> python3 -m pytest rebattery_mail/tests/test_w2_*.py -q
+python3 -m pytest rebattery_mail/tests test_bulk_trade_inbox_check.py test_buyer_email_mine.py test_bulk_trade_auction_sync.py -q
 ```
 
 ## Troubleshooting

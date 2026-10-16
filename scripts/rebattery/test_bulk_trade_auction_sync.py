@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from uuid import uuid4
+import pytest
 
 spec = importlib.util.spec_from_file_location("sync", Path(__file__).with_name("bulk_trade_auction_sync.py"))
 sync = importlib.util.module_from_spec(spec)
@@ -52,7 +53,7 @@ class FakePlatform:
 TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ.get("DENCH_MAIL_DSN")
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class SyncRun(unittest.TestCase):
     def test_multilot_invites_and_clicks_follow_only_the_matching_destination(self):
         import psycopg2

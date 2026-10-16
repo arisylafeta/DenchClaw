@@ -3,6 +3,7 @@ import os
 import unittest
 from pathlib import Path
 from uuid import uuid4
+import pytest
 
 spec = importlib.util.spec_from_file_location("mine", Path(__file__).with_name("buyer_email_mine.py"))
 mine = importlib.util.module_from_spec(spec)
@@ -85,8 +86,7 @@ class Validate(unittest.TestCase):
         self.assertEqual(values, {"buyer_projects": "10 MW BESS in Brandenburg (2026-09-21)", "about": "Develops second-life storage."})
 
 
-@unittest.skipUnless(os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ.get("DENCH_MAIL_DSN"),
-                     "needs a disposable migrated mail database")
+@pytest.mark.usefixtures("db_after_cutover")
 class MailHistory(unittest.TestCase):
     def test_reads_visible_history_in_order_without_private_mail(self):
         import psycopg2

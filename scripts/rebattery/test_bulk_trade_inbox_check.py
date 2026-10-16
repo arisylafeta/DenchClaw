@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+import pytest
 
 spec = importlib.util.spec_from_file_location("check", Path(__file__).with_name("bulk_trade_inbox_check.py"))
 check = importlib.util.module_from_spec(spec)
@@ -378,7 +379,7 @@ class History(unittest.TestCase):
 TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ.get("DENCH_MAIL_DSN")
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class FullRun(unittest.TestCase):
     """End to end against a throwaway database with every migration, the model mocked."""
 
@@ -511,7 +512,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(runs[-1][2], 0)
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class HistoryRun(unittest.TestCase):
     def test_reads_all_of_a_trades_mail_oldest_first_and_keeps_the_latest_value(self):
         import psycopg2
@@ -579,7 +580,7 @@ class HistoryRun(unittest.TestCase):
         self.assertEqual(run, ("history", "ok", 3))
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class DemandRun(unittest.TestCase):
     def test_new_sender_with_matching_name_does_not_reuse_another_buyer(self):
         from demand_lifecycle import resolve_entity
@@ -1050,7 +1051,7 @@ class DemandRun(unittest.TestCase):
         self.assertIn("Buy-boxes to reconfirm: Waiting Energy (agreed)", text)
         self.assertNotIn("Answered Ltd", text.split("Buy-boxes to reconfirm:")[1])
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class HoldSummary(unittest.TestCase):
     def test_a_hold_ending_within_a_week_is_named_and_held_trades_are_still_watched(self):
         import psycopg2
