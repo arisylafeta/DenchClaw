@@ -8,7 +8,12 @@ export interface MessageHtmlRecord {
   html: string;
   created_at: string;
 }
+export class MessageHtmlError extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
+}
 export async function saveMessageHtml(profile: string, storedSessionId: string, clientMessageId: string, text: string, html: string): Promise<void> {
+  if (!clientMessageId || Buffer.byteLength(clientMessageId) > 256) throw new MessageHtmlError(400, "invalid_client_message_id");
+  if (Buffer.byteLength(html) > 262_144) throw new MessageHtmlError(413, "message_html_too_large");
   await queryPg(`insert into hermes_message_html (profile, stored_session_id, client_message_id, text_hash, html)
     values ($1, $2, $3, $4, $5) on conflict (profile, stored_session_id, client_message_id)
     do update set text_hash = excluded.text_hash, html = excluded.html`,

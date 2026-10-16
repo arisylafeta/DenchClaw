@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { conversationKey, filterConversations, parseConversationKey } from "./hermes-conversations";
 vi.mock("./workspace", () => ({ discoverWorkspaces: () => [{ name: "default" }, { name: "alpha" }] }));
 import { createConversation, groupRpc, listConversations, nativeFetch, readConversation } from "./hermes-native";
+import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
 let server: WebSocketServer | undefined;
 let handler: (method: string, params: Record<string, unknown>) => unknown;
@@ -32,6 +33,23 @@ beforeEach(() => {
 afterEach(async () => {
   if (server) { for (const client of server.clients) client.terminate(); await new Promise<void>((resolve) => server!.close(() => resolve())); server = undefined; }
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
+});
+it("uses gateway status for hidden solo chats with profile-colliding stored ids", async () => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "same", title: "Solo" }] })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [{ id: "runtime-alpha", session_key: "same", status: "waiting" }] } as never);
+  const attach = vi.spyOn(manager, "attachLive").mockImplementation(async key => key.includes("alpha") ? { session_id: "runtime-alpha", running: true, info: { profile_name: "alpha" } } as never : undefined);
+  const requests = vi.spyOn(manager, "pendingRequests").mockReturnValue([{ id: "srq", method: "clarify", params: {} }]);
+  try {
+    const result = await listConversations();
+    expect(result.sessions.find(row => row.profile === "alpha")).toMatchObject({ working: true, blocked: true });
+    expect(result.sessions.find(row => row.profile === "default")).toMatchObject({ working: false, blocked: false });
+    expect(call).toHaveBeenCalledTimes(1);
+    call.mockRejectedValue(new Error("offline"));
+    const offline = await listConversations();
+    expect(offline.sessions.every(row => row.working === null)).toBe(true);
+  } finally { call.mockRestore(); attach.mockRestore(); requests.mockRestore(); }
 });
 describe("native Hermes conversations", () => {
   it("keeps profile-scoped identities stable and filtering never rewrites them", () => {

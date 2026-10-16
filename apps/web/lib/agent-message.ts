@@ -76,3 +76,10 @@ export function buildAgentMessage(args: {
 
 	return message;
 }
+
+/** Undo only the agent-only blocks emitted by buildAgentMessage; preserve attachment cards. */
+export function stripAgentMessageContext(text: string): string {
+	return text.replace(/(?:^|\n\n)\[Selected table (?:rows|cells): [^\n]*\]\n[\s\S]*?\n\n(?=\[Context: workspace |[^\n])/g, "\n\n")
+		.replace(/(?:^|\n\n)\[Context: workspace (?:file|directory) '[^\n]*'\]\n\n/g, "\n\n")
+		.replace(/^\n\n/, "");
+}

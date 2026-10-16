@@ -5,6 +5,8 @@ import { resolveHermesConfig } from "./agent-backend";
 import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
 import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
+import { hermesChatTransport } from "./hermes-gateway/transport-flag";
+import { getHermesGatewayManager } from "./hermes-gateway/manager";
 
 type NativeSession = { id: string; source?: string; title?: string; last_active?: number; started_at?: number; hidden?: boolean; is_internal_child?: boolean };
 type Member = { profile: string; member_id: string; display_name?: string; handle?: string };
@@ -138,6 +140,30 @@ export async function listConversations() {
       return page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
+  if (hermesChatTransport() === "gateway") {
+    const manager = getHermesGatewayManager();
+    const rows = soloLists.flat();
+    for (const row of rows) { row.working = null; row.blocked = null; }
+    try {
+      const active = await manager.call("session.active_list", {});
+      for (const row of rows) {
+        const profile = row.participants[0].profile;
+        const candidates = active.sessions.filter(live => live.session_key === row.id);
+        row.working = false;
+        row.blocked = false;
+        for (const live of candidates) {
+          // active_list is global and omits profile identity; activate is warm-only,
+          // and its info.profile_name is authoritative even for colliding stored ids.
+          const retained = manager.retainSession(profile, row.id);
+          const snapshot = await manager.attachLive(retained, live.id);
+          if (!snapshot) continue;
+          row.working = Boolean(snapshot.running || live.status !== "idle");
+          row.blocked = Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval);
+          break;
+        }
+      }
+    } catch { for (const row of rows) { row.working = null; row.blocked = null; } }
+  }
   const rooms = new Map<string, HermesConversation>();
   if (groupsConfigured()) {
     try {

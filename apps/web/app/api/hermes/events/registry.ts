@@ -7,7 +7,19 @@ export class EventConnection {
   private readonly subscriptions = new Map<string, () => void>();
   private closed = false;
   private tail: Promise<void> = Promise.resolve();
-  constructor(readonly userId: string, private readonly emit: (event: string, payload: unknown, id?: string) => void, private readonly service: HermesChatService = getHermesChatService()) {}
+  private readonly stopNotices: () => void;
+  constructor(readonly userId: string, private readonly emit: (event: string, payload: unknown, id?: string) => void, private readonly service: HermesChatService = getHermesChatService()) {
+    this.stopNotices = service.manager.subscribeNotices(notice => {
+      if (this.closed) return;
+      if (notice.type === "gateway") { this.emit("gateway", { state: notice.state }); return; }
+      for (const key of this.subscriptions.keys()) {
+        if (service.retainedKey(key) !== notice.key) continue;
+        this.emit("resync", { key, reason: notice.reason });
+        void this.update([], [key]).then(() => this.update([key], [])).catch(() => {});
+      }
+    });
+    this.emit("gateway", { state: service.manager.connectionState() });
+  }
   update(add: string[], remove: string[], cursor?: { generation: number; seq: number }): Promise<void> {
     const operation = this.tail.then(async () => {
       if (this.closed) return;
@@ -23,6 +35,7 @@ export class EventConnection {
         const publish = (event: GatewaySessionEvent) => {
           if (event.generation === generation && event.seq <= seq) return;
           if (generation && event.generation !== generation) {
+            this.emit("resync", { key, reason: "generation_change" });
             void this.update([], [key]).then(() => this.update([key], [])).catch(() => {});
             return;
           }
@@ -58,6 +71,7 @@ export class EventConnection {
   }
   close(): void {
     this.closed = true;
+    this.stopNotices();
     for (const unsubscribe of this.subscriptions.values()) unsubscribe();
     this.subscriptions.clear();
   }

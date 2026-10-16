@@ -37,6 +37,7 @@ import {
 import { resolveAgentBackend, resolveHermesConfig } from "@/lib/agent-backend";
 import { createHermesChatStream } from "@/lib/hermes-client";
 import { assertProfile } from "@/lib/hermes-native";
+import { hermesChatTransport } from "@/lib/hermes-gateway/transport-flag";
 import {
 	buildAgentMessage,
 	type WorkspaceContext,
@@ -147,6 +148,7 @@ export async function POST(req: Request) {
   const nativeHermesSession = backend === "hermes" && typeof hermesProfile === "string";
   if (nativeHermesSession) {
     try { assertProfile(hermesProfile); } catch { return new Response("Unknown Hermes profile", { status: 400 }); }
+    if (hermesChatTransport() === "gateway") return Response.json({ error: "gateway_transport" }, { status: 409 });
   }
 	const normalizedModelOverride =
 		typeof modelOverride === "string" && modelOverride.trim()

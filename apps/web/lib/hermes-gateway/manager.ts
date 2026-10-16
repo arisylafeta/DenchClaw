@@ -4,6 +4,8 @@ import { JsonRpcRequestChannel, JsonRpcGatewayError, wireFrameText, type ServerR
 import type { GatewayEvent, RpcMethods, SessionResumeResult, ServerRequestMap } from "../../vendor/hermes-gateway/gateway-events";
 
 export type GatewaySessionEvent = GatewayEvent & { generation: number; session_id: string; seq: number };
+export type GatewayConnectionState = "connected" | "reconnecting" | "lost";
+export interface GatewayNotice { type: "gateway" | "resync"; state?: GatewayConnectionState; key?: string; reason?: string }
 export interface RetainedSession {
   key: string;
   profile: string;
@@ -17,7 +19,7 @@ export interface PendingServerRequest {
   params: Record<string, unknown>;
   replayed?: boolean;
 }
-export interface ReplayResult { generation: number; events: GatewaySessionEvent[]; truncated: boolean }
+export interface ReplayResult { generation: number; latestSeq: number; events: GatewaySessionEvent[]; truncated: boolean }
 export interface GatewayClock {
   now(): number;
   setTimeout(callback: () => void, delay: number): unknown;
@@ -27,6 +29,7 @@ export interface GatewaySocket {
   send(text: string): void;
   close(): void;
   addEventListener(type: string, listener: (event: any) => void): void;
+  on?(type: "unexpected-response", listener: (request: unknown, response: { statusCode?: number; resume(): void }) => void): void;
 }
 export interface GatewayManagerOptions {
   url?: string;
@@ -36,6 +39,9 @@ export interface GatewayManagerOptions {
   clock?: GatewayClock;
   random?: () => number;
   ringSize?: number;
+  ringBytes?: number;
+  maxSessions?: number;
+  idleMs?: number;
 }
 interface SessionState extends RetainedSession {
   events: GatewaySessionEvent[];
@@ -46,13 +52,16 @@ interface SessionState extends RetainedSession {
   resume?: Promise<SessionResumeResult>;
   tail: Promise<unknown>;
   held?: GatewayEvent[];
+  touched: number;
+  active: boolean;
+  bytes: number;
+  operations: number;
 }
 const defaultClock: GatewayClock = {
   now: () => Date.now(),
   setTimeout: (callback, delay) => { const timer = setTimeout(callback, delay); timer.unref?.(); return timer; },
   clearTimeout: handle => clearTimeout(handle as NodeJS.Timeout),
 };
-const SAFE_READS: Record<string, true> = { "session.status": true, "session.history": true, "session.events.since": true, "approval.pending": true, "subagent.list": true, "subagent.tail": true };
 /** Process-owned transport: browser subscription count never controls socket lifetime. */
 export class HermesGatewayManager {
   private readonly clock: GatewayClock;
@@ -72,6 +81,19 @@ export class HermesGatewayManager {
   private heartbeatTimer?: unknown;
   private rejectConnect?: (error: Error) => void;
   private readonly timers = new Set<unknown>();
+  private readonly noticeListeners = new Set<(notice: GatewayNotice) => void>();
+  private state: GatewayConnectionState = "lost";
+  private retirementTimer?: unknown;
+  connectionState(): GatewayConnectionState { return this.state; }
+  subscribeNotices(handler: (notice: GatewayNotice) => void): () => void {
+    this.noticeListeners.add(handler);
+    return () => { this.noticeListeners.delete(handler); };
+  }
+  private notice(notice: GatewayNotice): void {
+    for (const handler of this.noticeListeners) { try { handler(notice); } catch { /* Isolated consumer. */ } }
+  }
+  private connection(state: GatewayConnectionState): void { this.state = state; this.notice({ type: "gateway", state }); }
+  private resync(session: SessionState, reason: string): void { this.notice({ type: "resync", key: session.key, reason }); }
 
   constructor(private readonly options: GatewayManagerOptions = {}) {
     this.clock = options.clock ?? defaultClock;
@@ -104,6 +126,16 @@ export class HermesGatewayManager {
       await new Promise<void>((resolve, reject) => {
         this.rejectConnect = reject;
         const deadline = this.later(() => this.lose(socket, new Error("Gateway handshake timed out")), 15_000);
+        socket.on?.("unexpected-response", (_request, response) => {
+          if (this.socket !== socket) return;
+          if (response.statusCode === 401 || response.statusCode === 403) {
+            (this.options.invalidateToken ?? invalidateDashboardToken)();
+            this.authFailures++;
+          }
+          response.resume();
+          this.cancel(deadline);
+          this.lose(socket, new Error(`Gateway upgrade rejected (${response.statusCode})`));
+        });
         socket.addEventListener("open", () => {
           if (this.socket !== socket) return;
           this.connected = true;
@@ -152,6 +184,7 @@ export class HermesGatewayManager {
     this.socket = undefined;
     this.connected = false;
     this.ready = false;
+    this.connection(this.authFailures >= 2 || this.stopped ? "lost" : "reconnecting");
     this.channel.detach(error);
     this.rejectConnect?.(error);
     this.rejectConnect = undefined;
@@ -190,10 +223,13 @@ export class HermesGatewayManager {
   async callSession<M extends keyof RpcMethods>(key: string, method: M, params: RpcMethods[M]["params"]): Promise<RpcMethods[M]["result"]> {
     const session = this.requireSession(key);
     const invoke = () => this.call(method, { ...params, profile: session.profile, session_id: session.runtimeId } as RpcMethods[M]["params"]);
+    if (!session.runtimeId) throw new Error("session_not_live");
     try { return await invoke(); } catch (error) {
       if (error instanceof JsonRpcGatewayError && error.code === 4001) {
-        await this.resumeSession(key);
-        if (SAFE_READS[method]) return invoke();
+        session.runtimeId = undefined;
+        session.active = false;
+        this.resync(session, "session_reclaimed");
+        throw new Error("session_not_live: runtime reclaimed; send a new prompt to resume");
       }
       throw error;
     }
@@ -203,9 +239,16 @@ export class HermesGatewayManager {
     const key = JSON.stringify([profile, storedSessionId]);
     let session = this.sessions.get(key);
     if (!session) {
-      session = { key, profile, storedSessionId, generation: 1, events: [], seq: 0, truncated: false, subscribers: new Set(), requests: new Map(), tail: Promise.resolve() };
+      if (this.sessions.size >= (this.options.maxSessions ?? 128)) {
+        const idle = [...this.sessions.values()].filter(candidate => !candidate.active && !candidate.operations && !candidate.subscribers.size && !candidate.requests.size && !candidate.resume).sort((a, b) => a.touched - b.touched)[0];
+        if (!idle) throw new Error("gateway_session_capacity");
+        this.releaseSession(idle.key);
+      }
+      session = { key, profile, storedSessionId, generation: 1, events: [], seq: 0, truncated: false, subscribers: new Set(), requests: new Map(), tail: Promise.resolve(), touched: this.clock.now(), active: false, bytes: 0, operations: 0 };
       this.sessions.set(key, session);
+      this.retireIdle();
     }
+    session.touched = this.clock.now();
     if (runtimeId) this.adoptRuntime(session, runtimeId);
     return key;
   }
@@ -213,14 +256,39 @@ export class HermesGatewayManager {
     const session = this.sessions.get(key);
     return session && { key, profile: session.profile, storedSessionId: session.storedSessionId, runtimeId: session.runtimeId, generation: session.generation };
   }
-  releaseSession(key: string): void { this.sessions.delete(key); }
-  private requireSession(key: string): SessionState { const session = this.sessions.get(key); if (!session) throw new Error("Unknown retained Hermes session"); return session; }
-  private bump(session: SessionState): void { session.generation++; session.seq = 0; session.events = []; session.truncated = true; session.requests.clear(); }
+  releaseSession(key: string): void {
+    const session = this.sessions.get(key);
+    if (!session || session.active || session.operations || session.subscribers.size || session.requests.size || session.resume) return;
+    this.sessions.delete(key);
+  }
+  private retireIdle(): void {
+    const idle = [...this.sessions.values()].filter(session => !session.active && !session.operations && !session.subscribers.size && !session.requests.size && !session.resume).sort((a, b) => a.touched - b.touched);
+    for (const session of idle) {
+      if (this.clock.now() - session.touched < (this.options.idleMs ?? 300_000) && this.sessions.size <= (this.options.maxSessions ?? 128)) continue;
+      this.releaseSession(session.key);
+    }
+    if (!this.stopped && this.retirementTimer === undefined) this.retirementTimer = this.later(() => { this.retirementTimer = undefined; this.retireIdle(); }, this.options.idleMs ?? 300_000);
+  }
+  private requireSession(key: string): SessionState { const session = this.sessions.get(key); if (!session) throw new Error("Unknown retained Hermes session"); session.touched = this.clock.now(); return session; }
+  private bump(session: SessionState): void { session.generation++; session.seq = 0; session.events = []; session.bytes = 0; session.truncated = true; session.requests.clear(); this.resync(session, "generation_change"); }
   private adoptRuntime(session: SessionState, runtime: string): void {
     if (session.runtimeId && session.runtimeId !== runtime) this.bump(session);
     session.runtimeId = runtime;
     for (const request of this.openRequests.values()) {
       if (request.params.session_id === runtime) session.requests.set(request.id, request);
+    }
+  }
+  async attachLive(key: string, runtimeId: string): Promise<SessionResumeResult | undefined> {
+    const session = this.requireSession(key);
+    try {
+      const result = await this.call("session.activate", { profile: session.profile, session_id: runtimeId, omit_messages: true });
+      if (result.info.profile_name !== session.profile) return undefined;
+      this.adoptRuntime(session, runtimeId);
+      session.active = Boolean(result.running);
+      return result;
+    } catch (error) {
+      if (error instanceof JsonRpcGatewayError && [4001, 4007, 4009].includes(error.code ?? 0)) return undefined;
+      throw error;
     }
   }
   resumeSession(key: string): Promise<SessionResumeResult> {
@@ -237,6 +305,7 @@ export class HermesGatewayManager {
         const result = await this.call("session.resume", { profile: session.profile, session_id: session.storedSessionId, source: "crm", close_on_disconnect: false, omit_messages: true });
         if (this.sessions.get(session.key) !== session) throw new Error("Session released while resuming");
         this.adoptRuntime(session, result.session_id);
+        session.active = Boolean(result.running || result.auto_continue);
         // Channel restores open_requests before the resume response resolves.
         return result;
       } catch (error) {
@@ -255,7 +324,8 @@ export class HermesGatewayManager {
   private readonly sleepers = new Map<unknown, (error: Error) => void>();
   serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const session = this.requireSession(key);
-    const pending = session.tail.then(operation);
+    session.operations++;
+    const pending = session.tail.then(operation).finally(() => { session.operations--; session.touched = this.clock.now(); });
     session.tail = pending.catch(() => {});
     return pending;
   }
@@ -269,7 +339,7 @@ export class HermesGatewayManager {
     const session = this.requireSession(key);
     const mismatch = lastGeneration !== undefined && lastGeneration !== session.generation;
     const oldest = session.events[0]?.seq ?? session.seq + 1;
-    return { generation: session.generation, events: session.events.filter(event => mismatch || (event.seq ?? 0) > lastSeq), truncated: mismatch || lastSeq < oldest - 1 || (session.truncated && lastSeq === 0) };
+    return { generation: session.generation, latestSeq: session.seq, events: session.events.filter(event => mismatch || (event.seq ?? 0) > lastSeq), truncated: mismatch || lastSeq < oldest - 1 || (session.truncated && lastSeq === 0) };
   }
   private onEvent(event: GatewayEvent): void {
     if (event.type === "gateway.ready") {
@@ -279,12 +349,21 @@ export class HermesGatewayManager {
       this.ready = true;
       this.reconnectAttempt = 0;
       this.authFailures = 0;
+      this.connection("connected");
       void this.request("client.capabilities", { server_requests: true }).then(() => {
         // History-only subscriptions must never cold-resume interrupted work.
         for (const session of this.sessions.values()) {
           if (session.runtimeId) void this.restore(session).catch(() => {});
         }
       }).catch(() => {});
+    }
+    if (event.type === "session.reclaimed") {
+      const runtime = (event.payload as { session_id?: string } | undefined)?.session_id;
+      for (const session of this.sessions.values()) if (runtime && session.runtimeId === runtime) {
+        session.runtimeId = undefined; session.active = false; session.requests.clear();
+        this.resync(session, "session_reclaimed");
+      }
+      return;
     }
     for (const session of this.sessions.values()) {
       if (event.session_id !== session.runtimeId || !event.session_id) continue;
@@ -296,8 +375,16 @@ export class HermesGatewayManager {
       if (typeof event.seq !== "number" || event.seq <= session.seq) continue;
       const frame: GatewaySessionEvent = { ...event, session_id: event.session_id, seq: event.seq, generation: session.generation };
       session.seq = event.seq;
+      session.touched = this.clock.now();
+      if (event.type === "message.start") session.active = true;
+      if (event.type === "message.complete" || event.type === "error") session.active = false;
+      session.bytes += Buffer.byteLength(JSON.stringify(frame));
       session.events.push(frame);
-      if (session.events.length > (this.options.ringSize ?? 512)) { session.events.shift(); session.truncated = true; }
+      while (session.events.length > (this.options.ringSize ?? 512) || session.bytes > (this.options.ringBytes ?? 2_097_152)) {
+        const removed = session.events.shift();
+        if (!removed) break;
+        session.bytes -= Buffer.byteLength(JSON.stringify(removed)); session.truncated = true;
+      }
       for (const handler of session.subscribers) { try { handler(frame); } catch { /* One consumer cannot break transport. */ } }
     }
   }
@@ -306,7 +393,9 @@ export class HermesGatewayManager {
     const held: GatewayEvent[] = [];
     session.held = held;
     try {
-      await this.resumeSession(session.key);
+      if (!session.runtimeId || !(await this.attachLive(session.key, session.runtimeId))) {
+        session.runtimeId = undefined; session.active = false; this.resync(session, "session_reclaimed"); return;
+      }
       if (!session.runtimeId || this.socket !== socket) return;
       const result = await this.call("session.events.since", { session_id: session.runtimeId, profile: session.profile, last_seen: session.seq });
       if (this.socket !== socket) return;
@@ -318,9 +407,11 @@ export class HermesGatewayManager {
       if (result.truncated) {
         session.truncated = true;
         session.seq = result.latest_seq;
+        this.resync(session, "truncated_replay");
       } else {
         held.push(...result.events as unknown as GatewayEvent[]);
       }
+      this.resync(session, "connection_restored");
     } finally {
       if (session.held === held) {
         session.held = undefined;

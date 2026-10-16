@@ -14,3 +14,8 @@ it("uses normalized text identity and parameterized session-scoped persistence",
   await lookupMessageHtml("alex", "other");
   expect(vi.mocked(queryPg).mock.calls[1]).toEqual([expect.stringContaining("order by created_at, client_message_id"), ["alex", "other"]]);
 });
+it("rejects oversized HTML and client ids before database allocation", async () => {
+  await expect(saveMessageHtml("ari", "one", "x".repeat(257), "text", "<b>x</b>")).rejects.toMatchObject({ status: 400 });
+  await expect(saveMessageHtml("ari", "one", "x", "text", "🔋".repeat(65_537))).rejects.toMatchObject({ status: 413 });
+  expect(queryPg).not.toHaveBeenCalled();
+});

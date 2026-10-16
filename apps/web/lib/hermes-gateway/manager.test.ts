@@ -19,16 +19,18 @@ class FakeSocket implements GatewaySocket {
 }
 const managers: HermesGatewayManager[] = [];
 async function flush() { for (let index = 0; index < 20; index++) await Promise.resolve(); }
-function harness(extra: { ringSize?: number; responder?: (frame: Frame, socket: FakeSocket) => boolean } = {}) {
+function harness(extra: { ringSize?: number; ringBytes?: number; maxSessions?: number; idleMs?: number; responder?: (frame: Frame, socket: FakeSocket) => boolean } = {}) {
   const sockets: FakeSocket[] = [];
   const tokens = vi.fn(async () => "token");
   const invalidate = vi.fn();
   const manager = new HermesGatewayManager({
     url: "ws://127.0.0.1/api/ws", tokenProvider: tokens, invalidateToken: invalidate, random: () => 0.5, ringSize: extra.ringSize,
+    ringBytes: extra.ringBytes, maxSessions: extra.maxSessions, idleMs: extra.idleMs,
     socketFactory: () => {
       const socket = new FakeSocket((frame, peer) => {
         if (!frame.method || extra.responder?.(frame, peer)) return;
         if (frame.method === "session.resume") peer.receive({ id: frame.id, result: { session_id: `runtime-${frame.params?.session_id}`, open_requests: [] } });
+        else if (frame.method === "session.activate") peer.receive({ id: frame.id, result: { session_id: frame.params?.session_id, info: { profile_name: frame.params?.profile }, open_requests: [] } });
         else if (frame.method === "session.events.since") peer.receive({ id: frame.id, result: { epoch: "epoch-a", events: [], latest_seq: 0, truncated: false, open_requests: [] } });
         else peer.receive({ id: frame.id, result: {} });
       });
@@ -65,9 +67,9 @@ describe("process gateway manager", () => {
     h.sockets[0].close();
     await vi.advanceTimersByTimeAsync(250);
     h.sockets[1].ready(); await flush();
-    expect(h.sockets[1].frames.filter(frame => frame.method === "session.resume").map(frame => frame.params)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ profile: "ari", session_id: "one", close_on_disconnect: false }),
-      expect.objectContaining({ profile: "alex", session_id: "two", close_on_disconnect: false }),
+    expect(h.sockets[1].frames.filter(frame => frame.method === "session.activate").map(frame => frame.params)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ profile: "ari", session_id: "runtime-one" }),
+      expect.objectContaining({ profile: "alex", session_id: "runtime-two" }),
     ]));
     expect(h.sockets[1].frames.some(frame => frame.method === "session.resume" && frame.params?.session_id === "history-only")).toBe(false);
   });
@@ -175,26 +177,51 @@ describe("process gateway manager", () => {
     await h.manager.resumeSession(key);
     expect(h.manager.pendingRequests(key)).toMatchObject([{ id: "srq-restored", replayed: true }]);
   });
-  it("re-resumes stale reads but never resubmits a stale mutation", async () => {
-    let statusCalls = 0;
-    let promptCalls = 0;
+  it.each(["session.interrupt", "session.steer", "approval.received", "subagent.interrupt"] as const)("never cold-resumes a reclaimed runtime for %s", async method => {
     const h = harness({ responder: (frame, socket) => {
-      if (frame.method === "session.status" && statusCalls++ === 0) {
-        socket.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return true;
-      }
-      if (frame.method === "prompt.submit") {
-        promptCalls++;
-        socket.receive({ id: frame.id, error: { code: 4001, message: "stale mutation" } }); return true;
-      }
-      return false;
+      if (frame.method !== method) return false;
+      socket.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return true;
     } });
     await start(h);
     const key = h.manager.retainSession("ari", "one", "old-runtime");
-    await h.manager.callSession(key, "session.status", { session_id: "old-runtime" });
-    expect(statusCalls).toBe(2);
-    const frames = h.sockets[0].frames.filter(frame => frame.method === "session.status");
-    expect(frames[1].params?.session_id).toBe("runtime-one");
-    await expect(h.manager.callSession(key, "prompt.submit", { session_id: "runtime-one", text: "hello" } as never)).rejects.toThrow("stale mutation");
-    expect(promptCalls).toBe(1);
+    await expect(h.manager.callSession(key, method, { session_id: "old-runtime", text: "steer", request_id: "r", subagent_id: "s" })).rejects.toThrow("session_not_live");
+    expect(h.sockets[0].frames.some(frame => frame.method === "session.resume")).toBe(false);
+    expect(h.manager.session(key)?.runtimeId).toBeUndefined();
+  });
+  it("routes sessionless reclaimed broadcasts and never restarts work", async () => {
+    const h = harness(); await start(h);
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
+    const notices = vi.fn(); h.manager.subscribeNotices(notices);
+    h.sockets[0].receive({ method: "event", params: { type: "session.reclaimed", payload: { session_id: "runtime-one", stored_session_id: "one", reason: "ttl" } } });
+    expect(h.manager.session(key)?.runtimeId).toBeUndefined();
+    expect(notices).toHaveBeenCalledWith({ type: "resync", key, reason: "session_reclaimed" });
+    expect(h.sockets[0].frames.some(frame => frame.method === "session.resume")).toBe(false);
+  });
+  it("publishes a resync on truncated reconnect replay and connection state", async () => {
+    const h = harness({ responder: (frame, socket) => {
+      if (frame.method !== "session.events.since") return false;
+      socket.receive({ id: frame.id, result: { epoch: "epoch-a", truncated: true, latest_seq: 50, events: [] } }); return true;
+    } });
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
+    const notices = vi.fn(); h.manager.subscribeNotices(notices);
+    await start(h);
+    expect(notices).toHaveBeenCalledWith({ type: "resync", key, reason: "truncated_replay" });
+    h.sockets[0].close();
+    expect(notices).toHaveBeenCalledWith({ type: "gateway", state: "reconnecting" });
+  });
+  it("caps retained bytes and retires idle sessions without retiring active work or on unsubscribe", async () => {
+    const h = harness({ ringBytes: 100, maxSessions: 2, idleMs: 1_000 }); await start(h);
+    const active = h.manager.retainSession("ari", "active", "runtime-active");
+    const idle = h.manager.retainSession("ari", "idle");
+    const stop = h.manager.subscribe(idle, () => {}); stop();
+    expect(h.manager.session(idle)).toBeDefined();
+    h.sockets[0].event("runtime-active", 1, "message.start", {});
+    h.sockets[0].event("runtime-active", 2, "message.delta", { text: "x".repeat(500) });
+    expect(h.manager.eventsSince(active).events).toHaveLength(0);
+    const newKey = h.manager.retainSession("ari", "new");
+    expect(h.manager.session(idle)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.manager.session(newKey)).toBeUndefined();
+    expect(h.manager.session(active)).toBeDefined();
   });
 });

@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/auth", () => ({ currentUser: vi.fn(async () => ({ id: "user" })) }));
 vi.mock("@/lib/agent-backend", () => ({ resolveAgentBackend: () => "hermes" }));
 vi.mock("@/lib/hermes-native", () => ({ assertProfile: vi.fn(), nativeFetch: vi.fn(), readConversation: vi.fn(), soloConversation: vi.fn() }));
-vi.mock("@/lib/hermes-gateway/manager", () => ({ getHermesGatewayManager: vi.fn(() => ({ onServerRequest: vi.fn() })) }));
+vi.mock("@/lib/hermes-gateway/manager", () => ({ getHermesGatewayManager: vi.fn(() => ({ onServerRequest: vi.fn(), subscribeNotices: () => () => {}, connectionState: () => "connected" })) }));
 import { currentUser, type AuthenticatedUser } from "@/lib/auth";
 import { HermesChatService, type GatewayChatSnapshot } from "@/lib/hermes-gateway/chat-service";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { EventConnection, eventConnections } from "./registry";
+import type { GatewayNotice } from "@/lib/hermes-gateway/manager";
 import { GET } from "./route";
 import { POST as subscribe } from "./subscriptions/route";
 import { POST as prompt } from "../conversations/[key]/prompt/route";
@@ -19,6 +20,8 @@ function fixture(truncated = false) {
   const unsubscribed = vi.fn();
   const manager = {
     onServerRequest: vi.fn(),
+    subscribeNotices: vi.fn((_listener: (notice: GatewayNotice) => void) => () => {}),
+    connectionState: () => "connected",
     retainSession: vi.fn((_profile: string, id: string) => id),
     subscribe: vi.fn((id: string, callback: (event: { type: "message.delta"; generation: number; seq: number; session_id: string; payload: { text: string } }) => void) => { listeners.set(id, callback); return () => { listeners.delete(id); unsubscribed(); }; }),
     eventsSince: vi.fn(() => ({ generation: 1, truncated, events: [{ type: "message.delta", seq: 3, generation: 1, payload: { text: "three" } }] })),
@@ -47,7 +50,7 @@ describe("multiplexed gateway endpoints", () => {
     f.connection.close();
     const lost = fixture(true);
     await lost.connection.update([key], [], { generation: 0, seq: 900 });
-    expect(lost.emitted[0].event).toBe("snapshot");
+    expect(lost.emitted.some(event => event.event === "snapshot")).toBe(true);
     lost.connection.close();
   });
   it("multiplexes keys and unsubscribes without releasing or interrupting sessions", async () => {
@@ -70,14 +73,40 @@ describe("multiplexed gateway endpoints", () => {
     const abort = new AbortController();
     const response = await GET(new Request("http://local/api/hermes/events", { signal: abort.signal }));
     const reader = response.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: gateway");
     expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: connection");
     await vi.advanceTimersByTimeAsync(15_000);
     expect(new TextDecoder().decode((await reader.read()).value)).toBe(": heartbeat\n\n");
     abort.abort(); expect(eventConnections.size).toBe(0);
   });
-  it("server-gates legacy solo sends while preserving stop", async () => {
-    process.env.HERMES_CHAT_TRANSPORT = "gateway";
-    const response = await legacyPost(new Request("http://local", { method: "POST", body: JSON.stringify({ message: "old bundle" }) }), { params: Promise.resolve({ key }) });
-    expect(response.status).toBe(409); expect(await response.json()).toEqual({ error: "gateway_transport" });
+  it("gates gateway submission commands in SSE mode", async () => {
+    process.env.HERMES_CHAT_TRANSPORT = "sse";
+    const response = await prompt(new Request("http://local", { method: "POST", body: JSON.stringify({ text: "new client" }) }), { params: Promise.resolve({ key }) });
+    expect(response.status).toBe(409); expect(await response.json()).toEqual({ error: "sse_transport" });
+  });
+  it("disconnects a stalled browser at the bounded output budget", async () => {
+    const response = await GET(new Request("http://local/api/hermes/events"));
+    const connection = [...eventConnections.values()][0];
+    // Inspect the in-process emitter seam while exercising the actual route stream.
+    const emitter = connection as unknown as { emit(event: string, payload: unknown): void };
+    for (let i = 0; i < 100; i++) emitter.emit("gw", { text: "x".repeat(65_536) });
+    expect(eventConnections.size).toBe(0);
+    const reader = response.body!.getReader();
+    let bytes = 0;
+    for (;;) { const result = await reader.read(); if (result.done) break; bytes += result.value.byteLength; }
+    expect(bytes).toBeLessThanOrEqual(4_194_304);
+  });
+  it("forwards lost/restored gateway state and refreshes stale request snapshots on resync", async () => {
+    const f = fixture(); await f.connection.update([key], []);
+    const notify = f.manager.subscribeNotices.mock.calls[0][0];
+    notify({ type: "gateway", state: "reconnecting" });
+    notify({ type: "resync", key: "one", reason: "connection_restored" });
+    await f.connection.update([], []);
+    await f.connection.update([], []);
+    await f.connection.update([], []);
+    expect(f.emitted).toContainEqual({ event: "gateway", payload: { state: "reconnecting" }, id: undefined });
+    expect(f.emitted).toContainEqual({ event: "resync", payload: { key, reason: "connection_restored" }, id: undefined });
+    expect(f.snapshot.mock.calls.length).toBeGreaterThan(1);
+    f.connection.close();
   });
 });

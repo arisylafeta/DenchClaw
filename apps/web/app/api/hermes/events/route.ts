@@ -23,12 +23,20 @@ export async function GET(req: Request) {
     start(controller) {
       const encoder = new TextEncoder();
       let closed = false;
+      const enqueue = (bytes: Uint8Array) => {
+        if (closed) return;
+        if (bytes.byteLength > 4_194_304 || (controller.desiredSize ?? 0) < bytes.byteLength) {
+          close();
+          return;
+        }
+        controller.enqueue(bytes);
+      };
       const emit = (event: string, payload: unknown, id?: string) => {
-        if (!closed) controller.enqueue(encoder.encode(`${id ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
+        enqueue(encoder.encode(`${id ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
       };
       const connection = new EventConnection(user.id, emit);
       eventConnections.set(connection.id, connection);
-      const heartbeat = setInterval(() => { if (!closed) controller.enqueue(encoder.encode(": heartbeat\n\n")); }, 15_000);
+      const heartbeat = setInterval(() => enqueue(encoder.encode(": heartbeat\n\n")), 15_000);
       close = () => {
         if (closed) return;
         closed = true;
@@ -43,6 +51,6 @@ export async function GET(req: Request) {
       if (req.signal.aborted) close();
     },
     cancel() { close(); },
-  });
+  }, { highWaterMark: 4_194_304, size: chunk => chunk.byteLength });
   return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", Connection: "keep-alive" } });
 }

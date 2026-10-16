@@ -8,11 +8,13 @@ vi.mock("../hermes-native", () => ({
 }));
 vi.mock("./message-html-store", () => ({ lookupMessageHtml: vi.fn(async () => []), saveMessageHtml: vi.fn() }));
 vi.mock("../chat-image-attachments", () => ({ hydrateMessageImageAttachments: vi.fn(() => ({ attachments: [], skipped: [] })), buildChatImageHydrationErrorMessage: vi.fn(() => null) }));
-import { nativeFetch } from "../hermes-native";
+vi.mock("../workspace", () => ({ resolveAgentWorkspacePrefix: () => "/source-workspace" }));
+import { nativeFetch, readConversation } from "../hermes-native";
 import { hydrateMessageImageAttachments } from "../chat-image-attachments";
 import { HermesGatewayManager, type GatewaySocket } from "./manager";
 import { HermesChatService } from "./chat-service";
 import { conversationKey } from "../hermes-conversations";
+import { buildAgentMessage } from "../agent-message";
 
 type Frame = { id?: string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { code: number; message: string } };
 class FakeSocket implements GatewaySocket {
@@ -22,6 +24,9 @@ class FakeSocket implements GatewaySocket {
   busy = false;
   autoContinue = false;
   addEventListener(type: string, handler: (event: unknown) => void) { (this.listeners[type] ??= []).push(handler); }
+  deferConsumption = false;
+  activeRows: { id: string; session_key: string; status: string }[] = [];
+  snapshot: Record<string, unknown> = {};
   emit(type: string, event: unknown = {}) { for (const handler of this.listeners[type] ?? []) handler(event); }
   receive(frame: Frame) { this.emit("message", { data: JSON.stringify({ jsonrpc: "2.0", ...frame }) }); }
   send(text: string) {
@@ -29,12 +34,14 @@ class FakeSocket implements GatewaySocket {
     if (!frame.method || frame.method === "event") return;
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
-      : frame.method === "session.active_list" ? { sessions: this.busy ? [{ id: "runtime-one", session_key: "one", status: "working" }] : [] }
+      : frame.method === "session.active_list" ? { sessions: this.activeRows }
+      : frame.method === "session.activate" ? { session_id: frame.params?.session_id, info: { profile_name: "ari" }, ...this.snapshot }
       : frame.method === "image.attach_bytes" ? { attached: true, path: "/image" }
       : frame.method === "session.create" ? { session_id: "runtime-one", stored_session_id: "one" }
       : frame.method === "prompt.submit" ? { status: this.busy ? "queued" : "streaming" }
       : frame.method === "session.events.since" ? { events: [], latest_seq: 0, epoch: "e" } : {};
     this.receive({ id: frame.id, result });
+    if (frame.method === "prompt.submit" && !this.busy && !this.deferConsumption) this.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: this.frames.length, payload: {} } });
   }
   close() {}
 }
@@ -79,7 +86,7 @@ describe("gateway chat service", () => {
   });
   it("detaches staged images and never retries stale prompt mutations", async () => {
     socket.failPrompt = true;
-    await expect(service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" }] })).rejects.toThrow("stale");
+    await expect(service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" }] })).rejects.toThrow("session_not_live");
     expect(socket.frames.filter(frame => frame.method === "prompt.submit")).toHaveLength(1);
     expect(socket.frames.find(frame => frame.method === "image.detach")?.params).toMatchObject({ session_id: "runtime-one", path: "/image" });
   });
@@ -116,5 +123,52 @@ describe("gateway chat service", () => {
     await service.command(key, "clarify", { request_id: "srq-question", answers: { question: "yes" } });
     expect(socket.frames.at(-1)).toMatchObject({ id: "srq-question", result: { answers: { question: "yes" } } });
     unsubscribe(); stopOther();
+  });
+  it("holds staged images until the streaming turn claims them, even after acknowledgement", async () => {
+    socket.deferConsumption = true;
+    const image = { content: "aGVsbG8=", mimeType: "image/png" };
+    const first = service.sendPrompt(key, { text: "first", images: [image] });
+    await flush(); await flush();
+    const second = service.sendPrompt(key, { text: "second", images: [image] });
+    await flush(); await flush();
+    expect(socket.frames.filter(frame => frame.method === "image.attach_bytes")).toHaveLength(1);
+    socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 100, payload: {} } });
+    await first; await flush(); await flush();
+    expect(socket.frames.filter(frame => frame.method === "image.attach_bytes")).toHaveLength(2);
+    socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 101, payload: {} } });
+    await second;
+  });
+  it("resolves viewed files and image paths in the source workspace, not the bot workspace", async () => {
+    await service.sendPrompt(key, { text: "inspect", context: { filePath: "doc.md" } });
+    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params).toMatchObject({ text: "[Context: workspace file '/source-workspace/doc.md']\n\ninspect", queued: true });
+    expect(hydrateMessageImageAttachments).toHaveBeenCalledWith("[Context: workspace file '/source-workspace/doc.md']\n\ninspect", "/source-workspace");
+  });
+  it("reads durable history when the gateway is unavailable", async () => {
+    vi.spyOn(manager, "call").mockRejectedValue(new Error("offline"));
+    const snapshot = await service.openForView("ari", "one");
+    expect(snapshot.gateway).toBe("unavailable");
+    expect(readConversation).toHaveBeenCalled();
+  });
+  it("uses warm-only activation and strips context on durable, inflight and merged queued rows", async () => {
+    const context = { filePath: "doc.md", tableSelection: { objectName: "companies", kind: "rows" as const, rowCount: 1, columnCount: 1, columns: ["name"], updatedAt: 1, rows: [{ rowIndex: 0, entryId: "a", values: { name: "Acme" } }] } };
+    const inflight = buildAgentMessage({ userText: "first", workspaceContext: context });
+    const queued = buildAgentMessage({ userText: "second", workspaceContext: context }) + "\n\n" + buildAgentMessage({ userText: "third", workspaceContext: context });
+    socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
+    socket.snapshot = { running: true, inflight: { user: inflight }, queued: { user: queued } };
+    vi.mocked(readConversation).mockResolvedValueOnce({ conversation: { key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: true, source: "crm" }, messages: [{ id: "1", role: "user", text: inflight }, { id: "2", role: "user", text: queued }] });
+    const snapshot = await service.openForView("ari", "one");
+    expect(snapshot.messages).toMatchObject([{ text: "first", pending: "inflight" }, { text: "second\n\nthird", pending: "queued" }]);
+    expect(snapshot.inflight?.user).toBe("first");
+    expect(snapshot.queued?.user).toBe("second\n\nthird");
+    expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
+  });
+  it("ignores a different profile's identical stored id and tolerates a vanished runtime", async () => {
+    socket.activeRows = [{ id: "foreign", session_key: "one", status: "working" }];
+    socket.snapshot = { info: { profile_name: "alex" }, running: true };
+    expect((await service.openForView("ari", "one")).running).toBe(false);
+    expect(manager.session(service.retainedKey(key))?.runtimeId).toBeUndefined();
+    vi.spyOn(manager, "attachLive").mockResolvedValue(undefined);
+    expect((await service.openForView("ari", "one")).messages).toEqual([]);
+    expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
   });
 });
