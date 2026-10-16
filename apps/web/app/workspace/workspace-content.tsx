@@ -98,6 +98,7 @@ import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
 import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog } from "../components/workspace/hermes-conversations";
+import { GroupBadge } from "../components/workspace/group-chat";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
@@ -718,7 +719,7 @@ function WorkspacePageInner() {
   }, []);
 
   useEffect(() => {
-    if (hermesChats.selected?.kind === "solo") openSessionChatTab(hermesChats.selected.key, hermesChats.selected.title);
+    if (hermesChats.selected) openSessionChatTab(hermesChats.selected.key, hermesChats.selected.title);
   }, [hermesChats.selected, openSessionChatTab]);
 
   const lastHermesTab = useRef<string | null>(null);
@@ -728,7 +729,7 @@ function WorkspacePageInner() {
     const tab = tabsState.chatTabs.find((entry) => entry.id === activeChatTabId);
     const row = hermesChats.listing?.sessions.find((entry) => entry.key === tab?.sessionId);
     if (row && row.key !== hermesChats.selected?.key) hermesChats.select(row);
-    else if (!tab?.sessionId && hermesChats.selected?.kind === "solo") hermesChats.clear();
+    else if (!tab?.sessionId && hermesChats.selected) hermesChats.clear();
   }, [activeChatTabId, tabsState.chatTabs, hermesChats]);
 
   const openSubagentChatTab = useCallback((params: {
@@ -2445,7 +2446,7 @@ function WorkspacePageInner() {
   // Shared props for the chat-panel header history dropdown.
   // Defined here so all open ChatPanel tabs see the same up-to-date data.
   const chatHistoryPanelProps = {
-    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).filter((row) => row.kind === "solo").map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
+    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
     historyStreamingSessionIds: streamingSessionIds,
     historySubagents: subagents,
     historyActiveSubagentKey: activeSubagentKey,
@@ -2692,14 +2693,15 @@ function WorkspacePageInner() {
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
-          {hermesChats.enabled && (!hermesChats.selected || hermesChats.selected.kind === "group") && <HermesConversationPanel chats={hermesChats} />}
+          {hermesChats.enabled && !hermesChats.selected && <HermesConversationPanel chats={hermesChats} />}
           {hermesChats.enabled && <HermesNewChatDialog chats={hermesChats} />}
           {mainChatTabs.map((tab) => {
             let nativeKey: string | undefined;
             if (hermesChats.enabled) {
-              try { if (tab.sessionId && parseConversationKey(tab.sessionId).kind === "solo") nativeKey = tab.sessionId; } catch { /* Legacy tabs are not native Hermes sessions. */ }
+              try { if (tab.sessionId) { parseConversationKey(tab.sessionId); nativeKey = tab.sessionId; } } catch { /* Legacy tabs are not native Hermes sessions. */ }
               if (!nativeKey) return null;
             }
+            const groupRow = nativeKey ? hermesChats.listing?.sessions.find((row) => row.key === nativeKey && row.kind === "group") : undefined;
             const isGateway = tab.variant === "gateway";
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
@@ -2769,6 +2771,7 @@ function WorkspacePageInner() {
               >
                 <ChatPanel
                   nativeConversationKey={nativeKey}
+                  headerBadge={groupRow ? <GroupBadge row={groupRow} /> : undefined}
                   ref={(handle) => setMainChatPanelRef(tab.id, handle)}
                   sessionTitle={tab.title}
                   initialSessionId={isGateway ? undefined : (tab.sessionKey ? undefined : tab.sessionId ?? undefined)}

@@ -189,7 +189,7 @@ export async function readConversation(key: string, sinceSeq = 0) {
     }
     const messages: HermesMessage[] = events.filter((e) => ["message.user", "message.member"].includes(e.kind)).map((e) => {
       const member = state.room.members.find((m) => m.member_id === e.actor.id);
-      return { id: e.event_id, role: e.kind === "message.user" ? "user" : "assistant", text: e.payload.text || "", profile: member?.profile, name: member?.display_name || e.actor.display_name };
+      return { id: e.event_id, role: e.kind === "message.user" ? "user" : "assistant", text: e.payload.text || "", content: e.payload.text || "", profile: member?.profile, name: member?.display_name || e.actor.display_name };
     });
     const conversation = roomConversation(state.room, state.driver_status?.working ?? null);
     return { conversation, messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false };

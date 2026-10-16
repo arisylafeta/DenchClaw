@@ -3,6 +3,8 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { parseConversationKey } from "@/lib/hermes-conversations";
+import { GroupAuthor } from "./workspace/group-chat";
+import { Fragment } from "react";
 import {
 	forwardRef,
 	useCallback,
@@ -881,6 +883,8 @@ type ChatPanelProps = {
 	hideHeaderActions?: boolean;
 	/** Optional content rendered at the start of the chat header bar (e.g. layout toggles). */
 	headerLeftSlot?: React.ReactNode;
+	/** Marks the chat in the header, e.g. a "Group" tag with participant avatars. */
+	headerBadge?: React.ReactNode;
 	/** Optional content rendered at the end of the chat header bar (e.g. layout toggles). */
 	headerRightSlot?: React.ReactNode;
 	/** Called whenever the panel's runtime state changes. */
@@ -959,6 +963,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			onBack,
 			hideHeaderActions,
 			headerLeftSlot,
+			headerBadge,
 			headerRightSlot,
 			onRuntimeStateChange,
 			onConversationActivity,
@@ -1145,10 +1150,49 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// produced empty session rows in the sidebar whenever the user
 		// opened a +/new chat and then navigated away without typing.
 
+		// ── Group chats: same panel, but history and sends go through the room log ──
+		const groupKey = useMemo(() => {
+			if (!nativeConversationKey) return undefined;
+			try { return parseConversationKey(nativeConversationKey).kind === "group" ? nativeConversationKey : undefined; } catch { return undefined; }
+		}, [nativeConversationKey]);
+		const groupCursorRef = useRef(0);
+		const [groupWorking, setGroupWorking] = useState(false);
+		const [groupSending, setGroupSending] = useState(false);
+		const applyGroupDetail = useCallback((data: { conversation?: { working?: boolean | null }; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string }>; cursor?: number }) => {
+			if (typeof data.cursor === "number") groupCursorRef.current = Math.max(groupCursorRef.current, data.cursor);
+			setGroupWorking(data.conversation?.working === true);
+			const incoming = data.messages ?? [];
+			if (!incoming.length) return;
+			setMessages((prev) => {
+				const have = new Set(prev.map((m) => m.id));
+				const added = incoming.filter((m) => !have.has(m.id)).map((m) => ({
+					id: m.id,
+					role: m.role,
+					parts: [{ type: "text" as const, text: m.text ?? m.content ?? "" }] as UIMessage["parts"],
+					...(m.profile ? { metadata: { profile: m.profile, name: m.name } } : {}),
+				}));
+				return added.length ? [...prev, ...added] : prev;
+			});
+		}, [setMessages]);
+		useEffect(() => {
+			if (!groupKey || loadingSession || !currentSessionId) return;
+			let alive = true;
+			const poll = async () => {
+				try {
+					const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(groupKey)}?since_seq=${groupCursorRef.current}`);
+					if (alive && res.ok) applyGroupDetail(await res.json());
+				} catch { /* The next tick retries. */ }
+			};
+			const timer = setInterval(() => void poll(), 3000);
+			return () => { alive = false; clearInterval(timer); };
+		}, [groupKey, loadingSession, currentSessionId, applyGroupDetail]);
+
 		const isStreaming =
 			status === "streaming" ||
 			status === "submitted" ||
-			isReconnecting;
+			isReconnecting ||
+			groupWorking ||
+			groupSending;
 		useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
 
 		// Keep cloud catalog + primary model in sync (hero, session switches, and after
@@ -2042,6 +2086,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					} catch {
 						setStreamError("Failed to send message.");
 					}
+				} else if (groupKey) {
+					// Group chats post to the room log instead of streaming through /api/chat.
+					userHtmlMapRef.current.set(messageText, html);
+					const eventId = crypto.randomUUID();
+					setMessages((prev) => [...prev, { id: eventId, role: "user" as const, parts: [{ type: "text" as const, text: messageText }] as UIMessage["parts"] }]);
+					setGroupSending(true);
+					try {
+						const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(groupKey)}`, {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ message: messageText, eventId }),
+						});
+						if (res.ok) { setStreamError(null); applyGroupDetail(await res.json()); }
+						else setStreamError((await res.json().catch(() => ({ error: "" }))).error || "Failed to send message.");
+					} catch {
+						setStreamError("Failed to send message.");
+					} finally {
+						setGroupSending(false);
+					}
 				} else {
 					// /api/chat path: send messageText (raw text + inline
 					// attachments prefix only) + structured workspaceContext
@@ -2075,6 +2138,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				onConversationActivity,
 				isSubagentMode,
 				setMessages,
+				groupKey,
+				applyGroupDetail,
 			],
 		);
 
@@ -2151,6 +2216,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						parts?: Array<Record<string, unknown>>;
 						html?: string;
 						_streaming?: boolean;
+						/** Group chats only: which agent wrote the message. */
+						profile?: string;
+						name?: string;
 					}> = data.messages || [];
 
 					const hasStreaming = sessionMessages.some(
@@ -2181,11 +2249,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 										text: msg.content,
 									},
 								]) as UIMessage["parts"],
+								...(msg.profile ? { metadata: { profile: msg.profile, name: msg.name } } : {}),
 							};
 						},
 					);
 
 					setMessages(uiMessages);
+					if (groupKey) { groupCursorRef.current = typeof data.cursor === "number" ? data.cursor : 0; setGroupWorking(data.conversation?.working === true); }
 
 					// Clear loading state *before* reconnecting — the
 					// persisted messages are now visible.  attemptReconnect
@@ -2210,6 +2280,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				stop,
 				attemptReconnect,
         nativeConversationKey,
+				groupKey,
 			],
 		);
 
@@ -2242,6 +2313,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			newSession: async () => { handleNewSession(); },
 				sendNewMessage: async (text: string) => {
 					onConversationActivity?.();
+          if (groupKey) { await handleEditorSubmitRef.current?.(text, [], `<p>${text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!)}</p>`); return; }
           if (nativeConversationKey) { await sendMessage({ text }); return; }
 					handleNewSession();
 					const title =
@@ -2258,7 +2330,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					editorRef.current?.insertFileMention(name, path);
 				},
 			}),
-			[handleSessionSelect, handleNewSession, createSession, onActiveSessionChange, onSessionsChange, onConversationActivity, sendMessage],
+			[handleSessionSelect, handleNewSession, createSession, onActiveSessionChange, onSessionsChange, onConversationActivity, sendMessage, groupKey],
 		);
 
 		// ── Stop handler (aborts server-side run + client-side stream) ──
@@ -2668,15 +2740,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<>
 					<div className="min-w-0 flex-1">
 						{currentSessionId ? (
-							<h2
-								className="text-sm font-semibold truncate"
-								style={{
-									color: "var(--color-text)",
-								}}
-								title={sessionTitle || "Chat Session"}
-							>
-								{sessionTitle || "Chat Session"}
-							</h2>
+							<div className="flex min-w-0 items-center gap-2">
+								<h2
+									className="text-sm font-semibold truncate"
+									style={{
+										color: "var(--color-text)",
+									}}
+									title={sessionTitle || "Chat Session"}
+								>
+									{sessionTitle || "Chat Session"}
+								</h2>
+								{headerBadge}
+							</div>
 						) : null}
 					</div>
 					{!hideHeaderActions && (
@@ -2870,20 +2945,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									uniqueMessages.unshift(m);
 								}
 							}
-							return uniqueMessages.map((message, i) => (
-								<ChatMessage
-									key={message.id}
-									message={message}
-									isStreaming={isStreaming && i === uniqueMessages.length - 1}
-									onSubagentClick={onSubagentClick}
-									onFilePathClick={onFilePathClick}
-																		onQuestionAnswer={handleQuestionAnswer}
-									sessionId={currentSessionId}
-									voicePlaybackEnabled={voicePlaybackEnabled}
-									userHtmlMap={userHtmlMapRef.current}
-									copyable
-								/>
-							));
+							return uniqueMessages.map((message, i) => {
+								const author = message.role === "assistant" ? (message.metadata as { profile?: string; name?: string } | undefined) : undefined;
+								return (
+									<Fragment key={message.id}>
+										{author?.profile && <GroupAuthor profile={author.profile} name={author.name} />}
+										<ChatMessage
+											message={message}
+											isStreaming={isStreaming && i === uniqueMessages.length - 1}
+											onSubagentClick={onSubagentClick}
+											onFilePathClick={onFilePathClick}
+											onQuestionAnswer={handleQuestionAnswer}
+											sessionId={currentSessionId}
+											voicePlaybackEnabled={voicePlaybackEnabled}
+											userHtmlMap={userHtmlMapRef.current}
+											copyable
+										/>
+									</Fragment>
+								);
+							});
 						})()}
 						{showStreamActivity && (
 							<div className="py-3 min-w-0">

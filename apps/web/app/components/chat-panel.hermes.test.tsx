@@ -60,3 +60,30 @@ describe("existing ChatPanel with native Hermes identity", () => {
     await waitFor(() => expect(runtime.mock.calls.at(-1)![0].isStreaming).toBe(false));
   });
 });
+describe("existing ChatPanel with a native Hermes group", () => {
+  const groupKey = conversationKey("group", "room-1");
+  const groupEndpoint = `/api/hermes/conversations/${encodeURIComponent(groupKey)}`;
+  it("renders room history with who said it, posts sends to the room log instead of /api/chat, and picks up new replies", async () => {
+    let replied = false;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
+      if (url.startsWith(groupEndpoint) && init?.method === "POST") { const { eventId, message } = JSON.parse(init.body as string); return Response.json({ conversation: { working: true }, cursor: 3, messages: [{ id: eventId, role: "user", text: message, content: message }] }); }
+      if (url.startsWith(groupEndpoint)) {
+        const messages = url.includes("since_seq=0") && !replied ? [] : replied ? [{ id: "e3", role: "assistant", text: "Mailvin reply", content: "Mailvin reply", profile: "mailvin", name: "Mailvin" }] : [];
+        return Response.json(url.includes("since_seq") ? { conversation: { working: false }, cursor: 3, messages } : { conversation: { working: false }, cursor: 2, messages: [{ id: "e1", role: "user", text: "hello", content: "hello" }, { id: "e2", role: "assistant", text: "Hi from the group", content: "Hi from the group", profile: "investigator", name: "InvestiGator" }] });
+      }
+      return new Response(null, { status: 404 });
+    });
+    render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} headerBadge={<span>Group badge</span>} />);
+    await waitFor(() => expect(screen.getAllByTestId("rich-message").some((m) => m.textContent?.includes("Hi from the group"))).toBe(true));
+    expect(screen.getByText("InvestiGator")).toBeInTheDocument();
+    expect(screen.getByText("Group badge")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === groupEndpoint && init?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([url, init]) => url === groupEndpoint && init?.method === "POST")!;
+    expect(JSON.parse(post[1].body)).toMatchObject({ message: "Continue native", eventId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/chat")).toBe(false);
+    replied = true;
+    await waitFor(() => expect(screen.getByText("Mailvin")).toBeInTheDocument(), { timeout: 5000 });
+  }, 10000);
+});
