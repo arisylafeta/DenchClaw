@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { BulkTrade } from "@/lib/bulk-trades";
 import type { Demand } from "@/lib/bulk-demand";
@@ -150,5 +150,40 @@ it("links overdue work, unsent questions, inbox, missing sides and incomplete de
   ).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: /Missing: no price/ }),
+  ).toBeInTheDocument();
+});
+it("caps work sections at five and expands the remaining items", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ demand: [] }))),
+  );
+  render(
+    <TodayDashboard
+      trades={Array.from({ length: 6 }, (_, index) =>
+        trade({
+          id: `t${index}`,
+          title: `Trade ${index}`,
+          next_step_due: "2026-10-07",
+        }),
+      )}
+      today={today}
+      proposalCount={0}
+      onOpenTrade={() => {}}
+      onOpenDemand={() => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  const section = await screen.findByRole("region", {
+    name: "Overdue next steps",
+  });
+  expect(
+    within(section).queryByRole("button", { name: /Trade 5/ }),
+  ).not.toBeInTheDocument();
+  expect(within(section).getAllByText("7 Oct")).toHaveLength(5);
+  await userEvent.click(
+    within(section).getByRole("button", { name: "+1 more" }),
+  );
+  expect(
+    within(section).getByRole("button", { name: /Trade 5/ }),
   ).toBeInTheDocument();
 });

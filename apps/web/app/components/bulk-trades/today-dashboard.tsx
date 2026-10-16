@@ -3,9 +3,18 @@
 import { useEffect, useState } from "react";
 import type { BulkTrade } from "@/lib/bulk-trades";
 import type { Demand } from "@/lib/bulk-demand";
-import { ErrorText, request } from "./trade-ui";
+import { shortDate } from "@/lib/bulk-trade-details";
+import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
 import { rowFocus } from "./demand-page";
 
+type WorkItem = {
+  id: string;
+  title: string;
+  detail: string;
+  due?: string;
+  open: () => void;
+};
+type WorkSection = { title: string; items: WorkItem[]; inbox?: boolean };
 export function TodayDashboard({
   trades,
   today,
@@ -24,6 +33,7 @@ export function TodayDashboard({
   const [demand, setDemand] = useState<Demand[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string[]>([]);
   useEffect(() => {
     void request<{ demand: Demand[] }>("/api/bulk-trades/demand")
       .then((data) => setDemand(data.demand))
@@ -41,14 +51,16 @@ export function TodayDashboard({
   const active = trades.filter(
     (trade) => trade.trade_stage !== "Done" && trade.trade_stage !== "Lost",
   );
-  const sections = [
+  const sections: WorkSection[] = [
     {
       title: "Overdue next steps",
       items: active
         .filter((trade) => trade.next_step_due && trade.next_step_due < today)
         .map((trade) => ({
           id: trade.id,
-          label: `${trade.title} · ${trade.next_step ?? "Next step"} · ${trade.next_step_due}`,
+          title: trade.title,
+          detail: trade.next_step ?? "Next step",
+          due: trade.next_step_due!,
           open: () => onOpenTrade(trade.id),
         })),
     },
@@ -58,27 +70,25 @@ export function TodayDashboard({
         .filter((row) => row.status === "qualifying" && !row.qualify_asked_on)
         .map((row) => ({
           id: row.id,
-          label: `${row.buyer} · ${row.qualify_question ?? "Question needed"}`,
+          title: row.buyer,
+          detail: row.qualify_question ?? "Question needed",
           open: () => onOpenDemand(row.id),
         })),
     },
-    {
-      title: "Inbox proposals",
-      items: [
-        {
-          id: "inbox",
-          label: `${proposalCount} proposals to review`,
-          open: onOpenInbox,
-        },
-      ],
-    },
+    { title: "Inbox proposals", inbox: true, items: [] },
     {
       title: "Trades missing a side",
       items: active
         .filter((trade) => !trade.has_seller || !trade.has_buyer)
         .map((trade) => ({
           id: trade.id,
-          label: `${trade.title} · ${[!trade.has_seller ? "No seller yet" : "", !trade.has_buyer ? "No buyer yet" : ""].filter(Boolean).join(" · ")}`,
+          title: trade.title,
+          detail: [
+            !trade.has_seller ? "No seller yet" : "",
+            !trade.has_buyer ? "No buyer yet" : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
           open: () => onOpenTrade(trade.id),
         })),
     },
@@ -95,7 +105,8 @@ export function TodayDashboard({
         )
         .map((row) => ({
           id: row.id,
-          label: `${row.buyer} · Missing: ${row.missing.filter((item) => item !== "no supply match" && item !== "question not sent").join(", ")}`,
+          title: row.buyer,
+          detail: `Missing: ${row.missing.filter((item) => item !== "no supply match" && item !== "question not sent").join(", ")}`,
           open: () => onOpenDemand(row.id),
         })),
     },
@@ -103,41 +114,104 @@ export function TodayDashboard({
   return (
     <div className="max-w-5xl space-y-7">
       <ErrorText error={error} />
-      {sections.map((section) => (
-        <section key={section.title}>
-          <h2
-            className="mb-2 text-[11px] uppercase tracking-wider"
-            style={{ color: "var(--bt-muted)" }}
-          >
-            {section.title}{" "}
-            <span className="ml-2 tabular-nums">
-              {section.title === "Inbox proposals"
-                ? proposalCount
-                : section.items.length}
-            </span>
-          </h2>
-          {section.items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`${rowFocus} block w-full truncate border-b py-3 text-left text-[13px] hover:bg-[var(--bt-row-hover)]`}
-              style={{ borderColor: "var(--bt-divider)" }}
-              title={item.label}
-              onClick={item.open}
-            >
-              {item.label}
-            </button>
-          ))}
-          {!section.items.length && (
-            <p
-              className="py-2 text-[13px]"
+      {sections.map((section) => {
+        const showingAll = expanded.includes(section.title);
+        const visible = showingAll ? section.items : section.items.slice(0, 5);
+        return (
+          <section key={section.title} aria-label={section.title}>
+            <h2
+              className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-wider"
               style={{ color: "var(--bt-muted)" }}
             >
-              Nothing needs attention.
-            </p>
-          )}
-        </section>
-      ))}
+              {section.title}
+              <span
+                className="rounded-full border px-2 py-0.5 font-semibold tabular-nums"
+                style={{ borderColor: "var(--bt-border)" }}
+              >
+                {section.inbox ? proposalCount : section.items.length}
+              </span>
+            </h2>
+            {section.inbox ? (
+              <div
+                className="flex items-center gap-4 border-b py-3"
+                style={{ borderColor: "var(--bt-divider)" }}
+              >
+                <p className="flex-1 text-[14px] font-semibold">
+                  {proposalCount} proposals to review
+                </p>
+                <button
+                  type="button"
+                  aria-label={`${proposalCount} proposals to review`}
+                  className={`${buttonClass} ${rowFocus}`}
+                  style={buttonStyle}
+                  onClick={onOpenInbox}
+                >
+                  Review Inbox
+                </button>
+              </div>
+            ) : (
+              <>
+                {visible.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={`${item.title} · ${item.detail}${item.due ? ` · ${shortDate(item.due)}` : ""}`}
+                    className={`${rowFocus} flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 border-b py-3 text-left hover:bg-[var(--bt-row-hover)]`}
+                    style={{ borderColor: "var(--bt-divider)" }}
+                    onClick={item.open}
+                  >
+                    <span className="text-[14px] font-semibold">
+                      {item.title}
+                    </span>
+                    <span
+                      className="text-[13px]"
+                      style={{ color: "var(--bt-muted)" }}
+                    >
+                      {" "}
+                      · {item.detail}
+                    </span>
+                    {item.due && (
+                      <time
+                        dateTime={item.due}
+                        className="ml-auto shrink-0 text-[13px] font-medium tabular-nums"
+                        style={{ color: "var(--color-warning)" }}
+                      >
+                        {shortDate(item.due)}
+                      </time>
+                    )}
+                  </button>
+                ))}
+                {!section.items.length && (
+                  <p
+                    className="py-2 text-[13px]"
+                    style={{ color: "var(--bt-muted)" }}
+                  >
+                    Nothing needs attention.
+                  </p>
+                )}
+                {section.items.length > 5 && (
+                  <button
+                    type="button"
+                    className={`${rowFocus} mt-2 text-[13px] font-medium underline`}
+                    style={{ color: "var(--bt-link)" }}
+                    onClick={() =>
+                      setExpanded((current) =>
+                        showingAll
+                          ? current.filter((title) => title !== section.title)
+                          : [...current, section.title],
+                      )
+                    }
+                  >
+                    {showingAll
+                      ? "Show less"
+                      : `+${section.items.length - 5} more`}
+                  </button>
+                )}
+              </>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

@@ -12,6 +12,28 @@ import { DemandActions } from "./demand-actions";
 import { DemandDialog } from "./demand-editor";
 import { CompanyContext } from "./company-context";
 
+const MISSING_ORDER = [
+  "no supply match",
+  "no price",
+  "no quantity",
+  "no timeline",
+  "question not sent",
+];
+function NextChip({ demand }: { demand: Demand }) {
+  const count = demand.inventory_matches?.length ?? 0;
+  const missing = MISSING_ORDER.find((gap) => demand.missing?.includes(gap));
+  if (!count && !missing) return null;
+  return (
+    <span
+      className={`${styles.chip} justify-self-start`}
+      style={{ color: count ? "var(--bt-green)" : "var(--color-warning)" }}
+    >
+      {count
+        ? `${count} supply matches`
+        : missing![0].toUpperCase() + missing!.slice(1)}
+    </span>
+  );
+}
 export const rowFocus =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--bt-accent)]";
 export function ScorePill({ score }: { score: number | null }) {
@@ -21,7 +43,7 @@ export function ScorePill({ score }: { score: number | null }) {
       : score >= 80
         ? "var(--bt-green)"
         : score >= 60
-          ? "var(--bt-amber)"
+          ? "var(--color-warning)"
           : "var(--bt-muted)";
   return (
     <span
@@ -244,20 +266,7 @@ export function DemandPage({
               >
                 {row.asked_on ? shortDate(row.asked_on) : ""}
               </span>
-              <span
-                className="text-[13px]"
-                style={{
-                  color: row.missing?.length
-                    ? "var(--bt-amber)"
-                    : "var(--bt-green)",
-                }}
-              >
-                {row.missing?.length
-                  ? `Missing: ${row.missing.join(", ")}`
-                  : row.inventory_matches?.length
-                    ? `${row.inventory_matches.length} supply matches`
-                    : ""}
-              </span>
+              <NextChip demand={row} />
             </button>
           ))}
           {!shown.length && (
@@ -317,23 +326,25 @@ function DemandPanel({
       <header className="flex gap-3 pr-6">
         <ScorePill score={demand.score} />
         <div>
-          <h2 className="text-[20px] font-semibold">
-            {demand.company_id ? (
-              <a
-                href={buildEntryLink("company", demand.company_id)}
-                className={rowFocus}
-              >
-                {demand.buyer}
-              </a>
-            ) : (
-              demand.buyer
-            )}
-          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[20px] font-semibold">
+              {demand.company_id ? (
+                <a
+                  href={buildEntryLink("company", demand.company_id)}
+                  className={rowFocus}
+                >
+                  {demand.buyer}
+                </a>
+              ) : (
+                demand.buyer
+              )}
+            </h2>
+            <span className={styles.status}>{demand.status}</span>
+          </div>
           <div className="mt-2 flex gap-2">
             {demand.product_family && (
               <span className={styles.chip}>{demand.product_family}</span>
             )}
-            <span className={styles.status}>{demand.status}</span>
           </div>
         </div>
       </header>

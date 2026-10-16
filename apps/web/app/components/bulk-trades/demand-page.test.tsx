@@ -141,9 +141,7 @@ describe("Demand visualization", () => {
     expect(
       high.compareDocumentPosition(priority) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(
-      within(priority).getByText("Missing: no timeline"),
-    ).toBeInTheDocument();
+    expect(within(priority).getByText("No timeline")).toBeInTheDocument();
     expect(screen.queryByText("0 —")).not.toBeInTheDocument();
   });
   it("opens visual tabs and retains editing and agent correction context", async () => {
@@ -170,6 +168,8 @@ describe("Demand visualization", () => {
         ],
       }),
     ]);
+    expect(await screen.findByText("1 supply matches")).toBeInTheDocument();
+    expect(screen.queryByText("No price")).not.toBeInTheDocument();
     await userEvent.click(
       await screen.findByRole("button", { name: /Green Voltage/ }),
     );
