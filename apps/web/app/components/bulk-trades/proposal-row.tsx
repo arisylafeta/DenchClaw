@@ -58,9 +58,11 @@ export function ProposalRow({ proposal, onDecided, compact, acceptLabel }: Props
       style={compact ? undefined : { background: "var(--bt-table-head)" }}
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm" title={proposal.summary}>{proposal.summary}</div>
         <details className="text-xs" style={{ color: "var(--bt-muted)" }}>
-          <summary className="cursor-pointer">{source} · Quote</summary>
+          <summary className="flex cursor-pointer items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-sm" style={{ color: "var(--bt-text)" }} title={proposal.summary}>{proposal.summary}</span>
+            <span className="max-w-[160px] truncate" title={source}>{source}</span><span>Quote</span>
+          </summary>
           <p className="py-2">“{proposal.quote}” {proposal.source_url && <a href={proposal.source_url} target="_blank" rel="noreferrer" className="underline">Source</a>}</p>
         </details>
         <ErrorText error={error} />
