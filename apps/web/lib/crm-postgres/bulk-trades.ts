@@ -4,7 +4,7 @@ import { LIVE_STAGES, todayInLondon, type BulkTrade, type TradeOwner, type Trade
 
 const TRADE_COLUMNS = `
   lot.id, lot.title, lot.trade_stage, lot.trade_kind, lot.fact_line, lot.next_step,
-  lot.origin, lot.seller_ref, lot.seller_name,
+  lot.origin, lot.seller_ref, bulk_trade_seller_display(lot.seller_ref, lot.seller_name) as seller_name,
   (nullif(trim(lot.seller_name), '') is not null or lot.seller_ref is not null) as has_seller,
   exists(select 1 from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id) as has_buyer,
   to_char(lot.next_step_due, 'YYYY-MM-DD') as next_step_due, lot.waiting_on,

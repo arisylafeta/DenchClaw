@@ -93,6 +93,21 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
     expect(await candidate()).toEqual([]);
   });
 
+  it("uses current company names on trade and feed rows and formats domain-only fallbacks", async () => {
+    await pg.queryPg("insert into crm_companies (id, name) values ('seller_display_company', 'Canonical Supplier')");
+    const trade = await db.createBulkTrade({ title: "Seller display regression",
+      seller_ref: "company:seller_display_company", seller_name: "old-label.example.com" }, userId);
+    expect(trade.seller_name).toBe("Canonical Supplier");
+    await pg.queryPg("update crm_companies set name = 'Renamed Supplier' where id = 'seller_display_company'");
+    expect((await db.getBulkTrade(trade.id))?.seller_name).toBe("Renamed Supplier");
+    expect(await pg.queryPg("select seller from crm_bulk_trade_supply_feed where id = $1", [trade.id]))
+      .toEqual([{ seller: "Renamed Supplier" }]);
+    expect(await pg.queryPg(`select bulk_trade_seller_display(null, 'sales@north-battery.co.uk') as email,
+      bulk_trade_seller_display(null, 'www.north-battery.com') as domain,
+      bulk_trade_seller_display(null, 'North Battery Ltd') as name`))
+      .toEqual([{ email: "North Battery", domain: "North Battery", name: "North Battery Ltd" }]);
+  });
+
   it("puts a trade on hold remembering its stage, and clears the hold on resume", async () => {
     const trade = await db.createBulkTrade({ title: "Synthetic BESS portfolio", trade_stage: "With buyers" }, userId);
     const held = await db.updateBulkTrade(trade.id,
