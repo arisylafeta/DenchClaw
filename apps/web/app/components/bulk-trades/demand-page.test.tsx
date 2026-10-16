@@ -131,6 +131,8 @@ describe("Demand visualization", () => {
         score: 30,
         priority: true,
         missing: ["no timeline"],
+        kind: "request",
+        basis: null,
       }),
       row({ id: "low", buyer: "Low", score: 20 }),
     ]);
