@@ -55,9 +55,19 @@ export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnl
 }
 
 export async function listMailFollowups(mailboxOwnerId?: string, dueOnly = false, filters: MailFilters = {}): Promise<MailFollowup[]> {
-  const { values, where, bind } = mailWhere(filters);
+  const { identity, crmOnly, ...messageFilters } = filters;
+  const { values, where, bind } = mailWhere(messageFilters);
+  const conditions: string[] = [];
   const owner = mailboxOwnerId ? bind(mailboxOwnerId) : null;
-  return queryPg<MailFollowup>(`select f.* from mail_followup f left join mail_message m on m.id = f.message_id left join mail_thread t on t.id = f.thread_id where true ${owner ? `and coalesce(m.mailbox_owner_id,t.mailbox_owner_id) = ${owner}::uuid` : ''} ${where.length ? `and ${where.join(' and ')}` : ''} ${dueOnly ? "and f.state = 'pending' and f.due_at <= now()" : ''} order by f.due_at,f.id`, values);
+  if (owner) conditions.push(`coalesce(anchor.mailbox_owner_id,t.mailbox_owner_id) = ${owner}::uuid`);
+  if (crmOnly) conditions.push('coalesce(anchor.crm_visible,t.crm_visible,false)');
+  if (identity) {
+    const key = bind(identity);
+    conditions.push(`(coalesce(f.identity_key,anchor.identity_key) = ${key} or (f.identity_key is null and f.message_id is null and exists (select 1 from mail_message identity_message where identity_message.thread_id = f.thread_id and identity_message.identity_key = ${key} ${owner ? `and identity_message.mailbox_owner_id = ${owner}::uuid` : ''})))`);
+  }
+  if (where.length) conditions.push(`exists (select 1 from mail_message m where (m.id = f.message_id or (f.message_id is null and m.thread_id = f.thread_id)) ${owner ? `and m.mailbox_owner_id = ${owner}::uuid` : ''} and ${where.join(' and ')})`);
+  if (dueOnly) conditions.push("f.state = 'pending' and f.due_at <= now()");
+  return queryPg<MailFollowup>(`select f.* from mail_followup f left join mail_message anchor on anchor.id = f.message_id left join mail_thread t on t.id = coalesce(f.thread_id,anchor.thread_id) ${conditions.length ? `where ${conditions.join(' and ')}` : ''} order by f.due_at,f.id`, values);
 }
 
 export async function mailCampaignCounts(id?: string, filters: MailFilters = {}): Promise<MailCampaignSummary[]> {

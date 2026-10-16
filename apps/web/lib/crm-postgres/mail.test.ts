@@ -49,6 +49,14 @@ describe.skipIf(!enabled)('unified mail log', () => {
   expect(await readMailThread(prefix,'00000000-0000-0000-0000-000000000000')).toBeNull();
  });
  it('lists due pending follow-ups',async () => { expect((await listMailFollowups(owner,true)).map(f=>f.id)).toEqual([prefix]); });
+ it('keeps CRM-visible thread-only follow-ups and applies identity and message filters without duplicates',async () => {
+  await queryPg(`insert into mail_followup(id,thread_id,identity_key,due_at,origin,state) values ($1||'_thread',$1,'ari',now()-interval '1 day','commitment','paused')`,[prefix]);
+  const scoped=await listMailFollowups(owner,false,{crmOnly:true,identity:'ari',q:'Battery'});
+  expect(scoped.map(f=>f.id)).toEqual([`${prefix}_thread`]);
+  expect((await listMailFollowups(owner,false,{crmOnly:true,identity:'alex'})).map(f=>f.id)).not.toContain(`${prefix}_thread`);
+  expect((await listMailFollowups('00000000-0000-0000-0000-000000000000',false,{crmOnly:true,identity:'ari'}))).toEqual([]);
+  await queryPg('delete from mail_followup where id=$1',[`${prefix}_thread`]);
+ });
  it('paginates tied timestamps deterministically without repeats',async () => {
   const first=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});
   const second=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1,cursor:first.nextCursor!});
