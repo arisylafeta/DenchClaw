@@ -68,6 +68,31 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
       .toMatchObject({ origin: "demand", seller_name: "Known supplier", has_seller: true });
   });
 
+  it("backfills sellers from supplier evidence, never buyer contacts or auction participants", async () => {
+    const trade = await db.createBulkTrade({ title: "Seller attribution regression" }, userId);
+    await pg.queryPg(`
+      insert into crm_companies (id, name, purpose) values
+        ('seller_test_supplier', 'Actual Supplier', '{Supplier}'),
+        ('seller_test_buyer', 'Known Buyer', '{Buyer,Supplier}');
+      insert into crm_people (id, full_name, email, company_id) values
+        ('seller_test_person_supplier', 'Supplier Person', 'supplier@seller-test.example', 'seller_test_supplier'),
+        ('seller_test_person_buyer', 'Buyer Person', 'buyer@seller-test.example', 'seller_test_buyer');
+    `);
+    await pg.queryPg(`insert into crm_bulk_trade_contacts (id, lot_id, name, email, sort_order) values
+      ('seller_test_contact_buyer', $1, 'buyer@seller-test.example', 'buyer@seller-test.example', 0),
+      ('seller_test_contact_supplier', $1, 'supplier@seller-test.example', 'supplier@seller-test.example', 1)`, [trade.id]);
+    await pg.queryPg(`insert into crm_bulk_trade_parties (id, lot_id, role, display_name, company_id) values
+      ('seller_test_wrong_party', $1, 'supplier', 'Known Buyer', 'seller_test_buyer')`, [trade.id]);
+    const candidate = () => pg.queryPg("select seller_name, seller_ref from crm_bulk_trade_seller_candidates where lot_id = $1", [trade.id]);
+    expect(await candidate()).toEqual([{ seller_name: "Actual Supplier", seller_ref: "company:seller_test_supplier" }]);
+    await pg.queryPg("insert into crm_bulk_trade_auction_people (lot_id, email) values ($1, 'supplier@seller-test.example')", [trade.id]);
+    expect(await candidate()).toEqual([]);
+    await pg.queryPg("delete from crm_bulk_trade_auction_people where lot_id = $1", [trade.id]);
+    await pg.queryPg(`insert into crm_bulk_trade_buyers (id, lot_id, name, person_id)
+      values ('seller_test_bidder', $1, 'Supplier Person', 'seller_test_person_supplier')`, [trade.id]);
+    expect(await candidate()).toEqual([]);
+  });
+
   it("puts a trade on hold remembering its stage, and clears the hold on resume", async () => {
     const trade = await db.createBulkTrade({ title: "Synthetic BESS portfolio", trade_stage: "With buyers" }, userId);
     const held = await db.updateBulkTrade(trade.id,
