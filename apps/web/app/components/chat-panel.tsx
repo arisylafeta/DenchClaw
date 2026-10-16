@@ -2550,7 +2550,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const showStreamActivity = isStreaming && !!streamActivityLabel;
 
 		const showHeroState =
-			(nativeGateway ? nativeChat.state.messages.length === 0 : messages.length === 0) &&
+			(nativeGateway ? nativeChat.state.messages.length === 0 && !nativeChat.state.busy && nativeChat.state.pendingRequests.length === 0 : messages.length === 0) &&
 			!isSubagentMode &&
 			!loadingSession &&
 			optimisticUserText === null;

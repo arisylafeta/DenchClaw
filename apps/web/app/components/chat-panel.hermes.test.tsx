@@ -144,7 +144,7 @@ describe("gateway ChatPanel solo transport", () => {
   it("answers approvals and four-option clarify questions using request identities", async () => {
     const runtime = vi.fn();
     render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onRuntimeStateChange={runtime} />);
-    openGateway({ running: true });
+    openGateway({ running: true, messages: [] });
     FakeEventSource.instance.emit("request", { key, id: "srq-approval", method: "approval", params: { request_id: "approval-payload", command: "pwd", choices: ["once", "deny"] } });
     expect(runtime.mock.calls.at(-1)![0]).toMatchObject({ awaiting: true, isStreaming: true, sessionId: key });
     fireEvent.click(screen.getByRole("button", { name: "Run once" }));
