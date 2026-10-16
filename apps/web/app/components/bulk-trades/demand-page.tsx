@@ -477,7 +477,8 @@ function DemandDialog({ demand, onClose, onSaved }: {
       max_price: maxPrice, price_currency: maxPrice === null ? null : draft.price_currency, price_unit: maxPrice === null ? null : draft.price_unit,
       spec,
       fee_eur: toNumber(draft.fee_eur), price_basis: draft.price_basis, reputation: draft.reputation,
-      product_family: draft.product_family.trim() || null, status: draft.status, qualify_question: draft.qualify_question.trim() || null,
+      product_family: draft.product_family.trim() || null, qualify_question: draft.qualify_question.trim() || null,
+      ...(demand?.status === "closed" ? {} : { status: draft.status }),
     };
     for (const key of ["buyer", "contact", "email", "wants", "quantity", "location", "note"] as const) body[key] = draft[key].trim() || null;
     const { demand: saved } = await request<{ demand: Demand }>(
@@ -550,7 +551,7 @@ function DemandDialog({ demand, onClose, onSaved }: {
       <FormField label="Wants">{form.input("wants", { required: true, placeholder: "One line, the way the buyer would say it" })}</FormField>
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Product family">{form.input("product_family", { placeholder: "e.g. VW MEB" })}</FormField>
-        <FormField label="Status">{form.select("status", ["open", "qualifying", "closed"], { open: "Demand", qualifying: "Qualifying", closed: "Closed" })}</FormField>
+        {demand?.status !== "closed" && <FormField label="Status">{form.select("status", ["open", "qualifying"], { open: "Demand", qualifying: "Qualifying" })}</FormField>}
         <FormField label="Expected fee (EUR)">{form.input("fee_eur", { type: "number", min: 0, step: "any" })}</FormField>
         <FormField label="Price basis">{form.select("price_basis", ["buyer", "estimate"], { buyer: "Buyer budget", estimate: "Our estimate" })}</FormField>
         <FormField label="Reputation">{form.select("reputation", ["paid", "active", "email", "inbound", "anon"], REPUTATION_LABEL)}</FormField>

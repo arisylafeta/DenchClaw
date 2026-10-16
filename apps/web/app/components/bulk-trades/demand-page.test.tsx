@@ -87,6 +87,7 @@ describe("DemandPage", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_1", expect.objectContaining({ body: JSON.stringify({ action: "confirm" }) }));
     await userEvent.click(within(panel).getByRole("button", { name: "Edit" }));
     const dialog = screen.getByRole("dialog", { name: "Edit demand" });
+    expect(within(within(dialog).getByLabelText("Status")).queryByRole("option", { name: "Closed" })).not.toBeInTheDocument();
     await userEvent.clear(within(dialog).getByLabelText("Expected fee (EUR)"));
     await userEvent.type(within(dialog).getByLabelText("Expected fee (EUR)"), "2500");
     await userEvent.selectOptions(within(dialog).getByLabelText("Price basis"), "estimate");
@@ -101,6 +102,23 @@ describe("DemandPage", () => {
       product_family: "VW MEB", fee_eur: 2500, price_basis: "estimate", reputation: "paid",
       status: "qualifying", qualify_question: "Still buying?",
     });
+  });
+
+  it("edits closed demand without allowing status changes or resending its status", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DemandPage today={TODAY} onOpenTrade={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Closed 1" }));
+    await userEvent.click(screen.getByRole("button", { name: /Old buyer/ }));
+    const panel = screen.getByRole("complementary", { name: "Demand detail" });
+    expect(within(panel).getByRole("button", { name: "Reopen" })).toBeInTheDocument();
+    await userEvent.click(within(panel).getByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit demand" });
+    expect(within(dialog).queryByLabelText("Status")).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/btd_3", expect.objectContaining({ method: "PATCH" })));
+    const call = fetchMock.mock.calls.find(([url, init]) => url === "/api/bulk-trades/demand/btd_3" && init?.method === "PATCH");
+    expect(JSON.parse(call![1]!.body as string)).not.toHaveProperty("status");
   });
 
   it("moves a buy-box to agreed, turns a request into a standing buy-box, and shows the trades it was offered on", async () => {
