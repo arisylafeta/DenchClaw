@@ -77,7 +77,7 @@ export async function getPostgresPersonActivity(
        from crm_interactions i
        left join mail_message m on m.id = i.email_message_id
       where i.person_id = $1
-        and (i.email_message_id is null or (m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $2::uuid))`,
+        and (i.email_message_id is null or (m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $2::uuid))`,
     [personId, userId],
   );
   const total = countRows[0]?.total ? Number(countRows[0].total) : 0;
@@ -93,7 +93,7 @@ export async function getPostgresPersonActivity(
        left join mail_message m on m.id = i.email_message_id
        left join crm_calendar_events e on e.id = i.calendar_event_id
       where i.person_id = $1
-        and (i.email_message_id is null or (m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $4::uuid))
+        and (i.email_message_id is null or (m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $4::uuid))
       order by i.occurred_at desc nulls last
       limit $2 offset $3`,
     [personId, params.limit, params.offset, userId],

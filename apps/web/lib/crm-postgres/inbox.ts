@@ -49,7 +49,7 @@ export async function getPostgresInbox(
              m.from_email
         from mail_message m
        where m.thread_id is not null
-         and m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $5::uuid
+         and m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $5::uuid
        order by m.thread_id, m.sent_at desc nulls last, m.id desc
     ),
     filtered as (
@@ -73,7 +73,7 @@ export async function getPostgresInbox(
         from mail_thread t
         left join latest_msg on latest_msg.thread_id = t.id
         left join crm_people sender on sender.id = latest_msg.from_person_id
-       where t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and conversation.campaign_id is null) and t.mailbox_owner_id = $5::uuid
+       where t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and (conversation.campaign_id is null or conversation.direction = 'inbound')) and t.mailbox_owner_id = $5::uuid
          and ($1::text = '' or lower(coalesce(t.subject, '')) like '%' || $1::text || '%')
          and ($2::text is null or exists (
            select 1

@@ -11,7 +11,7 @@ function mailWhere(filters: MailFilters = {}) {
     if (value) where.push(`m.${column} = ${bind(value)}`);
   }
   if (filters.crmOnly) where.push('m.crm_visible');
-  if (filters.view === 'conversations') where.push('m.campaign_id is null');
+  if (filters.view === 'conversations') where.push("(m.campaign_id is null or m.direction = 'inbound')");
   if (filters.view === 'sent') where.push("m.direction = 'outbound'");
   if (filters.view === 'campaigns') where.push('m.campaign_id is not null');
   if (filters.view === 'followups') where.push("exists (select 1 from mail_followup f where (f.message_id = m.id or f.thread_id = m.thread_id) and f.state in ('pending','drafted','paused'))");
@@ -79,7 +79,7 @@ export async function readMailCampaign(id: string) {
   const legacy = await getCampaignDetail(id);
   if (!legacy) return null;
   const [counts] = await mailCampaignCounts(id);
-  const recipients = await queryPg<MailMessageRow>('select * from mail_message where campaign_id = $1 order by recipient_email,id', [id]);
+  const recipients = await queryPg<MailMessageRow>("select * from mail_message where campaign_id = $1 and direction = 'outbound' order by recipient_email,id", [id]);
   const links = await queryPg('select l.* from mail_message_link l join mail_message m on m.id = l.message_id where m.campaign_id = $1 order by l.id', [id]);
   const [evidence] = await queryPg<{ scanner_evidence: boolean; proxy_evidence: boolean }>(`select coalesce(bool_or(e.detail->>'scanner' = 'true' or e.detail->>'scanner_evidence' = 'true' or (e.type = 'clicked' and m.delivered_at is not null and e.occurred_at between m.delivered_at and m.delivered_at + interval '10 seconds')),false) as scanner_evidence, coalesce(bool_or(e.detail->>'proxy' = 'true' or e.detail->>'proxy_evidence' = 'true' or e.detail::text ilike '%GoogleImageProxy%'),false) as proxy_evidence from mail_event e join mail_message m on m.id = e.message_id where m.campaign_id = $1`, [id]);
   return { ...legacy, ...counts, counts, delivery_rows: recipients, links, ...evidence };

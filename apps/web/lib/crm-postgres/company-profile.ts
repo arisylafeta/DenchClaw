@@ -394,7 +394,7 @@ export async function getPostgresCompanyProfile(
         select m.body_preview, m.from_person_id
           from mail_message m
          where m.thread_id = t.id
-           and m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $2::uuid
+           and m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $2::uuid
          order by m.sent_at desc nulls last
          limit 1
       ) msg on true
@@ -402,7 +402,7 @@ export async function getPostgresCompanyProfile(
      where o.name = 'email_thread'
        and f.name = 'Companies'
        and l.target_entry_id = $1
-       and t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and conversation.campaign_id is null) and t.mailbox_owner_id = $2::uuid
+       and t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and (conversation.campaign_id is null or conversation.direction = 'inbound')) and t.mailbox_owner_id = $2::uuid
      order by t.last_message_at desc nulls last
      limit 50
   `, [company.id, userId]);

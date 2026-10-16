@@ -18,13 +18,14 @@ describe.skipIf(!enabled)('unified mail log', () => {
   await queryPg(`insert into mail_message(id,direction,transport,purpose,state,campaign_id,mailbox_owner_id,recipient_email,accepted_at,delivered_at,opened_at,clicked_at,bounced_at) values
    ($1||'_c','outbound','postmark-broadcast','marketing','accepted',$1,$2,'one@example.test',now(),now(),now(),now(),null),
    ($1||'_d','outbound','postmark-broadcast','marketing','accepted',$1,$2,'two@example.test',now(),null,null,null,now())`,[prefix,owner]);
+  await queryPg(`update mail_message set campaign_id=$1 where id=$1||'_a'`,[prefix]);
   await queryPg(`insert into mail_thread(id,subject,mailbox_owner_id,crm_visible) values ($1||'_bulk','Bulk campaign',$2,true)`,[prefix,owner]);
   await queryPg(`update mail_message set thread_id=$1||'_bulk',crm_visible=true where id=$1||'_c'`,[prefix]);
   await queryPg(`insert into mail_event(message_id,type,source,occurred_at,detail) values ($1||'_a','replied','gmail',now(),'{}'),($1||'_c','unsubscribed','postmark',now(),'{"scanner":true}'),($1||'_c','replied','gmail',now(),'{}')`,[prefix]);
   await queryPg(`insert into mail_followup(id,message_id,due_at,origin) values ($1,$1||'_a',now()-interval '1 day','commitment')`,[prefix]);
  });
  afterAll(async () => { await queryPg('delete from mail_followup where id=$1',[prefix]); await queryPg('delete from mail_message where id like $1',[`${prefix}%`]); await queryPg('delete from mail_thread where id like $1',[`${prefix}%`]); await queryPg('delete from campaigns where id=$1',[prefix]); await queryPg('delete from crm_users where id=$1',[owner]); await pgPool.end(); });
- it('excludes bulk delivery rows from conversations and filters the CRM subset',async () => {
+ it('excludes bulk deliveries but retains inbound campaign replies and filters the CRM subset',async () => {
   const all=await searchMail({mailboxOwnerId:owner,view:'conversations'}); expect(all.items.map(m=>m.id).sort()).toEqual([`${prefix}_a`,`${prefix}_b`]);
   const crm=await searchMail({mailboxOwnerId:owner,crmOnly:true}); expect(crm.items.map(m=>m.id).sort()).toEqual([`${prefix}_a`,`${prefix}_c`]);
  });

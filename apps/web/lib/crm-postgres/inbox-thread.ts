@@ -65,7 +65,7 @@ export async function getPostgresInboxThread(
            and r.recipient_type = 'cc'
       ) cc_people on true
      where m.thread_id = $1
-       and m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $2::uuid
+       and m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $2::uuid
        and exists (
          select 1 from mail_thread t
           where t.id = m.thread_id and t.mailbox_owner_id = $2::uuid

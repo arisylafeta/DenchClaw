@@ -112,7 +112,7 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
       `select m.sent_at as at, m.subject, m.from_email as from,
               not exists (select 1 from crm_people p where p.id = m.from_person_id and p.company_id = $2) as outgoing
          from mail_message m
-        where m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $1::uuid
+        where m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $1::uuid
           and exists (
             select 1 from crm_people p
              where p.company_id = $2
