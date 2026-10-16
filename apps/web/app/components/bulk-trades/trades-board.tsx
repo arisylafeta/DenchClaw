@@ -88,6 +88,8 @@ function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: Trade
             )}
             {trade.value && <span className="bt-mono shrink-0 text-[13px] font-medium">{trade.value}</span>}
           </div>
+          <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{trade.seller_name || "Seller"} → {trade.buyer_count ?? 0} buyers</p>
+          {(!trade.has_seller || !trade.has_buyer) && <p className="text-[13px]" style={{ color: "var(--bt-amber)" }}>{[!trade.has_seller ? "No seller yet" : "", !trade.has_buyer ? "No buyer yet" : ""].filter(Boolean).join(" · ")}</p>}
           <div className="flex items-center gap-2 border-t pt-1.5" style={{ borderColor: "var(--bt-divider)" }}>
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" title={`Waiting on ${trade.waiting_on === "them" ? "them" : "us"}`}
               style={{ background: trade.waiting_on === "them" ? "var(--bt-amber)" : "var(--bt-muted)" }} />

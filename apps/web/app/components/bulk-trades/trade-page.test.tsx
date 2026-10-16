@@ -10,6 +10,7 @@ import { TradePage } from "./trade-page";
 const today = todayInLondon();
 
 const TRADE: BulkTrade = {
+  origin: "supply", seller_ref: null, seller_name: null, has_seller: false, has_buyer: true,
   id: "bt_1", title: "Synthetic eBS37", trade_stage: "With buyers", trade_kind: "packs",
   fact_line: "161 packs · NMC", next_step: "Follow up supplier", next_step_due: today, waiting_on: "us",
   next_step_contact_id: null, next_step_buyer_id: null,
@@ -256,7 +257,7 @@ describe("TradePage overview", () => {
     renderPage();
     expect(await screen.findByText("Viewed")).toBeInTheDocument();
     expect(screen.getByText("Invited")).toBeInTheDocument();
-    expect(screen.getAllByText("Synthetic Storage")).toHaveLength(1);
+    expect(screen.getAllByText("Synthetic Storage")).toHaveLength(2); // Header shows the buyer side; the table still has one buyer.
     expect(screen.getByText("other@example.test")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Suggested buyers" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Suggest buyers" }));
