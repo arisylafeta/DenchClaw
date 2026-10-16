@@ -1,12 +1,26 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { filterConversations, type HermesConversation } from "@/lib/hermes-conversations";
+import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, filterConversations, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { ProfileAvatar } from "./profile-avatar";
 
 type Listing = { backend: string; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
 export type NewChatMode = "solo" | "group";
 export type ChatStatus = "running" | "awaiting" | "done" | "idle";
 const SEEN_KEY = "hermes-chats-seen";
+const VIEW_KEY = "hermes-chats-view";
+const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: "none", label: "None" }, { value: "channel", label: "Channel" }, { value: "agent", label: "Agent" },
+  { value: "day", label: "Day" }, { value: "job", label: "Scheduled job" },
+];
+function loadView(): ChatView {
+  try {
+    const value = JSON.parse(localStorage.getItem(VIEW_KEY) || "null");
+    if (value && Array.isArray(value.hidden) && value.hidden.every((id: unknown) => typeof id === "string") &&
+        GROUP_OPTIONS.some((option) => option.value === value.groupBy)) return { hidden: value.hidden, groupBy: value.groupBy };
+  } catch { /* Unavailable or invalid storage uses the default view. */ }
+  return DEFAULT_VIEW;
+}
 async function jsonResponse(response: Response) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Hermes request failed");
@@ -109,9 +123,42 @@ function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmi
 export function HermesConversationList({ chats, workingKeys }: { chats: HermesChatsController; workingKeys?: Set<string> }) {
   const rows = filterConversations(chats.listing?.sessions ?? [], chats.filter);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [view, setView] = useState<ChatView>(DEFAULT_VIEW);
+  const [query, setQuery] = useState("");
+  useEffect(() => { setView(loadView()); }, []);
+  const updateView = (next: ChatView) => {
+    setView(next);
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
+  };
+  const result = applyChatView(rows, view, query);
+  const hiddenLabels = view.hidden.map((id) => result.channels.find((channel) => channel.id === id)!.label);
   return <div className="flex-1 min-h-0 overflow-y-auto p-2" aria-label="Hermes conversations">
+    <div className="flex items-center gap-1 pb-2">
+      <input type="search" aria-label="Search chats" placeholder="Search chats" value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-transparent px-2 py-1 text-xs" />
+      <DropdownMenu>
+        <DropdownMenuTrigger className="rounded border border-[var(--color-border)] px-2 py-1 text-xs">Chat view</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Channels</DropdownMenuLabel>
+            {result.channels.map((channel) => <DropdownMenuCheckboxItem key={channel.id} checked={!view.hidden.includes(channel.id)} onCheckedChange={(checked) => updateView({ ...view, hidden: checked ? view.hidden.filter((id) => id !== channel.id) : [...view.hidden, channel.id] })}>
+              {channel.label} {channel.count}
+            </DropdownMenuCheckboxItem>)}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Group by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={view.groupBy} onValueChange={(value) => updateView({ ...view, groupBy: value as GroupBy })}>
+              {GROUP_OPTIONS.map((option) => <DropdownMenuRadioItem key={option.value} value={option.value}>{option.label}</DropdownMenuRadioItem>)}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+    {hiddenLabels.length > 0 && <button type="button" onClick={() => updateView({ ...view, hidden: [] })} className="px-2 pb-2 text-left text-[10px] text-[var(--color-text-muted)]">{hiddenLabels.join(" and ")} hidden</button>}
     {chats.listing?.warnings.map((warning) => <p key={warning} role="status" className="text-xs p-2 text-amber-700">{warning}</p>)}
-    {rows.map((row) => {
+    {result.sections.map((section) => <section key={section.key} aria-label={section.label ?? undefined}>
+      {section.label && <h3 className="px-2 pt-3 pb-1 text-[10px] font-semibold text-[var(--color-text-muted)]">{section.label}</h3>}
+      {section.rows.map((row) => {
       const status = chatStatus(row, chats, workingKeys?.has(row.key));
       return <div key={row.key} className="group relative">
         <button type="button" onClick={() => chats.select(row)} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="flex w-full items-center gap-2 p-2 rounded-lg text-left hover:bg-[var(--color-surface-hover)] aria-[current=true]:bg-[var(--color-surface-hover)]">
@@ -120,7 +167,8 @@ export function HermesConversationList({ chats, workingKeys }: { chats: HermesCh
             {renaming === row.key
               ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} />
               : <span className="block truncate text-xs font-medium">{row.title}</span>}
-            <span className="block truncate text-[10px] text-[var(--color-text-muted)]">{formatChatDate(row.updatedAt)}{row.kind === "solo" ? ` · ${row.profile}` : ""}</span>
+            <span className="block truncate text-[10px] text-[var(--color-text-muted)]">{[formatChatDate(row.updatedAt), view.groupBy !== "agent" ? row.participants.map((participant) => participant.name).join(", ") : "", view.groupBy !== "channel" ? conversationChannel(row).label : ""].filter(Boolean).join(" · ")}</span>
+            {automation(row) && <span className="text-[9px] text-[var(--color-text-muted)]">read-only</span>}
           </span>
           <StatusDot status={status} />
         </button>
@@ -128,8 +176,9 @@ export function HermesConversationList({ chats, workingKeys }: { chats: HermesCh
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
         </button>}
       </div>;
-    })}
-    {!rows.length && <p className="p-3 text-xs text-[var(--color-text-muted)]">No conversations{chats.filter ? ` for ${chats.filter}` : ""} yet.</p>}
+      })}
+    </section>)}
+    {!result.shown && <p className="p-3 text-xs text-[var(--color-text-muted)]">{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>}
   </div>;
 }
 export function HermesNewChatDialog({ chats }: { chats: HermesChatsController }) {

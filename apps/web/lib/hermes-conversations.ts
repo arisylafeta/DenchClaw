@@ -32,12 +32,15 @@ export function filterConversations(rows: HermesConversation[], profile: string 
 
 /** Where a chat came from. Hermes sets `source` on every session; scheduled runs use `cron`. */
 const CHANNEL_LABELS: Record<string, string> = {
-  cron: "Scheduled", webhook: "Webhook", api_server: "CRM / API", discord: "Discord", whatsapp: "WhatsApp", telegram: "Telegram",
+  cron: "Scheduled", webhook: "Webhook", crm: "CRM", api_server: "CRM / API", discord: "Discord", whatsapp: "WhatsApp", telegram: "Telegram",
   slack: "Slack", ios: "iOS", desktop: "Desktop", cli: "CLI", tui: "Terminal", group: "Groups", other: "Other",
 };
 export function conversationChannel(row: HermesConversation): { id: string; label: string } {
   const id = row.kind === "group" ? "group" : row.source || "other";
   return { id, label: CHANNEL_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1) };
+}
+export function automation(row: HermesConversation): boolean {
+  return row.kind === "solo" && (row.source === "cron" || row.source === "webhook");
 }
 /** Scheduled runs are titled "<job name> · <time>"; the job name groups repeated runs. */
 function scheduledJob(row: HermesConversation) {
@@ -45,8 +48,8 @@ function scheduledJob(row: HermesConversation) {
 }
 export type GroupBy = "none" | "channel" | "agent" | "day" | "job";
 export type ChatView = { hidden: string[]; groupBy: GroupBy };
-/** Scheduled runs are the noisiest source, so they start hidden. */
-export const DEFAULT_VIEW: ChatView = { hidden: ["cron"], groupBy: "none" };
+/** Unattended automation starts hidden, but remains available in the channel menu. */
+export const DEFAULT_VIEW: ChatView = { hidden: ["cron", "webhook"], groupBy: "none" };
 export type ChatSection = { key: string; label: string | null; rows: HermesConversation[] };
 function dayBucket(ms: number, now: Date) {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();

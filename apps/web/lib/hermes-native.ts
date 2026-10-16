@@ -121,7 +121,7 @@ export async function groupRpc<T>(method: string, params: Record<string, unknown
 export function soloConversation(profile: string, s: NativeSession): HermesConversation {
   return { key: conversationKey("solo", s.id, profile), kind: "solo", id: s.id, profile,
     title: s.title || "Untitled chat", updatedAt: (s.last_active || s.started_at || 0) * 1000,
-    participants: [{ profile, name: profile }], working: nativeHermesWorking(profile, s.id) };
+    participants: [{ profile, name: profile }], working: nativeHermesWorking(profile, s.id), source: s.source };
 }
 export function roomConversation(room: Room, working: boolean | null = null): HermesConversation {
   return { key: conversationKey("group", room.room_id), kind: "group", id: room.room_id,
@@ -134,7 +134,7 @@ export async function listConversations() {
   const soloLists = await Promise.all(profiles.map(async (profile) => {
     // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
-      const page = await (await nativeFetch(profile, "/api/sessions?limit=100&offset=0")).json() as { data: NativeSession[] };
+      const page = await (await nativeFetch(profile, "/api/sessions?limit=200&offset=0")).json() as { data: NativeSession[] };
       return page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));

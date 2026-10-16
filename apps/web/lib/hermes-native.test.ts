@@ -43,8 +43,8 @@ describe("native Hermes conversations", () => {
   it("lists the newest page per profile, hides execution sessions, and uses actual working not worker presence", async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = new URL(input); const alpha = url.pathname.includes("/alpha/");
-      if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2 }], has_more: false });
-      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3 }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
+      if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2, source: "webhook" }], has_more: false });
+      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3, source: "cron" }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
     });
     vi.stubGlobal("fetch", fetchMock);
     handler = (method, params) => method === "groups.list" ? { rooms: [room], next_offset: params.offset === 0 ? 100 : null } : { room, driver_status: { running: true, working: false, blocked: true } };
@@ -54,9 +54,11 @@ describe("native Hermes conversations", () => {
     expect(data.sessions.filter((r) => r.id === "shared-id")).toHaveLength(2);
     expect(data.sessions.find((r) => r.kind === "group")).toMatchObject({ working: false, blocked: true });
     expect(data.sessions.find((r) => r.kind === "solo")?.working).toBeNull();
+    expect(data.sessions.find((r) => r.profile === "alpha")).toMatchObject({ source: "webhook" });
+    expect(data.sessions.find((r) => r.profile === "default")).toMatchObject({ source: "cron" });
     expect(data.warnings).toEqual([]);
     expect(filterConversations(data.sessions, "alpha").map((r) => r.title)).toEqual(["Alpha and Sol", "Alpha chat"]);
-    expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=100&offset=0"))).toBe(true);
+    expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=200&offset=0"))).toBe(true);
   });
   it("keeps other profiles' chats when one profile's sessions cannot be read", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => input.includes("/alpha/") ? new Response("{}", { status: 401 }) : Response.json({ data: [{ id: "sol", title: "Sol chat" }] })));
