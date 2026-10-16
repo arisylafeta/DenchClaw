@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProfileSwitcher } from "./profile-switcher";
 
@@ -15,6 +15,34 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("ProfileSwitcher workspace delete action", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("shows names and avatars without paths, falls back to initials, and switches profiles", async () => {
+    const user = userEvent.setup();
+    const onWorkspaceSwitch = vi.fn();
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") return jsonResponse({ activeWorkspace: "the-enricher" });
+      return jsonResponse({ activeWorkspace: "default", workspaces: ["default", "the-enricher"].map((name) => ({
+        name, stateDir: `/profiles/${name}`, workspaceDir: `/profiles/${name}/workspace`, isActive: name === "default", hasConfig: true,
+      })) });
+    }) as typeof fetch;
+    render(<ProfileSwitcher onWorkspaceSwitch={onWorkspaceSwitch} />);
+    await user.click(await screen.findByTitle("Switch workspace"));
+    const menu = document.querySelector("[data-profile-switcher-portal]")!;
+    expect(menu.textContent).not.toContain("/profiles/");
+    expect(screen.getAllByText("default").find((node) => menu.contains(node))?.closest(".group")).toHaveTextContent("Active");
+    expect(screen.getByText("the-enricher").closest(".group")).not.toHaveTextContent("Active");
+    const avatar = menu.querySelector('img[src="/api/workspace/avatar?name=the-enricher"]')!;
+    expect(avatar).toBeTruthy();
+    const fallback = avatar.parentElement!;
+    fireEvent.error(avatar);
+    expect(fallback.querySelector("img")).toBeNull();
+    expect(fallback.textContent).toBe("TE");
+    await user.click(screen.getByText("the-enricher"));
+    await waitFor(() => expect(onWorkspaceSwitch).toHaveBeenCalledOnce());
+    expect(global.fetch).toHaveBeenCalledWith("/api/workspace/switch", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ workspace: "the-enricher" }),
+    }));
   });
 
   it("deletes a workspace from the dropdown action", async () => {

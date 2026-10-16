@@ -15,6 +15,7 @@ import {
 } from "@tabler/icons-react";
 import { type TreeNode } from "./file-manager-tree";
 import { ProfileSwitcher } from "./profile-switcher";
+import { ProfileAvatar } from "./profile-avatar";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 import { NavUser, type NavUserData } from "./nav-user";
 import type { SearchIndexItem } from "@/lib/search-index";
@@ -561,13 +562,7 @@ export function WorkspaceSidebar({
 							className="w-7 h-7 mx-auto rounded-lg overflow-hidden flex items-center justify-center transition-opacity hover:opacity-90"
 							title={`${orgName || "Workspace"}${workspaceName ? ` — ${workspaceName}` : ""}`}
 						>
-							{/* eslint-disable-next-line @next/next/no-img-element */}
-							<img
-								src="/rebattery-workspace-icon.svg"
-								alt=""
-								className="w-7 h-7 object-cover"
-								draggable={false}
-							/>
+							{workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-7 w-7" />}
 						</button>
 					)}
 				/>
@@ -669,15 +664,8 @@ export function WorkspaceSidebar({
 								onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
 								title="Switch workspace"
 							>
-								<span className="truncate font-semibold">{orgName || "Workspace"}</span>
-								{workspaceName && (
-									<>
-										<span className="shrink-0 opacity-40">/</span>
-										<span className="truncate text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-											{workspaceName}
-										</span>
-									</>
-								)}
+								{workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-6 w-6" />}
+								<span className="truncate font-semibold">{workspaceName ?? "Workspace"}</span>
 								<span className="flex-1" />
 								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
 									<path d="m6 9 6 6 6-6" />
