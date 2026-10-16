@@ -46,15 +46,18 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.updateDemand("btd_missing", { note: "x" })).toBeNull();
   });
 
-  it("ranks priority inside its status band and computes missing qualification and matches", async () => {
+  it("ranks priority inside its score and status bands and computes missing qualification and matches", async () => {
     const pinned = await demand.addDemand({ buyer: "Priority Buyer", wants: "Toyota packs", priority: true,
       fee_eur: 1, qualify_question: "When do you need these?" }, user.id);
-    const scored = await demand.addDemand({ buyer: "Scored Buyer", wants: "Toyota packs", fee_eur: 10000,
+    const scored = await demand.addDemand({ buyer: "Scored Buyer", wants: "Toyota packs", fee_eur: 2,
       price_basis: "buyer", reputation: "paid" }, user.id);
     const qualifying = await demand.addDemand({ buyer: "Qualifying Priority", wants: "Toyota packs",
       status: "qualifying", priority: true }, user.id);
+    const hot = await demand.addDemand({ buyer: "Hot Buyer", wants: "Toyota packs", fee_eur: 10000,
+      price_basis: "buyer", reputation: "paid" }, user.id);
     expect(pinned.missing).toEqual(["no price", "no quantity", "no timeline", "question not sent", "no supply match"]);
     const ordered = (await demand.listDemand()).map((row) => row.id);
+    expect(ordered.indexOf(hot.id)).toBeLessThan(ordered.indexOf(pinned.id));
     expect(ordered.indexOf(pinned.id)).toBeLessThan(ordered.indexOf(scored.id));
     expect(ordered.indexOf(scored.id)).toBeLessThan(ordered.indexOf(qualifying.id));
     await pg.queryPg(`insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason)

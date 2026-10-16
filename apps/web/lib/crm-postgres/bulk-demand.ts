@@ -52,7 +52,7 @@ const DEMAND_SELECT = `
     (demand.product_family is not null and (
       exists(select 1 from crm_stock_items stock where stock.stock_status not in ('sold', 'unavailable')
         and concat_ws(' ', stock.make, stock.model, stock.description) ilike '%' || demand.product_family || '%')
-      or exists(select 1 from crm_bulk_trade_lots stock where stock.lot_kind = 'supply'
+      or exists(select 1 from crm_bulk_trade_lots stock where stock.origin = 'supply'
         and stock.trade_stage in ('Needs info', 'With buyers', 'Closing')
         and stock.title ilike '%' || demand.product_family || '%')
     )) as has_stock,
@@ -77,20 +77,23 @@ const RANK = `case when demand.kind = 'request' then 0 when demand.basis = 'agre
 const TIER_RANK = `case (select company.buyer_tier from crm_companies company where company.id = demand.company_id)
   when 'A' then 0 when 'B' then 1 when 'C' then 2 else 3 end`;
 
+// Priority moves a row within its score band, never above a hotter qualified opportunity.
+const DEMAND_ORDER = `case status when 'open' then 0 when 'qualifying' then 1 else 2 end,
+  case when score >= 80 then 0 when score >= 60 then 1 when score >= 40 then 2
+    when score is not null then 3 else 4 end,
+  priority desc, score desc nulls last, buyer, id`;
+
 /** Open shortlist by expected-fee score, then qualification and closed history. */
 export async function listDemand(): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
-    `${DEMAND_SELECT} order by case demand.status when 'open' then 0 when 'qualifying' then 1 else 2 end,
-       demand.priority desc, score desc nulls last, demand.buyer, demand.id`,
+    `select * from (${DEMAND_SELECT}) ranked order by ${DEMAND_ORDER}`,
   ));
 }
 
 /** A company's demand rows, open first, in the same order as the Demand page. */
 export async function listDemandForCompany(companyId: string): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
-    `${DEMAND_SELECT} where demand.company_id = $1
-     order by case demand.status when 'open' then 0 when 'qualifying' then 1 else 2 end,
-       demand.priority desc, score desc nulls last, demand.buyer, demand.id`,
+    `select * from (${DEMAND_SELECT} where demand.company_id = $1) ranked order by ${DEMAND_ORDER}`,
     [companyId],
   ));
 }
