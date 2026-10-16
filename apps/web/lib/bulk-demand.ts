@@ -84,6 +84,10 @@ export type Demand = {
   price_basis: PriceBasis | null;
   reputation: Reputation | null;
   qualify_question: string | null;
+  qualify_asked_on: string | null;
+  qualify_entered_on: string | null;
+  activity_count: number;
+  last_activity_at: string | null;
   moved_to: string | null;
   asked_on: string | null;
   score: number | null;
@@ -126,11 +130,11 @@ export type SuggestedBuyer = {
 export type DemandInput = Partial<Pick<Demand,
   "kind" | "basis" | "buyer" | "company_id" | "person_id" | "contact" | "email" | "wants" | "quantity" | "location" | "note"
   | "confirmed_on" | "needed_by" | "volume" | "volume_unit" | "max_price" | "price_currency" | "price_unit" | "spec"
-  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "moved_to">>;
+  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to">>;
 const DEMAND_RULES: Record<string, Rule> = {
   kind: KINDS, basis: BASES, buyer: "text", company_id: "text", person_id: "text", contact: "text", email: "text", wants: "text",
   quantity: "text", location: "text", note: "text", confirmed_on: "date", needed_by: "date", observed_on: "date",
-  status: ["open", "qualifying", "closed"], product_family: "text", qualify_question: "text", moved_to: "text",
+  status: ["open", "qualifying", "closed"], product_family: "text", qualify_question: "text", qualify_asked_on: "date", moved_to: "text",
 };
 const NUMBER_KEYS = ["volume", "max_price", "fee_eur"] as const;
 const OPTION_KEYS = { volume_unit: VOLUME_UNITS, price_currency: CURRENCIES, price_unit: PRICE_UNITS,

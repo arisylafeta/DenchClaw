@@ -4,6 +4,7 @@ import { todayInLondon } from "../bulk-trades";
 import type { Basis, ClosedReason, Demand, DemandInput, SuggestedBuyer } from "../bulk-demand";
 import type { Buyer, Proposal } from "../bulk-trade-details";
 import { addBuyer } from "./bulk-trade-details";
+import { addDemandActivity } from "./bulk-demand-activity";
 
 const DEMAND_SELECT = `
   select demand.id, demand.kind, demand.basis, demand.buyer, demand.company_id, demand.person_id, demand.contact,
@@ -14,6 +15,10 @@ const DEMAND_SELECT = `
     demand.status, demand.closed_reason, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on, demand.updated_at,
     demand.product_family, demand.fee_eur::float8 as fee_eur, demand.price_basis, demand.reputation,
     demand.qualify_question, demand.moved_to,
+    to_char(demand.qualify_asked_on, 'YYYY-MM-DD') as qualify_asked_on,
+    to_char(demand.qualify_entered_on, 'YYYY-MM-DD') as qualify_entered_on,
+    (select count(*)::int from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as activity_count,
+    (select max(activity.occurred_at)::text from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as last_activity_at,
     to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on,
     bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on)) as score,
@@ -122,7 +127,7 @@ type Source = {
 const INSERT_KEYS = [
   "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
   "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
-  "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question",
+  "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question", "qualify_asked_on",
 ] as const;
 
 export async function addDemand(input: DemandInput & { buyer: string; wants: string }, userId: string | null, source: Source = {}) {
@@ -152,6 +157,10 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
 // Column names below come only from validated DemandInput keys.
 export async function updateDemand(id: string, input: DemandInput, source: Source = {}): Promise<Demand | null> {
   const patch: Record<string, unknown> = { ...input, ...Object.fromEntries(Object.entries(source).filter(([, v]) => v)) };
+  if (input.status === "open" || input.status === "qualifying") {
+    patch.closed_reason = null;
+    patch.moved_to = null;
+  }
   if ("spec" in patch) patch.spec = JSON.stringify(patch.spec ?? {});
   const keys = Object.keys(patch);
   // Turning a request into a standing buy-box keeps any basis it has, else it becomes stated.
@@ -192,6 +201,8 @@ export async function makeStanding(id: string): Promise<Demand | null> {
 
 /** "Still wanted": confirmed today, and reopened if it was closed. */
 export async function confirmDemand(id: string): Promise<Demand | null> {
+  // Status transitions are logged atomically by 045; a reconfirmation is useful even while already open.
+  const current = await getDemand(id);
   const rows = await queryPg(
     // A reopened row lost its suggestions when it closed, so the next matching passes judge it again.
     `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now(),
@@ -200,6 +211,9 @@ export async function confirmDemand(id: string): Promise<Demand | null> {
      where id = $1 returning id`,
     [id, todayInLondon()],
   );
+  if (rows.length && current?.status === "open") {
+    await addDemandActivity({ demandId: id, kind: "status", title: "Still wanted", data: { confirmed_on: todayInLondon() } });
+  }
   return rows.length ? getDemand(id) : null;
 }
 

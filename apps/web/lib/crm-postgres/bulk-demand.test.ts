@@ -46,6 +46,32 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.updateDemand("btd_missing", { note: "x" })).toBeNull();
   });
 
+  it("records activity, scopes deletion, counts it and stamps qualifying entries across writers", async () => {
+    // Load after DATABASE_URL is set: the Postgres pool is configured at module initialization.
+    const activity = await import("./bulk-demand-activity");
+    const row = await demand.addDemand({ buyer: "Activity Buyer", wants: "Leaf packs", status: "qualifying" }, user.id);
+    expect(row.qualify_entered_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(row.qualify_asked_on).toBeNull();
+    expect(row.activity_count).toBe(1);
+    const entry = await activity.addDemandActivity({ demandId: row.id, kind: "research", title: "  Found supplier  ",
+      body: "Checked stock", refKind: "url", refId: "https://supplier.test", data: { units: 12 }, actorUserId: user.id });
+    expect(entry).toMatchObject({ title: "Found supplier", kind: "research", actor_user_id: user.id, data: { units: 12 } });
+    expect((await activity.listDemandActivity(row.id))[0].id).toBe(entry.id);
+    expect(await demand.getDemand(row.id)).toMatchObject({ activity_count: 2, last_activity_at: entry.occurred_at });
+    expect(await activity.deleteDemandActivity("btd_other", entry.id)).toBe(false);
+    expect(await activity.deleteDemandActivity(row.id, entry.id)).toBe(true);
+    await expect(activity.addDemandActivity({ demandId: row.id, kind: "note", title: " " })).rejects.toThrow();
+    await demand.updateDemand(row.id, { qualify_asked_on: "2026-10-01" });
+    await demand.confirmDemand(row.id);
+    await demand.confirmDemand(row.id);
+    await demand.closeDemand(row.id, "bought_elsewhere");
+    await demand.updateDemand(row.id, { status: "qualifying" });
+    expect(await demand.getDemand(row.id)).toMatchObject({ status: "qualifying", qualify_asked_on: null });
+    expect((await activity.listDemandActivity(row.id)).map((a) => a.title)).toContain("Still wanted");
+    await pg.queryPg("delete from crm_bulk_trade_demand where id = $1", [row.id]);
+    expect(await activity.listDemandActivity(row.id)).toEqual([]);
+  });
+
   it("invalidates matching when qualifying and when reopening through edits or confirmation", async () => {
     const row = await demand.addDemand({ buyer: "Reconfirm Buyer", wants: "Leaf packs", status: "open" }, user.id);
     const seed = () => pg.queryPg("update crm_bulk_trade_demand set match_hash = 'matched', supply_match_hash = 'matched' where id = $1", [row.id]);
