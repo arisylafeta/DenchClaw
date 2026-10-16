@@ -30,7 +30,7 @@ const SELECT = `select id::text, demand_id, kind, title, body, ref_kind, ref_id,
   occurred_at::text, created_at::text from crm_bulk_trade_demand_activity`;
 
 export async function listDemandActivity(demandId: string): Promise<DemandActivity[]> {
-  return queryPg<DemandActivity>(`${SELECT} where demand_id = $1 order by occurred_at desc, id desc`, [demandId]);
+  return queryPg<DemandActivity>(`${SELECT} where demand_id = $1 order by occurred_at desc, crm_bulk_trade_demand_activity.id desc`, [demandId]);
 }
 
 export async function addDemandActivity(input: DemandActivityInput): Promise<DemandActivity> {
