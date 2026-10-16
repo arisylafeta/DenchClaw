@@ -72,19 +72,16 @@ describe("Hermes unified chat UI", () => {
     await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(3));
     for (const profile of profiles) await user.click(screen.getByRole("checkbox", { name: profile }));
     await user.click(screen.getByRole("button", { name: profiles.length > 1 ? "Create group chat" : "Create solo chat" }));
-    await screen.findByRole("heading", { name: created.title });
+    if (created.kind === "group") await screen.findByRole("heading", { name: created.title });
+    else await waitFor(() => expect(screen.getByRole("button", { name: /Alpha solo/ })).toHaveAttribute("aria-current", "true"));
     const request = fetchMock.mock.calls.find(([url, init]) => url === "/api/hermes/conversations" && init?.method === "POST");
     expect(JSON.parse(request![1].body)).toEqual({ profiles });
   });
-  it("continues the exact selected solo session and consumes native SSE", async () => {
+  it("delegates selected solo chats instead of rendering a second solo client", async () => {
     const user = userEvent.setup(); render(<Harness />);
     await user.click(await screen.findByRole("button", { name: /Alpha solo/ }));
-    await waitFor(() => expect(screen.getByLabelText("Message")).not.toBeDisabled());
-    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Continue solo" } });
-    await user.click(screen.getByRole("button", { name: "Send" }));
-    await screen.findByText("Native continuation");
-    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
-    expect(posts).toHaveLength(1); expect(posts[0][0]).toBe(`/api/hermes/conversations/${encodeURIComponent(solo.key)}`);
-    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue(""));
+    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Hermes chat")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url.includes(encodeURIComponent(solo.key)))).toBe(false);
   });
 });

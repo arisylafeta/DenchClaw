@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 import { resolveHermesConfig } from "./agent-backend";
+import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
 import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
 
@@ -8,12 +9,14 @@ type NativeSession = { id: string; source?: string; title?: string; last_active?
 type Member = { profile: string; member_id: string; display_name?: string; handle?: string };
 type Room = { room_id: string; name: string; updated_at: number; members: Member[] };
 type RoomState = { room: Room; driver_status?: { working?: boolean; blocked?: boolean } };
-type RoomEvent = { event_id: string; kind: string; actor: { id: string; profile?: string; label?: string }; payload: { text?: string } };
+type RoomEvent = { event_id: string; kind: string; actor: { id: string; profile?: string; display_name?: string }; payload: { text?: string; task_id?: string; member_id?: string } };
 export function hermesProfiles() { return discoverWorkspaces().map((p) => p.name); }
 export function assertProfile(profile: string) {
-  if (!hermesProfiles().includes(profile)) throw new Error("Unknown Hermes profile");
+  const found = discoverWorkspaces().find((workspace) => workspace.name === profile);
+  if (!found) throw new Error("Unknown Hermes profile");
+  return found;
 }
-export async function nativeFetch(profile: string, path: string, init: RequestInit = {}) {
+export async function nativeFetch(profile: string, path: string, init: RequestInit = {}, allowedStatuses: number[] = []) {
   assertProfile(profile);
   const config = resolveHermesConfig();
   if (!config.apiKey) throw new Error("Missing Hermes API key");
@@ -22,54 +25,62 @@ export async function nativeFetch(profile: string, path: string, init: RequestIn
     signal: init.signal ?? AbortSignal.timeout(30_000),
   });
   // Never forward upstream bodies, which may contain credential-bearing URLs.
-  if (!response.ok) throw new Error(`Hermes request failed (${response.status})`);
+  if (!response.ok && !allowedStatuses.includes(response.status)) throw new Error(`Hermes request failed (${response.status})`);
   return response;
 }
 export function groupsConfigured() { return Boolean(process.env.HERMES_GATEWAY_WS_URL && process.env.HERMES_GATEWAY_TOKEN); }
-/** Native dashboard JSON-RPC, not the API-server key or an independent group engine. */
+// One native dashboard socket multiplexes list/state/log/send RPCs, including concurrent refreshes.
+let gateway: { url: string; socket: WebSocket; pending: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }> } | undefined;
+/** Native dashboard JSON-RPC, never an API-server key or independent room engine. */
 export async function groupRpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
   if (!groupsConfigured()) throw new Error("Group chats require HERMES_GATEWAY_WS_URL and HERMES_GATEWAY_TOKEN on the server");
   const url = new URL(process.env.HERMES_GATEWAY_WS_URL!);
-  if (url.protocol !== "wss:" && !(url.protocol === "ws:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) {
-    throw new Error("Hermes gateway requires TLS except on loopback");
-  }
+  if (url.protocol !== "wss:" && !(url.protocol === "ws:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("Hermes gateway requires TLS except on loopback");
   url.searchParams.set("token", process.env.HERMES_GATEWAY_TOKEN!);
-  return new Promise<T>((resolve, reject) => {
-    const id = randomUUID();
-    const ws = new WebSocket(url, { handshakeTimeout: 10_000 });
-    const timer = setTimeout(() => finish(new Error("Hermes group request timed out")), 30_000);
-    let settled = false;
-    function finish(error?: Error, result?: T) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      ws.close();
-      if (error) reject(error); else resolve(result as T);
-    }
-    ws.on("open", () => ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"));
-    ws.on("message", (data) => {
+  const address = url.toString();
+  if (!gateway || gateway.url !== address || gateway.socket.readyState >= WebSocket.CLOSING) {
+    gateway?.socket.close();
+    const connection = { url: address, socket: new WebSocket(url, { handshakeTimeout: 10_000 }), pending: new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>() };
+    gateway = connection;
+    const fail = () => {
+      for (const request of connection.pending.values()) { clearTimeout(request.timer); request.reject(new Error("Hermes gateway disconnected")); }
+      connection.pending.clear();
+    };
+    connection.socket.on("error", fail);
+    connection.socket.on("close", fail);
+    connection.socket.on("message", (data) => {
       try {
         for (const line of data.toString().split("\n").filter(Boolean)) {
           const frame = JSON.parse(line);
-          if (frame.id !== id) continue;
-          if (frame.error) finish(new Error(`Hermes ${method} failed (code ${frame.error.code})`));
-          else finish(undefined, frame.result);
+          const request = connection.pending.get(frame.id);
+          if (!request) continue;
+          connection.pending.delete(frame.id); clearTimeout(request.timer);
+          if (frame.error) request.reject(new Error(`Hermes group request failed (code ${frame.error.code})`));
+          else request.resolve(frame.result);
         }
-      } catch { finish(new Error("Invalid Hermes gateway response")); }
+      } catch { fail(); connection.socket.close(); }
     });
-    ws.on("error", () => finish(new Error("Hermes gateway connection failed")));
-    ws.on("close", () => finish(new Error("Hermes gateway disconnected")));
+  }
+  const connection = gateway;
+  return new Promise<T>((resolve, reject) => {
+    const id = randomUUID();
+    const timer = setTimeout(() => { connection.pending.delete(id); reject(new Error("Hermes group request timed out")); }, 30_000);
+    connection.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
+    const send = () => {
+      if (connection.pending.has(id)) connection.socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    };
+    if (connection.socket.readyState === WebSocket.OPEN) send(); else connection.socket.once("open", send);
   });
 }
 export function soloConversation(profile: string, s: NativeSession): HermesConversation {
   return { key: conversationKey("solo", s.id, profile), kind: "solo", id: s.id, profile,
     title: s.title || "Untitled chat", updatedAt: (s.last_active || s.started_at || 0) * 1000,
-    participants: [{ profile, name: profile }], working: null };
+    participants: [{ profile, name: profile }], working: nativeHermesWorking(profile, s.id) };
 }
 export function roomConversation(room: Room, working: boolean | null = null): HermesConversation {
   return { key: conversationKey("group", room.room_id), kind: "group", id: room.room_id,
     title: room.name, updatedAt: room.updated_at * 1000, working,
-    participants: room.members.map((m) => ({ profile: m.profile, memberId: m.member_id, name: m.display_name || m.handle || m.profile })) };
+    participants: room.members.map((m) => ({ profile: m.profile, memberId: m.member_id, name: m.display_name || m.handle || m.profile, handle: m.handle })) };
 }
 export async function listConversations() {
   const warnings: string[] = [];
@@ -124,38 +135,57 @@ export async function createConversation(profiles: string[], title?: string) {
   const verified = await groupRpc<RoomState>("groups.state", { room_id: id });
   return roomConversation(verified.room, verified.driver_status?.working ?? null);
 }
-export async function readConversation(key: string) {
+export async function readConversation(key: string, sinceSeq = 0) {
   const identity = parseConversationKey(key);
   if (identity.kind === "group") {
     const state = await groupRpc<RoomState>("groups.state", { room_id: identity.id });
     const events: RoomEvent[] = [];
-    let since = 0;
+    let since = sinceSeq;
     for (;;) {
       const page = await groupRpc<{ events: (RoomEvent & { seq: number })[]; has_more?: boolean }>("groups.log", { room_id: identity.id, since_seq: since, limit: 100 });
       events.push(...page.events);
-      if (!page.events.length) break;
+      if (!page.events.length) {
+        if (page.has_more) throw new Error("Hermes room replay made no progress");
+        break;
+      }
       const next = page.events.at(-1)!.seq;
       if (next <= since) throw new Error("Invalid Hermes room replay cursor");
       since = next;
-      if (page.events.length < 100) break;
+      if (page.has_more === false || (page.has_more === undefined && page.events.length < 100)) break;
     }
     const messages: HermesMessage[] = events.filter((e) => ["message.user", "message.member"].includes(e.kind)).map((e) => {
       const member = state.room.members.find((m) => m.member_id === e.actor.id);
-      return { id: e.event_id, role: e.kind === "message.user" ? "user" : "assistant", text: e.payload.text || "", profile: member?.profile, name: member?.display_name || e.actor.label };
+      return { id: e.event_id, role: e.kind === "message.user" ? "user" : "assistant", text: e.payload.text || "", profile: member?.profile, name: member?.display_name || e.actor.display_name };
     });
-    return { conversation: roomConversation(state.room, state.driver_status?.working ?? null), messages, blocked: state.driver_status?.blocked ?? false };
+    const conversation = roomConversation(state.room, state.driver_status?.working ?? null);
+    return { conversation, messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false };
   }
   const root = `/api/sessions/${encodeURIComponent(identity.id)}`;
   const [sessionResponse, messagesResponse] = await Promise.all([nativeFetch(identity.profile, root), nativeFetch(identity.profile, `${root}/messages?order=oldest&limit=500&offset=0`)]);
   const session = await sessionResponse.json();
   const messages: HermesMessage[] = [];
+  const tools = new Map<string, Record<string, unknown>>();
   let page = await messagesResponse.json();
   let offset = 0;
   for (;;) {
     for (const m of page.data) {
+      if (m.role === "tool") {
+        const tool = tools.get(m.tool_call_id);
+        if (tool) { tool.result = m.content; delete tool.state; }
+        continue;
+      }
       if (!["user", "assistant"].includes(m.role)) continue;
       const text = typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.filter((p: { type: string }) => p.type === "text").map((p: { text: string }) => p.text).join("\n") : "";
-      messages.push({ id: String(m.id), role: m.role, text, profile: m.role === "assistant" ? identity.profile : undefined });
+      const parts: Record<string, unknown>[] = [];
+      if (typeof (m.reasoning_content ?? m.reasoning) === "string") parts.push({ type: "reasoning", text: m.reasoning_content ?? m.reasoning });
+      if (text) parts.push({ type: "text", text });
+      for (const call of m.tool_calls ?? []) {
+        let args: unknown = call.function?.arguments ?? {};
+        if (typeof args === "string") { try { args = JSON.parse(args); } catch { /* Preserve malformed historical arguments as text. */ } }
+        const part: Record<string, unknown> = { type: "tool-invocation", toolCallId: call.id, toolName: call.function?.name ?? call.name ?? "unknown", args, state: "call" };
+        tools.set(call.id, part); parts.push(part);
+      }
+      messages.push({ id: String(m.id), role: m.role, text, content: text, parts, profile: m.role === "assistant" ? identity.profile : undefined });
     }
     if (page.data.length < 500) break;
     offset += 500;

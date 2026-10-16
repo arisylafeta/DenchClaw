@@ -65,6 +65,30 @@ describe("native Hermes conversations", () => {
     expect(result.sessions).toHaveLength(2); expect(result.groupsAvailable).toBe(false);
     expect(result.warnings.join()).toContain("dashboard connection");
   });
+  it("replays byte-limited native log pages using has_more on one gateway socket", async () => {
+    const cursors: unknown[] = [];
+    handler = (method, params) => {
+      if (method === "groups.state") return { room, driver_status: { running: true, working: false } };
+      cursors.push(params.since_seq);
+      const seq = params.since_seq === 0 ? 1 : 2;
+      return { events: [{ seq, event_id: `event-${seq}`, kind: "message.user", actor: { id: "user" }, payload: { text: `message ${seq}` } }], has_more: seq === 1 };
+    };
+    await startGateway();
+    const detail = await readConversation(conversationKey("group", room.room_id));
+    expect(detail.messages.map((m) => m.text)).toEqual(["message 1", "message 2"]);
+    expect(cursors).toEqual([0, 1]); expect(server!.clients.size).toBe(1);
+  });
+  it("projects native reasoning and tool results into the existing rich message format", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/messages") ? Response.json({ data: [
+      { id: "assistant", role: "assistant", content: "Looking", reasoning_content: "Thinking", tool_calls: [{ id: "call1", function: { name: "terminal", arguments: '{"command":"fixture"}' } }] },
+      { id: "tool", role: "tool", tool_call_id: "call1", content: "Tool result" },
+      { id: "answer", role: "assistant", content: "Done" },
+    ] }) : Response.json({ session: { id: "rich", title: "Rich fixture" } })));
+    const detail = await readConversation(conversationKey("solo", "rich", "alpha"));
+    expect(detail.messages).toHaveLength(2);
+    expect(detail.messages[0]).toMatchObject({ content: "Looking", parts: [{ type: "reasoning", text: "Thinking" }, { type: "text", text: "Looking" }, { type: "tool-invocation", toolCallId: "call1", toolName: "terminal", args: { command: "fixture" }, result: "Tool result" }] });
+    expect(detail.messages[0].parts?.[2]).not.toHaveProperty("state");
+  });
   it("creates a solo only in its chosen profile and reads back the native record", async () => {
     const requests: { url: string; init: RequestInit }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {

@@ -54,6 +54,13 @@ vi.mock("@/lib/auth", () => ({
   })),
 }));
 
+vi.mock("@/lib/hermes-native", () => ({
+  assertProfile: vi.fn((profile: string) => {
+    if (profile !== "alpha") throw new Error("Unknown Hermes profile");
+    return { name: profile, workspaceDir: "/fixtures/alpha/workspace" };
+  }),
+}));
+
 // Mock workspace module
 vi.mock("@/lib/workspace", () => ({
   ensureManagedWorkspaceRouting: vi.fn(),
@@ -147,6 +154,26 @@ describe("Chat API routes", () => {
   // ─── POST /api/chat ──────────────────────────────────────────────
 
   describe("POST /api/chat", () => {
+    it("continues native Hermes through the existing authenticated route with pinned profile and no Dench history writes", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      const { persistUserMessage } = await import("@/lib/active-runs");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes"); vi.mocked(persistUserMessage).mockClear();
+      const { POST } = await import("./route.js");
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "alpha", messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Continue this session" }] }] }) }));
+      expect(response.status).toBe(200); await response.text();
+      expect(createHermesChatStream).toHaveBeenCalledWith(expect.objectContaining({ profile: "alpha", existingSession: true, sessionKey: "native-existing", userId: "11111111-1111-4111-8111-111111111111", message: "Continue this session", signal: expect.any(AbortSignal) }));
+      expect(persistUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown pinned Hermes profile before opening a provider stream", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+      const { POST } = await import("./route.js");
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "../default", messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }] }) }));
+      expect(response.status).toBe(400); expect(createHermesChatStream).not.toHaveBeenCalled();
+    });
     it("returns 400 when no user message text", async () => {
       const { POST } = await import("./route.js");
       const req = new Request("http://localhost/api/chat", {

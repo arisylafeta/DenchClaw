@@ -2,6 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
+import { parseConversationKey } from "@/lib/hermes-conversations";
 import {
 	forwardRef,
 	useCallback,
@@ -842,6 +843,8 @@ export function ChatPanelTerminalButton({
 }
 
 type ChatPanelProps = {
+  /** Immutable native Hermes identity; never resolved through the workspace filter. */
+  nativeConversationKey?: string;
 	/** When set, scopes sessions to this file and prepends content as context. */
 	fileContext?: FileContext;
 	/** Compact mode for workspace sidebar (smaller UI, built-in session tabs). */
@@ -941,6 +944,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			compact,
 			sessionTitle,
 			initialSessionId,
+			nativeConversationKey,
 			onFileChanged,
 			onActiveSessionChange,
 			onSessionsChange,
@@ -1090,6 +1094,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						if (sk) {extra.sessionKey = sk;}
 						const sid = sessionIdRef.current;
 						if (sid) {extra.sessionId = sid;}
+            if (nativeConversationKey) {
+              const identity = parseConversationKey(nativeConversationKey);
+              extra.sessionId = identity.id;
+              extra.hermesProfile = identity.profile;
+            }
 						if (pendingHtmlRef.current) {
 							extra.userHtml = pendingHtmlRef.current;
 							pendingHtmlRef.current = null;
@@ -1115,7 +1124,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					};
 				},
 			}),
-		[],
+		[nativeConversationKey],
 	);
 
 		const { messages, sendMessage, status, stop, error, setMessages } =
@@ -1364,6 +1373,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		const createSession = useCallback(
 			async (title: string): Promise<string> => {
+        if (nativeConversationKey) return nativeConversationKey;
 				// All chat sessions are workspace-level since the v3 three-column
 				// refactor. The previous behavior — binding `filePath` on the
 				// session whenever any content tab was active — caused the
@@ -1381,7 +1391,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				const data = await res.json();
 				return data.session.id;
 			},
-			[],
+			[nativeConversationKey],
 		);
 
 		// ── Stream reconnection ──
@@ -2124,7 +2134,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 				try {
 					const response = await fetch(
-						`/api/web-sessions/${sessionId}`,
+						nativeConversationKey ? `/api/hermes/conversations/${encodeURIComponent(nativeConversationKey)}` : `/api/web-sessions/${sessionId}`,
 					);
 					if (!response.ok) {
 						console.warn(`Session ${sessionId} not found (${response.status}), starting fresh.`);
@@ -2187,7 +2197,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					// returns 404 gracefully if no active run exists,
 					// and this avoids missing runs whose _streaming
 					// flag hasn't been persisted yet.
-					await attemptReconnect(sessionId, uiMessages);
+					if (!nativeConversationKey) await attemptReconnect(sessionId, uiMessages);
 				} catch (err) {
 					console.error("Error loading session:", err);
 					setLoadingSession(false);
@@ -2199,10 +2209,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				onActiveSessionChange,
 				stop,
 				attemptReconnect,
+        nativeConversationKey,
 			],
 		);
 
 		const handleNewSession = useCallback(() => {
+      if (nativeConversationKey) { onNewChatSession?.(); return; }
 			reconnectAbortRef.current?.abort();
 			void stop();
 			setIsReconnecting(false);
@@ -2218,7 +2230,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			requestAnimationFrame(() => {
 				editorRef.current?.focus();
 			});
-		}, [setMessages, onActiveSessionChange, stop]);
+		}, [setMessages, onActiveSessionChange, stop, nativeConversationKey, onNewChatSession]);
 
 		// Keep the ref in sync so handleEditorSubmit can call it
 		handleNewSessionRef.current = handleNewSession;
@@ -2230,6 +2242,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			newSession: async () => { handleNewSession(); },
 				sendNewMessage: async (text: string) => {
 					onConversationActivity?.();
+          if (nativeConversationKey) { await sendMessage({ text }); return; }
 					handleNewSession();
 					const title =
 						text.length > 60 ? text.slice(0, 60) + "..." : text;
@@ -2262,7 +2275,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			const stopKey = sk || sid;
 			if (stopKey) {
 				try {
-					await fetch("/api/chat/stop", {
+					await fetch(nativeConversationKey ? `/api/hermes/conversations/${encodeURIComponent(nativeConversationKey)}` : "/api/chat/stop", {
 						method: "POST",
 						headers: {
 							"Content-Type": "application/json",
@@ -2270,7 +2283,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						body: JSON.stringify(
 							sk
 								? { sessionKey: sk }
-								: { sessionId: sid },
+								: nativeConversationKey ? { action: "stop" } : { sessionId: sid },
 						),
 					});
 				} catch { /* ignore */ }
@@ -2278,7 +2291,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 			// Stop the useChat transport stream (transitions status → "ready").
 			void stop();
-		}, [stop]);
+		}, [stop, nativeConversationKey]);
 
 		// Keep the ref in sync so handleEditorSubmit can call stop without
 		// depending on handleStop (would create a dependency cycle).

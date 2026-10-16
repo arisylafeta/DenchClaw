@@ -1,5 +1,5 @@
 // Client-safe identities. Profile filters never participate in routing a selected chat.
-export type HermesParticipant = { profile: string; memberId?: string; name: string };
+export type HermesParticipant = { profile: string; memberId?: string; name: string; handle?: string };
 export type HermesConversation = {
   key: string;
   kind: "solo" | "group";
@@ -10,7 +10,7 @@ export type HermesConversation = {
   participants: HermesParticipant[];
   working: boolean | null;
 };
-export type HermesMessage = { id: string; role: string; text: string; profile?: string; name?: string };
+export type HermesMessage = { id: string; role: string; text: string; content?: string; parts?: Record<string, unknown>[]; profile?: string; name?: string };
 export function conversationKey(kind: "solo" | "group", id: string, profile = ""): string {
   return encodeURIComponent(JSON.stringify([kind, profile, id]));
 }

@@ -676,7 +676,7 @@ export function WorkspaceSidebar({
 								title="Switch workspace"
 							>
 								{workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-6 w-6" />}
-								<span className="truncate font-semibold">{workspaceName ?? "Workspace"}</span>
+								<span className="truncate font-semibold">{workspaceName ?? (conversationFilter ? "All chats" : "Workspace")}</span>
 								<span className="flex-1" />
 								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
 									<path d="m6 9 6 6 6-6" />
