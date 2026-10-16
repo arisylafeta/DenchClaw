@@ -41,6 +41,8 @@ export type CampaignRecipient = {
   clicked_at: string | null;
   last_synced_at: string | null;
   tracking_pending: boolean;
+  /** False for emails sent by hand from Gmail, which have no delivery, open or click events. */
+  tracked: boolean;
   /** First email back from the recipient or their company after the send. */
   replied_at: string | null;
   subject: string | null;

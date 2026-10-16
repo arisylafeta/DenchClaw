@@ -26,6 +26,7 @@ type CampaignRow = {
 
 type SendRow = {
   send_id: string;
+  provider_message_id?: string | null;
   campaign_id: string;
   state: string;
   accepted_at: Timestamp;
@@ -83,8 +84,13 @@ function accepted(send: SendRow): boolean {
   return send.accepted_at != null || send.state === "accepted";
 }
 
+// Emails sent by hand from Gmail have no provider events: delivery, opens and clicks are never observed.
+function untracked(send: SendRow): boolean {
+  return !!send.provider_message_id?.startsWith("gmail:");
+}
+
 function pending(send: SendRow): boolean {
-  return accepted(send) && !send.last_synced_at;
+  return accepted(send) && !untracked(send) && !send.last_synced_at;
 }
 
 function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boolean): CampaignSummary {
@@ -96,8 +102,9 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
     // An unchecked cohort has no verified negative tracking observations. Positive
     // observations remain useful even if its provider synchronization is pending.
     const unchecked = acceptedSends.length > 0 && trackingPending === acceptedSends.length;
+    const noneTracked = acceptedSends.length > 0 && acceptedSends.every(untracked);
     const observedCount = (predicate: (send: SendRow) => boolean): number | null => {
-      if (!ledgerAvailable) { return null; }
+      if (!ledgerAvailable || noneTracked) { return null; }
       const count = acceptedSends.filter(predicate).length;
       return unchecked && count === 0 ? null : count;
     };
@@ -160,7 +167,7 @@ async function ledgerAvailability(): Promise<Ledger> {
 async function readSends(ids: string[], ledger: Ledger, withRecipients = false): Promise<SendRow[]> {
   if (!ledger.available || !ids.length) { return []; }
   return queryPg<SendRow>(`
-    select s.id as send_id, s.campaign_id, s.state, s.accepted_at, s.delivered_at,
+    select s.id as send_id, s.campaign_id, s.provider_message_id, s.state, s.accepted_at, s.delivered_at,
            s.bounced_at, s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
            ${ledger.links_available ? `(select min(l.first_clicked_at) from crm_campaign_send_links l where l.send_id = s.id)` : "null::timestamptz"} as link_clicked_at,
            -- A reply is any synced email from the recipient, or someone at their company, after the send.
@@ -342,6 +349,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       clicked_at: firstClick,
       last_synced_at: iso(send.last_synced_at),
       tracking_pending: pending(send),
+      tracked: !untracked(send),
       replied_at: iso(send.replied_at),
       subject: send.rendered_subject ?? null,
       dismantler_id: send.dismantler_id ?? null,

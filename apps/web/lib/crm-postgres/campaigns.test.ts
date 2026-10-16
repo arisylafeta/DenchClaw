@@ -185,6 +185,18 @@ describe("campaign projections", () => {
     });
   });
 
+  it("never marks Gmail-sent rows as pending and reports their provider metrics as untracked", async () => {
+    detailRows(campaign({ channel: "email-gmail" }), [
+      send("gmail-a", { last_synced_at: null, provider_message_id: "gmail:1a1443" }),
+      send("gmail-b", { last_synced_at: null, provider_message_id: "gmail:1a1444" }),
+    ]);
+    const detail = await getCampaignDetail("campaign-1");
+    expect(detail?.campaign).toMatchObject({
+      metrics: { sent: 2, delivered: null, opened: null, clicked: null, bounced: null }, tracking_pending: 0,
+    });
+    expect(detail?.recipients.map((recipient) => [recipient.tracked, recipient.tracking_pending])).toEqual([[false, false], [false, false]]);
+  });
+
   it("returns all five campaigns while retaining separate snapshot and ledger bases", async () => {
     queryPgMock.mockResolvedValueOnce([
       campaign({ id: "historical", source_system: "gog-reconciled" }),

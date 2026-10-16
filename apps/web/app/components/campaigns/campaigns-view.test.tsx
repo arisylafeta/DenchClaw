@@ -20,7 +20,7 @@ const summary: CampaignSummary = {
 function recipient(overrides: Partial<CampaignRecipient>): CampaignRecipient {
   return { send_id: "send", person_id: "person", person_name: "Contact", company_id: null, company_name: null,
     recipient_email: "contact@example.test", state: "accepted", accepted_at: AT, delivered_at: null, bounced_at: null,
-    opened_at: null, clicked_at: null, last_synced_at: AT, tracking_pending: false, replied_at: null, subject: null,
+    opened_at: null, clicked_at: null, last_synced_at: AT, tracking_pending: false, tracked: true, replied_at: null, subject: null,
     dismantler_id: null, dismantler_stage: null, listing_clicks: [], other_clicks: [], ...overrides };
 }
 const recipients = [
@@ -137,6 +137,23 @@ describe("CampaignsView", () => {
     await user.click(screen.getByRole("button", { name: "Replied" }));
     expect(screen.getByRole("link", { name: "Reply Yard" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Quiet Yard" })).not.toBeInTheDocument();
+  });
+
+  it("shows Gmail-sent outreach as sent and its delivery, opens and clicks as not tracked", async () => {
+    mockDetail({ ...detail,
+      campaign: { ...summary, type: "dismantler_outreach", channel: "email-gmail", metrics_basis: "ledger", tracking_pending: 0,
+        metrics: { sent: 1, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 0, replied: 0 } },
+      dismantler_funnel: { emailed: 1, replied: 0, stages: { Talking: 1 } },
+      recipients: [recipient({ send_id: "g", person_id: "p-g", person_name: "Gmail Yard", tracked: false, last_synced_at: null,
+        dismantler_id: "dm_g", dismantler_stage: "Talking" })] });
+    render(<CampaignsView {...props} />);
+    const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
+    expect(within(metrics).getAllByText("Not tracked")).toHaveLength(3);
+    expect(within(metrics).queryByText("Unknown")).not.toBeInTheDocument();
+    const row = screen.getByText("Sent from Gmail").closest("tr")!;
+    expect(within(row).getAllByText("Not tracked")).toHaveLength(2);
+    expect(within(row).queryByText("Tracking pending")).not.toBeInTheDocument();
+    expect(within(metrics).queryByText("Tracking pending")).not.toBeInTheDocument();
   });
 
   it("renders unknown ledger totals without losing available observations on pending recipients", async () => {
