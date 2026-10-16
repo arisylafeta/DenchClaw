@@ -9,7 +9,9 @@ from psycopg2.extensions import make_dsn, parse_dsn
 import pytest
 
 DEFAULT_ADMIN_DSN = 'dbname=postgres host=127.0.0.1 port=55470 user=postgres password=test'
-CUTOVER = Path(__file__).resolve().parents[4] / 'apps/web/lib/crm-postgres/migrations/038_mail_cutover.sql'
+MIGRATIONS = Path(__file__).resolve().parents[4] / 'apps/web/lib/crm-postgres/migrations'
+CUTOVER = MIGRATIONS / '038_mail_cutover.sql'
+ROLE_MIGRATION = MIGRATIONS / '039_mail_agent_role.sql'
 
 
 def guard_test_dsn(dsn):
@@ -39,6 +41,11 @@ def mail_test_database(request):
         with admin.cursor() as cur:
             cur.execute(sql.SQL('create database {} template denchclaw').format(sql.Identifier(name)))
         created = True
+        # The shared template may predate idempotent additions to 037.
+        with psycopg2.connect(dsn) as db, db.cursor() as cur:
+            cur.execute((MIGRATIONS / '037_mail_log.sql').read_text())
+            if ROLE_MIGRATION.exists():
+                cur.execute(ROLE_MIGRATION.read_text())
         os.environ['DENCH_MAIL_DSN'] = dsn
         os.environ['BULK_TRADES_TEST_DATABASE_URL'] = dsn
         os.environ.pop('DENCH_MAIL_LIVE_SEND', None)
@@ -61,7 +68,7 @@ def mail_test_database(request):
 
 @pytest.fixture(scope='module')
 def db_pre_cutover(mail_test_database):
-    """A clone of the synthetic template with migrations through 037 only."""
+    """A clone with current 037 additions, before the destructive 038 cutover."""
     return mail_test_database
 
 
@@ -71,4 +78,6 @@ def db_after_cutover(db_pre_cutover):
     guard_test_dsn(db_pre_cutover)
     with psycopg2.connect(db_pre_cutover) as db, db.cursor() as cur:
         cur.execute(CUTOVER.read_text())
+        if ROLE_MIGRATION.exists():
+            cur.execute(ROLE_MIGRATION.read_text())
     return db_pre_cutover

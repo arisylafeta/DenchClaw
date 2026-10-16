@@ -1,11 +1,12 @@
 """Wide mailbox capture with the original narrow CRM side effects."""
 import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from .core import Refused
+from .core import Refused, dict_cursor
 from .gmail_driver import GmailDriver
-from .crm_visibility import normalize_email, parse_email_addresses, ensure_person, visibility, is_common_email_provider
+from .crm_visibility import normalize_email, parse_email_addresses, ensure_person, visibility, is_common_email_provider, reply_matches
 
 
 def stable_id(prefix, value):
@@ -64,9 +65,9 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
     # Chronological processing means sent rows exist before their replies are reconciled.
     planned = {}
     if not apply:
-        with db.cursor() as cur:
-            cur.execute('select id,direction,sent_at,thread_id,rfc_message_id,in_reply_to,mailbox_owner_id from mail_message')
-            planned = {r[0]:r for r in cur.fetchall()}
+        with dict_cursor(db) as cur:
+            cur.execute('select * from mail_message')
+            planned = {r['id']:dict(r) for r in cur.fetchall()}
     for date,gmail_id,full,raw,headers,labels in sorted(prepared,key=lambda r:(r[0],r[1])):
         from_parties = parse_email_addresses(headers.get('from'))
         to_parties = parse_email_addresses(headers.get('to'))
@@ -88,7 +89,10 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
         message_id = existing[0] if existing else stable_id('gmail_msg_',account.lower()+':'+gmail_id)
         stats['linked'] += int(bool(existing))
         if not apply:
-            planned[message_id] = (message_id,direction,date,stable_id('gmail_thread_',account.lower()+':'+raw['threadId']),rfc_id,headers.get('in-reply-to'),owner_id)
+            observed = {'id':message_id,'direction':direction,'sent_at':date,'thread_id':stable_id('gmail_thread_',account.lower()+':'+raw['threadId']),'rfc_message_id':rfc_id,'mailbox_owner_id':owner_id}
+            if not outbound or not existing:
+                observed.update(from_email=sender,to_emails=[normalize_email(e) for _,e in to_parties],cc_emails=[normalize_email(e) for _,e in cc_parties],bcc_emails=[normalize_email(e) for _,e in bcc_parties],in_reply_to=headers.get('in-reply-to'),rfc_references=headers.get('references'),personalization={'provider_headers':headers})
+            planned[message_id] = {**planned.get(message_id,{}),**observed}
         if not apply:
             if visible:
                 for name,email in parties:
@@ -110,9 +114,14 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
             body = full.get('body','') or ''
             preview = re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',body)).strip()[:500]
             fields = {'thread_id':thread_pk,'mailbox_owner_id':owner_id,'gmail_message_id':gmail_id,'rfc_message_id':rfc_id,'in_reply_to':headers.get('in-reply-to'),'rfc_references':headers.get('references'),'subject':headers.get('subject'),'body_text':body,'body_preview':preview,'body_html':full.get('html') or full.get('bodyHtml'),'from_email':sender,'from_person_id':from_person,'to_emails':recipients['to'],'cc_emails':recipients['cc'],'bcc_emails':recipients['bcc'],'labels':labels,'has_attachments':bool(full.get('attachments')),'sent_at':date,'crm_visible':visible,'crm_visible_reason':reason}
+            if not outbound:
+                fields['personalization'] = json.dumps({'provider_headers':headers})
             if existing:
-                # Linking provider receipts must not replace a tool-authored purpose or transport.
+                # An outbound row is an immutable copy/routing snapshot. Gmail
+                # receipt normalisation must never rewrite approved content.
                 if outbound:
+                    observed_fields = ('thread_id','mailbox_owner_id','gmail_message_id','rfc_message_id','labels','sent_at','crm_visible','crm_visible_reason')
+                    fields = {key:fields[key] for key in observed_fields}
                     fields.update(state='accepted',accepted_at=date)
                 cur.execute('update mail_message set '+','.join(k+'=%s' for k in fields)+',last_synced_at=now(),updated_at=now() where id=%s', (*fields.values(),message_id))
             else:
@@ -137,24 +146,28 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
                     interaction = 'int_'+hashlib.md5(f'{message_id}_{person}'.encode()).hexdigest()[:16]
                     cur.execute('''insert into crm_interactions(id,type,occurred_at,person_id,company_id,email_message_id,direction,score_contribution) values(%s,'Email',%s,%s,%s,%s,%s,%s) on conflict(id) do update set occurred_at=excluded.occurred_at,direction=excluded.direction,score_contribution=excluded.score_contribution''',(interaction,date,person,companies.get(person),message_id,interaction_direction,score))
                     cur.execute("update crm_people set last_interaction_at=greatest(coalesce(last_interaction_at,'1970-01-01'::timestamptz),%s) where id=%s and (last_interaction_at is null or last_interaction_at<%s)",(date,person,date))
-    if not apply:
-        with db.cursor() as cur:
-            cur.execute("select provider_event_id from mail_event where source='gmail' and type='replied'")
-            observed_replies = {r[0] for r in cur.fetchall()}
-        for incoming in planned.values():
-            if incoming[1] != 'inbound' or str(incoming[6]) != str(owner_id):
-                continue
-            for outgoing in planned.values():
-                if outgoing[1] == 'outbound' and outgoing[2] and outgoing[2] <= incoming[2] and ((incoming[3] and incoming[3] == outgoing[3]) or (outgoing[4] and incoming[5] == outgoing[4])):
-                    stats['replies'] += int('reply:'+outgoing[0]+':'+incoming[0] not in observed_replies)
     if apply:
-        with db.cursor() as cur:
-            # Reconcile all inbound rows, including replies imported before a late outbound receipt.
-            cur.execute('''select o.id,i.id,i.sent_at,o.thread_id,i.thread_id from mail_message i join mail_message o on o.direction='outbound' and o.sent_at<=i.sent_at and ((i.thread_id=o.thread_id and i.thread_id is not null) or (o.rfc_message_id is not null and i.in_reply_to=o.rfc_message_id)) where i.direction='inbound' and i.mailbox_owner_id=%s''',(owner_id,))
-            for outbound_id,inbound_id,at,out_thread,in_thread in cur.fetchall():
-                cur.execute('update mail_message set replied_at=least(replied_at,%s) where id=%s',(at,outbound_id))
-                cur.execute("insert into mail_event(message_id,type,source,provider_event_id,occurred_at,detail) values(%s,'replied','gmail',%s,%s,jsonb_build_object('reply_message_id',%s)) on conflict do nothing",(outbound_id,'reply:'+outbound_id+':'+inbound_id,at,inbound_id))
+        with dict_cursor(db) as cur:
+            cur.execute("select * from mail_message where mailbox_owner_id=%s or (direction='outbound' and mailbox_owner_id is null)",(owner_id,))
+            planned = {r['id']:dict(r) for r in cur.fetchall()}
+    with db.cursor() as cur:
+        cur.execute("select provider_event_id from mail_event where source='gmail' and type='replied'")
+        observed_replies = {r[0] for r in cur.fetchall()}
+        outgoing = [row for row in planned.values() if row['direction']=='outbound']
+        for incoming in planned.values():
+            if incoming['direction'] != 'inbound':
+                continue
+            for original in outgoing:
+                if not reply_matches(incoming,original,owner_id,account):
+                    continue
+                event_id = 'reply:'+original['id']+':'+incoming['id']
+                if not apply:
+                    stats['replies'] += int(event_id not in observed_replies)
+                    continue
+                cur.execute('update mail_message set replied_at=least(replied_at,%s) where id=%s',(incoming['sent_at'],original['id']))
+                cur.execute("insert into mail_event(message_id,type,source,provider_event_id,occurred_at,detail) values(%s,'replied','gmail',%s,%s,jsonb_build_object('reply_message_id',%s)) on conflict do nothing",(original['id'],event_id,incoming['sent_at'],incoming['id']))
                 stats['replies'] += cur.rowcount
-                cur.execute("update mail_followup set state='paused',paused_reason='reply',updated_at=now() where state in ('pending','drafted') and (thread_id=any(%s::text[]) or message_id=%s)",([out_thread,in_thread],outbound_id))
+                cur.execute("update mail_followup set state='paused',paused_reason='reply',updated_at=now() where state in ('pending','drafted') and (thread_id=any(%s::text[]) or message_id=%s)",([original.get('thread_id'),incoming.get('thread_id')],original['id']))
+        if apply:
             cur.execute('''update mail_thread t set message_count=s.n,last_message_at=s.latest,crm_visible=s.visible from (select thread_id,count(*)::integer n,max(sent_at) latest,bool_or(crm_visible) visible from mail_message where mailbox_owner_id=%s group by thread_id) s where t.id=s.thread_id''',(owner_id,))
     return {'account':account,'dry_run':not apply,'counts':stats}

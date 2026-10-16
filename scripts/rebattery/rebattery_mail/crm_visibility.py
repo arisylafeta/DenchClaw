@@ -1,5 +1,6 @@
 """The existing narrow CRM enrolment policy, independent of wide capture."""
 import hashlib
+import re
 from email.utils import getaddresses
 
 COMMON_EMAIL_PROVIDERS = {'gmail','googlemail','yahoo','outlook','hotmail','icloud','proton','protonmail','aol','live','msn','me','gmx','yandex','zoho','mail','btinternet','wp','o2','interia','onet','ukr','i','seznam','web','t-online'}
@@ -66,3 +67,38 @@ def visibility(parties, people, owners, labelled=False, triaged=False):
     if any(normalize_email(email) in people and normalize_email(email) not in owners for _,email in parties):
         return True,'crm-party'
     return False,'no-match'
+
+
+def parse_message_ids(value):
+    """Extract complete RFC Message-ID tokens, including folded References."""
+    return set(re.findall(r'<[^<>\s]+>', value or ''))
+
+
+def reply_matches(incoming, outgoing, owner_id, account):
+    if incoming['direction'] != 'inbound' or outgoing['direction'] != 'outbound':
+        return False
+    if str(incoming.get('mailbox_owner_id')) != str(owner_id):
+        return False
+    if outgoing.get('mailbox_owner_id') and str(outgoing['mailbox_owner_id']) != str(owner_id):
+        return False
+    if not outgoing.get('sent_at') or not incoming.get('sent_at') or outgoing['sent_at'] > incoming['sent_at']:
+        return False
+    counterparties = {normalize_email(email) for field in ('to_emails','cc_emails','bcc_emails') for email in outgoing.get(field,[])}
+    counterparties.add(normalize_email(outgoing.get('recipient_email')))
+    if not incoming.get('from_email') or normalize_email(incoming['from_email']) not in counterparties:
+        return False
+    snapshot = outgoing.get('personalization',{}).get('identity_snapshot',{})
+    reply_addresses = {normalize_email(account),normalize_email(outgoing.get('from_email')),normalize_email(snapshot.get('reply_to'))}
+    incoming_recipients = {normalize_email(email) for field in ('to_emails','cc_emails') for email in incoming.get(field,[])}
+    if not (incoming_recipients - {None}) & (reply_addresses - {None}):
+        return False
+    ancestry = parse_message_ids(incoming.get('in_reply_to')) | parse_message_ids(incoming.get('rfc_references'))
+    if outgoing.get('rfc_message_id') in ancestry:
+        return True
+    provider_headers = incoming.get('personalization',{}).get('provider_headers',{})
+    provider_id = outgoing.get('provider_message_id')
+    if provider_id and any(token[1:-1] == provider_id or token[1:-1].split('@',1)[0] == provider_id for token in ancestry):
+        return True
+    if provider_id and any(str(provider_headers.get(key,'')).strip().strip('<>') == provider_id for key in ('x-pm-message-id','x-postmark-message-id','postmark-message-id')):
+        return True
+    return bool(incoming.get('thread_id') and incoming['thread_id'] == outgoing.get('thread_id'))

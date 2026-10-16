@@ -2,9 +2,24 @@
 from urllib.parse import quote
 from urllib.error import URLError
 from datetime import datetime, timezone
+from email.parser import Parser
 from .core import connection, dict_cursor, Refused, ProviderError
 from .gmail_sync import sync_gmail
 from .ingest import ingest_postmark_event
+from .crm_visibility import parse_message_ids
+
+
+def postmark_rfc_identity(details):
+    headers = details.get('Headers') or details.get('headers') or {}
+    if isinstance(headers,list):
+        headers = {item['Name'].lower():item.get('Value','') for item in headers if item.get('Name')}
+    else:
+        headers = {key.lower():value for key,value in headers.items()}
+    value = headers.get('message-id') or details.get('Message-ID')
+    if not value and details.get('RawMessage'):
+        value = Parser().parsestr(details['RawMessage'],headersonly=True).get('Message-ID')
+    tokens = parse_message_ids(value)
+    return next(iter(tokens)) if len(tokens)==1 else None
 
 
 class PostmarkClient:
@@ -16,7 +31,11 @@ class PostmarkClient:
             raise ProviderError('postmark_read_failed', provider='postmark', cause=type(exc).__name__) from exc
 
     def details(self, message_id):
-        return self.request('/messages/outbound/'+quote(message_id,safe='')+'/details')
+        path = '/messages/outbound/'+quote(message_id,safe='')
+        details = self.request(path+'/details')
+        if not postmark_rfc_identity(details):
+            details['RawMessage'] = self.request(path+'/dump').get('Body','')
+        return details
 
     def suppressions(self, stream):
         from .drivers import stream_suppressions
@@ -61,7 +80,7 @@ def sync_postmark(db, campaign=None, since=None, apply=False, client=None, accou
                     continue
             if event.get('Type') in TYPES:
                 payloads.append({**event,'MessageID':message['provider_message_id']})
-        receipts.append({'message_id':message['id'],'provider_message_id':message['provider_message_id'],'event_count':len(details.get('MessageEvents',[]))})
+        receipts.append({'message_id':message['id'],'provider_message_id':message['provider_message_id'],'rfc_message_id':postmark_rfc_identity(details),'event_count':len(details.get('MessageEvents',[]))})
     dumps = {stream:client.suppressions(stream) for stream in streams}
     for stream,dump in dumps.items():
         suppression_results.extend(sync_suppressions(stream,dump,apply,db=db))
@@ -69,20 +88,22 @@ def sync_postmark(db, campaign=None, since=None, apply=False, client=None, accou
             payloads.append({**item,'RecordType':'Suppressed','MessageStream':stream,'Recipient':email})
             if item.get('SuppressionReason')=='ManualSuppression' and item.get('Origin')=='Recipient':
                 payloads.append({**item,'RecordType':'SubscriptionChange','MessageStream':stream,'Recipient':email})
+    if apply:
+        with db.cursor() as cur:
+            for receipt in receipts:
+                if receipt['rfc_message_id']:
+                    cur.execute('update mail_message set rfc_message_id=coalesce(rfc_message_id,%s),last_synced_at=now() where id=%s',(receipt['rfc_message_id'],receipt['message_id']))
     results = [ingest_postmark_event(db,payload,apply=apply) for payload in payloads]
     inserted_events = len({event_id for result in results for event_id in result.get('event_ids',[])})
     return {'dry_run':not apply,'receipts':receipts,'suppressions':suppression_results,'event_count':len(payloads),'inserted_events':inserted_events}
 
 def recheck_thread(thread_id, account, driver=None):
     with connection() as db:
-        with db.cursor() as cur:
-            cur.execute('select gmail_thread_id from mail_thread where id=%s',(thread_id,))
-            row = cur.fetchone()
-        if not row or not row[0]:
-            # Postmark-origin replies arrive in other Gmail threads: refresh the mailbox.
-            sync_gmail(db,account,apply=True,driver=driver)
-        else:
-            sync_gmail(db,account,apply=True,driver=driver,thread_id=row[0])
+        # References and Postmark-origin replies may cross Gmail threads, and
+        # accepted sends may not have any provider thread linkage yet.
+        result = sync_gmail(db,account,apply=True,driver=driver)
+        if thread_id is None:
+            return bool(result['counts']['replies'])
         with db.cursor() as cur:
             cur.execute("select exists(select 1 from mail_message where thread_id=%s and direction='inbound')",(thread_id,))
             return cur.fetchone()[0]

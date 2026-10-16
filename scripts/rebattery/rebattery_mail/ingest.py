@@ -63,6 +63,8 @@ def ingest_postmark_event(db, payload, apply=True):
             # Soft bounces are evidence, not permanent suppressions.
             suppress = kind in ('suppressed','unsubscribed') or payload.get('Inactive') is True or reason in ('HardBounce','SpamComplaint')
             if suppress:
+                from .suppression import record_suppression
+                record_suppression(db,email,reason,'postmark',payload.get('MessageStream'),canonical_at,payload)
                 how = 'Postmark stream={}; reason={}; origin={}'.format(payload.get('MessageStream',''),reason,payload.get('Origin',''))
                 cur.execute('''insert into crm_subscriptions(person_id,list,status,since,how) select id,'Supply update','Opted out',%s::timestamptz::date,%s from crm_people where lower(trim(email))=%s on conflict(person_id,list) do update set status='Opted out',since=excluded.since,how=excluded.how where (crm_subscriptions.status,crm_subscriptions.since,crm_subscriptions.how) is distinct from (excluded.status,excluded.since,excluded.how)''',(at,how,email))
                 if reason in ('HardBounce','SpamComplaint'):
