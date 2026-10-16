@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { initialsFromName } from "@/lib/avatar-initials";
+import { bundledProfileAvatar } from "@/lib/profile-avatars";
 
 export function ProfileAvatar({ name, className = "h-8 w-8" }: { name: string; className?: string }) {
   const [failedName, setFailedName] = useState<string | null>(null);
@@ -15,7 +16,10 @@ export function ProfileAvatar({ name, className = "h-8 w-8" }: { name: string; c
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={name}
-          src={`/api/workspace/avatar?name=${encodeURIComponent(name)}`}
+          src={bundledProfileAvatar(name) ?? `/api/workspace/avatar?name=${encodeURIComponent(name)}`}
+          width={64}
+          height={64}
+          decoding="async"
           alt=""
           draggable={false}
           className="absolute inset-0 h-full w-full object-cover"
