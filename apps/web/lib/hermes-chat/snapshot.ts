@@ -16,6 +16,8 @@ export interface SnapshotInflight {
 export interface GatewayChatSnapshot {
   gateway?: 'connected' | 'unavailable'
   key: string
+  subscriptionId?: string
+  olderCursor?: string | null
   conversation: { id: string; profile: string; title: string; source?: string; working: boolean }
   messages: SnapshotRow[]; running: boolean; inflight?: SnapshotInflight | null
   queued?: { user: string; count?: number } | null

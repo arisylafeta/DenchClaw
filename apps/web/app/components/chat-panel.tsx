@@ -2944,6 +2944,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					) : nativeGateway ? (
 						<div className={`${compact ? "" : "max-w-2xl mx-auto"} py-3`}>
 							{nativeChat.connection !== "connected" && <p role="status">{nativeChat.connection === "lost" ? "Gateway connection lost" : "Reconnecting to gateway…"}</p>}
+							{nativeChat.olderCursor && <button type="button" disabled={nativeChat.loadingEarlier} onClick={async () => {
+								const container = scrollContainerRef.current;
+								const height = container?.scrollHeight ?? 0;
+								const top = container?.scrollTop ?? 0;
+								wantsToBePinnedRef.current = false;
+								await nativeChat.loadEarlier();
+								requestAnimationFrame(() => {
+									if (container) container.scrollTop = top + container.scrollHeight - height;
+								});
+							}}>{nativeChat.loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}</button>}
 							<NativeTranscript state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} subagentTails={nativeChat.tails} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
 								onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 								onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,

@@ -199,3 +199,21 @@ describe("gateway ChatPanel solo transport", () => {
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/chat")).toBe(false);
   });
 });
+
+it("pages earlier gateway rows through the visible control without replacing recent rows", async () => {
+  fetchMock.mockImplementation(async (url: string) => {
+    if (url.startsWith(`${endpoint}/history?`)) return Response.json({ messages: [{ id: "older", role: "user", text: "Earlier page" }], olderCursor: null });
+    return Response.json(url === "/api/settings/cloud" ? { status: "no_key" } : {});
+  });
+  const { container } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+  openGateway({ olderCursor: "200" });
+  const scroll = container.querySelector(".min-h-0.min-w-0.flex-1.overflow-y-auto") as HTMLElement;
+  Object.defineProperty(scroll, "scrollHeight", { configurable: true, get: () => screen.queryByText("Earlier page") ? 1500 : 1000 });
+  scroll.scrollTop = 125;
+  fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+  await waitFor(() => expect(screen.getByText("Earlier page")).toBeInTheDocument());
+  expect(screen.getByText("saved gateway result")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/history?before=200&limit=200`);
+  expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
+  await waitFor(() => expect(scroll.scrollTop).toBe(625));
+});

@@ -16,7 +16,8 @@ export function initialReconcileState(sessionId: string | null = null, key: stri
 /** Capture the returned token with the fetch. Switching sessions never interrupts work. */
 export function beginHydration(state: ReconcileState, sessionId: string | null = state.sessionId, key: string | null = state.key): ReconcileState {
   const base = key === state.key ? state : initialReconcileState(sessionId, key)
-  return { ...base, loadToken: state.loadToken + 1, hydrating: true, buffered: [], resyncRequired: false }
+  if (base.hydrating && base.loadToken > 0) return base
+  return { ...base, loadToken: state.loadToken + 1, hydrating: true, buffered: base.buffered, resyncRequired: false }
 }
 export function needsResync(state: ChatState, event: ResyncEvent): boolean {
   return event.truncated === true || asRecord(event.payload).truncated === true || event.type === 'resync'
@@ -24,7 +25,17 @@ export function needsResync(state: ChatState, event: ResyncEvent): boolean {
 }
 /** Events are overlay-only. A changed generation must be hydrated, not reduced. */
 export function applyLive(state: ReconcileState, events: readonly GatewayEvent[], ctx: ReducerContext): ReconcileState {
-  if (state.hydrating) return { ...state, buffered: [...state.buffered, ...events] }
+  if (state.hydrating) {
+    let next = { ...state, buffered: [...state.buffered, ...events] }
+    // Control frames establish acceptance even while their content waits for history.
+    // Otherwise a late POST failure can incorrectly settle a newly accepted turn.
+    for (const event of events) {
+      if (event.session_id && next.sessionId && event.session_id !== next.sessionId) continue
+      if (event.type === 'message.start') next = { ...next, busy: true, live: true, awaitingResponse: true, interrupted: false }
+      else if (event.type === 'message.complete') next = { ...next, busy: false, live: false, awaitingResponse: false }
+    }
+    return next
+  }
   let next = state
   const ordered: GatewayEvent[] = []
   let sequenced: GatewayEvent[] = []
@@ -102,23 +113,62 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   const snapshotVersion = JSON.stringify(snapshot)
   if (!state.hydrating && state.snapshotVersion === snapshotVersion) return state
   const base = stateFromSnapshot(snapshot, ctx)
-  // Durable row identity (including the completion receipt) owns event-only detail.
-  base.messages = base.messages.map(message => {
-    const old = state.messages.find(item => item.id === message.id || (item.rowId !== undefined && item.rowId === message.rowId))
-    if (!old) return message
-    const segments = message.segments.map(segment => {
-      const live = old.segments.find(item => item.id === segment.id || (item.type === 'tool' && segment.type === 'tool' && item.toolId === segment.toolId))
-      return live?.type === 'tool' && segment.type === 'tool' ? { ...segment, ...live } : segment
-    })
-    // History may persist only final prose; retain tools/reasoning not stored in the row.
-    const retained = old.segments.filter(segment => segment.type === 'tool' || segment.type === 'reasoning')
-      .filter(segment => !segments.some(item => item.id === segment.id || (item.type === 'tool' && segment.type === 'tool' && item.toolId === segment.toolId)))
-    return { ...old, ...message, segments: [...retained, ...segments], interrupted: old.interrupted, error: message.error ?? old.error,
-      status: old.status === 'interrupted' || old.status === 'error' ? old.status : message.status }
-  })
+  // Resolve ownership across the whole snapshot before retaining event-only detail.
+  // A completion receipt may move a tool from the final live message to an earlier row.
+  const claimed = new Set<object>()
+  const claimedTools = new Set<string>()
+  const sameReasoning = (a: typeof base.messages[number]['segments'][number], b: typeof a) =>
+    a.type === 'reasoning' && b.type === 'reasoning' &&
+    (normalizeMessageText(a.text) === normalizeMessageText(b.text) ||
+      (Boolean(a.text && b.text) && (a.text.startsWith(b.text) || b.text.startsWith(a.text))))
+  for (const old of state.messages) {
+    const identity = base.messages.find(item => item.source === 'durable' &&
+      (item.id === old.id || (old.rowId !== undefined && item.rowId === old.rowId)))
+    const oldUser = state.messages.findLast(item => item.role === 'user' && item.source !== 'queued')
+    const newUser = base.messages.findLast(item => item.role === 'user' && item.source !== 'queued')
+    const sameTurn = !oldUser || !newUser || normalizeMessageText(messageText(oldUser)) === normalizeMessageText(messageText(newUser))
+    const active = !state.interrupted && sameTurn && snapshot.generation === state.generation && snapshot.running && old.id === state.streamId
+      ? base.messages.find(item => item.id === base.streamId) : undefined
+    const target = identity ?? active
+    const targetIndex = target ? base.messages.indexOf(target) : -1
+    const turnStart = base.messages.findLastIndex((item, index) => index < targetIndex && item.role === 'user')
+    for (const detail of old.segments.filter(segment => segment.type === 'tool' || segment.type === 'reasoning')) {
+      if (detail.type === 'tool') {
+        if (claimedTools.has(detail.toolId)) continue
+        claimedTools.add(detail.toolId)
+      }
+      let owner: typeof base.messages[number] | undefined
+      let index = -1
+      for (const row of base.messages) {
+        index = row.segments.findIndex(segment => !claimed.has(segment) &&
+          (segment.id === detail.id || (segment.type === 'tool' && detail.type === 'tool' && segment.toolId === detail.toolId) ||
+            (base.messages.indexOf(row) > turnStart && base.messages.indexOf(row) <= targetIndex && sameReasoning(segment, detail))))
+        if (index >= 0) { owner = row; break }
+      }
+      if (owner) {
+        const durable = owner.segments[index]
+        const merged = durable.type === 'tool' && detail.type === 'tool'
+          ? { ...durable, ...detail, id: durable.id, ...(durable.status !== 'running'
+            ? { status: durable.status, result: durable.result, error: durable.error, completedAt: durable.completedAt } : {}) }
+          : durable.type === 'reasoning' && detail.type === 'reasoning'
+            ? { ...detail, ...durable, text: durable.text.length >= detail.text.length ? durable.text : detail.text } : durable
+        owner.segments[index] = merged
+        claimed.add(merged)
+      } else if (target) {
+        const textIndex = target.segments.findIndex(segment => segment.type === 'text')
+        target.segments.splice(textIndex < 0 ? target.segments.length : textIndex, 0, detail)
+        claimed.add(detail)
+      }
+    }
+    if (identity) {
+      identity.interrupted = old.interrupted
+      identity.error ??= old.error
+      if (old.status === 'interrupted' || old.status === 'error') identity.status = old.status
+    }
+  }
   base.usage = state.usage
   base.subagents = state.subagents
-  base.interrupted = state.interrupted
+  base.interrupted = !snapshot.running && state.interrupted
   if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
     hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion }
@@ -128,7 +178,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
       ? { ...item, resolvedMessageId: id } : item
   })
   return applyLive(merged, [
-    ...state.overlay.filter(event => event.seq !== undefined && (event.generation === undefined || event.generation === snapshot.generation)),
-    ...state.buffered.map(event => event.type === 'request.cancel' ? { ...event, seq: undefined } : event),
+    ...state.overlay.filter(event => event.seq !== undefined && event.seq > base.watermark && (event.generation === undefined || event.generation === snapshot.generation)),
+    ...state.buffered.map(event => event.type === 'request.cancel' || event.type === 'approval.request' || event.type === 'clarify.request' ? { ...event, seq: undefined } : event),
   ], ctx)
 }

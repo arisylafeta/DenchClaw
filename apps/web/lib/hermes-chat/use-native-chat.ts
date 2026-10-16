@@ -6,6 +6,7 @@ import { getHermesEventsClient, type ConnectionState } from './events-client'
 import { applyLive, applySnapshot, beginHydration, initialReconcileState, submitOptimistic, type ReconcileState } from './reconcile'
 import { messageText, reduce, type PendingRequest } from './reducer'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
+import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 
 export interface NativePrompt { text: string; images?: { content: string; mimeType: string; fileName?: string }[]; context?: WorkspaceContext; html?: string }
 export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
@@ -19,6 +20,9 @@ export interface NativeHermesChat {
   readOnly: { source: string } | null
   html: Map<string, string>
   queuedMessageIds: string[]
+  olderCursor: string | null
+  loadingEarlier: boolean
+  loadEarlier(): Promise<void>
   send(prompt: NativePrompt): Promise<void>
   interrupt(): Promise<void>
   steer(text: string): Promise<void>
@@ -40,6 +44,12 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   const optimisticHtml = useRef(new Map<string, string>())
   const queued = useRef(new Set<string>())
   const activeKey = useRef(conversationKey)
+  const hydrationToken = useRef(0)
+  const [olderCursor, setOlderCursor] = useState<string | null>(null)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
+  const historyLoading = useRef(false)
+  const earlierRows = useRef<GatewayChatSnapshot['messages']>([])
+  const lastSnapshot = useRef<GatewayChatSnapshot | null>(null)
   activeKey.current = conversationKey
   const update = useCallback((fn: (previous: ReconcileState) => ReconcileState) => {
     current.current = fn(current.current)
@@ -48,20 +58,28 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   const surface = useCallback((message: string) => update(previous => ({ ...previous, ...reduce(previous, { type: 'client.error', payload: { message } }, context) })), [update])
   const resync = useCallback(() => {
     if (!conversationKey || !enabled) return
-    update(previous => beginHydration(previous))
     getHermesEventsClient().resubscribe(conversationKey)
   }, [conversationKey, enabled, update])
   useEffect(() => {
     if (current.current.key !== (conversationKey ?? null)) {
       setReadOnly(null); setTails({}); setHtmlRows([]); optimisticHtml.current.clear(); queued.current.clear()
+      setOlderCursor(null); earlierRows.current = []; lastSnapshot.current = null
       update(previous => beginHydration(previous, conversationKey ?? null, conversationKey ?? null))
     }
     if (!enabled || !conversationKey) return
     update(previous => beginHydration(previous))
+    hydrationToken.current = current.current.loadToken
     return getHermesEventsClient().subscribe(conversationKey, {
       snapshot(snapshot) {
         if (activeKey.current !== conversationKey) return
-        update(previous => applySnapshot(previous, snapshot, previous.loadToken, context))
+        update(previous => applySnapshot(previous, snapshot, hydrationToken.current, context))
+        lastSnapshot.current = snapshot
+        if (!earlierRows.current.length) setOlderCursor(snapshot.olderCursor ?? null)
+        if (earlierRows.current.length) {
+          const ids = new Set(current.current.messages.map(message => message.id))
+          const earlier = stateFromSnapshot({ ...snapshot, messages: earlierRows.current, running: false, inflight: null, queued: null }, context).messages
+          update(previous => ({ ...previous, messages: [...earlier.filter(message => !ids.has(message.id)), ...previous.messages] }))
+        }
         if (snapshot.gateway) setConnection(snapshot.gateway === 'connected' ? 'connected' : 'lost')
         setHtmlRows(snapshot.html ?? [])
         const source = snapshot.conversation.source
@@ -73,13 +91,19 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
         update(previous => applyLive(previous, [event], context))
         if (current.current.resyncRequired) resync()
         if (!current.current.busy) queued.current.clear()
+        // A completed turn becomes durable; refresh its watermark rather than
+        // retaining every delta forever (including while the panel is hidden).
+        if (event.type === 'message.complete' || (event.type === 'error' && !current.current.busy)) resync()
       },
       request(request) {
         if (activeKey.current !== conversationKey) return
         update(previous => applyLive(previous, [{ type: request.method === 'approval' ? 'approval.request' : 'clarify.request', requestId: request.id, payload: request.params }], context))
       },
       error: surface,
-      resync() { update(previous => beginHydration(previous)) },
+      resync() {
+        update(previous => beginHydration(previous))
+        hydrationToken.current = current.current.loadToken
+      },
       connection(state) {
         setConnection(previous => {
           if (state === 'connected' && previous !== 'connected' && !current.current.hydrating) resync()
@@ -144,8 +168,32 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     const ids = message.clientIds ?? (message.source === 'optimistic' ? [message.id] : [])
     if (ids.length === 1 && optimisticHtml.current.has(ids[0])) html.set(message.id, optimisticHtml.current.get(ids[0])!)
   }
+  const loadEarlier = async () => {
+    const key = conversationKey
+    const snapshot = lastSnapshot.current
+    if (!key || !olderCursor || !snapshot || historyLoading.current) return
+    historyLoading.current = true; setLoadingEarlier(true)
+    try {
+      const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}/history?before=${encodeURIComponent(olderCursor)}&limit=200`)
+      if (activeKey.current !== key) return
+      if (response.status === 404) return
+      if (!response.ok) throw new Error(`History failed (${response.status})`)
+      const page = await response.json() as { messages: GatewayChatSnapshot['messages']; olderCursor?: string | null }
+      if (activeKey.current !== key) return
+      const known = new Set(earlierRows.current.map(row => row.id))
+      earlierRows.current = [...page.messages.filter(row => !known.has(row.id)), ...earlierRows.current]
+      const messages = stateFromSnapshot({ ...snapshot, messages: page.messages, running: false, inflight: null, queued: null }, context).messages
+      update(previous => {
+        const ids = new Set(previous.messages.map(message => message.id))
+        return { ...previous, messages: [...messages.filter(message => !ids.has(message.id)), ...previous.messages] }
+      })
+      setOlderCursor(page.olderCursor ?? null)
+    } catch (error) {
+      if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
+    } finally { historyLoading.current = false; setLoadingEarlier(false) }
+  }
   return {
-    state, subagents: state.subagents, todos: state.todos, tails, connection, send, readOnly, html,
+    state, subagents: state.subagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
     retry: async () => {
       const lastUser = current.current.messages.findLast(message => message.role === 'user')
       if (lastUser) await send({ text: messageText(lastUser), html: html.get(lastUser.id) })

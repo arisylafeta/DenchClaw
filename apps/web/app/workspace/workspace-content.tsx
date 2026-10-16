@@ -97,7 +97,7 @@ import {
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
-import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog } from "../components/workspace/hermes-conversations";
+import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
 import { GroupBadge } from "../components/workspace/group-chat";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
@@ -143,6 +143,18 @@ const TerminalDrawer = dynamic(
   () => import("../components/terminal/terminal-drawer"),
   { ssr: false },
 );
+
+/** Only the visible panel has a current subscription; hidden panels use the server listing. */
+export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId }: {
+  chats: HermesChatsController;
+  snapshots: Record<string, ChatTabRuntimeSnapshot>;
+  visibleTabId: string | null;
+}) {
+  const visible = Object.values(snapshots).filter(snapshot => snapshot.tabId === visibleTabId && snapshot.sessionId);
+  return <HermesConversationList chats={chats}
+    workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming).map(snapshot => snapshot.sessionId!))}
+    awaitingKeys={new Set(visible.filter(snapshot => snapshot.awaiting).map(snapshot => snapshot.sessionId!))} />;
+}
 
 // --- Types ---
 
@@ -2417,7 +2429,7 @@ function WorkspacePageInner() {
       { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
     ] : undefined,
     chatsPanel: (
-      hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.tabId === visibleMainChatTabId && snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} awaitingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.tabId === visibleMainChatTabId && snapshot.awaiting && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
+      hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
