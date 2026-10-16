@@ -218,7 +218,6 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       const spec = cleanSpec(proposed.spec);
       if (Object.keys(spec).length) structured.spec = spec;
       const family = text(proposed.product_family);
-      if (!family) throw new Error("Confirm the product family before accepting this demand.");
       const email = text(proposed.email);
       const ids = { ...(await crmIdsForEmail(email)),
         ...(text(proposed.company_id) ? { company_id: text(proposed.company_id) } : {}),
@@ -235,9 +234,11 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
         const existing = await getDemand(demandId);
         if (!existing) throw new Error("That demand row no longer exists.");
         if (existing.status === "closed") throw new Error("That demand is closed; review a fresh request instead.");
-        details.status = (details.quantity || existing.quantity || structured.volume || existing.volume)
+        details.status = (family || existing.product_family)
+          && (details.quantity || existing.quantity || structured.volume || existing.volume)
           && (structured.max_price || existing.max_price) ? "open" : "qualifying";
-        details.qualify_question = details.status === "qualifying" ? "What quantity and unit price?" : null;
+        details.qualify_question = details.status === "qualifying"
+          ? (!(family || existing.product_family) ? "What product family, quantity and unit price?" : "What quantity and unit price?") : null;
         // An email never changes what kind of row this is; a standing buy-box has no needed-by date.
         delete structured.kind;
         if (existing.kind === "standing") delete structured.needed_by;
@@ -249,9 +250,10 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       }
       const buyer = text(proposed.buyer);
       if (!buyer || !wants) throw new Error("The demand has no buyer or no want.");
-      const status = (details.quantity || structured.volume) && structured.max_price ? "open" : "qualifying";
+      const status = family && (details.quantity || structured.volume) && structured.max_price ? "open" : "qualifying";
       const base = { ...details, wants, buyer, contact: text(proposed.contact), email, ...ids,
-        status, qualify_question: status === "qualifying" ? "What quantity and unit price?" : null };
+        status, qualify_question: status === "qualifying"
+          ? (!family ? "What product family, quantity and unit price?" : "What quantity and unit price?") : null };
       const parsed = parseDemandInput({ ...base, ...structured }, true);
       if ("error" in parsed) throw new Error(parsed.error);
       await addDemand(parsed.value as DemandInput & { buyer: string; wants: string }, user.id, source);

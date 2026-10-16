@@ -79,12 +79,12 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     const first = await insert({ buyer: "Revoxa buyer", email: "dawid@revoxa.example", wants: "LFP packs, no pouch", quantity: "Large", location: "Romania" });
     expect(await proposals.decideProposal(first, "accept", user)).toEqual({ ok: true, lot_id: null });
     const [row] = (await demand.listDemand()).filter((d) => d.buyer === "Revoxa buyer");
-    expect(row).toMatchObject({ wants: "LFP packs, no pouch", location: "Romania", confirmed_on: "2026-08-17",
+    expect(row).toMatchObject({ status: "qualifying", product_family: null, wants: "LFP packs, no pouch", location: "Romania", confirmed_on: "2026-08-17",
       source_label: "Gmail · dawid@revoxa.example", source_quote: "We are looking for LFP packs" });
 
     const update = await insert({ buyer: "Revoxa buyer", wants: "LFP packs and blade cells", demand_id: row.id }, row.id);
     await proposals.decideProposal(update, "accept", user);
-    expect(await demand.getDemand(row.id)).toMatchObject({ wants: "LFP packs and blade cells", location: "Romania" });
+    expect(await demand.getDemand(row.id)).toMatchObject({ status: "qualifying", wants: "LFP packs and blade cells", location: "Romania" });
     expect((await demand.possibleDemand()).map((p) => p.id)).not.toContain(update);
   });
   it("keeps requests and standing buy-boxes apart, moves a buy-box through its bases, and makes a request standing", async () => {
@@ -198,9 +198,9 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
       [JSON.stringify({ buyer: "Rahul's buyer", wants: "1,000 LFP cells in three weeks", kind: "request", needed_by: "2026-10-20",
         volume: 1000, volume_unit: "cells", spec: { chemistries: ["LFP", "Unobtainium"], formats: ["Cells"] } })],
     );
-    await proposals.decideProposal(card.id, "accept", user);
+    expect(await proposals.decideProposal(card.id, "accept", user)).toMatchObject({ ok: true });
     const [row] = (await demand.listDemand()).filter((d) => d.buyer === "Rahul's buyer");
-    expect(row).toMatchObject({ kind: "request", basis: null, needed_by: "2026-10-20", volume: 1000, volume_unit: "cells",
+    expect(row).toMatchObject({ status: "qualifying", product_family: null, kind: "request", basis: null, needed_by: "2026-10-20", volume: 1000, volume_unit: "cells",
       spec: { chemistries: ["LFP"], formats: ["Cells"] }, source_kind: "call", observed_on: "2026-09-29" });
   });
   it("marks a buyer waiting on our reply until either founder writes back", async () => {
