@@ -124,7 +124,7 @@ describe("native Hermes conversations", () => {
     expect(calls[0]).toMatchObject({ method: "groups.create", params: { members: [{ profile: "default", member_id: "bot-1", handle: "bot1", target: { kind: "local", profile: "default" } }, { profile: "alpha", member_id: "bot-2", handle: "bot2", target: { kind: "local", profile: "alpha" } }] } });
     expect(calls[1].method).toBe("groups.state");
     const detail = await readConversation(conversationKey("group", room.room_id));
-    expect(detail.messages).toEqual([{ id: "user:1", role: "user", text: "hello", profile: undefined, name: undefined }, { id: "answer:1", role: "assistant", text: "Alpha reply", profile: "alpha", name: "Alpha" }]);
+    expect(detail.messages).toEqual([{ id: "user:1", role: "user", text: "hello", content: "hello", profile: undefined, name: undefined }, { id: "answer:1", role: "assistant", text: "Alpha reply", content: "Alpha reply", profile: "alpha", name: "Alpha" }]);
     expect(detail.conversation.working).toBe(true);
   });
   it("reads all pages of native solo history without copying or rewriting it", async () => {

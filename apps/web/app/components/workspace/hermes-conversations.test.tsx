@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { conversationKey, type HermesConversation } from "@/lib/hermes-conversations";
-import { chatStatus, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, useHermesConversations } from "./hermes-conversations";
+import { chatStatus, HermesConversationList, HermesNewChatDialog, useHermesConversations } from "./hermes-conversations";
 import { ProfileSwitcher } from "./profile-switcher";
 vi.mock("./profile-avatar", () => ({ ProfileAvatar: ({ name }: { name: string }) => <span data-testid={`avatar-${name}`} /> }));
 const solo: HermesConversation = { key: conversationKey("solo", "same-id", "alpha"), id: "same-id", kind: "solo", profile: "alpha", title: "Alpha solo", participants: [{ profile: "alpha", name: "Alpha" }], updatedAt: 100, working: null };
 const group: HermesConversation = { key: conversationKey("group", "native-room"), id: "native-room", kind: "group", title: "Shared room", participants: [{ profile: "alpha", name: "Alpha", memberId: "a" }, { profile: "default", name: "Sol", memberId: "b" }], updatedAt: 200, working: false };
 function Harness() {
   const chats = useHermesConversations();
-  return <><ProfileSwitcher conversationFilter={{ value: chats.filter, profiles: chats.listing?.profiles ?? [], onChange: chats.setFilter }} /><button type="button" onClick={() => chats.newChat("solo")}>new solo</button><button type="button" onClick={() => chats.newChat("group")}>new group</button><HermesConversationList chats={chats} /><HermesConversationPanel chats={chats} /><HermesNewChatDialog chats={chats} /></>;
+  return <><ProfileSwitcher conversationFilter={{ value: chats.filter, profiles: chats.listing?.profiles ?? [], onChange: chats.setFilter }} /><button type="button" onClick={() => chats.newChat("solo")}>new solo</button><button type="button" onClick={() => chats.newChat("group")}>new group</button><HermesConversationList chats={chats} /><HermesNewChatDialog chats={chats} /></>;
 }
 let messages: { id: string; role: string; text: string }[];
 let created: HermesConversation;
@@ -47,17 +47,11 @@ describe("Hermes unified chat UI", () => {
     expect(within(list).queryByRole("img", { name: /Running|attention|activity/ })).not.toBeInTheDocument();
     expect(within(list).getByLabelText("Participants: Alpha, Sol").children).toHaveLength(2);
     await user.click(within(list).getByRole("button", { name: /^(?!Rename).*Shared room/ }));
-    await screen.findByText("Existing room history");
+    await waitFor(() => expect(within(list).getByRole("button", { name: /^(?!Rename).*Shared room/ })).toHaveAttribute("aria-current", "true"));
     await user.click(screen.getByTitle("Switch workspace"));
     await user.click(screen.getByText("other"));
     await waitFor(() => expect(within(list).queryByText("Shared room")).not.toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "Shared room" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Message"), "Continue existing group");
-    await user.click(screen.getByRole("button", { name: "Send" }));
-    await screen.findByText("Continue existing group");
-    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
-    expect(posts).toHaveLength(1);
-    expect(posts[0][0]).toBe(`/api/hermes/conversations/${encodeURIComponent(group.key)}`);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/workspace/switch")).toBe(false);
     await user.click(screen.getByTitle("Switch workspace"));
     await user.click(screen.getByRole("button", { name: "All chats" }));
@@ -72,7 +66,7 @@ describe("Hermes unified chat UI", () => {
     const dialog = await screen.findByRole("dialog", { name: "New chat" });
     for (const profile of profiles) await user.click(within(dialog).getByRole(mode === "solo" ? "radio" : "checkbox", { name: profile }));
     await user.click(within(dialog).getByRole("button", { name: "Start chat" }));
-    if (created.kind === "group") await screen.findByRole("heading", { name: created.title });
+    if (created.kind === "group") await waitFor(() => expect(screen.getByRole("button", { name: /^(?!Rename).*Shared room/ })).toHaveAttribute("aria-current", "true"));
     else await waitFor(() => expect(screen.getByRole("button", { name: /^(?!Rename).*Alpha solo/ })).toHaveAttribute("aria-current", "true"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     const request = fetchMock.mock.calls.find(([url, init]) => url === "/api/hermes/conversations" && init?.method === "POST");
@@ -89,7 +83,7 @@ describe("Hermes unified chat UI", () => {
     expect(JSON.parse(request[1].body)).toEqual({ title: "Renamed chat" });
   });
   it("shows a dot only for running, awaiting and unread chats, never status text", async () => {
-    const base = { busy: new Set<string>(), selected: null };
+    const base = { selected: null };
     expect(chatStatus({ ...solo, working: true }, { ...base, seen: {} })).toBe("running");
     expect(chatStatus({ ...group, blocked: true }, { ...base, seen: {} })).toBe("awaiting");
     expect(chatStatus({ ...solo, updatedAt: 500 }, { ...base, seen: { [solo.key]: 100 } })).toBe("done");
@@ -102,12 +96,5 @@ describe("Hermes unified chat UI", () => {
     expect(list.textContent).not.toMatch(/Idle|unavailable|Working/);
     await user.click(screen.getByRole("button", { name: "new group" })); // dialog opens without hiding the list
     expect(within(list).getByText("Alpha solo")).toBeInTheDocument();
-  });
-  it("delegates selected solo chats instead of rendering a second solo client", async () => {
-    const user = userEvent.setup(); render(<Harness />);
-    await user.click(await screen.findByRole("button", { name: /^(?!Rename).*Alpha solo/ }));
-    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Hermes chat")).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([url]) => url.includes(encodeURIComponent(solo.key)))).toBe(false);
   });
 });
