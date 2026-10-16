@@ -168,7 +168,7 @@ describe("Demand visualization", () => {
         ],
       }),
     ]);
-    expect(await screen.findByText("1 supply matches")).toBeInTheDocument();
+    expect(await screen.findByText("1 supply match")).toBeInTheDocument();
     expect(screen.queryByText("No price")).not.toBeInTheDocument();
     await userEvent.click(
       await screen.findByRole("button", { name: /Green Voltage/ }),

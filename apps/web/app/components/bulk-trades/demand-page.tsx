@@ -29,7 +29,7 @@ function NextChip({ demand }: { demand: Demand }) {
       style={{ color: count ? "var(--bt-green)" : "var(--color-warning)" }}
     >
       {count
-        ? `${count} supply matches`
+        ? `${count} supply ${count === 1 ? "match" : "matches"}`
         : missing![0].toUpperCase() + missing!.slice(1)}
     </span>
   );

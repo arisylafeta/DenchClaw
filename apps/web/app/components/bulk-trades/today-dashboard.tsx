@@ -137,11 +137,11 @@ export function TodayDashboard({
                 style={{ borderColor: "var(--bt-divider)" }}
               >
                 <p className="flex-1 text-[14px] font-semibold">
-                  {proposalCount} proposals to review
+                  {proposalCount} {proposalCount === 1 ? "proposal" : "proposals"} to review
                 </p>
                 <button
                   type="button"
-                  aria-label={`${proposalCount} proposals to review`}
+                  aria-label={`${proposalCount} ${proposalCount === 1 ? "proposal" : "proposals"} to review`}
                   className={`${buttonClass} ${rowFocus}`}
                   style={buttonStyle}
                   onClick={onOpenInbox}

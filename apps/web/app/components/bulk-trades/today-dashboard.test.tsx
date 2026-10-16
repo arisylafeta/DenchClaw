@@ -167,7 +167,7 @@ it("caps work sections at five and expands the remaining items", async () => {
         }),
       )}
       today={today}
-      proposalCount={0}
+      proposalCount={1}
       onOpenTrade={() => {}}
       onOpenDemand={() => {}}
       onOpenInbox={() => {}}
@@ -176,6 +176,7 @@ it("caps work sections at five and expands the remaining items", async () => {
   const section = await screen.findByRole("region", {
     name: "Overdue next steps",
   });
+  expect(screen.getByRole("button", { name: "1 proposal to review" })).toBeInTheDocument();
   expect(
     within(section).queryByRole("button", { name: /Trade 5/ }),
   ).not.toBeInTheDocument();
