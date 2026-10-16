@@ -240,6 +240,13 @@ The timer invokes `--apply`; its journal contains aggregate counts only.
 
 ## Bulk-trade demand shortlist (16 October 2026)
 
+The Bulk Trades workspace has three tabs: **Trades | Demand | Supply**.
+Trades is the operational trade board; Demand is the buyer-ask shortlist and
+activity workspace; Supply holds seller offers. The **Inbox** button opens a
+right-hand review drawer rather than a fourth tab. Review proposals there:
+accept or reject new demand, supply and trade candidates, or apply proposed
+updates to existing trades. Accepted demand refreshes the Demand workspace.
+
 Migration `044` separates current sourcing work from buyer discovery. **Demand**
 is a buyer's own dated, actionable request or standing ask with an identified
 buyer, product family and quantity. **Qualifying** holds a specific need that
@@ -281,15 +288,27 @@ Only 21 days after sending, without reconfirmation, does a qualifying standing
 ask move to the company profile or a qualifying request expire. Reconfirmation
 must be dated strictly after the question was sent; same-day creation or
 acceptance is not a response. Old buyer observations never age a qualifying row.
+In the Demand detail panel, **Qualify** saves the next question without starting
+the response clock. Use **Question sent today** only after actually sending it;
+this sets `qualify_asked_on`. **Send again** resets that date and the 21-day
+response window. **Still wanted** records a new confirmation; it only counts
+as a response when dated after `qualify_asked_on`.
+
 Open requests still expire after
 `needed_by`, or after 90 days without a deadline, using their latest observation
 or confirmation. Closure is an explicit lifecycle transition, not score-based.
 
-Demand activity (`045_demand_activity.sql`) records notes, research, outreach,
-calls, quotes, supply candidates and status changes. Status transitions are
-logged atomically by a database trigger, including script-originated changes.
-The activity API is `/api/bulk-trades/demand/[demandId]/activity`; deletion is
-scoped to the demand and activity IDs.
+The Demand list shows activity counts and opens a detail panel for the selected
+ask. Its activity workspace (`045_demand_activity.sql`) supports `note`,
+`research`, `outreach`, `call`, `quote`, `supply` and `status` entries, with a
+required title, optional body and timestamped history. Under **Details / link**,
+link a URL, lot, supply record or stock-item URL. Lot and supply links navigate
+to their existing CRM views; web links open in a separate tab. Suggested supply
+can be pinned as a linked `supply` activity without creating a trade.
+Status transitions are logged atomically by a database trigger, including
+script-originated changes. **Still wanted** also appears in activity. The API
+is `/api/bulk-trades/demand/[demandId]/activity`; deleting an entry is scoped to
+both its demand and activity IDs.
 
 Saved searches feed company profiles, never open demand. Sourcing requests
 enter as qualifying demand. Surveys are profile evidence unless they state
