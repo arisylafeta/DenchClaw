@@ -125,7 +125,8 @@ def lot_interest(conn, row, item):
     status = 'Bid in' if row['max_price'] is not None else 'To contact'
     if existing:
         conn.execute('update crm_bulk_trade_buyers set demand_id=%s, wants=%s, '
-                     'person_id=coalesce(person_id,%s), status=case when %s then %s else status end where id=%s',
+                     'person_id=coalesce(person_id,%s), status=case when %s and status in '
+                     '(\'To contact\',\'Teaser sent\',\'No reply\',\'NDA, specs sent\') then %s else status end where id=%s',
                      [row['id'], row['wants'], row['person_id'], row['max_price'] is not None, status, buyer_id])
     else:
         conn.execute('insert into crm_bulk_trade_buyers (id,lot_id,name,person_id,contact,wants,demand_id,status) '
