@@ -155,7 +155,7 @@ the marketplace provider. Technical fields and notes are shown only under
 Details. This page adds no schema, sending, tracking capture or scoring changes.
 
 Lot-buyer email tracking and auction synchronization attribute clicks only through
-`crm_campaign_send_links.first_clicked_at` for the matching listing. The provider's
+`mail_message_link.first_clicked_at` for the matching listing. The provider's
 message-wide click timestamp must never stand in for a listing click. A multi-lot
 send supplies invitation evidence for its primary listing and every listing CTA;
 general links supply neither listing clicks nor extra listing invitations. The

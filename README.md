@@ -140,7 +140,7 @@ snapshots are not a conversion rate or a human/bot classification.
 In PostgreSQL-backed workspaces, a person's **Campaigns** tab shows lifetime
 accepted-send, delivery, tracked-open and tracked-click totals, listing clicks
 across updates, and each update's CTA activity. Counts use existing
-`crm_campaign_sends` and `crm_campaign_send_links` records; multiple links in one
+`mail_message` campaign deliveries and `mail_message_link` records; multiple links in one
 email do not multiply the send count, and multiple CTAs for one listing count
 once per update. General CTAs are not listing engagement.
 

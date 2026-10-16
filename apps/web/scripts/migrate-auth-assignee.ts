@@ -11,10 +11,10 @@ async function main() {
     "005_stock_enrichment_state.sql",
   ]) {
     if (migration === "002_user_data_isolation.sql") {
-      const [state] = await queryPg<{ legacy: string | null }>(
-        "select to_regclass('public.crm_email_messages')::text as legacy",
+      const [state] = await queryPg<{ mail: string | null }>(
+        "select to_regclass('public.mail_message')::text as mail",
       );
-      if (!state?.legacy) continue; // Mail cutover already replaced the mailbox tables.
+      if (state?.mail) continue; // Mail cutover already replaced the mailbox tables.
     }
     const sql = readFileSync(
       join(import.meta.dirname, "../lib/crm-postgres/migrations", migration),

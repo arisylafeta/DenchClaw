@@ -41,7 +41,7 @@ select kind, changes, buyer_id, occurred_at from crm_bulk_trade_events where lot
 The trade page's API returns the same in one call: `GET /api/bulk-trades/<id>` (signed-in session).
 Missing data per step comes from `missingItems()`; do not recompute it differently in reports.
 
-Email tracking on a buyer comes from two places. Campaign sends (`crm_campaign_sends`) to the
+Email tracking on a buyer comes from two places. Campaign sends (`mail_message where campaign_id is not null`) to the
 buyer's CRM person for the trade's `listing_id` give sent, delivered, opened, clicked, bounced.
 Tracked links in Gmail drafts give clicks (`crm_bulk_trade_links`, `link_clicked` events). Report
 clicks and replies as the real signal; opens are noisy (Apple Mail and Gmail image proxies).
@@ -49,7 +49,8 @@ clicks and replies as the real signal; opens are noisy (Apple Mail and Gmail ima
 ## Inbox check (Phase 2)
 
 `scripts/rebattery/bulk_trade_inbox_check.py` runs from Hermes cron ("Bulk Trades inbox check") at
-08:00, 10:30, 13:00, 15:30 and 18:30 UK. It reads Alex's synced Gmail (`crm_email_messages`) and
+08:00, 10:30, 13:00, 15:30 and 18:30 UK. It reads Alex's Gmail synced by `rebattery-mail sync gmail` into
+`mail_message` and `mail_thread`, filtered by `crm_visible`, and
 Granola notes, matches them to trades by contacts, linked buyers and known threads, and stores
 proposals in `crm_bulk_trade_proposals` (kinds: field, buyer_update, next_step, new_buyer, file,
 link_contact, needs_triage, possible_trade). Each has a verbatim quote and its source. Runs are in

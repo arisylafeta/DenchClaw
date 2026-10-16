@@ -150,8 +150,8 @@ export async function getReverseRelationsForEntry(
            o.id as source_object_id,
            l.source_entry_id,
            case
-             when coalesce(o.entity_table,'') in ('mail_message','crm_email_messages') then 'Subject'
-             when coalesce(o.entity_table,'') in ('mail_thread','crm_email_threads') then 'Subject'
+             when coalesce(o.entity_table,'') = 'mail_message' then 'Subject'
+             when coalesce(o.entity_table,'') = 'mail_thread' then 'Subject'
              when o.name = 'calendar_event' then 'Title'
              when o.name = 'interaction' then 'Type'
              when o.name = 'people' then 'Full Name'
@@ -180,16 +180,16 @@ export async function getReverseRelationsForEntry(
         on display_field.object_id = o.id
        and display_field.name = coalesce(o.display_field,
          case
-           when coalesce(o.entity_table,'') in ('mail_message','crm_email_messages') then 'Subject'
-           when coalesce(o.entity_table,'') in ('mail_thread','crm_email_threads') then 'Subject'
+           when coalesce(o.entity_table,'') = 'mail_message' then 'Subject'
+           when coalesce(o.entity_table,'') = 'mail_thread' then 'Subject'
            when o.name = 'calendar_event' then 'Title'
            when o.name = 'interaction' then 'Type'
            when o.name = 'people' then 'Full Name'
            when o.name in ('company', 'companies') then 'Company Name'
            else null
          end)
-      left join mail_message email_messages on coalesce(o.entity_table,'') in ('mail_message','crm_email_messages') and email_messages.id = l.source_entry_id
-      left join mail_thread email_threads on coalesce(o.entity_table,'') in ('mail_thread','crm_email_threads') and email_threads.id = l.source_entry_id
+      left join mail_message email_messages on coalesce(o.entity_table,'') = 'mail_message' and email_messages.id = l.source_entry_id
+      left join mail_thread email_threads on coalesce(o.entity_table,'') = 'mail_thread' and email_threads.id = l.source_entry_id
       left join crm_calendar_events calendar_events on o.name = 'calendar_event' and calendar_events.id = l.source_entry_id
       left join crm_interactions interactions on o.name = 'interaction' and interactions.id = l.source_entry_id
       left join crm_people people on o.name = 'people' and people.id = l.source_entry_id
@@ -199,8 +199,8 @@ export async function getReverseRelationsForEntry(
       left join automation_loop_runs on o.name = 'automation_loop_run' and automation_loop_runs.id = l.source_entry_id
      where l.target_entry_id = $1
        and (o.name <> 'work_task' or ${buildWorkTaskReadScope("work_tasks.assignee_id", "$2")})
-       and (coalesce(o.entity_table,'') not in ('mail_message','crm_email_messages') or (email_messages.crm_visible and email_messages.mailbox_owner_id = $2::uuid))
-       and (coalesce(o.entity_table,'') not in ('mail_thread','crm_email_threads') or (email_threads.crm_visible and email_threads.mailbox_owner_id = $2::uuid))
+       and (coalesce(o.entity_table,'') <> 'mail_message' or (email_messages.crm_visible and email_messages.mailbox_owner_id = $2::uuid))
+       and (coalesce(o.entity_table,'') <> 'mail_thread' or (email_threads.crm_visible and email_threads.mailbox_owner_id = $2::uuid))
        and (o.name <> 'interaction' or interactions.email_message_id is null or exists (
          select 1 from mail_message scoped_message
           where scoped_message.id = interactions.email_message_id
@@ -354,11 +354,11 @@ export async function getPostgresEntryData(
           `select ${buildEntrySelect(fields, existingColumns)} from ${tableName}
             where id = $1
               ${object.name === "work_task" ? `and ${buildWorkTaskReadScope("assignee_id", "$2")}` : ""}
-              ${["mail_thread", "mail_message", "crm_email_threads", "crm_email_messages"].includes(tableName ?? "") ? "and crm_visible = true and mailbox_owner_id = $2::uuid" : ""}
+              ${["mail_thread", "mail_message"].includes(tableName ?? "") ? "and crm_visible = true and mailbox_owner_id = $2::uuid" : ""}
               ${object.name === "interaction" ? "and (email_message_id is null or exists (select 1 from mail_message scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $2::uuid))" : ""}
             limit 1`,
           object.name === "work_task" ||
-            ["mail_thread", "mail_message", "crm_email_threads", "crm_email_messages"].includes(tableName ?? "") ||
+            ["mail_thread", "mail_message"].includes(tableName ?? "") ||
             object.name === "interaction"
             ? [entryId, userId]
             : [entryId],
