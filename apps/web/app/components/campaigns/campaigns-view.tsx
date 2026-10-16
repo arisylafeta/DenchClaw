@@ -4,7 +4,8 @@ import tableStyles from "../ui/data-table.module.css";
 import { TableCell } from "../ui/table-cell";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import type { CampaignDetail, CampaignSummary } from "@/lib/campaigns";
+import type { CampaignSummary } from "@/lib/campaigns";
+import type { MailCampaignDetail, MailCampaignSummary } from "@/lib/mail-types";
 import { buildEntryLink, buildFileLink } from "@/lib/workspace-links";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
@@ -16,13 +17,14 @@ export type CampaignsViewProps = {
   onOpenCampaign: (id: string) => void;
   onBack: () => void;
   onNavigatePerson: (id: string) => void;
+  query?: string;
 };
 
-type Payload = { kind: "list"; campaigns: CampaignSummary[] } | { kind: "detail"; detail: CampaignDetail };
+type Payload = { kind: "list"; campaigns: (CampaignSummary & MailCampaignSummary)[] } | { kind: "detail"; detail: MailCampaignDetail };
 type Resource = { key: string; payload: Payload | null; error: string | null };
 
-export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePerson }: CampaignsViewProps) {
-  const key = campaignId == null ? "list" : `campaign:${campaignId}`;
+export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePerson, query = "" }: CampaignsViewProps) {
+  const key = campaignId == null ? `list:${query}` : `campaign:${campaignId}:${query}`;
   const [attempt, setAttempt] = useState(0);
   const [resource, setResource] = useState<Resource>({ key, payload: null, error: null });
 
@@ -32,8 +34,8 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
     async function load() {
       try {
         const payload: Payload = campaignId == null
-          ? { kind: "list", campaigns: (await request<{ campaigns: CampaignSummary[] }>("/api/campaigns", { signal: controller.signal })).campaigns }
-          : { kind: "detail", detail: await request<CampaignDetail>(`/api/campaigns/${encodeURIComponent(campaignId)}`, { signal: controller.signal }) };
+          ? { kind: "list", campaigns: (await request<{ items: (CampaignSummary & MailCampaignSummary)[] }>(`/api/mail/campaigns${query ? `?${query}` : ""}`, { signal: controller.signal })).items }
+          : { kind: "detail", detail: await request<MailCampaignDetail>(`/api/mail/campaigns/${encodeURIComponent(campaignId)}${query ? `?${query}` : ""}`, { signal: controller.signal }) };
         if (!controller.signal.aborted) { setResource({ key, payload, error: null }); }
       } catch (error) {
         if (!controller.signal.aborted) { setResource({ key, payload: null, error: error instanceof Error ? error.message : "Could not load campaigns." }); }
@@ -41,7 +43,7 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
     }
     void load();
     return () => controller.abort();
-  }, [campaignId, key, attempt]);
+  }, [campaignId, key, attempt, query]);
 
   const current = resource.key === key ? resource : null;
   return (
@@ -63,7 +65,7 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
   );
 }
 
-function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: CampaignSummary[]; onOpenCampaign: (id: string) => void }) {
+function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: (CampaignSummary & MailCampaignSummary)[]; onOpenCampaign: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const table = useRef<HTMLTableElement>(null);
@@ -80,17 +82,17 @@ function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: CampaignSumma
       </div>
       <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
         <table ref={table} tabIndex={-1} aria-label="Campaigns" className={`${tableStyles.table} min-w-[780px] focus:outline-none`}>
-          <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Campaign", "Sent date / audience", "Status", "Sent", "Delivered", "Tracked opens", "Tracked clicks"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
+          <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Campaign", "Sent date / audience", "Status", "Sent", "Delivered", "Bounced", "Opened", "Clicked", "Unsubscribed", "Replied"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>
             {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => <tr key={campaign.id} className="hover:bg-[var(--bt-row-hover)]">
               <TableCell className={`${tableStyles.cell} min-w-[190px]`} style={cellStyle}><a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
-              <div className="mt-0.5 text-xs" style={mutedStyle}>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger"} · {campaign.recipient_count} retained</div>
+              <div className="mt-0.5 text-xs" style={mutedStyle}>Mail log · {campaign.recipient_count} deliveries</div>
               {campaign.tracking_pending > 0 && <div className="mt-0.5 text-xs" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</div>}</TableCell>
               <TableCell className={tableStyles.cell} style={cellStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /><div className="mt-0.5" style={mutedStyle}>{humanize(campaign.audience)}</div></TableCell>
-              <TableCell className={tableStyles.cell} style={cellStyle}><StatusTag status={campaign.status} /></TableCell>
-              {[campaign.metrics.sent, campaign.metrics.delivered, campaign.metrics.opened, campaign.metrics.clicked].map((value, index) => <TableCell key={index} className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</TableCell>)}
+              <TableCell className={tableStyles.cell} style={cellStyle}><StatusTag status={campaign.mail_state ?? campaign.status} /></TableCell>
+              {[campaign.sent, campaign.delivered, campaign.bounced, campaign.opened, campaign.clicked, campaign.unsubscribed, campaign.replied].map((value, index) => <TableCell key={index} className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</TableCell>)}
             </tr>)}
-            {!rows.length && <tr><td colSpan={7} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your search.</td></tr>}
+            {!rows.length && <tr><td colSpan={10} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your search.</td></tr>}
           </tbody>
         </table>
       </div>

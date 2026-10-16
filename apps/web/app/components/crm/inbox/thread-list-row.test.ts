@@ -21,6 +21,9 @@ function makeThread(overrides: Partial<Thread>): Thread {
 }
 
 describe("pickSenderDisplay", () => {
+  it("shows a wide-log counterparty without requiring a CRM person", () => {
+    expect(pickSenderDisplay(makeThread({ primary_sender_email: "synthetic@example.test" }))).toMatchObject({ email: "synthetic@example.test" });
+  });
   it("shows recipient when latest sender is ReBattery", () => {
     const thread = makeThread({
       primary_sender_id: "p_rebattery",

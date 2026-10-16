@@ -1,6 +1,6 @@
 /**
- * Shared types for the CRM inbox components. Keep in sync with
- * /api/crm/inbox/route.ts and /api/crm/inbox/[threadId]/route.ts.
+ * Conversation presentation types, populated from /api/mail/messages and
+ * /api/mail/threads/[id]. Provider metadata stays in the shared mail types.
  */
 
 import type { Participant } from "./participant-chips";

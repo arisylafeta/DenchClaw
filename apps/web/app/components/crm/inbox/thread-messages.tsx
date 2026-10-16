@@ -44,6 +44,7 @@ export function ThreadMessages({
   onOpenPerson,
   autoScrollOnLoad = true,
   showReply = true,
+  crmOnly = true,
 }: {
   threadId: string;
   seedParticipants?: ReadonlyArray<Participant>;
@@ -51,6 +52,7 @@ export function ThreadMessages({
   onOpenPerson?: (id: string) => void;
   autoScrollOnLoad?: boolean;
   showReply?: boolean;
+  crmOnly?: boolean;
 }) {
   const [detail, setDetail] = useState<ThreadDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,10 +68,11 @@ export function ThreadMessages({
     }
     const controller = new AbortController();
     setLoading(true);
+    setDetail(null);
     setError(null);
     void (async () => {
       try {
-        const res = await fetch(`/api/crm/inbox/${encodeURIComponent(threadId)}`, {
+        const res = await fetch(`/api/mail/threads/${encodeURIComponent(threadId)}?crmOnly=${crmOnly}`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -84,7 +87,7 @@ export function ThreadMessages({
       }
     })();
     return () => controller.abort();
-  }, [threadId]);
+  }, [threadId, crmOnly]);
 
   // Hydrated participant map for MessageCard lookup. Seeded participants
   // (e.g. from the row's own data) are merged in case the detail fetch
@@ -147,7 +150,7 @@ export function ThreadMessages({
       ))}
       {showReply && (
         <div className="pt-3">
-          <QuickReply recipientName={recipientName ?? null} />
+          <QuickReply key={threadId} threadId={threadId} recipientName={recipientName ?? null} />
         </div>
       )}
     </div>

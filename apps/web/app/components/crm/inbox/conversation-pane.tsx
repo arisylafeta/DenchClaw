@@ -24,6 +24,7 @@ export function ConversationPane({
   onToggleStar,
   onOpenPerson,
   onClose,
+  crmOnly = true,
 }: {
   selectedThread: Thread | null;
   starred: boolean;
@@ -31,6 +32,7 @@ export function ConversationPane({
   onOpenPerson?: (id: string) => void;
   /** Single-pane drilldown back-to-list. */
   onClose?: () => void;
+  crmOnly?: boolean;
 }) {
   const handleClose = useCallback(() => {
     onClose?.();
@@ -91,6 +93,7 @@ export function ConversationPane({
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
         <ThreadMessages
           threadId={selectedThread.id}
+          crmOnly={crmOnly}
           seedParticipants={selectedThread.participants}
           recipientName={recipientName}
           onOpenPerson={onOpenPerson}

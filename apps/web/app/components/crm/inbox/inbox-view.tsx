@@ -1,308 +1,112 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { InboxLayout } from "./inbox-layout";
-import { InboxToolbar } from "./inbox-toolbar";
-import { ThreadList } from "./thread-list";
-import { ConversationPane } from "./conversation-pane";
-import { KeyboardShortcutsHelp } from "./keyboard-shortcuts-help";
-import { useInboxHotkeys } from "./use-inbox-hotkeys";
-import {
-  useReadState,
-  useSelectedThreads,
-  useStarredThreads,
-} from "@/lib/crm-inbox-state";
-import type { SenderFilter, Thread } from "./types";
+import type { MailFilters, MailFollowup, MailMessageRow, MailPage } from "@/lib/mail-types";
+import { ConversationsView } from "./conversations-view";
+import { CampaignsView } from "../../campaigns/campaigns-view";
 
-const DEFAULT_LIMIT = 100;
-
-/**
- * Top-level Inbox component for the CRM main panel. Composes:
- *
- *   InboxLayout (two-pane resizable)
- *   ├─ left: InboxToolbar + ThreadList
- *   └─ right: ConversationPane
- *
- * Owns:
- *   - URL state: ?crm=inbox&q=…&sender=person|all|automated&thread=<id>
- *   - Server fetch (debounced on search)
- *   - Selection/star/read state via the localStorage hooks
- *   - Keyboard navigation (j/k/o/Enter/Esc/x/s/e/?/“/”)
- */
-export function InboxView({
-  onOpenPerson,
-}: {
-  onOpenPerson?: (id: string) => void;
-}) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  // ─── URL state ─────────────────────────────────────────────────────────
-  const initialThread = searchParams.get("thread");
-  const initialSearch = searchParams.get("q") ?? "";
-  const initialSenderRaw = searchParams.get("sender");
-  const initialSender: SenderFilter =
-    initialSenderRaw === "all" || initialSenderRaw === "automated"
-      ? initialSenderRaw
-      : "person";
-
-  const [search, setSearch] = useState(initialSearch);
-  const [senderFilter] = useState<SenderFilter>(initialSender);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThread);
-  const [focusedIndex, setFocusedIndex] = useState<number>(0);
-  const [helpOpen, setHelpOpen] = useState(false);
-
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Persisted local state (star / read / selected)
-  const workspaceId = "default"; // TODO: thread workspace id once exposed
-  const starred = useStarredThreads(workspaceId);
-  const readState = useReadState(workspaceId);
-  const selection = useSelectedThreads(workspaceId);
-
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ─── Fetch (debounced on search/sender) ───────────────────────────────
-  const load = useCallback(
-    async (signal: AbortSignal) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams();
-        if (search.trim()) {params.set("q", search.trim());}
-        params.set("sender", senderFilter);
-        params.set("limit", String(DEFAULT_LIMIT));
-        const res = await fetch(`/api/crm/inbox?${params.toString()}`, {
-          cache: "no-store",
-          signal,
-        });
-        if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
-        const body = (await res.json()) as { threads: Thread[]; total: number };
-        setThreads(body.threads);
-        setTotal(body.total);
-      } catch (err) {
-        if ((err as Error).name === "AbortError") {return;}
-        setError(err instanceof Error ? err.message : "Failed to load inbox.");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [search, senderFilter],
-  );
-
-  useEffect(() => {
-    if (debounceRef.current) {clearTimeout(debounceRef.current);}
-    const controller = new AbortController();
-    debounceRef.current = setTimeout(() => {
-      void load(controller.signal);
-    }, 150);
-    return () => {
-      controller.abort();
-      if (debounceRef.current) {clearTimeout(debounceRef.current);}
-    };
-  }, [load]);
-
-  // ─── URL sync (write) ──────────────────────────────────────────────────
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("crm", "inbox");
-    if (search.trim()) {params.set("q", search.trim());}
-    else {params.delete("q");}
-    if (senderFilter !== "person") {params.set("sender", senderFilter);}
-    else {params.delete("sender");}
-    if (selectedThreadId) {params.set("thread", selectedThreadId);}
-    else {params.delete("thread");}
-    const next = `/?${params.toString()}`;
-    if (next !== `${window.location.pathname}${window.location.search}`) {
-      router.replace(next, { scroll: false });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-way write
-  }, [search, senderFilter, selectedThreadId, router]);
-
-  // Keep focusedIndex pointing to the selected thread.
-  useEffect(() => {
-    if (!selectedThreadId) {return;}
-    const idx = threads.findIndex((t) => t.id === selectedThreadId);
-    if (idx >= 0) {setFocusedIndex(idx);}
-  }, [selectedThreadId, threads]);
-
-  // Mark selected thread as read once loaded.
-  useEffect(() => {
-    if (selectedThreadId) {
-      readState.setOn(selectedThreadId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- readState mutators are stable
-  }, [selectedThreadId]);
-
-  const selectedThread = useMemo(
-    () => threads.find((t) => t.id === selectedThreadId) ?? null,
-    [threads, selectedThreadId],
-  );
-  const focusedThread = threads[focusedIndex] ?? null;
-
-  // ─── Handlers ──────────────────────────────────────────────────────────
-  const handleSelect = useCallback(
-    (thread: Thread) => {
-      setSelectedThreadId(thread.id);
-      setFocusedIndex(threads.findIndex((t) => t.id === thread.id));
-    },
-    [threads],
-  );
-
-  const handleClose = useCallback(() => {
-    setSelectedThreadId(null);
-  }, []);
-
-  const handleBulkAction = useCallback(
-    (action: "read" | "star" | "archive") => {
-      const ids = Array.from(selection.set);
-      if (action === "read") {
-        selection.set.forEach((id) => readState.setOn(id));
-      } else if (action === "star") {
-        ids.forEach((id) => starred.toggle(id));
-      } else {
-        // Archive — no-op + toast (pending two-way sync)
-        if (typeof window !== "undefined") {
-          window.alert(
-            "Read-only inbox — archive will work once two-way Gmail sync ships.",
-          );
-        }
-      }
-    },
-    [selection, readState, starred],
-  );
-
-  // ─── Hotkeys ───────────────────────────────────────────────────────────
-  useInboxHotkeys(
-    {
-      next: () => {
-        if (threads.length === 0) {return;}
-        const next = Math.min(threads.length - 1, focusedIndex + 1);
-        setFocusedIndex(next);
-        const thread = threads[next];
-        if (thread) {handleSelect(thread);}
-      },
-      prev: () => {
-        if (threads.length === 0) {return;}
-        const prev = Math.max(0, focusedIndex - 1);
-        setFocusedIndex(prev);
-        const thread = threads[prev];
-        if (thread) {handleSelect(thread);}
-      },
-      openSelected: () => {
-        if (focusedThread) {handleSelect(focusedThread);}
-      },
-      back: () => {
-        if (helpOpen) {
-          setHelpOpen(false);
-          return;
-        }
-        setSelectedThreadId(null);
-      },
-      focusSearch: () => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      },
-      toggleSelectedBulk: () => {
-        if (focusedThread) {selection.toggle(focusedThread.id);}
-      },
-      toggleStar: () => {
-        if (focusedThread) {starred.toggle(focusedThread.id);}
-      },
-      archiveSelected: () => {
-        handleBulkAction("archive");
-      },
-      openHelp: () => setHelpOpen(true),
-    },
-    !helpOpen,
-  );
-
-  // Auto-scroll focused row into view
-  useEffect(() => {
-    if (!focusedThread) {return;}
-    const el = document.querySelector<HTMLElement>(
-      `[data-thread-row="true"][data-thread-id="${cssEscape(focusedThread.id)}"]`,
-    );
-    if (el) {
-      el.scrollIntoView({ block: "nearest", behavior: "auto" });
-    }
-  }, [focusedThread]);
-
-  return (
-    <>
-      <InboxLayout
-        hasSelection={!!selectedThread}
-        list={
-          <div
-            className="flex h-full min-h-0 flex-col"
-            style={{ background: "var(--color-bg)" }}
-          >
-            <InboxToolbar
-              ref={searchInputRef}
-              search={search}
-              onSearchChange={setSearch}
-              selectedCount={selection.set.size}
-              onClearSelection={selection.clear}
-              onBulkAction={handleBulkAction}
-              onOpenShortcuts={() => setHelpOpen(true)}
-            />
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {error && (
-                <div
-                  className="px-4 py-3 text-[13px]"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  {error}
-                </div>
-              )}
-              <ThreadList
-                threads={threads}
-                loading={loading}
-                selectedThreadId={selectedThreadId}
-                selectedIds={selection.set}
-                isRead={readState.has}
-                isStarred={starred.has}
-                onSelect={handleSelect}
-                onToggleSelected={selection.toggle}
-                onToggleStarred={starred.toggle}
-              />
-              {!loading && total > threads.length && (
-                <div
-                  className="px-4 py-3 text-[12px]"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  Showing {threads.length.toLocaleString()} of {total.toLocaleString()} threads.
-                </div>
-              )}
-            </div>
-          </div>
-        }
-        conversation={
-          <ConversationPane
-            selectedThread={selectedThread}
-            starred={selectedThread ? starred.has(selectedThread.id) : false}
-            onToggleStar={() => {
-              if (selectedThread) {starred.toggle(selectedThread.id);}
-            }}
-            onOpenPerson={onOpenPerson}
-            onClose={handleClose}
-          />
-        }
-      />
-      <KeyboardShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
-    </>
-  );
-}
-
-// CSS.escape polyfill for older runtime contexts (Node test envs)
-function cssEscape(value: string): string {
-  if (typeof window !== "undefined" && typeof window.CSS?.escape === "function") {
-    return window.CSS.escape(value);
+export type MailView = NonNullable<MailFilters["view"]>;
+const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", sent: "Sent", followups: "Follow-ups" };
+const filterOptions: Record<string, string[]> = {
+  identity: ["alex", "ari", "supply", "hello", "support", "enterprise"],
+  direction: ["inbound", "outbound"], transport: ["gmail", "postmark-broadcast", "postmark-transactional"],
+  purpose: ["personal", "marketing", "transactional"], state: ["draft", "frozen", "approved", "sending", "unknown", "accepted", "failed", "received"],
+  event: ["opened", "clicked", "replied", "bounced"],
+};
+export function mailQuery(filters: MailFilters): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "" && key !== "mailboxOwnerId") {params.set(key, String(value));}
   }
-  return value.replace(/['"\\]/g, "\\$&");
+  return params.toString();
+}
+export function InboxView({ onOpenPerson, initialView, initialCampaignId }: { onOpenPerson?: (id: string) => void; initialView?: MailView; initialCampaignId?: string | null }) {
+  const router = useRouter();
+  const params = useSearchParams();
+  const requestedView = params.get("view");
+  const [filters, setFilters] = useState<MailFilters>(() => ({
+    ...Object.fromEntries(["q", "from", "to", "thread", "identity", "direction", "transport", "purpose", "state", "event", "campaign", "since", "until"].map((key) => [key, params.get(key) ?? ""])),
+    view: initialView ?? (requestedView && requestedView in views ? requestedView as MailView : "conversations"), crmOnly: params.get("crmOnly") !== "false", limit: 100,
+  }));
+  const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId ?? params.get("campaignDetail"));
+  const query = mailQuery(filters);
+  const view = filters.view ?? "conversations";
+  useEffect(() => {
+    const next = new URLSearchParams(params.toString());
+    next.set("crm", "inbox");
+    for (const key of ["view", "q", "from", "to", "thread", "identity", "direction", "transport", "purpose", "state", "event", "campaign", "since", "until", "crmOnly"]) {
+      const value = new URLSearchParams(query).get(key);
+      if (value !== null) {next.set(key, value);} else {next.delete(key);}
+    }
+    if (campaignId) {next.set("campaignDetail", campaignId);} else {next.delete("campaignDetail");}
+    router.replace(`/?${next.toString()}`, { scroll: false });
+  // URL is written from this page's state, not used as a second state owner.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, campaignId, router]);
+  const update = (key: string, value: string | boolean) => setFilters((current) => ({ ...current, [key]: value }));
+  return <div className="flex h-full min-h-0 flex-col" style={{ background: "var(--color-bg)", color: "var(--color-text)" }}>
+    <header className="border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
+      <h1 className="mb-3 text-xl font-semibold">Mail</h1>
+      <nav role="tablist" aria-label="Mail views" className="flex flex-wrap gap-2">
+        {(Object.entries(views) as [MailView, string][]).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} className={`rounded px-3 py-2 text-sm ${view === key ? "bg-[var(--color-surface-hover)] font-semibold" : ""}`} onClick={() => update("view", key)}>{label}</button>)}
+      </nav>
+      <div role="group" aria-label="Mail filters" className="mt-3 flex flex-wrap items-end gap-2 text-xs">
+        <label>Search<input className="ml-2 rounded border p-1" type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} /></label>
+        {Object.entries(filterOptions).map(([key, options]) => <label key={key} className="capitalize">{key}<select aria-label={key} className="ml-1 rounded border p-1" value={String(filters[key as keyof MailFilters] ?? "")} onChange={(event) => update(key, event.target.value)}><option value="">All</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>)}
+        <label>Campaign<input className="ml-1 w-28 rounded border p-1" value={filters.campaign ?? ""} onChange={(event) => update("campaign", event.target.value)} /></label>
+        {(["from", "to", "thread"] as const).map((key) => <label key={key} className="capitalize">{key}<input className="ml-1 w-28 rounded border p-1" value={filters[key] ?? ""} onChange={(event) => update(key, event.target.value)} /></label>)}
+        <label>Since<input className="ml-1 rounded border p-1" type="date" value={filters.since ?? ""} onChange={(event) => update("since", event.target.value)} /></label>
+        <label>Until<input className="ml-1 rounded border p-1" type="date" value={filters.until ?? ""} onChange={(event) => update("until", event.target.value)} /></label>
+        <label className="flex gap-1"><input type="checkbox" checked={filters.crmOnly} onChange={(event) => update("crmOnly", event.target.checked)} />CRM-only</label>
+      </div>
+    </header>
+    <section role="tabpanel" aria-label={views[view]} className="min-h-0 flex-1 overflow-auto">
+      {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
+      {view === "campaigns" && <CampaignsView campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query={query} />}
+      {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
+    </section>
+  </div>;
+}
+function MailLogRows({ view, query }: { view: "sent" | "followups"; query: string }) {
+  const [rows, setRows] = useState<(MailMessageRow | MailFollowup)[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const latestQuery = useRef(query);
+  useEffect(() => {
+    latestQuery.current = query;
+    const controller = new AbortController();
+    setRows([]); setError(null); setLoading(true); setNextCursor(null);
+    const endpoint = view === "followups" ? "followups" : "messages";
+    void fetch(`/api/mail/${endpoint}?${query}`, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) {throw new Error(`HTTP ${response.status}`);}
+      const page = await response.json() as MailPage<MailMessageRow | MailFollowup>;
+      if (!controller.signal.aborted) {setRows(page.items); setNextCursor(page.nextCursor ?? null);}
+    }).catch((failure: Error) => {if (!controller.signal.aborted) {setError(failure.message);}}).finally(() => {if (!controller.signal.aborted) {setLoading(false);}});
+    return () => controller.abort();
+  }, [view, query]);
+  async function more() {
+    const snapshot = query;
+    try {
+      const response = await fetch(`/api/mail/messages?${query}&cursor=${encodeURIComponent(nextCursor!)}`);
+      if (!response.ok) {throw new Error(`HTTP ${response.status}`);}
+      const page = await response.json() as MailPage<MailMessageRow>;
+      if (latestQuery.current === snapshot) {setRows((current) => [...current, ...page.items]); setNextCursor(page.nextCursor);}
+    } catch (failure) {setError(failure instanceof Error ? failure.message : "Could not load mail.");}
+  }
+  return <div className="p-4 text-sm">
+    {loading && <p role="status">Loading {views[view].toLowerCase()}…</p>}
+    {error && <p role="alert">{error}</p>}
+    {!loading && !error && !rows.length && <p>No {views[view].toLowerCase()} match these filters.</p>}
+    <ul className="space-y-3">{rows.map((row) => <li key={row.id} className="rounded border p-3" style={{ borderColor: "var(--color-border)" }}>
+      {"direction" in row ? <>
+        <div className="font-semibold">{row.subject || "(No subject)"}</div><p>{row.identity_key} → {row.recipient_email ?? row.to_emails.join(", ")}</p>
+        <p>{row.state}{["unknown", "sending"].includes(row.state) && <strong role="status" className="ml-2 text-amber-700">Reconcile before retrying: {row.state}</strong>}</p>
+        <p>{["sent", "delivered", "bounced", "opened", "clicked", "replied"].map((event) => `${event}: ${row[`${event}_at` as keyof MailMessageRow] ?? "not recorded"}`).join(" · ")}</p>
+        <p>Unsubscribed: {row.events?.some((event) => event.type === "unsubscribed") ? "recorded" : "not recorded"}</p>
+      </> : <><strong>{row.state === "pending" && Date.parse(row.due_at) <= Date.now() ? "Due" : row.state}</strong><p>Due: {new Date(row.due_at).toLocaleString("en-GB")} · {row.identity_key}</p><p>{row.note}</p>{row.paused_reason && <p>Paused: {row.paused_reason}</p>}</>}
+    </li>)}</ul>
+    {nextCursor && <button onClick={() => void more()} className="mt-4 rounded border px-3 py-2">Load more</button>}
+  </div>;
 }

@@ -4,6 +4,7 @@ import tableStyles from "../ui/data-table.module.css";
 import { TableCell } from "../ui/table-cell";
 import { useMemo, useRef, useState } from "react";
 import type { CampaignRecipient } from "@/lib/campaigns";
+import type { MailMessageRow } from "@/lib/mail-types";
 import { Card, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import { StageTag } from "../dismantlers/dismantler-ui";
@@ -13,12 +14,13 @@ import { CampaignDate, Observation, PAGE_SIZE, Pagination, PersonLink, cellStyle
 const FILTERS = ["All", "Replied", "Opened", "Clicked", "Bounced", "Tracking pending"] as const;
 type RecipientFilter = typeof FILTERS[number];
 
-/** outreach: a dismantler outreach campaign, where the last column shows the dismantler and the email's own subject. */
-export function CampaignRecipients({ recipients, onNavigatePerson, outreach = false }: { recipients: CampaignRecipient[]; onNavigatePerson: (id: string) => void; outreach?: boolean }) {
+/** Outreach campaigns retain dismantler stage and the frozen subject. */
+export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePerson, outreach = false }: { recipients: CampaignRecipient[]; deliveryRows?: MailMessageRow[]; onNavigatePerson: (id: string) => void; outreach?: boolean }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<RecipientFilter>("All");
   const [page, setPage] = useState(0);
   const table = useRef<HTMLTableElement>(null);
+  const deliveryById = useMemo(() => new Map(deliveryRows.map((row) => [row.id, row])), [deliveryRows]);
   const rows = useMemo(() => {
     const term = query.trim().toLocaleLowerCase();
     return recipients.filter((recipient) => {
@@ -45,16 +47,17 @@ export function CampaignRecipients({ recipients, onNavigatePerson, outreach = fa
       <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
         <table ref={table} tabIndex={-1} aria-label="Recipients" className={`${tableStyles.table} min-w-[720px] focus:outline-none`}>
           <thead style={{ background: "var(--bt-table-head)" }}>
-            <tr>{["Recipient", "Delivery", "Reply", "First tracked open", "First tracked click", outreach ? "Dismantler" : "Clicked listings"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr>
+            <tr>{["Recipient", "Delivery", "Reply", "First tracked open", "First tracked click", outreach ? "Dismantler" : "Clicked listings", "Unsubscribed"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr>
           </thead>
           <tbody>
             {visible.map((recipient) => (
               <tr key={recipient.send_id} className="hover:bg-[var(--bt-row-hover)]">
-                <TableCell className={`${tableStyles.cell} min-w-[220px]`} style={cellStyle}><PersonLink id={recipient.person_id} onNavigate={onNavigatePerson}>{recipient.person_name || recipient.recipient_email}</PersonLink>
+                <TableCell className={`${tableStyles.cell} min-w-[220px]`} style={cellStyle}>{recipient.person_id ? <PersonLink id={recipient.person_id} onNavigate={onNavigatePerson}>{recipient.person_name || recipient.recipient_email}</PersonLink> : <span>{recipient.recipient_email}</span>}
                 {recipient.company_name && <div className="mt-0.5" style={mutedStyle}>{recipient.company_name}</div>}
                 {recipient.person_name && <div className="mt-0.5 break-all text-xs" style={mutedStyle}>{recipient.recipient_email}</div>}</TableCell>
                 <TableCell className={tableStyles.cell} style={cellStyle}><span style={{ color: recipient.bounced_at || recipient.state.toLowerCase() === "bounced" ? "var(--bt-red)" : "var(--bt-text)" }}>{recipient.bounced_at || recipient.state.toLowerCase() === "bounced" ? "Bounced" : recipient.delivered_at ? "Delivered" : recipient.accepted_at ? (recipient.tracked ? "Accepted" : "Sent from Gmail") : humanize(recipient.state)}</span>
                 {(recipient.bounced_at || recipient.delivered_at || recipient.accepted_at) && <div className="mt-0.5 text-xs" style={mutedStyle}><CampaignDate value={recipient.bounced_at || recipient.delivered_at || recipient.accepted_at} withTime /></div>}
+                {["unknown", "sending"].includes(recipient.state) && <div role="status" className="text-xs" style={{ color: "var(--bt-amber)" }}>Reconcile before retrying</div>}
                 {recipient.tracking_pending && <div className="mt-0.5 text-xs" style={{ color: "var(--bt-amber)" }}>Tracking pending</div>}</TableCell>
                 <TableCell className={tableStyles.cell} style={cellStyle}>{recipient.replied_at ? <CampaignDate value={recipient.replied_at} withTime /> : <span style={mutedStyle}>{recipient.accepted_at ? "No reply yet" : "Not sent"}</span>}</TableCell>
                 <TableCell className={tableStyles.cell} style={cellStyle}><Observation at={recipient.opened_at} recipient={recipient} /></TableCell>
@@ -62,9 +65,10 @@ export function CampaignRecipients({ recipients, onNavigatePerson, outreach = fa
                 {outreach ? <TableCell className={`${tableStyles.cell} min-w-[200px]`} style={cellStyle}>{recipient.dismantler_stage ? <StageTag stage={recipient.dismantler_stage as Stage} /> : <span style={mutedStyle}>Not a dismantler</span>}
                 {recipient.subject && <div className="mt-1 text-xs" style={mutedStyle}>{recipient.subject}</div>}</TableCell>
                 : <TableCell className={`${tableStyles.cell} min-w-[160px]`} style={cellStyle}>{recipient.listing_clicks.length ? <ul className="flex flex-col gap-1">{recipient.listing_clicks.map((listing) => <li key={listing.listing_id}>{listing.label}</li>)}</ul> : <span style={mutedStyle}>{recipient.tracking_pending ? "Unknown · pending" : recipient.last_synced_at ? "None observed" : "Unknown"}</span>}</TableCell>}
+                <TableCell className={tableStyles.cell} style={cellStyle}>{deliveryById.get(recipient.send_id)?.events?.some((event) => event.type === "unsubscribed") ? "Recorded" : "Not recorded"}</TableCell>
               </tr>
             ))}
-            {!visible.length && <tr><td colSpan={6} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>{recipients.length ? "No recipients match these filters." : "No retained recipients for this campaign."}</td></tr>}
+            {!visible.length && <tr><td colSpan={7} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>{recipients.length ? "No recipients match these filters." : "No retained recipients for this campaign."}</td></tr>}
           </tbody>
         </table>
       </div>

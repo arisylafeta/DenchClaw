@@ -27,6 +27,17 @@ function fireKey(key: string, target: Element | Document = document) {
 }
 
 describe("useInboxHotkeys", () => {
+  it.each(["textarea", "select"])("does not navigate while editing a %s", (tag) => {
+    const handlers = makeHandlers();
+    render(<HotkeyHost handlers={handlers} />);
+    const field = document.createElement(tag);
+    document.body.appendChild(field);
+    fireKey("j", field);
+    fireKey("?", field);
+    expect(handlers.next).not.toHaveBeenCalled();
+    expect(handlers.openHelp).not.toHaveBeenCalled();
+    field.remove();
+  });
   it("j and ArrowDown both trigger next", () => {
     const handlers = makeHandlers();
     render(<HotkeyHost handlers={handlers} />);
