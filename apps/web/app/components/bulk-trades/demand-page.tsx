@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle } from "lucide-react";
+import { formatFee, REPUTATION_LABEL, scoreDemand } from "@/lib/bulk-demand-score";
 import {
   BASES,
   CHECK_LABEL,
@@ -18,11 +20,9 @@ import {
   specLines,
   volumeLabel,
   waitingLabel,
-  type Basis,
   type ClosedReason,
   type Demand,
   type DemandInput,
-  type DemandKind,
   type Spec,
   type SpecListKey,
 } from "@/lib/bulk-demand";
@@ -30,7 +30,7 @@ import { shortDate, ukTime, type Proposal } from "@/lib/bulk-trade-details";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
 import { CrmSearch } from "./buyer-dialogs";
-import { DemandBadge, TierBadge } from "./demand-badge";
+import { DemandBadge } from "./demand-badge";
 import { ProposalRow } from "./proposal-row";
 import {
   Card,
@@ -49,28 +49,24 @@ import {
 /** The latest demand-matching pass. */
 type MatchRun = { at: string; status: "running" | "ok" | "failed" };
 
-type Filter = "requests" | "standing" | "check" | "closed";
+type Filter = "open" | "qualifying" | "closed";
 
 type Props = {
   today: string;
   onOpenTrade: (lotId: string) => void;
 };
 
-const COLUMNS = "grid-cols-[minmax(160px,1fr)_minmax(260px,2.2fr)_130px_100px_120px_minmax(140px,1fr)]";
-
-/**
- * Who wants what (bulk only, 2+ units): requests (one-off, by a date) and standing buy-boxes (ongoing, estimated,
- * stated or agreed), which live trades fit, and new demand from the inbox.
- */
+const COLUMNS = "grid-cols-[100px_minmax(160px,1fr)_minmax(260px,2fr)_minmax(240px,1.5fr)]";
 export function DemandPage({ today, onOpenTrade }: Props) {
   const [demand, setDemand] = useState<Demand[]>([]);
   const [possible, setPossible] = useState<Proposal[]>([]);
   const [matched, setMatched] = useState<MatchRun | null>(null);
-  const [chosen, setFilter] = useState<Filter | null>(null);
+  const [filter, setFilter] = useState<Filter>("open");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Demand | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -81,26 +77,27 @@ export function DemandPage({ today, onOpenTrade }: Props) {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load demand.");
+    } finally {
+      setLoading(false);
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   const open = demand.filter((row) => row.status === "open");
-  const toCheck = open.filter((row) => checkReason(row, today));
-  const requests = open.filter((row) => row.kind === "request");
-  const standing = open.filter((row) => row.kind === "standing");
-  // Requests first while there are any: they have dates.
-  const filter = chosen ?? (requests.length ? "requests" : "standing");
+  const qualifying = demand.filter((row) => row.status === "qualifying");
+  const families = new Map<string, Set<string>>();
+  for (const row of open) {
+    if (!row.product_family) { continue; }
+    const buyers = families.get(row.product_family) ?? new Set<string>();
+    buyers.add(row.company_id ?? row.person_id ?? row.buyer);
+    families.set(row.product_family, buyers);
+  }
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const rows = filter === "closed" ? demand.filter((row) => row.status === "closed")
-      : filter === "check" ? toCheck
-        : filter === "requests" ? requests
-          // Tier A buyers first, grouped by buyer; the server already orders each buyer's rows agreed, stated, estimated.
-          : standing.toSorted((a, b) => tierOrder(a.tier) - tierOrder(b.tier) || a.buyer.localeCompare(b.buyer));
-    return needle ? rows.filter((row) => `${row.buyer} ${row.contact ?? ""} ${row.wants} ${specLines(row.spec).join(" ")}`
-      .toLowerCase().includes(needle)) : rows;
-  }, [demand, filter, query, toCheck, requests, standing]);
+    return demand.filter((row) => row.status === filter)
+      .filter((row) => !needle || `${row.buyer} ${row.contact ?? ""} ${row.wants} ${row.product_family ?? ""} ${specLines(row.spec).join(" ")}`.toLowerCase().includes(needle))
+      .toSorted((a, b) => (ranking(b, today).score ?? -1) - (ranking(a, today).score ?? -1) || a.buyer.localeCompare(b.buyer));
+  }, [demand, filter, query, today]);
   const selected = demand.find((row) => row.id === selectedId) ?? null;
 
   const segment = (value: Filter, label: string) => (
@@ -137,12 +134,16 @@ export function DemandPage({ today, onOpenTrade }: Props) {
           </Card>
         )}
 
+        {!!families.size && <div aria-label="Product families" className="flex flex-wrap gap-3 text-xs" style={{ color: "var(--bt-muted)" }}>
+          {[...families].toSorted(([a], [b]) => a.localeCompare(b)).map(([family, buyers]) => (
+            <span key={family}>{family} · {buyers.size} {buyers.size === 1 ? "buyer" : "buyers"}</span>
+          ))}
+        </div>}
         <div data-table-part="toolbar" className={`bulk-trades ${tableStyles.surface} flex flex-wrap items-center gap-3 border`}>
           <div role="group" aria-label="Filter" className="flex border" style={{ borderColor: "var(--bt-border)" }}>
-            {segment("requests", `Requests ${requests.length}`)}
-            {segment("standing", `Standing ${standing.length}`)}
-            {segment("check", `To check ${toCheck.length}`)}
-            {segment("closed", "Closed")}
+            {segment("open", `Demand ${open.length}`)}
+            {segment("qualifying", `Qualifying ${qualifying.length}`)}
+            {segment("closed", `Closed ${demand.filter((row) => row.status === "closed").length}`)}
           </div>
           <input data-table-part="search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search demand"
             placeholder="Search buyers or wants" className="h-8 w-full max-w-[340px] rounded-none border px-2.5 text-xs"
@@ -161,13 +162,12 @@ export function DemandPage({ today, onOpenTrade }: Props) {
         </div>
 
         <Card label="Demand" className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}>
-          <div className="min-w-[900px]">
+          <div className="min-w-[760px]">
             <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-3.5 border-b px-3 py-2 font-medium`} style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
-              <span>Buyer</span><span>Wants</span><span>Volume</span><span>Where</span>
-              <span>{filter === "requests" ? "Needed by" : "Confirmed"}</span><span>Fits</span>
+              <span>Score ↓</span><span>Buyer</span><span>Ask</span><span>Fee · freshness · relationship</span>
             </div>
             {shown.map((row) => {
-              const check = checkReason(row, today);
+              const scored = ranking(row, today);
               const summary = [...specLines(row.spec).slice(0, 3), priceLabel(row) && `max ${priceLabel(row)}`].filter(Boolean).join(" · ");
               return (
                 <div key={row.id} data-table-part="grid-row" role="button" tabIndex={0} onClick={() => setSelectedId(row.id)} aria-pressed={row.id === selectedId}
@@ -178,53 +178,40 @@ export function DemandPage({ today, onOpenTrade }: Props) {
                     }
                   }}
                   className={`grid w-full ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)]`}
-                  style={{ borderColor: "var(--bt-divider)", color: check || row.status === "closed" ? "var(--bt-muted)" : "var(--bt-text)",
+                  style={{ borderColor: "var(--bt-divider)", color: row.status === "closed" ? "var(--bt-muted)" : "var(--bt-text)",
                     background: row.id === selectedId ? "var(--bt-row-hover)" : undefined }}>
+                  <TableCellContent><DemandScore demand={row} today={today} /></TableCellContent>
                   <TableCellContent>
                   <div className="flex min-w-0 flex-col items-start gap-1">
                     <div className="max-w-full truncate text-xs font-semibold">{row.buyer}</div>
                     {row.contact && <div className="max-w-full truncate text-xs" style={{ color: "var(--bt-muted)" }}>{row.contact}</div>}
-                    <span className="flex flex-wrap gap-1">
-                      <TierBadge tier={row.tier} />
-                      <DemandBadge kind={row.kind} basis={row.basis} />
-                      {row.waiting && (
-                        <span className="rounded-none border px-1.5 py-px text-xs font-medium" title={row.waiting.subject ?? undefined}
-                          style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" }}>
-                          {waitingLabel(row.waiting.since)}
-                        </span>
-                      )}
-                    </span>
+                    {row.product_family && <span style={{ color: "var(--bt-muted)" }}>{row.product_family}</span>}
                   </div>
                   </TableCellContent>
                   <TableCellContent>
                   <span className="flex flex-col gap-0.5 text-xs leading-snug">
                     {row.wants}
                     {summary && <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{summary}</span>}
-                  </span>
-                  </TableCellContent>
-                  <TableCellContent><span className="bt-mono text-xs">{volumeLabel(row) ?? ""}</span></TableCellContent>
-                  <TableCellContent><span className="text-xs">{row.location ?? ""}</span></TableCellContent>
-                  <TableCellContent>
-                  <span className="flex flex-col items-start gap-1 text-xs">
-                    {row.kind === "request"
-                      ? (row.needed_by ? shortDate(row.needed_by) : "No date")
-                      : (row.confirmed_on ? shortDate(row.confirmed_on) : "Never")}
-                    {check && (
-                      <span className="rounded-none border px-1.5 py-px text-xs font-medium"
-                        style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" }}>{CHECK_LABEL[check]}</span>
-                    )}
-                    {row.status === "closed" && row.closed_reason && <span className="text-xs">{CLOSED_REASON_LABEL[row.closed_reason]}</span>}
+                    {row.status === "qualifying" && row.qualify_question && <span className="font-medium" style={{ color: "var(--bt-amber)" }}>{row.qualify_question}</span>}
+                    {row.status === "closed" && <span style={{ color: "var(--bt-muted)" }}>
+                      {row.closed_reason ? CLOSED_REASON_LABEL[row.closed_reason] : "Closed"}{row.moved_to ? ` · ${row.moved_to}` : ""}
+                    </span>}
                   </span>
                   </TableCellContent>
                   <TableCellContent>
-                  <span className="text-xs" style={{ color: row.fits.length ? "var(--bt-link)" : "var(--bt-muted)" }}>
-                    {row.fits.length ? row.fits.map((fit) => fit.title).join(" · ") : "—"}
-                  </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      <DemandChip>{row.fee_eur == null ? "Fee unknown" : `${formatFee(row.fee_eur)} fee · ${row.price_basis === "buyer" ? "buyer budget" : "our estimate"}`}</DemandChip>
+                      <DemandChip>Asked {scored.daysAgo}d ago</DemandChip>
+                      <DemandChip>{REPUTATION_LABEL[row.reputation ?? "anon"]}</DemandChip>
+                      {!row.has_stock && row.status !== "closed" && <DemandChip warning><AlertTriangle size={12} aria-hidden="true" />No stock on file</DemandChip>}
+                    </div>
                   </TableCellContent>
                 </div>
               );
             })}
-            {!shown.length && <p className="px-5 py-8 text-center text-sm" style={{ color: "var(--bt-muted)" }}>Nothing here.</p>}
+            {!shown.length && <p role="status" className="px-5 py-8 text-center text-sm" style={{ color: "var(--bt-muted)" }}>
+              {loading ? "Loading demand…" : error ? "Demand unavailable." : query ? "No demand matches your search." : `No ${filter === "open" ? "open demand" : filter === "qualifying" ? "demand to qualify" : "closed demand"}.`}
+            </p>}
           </div>
         </Card>
       </div>
@@ -374,7 +361,7 @@ function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade }:
         <div className="flex flex-wrap gap-2 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}>
           <button type="button" disabled={busy} className={`${darkButtonClass} h-9`} style={darkButtonStyle}
             onClick={() => run(() => patch({ action: "confirm" }))}>
-            {demand.status === "closed" ? "Reopen" : demand.basis === "estimated" ? "Research still holds" : "Still wanted"}
+            {demand.status === "closed" ? "Reopen" : "Still wanted"}
           </button>
           <button type="button" onClick={onEdit} className={`${buttonClass} h-9`} style={buttonStyle}>Edit</button>
           {demand.status === "open" && demand.kind === "standing" && BASES.filter((basis) => basis !== demand.basis && basis !== "estimated").map((basis) => (
@@ -387,14 +374,40 @@ function DemandPanel({ demand, today, onClose, onChanged, onEdit, onOpenTrade }:
             <button type="button" disabled={busy} className={`${buttonClass} h-9`} style={buttonStyle}
               onClick={() => run(() => patch({ action: "make_standing" }))}>Make standing</button>
           )}
-          {demand.status === "open" && <button type="button" onClick={() => setClosing(true)} className={`${buttonClass} h-9`} style={buttonStyle}>Close…</button>}
+          {demand.status !== "closed" && <button type="button" onClick={() => setClosing(true)} className={`${buttonClass} h-9`} style={buttonStyle}>Close…</button>}
         </div>
       )}
     </aside>
   );
 }
 
-const tierOrder = (tier: string | null) => ({ A: 0, B: 1, C: 2 } as Record<string, number>)[tier ?? ""] ?? 3;
+function ranking(demand: Demand, today: string) {
+  return scoreDemand({ feeEur: demand.fee_eur, priceBasis: demand.price_basis, reputation: demand.reputation,
+    askedOn: demand.observed_on && demand.confirmed_on
+      ? (demand.observed_on > demand.confirmed_on ? demand.observed_on : demand.confirmed_on)
+      : demand.observed_on ?? demand.confirmed_on }, today);
+}
+
+function DemandChip({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
+  return <span className="inline-flex items-center gap-1 border px-1.5 py-0.5 text-xs"
+    style={{ borderColor: warning ? "var(--bt-amber-border)" : "var(--bt-border)", color: warning ? "var(--bt-amber)" : "var(--bt-text-2)",
+      background: warning ? "var(--bt-amber-bg)" : "var(--bt-surface)" }}>{children}</span>;
+}
+
+function DemandScore({ demand, today }: { demand: Demand; today: string }) {
+  const result = ranking(demand, today);
+  if (result.score == null) { return <span className="text-xs" style={{ color: "var(--bt-amber)" }}>Needs quantity</span>; }
+  const color = result.score >= 80 ? "var(--bt-red)" : result.score >= 60 ? "var(--bt-amber)" : result.score >= 40 ? "var(--bt-green)" : "var(--bt-muted)";
+  const arithmetic = `${formatFee(demand.fee_eur)} × ${demand.price_basis === "buyer" ? "1 (buyer budget)" : "½ (our estimate)"} × ${Math.round(result.closeChance * 100)}% × ${result.freshness.toFixed(2)} = ${formatFee(result.expectedFee ?? 0)} expected`;
+  return <span tabIndex={0} title={arithmetic} aria-label={`${result.score} ${result.band}. ${arithmetic}`} className="inline-flex flex-col items-center gap-1">
+    <span className="relative inline-flex h-11 w-11 items-center justify-center font-semibold" style={{ color }}>
+      <svg aria-hidden="true" viewBox="0 0 40 40" className="absolute inset-0 h-full w-full -rotate-90">
+        <circle cx="20" cy="20" r="17" fill="none" stroke="var(--bt-divider)" strokeWidth="3" />
+        <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3" pathLength="100" strokeDasharray={`${result.score} 100`} />
+      </svg>{result.score}
+    </span><span className="text-xs" style={{ color }}>{result.band}</span>
+  </span>;
+}
 
 const MAIN_LISTS: SpecListKey[] = ["chemistries", "formats", "conditions", "origins"];
 const MORE_LISTS: SpecListKey[] = ["cell_formats", "makes", "cell_makers", "system_brands", "evidence", "excludes"];
@@ -443,6 +456,9 @@ function DemandDialog({ demand, onClose, onSaved }: {
     max_price: numberText(demand?.max_price), price_currency: demand?.price_currency ?? "EUR", price_unit: demand?.price_unit ?? "kWh",
     kwh_min: numberText(demand?.spec.kwh_min), kwh_max: numberText(demand?.spec.kwh_max), min_soh: numberText(demand?.spec.min_soh),
     mixed_ok: demand?.spec.mixed_ok === undefined ? "" : demand.spec.mixed_ok ? "yes" : "no",
+    product_family: demand?.product_family ?? "", fee_eur: numberText(demand?.fee_eur),
+    price_basis: demand?.price_basis ?? "estimate", reputation: demand?.reputation ?? "anon",
+    status: demand?.status ?? "open", qualify_question: demand?.qualify_question ?? "",
   }, async (draft) => {
     const request_ = draft.kind === "request";
     const spec: Spec = { ...lists };
@@ -455,11 +471,13 @@ function DemandDialog({ demand, onClose, onSaved }: {
     const maxPrice = toNumber(draft.max_price);
     const body: Record<string, unknown> = {
       ...link,
-      kind: draft.kind as DemandKind,
-      ...(request_ ? { needed_by: draft.needed_by || null } : { basis: draft.basis as Basis }),
+      kind: draft.kind,
+      ...(request_ ? { needed_by: draft.needed_by || null } : { basis: draft.basis }),
       volume, volume_unit: volume === null ? null : draft.volume_unit,
       max_price: maxPrice, price_currency: maxPrice === null ? null : draft.price_currency, price_unit: maxPrice === null ? null : draft.price_unit,
       spec,
+      fee_eur: toNumber(draft.fee_eur), price_basis: draft.price_basis, reputation: draft.reputation,
+      product_family: draft.product_family.trim() || null, status: draft.status, qualify_question: draft.qualify_question.trim() || null,
     };
     for (const key of ["buyer", "contact", "email", "wants", "quantity", "location", "note"] as const) body[key] = draft[key].trim() || null;
     const { demand: saved } = await request<{ demand: Demand }>(
@@ -530,6 +548,14 @@ function DemandDialog({ demand, onClose, onSaved }: {
         <FormField label="Email">{form.input("email", { type: "email" })}</FormField>
       </div>
       <FormField label="Wants">{form.input("wants", { required: true, placeholder: "One line, the way the buyer would say it" })}</FormField>
+      <div className="grid grid-cols-2 gap-3">
+        <FormField label="Product family">{form.input("product_family", { placeholder: "e.g. VW MEB" })}</FormField>
+        <FormField label="Status">{form.select("status", ["open", "qualifying", "closed"], { open: "Demand", qualifying: "Qualifying", closed: "Closed" })}</FormField>
+        <FormField label="Expected fee (EUR)">{form.input("fee_eur", { type: "number", min: 0, step: "any" })}</FormField>
+        <FormField label="Price basis">{form.select("price_basis", ["buyer", "estimate"], { buyer: "Buyer budget", estimate: "Our estimate" })}</FormField>
+        <FormField label="Reputation">{form.select("reputation", ["paid", "active", "email", "inbound", "anon"], REPUTATION_LABEL)}</FormField>
+      </div>
+      {form.draft.status === "qualifying" && <FormField label="Qualification question">{form.input("qualify_question")}</FormField>}
       <div className="grid grid-cols-3 gap-3">
         {isRequest
           ? <FormField label="Needed by">{form.input("needed_by", { type: "date" })}</FormField>

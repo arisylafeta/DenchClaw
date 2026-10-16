@@ -9,6 +9,17 @@ describe("parseDemandInput", () => {
     expect(parseDemandInput({ buyer: "STN", wants: "Tested packs, 7 to 8 a month" }, true))
       .toEqual({ value: { buyer: "STN", wants: "Tested packs, 7 to 8 a month", kind: "standing", basis: "stated", needed_by: null } });
   });
+  it("validates ranking and qualification fields, preserving zero and unknown fees", () => {
+    const fields = { product_family: "VW MEB", fee_eur: 0, price_basis: "buyer", reputation: "paid",
+      status: "qualifying", qualify_question: "How many?" };
+    expect(parseDemandInput(fields, false)).toEqual({ value: fields });
+    expect(parseDemandInput({ fee_eur: null, price_basis: null, reputation: null }, false))
+      .toEqual({ value: { fee_eur: null, price_basis: null, reputation: null } });
+    expect(parseDemandInput({ fee_eur: -1 }, false)).toHaveProperty("error");
+    expect(parseDemandInput({ fee_eur: Number.NaN }, false)).toHaveProperty("error");
+    expect(parseDemandInput({ reputation: "great" }, false)).toHaveProperty("error");
+    expect(parseDemandInput({ status: "pending" }, false)).toHaveProperty("error");
+  });
 
   it("keeps a needed-by date on requests only, and a basis on standing buy-boxes only", () => {
     expect(parseDemandInput({ buyer: "B", wants: "W", kind: "request", needed_by: "2026-10-20" }, true))

@@ -602,7 +602,8 @@ export async function getBuyer(companyId: string): Promise<PostgresCompanyProfil
          buyer_accepts_standard_terms as accepts_standard_terms, buyer_collection as collection, buyer_past_issues as past_issues,
          buyer_outreach_notes as outreach_notes, buyer_main_contact_id as main_contact_id, buyer_next_step as next_step,
          ${ISO("buyer_next_step_on")} as next_step_on, buyer_projects as projects, buyer_category as category, buyer_workstream_status as workstream_status,
-         buyer_evidence as evidence, ${ISO("buyer_last_reviewed_at")} as last_reviewed_at
+         buyer_evidence as evidence, ${ISO("buyer_last_reviewed_at")} as last_reviewed_at,
+         buyer_profile, buyer_profile_basis, ${ISO("buyer_profiled_at")} as buyer_profiled_at
        from crm_companies where id = $1`,
       [companyId],
     ),
