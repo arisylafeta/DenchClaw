@@ -40,6 +40,34 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
     expect(await find()).toMatchObject({ last_touched: "2099-03-10", buyer_count: 1, bid_count: 0 });
   });
 
+  it("includes linked Gmail threads and unresolved buyer-company email activity in last touch", async () => {
+    const trade = await db.createBulkTrade({ title: "Toyota Proace linkage regression" }, userId);
+    const [company] = await pg.queryPg<{ id: string }>(
+      "insert into crm_companies (id, name) values ('company_' || gen_random_uuid(), 'Synthetic STN Link Buyer') returning id");
+    const [person] = await pg.queryPg<{ id: string }>(
+      "insert into crm_people (id, full_name, email, company_id) values ('person_' || gen_random_uuid(), 'STN Contact', 'stn-link@example.test', $1) returning id", [company.id]);
+    const [thread] = await pg.queryPg<{ id: string; gmail_thread_id: string }>(
+      `insert into crm_email_threads (id, gmail_thread_id, subject, last_message_at, mailbox_owner_id)
+       values ('thread_' || gen_random_uuid(), gen_random_uuid()::text, 'STN collaboration', '2099-04-01', $1) returning id, gmail_thread_id`, [userId]);
+    await pg.queryPg("insert into crm_bulk_trade_threads (thread_key, lot_id, verdict) values ($1, $2, 'trade')",
+      [`gmail:${thread.gmail_thread_id}`, trade.id]);
+    expect(await db.getBulkTrade(trade.id)).toMatchObject({ last_touched: "2099-04-01" });
+    await pg.queryPg("delete from crm_bulk_trade_threads where lot_id = $1", [trade.id]);
+    // STN was a named trade buyer with no resolved person_id or manually-maintained touch date.
+    await pg.queryPg("insert into crm_bulk_trade_buyers (id, lot_id, name) values ('btb_' || gen_random_uuid(), $1, 'Synthetic STN Link Buyer')", [trade.id]);
+    await pg.queryPg("insert into crm_email_thread_participants (thread_id, person_id) values ($1, $2)", [thread.id, person.id]);
+    expect(await db.getBulkTrade(trade.id)).toMatchObject({ last_touched: "2099-04-01", has_buyer: true });
+    const unrelated = await db.createBulkTrade({ title: "Unrelated trade" }, userId);
+    expect((await db.getBulkTrade(unrelated.id))?.last_touched).not.toBe("2099-04-01");
+  });
+
+  it("keeps origin independent from whether each counterparty is known", async () => {
+    const trade = await db.createBulkTrade({ title: "Demand-origin trade", origin: "demand" }, userId);
+    expect(trade).toMatchObject({ origin: "demand", has_seller: false, has_buyer: false });
+    expect(await db.updateBulkTrade(trade.id, { seller_name: "Known supplier" }, userId))
+      .toMatchObject({ origin: "demand", seller_name: "Known supplier", has_seller: true });
+  });
+
   it("puts a trade on hold remembering its stage, and clears the hold on resume", async () => {
     const trade = await db.createBulkTrade({ title: "Synthetic BESS portfolio", trade_stage: "With buyers" }, userId);
     const held = await db.updateBulkTrade(trade.id,

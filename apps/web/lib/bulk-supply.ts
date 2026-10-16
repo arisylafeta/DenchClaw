@@ -1,4 +1,20 @@
 import type { Basis, DemandKind } from "./bulk-demand";
+import type { CompanyContextNote } from "./crm-postgres/company-context";
+
+export type SupplyFeedRow = {
+  id: string;
+  kind: "supply" | "trade" | "auction" | "stock";
+  title: string;
+  seller: string | null;
+  size: string | null;
+  location: string | null;
+  seen: string | null;
+  status: string;
+  href: string;
+  suppliers: string[];
+  verified: boolean | null;
+  count: number | null;
+};
 
 /** Why a batch left the Supply list. */
 export const SUPPLY_CLOSED_REASONS = ["sold", "became_trade", "gone", "not_a_fit", "other"] as const;
@@ -52,6 +68,7 @@ export type Supply = {
   closed_reason: SupplyClosedReason | null;
   updated_at: string;
   fits: SupplyFit[];
+  context_notes: CompanyContextNote[];
 };
 
 /** "~2.4 t · ~$6k", or null when the size is unknown. */

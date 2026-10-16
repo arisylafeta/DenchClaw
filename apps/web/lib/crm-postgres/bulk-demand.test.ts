@@ -46,6 +46,27 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.updateDemand("btd_missing", { note: "x" })).toBeNull();
   });
 
+  it("ranks priority inside its status band and computes missing qualification and matches", async () => {
+    const pinned = await demand.addDemand({ buyer: "Priority Buyer", wants: "Toyota packs", priority: true,
+      fee_eur: 1, qualify_question: "When do you need these?" }, user.id);
+    const scored = await demand.addDemand({ buyer: "Scored Buyer", wants: "Toyota packs", fee_eur: 10000,
+      price_basis: "buyer", reputation: "paid" }, user.id);
+    const qualifying = await demand.addDemand({ buyer: "Qualifying Priority", wants: "Toyota packs",
+      status: "qualifying", priority: true }, user.id);
+    expect(pinned.missing).toEqual(["no price", "no quantity", "no timeline", "question not sent", "no supply match"]);
+    const ordered = (await demand.listDemand()).map((row) => row.id);
+    expect(ordered.indexOf(pinned.id)).toBeLessThan(ordered.indexOf(scored.id));
+    expect(ordered.indexOf(scored.id)).toBeLessThan(ordered.indexOf(qualifying.id));
+    await pg.queryPg(`insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason)
+      values ($1, $2, 'strong', 'Exact Toyota pack family')`, [pinned.id, lotId]);
+    const complete = await demand.updateDemand(pinned.id, { quantity: "10 packs", max_price: 1000,
+      price_currency: "EUR", price_unit: "pack", needed_by: "2027-01-01", qualify_asked_on: "2026-10-16" });
+    expect(complete?.missing).toEqual([]);
+    expect(complete?.inventory_matches).toMatchObject([{ id: lotId, kind: "trade", strength: "strong" }]);
+    await pg.queryPg("update crm_bulk_trade_demand_matches set hidden = true where demand_id = $1", [pinned.id]);
+    expect((await demand.getDemand(pinned.id))?.missing).toEqual(["no supply match"]);
+  });
+
   it("records activity, scopes deletion, counts it and stamps qualifying entries across writers", async () => {
     // Load after DATABASE_URL is set: the Postgres pool is configured at module initialization.
     const activity = await import("./bulk-demand-activity");

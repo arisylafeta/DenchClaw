@@ -3,6 +3,7 @@ import type { Demand } from "../bulk-demand";
 import type { BuyerEngagement, BuyerProfile, BuyerProfileChange } from "../buyer-profile";
 import { listDemandForCompany } from "./bulk-demand";
 import { deriveDisplayDomain, deriveWebsite } from "../website-from-domain";
+import { listCompanyContextNotes, type CompanyContextNote } from "./company-context";
 
 export type CommercialProfile = {
   id: string;
@@ -85,6 +86,7 @@ export type CompanyCommercial = {
 };
 
 export type PostgresCompanyProfile = {
+  context_notes: CompanyContextNote[];
   company: {
     id: string;
     name: string | null;
@@ -571,6 +573,7 @@ export async function getPostgresCompanyProfile(
 
   return {
     company,
+    context_notes: await listCompanyContextNotes(companyId),
     people,
     threads: threads.map((row) => ({
       ...row,

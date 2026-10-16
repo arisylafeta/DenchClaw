@@ -1,12 +1,14 @@
 import { queryPg } from "../postgres";
 import type { Supply, SupplyClosedReason } from "../bulk-supply";
+import type { SupplyFeedRow } from "../bulk-supply";
+import { companyContextSql } from "./company-context";
 
 const SUPPLY_SELECT = `
   select supply.id, supply.seller, supply.company_id, supply.person_id, supply.contact, supply.email, supply.offers,
     supply.trade_kind, supply.quantity, supply.location, supply.est_tonnes::float8 as est_tonnes,
     supply.est_value_usd::float8 as est_value_usd, supply.size_note, supply.source_kind, supply.source_label,
     supply.source_url, supply.source_quote, to_char(supply.observed_on, 'YYYY-MM-DD') as observed_on, supply.status,
-    supply.closed_reason, supply.updated_at,
+    supply.closed_reason, supply.updated_at, ${companyContextSql("supply.company_id")} as context_notes,
     coalesce((
       select json_agg(json_build_object('demand_id', demand.id, 'buyer', demand.buyer, 'contact', demand.contact,
         'email', demand.email, 'wants', demand.wants, 'kind', demand.kind, 'basis', demand.basis, 'strength', m.strength,
@@ -19,6 +21,11 @@ const SUPPLY_SELECT = `
 /** Every batch: open first, newest first. */
 export async function listSupply(): Promise<Supply[]> {
   return queryPg<Supply>(`${SUPPLY_SELECT} order by supply.status = 'closed', supply.observed_on desc nulls last, supply.seller`);
+}
+
+/** Unified sell-side availability; matching remains separate from this read model. */
+export async function listSupplyFeed(): Promise<SupplyFeedRow[]> {
+  return queryPg<SupplyFeedRow>("select * from crm_bulk_trade_supply_feed order by seen desc nulls last, kind, title, id");
 }
 
 export async function getSupply(id: string): Promise<Supply | null> {

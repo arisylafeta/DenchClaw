@@ -5,9 +5,34 @@ import type { Basis, ClosedReason, Demand, DemandInput, SuggestedBuyer } from ".
 import type { Buyer, Proposal } from "../bulk-trade-details";
 import { addBuyer } from "./bulk-trade-details";
 import { addDemandActivity } from "./bulk-demand-activity";
+import { companyContextSql } from "./company-context";
 
 const DEMAND_SELECT = `
   select demand.id, demand.kind, demand.basis, demand.buyer, demand.company_id, demand.person_id, demand.contact,
+    demand.priority, ${companyContextSql("demand.company_id")} as context_notes,
+    array_remove(array[
+      case when demand.max_price is null then 'no price' end,
+      case when nullif(trim(demand.quantity), '') is null and demand.volume is null then 'no quantity' end,
+      case when demand.needed_by is null then 'no timeline' end,
+      case when nullif(trim(demand.qualify_question), '') is not null and demand.qualify_asked_on is null then 'question not sent' end,
+      case when not exists(select 1 from crm_bulk_trade_demand_matches matched
+        join crm_bulk_trade_lots matched_lot on matched_lot.id = matched.lot_id
+        where matched.demand_id = demand.id and not matched.hidden and matched_lot.origin = 'supply'
+          and matched_lot.trade_stage in ('Needs info', 'With buyers', 'Closing'))
+        and not exists(select 1 from crm_bulk_trade_supply_matches matched
+          join crm_bulk_trade_supply matched_supply on matched_supply.id = matched.supply_id
+          where matched.demand_id = demand.id and not matched.hidden and matched_supply.status = 'open')
+        then 'no supply match' end
+    ]::text[], null) as missing,
+    coalesce((select json_agg(row_to_json(inventory) order by inventory.strength desc, inventory.title) from (
+      select feed.*, matched.strength, matched.reason from crm_bulk_trade_demand_matches matched
+      join crm_bulk_trade_supply_feed feed on feed.id = matched.lot_id and feed.kind in ('trade', 'auction')
+      where matched.demand_id = demand.id and not matched.hidden
+      union all
+      select feed.*, matched.strength, matched.reason from crm_bulk_trade_supply_matches matched
+      join crm_bulk_trade_supply_feed feed on feed.id = matched.supply_id and feed.kind = 'supply'
+      where matched.demand_id = demand.id and not matched.hidden
+    ) inventory), '[]'::json) as inventory_matches,
     demand.email, demand.wants, demand.quantity, demand.location, demand.note,
     to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, demand.volume::float8 as volume, demand.volume_unit,
     demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.source_kind,
@@ -56,7 +81,7 @@ const TIER_RANK = `case (select company.buyer_tier from crm_companies company wh
 export async function listDemand(): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
     `${DEMAND_SELECT} order by case demand.status when 'open' then 0 when 'qualifying' then 1 else 2 end,
-       score desc nulls last, demand.buyer, demand.id`,
+       demand.priority desc, score desc nulls last, demand.buyer, demand.id`,
   ));
 }
 
@@ -65,7 +90,7 @@ export async function listDemandForCompany(companyId: string): Promise<Demand[]>
   return withWaiting(await queryPg<Demand>(
     `${DEMAND_SELECT} where demand.company_id = $1
      order by case demand.status when 'open' then 0 when 'qualifying' then 1 else 2 end,
-       score desc nulls last, demand.buyer, demand.id`,
+       demand.priority desc, score desc nulls last, demand.buyer, demand.id`,
     [companyId],
   ));
 }
@@ -128,6 +153,7 @@ const INSERT_KEYS = [
   "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
   "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
   "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question", "qualify_asked_on",
+  "priority",
 ] as const;
 
 export async function addDemand(input: DemandInput & { buyer: string; wants: string }, userId: string | null, source: Source = {}) {
@@ -143,6 +169,7 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
     // Our own estimate is not a confirmation from the buyer.
     confirmed_on: input.confirmed_on ?? (input.basis === "estimated" ? null : todayInLondon()),
     status: input.status ?? "open",
+    priority: input.priority ?? false,
   };
   const values = INSERT_KEYS.map((key) => row[key] ?? null);
   const sourceKeys = ["source_kind", "source_id", "source_label", "source_url", "source_quote"] as const;
