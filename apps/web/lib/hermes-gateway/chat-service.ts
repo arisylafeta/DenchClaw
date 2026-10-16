@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import { z } from "zod";
 import { buildAgentMessage, type WorkspaceContext } from "../agent-message";
@@ -143,8 +144,13 @@ export class HermesChatService {
         if (!image || typeof image.content !== "string" || !Object.values(CHAT_IMAGE_EXTENSION_TO_MIME).includes(image.mimeType as typeof CHAT_IMAGE_EXTENSION_TO_MIME[".png"]) || Buffer.byteLength(image.content, "base64") > MAX_CHAT_IMAGE_BYTES) throw new ChatServiceError(400, "invalid_image");
       }
       const attached: string[] = [];
+      const imageHashes = new Set<string>();
       try {
         for (const image of images) {
+          // Uploaded images also appear in the attachment prefix; stage each byte payload once.
+          const hash = createHash("sha256").update(Buffer.from(image.content, "base64")).digest("hex");
+          if (imageHashes.has(hash)) continue;
+          imageHashes.add(hash);
           const result = await this.manager.callSession(retained, "image.attach_bytes", { session_id: "", content_base64: image.content, filename: image.fileName, ext: extname(image.fileName ?? "") });
           if (!result.attached || !result.path) throw new ChatServiceError(502, "image_attach_failed");
           attached.push(result.path);

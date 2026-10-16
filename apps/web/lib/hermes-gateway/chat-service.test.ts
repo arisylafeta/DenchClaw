@@ -9,6 +9,7 @@ vi.mock("../hermes-native", () => ({
 vi.mock("./message-html-store", () => ({ lookupMessageHtml: vi.fn(async () => []), saveMessageHtml: vi.fn() }));
 vi.mock("../chat-image-attachments", () => ({ hydrateMessageImageAttachments: vi.fn(() => ({ attachments: [], skipped: [] })), buildChatImageHydrationErrorMessage: vi.fn(() => null) }));
 import { nativeFetch } from "../hermes-native";
+import { hydrateMessageImageAttachments } from "../chat-image-attachments";
 import { HermesGatewayManager, type GatewaySocket } from "./manager";
 import { HermesChatService } from "./chat-service";
 import { conversationKey } from "../hermes-conversations";
@@ -67,6 +68,14 @@ describe("gateway chat service", () => {
     await Promise.all([service.sendPrompt(key, { text: "first", images: [image] }), service.sendPrompt(key, { text: "second", images: [image] })]);
     expect(socket.frames.filter(frame => ["image.attach_bytes", "prompt.submit"].includes(frame.method ?? "")).map(frame => frame.method)).toEqual(["image.attach_bytes", "prompt.submit", "image.attach_bytes", "prompt.submit"]);
     expect(socket.frames.filter(frame => frame.method === "prompt.submit").every(frame => frame.params?.queued)).toBe(true);
+  });
+  it("attaches matching prefix and explicit image bytes only once, retaining distinct images", async () => {
+    const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
+    vi.mocked(hydrateMessageImageAttachments).mockReturnValueOnce({ attachmentPaths: ["a.png"], imagePaths: ["a.png"], attachments: [image], skipped: [] });
+    await service.sendPrompt(key, { text: "[Attached files: a.png]\n\nInspect", images: [{ ...image, fileName: "renamed.png" }, { ...image, content: "ZGlmZmVyZW50", fileName: "b.png" }] });
+    const staged = socket.frames.filter(frame => frame.method === "image.attach_bytes");
+    expect(staged).toHaveLength(2);
+    expect(staged.map(frame => frame.params?.content_base64)).toEqual(["aGVsbG8=", "ZGlmZmVyZW50"]);
   });
   it("detaches staged images and never retries stale prompt mutations", async () => {
     socket.failPrompt = true;
