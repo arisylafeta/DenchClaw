@@ -50,7 +50,7 @@ def test_import_reconciliation_and_clean_cutover(db):
           insert into crm_bulk_trade_demand (id,buyer,company_id,wants)
             values ('legacy_demand','Synthetic Buyer','legacy_co','Used traction packs');
           insert into campaigns (id,campaign_name,sender_identity) values
-            ('legacy_campaign','Historical cohort','supply'), ('legacy_pending','No receipt','unmapped');
+            ('legacy_campaign','Historical cohort','Supply @ ReBattery <SUPPLY@rebattery.io>'), ('legacy_pending','No receipt','unmapped');
           insert into crm_people (id,full_name,email,company_id)
             select 'legacy_'||s, s, s||'@example.test','legacy_co'
             from unnest(array['frozen','sending','unknown','accepted','failed']) s;
@@ -116,6 +116,7 @@ def test_import_reconciliation_and_clean_cutover(db):
     accepted = next(s for s in sends if s['state'] == 'accepted')
     assert (accepted['id'], accepted['transport'], accepted['direction'], accepted['purpose'], accepted['identity_key']) == (
         'legacy_send_accepted', 'postmark-broadcast', 'outbound', 'marketing', 'supply')
+    assert all(s['from_email'] == 'supply@rebattery.io' for s in sends)
     assert (accepted['subject'], accepted['body_html'], accepted['body_text'], accepted['personalization']) == (
         'Frozen subject', '<p>Frozen</p>', 'Frozen text', {'name': 'Synthetic'})
     assert (accepted['person_id'], accepted['company_id'], accepted['listing_id'], accepted['auction_url'], accepted['recipient_email'], accepted['provider_message_id']) == (
@@ -136,17 +137,89 @@ def test_import_reconciliation_and_clean_cutover(db):
     assert gmail['legacy_owner']['cc_emails'] == ['accepted@example.test']
     assert all(r['crm_visible'] and r['crm_visible_reason']=='legacy' for r in gmail.values())
 
-    # A collision with different content must refuse, rather than silently skip.
+    # RFC display-name authors keep unknown rows recoverable with the fake driver.
+    from rebattery_mail.send import recover
+    class Recovery:
+        def __init__(self):
+            self.seen = []
+
+        def recover(self, author, message):
+            self.seen.append((author['key'], message['id']))
+            return None
+
+    with db.cursor() as cur:
+        cur.execute("update mail_identity set postmark_stream='broadcast' where key='supply'")
+    fake = Recovery()
+    recover(SimpleNamespace(target='legacy_campaign', apply=False), driver=fake)
+    assert ('supply', 'legacy_send_unknown') in fake.seen
+
+    # The exact review reproduction: receipts and rendered content arrive after
+    # the initial import. The locked cutover must refuse until a fresh import.
+    def refused_cutover():
+        with pytest.raises(psycopg2.Error, match='mismatched'):
+            with db.cursor() as cur:
+                cur.execute((SQL / 'migrations/038_mail_cutover.sql').read_text())
+        with db.cursor() as cur:
+            cur.execute('rollback')
+        assert rows(db, "select to_regclass('crm_campaign_sends') as name")[0]['name']
+
+    with db.cursor() as cur:
+        cur.execute("""update crm_campaign_sends set state='accepted',
+          provider_message_id='late-receipt',accepted_at='2026-10-03T09:00:00Z',
+          delivered_at='2026-10-03T09:01:00Z',provider_opened_at='2026-10-03T09:02:00Z',
+          provider_link_clicked_at='2026-10-03T09:03:00Z',
+          rendered_subject='Updated subject',rendered_html='<p>Updated</p>',rendered_text='Updated text'
+          where id='legacy_send_sending';
+          update crm_email_messages set body='Late synced body' where id='legacy_in';
+          update crm_campaign_send_links set first_clicked_at='2026-10-03T09:03:00Z' where id='legacy_link';
+        """)
+    refused_cutover()
+    refreshed = import_legacy(SimpleNamespace(apply=True))
+    assert refreshed['counts']['crm_campaign_sends']['updated'] == 1
+    assert refreshed['counts']['crm_email_messages']['updated'] == 1
+    assert refreshed['counts']['crm_campaign_send_links']['updated'] == 1
+    late = rows(db, "select * from mail_message where id='legacy_send_sending'")[0]
+    assert (late['state'],late['provider_message_id'],late['subject'],late['body_text']) == (
+        'accepted','late-receipt','Updated subject','Updated text')
+    assert rows(db, "select body_text from mail_message where id='legacy_in'")[0]['body_text'] == 'Late synced body'
+    assert rows(db, "select first_clicked_at from mail_message_link where id='legacy_link'")[0]['first_clicked_at'].isoformat() == '2026-10-03T09:03:00+00:00'
+    assert rows(db, "select count(*) as n from mail_event where message_id='legacy_send_sending'")[0]['n'] == 4
+    assert import_legacy(SimpleNamespace(apply=True))['counts']['crm_campaign_sends']['updated'] == 0
+
+    # Independently guard each previously unchecked projection, not just state.
+    for mutation in (
+        "update crm_campaign_sends set rendered_text='Changed again' where id='legacy_send_sending'",
+        "update crm_email_messages set body='Another body' where id='legacy_in'",
+        "update crm_campaign_send_links set first_clicked_at='2026-10-04T09:03:00Z' where id='legacy_link'",
+        "update crm_email_thread_participants set position=9 where thread_id='legacy_thread'",
+    ):
+        with db.cursor() as cur:
+            cur.execute(mutation)
+        refused_cutover()
+        assert import_legacy(SimpleNamespace(apply=True))['reconciled']
+
+    # A stale source never rolls a newer log state or receipt back.
+    with db.cursor() as cur:
+        cur.execute("update crm_campaign_sends set state='sending',provider_message_id=null where id='legacy_send_sending'")
+    with pytest.raises(Refused, match='legacy_reconciliation_failed'):
+        import_legacy(SimpleNamespace(apply=True))
+    assert rows(db, "select state,provider_message_id from mail_message where id='legacy_send_sending'")[0] == {
+        'state':'accepted','provider_message_id':'late-receipt'}
+    with db.cursor() as cur:
+        cur.execute("update crm_campaign_sends set state='accepted',provider_message_id='late-receipt' where id='legacy_send_sending'")
+        cur.execute("update mail_event set occurred_at=occurred_at+interval '1 second' where provider_event_id='legacy:legacy_send_sending:sent'")
+    refused_cutover()
+    assert import_legacy(SimpleNamespace(apply=True))['reconciled']
+
+    # Same-state content is refreshed as well; unchanged reruns update nothing.
     with db.cursor() as cur:
         cur.execute("update mail_message set subject='Corrupted' where id='legacy_in'")
-    with pytest.raises(Refused, match='legacy_reconciliation_failed') as error:
-        import_legacy(SimpleNamespace(apply=True))
-    assert error.value.detail['counts']['crm_email_messages']['mismatches'] == 1
-    with db.cursor() as cur:
-        cur.execute("update mail_message set subject='A question' where id='legacy_in'")
+    assert import_legacy(SimpleNamespace(apply=True))['counts']['crm_email_messages']['updated'] == 1
+    assert rows(db, "select subject from mail_message where id='legacy_in'")[0]['subject'] == 'A question'
     cli = subprocess.run(['python3', str(ROOT/'scripts/rebattery/rebattery-mail.py'), 'legacy','import'], capture_output=True, text=True)
     assert cli.returncode == 0, cli.stderr
     assert json.loads(cli.stdout)['reconciled']
+    before = snapshot(db)
 
     # Apply to this module's throwaway database using the deployment command.
     cutover = subprocess.run(['psql', os.environ['DENCH_MAIL_DSN'], '-X', '-v', 'ON_ERROR_STOP=1', '-f', str(SQL/'migrations/038_mail_cutover.sql')], capture_output=True, text=True)
@@ -180,3 +253,58 @@ def test_import_reconciliation_and_clean_cutover(db):
     assert rows(db, "select status from crm_subscriptions where person_id='legacy_failed' and list='Supply update'")[0]['status'] == 'Subscribed'
     with pytest.raises(Refused, match='already removed'):
         import_legacy(SimpleNamespace(apply=True))
+
+
+def test_campaign_deliveries_do_not_answer_buyers_but_campaign_replies_do(db):
+    queries = {
+        'waiting': "select * from crm_bulk_trade_buyer_waiting where person_id='legacy_accepted'",
+        'engagement': "select * from crm_buyer_engagement where company_id='legacy_co'",
+    }
+    before = {key: rows(db, sql) for key, sql in queries.items()}
+    assert before['waiting'][0]['waiting_since'] is not None
+    with db.cursor() as cur:
+        cur.execute("""insert into campaigns (id,campaign_name) values ('queue_campaign','Synthetic Gmail marketing');
+          insert into mail_message (id,direction,transport,purpose,state,campaign_id,person_id,
+            from_email,to_emails,sent_at,crm_visible)
+          values ('queue_delivery','outbound','gmail','marketing','accepted','queue_campaign','legacy_accepted',
+            'supply@rebattery.io',array['accepted@example.test'],'2026-10-05T12:00:00Z',true);
+          insert into mail_message_recipient (message_id,person_id,recipient_type)
+          values ('queue_delivery','legacy_accepted','to');
+        """)
+    assert {key: rows(db, sql) for key, sql in queries.items()} == before
+    with db.cursor() as cur:
+        cur.execute("""insert into mail_message (id,direction,transport,state,campaign_id,from_person_id,
+            from_email,sent_at,crm_visible)
+          values ('queue_reply','inbound','gmail','received','queue_campaign','legacy_accepted',
+            'accepted@example.test','2026-10-06T12:00:00Z',true)""")
+    after = {key: rows(db, sql) for key, sql in queries.items()}
+    assert after['waiting'][0]['waiting_since'].isoformat() == '2026-10-06T12:00:00+00:00'
+    assert after['waiting'][0]['last_out_at'] == before['waiting'][0]['last_out_at']
+    assert after['engagement'][0]['emails_in_90d'] == before['engagement'][0]['emails_in_90d']+1
+    assert after['engagement'][0]['emails_out_90d'] == before['engagement'][0]['emails_out_90d']
+
+
+def test_operational_bootstraps_never_replay_the_retired_mail_schema(db):
+    scripts = ROOT / 'scripts/rebattery'
+    setup = scripts / 'setup-loop-monitor.mjs'
+    fixture = scripts / 'run-projects-mvp-fixture.mjs'
+    assert 'crm-postgres/schema.sql' not in setup.read_text()
+    assert 'crm-postgres/schema.sql' not in fixture.read_text()
+    assert 'for (const file of [fixture])' in fixture.read_text()
+    bootstrap = (ROOT / 'apps/web/scripts/apply-postgres-schema.ts').read_text()
+    assert bootstrap.index("to_regclass('public.crm_objects')") < bootstrap.index('await queryPg(sql)')
+    assert 'if (state?.existing)' in bootstrap
+    before = snapshot(db)
+    definitions = rows(db, "select viewname,definition from pg_views where schemaname='public' and viewname=any(%s) order by viewname", (list(VIEWS),))
+    env = dict(os.environ, LOOP_MONITOR_DATABASE_URL=os.environ['DENCH_MAIL_DSN'])
+    # The executable expects a URL, whereas DENCH_MAIL_DSN is a libpq DSN.
+    from psycopg2.extensions import parse_dsn
+    from urllib.parse import quote
+    params = parse_dsn(os.environ['DENCH_MAIL_DSN'])
+    env['LOOP_MONITOR_DATABASE_URL'] = f"postgresql://{quote(params['user'])}:{quote(params['password'])}@{params['host']}:{params['port']}/{params['dbname']}"
+    run = subprocess.run(['node', str(setup)], env=env, capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    assert snapshot(db) == before
+    assert rows(db, "select viewname,definition from pg_views where schemaname='public' and viewname=any(%s) order by viewname", (list(VIEWS),)) == definitions
+    for source, *_ in SOURCES:
+        assert rows(db, 'select to_regclass(%s) as name', (source,))[0]['name'] is None

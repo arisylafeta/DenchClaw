@@ -5,12 +5,114 @@ begin;
 set local lock_timeout = '5s';
 lock table crm_email_threads, crm_email_messages, crm_email_thread_participants,
   crm_email_message_recipients, crm_campaign_sends, crm_campaign_send_links in access exclusive mode;
-do $$ begin if exists(select 1 from crm_email_threads s where not exists(select 1 from mail_thread t where t.id=s.id)) then raise exception 'mail cutover refused: crm_email_threads has unloaded rows'; end if; end $$;
-do $$ begin if exists(select 1 from crm_campaign_sends s where not exists(select 1 from mail_message t where t.id=s.id)) then raise exception 'mail cutover refused: crm_campaign_sends has unloaded rows'; end if; end $$;
-do $$ begin if exists(select 1 from crm_email_messages s where not exists(select 1 from mail_message t where t.id=s.id)) then raise exception 'mail cutover refused: crm_email_messages has unloaded rows'; end if; end $$;
-do $$ begin if exists(select 1 from crm_campaign_send_links s where not exists(select 1 from mail_message_link t where t.id=s.id)) then raise exception 'mail cutover refused: crm_campaign_send_links has unloaded rows'; end if; end $$;
-do $$ begin if exists(select 1 from crm_email_thread_participants s where not exists(select 1 from mail_thread_participant t where t.thread_id=s.thread_id and t.person_id=s.person_id)) then raise exception 'mail cutover refused: crm_email_thread_participants has unloaded rows'; end if; end $$;
-do $$ begin if exists(select 1 from crm_email_message_recipients s where not exists(select 1 from mail_message_recipient t where t.message_id=s.message_id and t.person_id=s.person_id and t.recipient_type=s.recipient_type)) then raise exception 'mail cutover refused: crm_email_message_recipients has unloaded rows'; end if; end $$;
+-- Compare every imported field again while the sources remain exclusively locked.
+do $$ begin
+  if exists (select 1 from (
+      select id, subject, gmail_thread_id, mailbox_owner_id, last_message_at,
+             coalesce(message_count,0) as message_count, true as crm_visible, created_at, updated_at
+      from crm_email_threads) e where not exists (
+    select 1 from mail_thread t where t.id=e.id and not exists (
+      select 1 from jsonb_each(to_jsonb(e)) field
+      where to_jsonb(t)->field.key is distinct from field.value))) then
+    raise exception 'mail cutover refused: crm_email_threads has unloaded rows or mismatched fields; rerun legacy import';
+  end if;
+end $$;
+do $$ begin
+  if exists (select 1 from (
+      select s.id, 'outbound'::text as direction, 'postmark-broadcast'::text as transport,
+        'marketing'::text as purpose,
+        identity.key as identity_key,
+        coalesce(identity.address, case when sender.address like '%@%' then sender.address end) as from_email,
+        s.campaign_id, s.person_id, s.company_id, s.listing_id, s.auction_url,
+        s.recipient_email, array[s.recipient_email] as to_emails,
+        s.provider_message_id, s.state, s.claimed_at, s.accepted_at,
+        s.accepted_at as sent_at, s.delivered_at, s.bounced_at,
+        s.provider_opened_at as opened_at, s.provider_link_clicked_at as clicked_at,
+        s.last_synced_at, s.personalization, s.rendered_subject as subject,
+        s.rendered_html as body_html, s.rendered_text as body_text,
+        false as crm_visible, s.created_at, s.created_at as updated_at
+      from crm_campaign_sends s join campaigns c on c.id=s.campaign_id
+      cross join lateral (select lower(btrim(coalesce(
+        substring(c.sender_identity from '<([^<>]+)>'),c.sender_identity))) as address) sender
+      left join lateral (select i.key,i.address from mail_identity i
+        where lower(i.key)=lower(btrim(c.sender_identity)) or lower(i.address)=sender.address
+        order by i.key limit 1) identity on true) e where not exists (
+    select 1 from mail_message t where t.id=e.id and not exists (
+      select 1 from jsonb_each(to_jsonb(e)) field
+      where to_jsonb(t)->field.key is distinct from field.value))) then
+    raise exception 'mail cutover refused: crm_campaign_sends has unloaded rows or mismatched fields; rerun legacy import';
+  end if;
+end $$;
+do $$ begin
+  if exists (select 1 from (
+      select m.id, m.thread_id, m.subject, m.sent_at, m.from_person_id,
+        m.from_email, m.body_preview, m.body as body_text, coalesce(m.has_attachments,false) as has_attachments,
+        m.gmail_message_id, m.mailbox_owner_id, m.created_at, m.updated_at,
+        'gmail'::text as transport, 'personal'::text as purpose,
+        case when own.is_own then 'outbound' else 'inbound' end as direction,
+        case when own.is_own then 'accepted' else 'received' end as state,
+        case when own.is_own then m.sent_at end as accepted_at,
+        (select i.key from mail_identity i where lower(i.address)=lower(m.from_email)
+          order by i.key limit 1) as identity_key,
+        coalesce((select array_agg(p.email order by r.position, p.id)
+          from crm_email_message_recipients r join crm_people p on p.id=r.person_id
+          where r.message_id=m.id and r.recipient_type='to' and p.email is not null), '{}') as to_emails,
+        coalesce((select array_agg(p.email order by r.position, p.id)
+          from crm_email_message_recipients r join crm_people p on p.id=r.person_id
+          where r.message_id=m.id and r.recipient_type='cc' and p.email is not null), '{}') as cc_emails,
+        true as crm_visible, 'legacy'::text as crm_visible_reason
+      from crm_email_messages m left join crm_users u on u.id=m.mailbox_owner_id
+      cross join lateral (select coalesce(lower(m.from_email)=lower(u.email),false)
+        or exists(select 1 from mail_identity i where lower(i.address)=lower(m.from_email)
+          or lower(i.gmail_account)=lower(m.from_email)) as is_own) own) e where not exists (
+    select 1 from mail_message t where t.id=e.id and not exists (
+      select 1 from jsonb_each(to_jsonb(e)) field
+      where to_jsonb(t)->field.key is distinct from field.value))) then
+    raise exception 'mail cutover refused: crm_email_messages has unloaded rows or mismatched fields; rerun legacy import';
+  end if;
+end $$;
+do $$ begin
+  if exists (select 1 from (
+      select id, send_id as message_id, cta_key, destination_url, listing_id,
+             first_clicked_at from crm_campaign_send_links) e where not exists (
+    select 1 from mail_message_link t where t.id=e.id and not exists (
+      select 1 from jsonb_each(to_jsonb(e)) field
+      where to_jsonb(t)->field.key is distinct from field.value))) then
+    raise exception 'mail cutover refused: crm_campaign_send_links has unloaded rows or mismatched fields; rerun legacy import';
+  end if;
+end $$;
+do $$ begin
+  if exists (select 1 from (
+      select thread_id, person_id, position, created_at from crm_email_thread_participants) e where not exists (
+    select 1 from mail_thread_participant t where t.thread_id=e.thread_id and t.person_id=e.person_id and not exists (
+      select 1 from jsonb_each(to_jsonb(e)) field
+      where to_jsonb(t)->field.key is distinct from field.value))) then
+    raise exception 'mail cutover refused: crm_email_thread_participants has unloaded rows or mismatched fields; rerun legacy import';
+  end if;
+end $$;
+do $$ begin
+  if exists (select 1 from (
+      select message_id, person_id, recipient_type, position, created_at from crm_email_message_recipients) e where not exists (
+    select 1 from mail_message_recipient t where t.message_id=e.message_id and t.person_id=e.person_id and t.recipient_type=e.recipient_type and not exists (
+      select 1 from jsonb_each(to_jsonb(e)) field
+      where to_jsonb(t)->field.key is distinct from field.value))) then
+    raise exception 'mail cutover refused: crm_email_message_recipients has unloaded rows or mismatched fields; rerun legacy import';
+  end if;
+end $$;
+do $$ begin
+  if exists (select 1 from (
+ select s.id as message_id, e.type, 'postmark'::text as source,
+   'legacy:' || s.id || ':' || e.type as provider_event_id, e.at as occurred_at
+ from crm_campaign_sends s cross join lateral (values
+   ('sent',s.accepted_at), ('delivered',s.delivered_at), ('bounced',s.bounced_at),
+   ('opened',s.provider_opened_at), ('clicked',s.provider_link_clicked_at)
+ ) e(type,at) where e.at is not null
+) e where not exists (
+    select 1 from mail_event t where t.source=e.source and t.provider_event_id=e.provider_event_id
+      and t.message_id=e.message_id and t.type=e.type and t.occurred_at=e.occurred_at)) then
+    raise exception 'mail cutover refused: missing or mismatched legacy events; rerun legacy import';
+  end if;
+end $$;
 
 -- Discover the existing FK name rather than depending on bootstrap naming.
 do $$ declare fk record; begin
@@ -262,8 +364,8 @@ UNION ALL
    FROM automation_loop_runs;
 
 create view crm_bulk_trade_buyer_waiting as
-WITH visible_messages as (select * from mail_message where crm_visible),
-visible_recipients as (select r.* from mail_message_recipient r join mail_message m on m.id=r.message_id where m.crm_visible),
+WITH visible_messages as (select * from mail_message where crm_visible and not (direction='outbound' and campaign_id is not null)),
+visible_recipients as (select r.* from mail_message_recipient r join visible_messages m on m.id=r.message_id),
 buyers AS (
          SELECT p.id AS person_id,
             p.company_id,
@@ -324,8 +426,8 @@ SELECT person_id,
   GROUP BY person_id;
 
 create view crm_buyer_engagement as
-WITH visible_messages as (select * from mail_message where crm_visible),
-visible_recipients as (select r.* from mail_message_recipient r join mail_message m on m.id=r.message_id where m.crm_visible),
+WITH visible_messages as (select * from mail_message where crm_visible and not (direction='outbound' and campaign_id is not null)),
+visible_recipients as (select r.* from mail_message_recipient r join visible_messages m on m.id=r.message_id),
 campaign_messages as (select * from mail_message where campaign_id is not null),
 people AS (
          SELECT crm_people.id AS person_id,

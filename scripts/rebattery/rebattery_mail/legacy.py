@@ -1,7 +1,8 @@
-"""Transactional, reconciled one-time import. Dry runs execute then roll back.
+"""Transactional, reconciled historical import. Dry runs execute then roll back.
 
-Loaded campaigns are launched when any receipt exists, otherwise legacy. Importing
-never makes a frozen historical cohort eligible for a new launch.
+Reruns refresh changed source fields without regressing message state or provider
+evidence. Loaded campaigns with a receipt become launched; others stay legacy.
+The cutover repeats these complete projections under exclusive source locks.
 """
 from .core import Refused, connection
 
@@ -15,8 +16,8 @@ SOURCES = (
     ("crm_campaign_sends", "mail_message", "id", """
       select s.id, 'outbound'::text as direction, 'postmark-broadcast'::text as transport,
         'marketing'::text as purpose,
-        (select i.key from mail_identity i where lower(c.sender_identity) in
-          (lower(i.key), lower(i.address)) order by i.key limit 1) as identity_key,
+        identity.key as identity_key,
+        coalesce(identity.address, case when sender.address like '%@%' then sender.address end) as from_email,
         s.campaign_id, s.person_id, s.company_id, s.listing_id, s.auction_url,
         s.recipient_email, array[s.recipient_email] as to_emails,
         s.provider_message_id, s.state, s.claimed_at, s.accepted_at,
@@ -25,7 +26,12 @@ SOURCES = (
         s.last_synced_at, s.personalization, s.rendered_subject as subject,
         s.rendered_html as body_html, s.rendered_text as body_text,
         false as crm_visible, s.created_at, s.created_at as updated_at
-      from crm_campaign_sends s join campaigns c on c.id=s.campaign_id"""),
+      from crm_campaign_sends s join campaigns c on c.id=s.campaign_id
+      cross join lateral (select lower(btrim(coalesce(
+        substring(c.sender_identity from '<([^<>]+)>'),c.sender_identity))) as address) sender
+      left join lateral (select i.key,i.address from mail_identity i
+        where lower(i.key)=lower(btrim(c.sender_identity)) or lower(i.address)=sender.address
+        order by i.key limit 1) identity on true"""),
     ("crm_email_messages", "mail_message", "id", """
       select m.id, m.thread_id, m.subject, m.sent_at, m.from_person_id,
         m.from_email, m.body_preview, m.body as body_text, coalesce(m.has_attachments,false) as has_attachments,
@@ -79,21 +85,46 @@ def import_legacy(args):
             counts = {}
             for source, target, key, projection in SOURCES:
                 cur.execute("select * from (" + projection + ") expected limit 0")
-                columns = ', '.join('"' + col.name + '"' for col in cur.description)
+                names = [col.name for col in cur.description]
+                columns = ', '.join('"' + name + '"' for name in names)
                 cur.execute(f"select count(*) from {source}")
                 source_count = cur.fetchone()[0]
-                cur.execute(f"insert into {target} ({columns}) {projection} on conflict do nothing")
-                inserted = cur.rowcount
                 keys = key.split(', ')
+                changed = [name for name in names if name not in keys]
+                assignments = ', '.join(f'"{name}"=excluded."{name}"' for name in changed)
+                current = ', '.join(f't."{name}"' for name in changed)
+                incoming = ', '.join(f'excluded."{name}"' for name in changed)
+                guard = ''
+                if target == 'mail_message':
+                    # A newer log receipt is never erased by an older source snapshot.
+                    states = "array['draft','frozen','approved','sending','unknown','failed','accepted','received']"
+                    guard = f" and array_position({states},t.state)<=array_position({states},excluded.state)"
+                    for name in ('claimed_at','accepted_at','delivered_at','bounced_at','opened_at','clicked_at','last_synced_at'):
+                        if name in names:
+                            guard += f' and (t."{name}" is null or excluded."{name}">=t."{name}")'
+                    if 'provider_message_id' in names:
+                        guard += ' and (t.provider_message_id is null or t.provider_message_id=excluded.provider_message_id)'
+                cur.execute(f"""insert into {target} as t ({columns}) {projection}
+                    on conflict ({key}) do update set {assignments}
+                    where row({current}) is distinct from row({incoming}) {guard}
+                    returning (xmax=0) as inserted""")
+                changes = cur.fetchall()
+                inserted = sum(row[0] for row in changes)
+                updated = len(changes)-inserted
                 match = ' and '.join(f't."{k}"=e."{k}"' for k in keys)
                 cur.execute(f"select count(*) from ({projection}) e join {target} t on {match}")
                 loaded = cur.fetchone()[0]
                 cur.execute(f"select count(*) from (({projection}) except select {columns} from {target}) differences")
                 mismatches = cur.fetchone()[0]
-                counts[source] = dict(source=source_count, loaded=loaded, inserted=inserted,
+                counts[source] = dict(source=source_count, loaded=loaded, inserted=inserted, updated=updated,
                                       orphans=source_count-loaded, mismatches=mismatches)
-            cur.execute("insert into mail_event (message_id,type,source,provider_event_id,occurred_at) " + EVENTS + " on conflict do nothing")
-            events_inserted = cur.rowcount
+            cur.execute("insert into mail_event (message_id,type,source,provider_event_id,occurred_at) " + EVENTS + """
+                on conflict (source,provider_event_id) where provider_event_id is not null
+                do update set message_id=excluded.message_id,type=excluded.type,occurred_at=excluded.occurred_at
+                where (mail_event.message_id,mail_event.type,mail_event.occurred_at) is distinct from
+                  (excluded.message_id,excluded.type,excluded.occurred_at)
+                returning (xmax=0) as inserted""")
+            events_inserted = sum(row[0] for row in cur.fetchall())
             cur.execute("select count(*) from (" + EVENTS + ") e where not exists (select 1 from mail_event t where t.source=e.source and t.provider_event_id=e.provider_event_id and t.message_id=e.message_id and t.type=e.type and t.occurred_at=e.occurred_at)")
             event_mismatches = cur.fetchone()[0]
             cur.execute("""update campaigns c set mail_state=case when exists

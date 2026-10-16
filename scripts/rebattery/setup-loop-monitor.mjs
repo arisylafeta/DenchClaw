@@ -9,11 +9,16 @@ if (!databaseName || (databaseName === "denchclaw" && !productionApproved)) {
   throw new Error("Production setup requires LOOP_MONITOR_ALLOW_PRODUCTION=approved-after-backup.");
 }
 
-const schema = fileURLToPath(
-  new URL("../../apps/web/lib/crm-postgres/schema.sql", import.meta.url),
-);
+// The canonical database must already be provisioned. Replaying the historical
+// base schema here would recreate mail tables retired by migration 038.
+const ready = spawnSync("psql", [databaseUrl, "-X", "-v", "ON_ERROR_STOP=1", "-c",
+  "do $$ begin if to_regclass('automation_loops') is null or to_regclass('automation_loop_runs') is null then raise exception 'Provision the CRM database before loop setup'; end if; end $$;"], {
+  stdio: "inherit",
+});
+if (ready.error) throw ready.error;
+if (ready.status !== 0) throw new Error("CRM database is not provisioned.");
 const objects = fileURLToPath(new URL("./loop-monitor-objects.sql", import.meta.url));
-for (const file of [schema, objects]) {
+for (const file of [objects]) {
   const result = spawnSync("psql", [databaseUrl, "-X", "-v", "ON_ERROR_STOP=1", "-f", file], {
     stdio: "inherit",
   });

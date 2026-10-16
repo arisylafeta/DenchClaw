@@ -6,6 +6,14 @@ import { pgPool, queryPg } from "../lib/postgres";
 async function main() {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const postgresDir = join(moduleDir, "..", "lib", "crm-postgres");
+  // This is a fresh-database bootstrap, not a migration replayer. Reapplying the
+  // base schema after mail cutover would recreate retired tables and views.
+  const [state] = await queryPg<{ existing: string | null }>(
+    "select to_regclass('public.crm_objects')::text as existing",
+  );
+  if (state?.existing) {
+    throw new Error("CRM database already exists; apply only explicitly approved new migrations.");
+  }
   const sql = readFileSync(join(postgresDir, "schema.sql"), "utf-8");
   await queryPg(sql);
   const migrationsDir = join(postgresDir, "migrations");
