@@ -1,3 +1,5 @@
+import type { CampaignDetail } from './campaigns';
+
 export type MailPurpose = 'personal' | 'marketing' | 'transactional';
 export type MailTransport = 'gmail' | 'postmark-broadcast' | 'postmark-transactional';
 export type MailEvent = { id: number; message_id: string; type: string; source: string; occurred_at: string; detail: Record<string, unknown> };
@@ -16,7 +18,7 @@ export type MailThread = { id: string; subject: string | null; last_message_at: 
 export type MailCounts = { sent: number; delivered: number; bounced: number; opened: number; clicked: number; unsubscribed: number; replied: number };
 export type MailCampaignSummary = MailCounts & { id: string; campaign_name: string; identity_key: string | null; purpose: MailPurpose | null; mail_state: string; total: number };
 export type MailLink = { id: string; message_id: string; cta_key: string; destination_url: string; first_clicked_at: string | null };
-export type MailCampaignDetail = MailCampaignSummary & { recipients: MailMessageRow[]; links: MailLink[]; scanner_evidence: boolean; proxy_evidence: boolean };
+export type MailCampaignDetail = CampaignDetail & MailCampaignSummary & { counts: MailCounts; delivery_rows: MailMessageRow[]; links: MailLink[]; scanner_evidence: boolean; proxy_evidence: boolean };
 export type MailFollowup = { id: string; message_id: string | null; thread_id: string | null; person_id: string | null; identity_key: string | null; due_at: string; origin: string; state: string; note: string | null; paused_reason: string | null };
 export type MailFilters = { view?: 'conversations' | 'campaigns' | 'sent' | 'followups'; q?: string; from?: string; to?: string; identity?: string; campaign?: string; thread?: string; person?: string; direction?: string; transport?: string; purpose?: string; state?: string; event?: string; crmOnly?: boolean; since?: string; until?: string; cursor?: string; limit?: number; mailboxOwnerId?: string };
 export type MailPage<T> = { items: T[]; nextCursor: string | null };

@@ -111,13 +111,13 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
     queryPg<{ at: string; subject: string | null; from: string | null; outgoing: boolean }>(
       `select m.sent_at as at, m.subject, m.from_email as from,
               not exists (select 1 from crm_people p where p.id = m.from_person_id and p.company_id = $2) as outgoing
-         from crm_email_messages m
-        where m.mailbox_owner_id = $1::uuid
+         from mail_message m
+        where m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $1::uuid
           and exists (
             select 1 from crm_people p
              where p.company_id = $2
                and (p.id = m.from_person_id
-                 or exists (select 1 from crm_email_message_recipients r where r.message_id = m.id and r.person_id = p.id)))
+                 or exists (select 1 from mail_message_recipient r where r.message_id = m.id and r.person_id = p.id)))
         order by m.sent_at desc nulls last limit 20`,
       [viewerId, dismantler.company_id],
     ),

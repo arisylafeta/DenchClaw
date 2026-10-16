@@ -100,14 +100,13 @@ describe.skipIf(!TEST_URL)("bulk trade detail writes", () => {
     );
     await pg.queryPg(`insert into campaigns (id, campaign_name) values ('c_test_' || $1, 'Synthetic teaser')`, [suffix]);
     await pg.queryPg(
-      `insert into crm_campaign_sends (id, campaign_id, person_id, listing_id, auction_url, recipient_email, state,
-         accepted_at, delivered_at, provider_opened_at, provider_link_clicked_at)
-       values ('s_test_' || $1, 'c_test_' || $1, $2, 'lst_' || $1, 'https://example.test/a', 'tess-' || $1 || '@example.test',
+      `insert into mail_message (direction,transport,purpose,crm_visible,id, campaign_id, person_id, listing_id, auction_url, recipient_email, state,
+         accepted_at, delivered_at, opened_at, clicked_at) values ('outbound','postmark-broadcast','marketing',true,'s_test_' || $1, 'c_test_' || $1, $2, 'lst_' || $1, 'https://example.test/a', 'tess-' || $1 || '@example.test',
          'accepted', '2026-09-24T09:00:00Z', '2026-09-24T09:01:00Z', '2026-09-25T08:00:00Z', '2026-09-25T08:10:00Z')`,
       [suffix, person.id],
     );
     await pg.queryPg(
-      `insert into crm_campaign_send_links (id, send_id, cta_key, destination_url, listing_id, first_clicked_at) values
+      `insert into mail_message_link (id, message_id, cta_key, destination_url, listing_id, first_clicked_at) values
        ('l_primary_' || $1, 's_test_' || $1, 'primary', 'https://example.test/a', 'lst_' || $1, null),
        ('l_secondary_' || $1, 's_test_' || $1, 'secondary', 'https://example.test/b', 'lst_secondary_' || $1, '2026-09-25T08:15:00Z'),
        ('l_form_' || $1, 's_test_' || $1, 'sourcing', 'https://example.test/form', null, '2026-09-25T08:10:00Z')`,

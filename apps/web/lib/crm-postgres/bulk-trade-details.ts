@@ -31,15 +31,15 @@ const BID_COLUMNS = `bid.id::text as id, bid.buyer_id, bid.amount::text as amoun
 const TRACKING = `
     (select row_to_json(latest) from (
        select campaign.campaign_name as campaign, send.accepted_at as sent_at, send.delivered_at, send.bounced_at,
-         send.provider_opened_at as opened_at,
-         (select min(link.first_clicked_at) from crm_campaign_send_links link
-          where link.send_id = send.id and link.listing_id = lot.listing_id) as clicked_at
-       from crm_campaign_sends send
+         send.opened_at as opened_at,
+         (select min(link.first_clicked_at) from mail_message_link link
+          where link.message_id = send.id and link.listing_id = lot.listing_id) as clicked_at
+       from mail_message send
        join campaigns campaign on campaign.id = send.campaign_id
        join crm_bulk_trade_lots lot on lot.id = buyer.lot_id
        where send.person_id = buyer.person_id and send.state = 'accepted' and lot.listing_id is not null
          and (send.listing_id = lot.listing_id or exists (
-           select 1 from crm_campaign_send_links link where link.send_id = send.id and link.listing_id = lot.listing_id))
+           select 1 from mail_message_link link where link.message_id = send.id and link.listing_id = lot.listing_id))
        order by send.accepted_at desc limit 1
      ) latest) as email_tracking`;
 

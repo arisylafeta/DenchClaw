@@ -155,9 +155,8 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     expect((await db.listDismantlers()).dismantlers.find((row) => row.id === d.id)!.last_contact).toBe("2026-09-29");
 
     await pg.queryPg(
-      `insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email, mailbox_owner_id) values
-         ($1, 'Their reply', '2026-09-20T10:00:00Z', $3, 'mo@example.test', $4::uuid),
-         ($2, 'Colleague thread', '2026-09-28T10:00:00Z', $3, 'mo@example.test', $5::uuid)`,
+      `insert into mail_message (direction,transport,purpose,crm_visible,state,id, subject, sent_at, from_person_id, from_email, mailbox_owner_id) values ('inbound','gmail',null,true,'received',$1, 'Their reply', '2026-09-20T10:00:00Z', $3, 'mo@example.test', $4::uuid),
+         ('inbound','gmail',null,true,'received',$2, 'Colleague thread', '2026-09-28T10:00:00Z', $3, 'mo@example.test', $5::uuid)`,
       [`e1-${s}`, `e2-${s}`, `mo-${s}`, userId, otherUserId],
     );
     const detail = (await db.getDismantlerDetail(d.id, userId))!;

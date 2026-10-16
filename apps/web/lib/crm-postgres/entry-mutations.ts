@@ -19,8 +19,10 @@ const canonicalTableByObjectName: Record<string, string> = {
   people: "crm_people",
   company: "crm_companies",
   companies: "crm_companies",
-  email_thread: "crm_email_threads",
-  email_message: "crm_email_messages",
+  email_thread: "mail_thread",
+  email_message: "mail_message",
+  mail_message: "mail_message",
+  mail_campaign: "campaigns",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
   project: "projects",
@@ -40,6 +42,8 @@ const READ_ONLY_OBJECTS = new Set([
   "crm_user",
   "email_thread",
   "email_message",
+  "mail_message",
+  "mail_campaign",
   "interaction",
 ]);
 
@@ -59,18 +63,18 @@ const JUNCTION_TABLE_MAP: Record<
   }
 > = {
   seed_fld_emthread_people_00000: {
-    table: "crm_email_thread_participants",
+    table: "mail_thread_participant",
     sourceCol: "thread_id",
     targetCol: "person_id",
   },
   seed_fld_emmsg_to_0000000000000: {
-    table: "crm_email_message_recipients",
+    table: "mail_message_recipient",
     sourceCol: "message_id",
     targetCol: "person_id",
     extraCols: { recipient_type: "to" },
   },
   seed_fld_emmsg_cc_0000000000000: {
-    table: "crm_email_message_recipients",
+    table: "mail_message_recipient",
     sourceCol: "message_id",
     targetCol: "person_id",
     extraCols: { recipient_type: "cc" },
@@ -412,11 +416,11 @@ export async function deletePostgresEntry(
 
     // Clean up junction table entries
     await tx.query(
-      "delete from crm_email_thread_participants where thread_id = $1 or person_id = $1",
+      "delete from mail_thread_participant where thread_id = $1 or person_id = $1",
       [entryId],
     );
     await tx.query(
-      "delete from crm_email_message_recipients where message_id = $1 or person_id = $1",
+      "delete from mail_message_recipient where message_id = $1 or person_id = $1",
       [entryId],
     );
     await tx.query(
@@ -456,11 +460,11 @@ export async function bulkDeletePostgresEntries(
 
     // Clean up junction table entries
     await tx.query(
-      "delete from crm_email_thread_participants where thread_id = any($1::text[]) or person_id = any($1::text[])",
+      "delete from mail_thread_participant where thread_id = any($1::text[]) or person_id = any($1::text[])",
       [entryIds],
     );
     await tx.query(
-      "delete from crm_email_message_recipients where message_id = any($1::text[]) or person_id = any($1::text[])",
+      "delete from mail_message_recipient where message_id = any($1::text[]) or person_id = any($1::text[])",
       [entryIds],
     );
     await tx.query(

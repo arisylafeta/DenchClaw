@@ -75,9 +75,9 @@ export async function getPostgresPersonActivity(
   const countRows = await queryPg<{ total: number | string | null }>(
     `select count(*)::bigint as total
        from crm_interactions i
-       left join crm_email_messages m on m.id = i.email_message_id
+       left join mail_message m on m.id = i.email_message_id
       where i.person_id = $1
-        and (i.email_message_id is null or m.mailbox_owner_id = $2::uuid)`,
+        and (i.email_message_id is null or (m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $2::uuid))`,
     [personId, userId],
   );
   const total = countRows[0]?.total ? Number(countRows[0].total) : 0;
@@ -90,10 +90,10 @@ export async function getPostgresPersonActivity(
             m.thread_id, m.subject, m.body_preview, m.from_person_id,
             e.title, e.start_at, e.end_at
        from crm_interactions i
-       left join crm_email_messages m on m.id = i.email_message_id
+       left join mail_message m on m.id = i.email_message_id
        left join crm_calendar_events e on e.id = i.calendar_event_id
       where i.person_id = $1
-        and (i.email_message_id is null or m.mailbox_owner_id = $4::uuid)
+        and (i.email_message_id is null or (m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $4::uuid))
       order by i.occurred_at desc nulls last
       limit $2 offset $3`,
     [personId, params.limit, params.offset, userId],

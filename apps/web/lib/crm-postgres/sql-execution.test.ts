@@ -23,7 +23,7 @@ describe("crm-postgres sql execution", () => {
     ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
     await expect(
       postgresReadOnlyQuery(
-        "WITH x AS (SELECT * FROM crm_email_messages) SELECT * FROM x",
+        "WITH x AS (SELECT * FROM crm_interactions) SELECT * FROM x",
       ),
     ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
     await expect(
@@ -32,6 +32,23 @@ describe("crm-postgres sql execution", () => {
     await expect(
       postgresReadOnlyQuery("SELECT * FROM crm_relation_links"),
     ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
+  });
+
+  it("allows mail reads but refuses every generic mail mutation including writable CTEs", async () => {
+    const { postgresReadOnlyQuery } = await import("./sql-execution");
+    const { queryPg } = await import("@/lib/postgres");
+    vi.mocked(queryPg).mockResolvedValue([]);
+    await expect(postgresReadOnlyQuery("select * from mail_message")).resolves.toEqual([]);
+    for (const sql of [
+      "update mail_message set state = 'accepted'",
+      "update mail_message set delivered_at = now()",
+      "insert into mail_approval (id) values ('fake')",
+      "delete from mail_event",
+      "update mail_identity set active = true",
+      "with x as (delete from mail_approval returning *) select * from x",
+      "select 1; update mail_message set state = 'accepted'",
+    ]) await expect(postgresReadOnlyQuery(sql)).rejects.toThrow("Only read-only");
+    expect(queryPg).toHaveBeenCalledTimes(1);
   });
 
   it("passes read-only SQL to postgres", async () => {

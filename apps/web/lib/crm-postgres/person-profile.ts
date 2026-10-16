@@ -233,12 +233,12 @@ export async function getPostgresPersonProfile(
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id
-      join crm_email_threads t on t.id = l.source_entry_id
+      join mail_thread t on t.id = l.source_entry_id
       left join lateral (
         select m.body_preview, m.from_person_id
-          from crm_email_messages m
+          from mail_message m
          where m.thread_id = t.id
-           and m.mailbox_owner_id = $2::uuid
+           and m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $2::uuid
          order by m.sent_at desc nulls last
          limit 1
       ) msg on true
@@ -246,7 +246,7 @@ export async function getPostgresPersonProfile(
      where o.name = 'email_thread'
        and f.name = 'Participants'
        and l.target_entry_id = $1
-       and t.mailbox_owner_id = $2::uuid
+       and t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and conversation.campaign_id is null) and t.mailbox_owner_id = $2::uuid
      order by t.last_message_at desc nulls last
      limit 50
   `, [person.id, userId]);
@@ -280,25 +280,25 @@ export async function getPostgresPersonProfile(
   const summary = summaryRows[0];
 
   const campaignTable = await queryPg<{ available: boolean; links_available: boolean; listings_available: boolean }>(
-    `select to_regclass('crm_campaign_sends') is not null as available,
-            to_regclass('crm_campaign_send_links') is not null as links_available,
+    `select to_regclass('mail_message') is not null as available,
+            to_regclass('mail_message_link') is not null as links_available,
             to_regclass('crm_bulk_trade_lots') is not null as listings_available`,
   );
   const campaignRows = campaignTable[0]?.available ? await queryPg<CampaignSendRow>(`
     select s.id as send_id, s.campaign_id, c.campaign_name, s.listing_id, s.auction_url, s.recipient_email,
            s.state, s.accepted_at, s.delivered_at, s.bounced_at,
-           s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
+           s.opened_at as provider_opened_at, s.clicked_at as provider_link_clicked_at, s.last_synced_at,
            count(*) filter (where s.accepted_at is not null) over (partition by s.person_id, s.listing_id) as pitch_count
-      from crm_campaign_sends s join campaigns c on c.id = s.campaign_id
-     where s.person_id = $1
+      from mail_message s join campaigns c on c.id = s.campaign_id
+     where s.direction = 'outbound' and s.person_id = $1
      order by s.created_at desc
   `, [person.id]) : [];
   const linkRows = campaignTable[0]?.available && campaignTable[0]?.links_available
     ? await queryPg<CampaignLinkRow>(`
-      select l.send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
-        from crm_campaign_send_links l
-        join crm_campaign_sends s on s.id = l.send_id
-       where s.person_id = $1
+      select l.message_id as send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
+        from mail_message_link l
+        join mail_message s on s.id = l.message_id
+       where s.direction = 'outbound' and s.person_id = $1
        order by l.cta_key
     `, [person.id])
     : [];

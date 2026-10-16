@@ -1,0 +1,86 @@
+import { queryPg } from '../postgres';
+import type { MailFilters, MailMessageRow, MailPage, MailThread, MailFollowup, MailCampaignSummary } from '../mail-types';
+import { listCampaigns, getCampaignDetail } from './campaigns';
+
+function mailWhere(filters: MailFilters = {}) {
+  const values: unknown[] = [];
+  const where: string[] = [];
+  const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
+  for (const [key, column] of Object.entries({ identity: 'identity_key', campaign: 'campaign_id', thread: 'thread_id', direction: 'direction', transport: 'transport', purpose: 'purpose', state: 'state', mailboxOwnerId: 'mailbox_owner_id' })) {
+    const value = filters[key as keyof MailFilters];
+    if (value) where.push(`m.${column} = ${bind(value)}`);
+  }
+  if (filters.crmOnly) where.push('m.crm_visible');
+  if (filters.view === 'conversations') where.push('m.campaign_id is null');
+  if (filters.view === 'sent') where.push("m.direction = 'outbound'");
+  if (filters.view === 'campaigns') where.push('m.campaign_id is not null');
+  if (filters.view === 'followups') where.push("exists (select 1 from mail_followup f where (f.message_id = m.id or f.thread_id = m.thread_id) and f.state in ('pending','drafted','paused'))");
+  if (filters.q) where.push(`to_tsvector('english',coalesce(m.subject,'') || ' ' || coalesce(m.body_text,m.body_preview,'')) @@ websearch_to_tsquery('english',${bind(filters.q)})`);
+  if (filters.from) where.push(`m.from_email = ${bind(filters.from)}`);
+  if (filters.to) { const p = bind(filters.to); where.push(`(${p} = any(m.to_emails) or ${p} = any(m.cc_emails) or ${p} = any(m.bcc_emails) or m.recipient_email = ${p})`); }
+  if (filters.person) { const p = bind(filters.person); where.push(`(m.person_id = ${p} or m.from_person_id = ${p} or lower(m.from_email) = lower(${p}) or ${p} = any(m.to_emails) or lower(m.recipient_email) = lower(${p}) or exists (select 1 from mail_message_recipient r where r.message_id = m.id and r.person_id = ${p}))`); }
+  if (filters.event) where.push(`(exists (select 1 from mail_event e where e.message_id = m.id and e.type = ${bind(filters.event)}) ${['opened','clicked','replied','bounced'].includes(filters.event) ? `or m.${filters.event}_at is not null` : ''})`);
+  if (filters.since) where.push(`m.sent_at >= ${bind(filters.since)}::timestamptz`);
+  if (filters.until) where.push(`m.sent_at <= ${bind(filters.until)}::timestamptz`);
+  return { values, where, bind };
+}
+
+export async function searchMail(filters: MailFilters = {}): Promise<MailPage<MailMessageRow>> {
+  const { values, where, bind } = mailWhere(filters);
+  if (filters.cursor) {
+    let cursor: unknown;
+    try { cursor = JSON.parse(Buffer.from(filters.cursor, 'base64url').toString()); } catch { throw new Error('invalid_cursor'); }
+    if (!Array.isArray(cursor) || cursor.length !== 2 || typeof cursor[0] !== 'string' || !Number.isFinite(Date.parse(cursor[0])) || typeof cursor[1] !== 'string') throw new Error('invalid_cursor');
+    where.push(`(coalesce(m.sent_at,m.created_at),m.id) < (${bind(cursor[0])}::timestamptz,${bind(cursor[1])})`);
+  }
+  const limit = Math.max(1, Math.min(200, filters.limit || 50));
+  const rows = await queryPg<MailMessageRow>(`select m.*, coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events from mail_message m ${where.length ? `where ${where.join(' and ')}` : ''} order by coalesce(m.sent_at,m.created_at) desc,m.id desc limit ${bind(limit + 1)}`, values);
+  const items = rows.slice(0, limit);
+  const last = items.at(-1);
+  return { items, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.sent_at || last.created_at, last.id])).toString('base64url') : null };
+}
+
+export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnly = false) {
+  const values = mailboxOwnerId ? [id, mailboxOwnerId] : [id];
+  const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? 'and mailbox_owner_id = $2::uuid' : ''}`, values);
+  if (!thread) return null;
+  const messages = await queryPg<MailMessageRow>(`select m.*, m.body_text as body, m.body_preview as preview,
+    coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events,
+    coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'to'),'{}') as to_person_ids,
+    coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'cc'),'{}') as cc_person_ids
+    from mail_message m where m.thread_id = $1 ${mailboxOwnerId ? 'and m.mailbox_owner_id = $2::uuid' : ''} ${crmOnly ? 'and m.crm_visible' : ''} order by m.sent_at asc nulls last,m.id`, values);
+  if (!messages.length) return null;
+  const people = await queryPg(`select id,full_name as name,email,null as avatar_url from crm_people where id in (select from_person_id from mail_message where thread_id = $1 union select r.person_id from mail_message_recipient r join mail_message m on m.id = r.message_id where m.thread_id = $1)`, [id]);
+  return { ...thread, thread_id: id, messages, people };
+}
+
+export async function listMailFollowups(mailboxOwnerId?: string, dueOnly = false, filters: MailFilters = {}): Promise<MailFollowup[]> {
+  const { values, where, bind } = mailWhere(filters);
+  const owner = mailboxOwnerId ? bind(mailboxOwnerId) : null;
+  return queryPg<MailFollowup>(`select f.* from mail_followup f left join mail_message m on m.id = f.message_id left join mail_thread t on t.id = f.thread_id where true ${owner ? `and coalesce(m.mailbox_owner_id,t.mailbox_owner_id) = ${owner}::uuid` : ''} ${where.length ? `and ${where.join(' and ')}` : ''} ${dueOnly ? "and f.state = 'pending' and f.due_at <= now()" : ''} order by f.due_at,f.id`, values);
+}
+
+export async function mailCampaignCounts(id?: string, filters: MailFilters = {}): Promise<MailCampaignSummary[]> {
+  const { values, where, bind } = mailWhere(filters);
+  const campaignWhere = id ? `c.id = ${bind(id)}` : "true";
+  return queryPg<MailCampaignSummary>(`select c.id,c.campaign_name,c.identity_key,c.purpose,c.mail_state,count(m.id)::int as total,
+    count(m.id) filter (where m.accepted_at is not null or m.sent_at is not null or m.state = 'accepted')::int as sent,
+    count(m.delivered_at)::int as delivered,count(m.bounced_at)::int as bounced,count(m.opened_at)::int as opened,
+    count(m.id) filter (where m.clicked_at is not null or exists (select 1 from mail_message_link l where l.message_id = m.id and l.first_clicked_at is not null))::int as clicked,
+    count(m.id) filter (where exists (select 1 from mail_event e where e.message_id = m.id and e.type = 'unsubscribed'))::int as unsubscribed,
+    count(m.id) filter (where m.replied_at is not null or exists (select 1 from mail_event e where e.message_id = m.id and e.type = 'replied'))::int as replied
+    from campaigns c left join mail_message m on m.campaign_id = c.id and m.direction = 'outbound' where ${campaignWhere} ${where.length ? `and ${where.join(' and ')}` : ''} group by c.id order by c.id`, values);
+}
+export async function listMailCampaigns(filters: MailFilters = {}) {
+  const [legacy, counts] = await Promise.all([listCampaigns(), mailCampaignCounts(undefined,filters)]);
+  return legacy.filter(c => counts.some(n => n.id === c.id)).map(c => ({ ...c, ...counts.find(n => n.id === c.id) }));
+}
+export async function readMailCampaign(id: string) {
+  const legacy = await getCampaignDetail(id);
+  if (!legacy) return null;
+  const [counts] = await mailCampaignCounts(id);
+  const recipients = await queryPg<MailMessageRow>('select * from mail_message where campaign_id = $1 order by recipient_email,id', [id]);
+  const links = await queryPg('select l.* from mail_message_link l join mail_message m on m.id = l.message_id where m.campaign_id = $1 order by l.id', [id]);
+  const [evidence] = await queryPg<{ scanner_evidence: boolean; proxy_evidence: boolean }>(`select coalesce(bool_or(e.detail->>'scanner' = 'true' or e.detail->>'scanner_evidence' = 'true' or (e.type = 'clicked' and m.delivered_at is not null and e.occurred_at between m.delivered_at and m.delivered_at + interval '10 seconds')),false) as scanner_evidence, coalesce(bool_or(e.detail->>'proxy' = 'true' or e.detail->>'proxy_evidence' = 'true' or e.detail::text ilike '%GoogleImageProxy%'),false) as proxy_evidence from mail_event e join mail_message m on m.id = e.message_id where m.campaign_id = $1`, [id]);
+  return { ...legacy, ...counts, counts, delivery_rows: recipients, links, ...evidence };
+}

@@ -79,16 +79,16 @@ function makeClient() {
 
     // Junction tables
     if (
-      sql.includes("delete from crm_email_thread_participants") ||
-      sql.includes("delete from crm_email_message_recipients") ||
+      sql.includes("delete from mail_thread_participant") ||
+      sql.includes("delete from mail_message_recipient") ||
       sql.includes("delete from crm_calendar_event_attendees")
     ) {
       return { rows: [] };
     }
 
     if (
-      sql.includes("insert into crm_email_thread_participants") ||
-      sql.includes("insert into crm_email_message_recipients") ||
+      sql.includes("insert into mail_thread_participant") ||
+      sql.includes("insert into mail_message_recipient") ||
       sql.includes("insert into crm_calendar_event_attendees")
     ) {
       return { rows: [] };
@@ -172,12 +172,12 @@ describe("crm-postgres entry mutations", () => {
     const queryCalls = txQuery.mock.calls.map(([sql]) => String(sql));
     expect(
       queryCalls.some((sql) =>
-        sql.includes("delete from crm_email_thread_participants"),
+        sql.includes("delete from mail_thread_participant"),
       ),
     ).toBe(true);
     expect(
       queryCalls.some((sql) =>
-        sql.includes("delete from crm_email_message_recipients"),
+        sql.includes("delete from mail_message_recipient"),
       ),
     ).toBe(true);
     expect(
@@ -208,14 +208,14 @@ describe("crm-postgres entry mutations", () => {
     expect(
       queryCalls.some(
         (sql) =>
-          sql.includes("delete from crm_email_thread_participants") &&
+          sql.includes("delete from mail_thread_participant") &&
           sql.includes("any($1::text[])"),
       ),
     ).toBe(true);
     expect(
       queryCalls.some(
         (sql) =>
-          sql.includes("delete from crm_email_message_recipients") &&
+          sql.includes("delete from mail_message_recipient") &&
           sql.includes("any($1::text[])"),
       ),
     ).toBe(true);

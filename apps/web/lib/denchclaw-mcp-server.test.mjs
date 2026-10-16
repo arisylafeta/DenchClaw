@@ -105,6 +105,7 @@ describe("denchclaw-mcp-server: curated tool registration", () => {
 
   it("exposes only CRM-owned tools", () => {
     expect(toolNames()).toEqual([
+      "mail_search", "mail_thread", "mail_person",
       ...expected,
       "crm_query",
       "crm_execute",
@@ -713,5 +714,43 @@ describe("handleRequest", () => {
   it("returns method not found for unknown methods", async () => {
     const res = await handleRequest({ jsonrpc: "2.0", id: 4, method: "nope" });
     expect(res.error.code).toBe(-32601);
+  });
+});
+
+describe("mail log read tools", () => {
+  afterEach(() => __resetPgPoolForTests());
+  it("registers typed read-only tools without send capabilities", () => {
+    for (const name of ["mail_search", "mail_thread", "mail_person"]) {
+      const definition = TOOLS.find(t => t.name === name);
+      expect(definition.annotations.readOnlyHint).toBe(true);
+      expect(definition.inputSchema.properties.limit.maximum).toBe(200);
+    }
+    expect(TOOLS.some(t => /^mail_(send|launch|approve)$/.test(t.name))).toBe(false);
+  });
+  it("parameterises filters and returns tracking events", async () => {
+    const { pool, calls } = makePoolWithQuerySpy(() => ({ rows: [{ id: "synthetic", events: [] }] }));
+    __setPgPoolForTests(pool);
+    const result = parseResult(await executeTool("mail_search", { q: "'quoted'", identity: "ari", event: "clicked", crmOnly: true }));
+    expect(result.items[0].id).toBe("synthetic");
+    expect(calls[0].sql).toContain("mail_event");
+    expect(calls[0].sql).toContain("m.crm_visible");
+    expect(calls[0].sql).not.toContain("'quoted'");
+    expect(calls[0].params).toContain("'quoted'");
+  });
+  it("reads thread and person timelines through the log", async () => {
+    const { pool, calls } = makePoolWithQuerySpy(() => ({ rows: [] }));
+    __setPgPoolForTests(pool);
+    await executeTool("mail_thread", { id: "thread-synthetic" });
+    await executeTool("mail_person", { id: "buyer@example.test" });
+    expect(calls[0].sql).toContain("m.thread_id = $1");
+    expect(calls.find(call => call.params.includes("buyer@example.test"))).toBeTruthy();
+  });
+  it("blocks generic writes to all mail-owned tables before connecting", async () => {
+    const { pool, calls } = makePoolWithQuerySpy(() => ({ rows: [] }));
+    __setPgPoolForTests(pool);
+    for (const sql of ["update mail_message set state='accepted'", "delete from mail_event", "insert into mail_approval(id) values ('fake')", "update mail_identity set active=true"]) {
+      expect(parseResult(await executeTool("crm_execute", { sql })).error).toBeTruthy();
+    }
+    expect(calls).toHaveLength(0);
   });
 });

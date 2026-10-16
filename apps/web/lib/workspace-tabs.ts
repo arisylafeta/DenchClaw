@@ -373,7 +373,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   }
   if (path === "~platform-admin/messages") return "Message monitoring";
   if (path === "~platform-admin/payout-reviews") return "Payout reviews";
-  if (path === "~crm/inbox") return "Inbox";
+  if (path === "~crm/inbox") return "Mail";
   if (path === "~crm/leaderboard") return "Leaderboard";
   if (path === "~crm/calendar") return "Calendar";
   return path.split("/").pop() || path;
@@ -991,7 +991,7 @@ export function contentTabFromUrl(
       return makeContentTab({
         kind: "crm-inbox",
         path: "~crm/inbox",
-        title: "Inbox",
+        title: "Mail",
         preview: false,
       });
     }

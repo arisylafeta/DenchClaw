@@ -1,11 +1,4 @@
-import { listCampaigns } from "@/lib/crm-postgres/campaigns";
-import { guardBulkTrades } from "@/lib/bulk-trades-route";
-
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
-export async function GET() {
-  const guard = await guardBulkTrades("Campaigns");
-  if ("response" in guard) { return guard.response; }
-  return Response.json({ campaigns: await listCampaigns() });
+export async function GET(req: Request) {
+ const url = new URL(`/api/mail/campaigns`,req.url); url.search = new URL(req.url).search;
+ return Response.redirect(url,308);
 }

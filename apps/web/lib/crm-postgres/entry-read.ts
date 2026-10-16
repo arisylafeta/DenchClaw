@@ -66,8 +66,10 @@ const supportedTables: Record<string, string> = {
   people: "crm_people",
   company: "crm_companies",
   companies: "crm_companies",
-  email_thread: "crm_email_threads",
-  email_message: "crm_email_messages",
+  email_thread: "mail_thread",
+  email_message: "mail_message",
+  mail_message: "mail_message",
+  mail_campaign: "campaigns",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
   campaign: "campaigns",
@@ -186,8 +188,8 @@ export async function getReverseRelationsForEntry(
            when o.name in ('company', 'companies') then 'Company Name'
            else null
          end)
-      left join crm_email_messages email_messages on o.name = 'email_message' and email_messages.id = l.source_entry_id
-      left join crm_email_threads email_threads on o.name = 'email_thread' and email_threads.id = l.source_entry_id
+      left join mail_message email_messages on o.name = 'email_message' and email_messages.id = l.source_entry_id
+      left join mail_thread email_threads on o.name = 'email_thread' and email_threads.id = l.source_entry_id
       left join crm_calendar_events calendar_events on o.name = 'calendar_event' and calendar_events.id = l.source_entry_id
       left join crm_interactions interactions on o.name = 'interaction' and interactions.id = l.source_entry_id
       left join crm_people people on o.name = 'people' and people.id = l.source_entry_id
@@ -200,7 +202,7 @@ export async function getReverseRelationsForEntry(
        and (o.name <> 'email_message' or email_messages.mailbox_owner_id = $2::uuid)
        and (o.name <> 'email_thread' or email_threads.mailbox_owner_id = $2::uuid)
        and (o.name <> 'interaction' or interactions.email_message_id is null or exists (
-         select 1 from crm_email_messages scoped_message
+         select 1 from mail_message scoped_message
           where scoped_message.id = interactions.email_message_id
             and scoped_message.mailbox_owner_id = $2::uuid
        ))
@@ -353,7 +355,7 @@ export async function getPostgresEntryData(
             where id = $1
               ${object.name === "work_task" ? `and ${buildWorkTaskReadScope("assignee_id", "$2")}` : ""}
               ${object.name === "email_thread" || object.name === "email_message" ? "and mailbox_owner_id = $2::uuid" : ""}
-              ${object.name === "interaction" ? "and (email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $2::uuid))" : ""}
+              ${object.name === "interaction" ? "and (email_message_id is null or exists (select 1 from mail_message scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $2::uuid))" : ""}
             limit 1`,
           object.name === "work_task" ||
             object.name === "email_thread" ||

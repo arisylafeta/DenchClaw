@@ -16,7 +16,7 @@ export async function projectCampaignMetrics(
   const ids = entries.map((entry) => entry.entry_id).filter((id): id is string => typeof id === "string");
   if (!ids.length) return entries;
   const [ledger] = await queryPg<{ available: boolean }>(
-    "select to_regclass('crm_campaign_sends') is not null as available",
+    "select to_regclass('mail_message') is not null as available",
   );
   if (!ledger?.available) return entries;
 
@@ -24,10 +24,10 @@ export async function projectCampaignMetrics(
     select c.id,
            count(s.id) filter (where s.accepted_at is not null) as invites_sent,
            count(s.id) filter (where s.delivered_at is not null) as emails_delivered,
-           count(s.id) filter (where s.provider_opened_at is not null) as emails_opened,
-           count(s.id) filter (where s.provider_link_clicked_at is not null) as emails_clicked,
+           count(s.id) filter (where s.opened_at is not null) as emails_opened,
+           count(s.id) filter (where s.clicked_at is not null) as emails_clicked,
            count(s.id) filter (where s.bounced_at is not null) as emails_bounced
-      from campaigns c left join crm_campaign_sends s on s.campaign_id = c.id
+      from campaigns c left join mail_message s on s.campaign_id = c.id and s.direction = 'outbound'
      where c.id = any($1::text[]) and c.source_system = 'dench-campaign'
      group by c.id
   `, [ids]);

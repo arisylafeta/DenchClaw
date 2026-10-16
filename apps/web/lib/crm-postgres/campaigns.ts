@@ -157,8 +157,8 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
 
 async function ledgerAvailability(): Promise<Ledger> {
   const [ledger] = await queryPg<Ledger>(`
-    select to_regclass('crm_campaign_sends') is not null as available,
-           to_regclass('crm_campaign_send_links') is not null as links_available,
+    select to_regclass('mail_message') is not null as available,
+           to_regclass('mail_message_link') is not null as links_available,
            to_regclass('crm_bulk_trade_lots') is not null as listings_available
   `);
   return ledger ?? { available: false, links_available: false, listings_available: false };
@@ -168,24 +168,24 @@ async function readSends(ids: string[], ledger: Ledger, withRecipients = false):
   if (!ledger.available || !ids.length) { return []; }
   return queryPg<SendRow>(`
     select s.id as send_id, s.campaign_id, s.provider_message_id, s.state, s.accepted_at, s.delivered_at,
-           s.bounced_at, s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
-           ${ledger.links_available ? `(select min(l.first_clicked_at) from crm_campaign_send_links l where l.send_id = s.id)` : "null::timestamptz"} as link_clicked_at,
-           -- A reply is any synced email from the recipient, or someone at their company, after the send.
-           (select min(m.sent_at) from crm_email_messages m
-             where s.accepted_at is not null and m.sent_at > s.accepted_at
+           s.bounced_at, s.opened_at as provider_opened_at, s.clicked_at as provider_link_clicked_at, s.last_synced_at,
+           ${ledger.links_available ? `(select min(l.first_clicked_at) from mail_message_link l where l.message_id = s.id)` : "null::timestamptz"} as link_clicked_at,
+           -- A reply is any inbound synced email from the recipient, or their company, after the send.
+           (select min(m.sent_at) from mail_message m
+             where m.direction = 'inbound' and s.accepted_at is not null and m.sent_at > s.accepted_at
                and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
                and (lower(m.from_email) = s.recipient_email or m.from_person_id = s.person_id
                  or exists (select 1 from crm_people fp where fp.id = m.from_person_id
                              and fp.company_id = coalesce(s.company_id, (select sp.company_id from crm_people sp where sp.id = s.person_id))))
            ) as replied_at
            ${withRecipients ? `, s.person_id, p.full_name as person_name, coalesce(s.company_id, p.company_id) as company_id,
-             company.name as company_name, s.recipient_email, s.listing_id, s.auction_url, s.rendered_subject,
+             company.name as company_name, s.recipient_email, s.listing_id, s.auction_url, s.subject as rendered_subject,
              d.id as dismantler_id, d.stage as dismantler_stage` : ""}
-      from crm_campaign_sends s
+      from mail_message s
       ${withRecipients ? `left join crm_people p on p.id = s.person_id
         left join crm_companies company on company.id = coalesce(s.company_id, p.company_id)
         left join crm_dismantlers d on d.company_id = coalesce(s.company_id, p.company_id)` : ""}
-     where s.campaign_id = any($1::text[])
+     where s.direction = 'outbound' and s.campaign_id = any($1::text[])
      order by s.created_at, s.id
   `, [ids]);
 }
@@ -243,9 +243,9 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
   const ledger = await ledgerAvailability();
   const sends = await readSends([id], ledger, true);
   const links = ledger.available && ledger.links_available ? await queryPg<LinkRow>(`
-    select l.send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
-      from crm_campaign_send_links l
-      join crm_campaign_sends s on s.id = l.send_id
+    select l.message_id as send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
+      from mail_message_link l
+      join mail_message s on s.id = l.message_id
      where s.campaign_id = $1
      order by l.cta_key, l.id
   `, [id]) : [];

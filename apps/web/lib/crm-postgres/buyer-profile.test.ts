@@ -38,8 +38,7 @@ describe.skipIf(!TEST_URL)("buyer profile", () => {
     expect(buyer.engagement).toMatchObject({ suggested_stage: "Identified", open_buy_boxes: 1, emails_in_90d: 0 });
 
     // They wrote in, and nobody has answered: Responded, and waiting on us.
-    await pg.queryPg(`insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email)
-      values ('m_bp_in', 'Need packs', now() - interval '1 day', 'p_bp', 'pat@bp.example')`);
+    await pg.queryPg(`insert into mail_message (direction,transport,purpose,crm_visible,state,id, subject, sent_at, from_person_id, from_email) values ('inbound','gmail',null,true,'received','m_bp_in', 'Need packs', now() - interval '1 day', 'p_bp', 'pat@bp.example')`);
     buyer = await profile.getBuyer("co_bp");
     expect(buyer.engagement).toMatchObject({ suggested_stage: "Responded", emails_in_90d: 1 });
     expect(buyer.engagement?.waiting_since).not.toBeNull();

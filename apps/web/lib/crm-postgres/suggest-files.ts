@@ -26,8 +26,10 @@ const OBJECT_TABLES: Record<string, string> = {
   people: "crm_people",
   company: "crm_companies",
   companies: "crm_companies",
-  email_thread: "crm_email_threads",
-  email_message: "crm_email_messages",
+  email_thread: "mail_thread",
+  email_message: "mail_message",
+  mail_message: "mail_message",
+  mail_campaign: "campaigns",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
 };
@@ -127,7 +129,7 @@ export async function searchPostgresEntries(
             : object.name === "work_task"
               ? "assignee_id = $3::uuid"
               : object.name === "interaction"
-                ? "(email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $3::uuid))"
+                ? "(email_message_id is null or exists (select 1 from mail_message scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $3::uuid))"
                 : null;
         const sql = `select id as entry_id, coalesce(${coalesceExpr}, id::text) as label from ${tableName} where (${whereExpr}) ${scopeExpr ? `and ${scopeExpr}` : ""} order by updated_at desc nulls last, id desc limit $2`;
         const rows = await queryPg<{ entry_id: string; label: string }>(

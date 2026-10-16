@@ -105,12 +105,12 @@ async function readBulkTradeDetail(entryId: string, userId: string): Promise<Reg
               '[]'::jsonb
             ) as messages
        from crm_bulk_trade_evidence_links link
-       join crm_email_threads thread on thread.id = link.evidence_id
+       join mail_thread thread on thread.id = link.evidence_id
        left join crm_users owner on owner.id = thread.mailbox_owner_id
        left join crm_users viewer
          on viewer.id = $2::uuid
         and lower(viewer.email) in ('ari@rebattery.io', 'alex@rebattery.io')
-       left join crm_email_messages message
+       left join mail_message message
          on message.thread_id = thread.id and viewer.id is not null
       where link.lot_id = $1 and link.evidence_kind = 'gmail_thread'
       group by link.evidence_id, link.relationship, link.note, thread.id, owner.email, viewer.id

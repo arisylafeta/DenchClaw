@@ -389,12 +389,12 @@ export async function getPostgresCompanyProfile(
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id
-      join crm_email_threads t on t.id = l.source_entry_id
+      join mail_thread t on t.id = l.source_entry_id
       left join lateral (
         select m.body_preview, m.from_person_id
-          from crm_email_messages m
+          from mail_message m
          where m.thread_id = t.id
-           and m.mailbox_owner_id = $2::uuid
+           and m.crm_visible and m.campaign_id is null and m.mailbox_owner_id = $2::uuid
          order by m.sent_at desc nulls last
          limit 1
       ) msg on true
@@ -402,7 +402,7 @@ export async function getPostgresCompanyProfile(
      where o.name = 'email_thread'
        and f.name = 'Companies'
        and l.target_entry_id = $1
-       and t.mailbox_owner_id = $2::uuid
+       and t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and conversation.campaign_id is null) and t.mailbox_owner_id = $2::uuid
      order by t.last_message_at desc nulls last
      limit 50
   `, [company.id, userId]);
