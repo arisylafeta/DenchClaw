@@ -31,14 +31,14 @@ Sources:
    A possible new trade becomes a card only when it is a reuse batch (not recycling) of about 8 tonnes or $10k or
    more. A smaller reuse batch on offer, or one of unknown size, goes on the Supply list instead; a smaller request
    is left to the demand screen below; recycling batches are skipped.
-5. Demand. New mail and calls in which someone asks to buy batteries in bulk, or a reply to our
-   outreach saying what they buy, are added as buy-boxes (quoting the source) and close that
-   company's research estimates. A reply from someone we emailed moves their company to Engaged;
+5. Demand. New mail and calls asking to buy batteries in bulk become human-approved cards;
+   replies about stock we offered attach to that lot as buyers/bids, never a new demand.
+   A reply from someone we emailed moves their company to Engaged;
    "remove me" or "not interested" takes them off the supply update ("not interested" also marks the
    company Excluded). Someone unknown who asks to buy or offers stock becomes a lead: a company with
    Purpose Buyer or Supplier, Stage Engaged, Source Inbound, and the person as its contact. After each run, live trades whose facts or the open demand changed are matched
    against open demand (one model call per changed trade) for their Suggested buyers, and Supply list
-   batches that changed are matched against the open demand buyers told us about (not research estimates).
+   batches that changed are matched only against status=open demand, never buyer profiles.
 Every run is recorded in crm_bulk_trade_check_runs, including failures.
 """
 
@@ -60,6 +60,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
+from demand_lifecycle import resolve_entity, reputation_for, family_key, existing_demand, expire_demand
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = json.loads((REPO / "apps/web/lib/bulk-trade-templates.json").read_text())
@@ -656,7 +657,7 @@ def insert_proposal(cur, run_id, lot_id, p, status="new"):
 
 # Applied in this order, so the trade kind is set before fields and buyers exist before updates.
 APPLY_ORDER = ["trade_kind", "link_contact", "new_buyer", "field", "file", "buyer_update", "bid", "next_step"]
-CARD_KINDS = {"needs_triage", "possible_trade"}
+CARD_KINDS = {"needs_triage", "possible_trade", "possible_demand"}
 
 
 def is_card(p):
@@ -823,6 +824,13 @@ def apply_buyer_update(cur, lot_id, p, trade, ctx):
 
 def apply_bid(cur, lot_id, p, trade, ctx):
     bid = p["proposed"]
+    if not p["target"] and bid.get("buyer_name"):
+        cur.execute("select id from crm_bulk_trade_buyers where lot_id = %s and lower(name) = lower(%s)",
+                    (lot_id, bid["buyer_name"]))
+        buyer = cur.fetchone()
+        if not buyer:
+            return None
+        p["target"] = buyer["id"]
     cur.execute(
         """select 1 from crm_bulk_trade_bids where buyer_id = %s and lot_id = %s and amount = %s and unit = %s and currency = %s""",
         (p["target"], lot_id, bid["amount"], bid["unit"], bid["currency"]))
@@ -892,9 +900,13 @@ def ensure_lead(cur, email, contact, company_name, purpose, detail):
     already has is reused (and gets the purpose if it lacks it); otherwise a lead is created: the company with that
     Purpose, Stage Engaged (they wrote to us), Source Inbound, and the person as its contact."""
     email = (email or "").strip().lower()
-    if not email or email.endswith("@" + OWN_DOMAIN):
+    entity = resolve_entity(cur, email or None, contact, company_name)
+    person_id, company_id = entity["person_id"], entity["company_id"]
+    email = email or entity.get("email") or ""
+    if email.endswith("@" + OWN_DOMAIN):
         return None, None
-    person_id, company_id = crm_contact(cur, email)
+    if not email:
+        return person_id, company_id
     domain = email.split("@", 1)[1]
     business = domain.split(".", 1)[0] not in FREEMAIL
     if not company_id and business:
@@ -930,44 +942,6 @@ def ensure_lead(cur, email, contact, company_name, purpose, detail):
     return person_id, company_id
 
 
-def apply_demand(cur, lot_id, p, trade, ctx):
-    """Adds what a buyer said they want as a buy-box (stated) or request, quoting the email. The same want already open
-    for that buyer is only re-dated. A new real buy-box closes the company's open estimated (research) buy-boxes."""
-    d, source = p["proposed"], p["source"]
-    on = source_date(p)
-    person_id, company_id = ensure_lead(cur, d.get("email"), d.get("contact"), d.get("buyer"), "Buyer",
-                                        f"Inbox check {on}: wants {d['wants']}")
-    cur.execute(
-        """select id from crm_bulk_trade_demand where status = 'open' and coalesce(basis, '') <> 'estimated'
-             and lower(wants) = lower(%s)
-             and ((%s::text is not null and company_id = %s) or (%s::text is not null and email = %s))""",
-        (d["wants"], company_id, company_id, d.get("email"), d.get("email")))
-    same = cur.fetchone()
-    if same:
-        cur.execute("update crm_bulk_trade_demand set confirmed_on = greatest(confirmed_on, %s::date), updated_at = now() where id = %s",
-                    (on, same["id"]))
-        return {"refreshed": same["id"]}
-    kind = d.get("kind") if d.get("kind") in ("request", "standing") else "standing"
-    demand_id = "btd_" + str(uuid.uuid4())
-    cur.execute(
-        """insert into crm_bulk_trade_demand (id, buyer, company_id, person_id, contact, email, wants, quantity, location,
-             source_label, source_url, source_quote, kind, basis, needed_by, volume, volume_unit, max_price, price_currency,
-             price_unit, spec, source_kind, source_id, observed_on, confirmed_on)
-           values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-        (demand_id, d["buyer"], company_id, person_id, d.get("contact"), d.get("email"), d["wants"], d.get("quantity"),
-         d.get("location"), f"{'Call' if source['kind'] == 'granola' else 'Email'} (added automatically)", source.get("url"),
-         p["quote"], kind, "stated" if kind == "standing" else None, d.get("needed_by") if kind == "request" else None,
-         d.get("volume"), d.get("volume_unit"), d.get("max_price"), d.get("price_currency"), d.get("price_unit"),
-         json.dumps(d.get("spec") or {}), "call" if source["kind"] == "granola" else "email",
-         f"{source['id']}:{hashlib.md5(d['wants'].lower().encode()).hexdigest()[:8]}", on, on))
-    closed = []
-    if company_id:
-        cur.execute(
-            """update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other', updated_at = now(),
-                 note = coalesce(note || ' ', '') || 'Replaced on ' || %s || ' by what the buyer said.'
-               where company_id = %s and status = 'open' and basis = 'estimated' returning id""", (on, company_id))
-        closed = [row["id"] for row in cur.fetchall()]
-    return {"demand_id": demand_id, "closed_estimates": closed}
 
 
 def apply_supply(cur, lot_id, p, trade, ctx):
@@ -1033,7 +1007,7 @@ def apply_decline(cur, lot_id, p, trade, ctx):
 
 APPLY = {"field": apply_field, "next_step": apply_next_step, "trade_kind": apply_trade_kind, "link_contact": apply_contact,
          "new_buyer": apply_new_buyer, "buyer_update": apply_buyer_update, "bid": apply_bid, "file": apply_file,
-         "possible_demand": apply_demand, "possible_supply": apply_supply}
+         "possible_supply": apply_supply}
 
 
 def settle_declines(cur, declines, report, dry_run):
@@ -1127,7 +1101,7 @@ WAITING_DAYS = 30  # unanswered buyer email older than this has usually moved to
 
 DEMAND_SYSTEM = """You find BULK BUY DEMAND for ReBattery, a broker of second-life and surplus EV batteries, modules, cells and BESS.
 Reply with ONLY JSON: {"demands": [{"source_id", "buyer_company", "contact_name", "contact_email", "wants", "quantity",
-"where", "kind", "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "quote"}],
+"where", "kind", "needed_by", "product_family", "offered_lot_id", "unit_price", "currency", "price_basis", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "quote"}],
 "declines": [{"source_id", "decision", "quote"}]}.
 "declines" is only for replies to our outreach: "remove_me" when they ask not to be emailed or to be taken off the
 list; "not_interested" when they say they do not buy batteries or do not want to deal with us at all. A reply that
@@ -1137,10 +1111,16 @@ Include a source only when a person or company OUTSIDE ReBattery says they want 
 Skip buying for recycling (black mass, scrap, recycling feedstock), sellers offering stock, ReBattery's own outreach, newsletters, marketing, single-battery retail requests, and
 vague "keep us in mind".
 A source with "reply_to_our_outreach": true answers ReBattery's offer email (quoted after "[They are replying to:]").
-There, what they say they buy or use counts even when short or a narrowing ("We'd be interested in cells, not packs",
-"we only work with Tesla Model S packs"): record it as "standing". A request for prices or details of the offered stock
-is not demand by itself; skip it unless they say what they want. "quote" must come from their own words, not the
-quoted offer.
+There, what they say they buy or use generally counts even when short or a narrowing ("We'd be interested in cells, not packs",
+"we only work with Tesla Model S packs"): record it as "standing" unless it responds to a specific offered lot.
+A request for prices or details of offered stock is LOT INTEREST: return it with offered_lot_id.
+"quote" must come from their own new words, not the quoted offer.
+Each source includes existing_demand and offered_lots with their titles. Reuse the existing product_family key
+for the same product (canonical short model/family, not quantity, price or a whole wants sentence).
+When replying to stock we offered, set offered_lot_id to that lot's trade_id, including requests for details
+and bids: this is LOT INTEREST, never a new demand. Otherwise offered_lot_id is null.
+Return unit_price and currency when stated, price_basis "buyer"; never invent a price.
+Quotes MUST be in the NEW message before quoted history, not merely anywhere in the source.
 - "wants": one plain line in the buyer's terms, e.g. "NMC EV packs 30-70 kWh for storage builds, up to ~EUR 20/kWh".
 - "quantity": the amount in their words, e.g. "100+ packs" or null; "where": delivery country or region, or null.
 - "kind": "request" for a one-off need (a quantity wanted now or by a date), "standing" for ongoing or repeat buying.
@@ -1201,10 +1181,11 @@ def split_reply(text):
     """(new part, quoted part) of an email source: everything before the first quote marker in the body is what the
     sender wrote. The "Subject:/From:" header that email_sources puts first is kept with the new part."""
     header, sep, body = text.partition("\n\n")
+    body = body if sep else text
     match = QUOTE_START.search(body)
     if not match:
         return text, ""
-    return header + sep + body[:match.start()], body[match.start():]
+    return (header + sep if sep else "") + body[:match.start()], body[match.start():]
 
 
 def outreach_contacts(cur, sources):
@@ -1261,10 +1242,27 @@ def screen_demand(cur, sources, key, report):
     candidates = [s for s in sources if demand_candidate(s, replied)][-MAX_DEMAND_SOURCES:]
     if not candidates:
         return []
+    trades = load_trades(cur)
+    cur.execute("select lot_id, lower(recipient) as email from crm_bulk_trade_links where lot_id = any(%s)", (list(trades),))
+    for row in cur.fetchall():
+        trades[row["lot_id"]]["emails"] |= emails_in([row["email"]])
+    cur.execute("""select id, company_id, person_id, email, buyer, product_family, wants
+                   from crm_bulk_trade_demand where status in ('open', 'qualifying')""")
+    existing = cur.fetchall()
+    contexts = {}
+    for s in candidates:
+        identities = [resolve_entity(cur, e) for e in sorted(s.get("participants") or [])]
+        company_ids = {e["company_id"] for e in identities if e["company_id"]}
+        contexts[s["id"]] = {
+            "existing_demand": [r for r in existing if r["company_id"] in company_ids
+                                or r.get("email") in s.get("participants", set())],
+            "offered_lots": [trade_card(t) for t in trades.values()
+                             if s.get("participants", set()) & t["emails"] or s["key"] in t["threads"]]}
     try:
         raw = call_model(DEMAND_SYSTEM, json.dumps({"SOURCES": [
             {"source_id": s["id"], "type": s["kind"], "date": s["at"].date().isoformat() if s["at"] else None,
-             "from": s.get("from"), "reply_to_our_outreach": s.get("from") in replied, "text": demand_text(s)}
+             "from": s.get("from"), "reply_to_our_outreach": s.get("from") in replied, "text": demand_text(s),
+             **contexts[s["id"]]}
             for s in candidates]}, ensure_ascii=False, default=str), key)
         report["model_calls"] = report.get("model_calls", 0) + 1
     except Exception as err:
@@ -1275,16 +1273,51 @@ def screen_demand(cur, sources, key, report):
     for d in raw.get("demands") or []:
         source = by_id.get(str(d.get("source_id")))
         wants = str(d.get("wants") or "").strip()
-        if not source or not wants or not quote_ok(d.get("quote"), source["text"]):
+        if not source or not wants or not quote_ok(d.get("quote"), split_reply(source["text"])[0]):
             continue
         email = str(d.get("contact_email") or source.get("from") or "").strip().lower() or None
         if email and email.endswith("@" + OWN_DOMAIN):
             continue
         company = str(d.get("buyer_company") or "").strip() or None
         name = company or str(d.get("contact_name") or "").strip() or email or "Unknown buyer"
+        entity = resolve_entity(cur, email, d.get("contact_name"), company)
+        email = email or entity.get("email")
+        family = family_key(d.get("product_family"))
+        if not family:
+            continue
+        lot_id = d.get("offered_lot_id")
+        if lot_id:
+            allowed = {t["trade_id"] for t in contexts[source["id"]]["offered_lots"]}
+            if lot_id not in allowed:
+                continue
+            buyer = next((b for b in trades[lot_id]["buyers"] if norm(b["name"]) == norm(name)), None)
+            base = {"quote": str(d["quote"]).strip()[:300], "source": source, "lot_id": lot_id,
+                    "summary": f"{name} replied to offered stock"}
+            if not buyer:
+                out.append({**base, "kind": "new_buyer", "target": None,
+                            "proposed": {"name": name, "contact": d.get("contact_name"),
+                                         "person_id": entity["person_id"], "wants": wants}})
+            price = size_number(d.get("unit_price"))
+            if price and d.get("currency") in ("EUR", "USD", "GBP") and d.get("price_unit") in ("kWh", "pack", "cell"):
+                out.append({**base, "kind": "bid", "target": buyer["id"] if buyer else None,
+                            "proposed": {"buyer_name": name, "amount": price, "currency": d["currency"],
+                                         "unit": d["price_unit"], "firmness": "indicative"}})
+            continue
         proposed = {"buyer": name[:120], "contact": str(d.get("contact_name") or "").strip()[:120] or None, "email": email,
                     "wants": wants[:300], "quantity": str(d.get("quantity") or "").strip()[:80] or None,
                     "location": str(d.get("where") or "").strip()[:80] or None, **clean_structured(d)}
+        proposed.update({**entity, "email": email, "product_family": family,
+                         "existing_demand_id": existing_demand(cur, entity, family),
+                         "reputation": reputation_for(cur, entity["company_id"], entity["person_id"], email,
+                             two_way=email in replied, has_thread=bool(source.get("thread")))})
+        price = size_number(d.get("unit_price"))
+        if price and d.get("currency") in BUY_BOX["currencies"]:
+            proposed.update({"unit_price": price, "currency": d["currency"], "max_price": price,
+                             "price_currency": d["currency"], "price_basis": "buyer"})
+            if d.get("price_unit") in BUY_BOX["price_units"]:
+                proposed["price_unit"] = d["price_unit"]
+            if proposed.get("volume") and d["currency"] == "EUR" and proposed.get("volume_unit", "").rstrip("s").lower() == str(d.get("price_unit", "")).rstrip("s").lower():
+                proposed["fee_eur"] = proposed["volume"] * price * .1
         label = "needs" if proposed.get("kind") == "request" else "wants"
         out.append({"kind": "possible_demand", "target": None, "proposed": proposed,
                     "summary": f"{name} {label}: {wants}"[:300], "quote": str(d["quote"]).strip()[:300], "source": source})
@@ -1327,9 +1360,8 @@ MATCH_SYSTEM = """You match open buyer DEMAND rows to bulk battery TRADES (suppl
 and surplus EV batteries, modules, cells and BESS. Reply with ONLY JSON:
 {"matches": [{"trade", "row", "buyer", "strength", "reason"}]}, one entry per trade and row that fit; leave out the rest.
 "trade" and "row" are the labels given (T1, R7); "buyer" is that row's buyer, copied exactly.
-Each DEMAND row is a "request" (a one-off need, maybe by "needed_by") or a "standing" buy-box with a "basis":
-"agreed" and "stated" come from the buyer; "estimated" is ReBattery's guess from research, so match it only on a
-clear fit with its spec. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words; "note"
+Each DEMAND row is the buyer's own current "request" (a one-off need, maybe by "needed_by") or "standing" ask.
+Buyer profiles and research are not demand. "spec", "volume" and "max_price" are structured; "wants" is the buyer's own words; "note"
 holds other requirements (voltage, connectors, use, risk answers) that rule a batch out as surely as the spec.
 A missing spec value means unknown, not "no".
 "buyer_country" and "buyer_region" are where the buyer is based. Many buyers import, so distance from the trade's
@@ -1525,9 +1557,9 @@ def store_supply_pairs(cur, supply_ids, demand_ids, pairs):
 
 
 def match_supply(conn, key, report=None, dry_run=False):
-    """Matches open Supply list batches to the open demand buyers told us about (estimated research rows are left
-    out), judging only what changed, the same way as match_demand: a changed batch against every row, and changed rows
-    against the batches that did not change. Recorded as a run of kind 'supply_match'."""
+    """Matches open Supply list batches only to status=open buyer demand, judging only what changed:
+    a changed batch against every open row, and changed rows against unchanged batches.
+    Recorded as a run of kind 'supply_match'."""
     out = {"model_calls": 0, "batches_rejudged": 0, "rows_rejudged": 0, "matches": [], "warnings": []}
     if report is not None:
         report["supply_matching"] = out
@@ -1545,7 +1577,7 @@ def match_supply(conn, key, report=None, dry_run=False):
                           d.max_price::float8 as max_price, d.price_currency, d.price_unit, d.spec, left(d.note, 600) as note,
                           d.supply_match_hash, nullif(c.country, '') as buyer_country, c.region as buyer_region
                    from crm_bulk_trade_demand d left join crm_companies c on c.id = d.company_id
-                   where d.status = 'open' and coalesce(d.basis, '') <> 'estimated'
+                   where d.status = 'open'
                      and (d.kind <> 'request' or d.needed_by is null or d.needed_by >= current_date)
                    order by d.id""")
             demand = cur.fetchall()
@@ -1592,7 +1624,7 @@ def match_supply(conn, key, report=None, dry_run=False):
             if not dry_run:
                 for row_id in judged_rows:
                     cur.execute("update crm_bulk_trade_demand set supply_match_hash = %s where id = %s", (row_hash[row_id], row_id))
-                # 3. closed batches, and rows no longer open or now estimated, keep no open suggestions
+                # Closed batches and rows no longer open keep no open suggestions.
                 cur.execute(
                     """delete from crm_bulk_trade_supply_matches m
                        where not m.hidden and (not (m.demand_id = any(%s)) or not (m.supply_id = any(%s)))""",
@@ -1735,7 +1767,9 @@ def run(conn, args):
             mark_replies(cur, emails, outreach_contacts(cur, emails), report, args.dry_run)
             if key:
                 screened = screen_demand(cur, emails + notes, key, report)
-                findings.setdefault(None, []).extend(p for p in screened if p["kind"] != "decline")
+                for item in screened:
+                    if item["kind"] != "decline":
+                        findings.setdefault(item.pop("lot_id", None), []).append(item)
                 settle_declines(cur, [p for p in screened if p["kind"] == "decline"], report, args.dry_run)
             if unmatched and key:
                 for item in screen_possible(cur, unmatched, key, report):
@@ -1751,6 +1785,7 @@ def run(conn, args):
                                     f"Inbox check {source_date(item)}: {'seeks' if buyer else 'offered'} {item['proposed']['title']}")
 
             if not args.dry_run:
+                report["expiry"] = expire_demand(cur, now.date())
                 latest = lambda items, fallback: max([s["synced_at"] for s in items if s["synced_at"]] + [fallback])
                 finish_run(cur, run_id, report, {"gmail_since": latest(emails, gmail_since).isoformat(),
                                                  "granola_since": latest(notes, granola_since).isoformat()})

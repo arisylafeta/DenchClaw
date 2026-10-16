@@ -78,6 +78,26 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect((await details.getTradeDetail(lotId))!.fields.find((field) => field.field_key === "location")).toBeUndefined();
   });
 
+  it("approves incomplete asks as qualifying and reconfirms the same entity/family instead of inserting", async () => {
+    const email = `demand-${crypto.randomUUID()}@example.test`;
+    const initial = await propose("possible_demand", null, {
+      buyer: "Demand Buyer", email, wants: "Leaf packs", product_family: "nissan leaf", kind: "request",
+      reputation: "inbound",
+    }, null);
+    expect(await proposals.decideProposal(initial, "accept", user)).toMatchObject({ ok: true });
+    const [first] = await pg.queryPg<{ id: string; status: string }>(
+      "select id, status from crm_bulk_trade_demand where email = $1", [email]);
+    expect(first.status).toBe("qualifying");
+    const followup = await propose("possible_demand", null, {
+      buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf", kind: "request",
+      quantity: "20 packs", max_price: 1000, price_currency: "EUR", price_unit: "pack",
+      fee_eur: 2000, price_basis: "buyer", reputation: "email", existing_demand_id: first.id,
+    }, null);
+    expect(await proposals.decideProposal(followup, "accept", user)).toMatchObject({ ok: true });
+    expect(await pg.queryPg("select id, status, wants, fee_eur::float8 from crm_bulk_trade_demand where email = $1", [email]))
+      .toEqual([{ id: first.id, status: "open", wants: "Another Leaf batch", fee_eur: 2000 }]);
+  });
+
   it("puts a proposal back to new when it can no longer apply", async () => {
     const id = await propose("buyer_update", "btb_gone", { status: "Won" });
     const result = await proposals.decideProposal(id, "accept", user);

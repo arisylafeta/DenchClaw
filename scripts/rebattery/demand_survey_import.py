@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Imports buyer survey answers into Bulk Trades demand as stated standing buy-boxes.
+"""Imports buyer survey answers as stated buyer profiles, or qualifying asks with quantity and timing.
 
   demand_survey_import.py --formbricks                 # show what the Formbricks buyer survey would add
   demand_survey_import.py --csv FILE.csv               # the same for a Typeform demand survey CSV export
@@ -7,11 +7,11 @@
   demand_survey_import.py --rows FILE.json             # reviewed rows, e.g. estimated buy-boxes from a buyer review
   ... --apply                                          # write them
 
-Each answer becomes one row keyed by (source_kind, source_id), so a re-run or a scheduled run adds nothing
-twice. Answers map onto the lists in apps/web/lib/buy-box-spec.json; anything that does not map (use,
-timing, capabilities, voltage, risk answers, regions) goes into the row's note in the buyer's words.
-ReBattery staff and QA submissions are skipped. Unfinished Formbricks responses are kept when they
-hold at least one answer. Each row is linked to the CRM person by email and to that person's company.
+General preferences merge into the company's structured buyer profile (basis stated); research uses basis researched.
+Only a survey with quantity and timing creates a qualifying ask, never immediately matchable demand.
+Sourcing requests start as qualifying. Source IDs make request imports idempotent.
+ReBattery staff and QA submissions are skipped. Profiles link to the existing CRM person/company by email,
+or create a classified inbound buyer lead when the CRM does not yet know them.
 """
 import argparse
 import csv
@@ -22,6 +22,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from demand_lifecycle import merge_profile, family_key, existing_demand, reputation_for
 
 REPO = Path(__file__).resolve().parents[2]
 BUY_BOX = json.loads((REPO / "apps/web/lib/buy-box-spec.json").read_text())
@@ -189,6 +190,9 @@ def map_typeform_row(header, row):
         "kind": "standing", "basis": "stated", "email": email,
         "contact": stem("What's your name?") or None, "company": stem("company") or None,
         "wants": wants_line(use, spec), "location": stem("Which country will they be delivered to?") or None,
+        "quantity": f"{whole(first_order)} {unit}" if first_order and unit else None,
+        "timing": (stem("When do you need them?") or stem("When would you like your first order?")
+                   or (stem("Where are you in the process?") if re.search(r"\b(now|ready|weeks?|months?|days?|20\d\d)\b", stem("Where are you in the process?"), re.I) else None)),
         "volume": whole(monthly) if monthly and unit else None, "volume_unit": unit if monthly and unit else None,
         "max_price": whole(price) if price and currency in BUY_BOX["currencies"] else None,
         "price_currency": currency if price and currency in BUY_BOX["currencies"] else None,
@@ -278,6 +282,7 @@ def map_formbricks(response, now=None):
         "kind": "standing", "basis": "stated", "email": email, "contact": None,
         "company": str(hidden.get("company") or data.get("company") or "").strip() or None,
         "wants": wants_line(use, spec), "quantity": f"Lots of {lot}" if lot else None, "location": None,
+        "timing": data.get("timing") or data.get("needed_by") or None,
         "spec": spec, "note": "\n".join(notes) or None, "observed_on": created,
         "source_kind": "survey", "source_id": f"formbricks:{response['id']}", "source_label": "Formbricks buyer survey",
     }
@@ -376,6 +381,11 @@ def link(cur, row):
     if not row.get("company_id"):
         row["company_id"] = person and person["company_id"]
     row["contact"] = row.get("contact") or (person and person["full_name"])
+    if not row.get("company_id") and row.get("email"):
+        from bulk_trade_inbox_check import ensure_lead
+        person_id, company_id = ensure_lead(cur, row["email"], row.get("contact"), row.get("company"),
+                                           "Buyer", f"Buyer intake: {row.get('source_label') or 'import'}")
+        row["person_id"], row["company_id"] = person_id, company_id
     company = None
     if row.get("company_id"):
         cur.execute("select name from crm_companies where id = %s", (row["company_id"],))
@@ -385,7 +395,7 @@ def link(cur, row):
     return row
 
 
-COLUMNS = ["kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
+COLUMNS = ["status", "product_family", "reputation", "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
            "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on",
            "confirmed_on", "source_kind", "source_id", "source_label", "source_url", "source_quote"]
 
@@ -393,6 +403,15 @@ COLUMNS = ["kind", "basis", "buyer", "company_id", "person_id", "contact", "emai
 def insert(cur, row):
     """Adds the row unless its source is already in (then only a still-unfinished survey answer is refreshed).
     Returns True when a row was added or refreshed."""
+    profile_only = (row.get("source_id", "").startswith("saved_search:") or row.get("source_kind") == "research"
+                    or (row.get("source_kind") == "survey" and not (row.get("quantity") and (row.get("timing") or row.get("needed_by")))))
+    if profile_only:
+        return merge_profile(cur, row, "researched" if row.get("source_kind") == "research" else "stated")
+    row = {**row, "status": "qualifying", "product_family": family_key(row.get("product_family") or row["wants"]),
+           "reputation": reputation_for(cur, row.get("company_id"), row.get("person_id"), row.get("email"))}
+    duplicate = existing_demand(cur, row, row["product_family"])
+    if duplicate:
+        return False
     # A buyer's own answer confirms the buy-box on that date; our estimate confirms nothing.
     observed = row.get("observed_on") or dt.date.today().isoformat()
     confirmed = None if row.get("basis") == "estimated" else observed

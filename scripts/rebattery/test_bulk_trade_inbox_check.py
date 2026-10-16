@@ -79,6 +79,63 @@ class DemandScreen(unittest.TestCase):
         newsletter = self.source("Subject: News\nFrom: n@news.test\n\nOur battery newsletter. Unsubscribe here.", "n@news.test")
         self.assertFalse(check.demand_candidate(newsletter, {"n@news.test"}))
 
+    def screen(self, source, response):
+        from unittest.mock import MagicMock
+        cur = MagicMock()
+        cur.fetchall.return_value = []
+        entity = {"company_id": "co_known", "person_id": "p_known", "email": source["from"]}
+        with patch.object(check, "outreach_contacts", return_value={source["from"]}), \
+             patch.object(check, "load_trades", return_value={"bt_1": TRADE}), \
+             patch.object(check, "resolve_entity", return_value=entity), \
+             patch.object(check, "existing_demand", return_value="btd_same_family"), \
+             patch.object(check, "reputation_for", return_value="email"), \
+             patch.object(check, "call_model", return_value={"demands": [response]}) as model:
+            result = check.screen_demand(cur, [source], "mock-only", {"warnings": []})
+        return result, json.loads(model.call_args.args[1])
+
+    def test_quote_must_be_in_new_message_not_quoted_history(self):
+        source = self.source(self.REPLY, "fergal@buyer.test")
+        response = {"source_id": source["id"], "wants": "EV packs", "product_family": "EV packs",
+                    "quote": "We have EV packs."}
+        self.assertEqual(self.screen(source, response)[0], [])
+
+    def test_offered_stock_reply_routes_to_lot_buyer_and_bid(self):
+        source = self.source("Subject: Stock\n\nWe bid EUR 30 per kWh for your offered packs.", "sam@supplier.test")
+        response = {"source_id": source["id"], "buyer_company": "New Bidder", "wants": "Offered packs",
+                    "product_family": "ebs37", "offered_lot_id": "bt_1", "unit_price": 30,
+                    "currency": "EUR", "price_unit": "kWh", "quote": "We bid EUR 30 per kWh"}
+        out, payload = self.screen(source, response)
+        self.assertEqual([p["kind"] for p in out], ["new_buyer", "bid"])
+        self.assertTrue(all(p["lot_id"] == "bt_1" for p in out))
+        self.assertEqual(payload["SOURCES"][0]["offered_lots"][0]["title"], TRADE["title"])
+
+    def test_family_match_is_a_reconfirmation_card_never_auto_applied(self):
+        source = self.source("Subject: Packs\n\nWe need another batch of 20 Leaf packs.", "x@buyer.test")
+        response = {"source_id": source["id"], "wants": "Another Leaf batch", "product_family": " NISSAN LEAF ",
+                    "quantity": "20 packs", "quote": "We need another batch of 20 Leaf packs."}
+        [card], _ = self.screen(source, response)
+        self.assertEqual(card["proposed"]["existing_demand_id"], "btd_same_family")
+        self.assertEqual(card["proposed"]["product_family"], "nissan leaf")
+        self.assertTrue(check.is_card(card))
+
+
+class DemandAgeing(unittest.TestCase):
+    def test_expiry_boundaries_and_reconfirmation(self):
+        from demand_lifecycle import expiry_transition
+        today = dt.date(2026, 10, 16)
+        def row(days, **extra):
+            return {"kind": "standing", "status": "open", "observed_on": today - dt.timedelta(days=days),
+                    "confirmed_on": None, **extra}
+        self.assertIsNone(expiry_transition(row(59), today))
+        self.assertEqual(expiry_transition(row(60), today), "qualifying")
+        self.assertEqual(expiry_transition(row(120), today), "qualifying")
+        self.assertEqual(expiry_transition(row(121, status="qualifying"), today), "moved_to_profile")
+        self.assertIsNone(expiry_transition(row(121, confirmed_on=today), today))
+        self.assertIsNone(expiry_transition(row(90, kind="request"), today))
+        self.assertEqual(expiry_transition(row(91, kind="request"), today), "expired")
+        self.assertIsNone(expiry_transition(row(120, kind="request", needed_by=today), today))
+        self.assertEqual(expiry_transition(row(1, kind="request", needed_by=today-dt.timedelta(days=1)), today), "expired")
+
 
 class PossibleScreen(unittest.TestCase):
     class Cursor:
@@ -503,6 +560,32 @@ class HistoryRun(unittest.TestCase):
 
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
 class DemandRun(unittest.TestCase):
+    def test_lifecycle_merges_old_standing_asks_and_dedupes_by_family(self):
+        from demand_lifecycle import expire_demand, existing_demand, reputation_for
+        today = dt.date(2026, 10, 16)
+        try:
+            with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""insert into crm_companies (id, name) values ('co_age', 'Ageing Buyer');
+                  insert into crm_bulk_trade_demand
+                    (id, buyer, company_id, wants, kind, product_family, observed_on, status, spec, basis)
+                  values ('btd_age_old', 'Ageing Buyer', 'co_age', 'Leaf packs', 'standing', 'leaf', '2026-06-01', 'open', '{"formats":["Packs"]}', 'stated'),
+                    ('btd_age_confirm', 'Ageing Buyer', 'co_age', 'Cells', 'standing', '21700', '2026-08-01', 'open', '{}', 'stated'),
+                    ('btd_age_request', 'Ageing Buyer', 'co_age', 'Modules', 'request', 'meb', '2026-06-01', 'qualifying', '{}', null)""")
+                self.assertEqual(existing_demand(cur, {"company_id": "co_age"}, " LEAF "), "btd_age_old")
+                self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com"), "anon")
+                self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com", two_way=True), "email")
+                expire_demand(cur, today)
+                cur.execute("select id, status, closed_reason, qualify_question from crm_bulk_trade_demand where company_id = 'co_age' order by id")
+                rows = {r["id"]: r for r in cur.fetchall()}
+                self.assertEqual(rows["btd_age_old"]["closed_reason"], "moved_to_profile")
+                self.assertEqual(rows["btd_age_confirm"]["status"], "qualifying")
+                self.assertEqual(rows["btd_age_confirm"]["qualify_question"], "Still buying?")
+                self.assertEqual(rows["btd_age_request"]["closed_reason"], "expired")
+                cur.execute("select buyer_profile from crm_companies where id = 'co_age'")
+                self.assertEqual(cur.fetchone()["buyer_profile"], {"formats": ["Packs"], "wants": "Leaf packs"})
+        finally:
+            self.conn.rollback()
+
     def setUp(self):
         import psycopg2
         self.conn = psycopg2.connect(TEST_URL)
@@ -529,9 +612,9 @@ class DemandRun(unittest.TestCase):
         seller = {**SOURCE, "id": "d3", "text": "Subject: stock\n\nWe have 400 packs available. Are you looking for batteries?"}
         reply = {"demands": [
             {"source_id": "d1", "buyer_company": "Revoxa py buyer", "contact_email": "dawid.py@revoxa.example", "wants": "LFP packs or modules",
-             "quote": "We are looking for LFP batteries from EV or BESS applications"},
+             "product_family": "lfp packs", "quote": "We are looking for LFP batteries from EV or BESS applications"},
             {"source_id": "d2", "buyer_company": "Green Voltage", "wants": "Matched packs, repeat batches",
-             "quote": "Can you supply matched packs or modules in repeat batches"},
+             "product_family": "matched packs", "quote": "Can you supply matched packs or modules in repeat batches"},
             {"source_id": "d3", "buyer_company": "Seller", "wants": "packs", "quote": "an invented line that is not there"},
         ]}
         report = {"warnings": []}
@@ -542,7 +625,7 @@ class DemandRun(unittest.TestCase):
                          [("possible_demand", "Revoxa py buyer"), ("possible_demand", "Green Voltage")])
         self.assertEqual(cards[0]["proposed"]["email"], "dawid.py@revoxa.example")
 
-    def test_email_demand_is_added_closes_estimates_and_a_no_opts_out(self):
+    def test_email_demand_waits_for_approval_and_a_no_opts_out(self):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""
               insert into crm_companies (id, name, purpose, relationship_stage) values
@@ -580,8 +663,9 @@ class DemandRun(unittest.TestCase):
             cur.execute("select tags from crm_people where id = 'p_no'")
             tags = cur.fetchone()["tags"]
         self.assertEqual([(r["status"], r["basis"], r["wants"]) for r in rows],
-                         [("closed", "estimated", "Cells and modules"), ("open", "stated", "Cells, not packs")])
-        self.assertEqual(len(report["applied"]), 1)  # the same email a second time is already recorded
+                         [("open", "estimated", "Cells and modules")])
+        self.assertEqual(len(report["applied"]), 0)
+        self.assertEqual(len(report["cards"]), 1)
         self.assertEqual(report["declines"], ["nia@nothanks.example is not interested"])
         self.assertEqual((companies["co_auto"]["relationship_stage"], companies["co_auto"]["buyer_stage"]), ("Engaged", "Responded"))
         self.assertEqual(companies["co_no"]["relationship_stage"], "Excluded")
@@ -604,11 +688,11 @@ class DemandRun(unittest.TestCase):
                            from crm_people p join crm_companies c on c.id = p.company_id
                            where p.email in ('ola@newbuyer.example', 'sales@newseller.example') order by p.email""")
             rows = cur.fetchall()
-            cur.execute("select company_id is not null as linked from crm_bulk_trade_demand where email = 'ola@newbuyer.example'")
-            linked = cur.fetchone()["linked"]
-        self.assertTrue(linked)
+            cur.execute("select count(*) as n from crm_bulk_trade_demand where email = 'ola@newbuyer.example'")
+            count = cur.fetchone()["n"]
+        self.assertEqual(count, 0)
         self.assertEqual([(r["name"], r["purpose"], r["relationship_stage"], r["source"], r["main"]) for r in rows],
-                         [("New Buyer AS", ["Buyer"], "Engaged", "Inbound", True), ("Newseller", ["Supplier"], "Engaged", "Inbound", True)])
+                         [("Newseller", ["Supplier"], "Engaged", "Inbound", True)])
         self.assertIsNotNone(seller[1])
 
     def test_auto_replies_do_not_count_as_a_reply(self):
@@ -675,7 +759,7 @@ class DemandRun(unittest.TestCase):
             cur.execute("select status from crm_bulk_trade_check_runs where kind = 'match' order by id desc limit 1")
             self.assertEqual(cur.fetchone(), ("ok",))
 
-    def test_supply_matching_uses_stated_demand_only_and_judges_only_what_changed(self):
+    def test_supply_matching_uses_open_demand_only_and_judges_only_what_changed(self):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""
               delete from crm_bulk_trade_supply_matches;
@@ -683,8 +767,8 @@ class DemandRun(unittest.TestCase):
               update crm_bulk_trade_supply set status = 'closed', closed_reason = 'other' where id <> 'bts_small';
               update crm_bulk_trade_demand set status = 'open', closed_reason = null, supply_match_hash = null,
                 wants = 'Matched packs in repeat batches' where id in ('btd_open', 'btd_hid');
-              insert into crm_bulk_trade_demand (id, buyer, wants, kind, basis) values ('btd_est', 'Guessed Co', 'Any packs', 'standing', 'estimated')
-                on conflict (id) do update set status = 'open', closed_reason = null;
+              insert into crm_bulk_trade_demand (id, buyer, wants, kind, status) values ('btd_est', 'Qualifying Co', 'Any packs', 'standing', 'qualifying')
+                on conflict (id) do update set status = 'qualifying', closed_reason = null;
               insert into crm_bulk_trade_supply (id, seller, offers, trade_kind, quantity, est_tonnes)
                 values ('bts_small', 'Dismantler Ltd', '3 Toyota Prius hybrid packs', 'packs', 'three', 0.12)
                 on conflict (id) do update set status = 'open', closed_reason = null, match_hash = null;
@@ -710,7 +794,7 @@ class DemandRun(unittest.TestCase):
             first = check.match_supply(self.conn, "k")
             self.assertEqual(len(calls), 1)
             self.assertEqual(calls[0][0], ["3 Toyota Prius hybrid packs"])
-            self.assertEqual(sorted(calls[0][1]), ["Green Voltage", "Somerset EV"])  # the estimated row is not sent
+            self.assertEqual(sorted(calls[0][1]), ["Green Voltage", "Somerset EV"])  # qualifying is never matched
             self.assertEqual(matches(), [("btd_hid", "partial", True), ("btd_open", "strong", False)])  # not a fit stays hidden
             self.assertEqual(first["warnings"], [])
 
@@ -793,7 +877,7 @@ class DemandRun(unittest.TestCase):
     def test_screen_keeps_a_requests_date_volume_and_valid_spec_only(self):
         source = {**SOURCE, "id": "d9", "from": "rahul.py@exigo.example",
                   "text": "Subject: cells\n\nWe need 1,000 LFP cells by 20 October, max EUR 30/kWh."}
-        reply = {"demands": [{"source_id": "d9", "buyer_company": "Exigo py", "wants": "1,000 LFP cells", "kind": "request",
+        reply = {"demands": [{"source_id": "d9", "product_family": "lfp cells", "buyer_company": "Exigo py", "wants": "1,000 LFP cells", "kind": "request",
                               "needed_by": "2026-10-20", "volume": 1000, "volume_unit": "cells", "max_price": 30,
                               "price_currency": "EUR", "price_unit": "kWh",
                               "spec": {"chemistries": ["LFP", "Graphene"], "formats": ["Cells"], "min_soh": 150},

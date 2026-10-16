@@ -213,27 +213,48 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       }).filter(([, value]) => value)) as DemandInput;
       // The structured part (kind, date, volume, price, spec) is kept only when it passes validation.
       const structured = Object.fromEntries(["kind", "needed_by", "volume", "volume_unit", "max_price", "price_currency",
-        "price_unit"].map((key) => [key, proposed[key]]).filter(([, value]) => value !== null && value !== undefined && value !== ""));
+        "price_unit", "product_family", "fee_eur", "price_basis", "reputation"].map((key) => [key, proposed[key]])
+        .filter(([, value]) => value !== null && value !== undefined && value !== ""));
       const spec = cleanSpec(proposed.spec);
       if (Object.keys(spec).length) structured.spec = spec;
-      const demandId = text(proposed.demand_id);
+      const family = text(proposed.product_family);
+      if (!family) throw new Error("Confirm the product family before accepting this demand.");
+      const email = text(proposed.email);
+      const ids = { ...(await crmIdsForEmail(email)),
+        ...(text(proposed.company_id) ? { company_id: text(proposed.company_id) } : {}),
+        ...(text(proposed.person_id) ? { person_id: text(proposed.person_id) } : {}) };
+      const [duplicate] = await queryPg<{ id: string }>(
+        `select id from crm_bulk_trade_demand where status in ('open', 'qualifying')
+          and lower(product_family) = lower($1)
+          and (($2::text is not null and company_id = $2) or ($3::text is not null and person_id = $3)
+               or ($4::text is not null and lower(email) = lower($4)))
+          order by observed_on desc nulls last limit 1`,
+        [family, ids.company_id, ids.person_id, email]);
+      const demandId = duplicate?.id ?? text(proposed.existing_demand_id) ?? text(proposed.demand_id);
       if (demandId) {
         const existing = await getDemand(demandId);
         if (!existing) throw new Error("That demand row no longer exists.");
+        if (existing.status === "closed") throw new Error("That demand is closed; review a fresh request instead.");
+        details.status = (details.quantity || existing.quantity || structured.volume || existing.volume)
+          && (structured.max_price || existing.max_price) ? "open" : "qualifying";
+        details.qualify_question = details.status === "qualifying" ? "What quantity and unit price?" : null;
         // An email never changes what kind of row this is; a standing buy-box has no needed-by date.
         delete structured.kind;
         if (existing.kind === "standing") delete structured.needed_by;
         if (structured.spec && typeof structured.spec === "object") structured.spec = { ...existing.spec, ...structured.spec };
         const parsed = parseDemandInput({ ...details, ...structured }, false);
-        await updateDemand(demandId, "error" in parsed ? details : parsed.value, source);
+        if ("error" in parsed) throw new Error(parsed.error);
+        await updateDemand(demandId, parsed.value, source);
         return null;
       }
       const buyer = text(proposed.buyer);
       if (!buyer || !wants) throw new Error("The demand has no buyer or no want.");
-      const email = text(proposed.email);
-      const base = { ...details, wants, buyer, contact: text(proposed.contact), email, ...(await crmIdsForEmail(email)) };
+      const status = (details.quantity || structured.volume) && structured.max_price ? "open" : "qualifying";
+      const base = { ...details, wants, buyer, contact: text(proposed.contact), email, ...ids,
+        status, qualify_question: status === "qualifying" ? "What quantity and unit price?" : null };
       const parsed = parseDemandInput({ ...base, ...structured }, true);
-      await addDemand("error" in parsed ? base : parsed.value as typeof base, user.id, source);
+      if ("error" in parsed) throw new Error(parsed.error);
+      await addDemand(parsed.value as DemandInput & { buyer: string; wants: string }, user.id, source);
       return null;
     }
     case "link_auction": {
