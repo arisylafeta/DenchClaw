@@ -121,7 +121,13 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       const result = await response.json()
       if (!response.ok) {
         if (result.error === 'automation_read_only' && activeKey.current === key) setReadOnly({ source: 'automation' })
+        if (response.status === 503 && result.error === 'gateway_unavailable' && activeKey.current === key) setConnection('lost')
+        if (result.error === 'gateway_unavailable') throw new Error('Gateway disconnected. Reconnect before sending another message.')
+        if (response.status === 409 && result.error === 'sse_transport') throw new Error('This conversation uses the SSE transport and cannot accept gateway commands.')
         throw new Error(result.error || `Gateway ${action} failed (${response.status})`)
+      }
+      if (result.status === 'rejected' || result.found === false) {
+        throw new Error(typeof result.reason === 'string' ? result.reason : `Gateway ${action} rejected: the target is no longer controllable`)
       }
       return result
     } catch (error) {

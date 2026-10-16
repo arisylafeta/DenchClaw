@@ -16,7 +16,7 @@ function callbacks(): NativeTranscriptCallbacks {
 function approval() {
   return events([["approval.request", { command: "rm generated.txt", tool_name: "terminal", choices: ["once", "session", "always", "deny"], allow_session: true, allow_permanent: true }, "srq-1"]]).pendingRequests[0];
 }
-function clarify(questions: NonNullable<GatewayEvent["payload"]["questions"]>) {
+function clarify(questions: NonNullable<NonNullable<GatewayEvent["payload"]>["questions"]>) {
   return events([["clarify.request", { questions }, "srq-2"]]).pendingRequests[0];
 }
 

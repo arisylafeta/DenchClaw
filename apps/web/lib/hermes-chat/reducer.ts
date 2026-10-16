@@ -172,7 +172,7 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
   const duplicates = Object.fromEntries(Object.entries(state.duplicates).filter(([, at]) => now - at < 30000))
   if (key) duplicates[key] = now
   const s: ChatState = { ...state, generation, watermark: Math.max(watermark, event.seq ?? -1), duplicates, todos: expireTodos(state.todos, now) }
-  const p = event.payload
+  const p = event.payload ?? {}
   const text = stringValue(p.text)
   if (event.type === 'client.error') {
     const message = ensureMessage(s, ctx, now)
@@ -216,7 +216,17 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
       final = { ...final, interim: false, status: p.status === 'error' || p.status === 'interrupted' ? p.status : 'complete', interrupted: p.status === 'interrupted', partial: p.partial === true, error, error_surface: p.error_surface, persisted_turn: p.persisted_turn,
         response_previewed: p.response_previewed, response_transformed: p.response_transformed, response_reused: p.response_reused,
         ...(typeof rowId === 'number' && Number.isSafeInteger(rowId) && rowId > 0 ? { rowId, segments: final.segments.map((seg, i) => i === final.segments.findLastIndex(t => t.type === 'text' || t.type === 'interim') ? { ...seg, sourceRowId: rowId } : seg) } : {}) }
-      updateMessage(s, final)
+      const durable = typeof rowId === 'number' ? s.messages.find(item => item.rowId === rowId && item.id !== final.id) : undefined
+      if (durable) {
+        const receiptIds = new Set(p.persisted_turn?.row_ids ?? [rowId!])
+        const owners = s.messages.filter(item => item.rowId !== undefined && receiptIds.has(item.rowId))
+        const details = final.segments.filter(segment => (segment.type === 'tool' || segment.type === 'reasoning') &&
+          !owners.some(owner => owner.segments.some(existing =>
+            (existing.type === 'tool' && segment.type === 'tool' && existing.toolId === segment.toolId) ||
+            (existing.type === 'reasoning' && segment.type === 'reasoning' && normalize(existing.text) === normalize(segment.text)))))
+        s.messages = s.messages.filter(item => item.id !== final.id)
+        updateMessage(s, { ...durable, ...final, id: durable.id, segments: [...details, ...durable.segments] })
+      } else updateMessage(s, final)
     }
     if (p.usage) s.usage = { ...s.usage, ...p.usage }
     settle(s, now); s.interimBoundaryPending = false; s.heartbeatSettledStreamId = null; s.adoptedRunningTurn = false
@@ -237,12 +247,16 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     }
     return s
   }
+  if (event.type === 'message.start') {
+    if (s.interrupted) s.streamId = null
+    s.interrupted = false
+    s.busy = true; s.live = true; s.awaitingResponse = true; s.turnStartedAt = s.optimisticSentAt ?? now
+    s.sawAssistantPayload = false; s.interimBoundaryPending = false; s.heartbeatSettledStreamId = null
+    s.subagents = pruneFinishedSubagents(s.subagents)
+    return s
+  }
   if (s.interrupted) return s
   switch (event.type) {
-    case 'message.start':
-      s.busy = true; s.live = true; s.awaitingResponse = true; s.turnStartedAt ??= s.optimisticSentAt ?? now
-      s.sawAssistantPayload = false; s.interimBoundaryPending = false; s.heartbeatSettledStreamId = null
-      s.subagents = pruneFinishedSubagents(s.subagents); return s
     case 'message.delta': appendText(s, 'text', text, ctx, now); return s
     case 'reasoning.delta': appendText(s, 'reasoning', text, ctx, now); return s
     case 'reasoning.available': {

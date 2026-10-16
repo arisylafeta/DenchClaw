@@ -249,3 +249,45 @@ it('ignores an old load token rather than applying a stale snapshot to the curre
   state = beginHydration(state)
   expect(applySnapshot(state, snap({ messages: [{ id: 'old', role: 'user', text: 'Stale' }] }) as Parameters<typeof applySnapshot>[1], oldToken, ctx)).toBe(state)
 })
+
+it.each([
+  ['steer', { status: 'rejected', subagent_id: 'child', text: 'Change direction' }],
+  ['interrupt', { found: false }],
+] as const)('rejects HTTP 200 negative subagent %s outcomes', async (action, outcome) => {
+  const { result } = mount()
+  Source.current.emit('snapshot', snap())
+  vi.mocked(fetch).mockResolvedValue(Response.json(outcome))
+  await act(async () => {
+    const command = action === 'steer' ? result.current.subagentSteer('child', 'Change direction') : result.current.subagentInterrupt('child')
+    await expect(command).rejects.toThrow('no longer controllable')
+  })
+  expect(result.current.state.messages.at(-1)?.error).toContain('no longer controllable')
+})
+
+it.each([
+  [503, 'gateway_unavailable', 'Gateway disconnected'],
+  [409, 'sse_transport', 'SSE transport'],
+])('surfaces HTTP %s %s without retrying a prompt', async (status, error, message) => {
+  const { result } = mount()
+  Source.current.emit('snapshot', snap())
+  vi.mocked(fetch).mockImplementation(async url => String(url).endsWith('/prompt') ? Response.json({ error }, { status }) : Response.json({}))
+  await act(() => result.current.send({ text: 'Hello' }))
+  expect(result.current.state.messages.some(row => row.error?.includes(message))).toBe(true)
+  expect(result.current.state.busy).toBe(false)
+  if (status === 503) {
+    expect(result.current.connection).toBe('lost')
+    await act(() => result.current.send({ text: 'Do not send' }))
+  }
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/prompt'))).toHaveLength(1)
+})
+
+it('retains row 201 after loading all earlier history and sliding the snapshot window', async () => {
+  const { result } = mount()
+  const rows = Array.from({ length: 401 }, (_, i) => ({ id: String(i + 1), role: 'assistant', text: String(i + 1) }))
+  Source.current.emit('snapshot', snap({ olderCursor: '201', messages: rows.slice(200, 400) }))
+  vi.mocked(fetch).mockResolvedValue(Response.json({ messages: rows.slice(0, 200), olderCursor: null }))
+  await act(() => result.current.loadEarlier())
+  Source.current.emit('snapshot', snap({ seq: 1, messages: rows.slice(201) }))
+  expect(result.current.olderCursor).toBeNull()
+  expect(result.current.state.messages.map(row => row.id)).toEqual(rows.map(row => row.id))
+})

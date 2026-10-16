@@ -120,7 +120,8 @@ export interface GatewayEvent {
   type: string
   session_id?: string | null
   seq?: number
-  payload: EventPayload
+  /** Hermes omits payload on message.start and other signal-only events. */
+  payload?: EventPayload
   /** CRM transport epoch, not a Hermes envelope member. */
   generation?: string | number
   replayed?: boolean
