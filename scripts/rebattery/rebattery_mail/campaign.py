@@ -58,6 +58,20 @@ def cohort(db, config):
     return [people[i] for i in sorted(ids)]
 
 
+def campaign_policy(config,author):
+    supply = (config.get('type')=='supply_update'
+              or bool(re.match(r'(?i)supply[\s_-]*update',config['name']))
+              or bool(re.match(r'(?i)supply-update',config['id'])))
+    promotional = supply or config.get('type') in ('intro','newsletter','marketing','promotion')
+    if promotional and config['purpose']!='marketing':
+        raise Refused('campaign_purpose_mismatch','Promotional campaign types require marketing purpose')
+    if supply and (author['address']!='supply@rebattery.io' or (author.get('reply_to') or author['address'])!='supply@rebattery.io'):
+        raise Refused('supply_update_identity_required')
+    cap = config.get('pilot_cap')
+    if cap is not None and cap<1:
+        raise Refused('invalid_recipient_cap')
+
+
 def create(args):
     config = vars(args).copy()
     config.pop('handler',None)
@@ -70,8 +84,7 @@ def create(args):
         raise Refused('invalid_personalization')
     with connection(read_only=not args.apply) as db:
         author, transport = policy.identity(db,args.identity,args.purpose,args.transport)
-        if re.match(r'(?i)supply[\s_-]*update', args.name) and (author['address'] != 'supply@rebattery.io' or (author['reply_to'] or author['address']) != 'supply@rebattery.io'):
-            raise Refused('supply_update_identity_required')
+        campaign_policy(config,author)
         if args.apply:
             with db.cursor() as cur:
                 cur.execute("""insert into campaigns(id,campaign_name,purpose,identity_key,template_name,mail_state,notes,type)
@@ -87,6 +100,7 @@ def freeze(args, driver=None):
             raise Refused('campaign_not_draft')
         config = json.loads(campaign['notes'])['mail_config']
         author, transport = policy.identity(db,config['identity'],config['purpose'],config['transport'])
+        campaign_policy(config,author)
         driver = driver or resolve_driver(author,transport)
         suppressions = driver.preflight(author,{'purpose':config['purpose']})
         rows, exclusions,seen = [],[],set()
@@ -107,6 +121,7 @@ def freeze(args, driver=None):
                 variables[key] = person[column]
             row,_ = prepare(db,config['identity'],[email],config['purpose'],config['template'],variables,config['subject'],config['body'],config['html'],campaign=args.target,verification=config['verification'],transport=transport,message_id=hashlib.sha256((args.target+'\0'+person['id']).encode()).hexdigest()[:32])
             row.update(person_id=person['id'],company_id=person['company_id'],state='frozen',listing_id=config.get('listing_id'),auction_url=config.get('auction_url'))
+            row['personalization']['campaign_cap'] = config.get('pilot_cap')
             validate_links(row,config['links'],config.get('auction_url'))
             rows.append(row)
         if not rows:
@@ -130,6 +145,7 @@ def register(subparsers):
     parser.add_argument('--name',required=True)
     parser.add_argument('--person-ids')
     parser.add_argument('--cohort-sql')
+    parser.add_argument('--pilot-cap',type=int,help='Optional frozen ceiling for each explicitly approved launch')
     parser.add_argument('--links',default='[]')
     parser.add_argument('--personalization',default='{}')
     parser.add_argument('--listing-id')

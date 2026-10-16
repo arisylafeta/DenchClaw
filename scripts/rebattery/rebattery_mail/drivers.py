@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from contextlib import nullcontext
 from datetime import datetime
+from email.utils import getaddresses
 from .core import Refused, ProviderError, UnknownOutcome, connection, dict_cursor
 
 
@@ -81,6 +82,8 @@ def sync_suppressions(stream, suppressions, apply, db=None):
             how = f"Postmark stream={stream}; reason={item['SuppressionReason']}; origin={item['Origin']}"
             results.append({'email': email, 'person_ids': ids, 'reason': item['SuppressionReason'], 'origin': item['Origin'], 'since': item['since'], 'global_opt_out': global_out, 'matched': bool(ids)})
             if apply:
+                from .suppression import record_suppression
+                record_suppression(db,email,item['SuppressionReason'],'postmark',stream,item['CreatedAt'],item)
                 for person_id in ids:
                     cur.execute("""insert into crm_subscriptions(person_id,list,status,since,how) values (%s,'Supply update','Opted out',%s,%s)
                         on conflict(person_id,list) do update set status='Opted out',since=excluded.since,how=excluded.how,updated_at=now()
@@ -91,17 +94,14 @@ def sync_suppressions(stream, suppressions, apply, db=None):
 
 
 class GmailSendDriver:
-    def __init__(self, runner=None, gmail_no_send=False):
+    def __init__(self, runner=None, gmail_no_send=False, reader=None):
         self.runner = runner or subprocess.run
         self.gmail_no_send = gmail_no_send
+        self.reader = reader
 
     def preflight(self, identity, message):
         if self.gmail_no_send or os.environ.get('GOG_GMAIL_NO_SEND') == '1':
             raise Refused('live_send_disabled')
-        # A real mailbox refresh must be supplied by the caller's read driver.
-        if message.get('thread_id'):
-            from .sync import recheck_thread
-            recheck_thread(message['thread_id'], identity['gmail_account'])
         return {}
 
     def send(self, identity, message):
@@ -110,12 +110,14 @@ class GmailSendDriver:
             raise Refused('live_send_disabled')
         args = ['gog','--account',identity['gmail_account'],'--json','gmail','send','--from',identity['address'],
                 '--to',','.join(message['to_emails']),'--subject',message['subject'],'--body',message['body_text'] or '']
+        if identity.get('reply_to'):
+            args += ['--reply-to',identity['reply_to']]
         if message.get('body_html'):
             args += ['--body-html',message['body_html']]
         if message.get('gmail_thread_id'):
             args += ['--thread-id',message['gmail_thread_id']]
-        if message.get('thread_id'):
-            anchor = message.get('personalization', {}).get('reply_gmail_message_id')
+        anchor = message.get('personalization', {}).get('reply_gmail_message_id')
+        if message.get('thread_id') or anchor:
             if not anchor:
                 raise Refused('gmail_reply_anchor_missing')
             # gog resolves the Gmail message and derives In-Reply-To/References from its RFC headers.
@@ -133,8 +135,22 @@ class GmailSendDriver:
             raise UnknownOutcome('gmail_send_uncertain') from exc
 
     def recover(self, identity, message):
-        # Gmail offers no exact metadata receipt lookup. A missing receipt is never retry permission.
-        return None
+        from .gmail_driver import GmailDriver
+        reader = self.reader or GmailDriver()
+        candidates = {item.get('gmail_message_id') for item in message.get('recovery_receipts',[])}
+        if message.get('gmail_message_id'):
+            candidates.add(message['gmail_message_id'])
+        expected = {address.strip().lower() for key in ('to_emails','cc_emails','bcc_emails') for address in message.get(key,[])}
+        matches = []
+        for candidate in sorted(value for value in candidates if value):
+            full = reader.fetch(identity['gmail_account'],candidate)
+            raw = full.get('message',{})
+            headers = {key.lower():value for key,value in full.get('headers',{}).items()}
+            recipients = {address.lower() for _,address in getaddresses([headers[key] for key in ('to','cc','bcc') if headers.get(key)]) if address}
+            senders = {address.lower() for _,address in getaddresses([headers.get('from','')])}
+            if raw.get('id') == candidate and recipients == expected and identity['address'].lower() in senders:
+                matches.append({'gmail_message_id':candidate,'provider_message_id':None,'rfc_message_id':headers.get('message-id')})
+        return matches[0] if len(matches)==1 else None
 
 
 class PostmarkSendDriver:
@@ -156,6 +172,9 @@ class PostmarkSendDriver:
                    'TrackOpens':True,'TrackLinks':'HtmlAndText','Metadata':{'recipient_id':message['id'],'campaign_id':message.get('campaign_id') or '', 'idempotency_key':message['idempotency_key']}}
         if message.get('campaign_id'):
             payload['Tag'] = message['campaign_id']
+        headers = [{'Name':name,'Value':message[key]} for name,key in (('In-Reply-To','in_reply_to'),('References','rfc_references')) if message.get(key)]
+        if headers:
+            payload['Headers'] = headers
         try:
             response = self.client('/email','POST',payload)
         except urllib.error.HTTPError as exc:
@@ -173,7 +192,9 @@ class PostmarkSendDriver:
     def recover(self, identity, message):
         params = urllib.parse.urlencode({'count':100,'offset':0,'messagestream':identity['postmark_stream'],'metadata_recipient_id':message['id']})
         found = self.client('/messages/outbound?' + params).get('Messages', [])
-        matches = [m for m in found if m.get('MessageID') and m.get('Metadata',{}).get('recipient_id') == message['id'] and message['recipient_email'] in m.get('Recipients',[])]
+        expected = {address.strip().lower() for address in message['to_emails']}
+        matches = [m for m in found if m.get('MessageID') and m.get('Metadata',{}).get('recipient_id') == message['id']
+                   and {address.strip().lower() for address in m.get('Recipients',[])} == expected]
         return {'provider_message_id':matches[0]['MessageID'],'gmail_message_id':None} if len(matches) == 1 else None
 
 

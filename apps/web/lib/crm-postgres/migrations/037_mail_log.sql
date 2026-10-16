@@ -211,6 +211,8 @@ create table if not exists mail_approval (
   expires_at timestamptz,
   revoked_at timestamptz
 );
+alter table mail_approval add column if not exists scope text not null default 'full'
+  check (scope in ('pilot','full'));
 create index if not exists mail_approval_subject_idx on mail_approval (subject_type, subject_id, approved_at desc);
 
 -- Port of crm_mark_campaign_send (026): an accepted campaign message subscribes the person to the Supply update list
@@ -265,5 +267,15 @@ values
   ('support',    'support@rebattery.io',    'ReBattery Support',    null, 'outbound',   null, array['personal','marketing','transactional']),
   ('enterprise', 'enterprise@rebattery.io', 'ReBattery Enterprise', null, 'outbound',   null, array['personal','marketing','transactional'])
 on conflict (key) do nothing;
+
+-- Address-level opt-outs survive even when no CRM person or message exists.
+create table if not exists mail_suppression (
+  email text primary key check (email = lower(btrim(email)) and position('@' in email) > 1),
+  reason text not null,
+  source text not null,
+  stream text,
+  since timestamptz not null,
+  detail jsonb not null default '{}'::jsonb
+);
 
 commit;

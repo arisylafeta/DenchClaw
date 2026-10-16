@@ -19,9 +19,10 @@ Run `python3 scripts/rebattery/rebattery-mail.py` from this repository. The pack
 | `mail_thread`, `mail_thread_participant`, `mail_message_recipient` | Conversation grouping and CRM person associations, maintained by ingestion/import. |
 | `mail_identity` | Human-owned sender address, routing, reply mailbox, signature and permitted purposes. Configuration is not proof of provider verification. |
 | `mail_template` | Human-owned versioned subject, HTML, text, required variables and identity/purpose restrictions. Render uses the latest version by name. |
-| `mail_approval` | Named human's exact digest, recipient count and identity, with optional expiry/revocation. The CLI records a decision; it cannot grant itself permission. |
+| `mail_approval` | Named human's exact digest, remaining recipient count, identity and pilot/full scope, with optional expiry/revocation. The CLI records a decision; it cannot grant itself permission. |
 | `mail_followup` | Pending, drafted, paused, cancelled or done; follow-up preparation never sends. |
 | `campaigns` | Campaign record and platform metrics, plus mail identity/purpose, frozen timestamp, approval digest and mail lifecycle state. |
+| `mail_suppression` | Address-level provider suppression evidence, retained even without a CRM person or prior message. Never delete evidence to restore send eligibility. |
 
 ### Wide log, filtered CRM
 
@@ -89,19 +90,20 @@ Never send without the named human's explicit approval of the exact frozen copy,
 approve synthetic-message --sha256 EXACT_PREVIEW_SHA256 --approved-by 'Ari' --apply
 send synthetic-message
 send synthetic-message --apply
-approve synthetic-update --sha256 EXACT_PREVIEW_SHA256 --approved-by 'Ari' --expires-at 2026-10-17T12:00:00Z --apply
+approve synthetic-update --sha256 EXACT_PREVIEW_SHA256 --approved-by 'Ari' --scope pilot --expires-at 2026-10-17T12:00:00Z --apply
 launch synthetic-update --approved-sha256 EXACT_PREVIEW_SHA256 --max-recipients 2 --apply
 # STOP on next_gate=pilot_review. Inspect receipts and obtain the human's remainder go-ahead.
+approve synthetic-update --sha256 EXACT_PREVIEW_SHA256 --approved-by 'Ari' --scope full --apply
 launch synthetic-update --approved-sha256 EXACT_PREVIEW_SHA256 --apply
 recover synthetic-update
 recover synthetic-update --apply
 ```
 
-Real sends additionally require `DENCH_MAIL_LIVE_SEND=1`. Do not set it in an unattended agent or a test environment. Gmail no-send restrictions still block submission. The first capped launch is a pilot of the same campaign, not a duplicate campaign; it returns `next_gate: pilot_review` and stops. The remainder is a separate explicit invocation with the approved digest, never an automatic continuation. If content, recipients or identity changed, freeze/review a new campaign rather than mutating approved rows.
+Real sends additionally require `DENCH_MAIL_LIVE_SEND=1`; the gate is checked before claiming. Do not set it in an unattended agent or a test environment. Gmail no-send restrictions still block submission. Approval defaults to `--scope pilot`, which requires an explicit launch cap. Initial uncapped launch requires an explicit `--scope full` approval. A capped launch returns `next_gate: pilot_review` and stops. The remainder needs a NEW approval row recorded after that pilot, binding the same frozen digest, the remaining recipient count and the named human's full/pilot scope. It is never an automatic continuation. Campaign-member messages cannot be independently approved or sent to bypass this gate.
 
 Message states are `draft -> sending -> accepted`, or campaign `frozen -> sending -> accepted`; `approved` is also a claimable message state. Definite rejection becomes `failed`. Lost receipts or accepted-but-local-write-failed become `unknown` and exit 4. Inbound messages are `received`. Campaign mail states are draft, frozen, approved, pilot, launched, closed, or legacy.
 
-Execution checks approval, takes an audience lock, claims each message/idempotency key before the provider call, then immediately rechecks suppressions and replies. Any sending/unknown row blocks the audience. Never reset those states or retry a lost receipt. Recover links one exact Postmark metadata receipt; absent/ambiguous matches stay unresolved. Gmail has no exact metadata recovery in this implementation and stays unresolved until sync identifies the actual receipt. Provider acceptance followed by a local write failure attempts an `accepted_write_failed` event and leaves an unknown receipt; a database outage may leave the durable claim sending instead.
+Execution takes an audience lock, claims each message/idempotency key before submission and rechecks approval expiry/revocation/digest/count/identity after provider reads immediately before each call. It also rechecks suppressions and the reply mailbox on both transports, even before thread linkage exists. Pre-submission failure after a claim becomes definite `failed`, with `send_failure.reason=preflight_error`, not unknown; prepare a fresh draft rather than reuse the key. Any sending/unknown row blocks the audience. Never reset those states or retry a lost receipt. Postmark recovery requires exact metadata and the full frozen recipient set. Gmail recovery can verify an exact receipt saved in `accepted_write_failed` through a read-only fetch and attach it to the original claim; missing receipts remain unresolved. A database outage may leave the durable claim sending instead.
 
 ## Sync and follow-ups
 
@@ -119,9 +121,9 @@ legacy import
 legacy import --apply
 ```
 
-Sync is idempotent provider reconciliation, not approval to send. Postmark suppression sync opts out matching CRM people on Supply update; HardBounce/SpamComplaint also set global opt-out. Reasons, origins and provider calendar dates are retained. Missing suppressions never restore consent; unmatched addresses never create contacts. Daily schedulers use this same CLI, not a second suppression wrapper.
+Sync is idempotent provider reconciliation, not approval to send. Address-level suppressions are retained in `mail_suppression` and checked on both transports, even when there is no contact or prior message. Postmark suppression sync also opts out matching CRM people on Supply update; HardBounce/SpamComplaint additionally set global opt-out. Reasons, origins and provider calendar dates are retained. Missing suppressions never restore consent; unmatched addresses never create contacts. Daily schedulers use this same CLI, not a second suppression wrapper.
 
-A follow-up draft requires an existing pending `mail_followup` row. It never schedules or sends automatically. Before preparation/send, an immediate Gmail refresh checks replies for Gmail threads; a reply pauses the chase. An arrival race remains after the check. For non-Gmail routes, do not infer no reply from an empty local log; check the reply mailbox before approval. `legacy import` is a separately authorised one-time cutover, dry-run with rollback, reconciling source/loaded counts and evidence. It refuses after legacy tables have been removed.
+A follow-up draft requires an existing pending `mail_followup` row and a usable originating reply anchor. It never schedules or sends automatically, and preserves the original transport. The shared reply-mailbox refresh runs before taking a follow-up row lock, then rereads reply evidence under the lock. Both Gmail and Postmark routes use the configured reply mailbox; missing routing is refused rather than inferred empty. An arrival race remains after the final check. `legacy import` is a separately authorised one-time cutover, dry-run with rollback, reconciling source/loaded counts and evidence. It refuses after legacy tables have been removed.
 
 ## Output and refusals
 
@@ -133,4 +135,4 @@ Core rules include `purpose_not_allowed_for_identity`, `marketing_requires_unsub
 
 ## Verification boundary
 
-Use injected fakes in tests: send entrypoints accept a driver with `preflight`, `send`, `recover`; `GmailSendDriver` accepts a runner/no-send restriction and `PostmarkSendDriver` accepts a client. Read/sync functions also accept fake provider drivers. Never exercise real Gmail/Postmark/ZeroBounce APIs in deterministic tests. Run focused tests against a disposable database with an explicit DSN. Provider verification, a separately approved real test send and browser/UI checks are different evidence; never report one as another.
+Use injected fakes in tests: send entrypoints accept a driver with `preflight`, `send`, `recover` and an optional `refresh_replies` test boundary. `GmailSendDriver` accepts a runner/no-send restriction and read client; `PostmarkSendDriver` accepts a client. Read/sync functions also accept fake provider drivers. Tests patch the application live gate for fake providers, never set the real environment gate. Never exercise real Gmail/Postmark/ZeroBounce APIs in deterministic tests. Run the mail tests against the disposable harness without a production DSN. Provider verification, a separately approved real test send and browser/UI checks are distinct evidence.

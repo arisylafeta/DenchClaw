@@ -191,10 +191,13 @@ approvers, stale content and changed recipients are refused. `send <message-id>
 
 `launch <campaign-id> --approved-sha256 <digest> --max-recipients 5 --apply`
 sends a capped pilot and stops with `next_gate=pilot_review`. Sending the remainder
-requires a separate `launch` invocation with the exact approved digest. Every
-send rechecks suppressions and replies, claims its idempotency key before the
-provider call and records acceptance in the mail log. Any `sending` or `unknown`
-row blocks the whole audience; ambiguous sends exit with code 4 and are never
+requires a NEW named-human `approve` row after the pilot, binding the same frozen
+digest and the remaining recipient count, then a separate launch. Approval defaults
+to `--scope pilot`, requiring a cap; an uncapped launch needs `--scope full`.
+Every provider call rechecks approval, suppression and replies after its claim.
+The live gate is checked before claiming; preflight failures become definite
+failed/non-submitted rows rather than unknown receipts.
+Any `sending` or `unknown` row blocks the whole audience; ambiguous sends exit 4 and are never
 retried automatically. `recover <campaign-id> --apply` reconciles exact provider
 receipts, leaving missing receipts unresolved.
 

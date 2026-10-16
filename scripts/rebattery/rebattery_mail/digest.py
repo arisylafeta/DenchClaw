@@ -3,11 +3,14 @@ import hashlib
 import json
 from .core import dict_cursor, Refused
 
-FIELDS = ('id','identity_key','transport','purpose','from_email','to_emails','cc_emails','bcc_emails','recipient_email','person_id','company_id','subject','body_text','body_html','thread_id','in_reply_to','rfc_references','personalization')
+FIELDS = ('id','identity_key','transport','purpose','from_email','to_emails','cc_emails','bcc_emails','recipient_email','person_id','company_id','subject','body_text','body_html')
 
 
 def digest(rows):
-    values = [{key:row.get(key) for key in FIELDS} | {'links':row.get('links',[])} for row in rows]
+    values = [{key:row.get(key) for key in FIELDS} | {
+        'identity_snapshot':row.get('personalization',{}).get('identity_snapshot'),
+        'campaign_cap':row.get('personalization',{}).get('campaign_cap'),
+        'links':sorted(row.get('links',[]),key=lambda link:(link['cta_key'],link['destination_url'],link.get('listing_id') or ''))} for row in rows]
     return hashlib.sha256(json.dumps(sorted(values,key=lambda r:r['id']),sort_keys=True,separators=(',',':'),default=str).encode()).hexdigest()
 
 

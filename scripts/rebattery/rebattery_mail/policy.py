@@ -26,13 +26,16 @@ def identity(db, key, purpose, transport=None):
 def content(message):
     text, html = message.get('body_text') or '', message.get('body_html') or ''
     combined = '\n'.join((message.get('subject') or '', text, html))
-    if re.search(r'\{\{|\}\}|\{%|\*\|[^|]+\|\*', combined.replace(UNSUBSCRIBE, '')):
+    unchecked = combined.replace(UNSUBSCRIBE, '') if message['transport'].startswith('postmark') else combined
+    if re.search(r'\{\{|\}\}|\{%|\*\|[^|]+\|\*', unchecked):
         raise Refused('literal_merge_token')
     if message['purpose'] == 'marketing':
         if message['transport'].startswith('postmark'):
             valid = UNSUBSCRIBE in text and UNSUBSCRIBE in html
         else:
             valid = bool(re.search(r'(?i)unsubscribe.{0,150}(https://\S+|mailto:\S+)', text))
+            if html:
+                valid = valid and bool(re.search(r'(?is)<a\b[^>]*href=["\'](?:https://|mailto:)[^"\']+["\'][^>]*>[^<]*unsubscribe',html))
         if not valid:
             raise Refused('marketing_requires_unsubscribe')
 
@@ -41,6 +44,10 @@ def recipient(db, email, verification, suppressions=None):
     email = email.strip().lower()
     if email in (suppressions or {}):
         raise Refused('recipient_suppressed', email=email)
+    from .suppression import is_suppressed
+    address_suppression = is_suppressed(db,email)
+    if address_suppression:
+        raise Refused('recipient_suppressed',email=email,evidence=address_suppression)
     with dict_cursor(db) as cur:
         cur.execute("""select p.id,p.email_opted_out,
             exists(select 1 from crm_subscriptions s where s.person_id=p.id and s.status='Opted out') as opted_out
@@ -65,11 +72,18 @@ def recipient(db, email, verification, suppressions=None):
 
 
 def thread_reply(db, message):
-    if not message.get('thread_id'):
-        return False
     with dict_cursor(db) as cur:
-        cur.execute("""select 1 from mail_message where thread_id=%s and direction='inbound'
-            and coalesce(sent_at,created_at)>%s limit 1""", (message['thread_id'],message['created_at']))
+        origin = message.get('personalization',{}).get('followup_source_message_id')
+        cur.execute("select thread_id,replied_at,created_at from mail_message where id=any(%s::text[])",([message['id']]+([origin] if origin else []),))
+        sources = list(cur.fetchall())
+        if any(source['replied_at'] for source in sources):
+            return True
+        thread_ids = {source['thread_id'] for source in sources if source['thread_id']}
+        if message.get('thread_id'):
+            thread_ids.add(message['thread_id'])
+        cutoff = min([source['created_at'] for source in sources]+[message['created_at']])
+        cur.execute("""select 1 from mail_message where thread_id=any(%s::text[]) and direction='inbound'
+            and coalesce(sent_at,created_at)>%s limit 1""",(list(thread_ids),cutoff))
         return bool(cur.fetchone())
 
 
@@ -93,6 +107,7 @@ def approval(row, sha, count, identity_key, frozen_at=None):
 def human(name):
     if not name or not name.strip():
         raise Refused('approval_missing', 'A named human approver is required')
-    if re.search(r'\b(agent|claude|mailvin|hermes|auto|self|chatgpt|assistant)\b',name,re.I):
+    normalised = re.sub(r'[_\W]+',' ',name,flags=re.UNICODE)
+    if re.search(r'\b(agent|claude|mailvin|hermes|auto|self|chatgpt|assistant)\b',normalised,re.I):
         raise Refused('approval_invalid_approver')
     return name.strip()

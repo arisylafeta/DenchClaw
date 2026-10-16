@@ -19,6 +19,8 @@ class Fake:
         self.failure=None
     def preflight(self,identity,message):
         return self.suppressions
+    def refresh_replies(self,identity,message):
+        return None
     def send(self,identity,message):
         self.calls.append(message['id'])
         if self.failure:
@@ -26,6 +28,12 @@ class Fake:
         return {'provider_message_id':'fake-'+message['id']}
     def recover(self,identity,message):
         return {'provider_message_id':'fake-'+message['id']} if message['id'] in self.calls else None
+
+
+@pytest.fixture(autouse=True)
+def fake_execution_gate(monkeypatch):
+    # Tests inject fake providers; never enable the environment's real-send gate.
+    monkeypatch.setattr(send,'live_gate',lambda: None,raising=False)
 
 
 @pytest.fixture
@@ -53,16 +61,16 @@ def one(prefix,thread=None):
     return row
 
 
-def approved(target):
+def approved(target,scope='full'):
     with connection(read_only=True) as db:
         _,rows=load(db,target)
     sha=digest(rows)
-    send.approve(NS(target=target,sha256=sha,approved_by='Ari',expires_at=None,apply=True))
+    send.approve(NS(target=target,sha256=sha,approved_by='Ari',expires_at=None,scope=scope,apply=True))
     return sha
 
 
 def frozen(prefix):
-    args=NS(identity='alex',purpose='personal',transport=None,template=None,vars='{}',subject='Hello {{name}}',body='Synthetic',html='',verification=__import__('json').dumps({prefix+str(i)+'@example.test':{'status':'valid'} for i in range(3)}),id=prefix+'campaign',name='Synthetic',person_ids=','.join(prefix+str(i) for i in range(3)),cohort_sql=None,links='[]',personalization='{"name":"first_name"}',listing_id=None,auction_url=None,type='intro',apply=True)
+    args=NS(identity='alex',purpose='personal',transport=None,template=None,vars='{}',subject='Hello {{name}}',body='Synthetic',html='',verification=__import__('json').dumps({prefix+str(i)+'@example.test':{'status':'valid'} for i in range(3)}),id=prefix+'campaign',name='Synthetic',person_ids=','.join(prefix+str(i) for i in range(3)),cohort_sql=None,links='[]',personalization='{"name":"first_name"}',listing_id=None,auction_url=None,type='correspondence',apply=True)
     campaign.create(args)
     campaign.freeze(NS(target=args.id,apply=True),Fake())
     return args.id,approved(args.id)
@@ -90,6 +98,12 @@ def test_pilot_and_separate_remainder(env):
     fake=Fake()
     result=send.launch(NS(target=target,approved_sha256=sha,max_recipients=1,apply=True),fake)
     assert result['next_gate']=='pilot_review' and len(fake.calls)==1
+    with pytest.raises(Refused) as refusal:
+        send.launch(NS(target=target,approved_sha256=sha,max_recipients=None,apply=True),fake)
+    assert refusal.value.rule=='approval_stale'
+    approved(target,scope='full')
+    with connection(read_only=True) as db:
+        assert send.approval_row(db,target)['recipient_count']==2
     send.launch(NS(target=target,approved_sha256=sha,max_recipients=None,apply=True),fake)
     assert len(fake.calls)==3 and len(set(fake.calls))==3
 
@@ -379,3 +393,226 @@ def test_threaded_draft_binds_rfc_headers_and_gmail_anchor(env):
     assert receipt['gmail_message_id']=='fake-gmail-receipt'
     assert calls[0][calls[0].index('--reply-to-message-id')+1]=='gmail-anchor'
     assert calls[0][calls[0].index('--thread-id')+1]=='gmail-thread'
+
+
+def test_review_1_pilot_scope_requires_cap(env):
+    target,sha=frozen(env)
+    approved(target,scope='pilot')
+    fake=Fake()
+    with pytest.raises(Refused,match='pilot_cap_required'):
+        send.launch(NS(target=target,approved_sha256=sha,max_recipients=None,apply=True),fake)
+    assert fake.calls==[]
+
+
+@pytest.mark.parametrize('mutation,rule',[
+    ("expires_at=now()-interval '1 second'",'approval_expired'),
+    ("revoked_at=now()",'approval_revoked'),
+    ("sha256='tampered'",'approval_digest_mismatch'),
+    ("recipient_count=9",'approval_count_mismatch'),
+    ("identity_key='ari'",'approval_identity_mismatch')])
+def test_review_2_revalidate_after_postclaim_preflight(env,mutation,rule):
+    row=one(env);approved(row['id'])
+    class ChangesApproval(Fake):
+        n=0
+        def preflight(self,identity,message):
+            self.n+=1
+            if self.n==2:
+                with connection() as db,db.cursor() as cur:
+                    cur.execute('update mail_approval set '+mutation+' where subject_id=%s',(row['id'],))
+            return {}
+    fake=ChangesApproval()
+    with pytest.raises(Refused,match=rule):
+        send.execute(NS(target=row['id'],apply=True),fake)
+    assert fake.calls==[] and state(row['id'])=='failed'
+
+
+def test_review_3_campaign_member_cannot_bypass_flow(env):
+    target,_=frozen(env)
+    with connection(read_only=True) as db:
+        member=load(db,target)[1][0]
+    with pytest.raises(Refused,match='campaign_member_requires_campaign_flow'):
+        approved(member['id'])
+    with pytest.raises(Refused,match='campaign_member_requires_campaign_flow'):
+        send.execute(NS(target=member['id'],apply=True),Fake())
+
+
+def test_review_4_link_digest_survives_database_order(env):
+    row=one(env)
+    links=[{'cta_key':'z','destination_url':'https://www.rebattery.io/z','listing_id':None},
+           {'cta_key':'a','destination_url':'https://www.rebattery.io/a','listing_id':None}]
+    row['links']=links
+    with connection() as db,db.cursor() as cur:
+        for link in links:
+            cur.execute('insert into mail_message_link(id,message_id,cta_key,destination_url) values (%s,%s,%s,%s)',(uuid4().hex,row['id'],link['cta_key'],link['destination_url']))
+    with connection(read_only=True) as db:
+        assert digest([row])==digest(load(db,row['id'])[1])
+
+
+def followup_for(prefix,row):
+    with connection() as db,db.cursor() as cur:
+        cur.execute("insert into mail_followup(id,message_id,identity_key,due_at,origin) values (%s,%s,'alex',now(),'commitment')",(prefix+'follow',row['id']))
+    return NS(action='draft',target=prefix+'follow',apply=True,template=None,vars='{}',subject=None,body='Synthetic chase',html=None)
+
+
+def test_review_6_followup_refresh_holds_no_row_lock(env):
+    row=one(env)
+    args=followup_for(env,row)
+    class ReplyRefresh(Fake):
+        def refresh_replies(self,identity,message):
+            with connection() as db,db.cursor() as cur:
+                cur.execute("set local lock_timeout='100ms'")
+                cur.execute("update mail_followup set state='paused',paused_reason='thread_has_reply' where id=%s",(args.target,))
+        def preflight(self,identity,message):
+            self.refresh_replies(identity,message)
+            return {}
+    with pytest.raises(Refused,match='thread_has_reply'):
+        followup.manage(args,ReplyRefresh())
+
+
+@pytest.mark.parametrize('transport',['gmail','postmark-transactional'])
+def test_review_7_shared_refresh_without_thread(env,transport):
+    with connection() as db,db.cursor() as cur:
+        cur.execute("update mail_identity set postmark_stream='outbound' where key='alex'")
+    try:
+        with connection() as db:
+            email=env+'0@example.test'
+            row,_=draft.prepare(db,'alex',[email],subject='Synthetic',body='Hi',transport=transport,verification={email:{'status':'valid'}},message_id=env+'message')
+            draft.insert(db,row)
+        approved(row['id'])
+        class FindsReply(Fake):
+            def refresh_replies(self,identity,message):
+                assert message.get('thread_id') is None
+                with connection() as db,db.cursor() as cur:
+                    cur.execute('update mail_message set replied_at=now() where id=%s',(message['id'],))
+        fake=FindsReply()
+        with pytest.raises(Refused,match='thread_has_reply'):
+            send.execute(NS(target=row['id'],apply=True),fake)
+        assert fake.calls==[]
+    finally:
+        with connection() as db,db.cursor() as cur:
+            cur.execute("update mail_identity set postmark_stream=null where key='alex'")
+
+
+@pytest.mark.parametrize('purpose',['personal','transactional'])
+def test_review_9_promotional_campaign_type_requires_marketing(env,purpose):
+    args=NS(identity='supply',purpose=purpose,transport=None,template=None,vars='{}',subject='Promotion',body='Promotion',html='',verification='{}',id=env+'campaign',name='October',person_ids=env+'0',cohort_sql=None,links='[]',personalization='{}',listing_id=None,auction_url=None,type='supply_update',apply=True)
+    with pytest.raises(Refused) as refusal:
+        campaign.create(args)
+    assert refusal.value.rule=='campaign_purpose_mismatch'
+
+
+def test_review_12_html_unsubscribe_required():
+    with pytest.raises(Refused,match='marketing_requires_unsubscribe'):
+        policy.content({'purpose':'marketing','transport':'gmail','body_text':'Unsubscribe: mailto:remove@example.test','body_html':'<p>Promotion</p>'})
+
+
+def test_review_13_gate_precedes_claim(env,monkeypatch):
+    from rebattery_mail.drivers import live_gate
+    monkeypatch.setattr(send,'live_gate',live_gate,raising=False)
+    monkeypatch.delenv('DENCH_MAIL_LIVE_SEND',raising=False)
+    row=one(env);approved(row['id'])
+    with pytest.raises(Refused,match='live_send_disabled'):
+        send.execute(NS(target=row['id'],apply=True),GmailSendDriver())
+    with connection(read_only=True) as db:
+        stored=load(db,row['id'])[1][0]
+        assert stored['state']=='draft' and stored['idempotency_key'] is None
+
+
+def test_review_14_provider_read_failure_releases_claim(env):
+    from rebattery_mail.core import ProviderError
+    row=one(env);approved(row['id'])
+    class ReadFailure(Fake):
+        n=0
+        def preflight(self,identity,message):
+            self.n+=1
+            if self.n==2:raise ProviderError('synthetic_read_failure')
+            return {}
+    fake=ReadFailure()
+    with pytest.raises(ProviderError,match='synthetic_read_failure'):
+        send.execute(NS(target=row['id'],apply=True),fake)
+    with connection(read_only=True) as db:
+        stored=load(db,row['id'])[1][0]
+        assert stored['state']=='failed'
+        assert stored['personalization']['send_failure']['reason']=='preflight_error'
+    assert fake.calls==[]
+
+
+def test_review_15_saved_gmail_receipt_recovers_original(env):
+    row=one(env);approved(row['id'])
+    class AcceptedGmail(Fake):
+        def send(self,identity,message):
+            return {'gmail_message_id':'saved-gmail-id','provider_message_id':None}
+    with patch.object(send,'record_acceptance',side_effect=RuntimeError('synthetic local write')):
+        with pytest.raises(UnknownOutcome):
+            send.execute(NS(target=row['id'],apply=True),AcceptedGmail())
+    class Reader:
+        def fetch(self,account,message_id):
+            assert account=='alex@rebattery.io' and message_id=='saved-gmail-id'
+            return {'message':{'id':message_id,'threadId':'recovered-thread','labelIds':['SENT']},
+                    'headers':{'From':'alex@rebattery.io','To':row['recipient_email'],'Subject':'Synthetic'}}
+    result=send.recover(NS(target=row['id'],apply=True),GmailSendDriver(reader=Reader()))
+    assert result['results'][0]['state']=='found'
+    with connection(read_only=True) as db:
+        stored=load(db,row['id'])[1][0]
+        assert stored['state']=='accepted' and stored['gmail_message_id']=='saved-gmail-id'
+
+
+def test_review_16_recover_exact_recipient_set():
+    message={'id':'synthetic','to_emails':['a@example.test','b@example.test'],'recipient_email':None}
+    def client(path):
+        return {'Messages':[{'MessageID':'receipt','Metadata':{'recipient_id':'synthetic'},'Recipients':['b@example.test','a@example.test']}]}
+    assert PostmarkSendDriver(client).recover({'postmark_stream':'broadcast'},message)['provider_message_id']=='receipt'
+    message['to_emails']=['a@example.test']
+    assert PostmarkSendDriver(client).recover({'postmark_stream':'broadcast'},message) is None
+
+
+def test_review_17_gmail_cannot_send_postmark_tokens():
+    with pytest.raises(Refused,match='literal_merge_token'):
+        policy.content({'purpose':'personal','transport':'gmail','body_text':'{{{ pm:unsubscribe }}}'})
+
+
+@pytest.mark.parametrize('name',['mailvin_bot','hermes_agent','Ari_agent','claude-bot'])
+def test_review_18_agent_name_separators(name):
+    with pytest.raises(Refused,match='approval_invalid_approver'):policy.human(name)
+
+
+def test_review_19_gmail_forwards_reply_to():
+    calls=[]
+    def runner(args,**kwargs):
+        calls.append(args)
+        return NS(returncode=0,stdout='{"id":"receipt"}')
+    with patch('rebattery_mail.drivers.live_gate'):
+        GmailSendDriver(runner).send({'gmail_account':'alex@rebattery.io','address':'alex@rebattery.io','reply_to':'supply@rebattery.io'},
+                                    {'to_emails':['buyer@example.test'],'subject':'Synthetic','body_text':'Hi'})
+    assert calls[0][calls[0].index('--reply-to')+1]=='supply@rebattery.io'
+
+
+def test_review_20_supply_update_identifier_requires_supply(env):
+    args=NS(identity='alex',purpose='marketing',transport=None,template=None,vars='{}',subject='Hi',body='Hi',html='',verification='{}',id='supply-update-'+env,name='October',person_ids=env+'0',cohort_sql=None,links='[]',personalization='{}',listing_id=None,auction_url=None,type='correspondence',apply=False)
+    with pytest.raises(Refused,match='supply_update_identity_required'):campaign.create(args)
+
+
+def test_review_21_followup_preserves_explicit_transport(env):
+    with connection() as db,db.cursor() as cur:
+        cur.execute("update mail_identity set postmark_stream='broadcast' where key='alex'")
+    try:
+        with connection() as db:
+            email=env+'0@example.test'
+            row,_=draft.prepare(db,'alex',[email],subject='Synthetic',body='Hi',transport='gmail',verification={email:{'status':'valid'}},message_id=env+'message')
+            draft.insert(db,row)
+            with db.cursor() as cur:
+                cur.execute("update mail_message set state='accepted',gmail_message_id=%s,rfc_message_id=%s where id=%s",(env+'gmail','<'+env+'@example.test>',row['id']))
+        result=followup.manage(followup_for(env,row),Fake())
+        assert result['message']['transport']=='gmail'
+    finally:
+        with connection() as db,db.cursor() as cur:
+            cur.execute("update mail_identity set postmark_stream=null where key='alex'")
+
+
+def test_review_5_provider_metadata_does_not_change_approval_digest(env):
+    row=one(env)
+    approved_sha=digest([row])
+    observed={**row,'thread_id':'provider-thread','rfc_message_id':'<provider@example.test>','in_reply_to':'<parent@example.test>','rfc_references':'<ancestor@example.test>','gmail_message_id':'provider-id'}
+    observed['personalization']={**row['personalization'],'provider_observation':'not approved copy'}
+    assert digest([observed])==approved_sha
+    assert digest([{**observed,'body_text':'Changed approved body'}])!=approved_sha
