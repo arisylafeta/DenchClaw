@@ -1,11 +1,12 @@
 import { asRecord, stringValue, type ErrorSurface, type EventPayload } from './events'
-import { initialState, messageText, type ChatMessage, type ChatState, type ReducerContext, type Segment } from './reducer'
+import { initialState, toolError, type ChatMessage, type ChatState, type ReducerContext, type Segment } from './reducer'
 import { applyTodos } from './todos'
 import type { MessageHtmlRow } from './html-map'
 
 export interface SnapshotRow {
   id: string; role: string; text?: string; content?: string
   parts?: Record<string, unknown>[]; profile?: string; name?: string
+  pending?: 'inflight' | 'queued'; clientMessageId?: string
 }
 export interface SnapshotInflight {
   assistant: string; streaming: boolean; user: string; error?: string; status?: string
@@ -13,10 +14,11 @@ export interface SnapshotInflight {
 }
 /** Wire contract shared by the endpoint and the native ChatPanel hook. */
 export interface GatewayChatSnapshot {
+  gateway?: 'connected' | 'unavailable'
   key: string
   conversation: { id: string; profile: string; title: string; source?: string; working: boolean }
   messages: SnapshotRow[]; running: boolean; inflight?: SnapshotInflight | null
-  queued?: { user: string } | null
+  queued?: { user: string; count?: number } | null
   pendingRequests: { id: string | number; requestId?: string; method: string; params: Record<string, unknown> }[]
   todo_state?: { todos: unknown; revision: number } | null
   generation: number; seq: number | null; html?: MessageHtmlRow[]
@@ -38,7 +40,7 @@ function rowMessage(row: SnapshotRow): SourcedMessage | null {
       segments.push({ type: part.type, id, text: stringValue(part.text), startedAt: 0, completedAt: 0 })
     } else if (part.type === 'tool-invocation') {
       const tool = { ...asRecord(part.toolInvocation), ...part }
-      const error = typeof tool.error === 'string' || typeof tool.error === 'boolean' ? tool.error : undefined
+      const error = toolError(tool)
       segments.push({ type: 'tool', id, toolId: stringValue(tool.toolCallId) || id,
         name: stringValue(tool.toolName) || 'tool', args: asRecord(tool.args),
         ...(Object.hasOwn(tool, 'result') ? { result: tool.result } : {}),
@@ -50,8 +52,9 @@ function rowMessage(row: SnapshotRow): SourcedMessage | null {
     segments.push({ type: 'text', id: `${row.id}:text`, text: row.text || row.content || '', startedAt: 0, completedAt: 0 })
   }
   const rowId = Number(row.id)
-  return { id: row.id, role: row.role, source: 'durable', segments, startedAt: 0, completedAt: 0,
-    pending: false, status: 'complete', ...(Number.isSafeInteger(rowId) && rowId > 0 ? { rowId } : {}) }
+  return { id: row.id, role: row.role, source: row.pending === 'queued' ? 'queued' : 'durable', segments, startedAt: 0, completedAt: 0,
+    clientIds: row.clientMessageId ? [row.clientMessageId] : undefined,
+    pending: Boolean(row.pending), status: 'complete', ...(Number.isSafeInteger(rowId) && rowId > 0 ? { rowId } : {}) }
 }
 function prompt(id: string, text: string, source: 'live' | 'queued'): SourcedMessage {
   return { id, role: 'user', source, startedAt: 0, pending: source === 'queued',
@@ -65,9 +68,7 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
     busy: snapshot.running, live: snapshot.running, adoptedRunningTurn: snapshot.running }
   const inflight = snapshot.inflight
   if (inflight) {
-    const lastUser = state.messages.findLast(message => message.role === 'user')
-    const lastText = lastUser ? messageText(lastUser) : ''
-    if (inflight.user && (!lastUser || normalizeMessageText(lastText) !== normalizeMessageText(inflight.user))) {
+    if (inflight.user && !snapshot.messages.some(row => row.pending === 'inflight')) {
       state.messages.push(prompt(`${snapshot.key}:inflight:user`, inflight.user, 'live'))
     }
     const failed = Boolean(inflight.error || inflight.status === 'error')
@@ -83,7 +84,10 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
       state.sawAssistantPayload = Boolean(inflight.assistant)
     }
   }
-  if (snapshot.queued?.user) state.messages.push(prompt(`${snapshot.key}:queued:user`, snapshot.queued.user, 'queued'))
+  // Queue rows persist immediately, but belong after the current live response.
+  const queuedRows = state.messages.filter(message => message.source === 'queued')
+  state.messages = [...state.messages.filter(message => message.source !== 'queued'), ...queuedRows]
+  if (snapshot.queued?.user && !snapshot.messages.some(row => row.pending === 'queued')) state.messages.push(prompt(`${snapshot.key}:queued:user`, snapshot.queued.user, 'queued'))
   state.pendingRequests = snapshot.pendingRequests.flatMap(request => {
     const kind = request.method === 'approval' || request.method === 'approval.pending' ? 'approval'
       : request.method === 'clarify' ? 'clarify' : null

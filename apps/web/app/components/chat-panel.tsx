@@ -1906,7 +1906,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				html: string,
 				overrideAttachments?: AttachedFile[],
 			) => {
-				if (nativeGateway && nativeChat.readOnly) return;
+				if (nativeGateway && (nativeChat.readOnly || nativeChat.connection === "lost")) return;
 				const hasText = text.trim().length > 0;
 				const hasMentions = mentionedFiles.length > 0;
 				// Use override attachments (from queue) or current state
@@ -2183,6 +2183,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				nativeGateway,
 				nativeChat.send,
 				nativeChat.readOnly,
+				nativeChat.connection,
 			],
 		);
 
@@ -2620,7 +2621,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={loadingSession || (nativeGateway && !!nativeChat.readOnly)}
+					disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 					compact={compact}
 					searchFn={searchFn}
 				/>
@@ -2660,7 +2661,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
 							compact={compact}
-							disabled={loadingSession || (nativeGateway && !!nativeChat.readOnly)}
+							disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 							preferServerTranscription={preferServerVoiceInput}
 							onTranscript={handleVoiceTranscript}
 						/>
@@ -2682,7 +2683,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								onClick={() => editorRef.current?.submit()}
 								disabled={
 									(editorEmpty && attachedFiles.length === 0) ||
-									loadingSession || (nativeGateway && !!nativeChat.readOnly)
+									loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
 								style={{

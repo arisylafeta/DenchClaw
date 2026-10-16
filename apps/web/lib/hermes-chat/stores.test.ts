@@ -22,9 +22,9 @@ describe('subagent lifecycle', () => {
     expect(reduceSubagents(state, 'subagent.start', payload, 600)).toBe(state)
   })
 
-  it('ignores unspawned progress, normalises cancellation, and caps adjacent-deduped activity at 24', () => {
+  it('adopts unspawned progress, normalises cancellation, and caps adjacent-deduped activity at 24', () => {
     const empty = initialSubagents()
-    expect(reduceSubagents(empty, 'subagent.progress', { subagent_id: 'x', text: 'lost' }, 0)).toBe(empty)
+    expect(reduceSubagents(empty, 'subagent.progress', { subagent_id: 'x', text: 'lost' }, 0).items[0]).toMatchObject({ id: 'x', status: 'running' })
     let state = reduceSubagents(empty, 'subagent.start', { subagent_id: 'x', goal: 'task' }, 1)
     for (let i = 0; i < 30; i++) {
       state = reduceSubagents(state, 'subagent.thinking', { subagent_id: 'x', text: `step ${i}` }, i + 2)

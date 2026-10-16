@@ -45,20 +45,24 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     current.current = fn(current.current)
     setState(current.current)
   }, [])
-  const surface = useCallback((message: string) => update(previous => ({ ...previous, ...reduce(previous, { type: 'error', payload: { message } }, context) })), [update])
+  const surface = useCallback((message: string) => update(previous => ({ ...previous, ...reduce(previous, { type: 'client.error', payload: { message } }, context) })), [update])
   const resync = useCallback(() => {
     if (!conversationKey || !enabled) return
     update(previous => beginHydration(previous))
     getHermesEventsClient().resubscribe(conversationKey)
   }, [conversationKey, enabled, update])
   useEffect(() => {
-    setReadOnly(null); setTails({}); setHtmlRows([]); optimisticHtml.current.clear(); queued.current.clear()
-    update(previous => beginHydration(previous, conversationKey ?? null, conversationKey ?? null))
+    if (current.current.key !== (conversationKey ?? null)) {
+      setReadOnly(null); setTails({}); setHtmlRows([]); optimisticHtml.current.clear(); queued.current.clear()
+      update(previous => beginHydration(previous, conversationKey ?? null, conversationKey ?? null))
+    }
     if (!enabled || !conversationKey) return
+    update(previous => beginHydration(previous))
     return getHermesEventsClient().subscribe(conversationKey, {
       snapshot(snapshot) {
         if (activeKey.current !== conversationKey) return
         update(previous => applySnapshot(previous, snapshot, previous.loadToken, context))
+        if (snapshot.gateway) setConnection(snapshot.gateway === 'connected' ? 'connected' : 'lost')
         setHtmlRows(snapshot.html ?? [])
         const source = snapshot.conversation.source
         setReadOnly(source === 'cron' || source === 'webhook' ? { source } : null)
@@ -67,20 +71,27 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       event(event) {
         if (activeKey.current !== conversationKey) return
         update(previous => applyLive(previous, [event], context))
-        if (current.current.resyncRequired || event.type === 'message.complete') resync()
+        if (current.current.resyncRequired) resync()
         if (!current.current.busy) queued.current.clear()
       },
       request(request) {
         if (activeKey.current !== conversationKey) return
-        update(previous => ({ ...previous, ...reduce(previous, { type: request.method === 'approval' ? 'approval.request' : 'clarify.request', requestId: request.id, payload: request.params }, context) }))
+        update(previous => applyLive(previous, [{ type: request.method === 'approval' ? 'approval.request' : 'clarify.request', requestId: request.id, payload: request.params }], context))
       },
       error: surface,
-      connection: setConnection,
+      resync() { update(previous => beginHydration(previous)) },
+      connection(state) {
+        setConnection(previous => {
+          if (state === 'connected' && previous !== 'connected' && !current.current.hydrating) resync()
+          return state
+        })
+      },
     })
   }, [conversationKey, enabled, resync, surface, update])
   const post = useCallback(async (action: string, body: unknown): Promise<Record<string, unknown>> => {
     const key = conversationKey
     if (!key || !enabled) throw new Error('No active gateway conversation')
+    if (connection === 'lost') throw new Error('Gateway disconnected')
     try {
       const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json()
@@ -93,15 +104,18 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
       throw error
     }
-  }, [conversationKey, enabled, surface])
+  }, [conversationKey, enabled, surface, connection])
   const send = useCallback(async (prompt: NativePrompt) => {
+    if (connection === 'lost') { surface('Gateway disconnected'); return }
     if (readOnly) { surface('automation_read_only'); return }
     const key = conversationKey
     const clientMessageId = crypto.randomUUID()
     const wasBusy = current.current.busy
+    const submittedAt = Date.now()
+    const loadToken = current.current.loadToken
     if (current.current.busy) queued.current.add(clientMessageId)
     if (prompt.html) optimisticHtml.current.set(clientMessageId, prompt.html)
-    update(previous => submitOptimistic(wasBusy ? previous : { ...previous, interrupted: false, optimisticSentAt: Date.now(), streamId: null, heartbeatSettledStreamId: null, sawAssistantPayload: false, interimBoundaryPending: false }, { clientId: clientMessageId, text: prompt.text }))
+    update(previous => submitOptimistic(wasBusy ? previous : { ...previous, interrupted: false, optimisticSentAt: submittedAt, streamId: null, heartbeatSettledStreamId: null, sawAssistantPayload: false, interimBoundaryPending: false }, { clientId: clientMessageId, text: prompt.text }))
     try {
       const result = await post('prompt', { ...prompt, clientMessageId })
       if (activeKey.current !== key) return
@@ -110,10 +124,15 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       // Failed/ambiguous submissions remain visible, but are never submitted automatically again.
       if (activeKey.current !== key) return
       queued.current.delete(clientMessageId)
-      update(previous => ({ ...previous, busy: wasBusy, awaitingResponse: false,
-        messages: previous.messages.map(message => message.id === clientMessageId ? { ...message, pending: false } : message) }))
+      update(previous => {
+        const ownsTurn = !wasBusy && previous.busy && !previous.live
+          && previous.optimisticSentAt === submittedAt && previous.loadToken === loadToken
+          && previous.optimistic.at(-1)?.clientId === clientMessageId
+        return { ...previous, ...(ownsTurn ? { busy: false, awaitingResponse: false } : {}),
+          messages: previous.messages.map(message => message.id === clientMessageId ? { ...message, pending: false } : message) }
+      })
     }
-  }, [post, readOnly, surface, update, conversationKey])
+  }, [post, readOnly, surface, update, conversationKey, connection])
   const resolveRequest = useCallback(async (request: PendingRequest, action: string, body: unknown) => {
     const key = conversationKey
     await post(action, body)
@@ -151,7 +170,8 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     subagentTail: async (id: string) => {
       const key = conversationKey
       const result = await post('subagent', { action: 'tail', subagent_id: id })
-      if (activeKey.current === key) setTails(previous => ({ ...previous, [id]: typeof result.tail === 'string' ? result.tail : JSON.stringify(result.tail ?? result) }))
+      if (activeKey.current === key) setTails(previous => ({ ...previous, [id]: result.available === false
+        ? 'Transcript unavailable' : [typeof result.text === 'string' ? result.text : '', result.truncated ? '[Transcript truncated]' : ''].filter(Boolean).join('\n\n') }))
     },
     subagentSteer: async (id: string, text: string) => { await post('subagent', { action: 'steer', subagent_id: id, text }) },
     subagentInterrupt: async (id: string) => { await post('subagent', { action: 'interrupt', subagent_id: id }) },

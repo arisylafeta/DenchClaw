@@ -59,7 +59,7 @@ describe("native transcript", () => {
   });
 
   it("shows tool errors and unified diff file counts", () => {
-    const state = events([["tool.complete", { tool_id: "edit", name: "edit_file", error: "Permission denied", inline_diff: "--- a/file.ts\n+++ b/file.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n+extra", result: { error: "Permission denied" } }]]);
+    const state = events([["tool.complete", { tool_id: "edit", name: "edit_file", inline_diff: "--- a/file.ts\n+++ b/file.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n+extra", result: { error: "Permission denied" } }]]);
     render(<NativeTranscript state={state} callbacks={callbacks()} />);
     expect(screen.getByText("Permission denied", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText("file.ts: +2 −1")).toBeInTheDocument();

@@ -8,12 +8,12 @@ describe('snapshot hydration', () => {
   it('hydrates ordered narration, reasoning, args and string results without flattening', () => {
     const state = stateFromSnapshot(snapshot({ messages: [{ id: '1', role: 'assistant', parts: [
       { type: 'text', text: 'Before' }, { type: 'reasoning', text: 'Why' },
-      { type: 'tool-invocation', toolCallId: 't', toolName: 'terminal', args: '{"command":"pwd"}', result: 'out', error: 'failed' },
+      { type: 'tool-invocation', toolCallId: 't', toolName: 'terminal', args: '{"command":"pwd"}', result: { error: 'failed' } },
       { type: 'text', text: 'After' }
     ] }] }), ctx)
     expect(state.messages[0]).toMatchObject({ source: 'durable', pending: false, status: 'complete' })
     expect(state.messages[0].segments.map(part => part.type)).toEqual(['text', 'reasoning', 'tool', 'text'])
-    expect(selectTools(state)[0]).toMatchObject({ args: { command: 'pwd' }, result: 'out', error: 'failed', status: 'error' })
+    expect(selectTools(state)[0]).toMatchObject({ args: { command: 'pwd' }, result: { error: 'failed' }, error: 'failed', status: 'error' })
   })
   it('patches a snapshot tool still running with a later completion in its original position', () => {
     const state = stateFromSnapshot(snapshot({ running: true, messages: [{ id: '1', role: 'assistant', parts: [
@@ -24,13 +24,13 @@ describe('snapshot hydration', () => {
     expect(selectTools(done)[0]).toMatchObject({ result: 'out', status: 'done' })
     expect(done.messages[0].segments.map(part => part.type)).toEqual(['text', 'tool', 'text'])
   })
-  it('deduplicates only the last durable user and restores queue, requests and todo revision', () => {
-    const state = stateFromSnapshot(snapshot({ running: true, messages: [{ id: '1', role: 'user', content: 'same  prompt' }],
+  it('deduplicates flagged inflight and durable queue rows and restores requests and todo revision', () => {
+    const state = stateFromSnapshot(snapshot({ running: true, messages: [{ id: '1', role: 'user', content: 'same  prompt', pending: 'inflight' }, { id: '2', role: 'user', text: 'next', pending: 'queued' }],
       inflight: { user: 'same prompt', assistant: 'Answer', streaming: true }, queued: { user: 'next' },
       pendingRequests: [{ id: 'srq-1', requestId: 'approval-1', method: 'approval', params: { command: 'pwd' } }, { id: 'srq-2', method: 'clarify', params: { question: 'Which?' } }],
       todo_state: { todos: [{ id: 'a', content: 'Work', status: 'in_progress' }], revision: 7 } }), ctx)
     expect(state.messages.filter(message => message.role === 'user').map(messageText)).toEqual(['same  prompt', 'next'])
-    expect(state.messages.at(-1)).toMatchObject({ source: 'queued', pending: true })
+    expect(state.messages.find(message => message.id === '2')).toMatchObject({ source: 'queued', pending: true })
     expect(state).toMatchObject({ busy: true, live: true, generation: 2, watermark: 10, needsInput: true })
     expect(state.pendingRequests.map(request => request.kind)).toEqual(['approval', 'clarify'])
     expect(state.todos).toMatchObject({ revision: 7, visible: [{ id: 'a', content: 'Work', status: 'in_progress' }] })

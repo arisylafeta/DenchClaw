@@ -175,12 +175,12 @@ describe('ordered Hermes stream', () => {
   it('keeps partial text and typed error_surface, usage and tool failure metadata', () => {
     const h = harness(); start(h); h.send('message.delta', { text: 'kept' })
     h.send('tool.start', { tool_id: 't', name: 'terminal' })
-    h.send('tool.complete', { tool_id: 't', name: 'terminal', error: 'bad', result: null })
+    h.send('tool.complete', { tool_id: 't', name: 'terminal', result: { error: 'bad' } })
     const surface = { layer: 'provider', code: 'quota', retryable: true, resets_at: 123 }
     h.send('message.complete', { status: 'error', error: 'limit', partial: true, text: 'kept partial', error_surface: surface, usage: { input: 12, output: 4 } })
     expect(messageText(assistant(h)[0])).toBe('kept partial')
     expect(assistant(h)[0]).toMatchObject({ error: 'limit', error_surface: surface, partial: true, status: 'error' })
-    expect(selectTools(h.state)[0]).toMatchObject({ status: 'error', error: 'bad', result: null })
+    expect(selectTools(h.state)[0]).toMatchObject({ status: 'error', error: 'bad', result: { error: 'bad' } })
     expect(h.state.usage).toMatchObject({ input: 12, output: 4 })
   })
 

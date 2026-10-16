@@ -15,7 +15,7 @@ export function initialReconcileState(sessionId: string | null = null, key: stri
 }
 /** Capture the returned token with the fetch. Switching sessions never interrupts work. */
 export function beginHydration(state: ReconcileState, sessionId: string | null = state.sessionId, key: string | null = state.key): ReconcileState {
-  const base = sessionId === state.sessionId && key === state.key ? state : initialReconcileState(sessionId, key)
+  const base = key === state.key ? state : initialReconcileState(sessionId, key)
   return { ...base, loadToken: state.loadToken + 1, hydrating: true, buffered: [], resyncRequired: false }
 }
 export function needsResync(state: ChatState, event: ResyncEvent): boolean {
@@ -26,7 +26,15 @@ export function needsResync(state: ChatState, event: ResyncEvent): boolean {
 export function applyLive(state: ReconcileState, events: readonly GatewayEvent[], ctx: ReducerContext): ReconcileState {
   if (state.hydrating) return { ...state, buffered: [...state.buffered, ...events] }
   let next = state
-  for (const event of [...events].sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity))) {
+  const ordered: GatewayEvent[] = []
+  let sequenced: GatewayEvent[] = []
+  const flush = () => { ordered.push(...sequenced.sort((a, b) => a.seq! - b.seq!)); sequenced = [] }
+  for (const event of events) {
+    if (event.seq !== undefined) sequenced.push(event)
+    else { flush(); ordered.push(event) }
+  }
+  flush()
+  for (const event of ordered) {
     if (event.session_id && next.sessionId && event.session_id !== next.sessionId) continue
     if (needsResync(next, event)) { next = { ...next, resyncRequired: true }; continue }
     if (next.resyncRequired) continue
@@ -62,6 +70,7 @@ function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pi
     for (let row = cursor; row < messages.length && match < 0; row++) {
       const message = messages[row]
       if (message.role !== 'user' || first.knownUserIds.includes(message.id)) continue
+      if (message.clientIds?.includes(first.clientId)) { match = row; consumed = 1; break }
       const target = normalizeMessageText(messageText(message))
       let combined = ''
       for (let end = i; end < state.optimistic.length; end++) {
@@ -93,6 +102,24 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   const snapshotVersion = JSON.stringify(snapshot)
   if (!state.hydrating && state.snapshotVersion === snapshotVersion) return state
   const base = stateFromSnapshot(snapshot, ctx)
+  // Durable row identity (including the completion receipt) owns event-only detail.
+  base.messages = base.messages.map(message => {
+    const old = state.messages.find(item => item.id === message.id || (item.rowId !== undefined && item.rowId === message.rowId))
+    if (!old) return message
+    const segments = message.segments.map(segment => {
+      const live = old.segments.find(item => item.id === segment.id || (item.type === 'tool' && segment.type === 'tool' && item.toolId === segment.toolId))
+      return live?.type === 'tool' && segment.type === 'tool' ? { ...segment, ...live } : segment
+    })
+    // History may persist only final prose; retain tools/reasoning not stored in the row.
+    const retained = old.segments.filter(segment => segment.type === 'tool' || segment.type === 'reasoning')
+      .filter(segment => !segments.some(item => item.id === segment.id || (item.type === 'tool' && segment.type === 'tool' && item.toolId === segment.toolId)))
+    return { ...old, ...message, segments: [...retained, ...segments], interrupted: old.interrupted, error: message.error ?? old.error,
+      status: old.status === 'interrupted' || old.status === 'error' ? old.status : message.status }
+  })
+  base.usage = state.usage
+  base.subagents = state.subagents
+  base.interrupted = state.interrupted
+  if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
     hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion }
   merged.optimistic = state.optimistic.map(item => {
@@ -100,5 +127,8 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
     return id && merged.messages.some(message => message.id === id && message.source === 'durable')
       ? { ...item, resolvedMessageId: id } : item
   })
-  return applyLive(merged, [...state.overlay.filter(event => event.generation === undefined || event.generation === snapshot.generation), ...state.buffered], ctx)
+  return applyLive(merged, [
+    ...state.overlay.filter(event => event.seq !== undefined && (event.generation === undefined || event.generation === snapshot.generation)),
+    ...state.buffered.map(event => event.type === 'request.cancel' ? { ...event, seq: undefined } : event),
+  ], ctx)
 }

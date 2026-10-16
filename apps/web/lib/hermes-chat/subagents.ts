@@ -64,7 +64,6 @@ export function reduceSubagents(state: SubagentState, type: string, payload: unk
   const id = stringValue(p.subagent_id) || `${stringValue(p.parent_id) || 'root'}:${num(p.task_index) ?? 0}:${stringValue(p.goal)}`
   const prev = state.items.find(item => item.id === id)
   if (state.retiredIds.includes(id) || (prev && isTerminalSubagent(prev.status))) return state
-  if (!prev && type !== 'subagent.spawn_requested' && type !== 'subagent.start') return state
   const status = normalizeSubagentStatus(p.status ?? (type === 'subagent.spawn_requested' ? 'queued' : 'running'), type === 'subagent.complete')
   // An out-of-order spawn acknowledgement cannot demote a running child.
   const nextStatus = prev?.status === 'running' && status === 'queued' ? 'running' : status

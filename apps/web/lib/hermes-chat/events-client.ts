@@ -9,6 +9,7 @@ export interface EventsCallbacks {
   request(value: RequestEvent): void
   error(message: string): void
   connection(state: ConnectionState): void
+  resync?(): void
 }
 export interface EventSourceLike {
   addEventListener(type: string, listener: (event: MessageEvent) => void): void
@@ -22,13 +23,14 @@ export class HermesEventsClient {
   private connectionId: string | null = null
   private listeners = new Map<string, Set<EventsCallbacks>>()
   private subscribed = new Set<string>()
+  private gatewayState: ConnectionState = 'reconnecting'
   private syncing: Promise<void> = Promise.resolve()
   constructor(private readonly Source: EventSourceConstructor, private readonly request: typeof fetch = (...args) => fetch(...args)) {}
   subscribe(key: string, callbacks: EventsCallbacks): () => void {
     let listeners = this.listeners.get(key)
     if (!listeners) { listeners = new Set(); this.listeners.set(key, listeners) }
     listeners.add(callbacks)
-    callbacks.connection(this.connectionId ? 'connected' : 'reconnecting')
+    callbacks.connection(this.gatewayState)
     if (!this.source) this.connect()
     else if (this.source.readyState === 2) this.resubscribe(key)
     else this.sync()
@@ -69,12 +71,27 @@ export class HermesEventsClient {
         }
       } catch (error) { this.report(`Invalid gateway event: ${String(error)}`) }
     })
+    source.addEventListener('gateway', event => {
+      try {
+        const state = JSON.parse(event.data).state as ConnectionState
+        if (!['connected', 'reconnecting', 'lost'].includes(state)) return
+        this.gatewayState = state
+        this.each(listener => listener.connection(state))
+      } catch (error) { this.report(String(error)) }
+    })
+    source.addEventListener('resync', event => {
+      try {
+        const { key } = JSON.parse(event.data)
+        for (const listener of this.listeners.get(key) ?? []) listener.resync?.()
+      } catch (error) { this.report(String(error)) }
+    })
     source.addEventListener('connection', event => {
       try {
         this.connectionId = JSON.parse(event.data).connectionId
         // Automatic reconnect uses the original URL; reconcile its key set with current visible views.
         this.subscribed = new Set(keys)
-        this.each(listener => listener.connection('connected'))
+        this.gatewayState = 'connected'
+        this.each(listener => listener.connection(this.gatewayState))
         this.sync()
       } catch (error) { this.report(String(error)) }
     })
@@ -82,7 +99,8 @@ export class HermesEventsClient {
       if (event.data) { try { this.report(JSON.parse(event.data).error) } catch { this.report(event.data) } }
       else {
         this.connectionId = null
-        this.each(listener => listener.connection(source.readyState === 2 ? 'lost' : 'reconnecting'))
+        this.gatewayState = source.readyState === 2 ? 'lost' : 'reconnecting'
+        this.each(listener => listener.connection(this.gatewayState))
       }
     })
   }

@@ -63,6 +63,14 @@ export const selectCurrentMessage = (state: ChatState): ChatMessage | undefined 
 export const selectTools = (state: ChatState): ToolSegment[] => state.messages.flatMap(m => m.segments.filter((s): s is ToolSegment => s.type === 'tool'))
 export const selectAwaitingInput = (state: ChatState): boolean => state.pendingRequests.length > 0
 const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim()
+/** Hermes ToolCompletePayload puts execution failures inside result. */
+export function toolError(payload: { result?: unknown; error?: unknown; is_error?: unknown }): string | boolean | undefined {
+  const result = asRecord(payload.result)
+  const error = payload.error || result.error
+  if (typeof error === 'string' || error === true) return error
+  return payload.is_error === true || result.is_error === true || result.success === false || result.ok === false
+    || (typeof result.exit_code === 'number' && result.exit_code !== 0) ? true : undefined
+}
 const lastUser = (s: ChatState): number => s.messages.findLastIndex(m => m.role === 'user')
 const sealSegments = (segments: Segment[], now: number, tools = false): Segment[] => segments.map(segment => {
   if (segment.completedAt !== undefined || (segment.type === 'tool' && !tools)) return segment
@@ -138,13 +146,14 @@ function upsertTool(s: ChatState, p: EventPayload, complete: boolean, ctx: Reduc
     ...old, type: 'tool', id: old?.id ?? ctx.id(), toolId: stableId || old?.toolId || `local:${ctx.id()}`,
     name: p.name || old?.name || 'tool', context: context || old?.context,
     args: { ...old?.args, ...args }, startedAt: old?.startedAt ?? now,
-    status: complete ? (p.error || old?.error ? 'error' : 'done') : 'running',
+    status: complete ? (toolError(p) || old?.error ? 'error' : 'done') : 'running',
     ...(complete ? { completedAt: now, result: Object.hasOwn(p, 'result') ? p.result : old?.result ?? p.result_text } : {})
   }
   if (!complete) delete tool.completedAt
   for (const key of ['summary', 'message', 'preview', 'duration_s', 'inline_diff', 'error'] as const) {
     if (p[key] !== undefined) Object.assign(tool, { [key]: p[key] })
   }
+  if (complete && toolError(p)) tool.error = toolError(p)
   const segments = sealSegments(message.segments, now)
   updateMessage(s, { ...message, segments: old ? segments.map(segment => segment.id === old.id ? tool : segment) : [...segments, tool] })
   if (!owner || message.id === s.streamId) { s.sawAssistantPayload = true; s.awaitingResponse = false; s.status = null }
@@ -165,6 +174,11 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
   const s: ChatState = { ...state, generation, watermark: Math.max(watermark, event.seq ?? -1), duplicates, todos: expireTodos(state.todos, now) }
   const p = event.payload
   const text = stringValue(p.text)
+  if (event.type === 'client.error') {
+    const message = ensureMessage(s, ctx, now)
+    updateMessage(s, { ...message, error: p.message || text })
+    return s
+  }
   if (event.type === 'client.tick') return s
   if (event.type === 'client.submit') {
     s.messages = [...s.messages, { id: p.id || ctx.id(), role: 'user', segments: [{ id: ctx.id(), type: 'text', text, startedAt: now }], startedAt: now, pending: false }]
@@ -260,7 +274,8 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     case 'status.update': s.status = text; return s
     case 'error': {
       const message = ensureMessage(s, ctx, now)
-      updateMessage(s, { ...message, error: p.message || text, error_surface: p.error_surface }); return s
+      updateMessage(s, { ...message, error: p.message || text, error_surface: p.error_surface, status: 'error' })
+      settle(s, now); return s
     }
     default: return s
   }

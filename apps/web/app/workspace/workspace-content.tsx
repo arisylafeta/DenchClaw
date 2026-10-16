@@ -2417,7 +2417,7 @@ function WorkspacePageInner() {
       { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
     ] : undefined,
     chatsPanel: (
-      hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} awaitingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.awaiting && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
+      hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.tabId === visibleMainChatTabId && snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} awaitingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.tabId === visibleMainChatTabId && snapshot.awaiting && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
