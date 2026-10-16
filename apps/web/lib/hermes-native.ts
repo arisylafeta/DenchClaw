@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { resolveHermesConfig } from "./agent-backend";
 import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
@@ -28,16 +29,56 @@ export async function nativeFetch(profile: string, path: string, init: RequestIn
   if (!response.ok && !allowedStatuses.includes(response.status)) throw new Error(`Hermes request failed (${response.status})`);
   return response;
 }
-export function groupsConfigured() { return Boolean(process.env.HERMES_GATEWAY_WS_URL && process.env.HERMES_GATEWAY_TOKEN); }
+export function groupsConfigured() {
+  return Boolean(process.env.HERMES_GATEWAY_WS_URL && (process.env.HERMES_GATEWAY_TOKEN ||
+    (process.env.HERMES_GATEWAY_USERNAME && process.env.HERMES_GATEWAY_PASSWORD_FILE)));
+}
+let dashboardSession: { token: string; expiresAt: number } | undefined;
+let dashboardLogin: Promise<string> | undefined;
+let dashboardRetryAt = 0;
+async function dashboardToken(url: URL): Promise<string> {
+  if (process.env.HERMES_GATEWAY_TOKEN) return process.env.HERMES_GATEWAY_TOKEN;
+  if (dashboardSession && dashboardSession.expiresAt > Date.now()) return dashboardSession.token;
+  if (Date.now() < dashboardRetryAt) throw new Error("Hermes dashboard sign-in temporarily unavailable");
+  if (dashboardLogin) return dashboardLogin;
+  dashboardLogin = (async () => {
+    const endpoint = new URL(url);
+    endpoint.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    endpoint.pathname = endpoint.pathname.replace(/\/api\/ws\/?$/, "/auth/password-login");
+    endpoint.search = "";
+    const password = (await readFile(process.env.HERMES_GATEWAY_PASSWORD_FILE!, "utf8")).trim();
+    const response = await fetch(endpoint, {
+      method: "POST", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10_000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "basic", username: process.env.HERMES_GATEWAY_USERNAME, password }),
+    });
+    if (!response.ok) throw new Error("Hermes dashboard sign-in failed");
+    const accessCookie = /^(?:__Host-|__Secure-)?hermes_session_at=([^;]+)/;
+    const cookie = response.headers.getSetCookie().find((value) => accessCookie.test(value));
+    const rawToken = cookie?.match(accessCookie)?.[1];
+    const token = rawToken?.startsWith('"') ? JSON.parse(rawToken) as string : rawToken;
+    const maxAge = Number(cookie?.match(/Max-Age=(\d+)/i)?.[1] ?? 60);
+    if (!token) throw new Error("Hermes dashboard did not return a session");
+    dashboardSession = { token, expiresAt: Date.now() + Math.max(1, maxAge - 60) * 1000 };
+    return token;
+  })().catch(() => {
+    dashboardRetryAt = Date.now() + 60_000;
+    throw new Error("Hermes dashboard sign-in failed");
+  }).finally(() => { dashboardLogin = undefined; });
+  return dashboardLogin;
+}
 // One native dashboard socket multiplexes list/state/log/send RPCs, including concurrent refreshes.
 let gateway: { url: string; socket: WebSocket; pending: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }> } | undefined;
 /** Native dashboard JSON-RPC, never an API-server key or independent room engine. */
 export async function groupRpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-  if (!groupsConfigured()) throw new Error("Group chats require HERMES_GATEWAY_WS_URL and HERMES_GATEWAY_TOKEN on the server");
+  if (!groupsConfigured()) throw new Error("Group chats require a Hermes dashboard connection on the server");
   const url = new URL(process.env.HERMES_GATEWAY_WS_URL!);
   if (url.protocol !== "wss:" && !(url.protocol === "ws:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("Hermes gateway requires TLS except on loopback");
-  url.searchParams.set("token", process.env.HERMES_GATEWAY_TOKEN!);
   const address = url.toString();
+  if (!gateway || gateway.url !== address || gateway.socket.readyState >= WebSocket.CLOSING) {
+    url.searchParams.set("token", await dashboardToken(url));
+  }
+  // Recheck after sign-in: another concurrent caller may have opened the socket.
   if (!gateway || gateway.url !== address || gateway.socket.readyState >= WebSocket.CLOSING) {
     gateway?.socket.close();
     const connection = { url: address, socket: new WebSocket(url, { handshakeTimeout: 10_000 }), pending: new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>() };
