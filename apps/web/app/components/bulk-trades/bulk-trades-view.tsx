@@ -42,6 +42,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [trades, setTrades] = useState<BulkTrade[]>([]);
   const [owners, setOwners] = useState<TradeOwner[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tradesLoaded, setTradesLoaded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [check, setCheck] = useState<CheckStatus>(null);
@@ -73,6 +74,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       setCheck(data.check ?? null);
       setPossible([...new Map([...(data.possible ?? []), ...(inbox.possible ?? [])].map((item) => [item.id, item])).values()]);
       setLoadError(null);
+      setTradesLoaded(true);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Could not load trades.");
     }
@@ -181,7 +183,9 @@ export function BulkTradesView({ onOpenEntry }: Props) {
           : mode === "supply"
             ? <SupplyPage initialSupplyId={openSupplyId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} />
             : mode === "today"
-              ? <TodayDashboard trades={trades} today={today} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} onOpenInbox={() => setShowPossible(true)} />
+              ? tradesLoaded
+                ? <TodayDashboard trades={trades} today={today} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} onOpenInbox={() => setShowPossible(true)} />
+                : <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{loadError ? "Today's work unavailable." : "Loading today's work…"}</p>
               : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
       <Dialog open={showPossible} onOpenChange={setShowPossible}>

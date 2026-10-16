@@ -45,6 +45,15 @@ describe("BulkTradesView", () => {
   beforeEach(() => { window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); });
   afterEach(() => vi.unstubAllGlobals());
 
+  it("defaults to Today and never shows empty work lists before trades have loaded", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    render(<BulkTradesView />);
+    expect(await screen.findByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Loading today's work…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing needs attention.")).not.toBeInTheDocument();
+  });
+
   it("remembers Trades and keeps closed trades off the board", async () => {
     vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
