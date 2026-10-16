@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Supply, SupplyFeedRow } from "@/lib/bulk-supply";
 import type { Demand } from "@/lib/bulk-demand";
+import { checkReason } from "@/lib/bulk-demand";
+import { todayInLondon } from "@/lib/bulk-trades";
 import { sizeLabel } from "@/lib/bulk-supply";
 import { shortDate } from "@/lib/bulk-trade-details";
 import {
@@ -59,7 +61,24 @@ export function SupplyPage({
   useEffect(() => {
     setSelectedId(initialSupplyId ?? null);
   }, [initialSupplyId]);
-  const shown = feed.filter(
+  const today = todayInLondon();
+  const closedSupply: SupplyFeedRow[] = supply
+    .filter((row) => row.status === "closed")
+    .map((row) => ({
+      id: row.id,
+      kind: "supply",
+      title: row.offers,
+      seller: row.seller,
+      size: sizeLabel(row),
+      location: row.location,
+      seen: row.observed_on,
+      status: row.status,
+      href: `/?path=bulk_trade&supply=${encodeURIComponent(row.id)}`,
+      suppliers: [row.seller],
+      verified: null,
+      count: null,
+    }));
+  const shown = (filter === "closed" ? closedSupply : feed).filter(
     (row) =>
       (initialSupplyId !== "stock" || row.kind === "stock") &&
       (filter === "closed"
@@ -69,7 +88,7 @@ export function SupplyPage({
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
-  const selected = feed.find(
+  const selected = [...feed, ...closedSupply].find(
     (row) => row.id === selectedId || row.id === `supply:${selectedId}`,
   );
   const detail = supply.find(
@@ -135,7 +154,10 @@ export function SupplyPage({
               onClick={() => setSelectedId(row.id)}
             >
               <span className={styles.chip}>{KIND[row.kind]}</span>
-              <span className="min-w-0 truncate text-[14px] font-semibold" title={row.seller ?? undefined}>
+              <span
+                className="min-w-0 truncate text-[14px] font-semibold"
+                title={row.seller ?? undefined}
+              >
                 {row.seller ?? ""}
               </span>
               <div>
@@ -180,6 +202,11 @@ export function SupplyPage({
           row={selected}
           supply={detail}
           matches={demand.flatMap((buyer) => {
+            if (
+              buyer.status !== "open" ||
+              checkReason(buyer, today) === "past_needed_by"
+            )
+              return [];
             const fit = buyer.inventory_matches?.find(
               (match) => match.id === selected?.id,
             );
@@ -221,6 +248,7 @@ function SupplyPanel({
   const [busy, setBusy] = useState(false);
   const [closing, setClosing] = useState(false);
   const [reason, setReason] = useState<SupplyClosedReason>("gone");
+  const [showAllBuyers, setShowAllBuyers] = useState(false);
   async function patch(body: object) {
     if (!supply) return;
     setBusy(true);
@@ -361,7 +389,7 @@ function SupplyPanel({
               No matching buyers.
             </p>
           )}
-          {fits.slice(0, 5).map((fit) => (
+          {(showAllBuyers ? fits : fits.slice(0, 5)).map((fit) => (
             <div
               key={fit.demand_id}
               className="border-b py-4"
@@ -394,6 +422,15 @@ function SupplyPanel({
               )}
             </div>
           ))}
+          {fits.length > 5 && (
+            <button
+              type="button"
+              className={`${rowFocus} mt-3 text-[13px] underline`}
+              onClick={() => setShowAllBuyers(!showAllBuyers)}
+            >
+              {showAllBuyers ? "Show less" : `+${fits.length - 5} more`}
+            </button>
+          )}
         </section>
       )}
       {tab === "Activity" && (

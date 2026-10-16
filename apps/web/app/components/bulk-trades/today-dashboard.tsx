@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { BulkTrade } from "@/lib/bulk-trades";
+import { LIVE_STAGES } from "@/lib/bulk-trades";
 import type { Demand } from "@/lib/bulk-demand";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
@@ -22,6 +23,7 @@ export function TodayDashboard({
   onOpenTrade,
   onOpenDemand,
   onOpenInbox,
+  demandRevision = 0,
 }: {
   trades: BulkTrade[];
   today: string;
@@ -29,19 +31,24 @@ export function TodayDashboard({
   onOpenTrade: (id: string) => void;
   onOpenDemand: (id: string) => void;
   onOpenInbox: () => void;
+  demandRevision?: number;
 }) {
   const [demand, setDemand] = useState<Demand[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string[]>([]);
   useEffect(() => {
+    setLoading(true);
     void request<{ demand: Demand[] }>("/api/bulk-trades/demand")
-      .then((data) => setDemand(data.demand))
+      .then((data) => {
+        setDemand(data.demand);
+        setError(null);
+      })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Could not load demand."),
       )
       .finally(() => setLoading(false));
-  }, []);
+  }, [demandRevision]);
   if (loading)
     return (
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
@@ -55,7 +62,12 @@ export function TodayDashboard({
     {
       title: "Overdue next steps",
       items: active
-        .filter((trade) => trade.next_step_due && trade.next_step_due < today)
+        .filter(
+          (trade) =>
+            LIVE_STAGES.some((stage) => stage === trade.trade_stage) &&
+            trade.next_step_due &&
+            trade.next_step_due < today,
+        )
         .map((trade) => ({
           id: trade.id,
           title: trade.title,
@@ -137,7 +149,8 @@ export function TodayDashboard({
                 style={{ borderColor: "var(--bt-divider)" }}
               >
                 <p className="flex-1 text-[14px] font-semibold">
-                  {proposalCount} {proposalCount === 1 ? "proposal" : "proposals"} to review
+                  {proposalCount}{" "}
+                  {proposalCount === 1 ? "proposal" : "proposals"} to review
                 </p>
                 <button
                   type="button"

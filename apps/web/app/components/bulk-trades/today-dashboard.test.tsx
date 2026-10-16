@@ -176,7 +176,9 @@ it("caps work sections at five and expands the remaining items", async () => {
   const section = await screen.findByRole("region", {
     name: "Overdue next steps",
   });
-  expect(screen.getByRole("button", { name: "1 proposal to review" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "1 proposal to review" }),
+  ).toBeInTheDocument();
   expect(
     within(section).queryByRole("button", { name: /Trade 5/ }),
   ).not.toBeInTheDocument();
@@ -186,5 +188,80 @@ it("caps work sections at five and expands the remaining items", async () => {
   );
   expect(
     within(section).getByRole("button", { name: /Trade 5/ }),
+  ).toBeInTheDocument();
+});
+it("keeps paused trades out of overdue next steps", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ demand: [] }))),
+  );
+  render(
+    <TodayDashboard
+      trades={[
+        trade({ id: "live", title: "Live trade", next_step_due: "2026-10-07" }),
+        trade({
+          id: "paused",
+          title: "Paused trade",
+          trade_stage: "On hold",
+          next_step_due: "2026-10-07",
+          hold_until: "2099-01-01",
+          hold_reason: "Wait for removal",
+        }),
+      ]}
+      today={today}
+      proposalCount={0}
+      onOpenTrade={() => {}}
+      onOpenDemand={() => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  const overdue = await screen.findByRole("region", {
+    name: "Overdue next steps",
+  });
+  expect(
+    within(overdue).getByRole("button", { name: /Live trade/ }),
+  ).toBeInTheDocument();
+  expect(
+    within(overdue).queryByRole("button", { name: /Paused trade/ }),
+  ).not.toBeInTheDocument();
+});
+it("refreshes qualifying work when the parent invalidates demand after Inbox acceptance", async () => {
+  let accepted = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            demand: accepted
+              ? [
+                  row({
+                    buyer: "Accepted buyer",
+                    status: "qualifying",
+                    qualify_question: "Confirm budget",
+                  }),
+                ]
+              : [],
+          }),
+        ),
+    ),
+  );
+  const props = {
+    trades: [],
+    today,
+    proposalCount: 0,
+    onOpenTrade: () => {},
+    onOpenDemand: () => {},
+    onOpenInbox: () => {},
+  };
+  const { rerender } = render(<TodayDashboard {...props} demandRevision={0} />);
+  await screen.findByRole("region", { name: "Qualifying questions not sent" });
+  expect(
+    screen.queryByRole("button", { name: /Accepted buyer/ }),
+  ).not.toBeInTheDocument();
+  accepted = true;
+  rerender(<TodayDashboard {...props} demandRevision={1} />);
+  expect(
+    await screen.findByRole("button", { name: /Accepted buyer/ }),
   ).toBeInTheDocument();
 });

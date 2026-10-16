@@ -198,4 +198,33 @@ describe("Demand visualization", () => {
       within(sheet).getByRole("textbox", { name: "Activity title" }),
     ).toBeInTheDocument();
   });
+  it("shows failed status actions visibly in Overview without opening Activity", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH")
+          return new Response(
+            JSON.stringify({ error: "Could not confirm demand." }),
+            { status: 500 },
+          );
+        return new Response(
+          JSON.stringify(
+            url.endsWith("/activity")
+              ? { activity: [] }
+              : { demand: [row({})] },
+          ),
+        );
+      }),
+    );
+    render(<DemandPage today="2026-10-16" onOpenTrade={() => {}} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Green Voltage/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Still wanted" }));
+    expect(await screen.findByText("Could not confirm demand.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
 });

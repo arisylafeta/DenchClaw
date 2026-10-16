@@ -280,6 +280,7 @@ export function DemandActions({
           </div>
         )}
       </div>
+      <ErrorText error={error} />
       <section aria-label="Activity" hidden={section !== "Activity"}>
         <h3 className="mb-3 text-sm font-semibold">
           Activity{" "}
@@ -411,7 +412,6 @@ export function DemandActions({
             Add activity
           </button>
         </form>
-        <ErrorText error={error} />
         {!activity.length && (
           <p
             className="py-5 text-center text-xs"

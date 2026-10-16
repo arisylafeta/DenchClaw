@@ -184,7 +184,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
             ? <SupplyPage initialSupplyId={openSupplyId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} />
             : mode === "today"
               ? tradesLoaded
-                ? <TodayDashboard trades={trades} today={today} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} onOpenInbox={() => setShowPossible(true)} />
+                ? <TodayDashboard trades={trades} today={today} demandRevision={demandRevision} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} onOpenInbox={() => setShowPossible(true)} />
                 : <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{loadError ? "Today's work unavailable." : "Loading today's work…"}</p>
               : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>

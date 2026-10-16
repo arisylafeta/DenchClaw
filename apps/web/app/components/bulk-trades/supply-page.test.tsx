@@ -49,6 +49,110 @@ function batch(overrides: Partial<Supply>): Supply {
 
 describe("Unified supply", () => {
   afterEach(() => vi.unstubAllGlobals());
+  it("keeps closed batches accessible for reopening even though the availability feed excludes them", async () => {
+    const fetchMock = vi.fn(
+      async (url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify(
+            url.endsWith("/demand")
+              ? { demand: [] }
+              : {
+                  supply: [batch({ status: "closed", closed_reason: "gone" })],
+                  feed: [],
+                },
+          ),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SupplyPage />);
+    await userEvent.click(screen.getByRole("button", { name: /^closed$/i }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Jacksons Car Dismantlers/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bulk-trades/supply/bts_1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ action: "reopen" }),
+      }),
+    );
+  });
+  it("only suggests eligible open buyers and makes matches beyond five accessible", async () => {
+    const eligible = Array.from({ length: 6 }, (_, index) => ({
+      id: `d${index}`,
+      buyer: `Eligible ${index}`,
+      status: "open",
+      kind: "standing",
+      needed_by: null,
+      inventory_matches: [{ id: "trade1", reason: "Explicit match" }],
+    }));
+    const rows = [
+      ...eligible,
+      { ...eligible[0], id: "closed", buyer: "Closed buyer", status: "closed" },
+      {
+        ...eligible[0],
+        id: "expired",
+        buyer: "Expired buyer",
+        kind: "request",
+        needed_by: "2000-01-01",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (url: string) =>
+          new Response(
+            JSON.stringify(
+              url.endsWith("/demand")
+                ? { demand: rows }
+                : {
+                    supply: [],
+                    feed: [
+                      {
+                        id: "trade1",
+                        kind: "trade",
+                        title: "Test lot",
+                        seller: null,
+                        status: "open",
+                        size: null,
+                        location: null,
+                        seen: null,
+                        href: "/?path=bulk_trade&trade=trade1",
+                        suppliers: [],
+                        verified: null,
+                        count: null,
+                      },
+                    ],
+                  },
+            ),
+          ),
+      ),
+    );
+    render(<SupplyPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Test lot/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Suitable buyers" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Eligible 0" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Closed buyer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Expired buyer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Eligible 5" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "+1 more" }));
+    expect(
+      screen.getByRole("button", { name: "Eligible 5" }),
+    ).toBeInTheDocument();
+  });
   it("renders kinds and opens suitable buyers with explicit match reasons", async () => {
     const fetchMock = vi.fn(
       async (url: string, init?: RequestInit) =>
