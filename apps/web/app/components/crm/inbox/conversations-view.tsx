@@ -82,7 +82,7 @@ export function ConversationsView({
         if (signal.aborted) {return;}
         const grouped = new Map<string, Thread>();
         for (const message of body.items) {
-          if (message.campaign_id || !message.thread_id) {continue;}
+          if ((message.campaign_id && message.direction === "outbound") || !message.thread_id) {continue;}
           const previous = grouped.get(message.thread_id);
           if (previous) {previous.message_count = (previous.message_count ?? 0) + 1; continue;}
           grouped.set(message.thread_id, {

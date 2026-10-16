@@ -36,12 +36,13 @@ describe("merged mail", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns?"), expect.anything());
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/followups?"), expect.anything());
   });
-  it("excludes bulk campaigns from the conversation rows and unread badge", async () => {
-    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({}), message({ id: "bulk", thread_id: "bulk-thread", campaign_id: "campaign", subject: "Bulk campaign" })], nextCursor: null })));
+  it("excludes campaign deliveries from unread but retains inbound campaign replies", async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({}), message({ id: "bulk", thread_id: "bulk-thread", campaign_id: "campaign", subject: "Bulk campaign", direction: "outbound" }), message({ id: "campaign-reply", thread_id: "reply-thread", campaign_id: "campaign", subject: "Campaign reply" })], nextCursor: null })));
     render(<InboxView />);
     expect(await screen.findByLabelText("Unread conversations")).toHaveTextContent("0 unread conversations");
     await screen.findByText("Synthetic conversation");
-    expect(screen.getByLabelText("Unread conversations")).toHaveTextContent("1 unread conversations");
+    expect(screen.getByLabelText("Unread conversations")).toHaveTextContent("2 unread conversations");
+    expect(screen.getByText("Campaign reply")).toBeInTheDocument();
     expect(screen.queryByText("Bulk campaign")).not.toBeInTheDocument();
   });
   it("maps all filters to API query parameters including whole-log scope", async () => {
