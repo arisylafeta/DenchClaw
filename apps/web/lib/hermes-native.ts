@@ -36,7 +36,7 @@ export function groupsConfigured() {
 let dashboardSession: { token: string; expiresAt: number } | undefined;
 let dashboardLogin: Promise<string> | undefined;
 let dashboardRetryAt = 0;
-async function dashboardToken(url: URL): Promise<string> {
+export async function dashboardToken(url: URL): Promise<string> {
   if (process.env.HERMES_GATEWAY_TOKEN) return process.env.HERMES_GATEWAY_TOKEN;
   if (dashboardSession && dashboardSession.expiresAt > Date.now()) return dashboardSession.token;
   if (Date.now() < dashboardRetryAt) throw new Error("Hermes dashboard sign-in temporarily unavailable");
@@ -66,6 +66,11 @@ async function dashboardToken(url: URL): Promise<string> {
     throw new Error("Hermes dashboard sign-in failed");
   }).finally(() => { dashboardLogin = undefined; });
   return dashboardLogin;
+}
+/** Forget a rejected dashboard credential; healthy sockets do not call this. */
+export function invalidateDashboardToken(): void {
+  dashboardSession = undefined;
+  dashboardRetryAt = 0;
 }
 // One native dashboard socket multiplexes list/state/log/send RPCs, including concurrent refreshes.
 let gateway: { url: string; socket: WebSocket; pending: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }> } | undefined;
