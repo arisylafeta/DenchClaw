@@ -4,7 +4,7 @@ import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, filterCon
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { ProfileAvatar } from "./profile-avatar";
 
-type Listing = { backend: string; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
+type Listing = { backend: string; transport?: "gateway" | "sse"; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
 export type NewChatMode = "solo" | "group";
 export type ChatStatus = "running" | "awaiting" | "done" | "idle";
 const SEEN_KEY = "hermes-chats-seen";
@@ -90,10 +90,10 @@ export function useHermesConversations() {
     seen, error, creating, dialog, newChat, closeDialog, clear, select, create, rename, reload };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
-/** running: work in progress; awaiting: group needs a human; done: new output you have not opened; idle: nothing to show. */
-export function chatStatus(row: HermesConversation, chats: Pick<HermesChatsController, "seen" | "selected">, streaming = false): ChatStatus {
+/** Awaiting human input outranks running; done means unseen output. */
+export function chatStatus(row: HermesConversation, chats: Pick<HermesChatsController, "seen" | "selected">, streaming = false, awaiting = false): ChatStatus {
+  if (awaiting || row.blocked) return "awaiting";
   if (streaming || row.working === true) return "running";
-  if (row.blocked) return "awaiting";
   if (chats.selected?.key !== row.key && row.updatedAt > (chats.seen[row.key] ?? row.updatedAt)) return "done";
   return "idle";
 }
@@ -120,7 +120,7 @@ function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmi
     onKeyDown={(e) => { if (e.key === "Enter") void submit(); else if (e.key === "Escape") { done.current = true; onCancel(); } }}
     className="w-full rounded border border-[var(--color-border)] bg-transparent px-1 text-xs font-medium" />;
 }
-export function HermesConversationList({ chats, workingKeys }: { chats: HermesChatsController; workingKeys?: Set<string> }) {
+export function HermesConversationList({ chats, workingKeys, awaitingKeys }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string> }) {
   const rows = filterConversations(chats.listing?.sessions ?? [], chats.filter);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [view, setView] = useState<ChatView>(DEFAULT_VIEW);
@@ -159,7 +159,7 @@ export function HermesConversationList({ chats, workingKeys }: { chats: HermesCh
     {result.sections.map((section) => <section key={section.key} aria-label={section.label ?? undefined}>
       {section.label && <h3 className="px-2 pt-3 pb-1 text-[10px] font-semibold text-[var(--color-text-muted)]">{section.label}</h3>}
       {section.rows.map((row) => {
-      const status = chatStatus(row, chats, workingKeys?.has(row.key));
+      const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
       return <div key={row.key} className="group relative">
         <button type="button" onClick={() => chats.select(row)} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="flex w-full items-center gap-2 p-2 rounded-lg text-left hover:bg-[var(--color-surface-hover)] aria-[current=true]:bg-[var(--color-surface-hover)]">
           <ParticipantIcons row={row} />

@@ -89,6 +89,8 @@ describe("Hermes unified chat UI", () => {
     const base = { selected: null };
     expect(chatStatus({ ...solo, working: true }, { ...base, seen: {} })).toBe("running");
     expect(chatStatus({ ...group, blocked: true }, { ...base, seen: {} })).toBe("awaiting");
+    expect(chatStatus({ ...solo, working: true }, { ...base, seen: {} }, true, true)).toBe("awaiting");
+    expect(chatStatus({ ...group, working: true, blocked: true }, { ...base, seen: {} }, true)).toBe("awaiting");
     expect(chatStatus({ ...solo, updatedAt: 500 }, { ...base, seen: { [solo.key]: 100 } })).toBe("done");
     expect(chatStatus({ ...solo, updatedAt: 500 }, { ...base, selected: solo, seen: { [solo.key]: 100 } })).toBe("idle");
     expect(chatStatus({ ...solo, working: null }, { ...base, seen: {} })).toBe("idle");

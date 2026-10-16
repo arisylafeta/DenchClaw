@@ -7,7 +7,7 @@
  * Approval callbacks receive the entire PendingRequest (JSON-RPC id plus approval
  * requestId); clarify callbacks receive qid-keyed answers, with multi-select values
  * joined by ", ". A single option click answers immediately; multi-select/free
- * text use Submit. The controller adapts answers to the gateway's ordered array.
+ * text use Submit. The controller posts these qid-keyed answers unchanged.
  *
  * userHtml(messageId) is inertly parsed to formatting/mention spans. Queue identity
  * and tail text are controller-owned props, never inferred from model prose.

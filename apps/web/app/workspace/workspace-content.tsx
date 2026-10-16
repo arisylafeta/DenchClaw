@@ -2417,7 +2417,7 @@ function WorkspacePageInner() {
       { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
     ] : undefined,
     chatsPanel: (
-      hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
+      hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} awaitingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.awaiting && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2796,6 +2796,8 @@ function WorkspacePageInner() {
                   gatewaySessionId={isGateway ? tab.sessionId : undefined}
                   gatewayChannel={isGateway ? tab.channel : undefined}
                   visible={isVisible}
+                  nativeTransport={hermesChats.listing?.transport}
+                  onBranched={(conversation) => { hermesChats.select(conversation); void hermesChats.reload(); }}
                   searchFn={searchIndex}
                   fileContext={isVisible ? fileContext : undefined}
                   onFileChanged={handleFileChanged}
