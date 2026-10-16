@@ -280,7 +280,10 @@ export class HermesGatewayManager {
       this.reconnectAttempt = 0;
       this.authFailures = 0;
       void this.request("client.capabilities", { server_requests: true }).then(() => {
-        for (const session of this.sessions.values()) void this.restore(session).catch(() => {});
+        // History-only subscriptions must never cold-resume interrupted work.
+        for (const session of this.sessions.values()) {
+          if (session.runtimeId) void this.restore(session).catch(() => {});
+        }
       }).catch(() => {});
     }
     for (const session of this.sessions.values()) {

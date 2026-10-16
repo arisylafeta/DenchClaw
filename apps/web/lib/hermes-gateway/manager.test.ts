@@ -54,11 +54,14 @@ describe("process gateway manager", () => {
     expect(h.tokens).toHaveBeenCalledTimes(1);
     expect(h.sockets[0].frames[0]).toMatchObject({ method: "client.capabilities", params: { server_requests: true } });
   });
-  it("resumes every retained session even with no browser subscribers", async () => {
+  it("resumes all retained active sessions but never history-only subscriptions", async () => {
     const h = harness();
     h.manager.retainSession("ari", "one", "runtime-one");
     h.manager.retainSession("alex", "two", "runtime-two");
+    const historyKey = h.manager.retainSession("ari", "history-only");
+    h.manager.subscribe(historyKey, () => {});
     await start(h);
+    expect(h.sockets[0].frames.some(frame => frame.method === "session.resume" && frame.params?.session_id === "history-only")).toBe(false);
     h.sockets[0].close();
     await vi.advanceTimersByTimeAsync(250);
     h.sockets[1].ready(); await flush();
@@ -66,6 +69,7 @@ describe("process gateway manager", () => {
       expect.objectContaining({ profile: "ari", session_id: "one", close_on_disconnect: false }),
       expect.objectContaining({ profile: "alex", session_id: "two", close_on_disconnect: false }),
     ]));
+    expect(h.sockets[1].frames.some(frame => frame.method === "session.resume" && frame.params?.session_id === "history-only")).toBe(false);
   });
   it("bumps generations for epoch and runtime changes and reports ring eviction", async () => {
     const h = harness({ ringSize: 2 });
