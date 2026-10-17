@@ -9,8 +9,7 @@ import { buildSubagentTree } from "@/lib/hermes-chat/subagents";
 import type { NativeTranscriptProps } from "./types";
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { ErrorCard, SubagentCard, TodoPanel, UsageMeter } from "./panels";
-import { ChevronRight } from "lucide-react";
-import { cardClass, chipClass, Elapsed, StepNode, stepSummaryClass, ToolRun, treeClass, useLiveDisclosure } from "./tool-run";
+import { cardClass, Elapsed, ToolRun, TraceStep } from "./tool-run";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
   const [content, setContent] = useState<ReactNode>(text);
@@ -31,15 +30,8 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 }
 export interface ReasoningBlockProps { segment: TextSegment; live: boolean }
 export function ReasoningBlock({ segment, live }: ReasoningBlockProps) {
-  const disclosure = useLiveDisclosure(live);
-  return <div className={treeClass}>
-    <div className="relative min-w-0">
-      <StepNode state={live ? "running" : "done"} />
-      <details className="group/step" data-segment="reasoning" open={disclosure.open} onToggle={disclosure.onToggle}>
-        <summary className={stepSummaryClass}><ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/step:rotate-90" /><span className="font-medium">Reasoning</span><span className={chipClass}><Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} /></span></summary>
-        <div className="whitespace-pre-wrap break-words pb-2 pl-5 text-[11px] leading-5 text-[var(--color-text-muted)]">{segment.text}</div>
-      </details>
-    </div>
+  return <div className="w-full min-w-0" data-segment="reasoning">
+    <TraceStep state={live ? "running" : "done"} label="Thinking" detail={<Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} />} />
   </div>;
 }
 export function NativeTranscript({ state, subagents = state.subagents, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], subagentTails }: NativeTranscriptProps) {

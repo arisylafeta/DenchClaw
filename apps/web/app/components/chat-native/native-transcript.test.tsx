@@ -35,7 +35,7 @@ describe("native transcript", () => {
     ]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} queuedMessageIds={["user"]} userHtml={() => '<span class="mention" onclick="bad()">CRM</span><script>unsafe()</script>'} />);
     expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["interim", "reasoning", "tool-run", "interim"]);
-    expect(screen.getByText("Explored 1 file, ran 1 command")).toBeInTheDocument();
+    expect(screen.getAllByText(/^(read file|terminal)/)).toHaveLength(2);
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
     expect(screen.getByText("Queued")).toBeInTheDocument();
     expect(screen.getByText("CRM")).not.toHaveAttribute("onclick");
@@ -46,23 +46,23 @@ describe("native transcript", () => {
     const live = events([["message.start", {}], ["reasoning.delta", { text: "Plan" }]]);
     const cb = callbacks();
     const { container, rerender } = render(<NativeTranscript state={live} callbacks={cb} />);
-    expect(container.querySelector('[data-segment="reasoning"]')).toHaveAttribute("open");
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
     const running = events([["tool.start", { tool_id: "t", name: "terminal", args: { command: "pwd" } }]], live);
     rerender(<NativeTranscript state={running} callbacks={cb} />);
-    expect(screen.getByText("Running pwd")).toBeInTheDocument();
-    expect(container.querySelector('[data-segment="reasoning"]')).not.toHaveAttribute("open");
+    expect(screen.getByText(/^Running ·/)).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(1);
     const done = events([["tool.complete", { tool_id: "t", name: "terminal", result: { exit_code: 0 }, duration_s: 2 }]], running);
     rerender(<NativeTranscript state={done} callbacks={cb} />);
-    expect(screen.queryByText("Running pwd")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Running ·/)).not.toBeInTheDocument();
     expect(screen.getByText(/^Done ·/)).toBeInTheDocument();
-    expect(screen.getByText("Exit code: 0")).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(1);
   });
 
-  it("shows tool errors and unified diff file counts", () => {
+  it("shows tool errors inline as a flat trace step", () => {
     const state = events([["tool.complete", { tool_id: "edit", name: "edit_file", inline_diff: "--- a/file.ts\n+++ b/file.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n+extra", result: { error: "Permission denied" } }]]);
     render(<NativeTranscript state={state} callbacks={callbacks()} />);
     expect(screen.getByText("Permission denied", { selector: "p" })).toBeInTheDocument();
-    expect(screen.getByText("file.ts: +2 −1")).toBeInTheDocument();
+    expect(screen.getByText(/^Error ·/)).toBeInTheDocument();
   });
 
   it.each(["Run once", "Allow for session", "Deny"])("submits %s with the wire choice", label => {
