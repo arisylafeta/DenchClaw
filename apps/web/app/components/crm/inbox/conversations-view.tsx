@@ -88,8 +88,8 @@ export function ConversationsView({
           grouped.set(message.thread_id, {
             id: message.thread_id, subject: message.subject, last_message_at: message.sent_at ?? message.created_at,
             message_count: 1, gmail_thread_id: null, participants: [], participant_ids: [],
-            snippet: message.body_preview, primary_sender_type: message.direction === "inbound" ? "person" : "self",
-            primary_sender_id: message.from_person_id, primary_sender_name: null, primary_sender_email: message.direction === "outbound" ? message.to_emails[0] ?? message.recipient_email : message.from_email,
+            snippet: message.body_preview, primary_sender_type: null, is_self: message.is_self,
+            primary_sender_id: message.from_person_id, primary_sender_name: message.is_self ? "You" : null, primary_sender_email: message.from_email,
           });
         }
         setThreads((current) => {
@@ -207,8 +207,9 @@ export function ConversationsView({
         setSelectedThreadId(null);
       },
       focusSearch: () => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        const input = document.querySelector<HTMLInputElement>('[aria-label="Search mail"]') ?? searchInputRef.current;
+        input?.focus();
+        input?.select();
       },
       toggleSelectedBulk: () => {
         if (focusedThread) {selection.toggle(focusedThread.id);}
@@ -245,6 +246,8 @@ export function ConversationsView({
             style={{ background: "var(--color-bg)" }}
           >
             <InboxToolbar
+              hideSearch
+              unreadCount={threads.filter((thread) => !thread.is_self && !readState.has(thread.id)).length}
               ref={searchInputRef}
               search={search}
               onSearchChange={onSearchChange}
@@ -253,7 +256,6 @@ export function ConversationsView({
               onBulkAction={handleBulkAction}
               onOpenShortcuts={() => setHelpOpen(true)}
             />
-            <p className="px-4 text-xs" aria-label="Unread conversations">{threads.filter((thread) => thread.primary_sender_type === "person" && !readState.has(thread.id)).length} unread conversations</p>
             <div className="flex-1 min-h-0 overflow-y-auto">
               {error && (
                 <div

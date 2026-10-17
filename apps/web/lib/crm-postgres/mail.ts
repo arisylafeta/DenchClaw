@@ -1,6 +1,11 @@
 import { queryPg } from '../postgres';
-import type { MailFilters, MailMessageRow, MailPage, MailThread, MailFollowup, MailCampaignSummary } from '../mail-types';
+import type { MailFilters, MailMessageRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
 import { listCampaigns, getCampaignDetail } from './campaigns';
+
+// Match the complete domain, not lookalikes such as rebattery.io.evil.com.
+function selfAddressSql(column: string) {
+  return `(coalesce(lower(${column}) like '%@rebattery.io',false) or exists (select 1 from mail_identity identity where lower(identity.address) = lower(${column})))`;
+}
 
 function mailWhere(filters: MailFilters = {}) {
   const values: unknown[] = [];
@@ -34,7 +39,7 @@ export async function searchMail(filters: MailFilters = {}): Promise<MailPage<Ma
     where.push(`(coalesce(m.sent_at,m.created_at),m.id) < (${bind(cursor[0])}::timestamptz,${bind(cursor[1])})`);
   }
   const limit = Math.max(1, Math.min(200, filters.limit || 50));
-  const rows = await queryPg<MailMessageRow & {cursor_timestamp:string}>(`select m.*, coalesce(m.sent_at,m.created_at)::text as cursor_timestamp, coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events from mail_message m ${where.length ? `where ${where.join(' and ')}` : ''} order by coalesce(m.sent_at,m.created_at) desc,m.id desc limit ${bind(limit + 1)}`, values);
+  const rows = await queryPg<MailMessageRow & {cursor_timestamp:string}>(`select m.*, ${selfAddressSql('m.from_email')} as is_self, coalesce(m.sent_at,m.created_at)::text as cursor_timestamp, coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events from mail_message m ${where.length ? `where ${where.join(' and ')}` : ''} order by coalesce(m.sent_at,m.created_at) desc,m.id desc limit ${bind(limit + 1)}`, values);
   const items = rows.slice(0, limit);
   const last = items.at(-1);
   return { items, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.cursor_timestamp, last.id])).toString('base64url') : null };
@@ -44,13 +49,13 @@ export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnl
   const values = mailboxOwnerId ? [id, mailboxOwnerId] : [id];
   const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? 'and mailbox_owner_id = $2::uuid' : ''}`, values);
   if (!thread) return null;
-  const messages = await queryPg<MailMessageRow>(`select m.*, m.body_text as body, m.body_preview as preview,
+  const messages = await queryPg<MailMessageRow>(`select m.*, ${selfAddressSql('m.from_email')} as is_self, m.body_text as body, m.body_preview as preview,
     coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events,
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'to'),'{}') as to_person_ids,
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'cc'),'{}') as cc_person_ids
     from mail_message m where m.thread_id = $1 ${mailboxOwnerId ? 'and m.mailbox_owner_id = $2::uuid' : ''} ${crmOnly ? 'and m.crm_visible' : ''} order by m.sent_at asc nulls last,m.id`, values);
   if (!messages.length) return null;
-  const people = await queryPg(`select id,full_name as name,email,null as avatar_url from crm_people where id in (select from_person_id from mail_message where thread_id = $1 union select r.person_id from mail_message_recipient r join mail_message m on m.id = r.message_id where m.thread_id = $1)`, [id]);
+  const people = await queryPg<MailParticipant>(`select id,full_name as name,email,null as avatar_url,${selfAddressSql('crm_people.email')} as is_self from crm_people where id in (select from_person_id from mail_message where thread_id = $1 union select r.person_id from mail_message_recipient r join mail_message m on m.id = r.message_id where m.thread_id = $1)`, [id]);
   return { ...thread, thread_id: id, messages, people };
 }
 
@@ -93,7 +98,7 @@ export async function listMailCampaigns(filters: MailFilters = {}) {
 export async function readMailCampaign(id: string, filters: MailFilters = {}) {
   const { values, where, bind } = mailWhere({...filters,campaign:id,direction:'outbound'});
   const predicate = where.join(' and ');
-  const recipients = await queryPg<MailMessageRow>(`select m.* from mail_message m where ${predicate} order by m.recipient_email,m.id`,values);
+  const recipients = await queryPg<MailMessageRow>(`select m.*, ${selfAddressSql('m.from_email')} as is_self from mail_message m where ${predicate} order by m.recipient_email,m.id`,values);
   const legacy = await getCampaignDetail(id,recipients.map(row => row.id));
   if (!legacy) return null;
   const [summary] = await mailCampaignCounts(id,filters);

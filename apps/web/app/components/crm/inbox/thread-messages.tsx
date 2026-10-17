@@ -135,8 +135,8 @@ export function ThreadMessages({
   if (!detail) {return null;}
 
   const lastMessageId = detail.messages.at(-1)?.id;
-  const replyMessage = detail.messages.findLast((message) => message.direction === "inbound") ?? detail.messages.at(-1);
-  const replyEmail = replyMessage?.direction === "inbound" ? replyMessage.from_email ?? null : replyMessage?.to_emails?.[0] ?? null;
+  const replyMessage = detail.messages.findLast((message) => message.direction === "inbound" && !message.is_self) ?? detail.messages.at(-1);
+  const replyEmail = replyMessage?.direction === "inbound" && !replyMessage.is_self ? replyMessage.from_email ?? null : replyMessage?.to_emails?.[0] ?? null;
 
   return (
     <div ref={containerRef} className="space-y-3">

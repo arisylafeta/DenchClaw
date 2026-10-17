@@ -14,4 +14,11 @@ do $$ declare item record; begin
     execute format('revoke all privileges on public.%I from crm_web_sql',item.tablename);
   end loop;
 end $$;
+-- The application connects as the owner of the CRM tables and switches role with SET LOCAL ROLE, which needs membership.
+do $$ declare app_role name; begin
+  select tableowner into app_role from pg_tables where schemaname = 'public' and tablename = 'crm_people';
+  if app_role is not null and app_role <> current_user then
+    execute format('grant crm_agent_sql, crm_web_sql to %I', app_role);
+  end if;
+end $$;
 commit;

@@ -128,3 +128,21 @@ def test_postmark_client_reads_actual_rfc_message_id_from_dump():
     client.request = request
     assert postmark_rfc_identity(client.details('provider-id'))=='<actual-message@test>'
     assert calls==['/messages/outbound/provider-id/details','/messages/outbound/provider-id/dump']
+
+
+def test_gmail_driver_never_wraps_ingested_content(monkeypatch):
+    """--wrap-untrusted rewrites subject/body with markers; ingestion must store the real text."""
+    import subprocess
+    from rebattery_mail import gmail_driver
+
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen['command'] = command
+        return subprocess.CompletedProcess(command, 0, stdout='{"messages": []}', stderr='')
+
+    monkeypatch.setattr(gmail_driver.subprocess, 'run', fake_run)
+    monkeypatch.setattr(gmail_driver.Path, 'read_text', lambda self: 'unused')
+    gmail_driver.GmailDriver().call('ari@rebattery.io', 'gmail', 'messages', 'search', 'in:anywhere')
+    assert '--wrap-untrusted' not in seen['command']
+    assert '--json' in seen['command']

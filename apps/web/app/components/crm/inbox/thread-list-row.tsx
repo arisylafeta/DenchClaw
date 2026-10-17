@@ -13,22 +13,7 @@ const SENDER_TYPE_COLOR: Record<string, string> = {
   Automated: "#94a3b8",
 };
 
-/**
- * Single row in the thread list. Layout (Gmail-derived):
- *
- *   ☐  ★  · [avatar]  Sender Name      Subject — snippet…       2d ago
- *
- *   - Checkbox: bulk-select (visual today; stored in localStorage).
- *   - Star: toggles the starred mock state.
- *   - Unread dot: 6px accent dot before the subject when not yet read.
- *   - Subject: Instrument Serif; bold (weight 600) when unread.
- *   - Sender-type chip: only shown for non-Person threads (Person is the
- *     default — "label only the exceptions").
- *   - Selected row: 1px accent border on the left + accent-tinted bg.
- *
- * Whole-row click selects + opens. The checkbox/star buttons stop
- * propagation so they don't trigger row click.
- */
+/** Compact two-line conversation row. Selection controls span both lines. */
 export function ThreadListRow({
   thread,
   selected,
@@ -49,10 +34,8 @@ export function ThreadListRow({
   onToggleStarred: () => void;
 }) {
   const sender = pickSenderDisplay(thread);
-  const senderTypeColor =
-    thread.primary_sender_type && thread.primary_sender_type !== "Person"
-      ? SENDER_TYPE_COLOR[thread.primary_sender_type] ?? "#94a3b8"
-      : null;
+  const senderTypeColor = !thread.is_self && thread.primary_sender_type
+    ? SENDER_TYPE_COLOR[thread.primary_sender_type] ?? null : null;
 
   const stop = (e: MouseEvent) => e.stopPropagation();
 
@@ -62,9 +45,10 @@ export function ThreadListRow({
       onClick={onSelect}
       data-thread-id={thread.id}
       data-thread-row="true"
-      className="group relative w-full grid items-center gap-2 px-4 py-2.5 text-left transition-colors"
+      className="group relative w-full grid items-center gap-x-2 gap-y-1 px-4 py-2.5 text-left transition-colors"
       style={{
-        gridTemplateColumns: "20px 16px auto minmax(0, 1fr) auto",
+        gridTemplateColumns: "20px 16px minmax(0, 1fr) auto",
+        gridTemplateRows: "18px 20px",
         background: selected
           ? "var(--color-accent-light)"
           : inBulkSelection
@@ -99,7 +83,7 @@ export function ThreadListRow({
             onToggleSelected();
           }
         }}
-        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border cursor-pointer"
+        className="row-span-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border cursor-pointer"
         style={{
           background: inBulkSelection ? "var(--color-accent-fill)" : "transparent",
           borderColor: inBulkSelection ? "var(--color-accent)" : "var(--color-border-strong)",
@@ -121,7 +105,7 @@ export function ThreadListRow({
           onToggleStarred();
         }}
         title={starred ? "Unstar" : "Star"}
-        className="inline-flex h-4 w-4 shrink-0 items-center justify-center cursor-pointer"
+        className="row-span-2 inline-flex h-4 w-4 shrink-0 items-center justify-center cursor-pointer"
       >
         <svg
           width="14"
@@ -139,7 +123,7 @@ export function ThreadListRow({
       </span>
 
       {/* Avatar + sender */}
-      <span className="inline-flex items-center gap-2 min-w-0 max-w-[180px]">
+      <span data-mail-line="sender" className="col-start-3 row-start-1 inline-flex items-center gap-1.5 min-w-0">
         <SenderAvatar
           avatarUrl={sender.avatar_url}
           name={sender.name}
@@ -147,6 +131,7 @@ export function ThreadListRow({
           seed={sender.email ?? thread.id}
           senderType={thread.primary_sender_type}
           size="sm"
+          className="!h-4 !w-4 !text-[9px]"
         />
         <span
           className="truncate text-[13px]"
@@ -169,7 +154,7 @@ export function ThreadListRow({
       </span>
 
       {/* Subject + snippet */}
-      <span className="min-w-0 flex items-baseline gap-2">
+      <span data-mail-line="subject" className="col-start-3 col-span-2 row-start-2 min-w-0 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
         {!read && (
           <span
             aria-hidden
@@ -183,10 +168,10 @@ export function ThreadListRow({
           />
         )}
         <span
-          className="truncate"
+          className="max-w-[70%] shrink-0 truncate text-[14px]"
           style={{
             color: "var(--color-text)",
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: read ? 400 : 600,
           }}
         >
@@ -210,10 +195,9 @@ export function ThreadListRow({
         )}
         {thread.snippet?.trim() && (
           <span
-            className="truncate text-[13px]"
+            className="min-w-0 flex-1 truncate text-[13px]"
             style={{
               color: "var(--color-text-muted)",
-              fontFamily: '"Bookerly", Georgia, "Times New Roman", serif',
             }}
           >
             — {thread.snippet.trim()}
@@ -223,7 +207,7 @@ export function ThreadListRow({
 
       {/* Time */}
       <span
-        className="text-right text-[11px] tabular-nums shrink-0"
+        className="col-start-4 row-start-1 text-right text-[11px] tabular-nums shrink-0"
         style={{ color: "var(--color-text-muted)" }}
         title={thread.last_message_at ? formatAbsoluteDate(thread.last_message_at) : undefined}
       >
@@ -231,10 +215,6 @@ export function ThreadListRow({
       </span>
     </button>
   );
-}
-
-function isRebatteryAddress(email: string | null | undefined): boolean {
-  return typeof email === "string" && email.toLowerCase().endsWith("@rebattery.io");
 }
 
 export function pickSenderDisplay(thread: Thread): {
@@ -245,17 +225,8 @@ export function pickSenderDisplay(thread: Thread): {
   const primaryParticipant = thread.primary_sender_id
     ? thread.participants.find((x) => x.id === thread.primary_sender_id)
     : undefined;
-  if (isRebatteryAddress(thread.primary_sender_email) || isRebatteryAddress(primaryParticipant?.email)) {
-    const recipient = thread.participants.find(
-      (x) => x.id !== thread.primary_sender_id && !isRebatteryAddress(x.email),
-    );
-    if (recipient) {
-      return {
-        name: recipient.name ?? recipient.email ?? null,
-        email: recipient.email ?? null,
-        avatar_url: recipient.avatar_url ?? null,
-      };
-    }
+  if (thread.is_self || primaryParticipant?.is_self) {
+    return { name: "You", email: thread.primary_sender_email, avatar_url: primaryParticipant?.avatar_url ?? null };
   }
 
   if (thread.primary_sender_name || thread.primary_sender_email) {

@@ -77,6 +77,28 @@ describe.skipIf(!enabled)('unified mail log', () => {
   const detail=await readMailCampaign(prefix,{crmOnly:true,event:'bounced'});
   expect(detail?.counts.total).toBe(0); expect(detail?.delivery_rows).toEqual([]); expect(detail?.recipients).toEqual([]); expect(detail?.links).toEqual([]); expect(detail?.scanner_evidence).toBe(false);
  });
+ it('classifies complete ReBattery domains and configured identities on messages and participants',async () => {
+  const addresses = ['admin@rebattery.io','alex@rebattery.io','ANY@ReBattery.IO','x@rebattery.io.evil.com','x@notrebattery.io','buyer@example.test'];
+  for (const address of addresses) {
+   await queryPg(`update mail_message set from_email=$2 where id=$1||'_a'`,[prefix,address]);
+   const page=await searchMail({mailboxOwnerId:owner,from:address});
+   expect(page.items[0].is_self).toBe(address.toLowerCase().endsWith('@rebattery.io'));
+   expect((await readMailThread(prefix,owner))?.messages[0].is_self).toBe(address.toLowerCase().endsWith('@rebattery.io'));
+  }
+  const [identity]=await queryPg<{key:string;address:string}>('select key,address from mail_identity order by key limit 1');
+  try {
+   await queryPg(`update mail_identity set address='configured@example.test' where key=$1`,[identity.key]);
+   await queryPg(`update mail_message set from_email='CONFIGURED@example.test' where id=$1||'_a'`,[prefix]);
+   expect((await searchMail({mailboxOwnerId:owner,thread:prefix})).items.find(m=>m.id===`${prefix}_a`)?.is_self).toBe(true);
+  } finally {
+   await queryPg('update mail_identity set address=$2 where key=$1',[identity.key,identity.address]);
+  }
+  await queryPg(`insert into crm_people(id,full_name,email) values ($1,'Synthetic self','admin@rebattery.io')`,[prefix]);
+  await queryPg(`update mail_message set from_person_id=$1 where id=$1||'_a'`,[prefix]);
+  expect((await readMailThread(prefix,owner))?.people).toEqual(expect.arrayContaining([expect.objectContaining({id:prefix,is_self:true})]));
+  await queryPg(`update mail_message set from_email='buyer@example.test',from_person_id=null where id=$1||'_a'`,[prefix]);
+  await queryPg('delete from crm_people where id=$1',[prefix]);
+ });
  it('enforces mail ownership with database permissions even for Unicode identifiers',async () => {
   const client=await pgPool.connect();
   try {

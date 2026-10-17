@@ -18,11 +18,13 @@ export type Thread = {
   primary_sender_id: string | null;
   primary_sender_name: string | null;
   primary_sender_email: string | null;
+  is_self?: boolean;
 };
 
 export type Message = {
   id: string;
   direction?: "inbound" | "outbound";
+  is_self?: boolean;
   to_emails?: string[];
   subject: string | null;
   sent_at: string | null;

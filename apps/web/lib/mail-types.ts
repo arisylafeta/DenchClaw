@@ -7,6 +7,7 @@ export type MailMessageRow = {
   id: string; thread_id: string | null; campaign_id: string | null; identity_key: string | null;
   direction: 'inbound' | 'outbound'; transport: MailTransport; purpose: MailPurpose | null; state: string;
   subject: string | null; from_email: string | null; from_person_id: string | null;
+  is_self: boolean;
   to_emails: string[]; cc_emails: string[]; recipient_email: string | null; person_id: string | null;
   body_text: string | null; body_html: string | null; body_preview: string | null;
   sent_at: string | null; created_at: string; accepted_at: string | null; delivered_at: string | null;
@@ -14,6 +15,7 @@ export type MailMessageRow = {
   crm_visible: boolean; has_attachments: boolean; gmail_message_id: string | null;
   events?: MailEvent[];
 };
+export type MailParticipant = { id: string; name: string | null; email: string | null; avatar_url: string | null; is_self: boolean };
 export type MailThread = { id: string; subject: string | null; last_message_at: string | null; message_count: number; gmail_thread_id: string | null; messages: MailMessageRow[] };
 export type MailCounts = { sent: number; delivered: number; bounced: number; opened: number; clicked: number; unsubscribed: number; replied: number };
 export type MailCampaignSummary = MailCounts & { id: string; campaign_name: string; identity_key: string | null; purpose: MailPurpose | null; mail_state: string; total: number };
