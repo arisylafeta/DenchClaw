@@ -97,7 +97,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           <button type="button" onClick={onBack} className="hover:underline">Bulk Trades</button> / {trade.title}
         </nav>
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-[26px] font-semibold tracking-[-0.01em]">{trade.title}</h1>
+          <h1 className="text-[20px] font-semibold tracking-[-0.01em]">{trade.title}</h1>
           <select aria-label="Trade stage" value={trade.trade_stage} className="border px-2 py-1 text-sm" style={buttonStyle}
             onChange={(event) => {
               const stage = event.target.value as TradeStage;
@@ -114,6 +114,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           )}
           <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setEditing(true)}>Edit trade</button>
         </div>
+        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}><span style={{ color: trade.has_seller ? undefined : "var(--bt-amber)" }}>{trade.seller_name || "No seller yet"}</span> → <span style={{ color: detail.buyers.length ? undefined : "var(--bt-amber)" }}>{detail.buyers.length ? detail.buyers.map((buyer) => buyer.name).join(", ") : "No buyer yet"}</span></p>
         <ErrorText error={holdError} />
         <ErrorText error={loadError} />
         {trade.trade_stage === HOLD_STAGE && (

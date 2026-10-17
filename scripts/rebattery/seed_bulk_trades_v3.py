@@ -87,8 +87,8 @@ def apply_plan(cursor, plan: dict, actor_id: str | None) -> None:
         fields = {"title": plan["title"], **plan["fields"]}
         columns = ", ".join(fields)
         cursor.execute(
-            f"""insert into crm_bulk_trade_lots (id, lot_kind, summary, observed_outcome, confidence, {columns})
-                values (%s, 'supply', '', '', 'confirmed', {', '.join(['%s'] * len(fields))})""",
+            f"""insert into crm_bulk_trade_lots (id, lot_kind, origin, summary, observed_outcome, confidence, {columns})
+                values (%s, 'supply', 'supply', '', '', 'confirmed', {', '.join(['%s'] * len(fields))})""",
             [lot_id, *fields.values()],
         )
         cursor.execute(

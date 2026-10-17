@@ -10,6 +10,7 @@ const today = todayInLondon();
 
 function trade(overrides: Partial<BulkTrade>): BulkTrade {
   return {
+    origin: "supply", seller_ref: null, seller_name: null, has_seller: false, has_buyer: false,
     id: "t", title: "Trade", trade_stage: "With buyers", trade_kind: null, fact_line: null,
     next_step: "Follow up", next_step_due: today, waiting_on: "us", waiting_since: null,
     next_step_contact_id: null, next_step_buyer_id: null,
@@ -27,6 +28,7 @@ const TRADES = [
 
 function mockFetch(patchResponse: (body: Record<string, unknown>) => Response) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [] }));
     if (init?.method === "PATCH") return patchResponse(JSON.parse(String(init.body)));
     const one = TRADES.find((candidate) => url === `/api/bulk-trades/${candidate.id}`);
     if (one) return new Response(JSON.stringify({ trade: one, buyers: [], contacts: [], fields: [], files: [] }));
@@ -40,10 +42,19 @@ function dataTransfer() {
 }
 
 describe("BulkTradesView", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => { window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("starts on Trades and keeps closed trades off the board", async () => {
+  it("defaults to Today and never shows empty work lists before trades have loaded", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    render(<BulkTradesView />);
+    expect(await screen.findByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Loading today's work…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing needs attention.")).not.toBeInTheDocument();
+  });
+
+  it("remembers Trades and keeps closed trades off the board", async () => {
     vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
     expect(await screen.findByRole("button", { name: "Trades" })).toHaveAttribute("aria-pressed", "true");
@@ -142,7 +153,7 @@ describe("BulkTradesView", () => {
       if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({
         demand: accepted ? [{ id: "new-demand", buyer: "New buyer", wants: "Tested packs", status: "open", spec: {},
           fee_eur: null, price_basis: null, reputation: null, observed_on: today, confirmed_on: null,
-          activity_count: 0, last_activity_at: null }] : [],
+          activity_count: 0, last_activity_at: null, fits: [], inventory_matches: [], context_notes: [], missing: [], score: null }] : [],
         possible: accepted ? [] : [proposal],
       }));
       return new Response(JSON.stringify({ trades: TRADES, owners: [], possible: [] }));
@@ -150,9 +161,9 @@ describe("BulkTradesView", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
     await userEvent.click(await screen.findByRole("button", { name: "Demand" }));
-    expect(await screen.findByText("No open demand.")).toBeInTheDocument();
+    expect(await screen.findByText("No demand here.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Inbox · 1/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Add demand" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Add demand" }));
     await waitFor(() => expect(screen.getByText("Inbox clear.")).toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(await screen.findByRole("button", { name: /New buyer/ })).toBeInTheDocument();

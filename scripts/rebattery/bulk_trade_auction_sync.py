@@ -160,9 +160,9 @@ def create_trade(cur, auction):
            "next_step": f"Watch auction offers; closes {closes}", "next_step_due": closes, "waiting_on": "them",
            "listing_id": auction["listing_id"]}
     cur.execute(
-        """insert into crm_bulk_trade_lots (id, lot_kind, summary, observed_outcome, confidence, title, trade_stage, trade_kind,
+        """insert into crm_bulk_trade_lots (id, lot_kind, origin, summary, observed_outcome, confidence, title, trade_stage, trade_kind,
              next_step, next_step_due, waiting_on, waiting_since, listing_id)
-           values (%(id)s, 'supply', '', '', 'confirmed', %(title)s, %(trade_stage)s, %(trade_kind)s, %(next_step)s,
+           values (%(id)s, 'supply', 'supply', '', '', 'confirmed', %(title)s, %(trade_stage)s, %(trade_kind)s, %(next_step)s,
              %(next_step_due)s, %(waiting_on)s, current_date, %(listing_id)s)""", row)
     check.log_event(cur, lot_id, "trade_created", {**row, "via": "auction sync", "auction": auction["slug"]})
     for key, value in listing_fields(auction).items():

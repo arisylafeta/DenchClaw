@@ -4,6 +4,9 @@ import { LIVE_STAGES, todayInLondon, type BulkTrade, type TradeOwner, type Trade
 
 const TRADE_COLUMNS = `
   lot.id, lot.title, lot.trade_stage, lot.trade_kind, lot.fact_line, lot.next_step,
+  lot.origin, lot.seller_ref, bulk_trade_seller_display(lot.seller_ref, lot.seller_name) as seller_name,
+  (nullif(trim(lot.seller_name), '') is not null or lot.seller_ref is not null) as has_seller,
+  exists(select 1 from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id) as has_buyer,
   to_char(lot.next_step_due, 'YYYY-MM-DD') as next_step_due, lot.waiting_on,
   to_char(lot.waiting_since, 'YYYY-MM-DD') as waiting_since, lot.owner_user_id,
   owner.display_name as owner_name, lot.value,
@@ -11,7 +14,32 @@ const TRADE_COLUMNS = `
   -- auction activity) and any buyer's last touch.
   to_char(greatest(lot.last_touched,
     (select max(event.occurred_at)::date from crm_bulk_trade_events event where event.lot_id = lot.id),
-    (select max(buyer.last_touch_on) from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id)), 'YYYY-MM-DD') as last_touched,
+    (select max(buyer.last_touch_on) from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id),
+    (select max(thread.last_message_at)::date from crm_email_threads thread where
+      (not exists(select 1 from crm_bulk_trade_threads attributed
+        where attributed.thread_key = 'gmail:' || thread.gmail_thread_id)
+       or exists(select 1 from crm_bulk_trade_threads attributed where attributed.lot_id = lot.id
+         and attributed.verdict = 'trade' and attributed.thread_key = 'gmail:' || thread.gmail_thread_id))
+      and (
+      exists(select 1 from crm_bulk_trade_threads linked where linked.lot_id = lot.id
+        and linked.verdict = 'trade' and linked.thread_key = 'gmail:' || thread.gmail_thread_id)
+      or exists(select 1 from crm_bulk_trade_evidence_links evidence where evidence.lot_id = lot.id and (
+        (evidence.evidence_kind = 'gmail_thread'
+          and evidence.evidence_id in (thread.id, thread.gmail_thread_id, 'gmail:' || thread.gmail_thread_id))
+        or (evidence.evidence_kind = 'gmail_message' and exists(
+          select 1 from crm_email_messages message where message.thread_id = thread.id
+            and evidence.evidence_id in (message.id, message.gmail_message_id, 'gmail:' || message.gmail_message_id)))
+      ))
+      or exists(select 1 from crm_email_thread_participants participant
+        join crm_people person on person.id = participant.person_id
+        left join crm_companies company on company.id = person.company_id
+        where participant.thread_id = thread.id and (
+          exists(select 1 from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id
+            and (buyer.person_id = person.id or lower(buyer.name) = lower(company.name)))
+          or exists(select 1 from crm_bulk_trade_contacts contact where contact.lot_id = lot.id
+            and lower(contact.email) = lower(person.email))
+        ))
+    ))), 'YYYY-MM-DD') as last_touched,
   (select count(*)::int from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id) as buyer_count,
   (select count(*)::int from crm_bulk_trade_bids bid where bid.lot_id = lot.id) as bid_count,
   to_char(lot.clear_by, 'YYYY-MM-DD') as clear_by,
@@ -55,6 +83,7 @@ export async function createBulkTrade(
 ): Promise<BulkTrade> {
   const id = `bt_${randomUUID()}`;
   const fields: Record<string, unknown> = { ...patch };
+  if (!fields.origin) fields.origin = "supply";
   if (fields.waiting_on === "them") fields.waiting_since = todayInLondon();
   const keys = Object.keys(fields);
 
@@ -63,8 +92,8 @@ export async function createBulkTrade(
     await client.query(
       `insert into crm_bulk_trade_lots
          (id, lot_kind, summary, observed_outcome, confidence, ${keys.join(", ")})
-       values ($1, 'supply', '', '', 'confirmed', ${keys.map((_, i) => `$${i + 2}`).join(", ")})`,
-      [id, ...keys.map((key) => fields[key])],
+       values ($1, $2, '', '', 'confirmed', ${keys.map((_, i) => `$${i + 3}`).join(", ")})`,
+      [id, fields.origin, ...keys.map((key) => fields[key])],
     );
     await client.query(
       `insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id)

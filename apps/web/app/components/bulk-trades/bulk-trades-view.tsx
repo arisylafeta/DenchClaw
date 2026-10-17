@@ -19,16 +19,17 @@ import { TradePage } from "./trade-page";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
+import { TodayDashboard } from "./today-dashboard";
 
-type Mode = "board" | "demand" | "supply";
+type Mode = "today" | "board" | "demand" | "supply";
 const MODE_KEY = "bulk-trades:view";
 
 function storedMode(): Mode {
   try {
     const stored = window.localStorage.getItem(MODE_KEY);
-    return stored === "demand" || stored === "supply" ? stored : "board";
+    return stored === "demand" || stored === "supply" || stored === "board" ? stored : "today";
   } catch {
-    return "board";
+    return "today";
   }
 }
 
@@ -37,10 +38,11 @@ type Props = {
 };
 
 export function BulkTradesView({ onOpenEntry }: Props) {
-  const [mode, setMode] = useState<Mode>("board");
+  const [mode, setMode] = useState<Mode>("today");
   const [trades, setTrades] = useState<BulkTrade[]>([]);
   const [owners, setOwners] = useState<TradeOwner[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tradesLoaded, setTradesLoaded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [check, setCheck] = useState<CheckStatus>(null);
@@ -55,7 +57,9 @@ export function BulkTradesView({ onOpenEntry }: Props) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    if (params.get("trade")) setOpenTradeId(params.get("trade"));
     if (params.get("supply")) { setOpenSupplyId(params.get("supply")); setMode("supply"); }
+    else if (params.get("demand")) { setOpenDemandId(params.get("demand")); setMode("demand"); }
     else setMode(storedMode());
   }, []);
 
@@ -70,6 +74,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       setCheck(data.check ?? null);
       setPossible([...new Map([...(data.possible ?? []), ...(inbox.possible ?? [])].map((item) => [item.id, item])).values()]);
       setLoadError(null);
+      setTradesLoaded(true);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Could not load trades.");
     }
@@ -146,8 +151,9 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   return (
     <div className="bulk-trades flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-4 border-b px-8 py-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
+        <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
         <nav aria-label="View" className="ml-2 flex rounded-none p-[3px]" style={{ background: "var(--bt-segment)" }}>
+          {tab("today", "Today")}
           {tab("board", "Trades")}
           {tab("demand", "Demand")}
           {tab("supply", "Supply")}
@@ -176,7 +182,11 @@ export function BulkTradesView({ onOpenEntry }: Props) {
           ? <DemandPage key={demandRevision} today={today} onOpenTrade={setOpenTradeId} initialDemandId={openDemandId} onOpenSupply={(id) => { setOpenSupplyId(id); switchMode("supply"); }} />
           : mode === "supply"
             ? <SupplyPage initialSupplyId={openSupplyId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} />
-            : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
+            : mode === "today"
+              ? tradesLoaded
+                ? <TodayDashboard trades={trades} today={today} demandRevision={demandRevision} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} onOpenInbox={() => setShowPossible(true)} />
+                : <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{loadError ? "Today's work unavailable." : "Loading today's work…"}</p>
+              : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
       <Dialog open={showPossible} onOpenChange={setShowPossible}>
         <DialogContent aria-describedby={undefined} showCloseButton={false} className="bulk-trades top-0 left-auto right-0 h-full max-w-2xl translate-x-0 translate-y-0 overflow-auto rounded-none sm:max-w-2xl block" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>

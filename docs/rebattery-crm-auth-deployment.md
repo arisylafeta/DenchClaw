@@ -252,12 +252,36 @@ The timer invokes `--apply`; its journal contains aggregate counts only.
 
 ## Bulk-trade demand shortlist (16 October 2026)
 
-The Bulk Trades workspace has three tabs: **Trades | Demand | Supply**.
-Trades is the operational trade board; Demand is the buyer-ask shortlist and
-activity workspace; Supply holds seller offers. The **Inbox** button opens a
-right-hand review drawer rather than a fourth tab. Review proposals there:
-accept or reject new demand, supply and trade candidates, or apply proposed
-updates to existing trades. Accepted demand refreshes the Demand workspace.
+The Bulk Trades workspace has four tabs: **Today | Trades | Demand | Supply**.
+Today is the default work queue: overdue next steps, qualifying questions not
+sent, Inbox proposals, trades missing a seller or buyer, and demand missing
+information. Each section opens the relevant record or Inbox; longer lists
+expand beyond the first five items. Trades is the operational board; Demand
+is the buyer-ask shortlist and activity workspace; Supply is the unified
+available-inventory feed. The **Inbox** button opens a right-hand review drawer,
+not another tab. Accept or reject new demand, supply and trade candidates there,
+or apply proposed updates to existing trades. Accepted demand refreshes both
+the Demand workspace and Today's demand queues.
+
+Migrations `046`–`048` support trades from either side: `origin` records whether
+the opportunity started with supply or demand, not whether both sides are now
+present. Seller identity/name and buyer records are tracked independently;
+board cards expose missing sides. Seller references use `company:`, `supply:`
+or `stock:` namespaces, with evidence retained for seller attribution.
+
+The unified supply feed combines open supplier batches, eligible sell-side
+trades and live published auctions, plus available stock grouped by make/model
+family. Promoted batches are represented by their trades rather than duplicated.
+Sold/unavailable stock and ended auctions are excluded; stock is verified only
+when every row in its group is supplier-confirmed. Closed supplier-batch history
+remains available separately from the available feed.
+
+Demand and supplier-batch detail sheets show **Company context** notes for the
+linked company. These dated, source-attributed notes live in
+`crm_company_context_notes`, separate from mutable buyer profiles; they describe
+the company, not a new actionable ask. Demand's **Missing to move this** section
+surfaces missing price, quantity, request timeline, unsent qualification question
+or eligible supply match. These are action gaps, not automatic closures.
 
 Migration `044` separates current sourcing work from buyer discovery. **Demand**
 is a buyer's own dated, actionable request or standing ask with an identified
@@ -269,9 +293,11 @@ They suggest whom to introduce, not what to source today. **Lot interest** is a
 reply or bid to stock we offered and belongs to that lot's buyer/bid records,
 not to standalone demand. Recycling intake remains a separate pipeline.
 
-The shortlist orders open rows by expected-fee score, then qualifying rows and
-closed history. Fee is quantity × unit price × 10%. Buyer-stated prices count
-in full; our estimates count at half weight:
+The shortlist orders open rows before qualifying rows and closed history.
+Within each status, score bands come first, then manual **Priority** within
+the band, then score. Priority never lifts a cold opportunity above a hotter
+band. Fee is quantity × unit price × 10%. Buyer-stated prices count in full;
+our estimates count at half weight:
 
 ```
 asked_on = latest(observed_on, confirmed_on)
