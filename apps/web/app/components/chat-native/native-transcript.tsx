@@ -21,7 +21,7 @@ function UserContent({ html, text }: { html?: string; text: string }) {
       if (!(node instanceof Element) || ["SCRIPT", "STYLE", "IFRAME", "OBJECT"].includes(node.tagName)) return null;
       if (node.tagName === "BR") return <br key={key} />;
       const children = Array.from(node.childNodes).map(render);
-      if (node.tagName === "SPAN" && (node.hasAttribute("data-type") || node.className.includes("mention"))) return <span key={key} className="rounded bg-[var(--color-surface-hover)] px-1 font-medium">{children}</span>;
+      if (node.tagName === "SPAN" && (node.hasAttribute("data-type") || node.className.includes("mention"))) return <span key={key} className="rounded bg-white/15 px-1 font-medium">{children}</span>;
       return <span key={key}>{children}</span>;
     };
     setContent(Array.from(doc.body.childNodes).map(render));
@@ -45,12 +45,12 @@ export function NativeTranscript({ state, subagents = state.subagents, todos = s
   // A session switch must not carry request cards into the next conversation.
   useEffect(() => { setRequests(state.pendingRequests); }, [state.sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   const visibleRequests = [...requests.filter(old => !state.pendingRequests.some(current => current.id === old.id)), ...state.pendingRequests];
-  return <div className="space-y-4 text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
-    {state.messages.map(message => <article key={message.id} aria-label={`${message.role} message`} className="space-y-3" data-message-id={message.id}>
-      {message.role === "user" ? <div className={cardClass}><UserContent html={userHtml?.(message.id)} text={message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join("")} />{queuedMessageIds.includes(message.id) && <span>Queued</span>}</div> : groupToolRuns(message.segments).map(segment => {
+  return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
+    {state.messages.map(message => <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-3 py-3"} data-message-id={message.id}>
+      {message.role === "user" ? <div className="flex flex-col items-end gap-1 py-2"><div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}><UserContent html={userHtml?.(message.id)} text={message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join("")} /></div>{queuedMessageIds.includes(message.id) && <span className="text-xs text-[var(--color-text-muted)]">Queued</span>}</div> : groupToolRuns(message.segments).map(segment => {
         if (segment.type === "tool-run") return <ToolRun key={segment.id} tools={segment.tools} live={state.live && message.pending} />;
         if (segment.type === "reasoning") return <ReasoningBlock key={segment.id} segment={segment} live={state.live && message.pending && segment.completedAt === undefined} />;
-        return <div key={segment.id} data-segment={segment.type} className={segment.type === "interim" ? "text-sm text-[var(--color-text-muted)]" : "break-words"}>{renderMarkdown ? renderMarkdown(segment.text) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment.text}</ReactMarkdown>}</div>;
+        return <div key={segment.id} data-segment={segment.type} className={segment.type === "interim" ? "chat-message-font text-sm leading-6 text-[var(--color-text-muted)]" : "chat-prose chat-message-font text-sm break-words"}>{renderMarkdown ? renderMarkdown(segment.text) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment.text}</ReactMarkdown>}</div>;
       })}
       {message.error_surface ? <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={callbacks.onRetry} /> : message.error ? <p role="alert">{message.error}</p> : null}
     </article>)}
