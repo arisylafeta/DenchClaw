@@ -9,7 +9,8 @@ import { buildSubagentTree } from "@/lib/hermes-chat/subagents";
 import type { NativeTranscriptProps } from "./types";
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { ErrorCard, SubagentCard, TodoPanel, UsageMeter } from "./panels";
-import { cardClass, Elapsed, ToolRun } from "./tool-run";
+import { ChevronRight } from "lucide-react";
+import { cardClass, chipClass, Elapsed, StepNode, stepSummaryClass, ToolRun, treeClass, useLiveDisclosure } from "./tool-run";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
   const [content, setContent] = useState<ReactNode>(text);
@@ -30,12 +31,16 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 }
 export interface ReasoningBlockProps { segment: TextSegment; live: boolean }
 export function ReasoningBlock({ segment, live }: ReasoningBlockProps) {
-  const [open, setOpen] = useState(live);
-  useEffect(() => { setOpen(live); }, [live]);
-  return <details open={open} onToggle={event => setOpen(event.currentTarget.open)} data-segment="reasoning" className="text-sm text-[var(--color-text-muted)]">
-    <summary className="cursor-pointer">Reasoning · <Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} /></summary>
-    <div className="whitespace-pre-wrap">{segment.text}</div>
-  </details>;
+  const disclosure = useLiveDisclosure(live);
+  return <div className={treeClass}>
+    <div className="relative min-w-0">
+      <StepNode state={live ? "running" : "done"} />
+      <details className="group/step" data-segment="reasoning" open={disclosure.open} onToggle={disclosure.onToggle}>
+        <summary className={stepSummaryClass}><ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/step:rotate-90" /><span className="font-medium">Reasoning</span><span className={chipClass}><Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} /></span></summary>
+        <div className="whitespace-pre-wrap break-words pb-2 pl-5 text-[11px] leading-5 text-[var(--color-text-muted)]">{segment.text}</div>
+      </details>
+    </div>
+  </div>;
 }
 export function NativeTranscript({ state, subagents = state.subagents, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], subagentTails }: NativeTranscriptProps) {
   const [requests, setRequests] = useState<PendingRequest[]>(state.pendingRequests);

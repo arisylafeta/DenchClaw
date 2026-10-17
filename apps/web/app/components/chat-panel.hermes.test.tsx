@@ -183,7 +183,8 @@ describe("gateway ChatPanel solo transport", () => {
     render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onBranched={branched} />);
     openGateway({ conversation: { id: "native-existing", profile: "alpha", title: "Cron", working: false, source: "cron" } });
     expect(screen.getByLabelText("Read-only conversation")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    // Read-only chats show no composer at all, so nothing can be sent.
+    expect(screen.queryByRole("button", { name: "Submit fixture" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/prompt"))).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Continue as new chat" }));
     await waitFor(() => expect(branched).toHaveBeenCalledWith(branch));

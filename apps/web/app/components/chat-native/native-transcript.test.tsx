@@ -54,7 +54,7 @@ describe("native transcript", () => {
     const done = events([["tool.complete", { tool_id: "t", name: "terminal", result: { exit_code: 0 }, duration_s: 2 }]], running);
     rerender(<NativeTranscript state={done} callbacks={cb} />);
     expect(screen.queryByText("Running pwd")).not.toBeInTheDocument();
-    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText(/^Done ·/)).toBeInTheDocument();
     expect(screen.getByText("Exit code: 0")).toBeInTheDocument();
   });
 
