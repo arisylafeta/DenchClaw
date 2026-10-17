@@ -89,6 +89,18 @@ npx denchclaw start --skip-daemon-install
 
 ---
 
+## Mail workspace
+
+Mail combines Conversations, Campaigns, Sent and Follow-ups. Search stays visible;
+the Filters button reveals all advanced filters and removable active-filter chips.
+CRM-only is on by default. Conversation rows use a small sender line above the
+subject and preview; unread senders and subjects are bold with an unread dot.
+Server-provided `is_self` recognizes every case-insensitive `@rebattery.io` address
+and configured mail identity. Own messages display as “You”, never as a person/self
+category. Campaign deliveries do not increase the unread conversation count.
+Sending and unknown outcomes retain their reconciliation warnings; quick reply
+only copies a CLI draft command and never saves or sends mail.
+
 ## Campaign engagement
 
 The mail port follows the production migration chain through 049: apply

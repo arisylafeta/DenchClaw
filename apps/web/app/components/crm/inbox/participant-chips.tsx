@@ -7,6 +7,7 @@ export type Participant = {
   name: string | null;
   email: string | null;
   avatar_url: string | null;
+  is_self?: boolean;
 };
 
 /**

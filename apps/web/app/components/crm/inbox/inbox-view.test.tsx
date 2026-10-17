@@ -15,7 +15,7 @@ vi.mock("./conversation-pane", () => ({ ConversationPane: () => <div>Conversatio
 const at = "2026-10-16T10:00:00Z";
 const message = (overrides: Partial<MailMessageRow>): MailMessageRow => ({
   id: "message", thread_id: "thread", campaign_id: null, identity_key: "alex", direction: "inbound", transport: "gmail", purpose: "personal", state: "received", subject: "Synthetic conversation", from_email: "buyer@example.test", from_person_id: null, to_emails: ["alex@rebattery.io"], cc_emails: [], recipient_email: null, person_id: null,
-  body_text: "Hello", body_html: null, body_preview: "Hello", sent_at: at, created_at: at, accepted_at: null, delivered_at: null, bounced_at: null, opened_at: null, clicked_at: null, replied_at: null, crm_visible: true, has_attachments: false, gmail_message_id: null, ...overrides,
+  body_text: "Hello", body_html: null, body_preview: "Hello", sent_at: at, created_at: at, accepted_at: null, delivered_at: null, bounced_at: null, opened_at: null, clicked_at: null, replied_at: null, crm_visible: true, has_attachments: false, gmail_message_id: null, is_self: false, ...overrides,
 });
 beforeEach(() => {
   navigation.params = new URLSearchParams(); navigation.replace.mockClear(); navigation.redirect.mockClear(); localStorage.clear();
@@ -47,11 +47,16 @@ describe("merged mail", () => {
   });
   it("maps all filters to API query parameters including whole-log scope", async () => {
     render(<InboxView initialView="sent" />);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "battery" } });
+    expect(screen.queryByRole("combobox", { name: "identity" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search mail" }), { target: { value: "battery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     fireEvent.change(screen.getByRole("combobox", { name: "identity" }), { target: { value: "ari" } });
     fireEvent.change(screen.getByRole("combobox", { name: "event" }), { target: { value: "clicked" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "CRM-only" }));
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringMatching(/q=battery.*identity=ari.*event=clicked.*crmOnly=false/), expect.anything()));
+    expect(screen.getByRole("button", { name: "Remove identity filter" })).toHaveTextContent("ari");
+    fireEvent.click(screen.getByRole("button", { name: "Remove identity filter" }));
+    await waitFor(() => expect(new URLSearchParams(vi.mocked(fetch).mock.calls.at(-1)![0].toString().split("?")[1]).has("identity")).toBe(false));
     const query = new URLSearchParams(mailQuery({ q: "battery & pack", from: "a@example.test", to: "b@example.test", identity: "supply", direction: "outbound", transport: "postmark-broadcast", purpose: "marketing", state: "accepted", event: "opened", campaign: "campaign", thread: "thread", since: "2026-10-01", until: "2026-10-16", crmOnly: false }));
     expect(Object.fromEntries(query)).toEqual({ q: "battery & pack", from: "a@example.test", to: "b@example.test", identity: "supply", direction: "outbound", transport: "postmark-broadcast", purpose: "marketing", state: "accepted", event: "opened", campaign: "campaign", thread: "thread", since: "2026-10-01", until: "2026-10-16", crmOnly: "false" });
   });

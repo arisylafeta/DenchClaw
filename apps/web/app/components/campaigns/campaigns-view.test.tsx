@@ -75,6 +75,17 @@ function visiblePeople() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CampaignsView", () => {
+  it("uses the Mail header when embedded and forwards filters unchanged to list and detail", async () => {
+    const query = "view=campaigns&identity=ari&event=clicked&crmOnly=true";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/historical") ? { ...detail, ...counts } : { items: [{ ...summary, ...counts }] }))));
+    const view = render(<CampaignsView {...props} embedded campaignId={null} query={query} />);
+    await screen.findByRole("table", { name: "Campaigns" });
+    expect(screen.queryByRole("heading", { name: "Campaigns" })).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns?${query}`, expect.anything());
+    view.rerender(<CampaignsView {...props} embedded query={query} />);
+    await screen.findByRole("table", { name: "Recipients" });
+    expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns/historical?${query}`, expect.anything());
+  });
   it("opens a campaign within the merged view without also opening a workspace tab", async () => {
     const outerNavigation = vi.fn();
     const openCampaign = vi.fn();

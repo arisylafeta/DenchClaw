@@ -107,7 +107,7 @@ export function ThreadList({
                 <ThreadListRow
                   thread={thread}
                   selected={selectedThreadId === thread.id}
-                  read={isRead(thread.id)}
+                  read={Boolean(thread.is_self) || isRead(thread.id)}
                   starred={isStarred(thread.id)}
                   inBulkSelection={selectedIds.has(thread.id)}
                   onSelect={() => onSelect(thread)}

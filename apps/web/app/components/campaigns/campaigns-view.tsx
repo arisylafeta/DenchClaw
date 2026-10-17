@@ -18,12 +18,13 @@ export type CampaignsViewProps = {
   onBack: () => void;
   onNavigatePerson: (id: string) => void;
   query?: string;
+  embedded?: boolean;
 };
 
 type Payload = { kind: "list"; campaigns: (CampaignSummary & MailCampaignSummary)[] } | { kind: "detail"; detail: MailCampaignDetail };
 type Resource = { key: string; payload: Payload | null; error: string | null };
 
-export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePerson, query = "" }: CampaignsViewProps) {
+export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePerson, query = "", embedded = false }: CampaignsViewProps) {
   const key = campaignId == null ? `list:${query}` : `campaign:${campaignId}:${query}`;
   const [attempt, setAttempt] = useState(0);
   const [resource, setResource] = useState<Resource>({ key, payload: null, error: null });
@@ -50,10 +51,10 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
     <div className="bulk-trades flex h-full min-h-0 min-w-0 flex-col overflow-auto">
       {current?.payload?.kind === "detail" ? <CampaignPage key={campaignId} detail={current.payload.detail} onBack={onBack} onNavigatePerson={onNavigatePerson} /> : (
         <>
-          <header className="flex flex-col gap-2.5 border-b px-4 pb-5 pt-5 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          {!embedded && <header className="flex flex-col gap-2.5 border-b px-4 pb-5 pt-5 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             {campaignId != null && <a href={buildFileLink("campaign")} onClick={(event) => followInApp(event, onBack)} className="inline-flex self-start items-center gap-1.5 text-[13px] hover:underline" style={mutedStyle}><ArrowLeft size={14} aria-hidden="true" />Back to Campaigns</a>}
             <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Campaigns</h1>
-          </header>
+          </header>}
           <main className="min-w-0 flex-1 pb-8 pt-6">
             {current?.error ? <div className="flex flex-col items-start gap-3 px-4 sm:px-8"><ErrorText error={current.error} /><button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button></div>
               : current?.payload?.kind === "list" ? <CampaignsList campaigns={current.payload.campaigns} onOpenCampaign={onOpenCampaign} />
