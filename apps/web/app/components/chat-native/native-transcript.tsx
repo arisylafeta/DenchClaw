@@ -31,7 +31,7 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 export interface ReasoningBlockProps { segment: TextSegment; live: boolean }
 export function ReasoningBlock({ segment, live }: ReasoningBlockProps) {
   return <div className="w-full min-w-0" data-segment="reasoning">
-    <TraceStep state={live ? "running" : "done"} label="Thinking" detail={<Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} />} />
+    <TraceStep state={live ? "running" : "done"} label={live ? "Thinking" : "Thought"} detail={live ? undefined : <Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} />} />
   </div>;
 }
 export function NativeTranscript({ state, subagents = state.subagents, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], subagentTails }: NativeTranscriptProps) {

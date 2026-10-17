@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, CircleAlert, LoaderCircle } from "lucide-react";
+import { Brain, CircleAlert, LoaderCircle, type LucideIcon } from "lucide-react";
 import type { ToolSegment } from "@/lib/hermes-chat/reducer";
-import { toolTarget } from "@/lib/hermes-chat/run-summary";
+import { describeTool } from "./describe";
 
 export const cardClass = "rounded-lg border border-[var(--color-border)] p-3 space-y-2 text-[13px] leading-5";
 export const buttonClass = "rounded border border-[var(--color-border)] px-3 py-1 focus-visible:outline-2 disabled:opacity-50";
@@ -20,10 +20,10 @@ export function Elapsed({ startedAt, completedAt, seconds }: ElapsedProps) {
 export type StepState = "running" | "done" | "error";
 export const chipClass = "min-w-0 rounded-md bg-[var(--color-surface-hover)] px-2 py-1 font-mono text-[10px] text-[var(--color-text-muted)]";
 /** One trace step in the rebattery-platform style: status node on a connector line, label, detail chip. No disclosure. */
-export function TraceStep({ state, label, detail, connectPrevious, connectNext, children, ...rest }: {
-  state: StepState; label: string; detail?: React.ReactNode; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
+export function TraceStep({ state, icon, label, detail, connectPrevious, connectNext, children, ...rest }: {
+  state: StepState; icon?: LucideIcon; label: string; detail?: React.ReactNode; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
-  const Icon = state === "error" ? CircleAlert : state === "done" ? Check : LoaderCircle;
+  const Icon = state === "error" ? CircleAlert : state === "done" ? (icon ?? Brain) : LoaderCircle;
   return <div {...rest} className="relative min-w-0 py-1.5 pl-7">
     {connectPrevious && <span aria-hidden="true" className="absolute top-0 bottom-1/2 left-[7px] w-px bg-[var(--color-border)]" />}
     {connectNext && <span aria-hidden="true" className="absolute top-1/2 -bottom-4 left-[7px] w-px bg-[var(--color-border)]" />}
@@ -39,11 +39,11 @@ export function TraceStep({ state, label, detail, connectPrevious, connectNext, 
 }
 export interface ToolRowProps { tool: ToolSegment; connectPrevious?: boolean; connectNext?: boolean }
 export function ToolRow({ tool, connectPrevious, connectNext }: ToolRowProps) {
-  const target = toolTarget(tool);
   const state: StepState = tool.status === "running" ? "running" : tool.status === "error" ? "error" : "done";
-  const label = [tool.name.replace(/_/g, " "), target].filter(Boolean).join(" · ");
-  return <TraceStep data-tool-id={tool.id} state={state} label={label} connectPrevious={connectPrevious} connectNext={connectNext}
-    detail={<>{state === "running" ? "Running" : state === "error" ? "Error" : "Done"} · <Elapsed startedAt={tool.startedAt} completedAt={tool.completedAt} seconds={tool.duration_s} /></>}>
+  const { label, icon } = describeTool(tool);
+  const seconds = tool.duration_s != null ? tool.duration_s : tool.completedAt !== undefined ? (tool.completedAt - tool.startedAt) / 1000 : 0;
+  const detail = state === "error" ? "Failed" : state === "done" && seconds >= 1 ? <Elapsed startedAt={tool.startedAt} completedAt={tool.completedAt} seconds={tool.duration_s} /> : undefined;
+  return <TraceStep data-tool-id={tool.id} state={state} icon={icon} label={label} detail={detail} connectPrevious={connectPrevious} connectNext={connectNext}>
     {tool.error && <p role="alert" className="mt-1 text-[11px] text-[var(--color-error)]">{typeof tool.error === "string" ? tool.error : tool.message || "Tool failed"}</p>}
   </TraceStep>;
 }
