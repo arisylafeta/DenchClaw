@@ -8,7 +8,7 @@ Native Hermes solo chats can run over the Hermes gateway WebSocket (`/api/ws`, J
 
 Required for `gateway`: `HERMES_GATEWAY_WS_URL`, and either `HERMES_GATEWAY_TOKEN` or `HERMES_GATEWAY_USERNAME` + `HERMES_GATEWAY_PASSWORD_FILE` (dashboard basic auth). Rotating the dashboard password breaks gateway chats and groups until the password file is updated.
 
-Database: apply `apps/web/lib/crm-postgres/migrations/046_hermes_message_html.sql` (additive `hermes_message_html` table for mention-pill HTML) before enabling `gateway`. Take a database backup first.
+Database: apply `apps/web/lib/crm-postgres/migrations/049_hermes_message_html.sql` (additive `hermes_message_html` table for mention-pill HTML) before enabling `gateway`. Take a database backup first.
 
 ## Behaviour
 
