@@ -12,7 +12,9 @@ class GmailDriver:
             env = os.environ.copy()
             env['GOG_KEYRING_PASSWORD'] = Path('/root/.hermes/workspace/.secrets/gog-keyring-password').read_text().strip()
             env['HOME'] = '/root'
-            result = subprocess.run(['/usr/local/bin/gog','--account',account,*args,'--wrap-untrusted','--json','--no-input'], env=env, capture_output=True, text=True, timeout=timeout)
+            # No --wrap-untrusted here: it rewrites subject and body with markers and would corrupt stored mail.
+            # Untrusted-content handling is for what agents read back, not for ingestion.
+            result = subprocess.run(['/usr/local/bin/gog','--account',account,*args,'--json','--no-input'], env=env, capture_output=True, text=True, timeout=timeout)
             if result.returncode:
                 raise ProviderError('gmail_read_failed', provider='gog', returncode=result.returncode)
             return json.loads(result.stdout)
