@@ -4,7 +4,7 @@
 #   scripts/rebattery/mail-test-db.sh up     # start, load schema.sql and every migration, print the DSN
 #   scripts/rebattery/mail-test-db.sh down   # stop and delete it
 #
-# Like crm-test-db.sh, seed the people object before 034 for a clean schema bootstrap.
+# Seed core objects before object-layout migrations; the live chain has no 034.
 set -euo pipefail
 
 NAME="${MAIL_TEST_DB_NAME:-crm-test-mail}"
@@ -20,10 +20,13 @@ case "${1:-}" in
     for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U postgres -q && break; sleep 1; done
     sleep 2
     for file in "$SQL_DIR/schema.sql" $(ls "$SQL_DIR"/migrations/*.sql | sort); do
-      case "$(basename "$file")" in
-        034_*) "${PSQL[@]}" -c "insert into crm_objects (id, name, entity_table, display_field) values ('obj_people','people','crm_people','name') on conflict do nothing" >/dev/null ;;
-      esac
       "${PSQL[@]}" < "$file" >/dev/null || { echo "Failed loading $(basename "$file")" >&2; exit 1; }
+      if [[ "$(basename "$file")" == schema.sql ]]; then
+        "${PSQL[@]}" -c "insert into crm_objects (id, name, entity_table, display_field) values ('obj_people','people','crm_people','full_name'), ('obj_company','company','crm_companies','name') on conflict do nothing" >/dev/null
+      fi
+      if [[ "$(basename "$file")" == 050_mail_log.sql ]]; then
+        "${PSQL[@]}" -c 'create database mail_pre_cutover_test template denchclaw' >/dev/null
+      fi
     done
     echo "dbname=denchclaw host=127.0.0.1 port=${PORT} user=postgres password=test"
     ;;

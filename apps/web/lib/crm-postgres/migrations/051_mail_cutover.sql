@@ -122,6 +122,7 @@ do $$ declare fk record; begin
 end $$;
 alter table crm_interactions add constraint crm_interactions_email_message_id_fkey
   foreign key (email_message_id) references mail_message(id) on delete set null;
+drop view crm_bulk_trade_seller_candidates;
 drop view crm_buyer_engagement;
 drop view crm_bulk_trade_buyer_waiting;
 drop view crm_person_campaign_activity;
@@ -539,4 +540,152 @@ people AS (
      LEFT JOIN demand ON ((demand.company_id = c.id)))
      LEFT JOIN waiting ON ((waiting.company_id = c.id)));
 
+
+create or replace view crm_bulk_trade_seller_candidates as
+with candidates as (
+  select lot.id as lot_id, company.id as company_id, company.name as company_name,
+    party.display_name as source_name, null::text as email, 0 as rank,
+    'Explicit supplier party'::text as reason
+  from crm_bulk_trade_lots lot
+  join crm_bulk_trade_parties party on party.lot_id = lot.id and party.role = 'supplier'
+  left join crm_companies company on company.id = party.company_id
+    or (party.company_id is null and lower(company.name) = lower(party.display_name))
+  union all
+  select lot.id, company.id, company.name, lot.seller_name, null, 1,
+    'Existing named supplier company; no buyer-side evidence'
+  from crm_bulk_trade_lots lot
+  join crm_companies company on lot.seller_ref = 'company:' || company.id
+  where lot.seller_name !~ '@' and lower(lot.seller_name) not in ('seller', 'supplier', 'unknown')
+    and ('Supplier' = any(coalesce(company.purpose, '{}'::text[])) or lower(company.platform_role) = 'supplier')
+  union all
+  select lot.id, company.id, company.name, person.full_name, contact.email, 2,
+    case when 'Supplier' = any(coalesce(company.purpose, '{}'::text[])) or lower(company.platform_role) = 'supplier'
+      then 'Trade contact resolves to a supplier company'
+      when 'Dismantler' = any(coalesce(company.purpose, '{}'::text[]))
+      then 'Dismantler contact corroborated by a linked trade thread'
+      else 'Incoming stock offer in an explicitly linked trade thread' end
+  from crm_bulk_trade_lots lot
+  join crm_bulk_trade_contacts contact on contact.lot_id = lot.id
+  join crm_people person on lower(person.email) = lower(contact.email)
+  left join crm_companies company on company.id = person.company_id
+  where 'Supplier' = any(coalesce(company.purpose, '{}'::text[])) or lower(company.platform_role) = 'supplier'
+    or exists (
+      select 1 from crm_bulk_trade_threads linked
+      join mail_thread thread on linked.thread_key = 'gmail:' || thread.gmail_thread_id
+      join mail_message message on message.thread_id = thread.id and lower(message.from_email) = lower(contact.email)
+      where message.crm_visible and message.direction = 'inbound' and linked.lot_id = lot.id and linked.verdict = 'trade'
+        and ('Dismantler' = any(coalesce(company.purpose, '{}'::text[]))
+          or concat_ws(' ', message.subject, message.body_preview) ~* '(we (currently )?have.{0,80}(available|stock)|asking price for|installation available|offering for sale)')
+    )
+), safe as (
+  select candidate.*,
+    coalesce(nullif(company_name, ''), case when source_name !~ '@'
+      and lower(trim(source_name)) !~ '^(seller|supplier|unknown|.*supplier route)$' then nullif(source_name, '') end) as display_name
+  from candidates candidate
+  left join crm_companies company on company.id = candidate.company_id
+  where not (
+    lower(coalesce(company.platform_role, '')) = 'buyer'
+    or 'Buyer' = any(coalesce(company.purpose, '{}'::text[]))
+    or 'buyer' = any(coalesce(company.roles, '{}'::text[]))
+    or company.buyer_stage is not null or company.buyer_tier is not null
+    or exists(select 1 from crm_bulk_trade_demand demand where demand.company_id = candidate.company_id)
+  )
+  and not exists (
+    select 1 from crm_bulk_trade_parties party where party.lot_id = candidate.lot_id and party.role = 'buyer'
+      and (party.company_id = candidate.company_id or lower(party.display_name) = lower(candidate.company_name)
+        or lower(party.display_name) = lower(candidate.source_name))
+  )
+  and not exists (
+    select 1 from crm_bulk_trade_buyers buyer
+    left join crm_people person on person.id = buyer.person_id
+    left join crm_bulk_trade_demand demand on demand.id = buyer.demand_id
+    where buyer.lot_id = candidate.lot_id and (
+      person.company_id = candidate.company_id or demand.company_id = candidate.company_id
+      or lower(buyer.name) in (lower(candidate.company_name), lower(candidate.source_name), lower(candidate.email))
+      or (candidate.email is not null and position(lower(candidate.email) in lower(coalesce(buyer.contact, ''))) > 0)
+      or exists(select 1 from crm_people member where member.company_id = candidate.company_id
+        and (member.id = buyer.person_id or lower(buyer.name) in (lower(member.full_name), lower(member.email))
+          or position(lower(member.email) in lower(coalesce(buyer.contact, ''))) > 0))
+    )
+  )
+  and not exists (
+    select 1 from crm_bulk_trade_auction_people participant
+    left join crm_people person on person.id = participant.person_id
+    left join crm_people address on lower(address.email) = lower(participant.email)
+    where participant.lot_id = candidate.lot_id and (
+      person.company_id = candidate.company_id or address.company_id = candidate.company_id
+      or lower(participant.email) = lower(candidate.email)
+      or lower(split_part(participant.email, '@', 2)) = lower(company.domain)
+    )
+  )
+)
+select distinct on (lot_id) lot_id, display_name as seller_name,
+  case when company_id is not null then 'company:' || company_id end as seller_ref, reason
+from safe where display_name is not null
+order by lot_id, rank, company_id nulls last, display_name;
+
+
+create or replace function crm_log_dismantler_campaign_send() returns trigger language plpgsql as $$
+declare
+  kind text;
+  label text;
+  company text;
+  d crm_dismantlers%rowtype;
+  today date := (now() at time zone 'Europe/London')::date;
+  changes jsonb;
+begin
+  if new.direction <> 'outbound' or new.campaign_id is null or new.state <> 'accepted' then
+    return null;
+  end if;
+  if tg_op = 'UPDATE' and old.state = 'accepted' then
+    return null;  -- already handled when it was first accepted
+  end if;
+  company := coalesce(new.company_id, (select company_id from crm_people where id = new.person_id));
+  if company is null then
+    return null;
+  end if;
+  select * into d from crm_dismantlers where company_id = company for update;
+  if not found then
+    return null;
+  end if;
+  select type, campaign_name into kind, label from campaigns where id = new.campaign_id;
+
+  changes := jsonb_build_object(
+    'campaign_id', new.campaign_id,
+    'campaign', label,
+    'send_id', new.id,
+    'subject', new.subject,
+    'email', new.recipient_email);
+
+  if kind = 'dismantler_outreach' then
+    if d.stage in ('Found', 'Parked') then
+      changes := changes || jsonb_build_object('stage', jsonb_build_array(d.stage, 'Talking'));
+      update crm_dismantlers
+         set stage = 'Talking', stage_since = today, parked_from = null, park_reason = null, revisit_on = null,
+             updated_at = now()
+       where id = d.id;
+    end if;
+    if d.next_step is null then
+      changes := changes || jsonb_build_object(
+        'next_step', jsonb_build_array(null, 'Follow up if no reply'),
+        'next_step_due', jsonb_build_array(null, crm_add_working_days(today, 4)));
+      update crm_dismantlers
+         set next_step = 'Follow up if no reply', next_step_due = crm_add_working_days(today, 4),
+             next_step_person_id = new.person_id, updated_at = now()
+       where id = d.id;
+    end if;
+    update crm_companies set relationship_stage = 'Contacted', updated_at = now()
+     where id = company and relationship_stage = 'New';
+  end if;
+
+  insert into crm_dismantler_events (dismantler_id, kind, changes, created_at)
+  values (d.id, 'campaign_email', changes, coalesce(new.accepted_at, now()));
+  return null;
+end $$;
+
+
+create trigger trg_mail_campaign_logs_dismantler after insert or update of state on mail_message
+  for each row execute function crm_log_dismantler_campaign_send();
+create index if not exists mail_message_from_person_sent_idx on mail_message(from_person_id,sent_at);
+create index if not exists mail_message_from_email_sent_idx on mail_message(lower(from_email),sent_at);
 commit;

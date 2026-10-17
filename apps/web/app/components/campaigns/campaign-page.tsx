@@ -57,7 +57,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
           <span>Sent: <CampaignDate value={campaign.launched_at || campaign.last_invite_at} /></span>
         </div>
         <section aria-label="Campaign metrics" className="grid grid-cols-2 border sm:grid-cols-7" style={{ borderColor: "var(--bt-border)" }}>
-          {(["sent", "delivered", "bounced", "opened", "clicked", "unsubscribed", "replied"] as const).map((key) => <div key={key} className="p-3"><span className="bt-label capitalize">{key}</span><p className="text-xl font-semibold">{detail[key] ?? "Unknown"}</p></div>)}
+          {(["sent", "delivered", "bounced", "opened", "clicked", "unsubscribed", "replied"] as const).map((key) => <div key={key} className="p-3"><span className="bt-label">{humanize(key)}</span><p className="text-xl font-semibold">{campaign.channel === "email-gmail" && ["delivered", "opened", "clicked"].includes(key) ? "Not tracked" : detail[key] ?? "Unknown"}</p></div>)}
         </section>
         <p role="note" className="text-xs" style={mutedStyle}>Scanner evidence: {detail.scanner_evidence ? "recorded" : "not recorded"} · Proxy evidence: {detail.proxy_evidence ? "recorded" : "not recorded"}. Opens and clicks do not prove human engagement.</p>
         {detail.dismantler_funnel && <DismantlerFunnel funnel={detail.dismantler_funnel} />}
@@ -93,7 +93,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
 }
 
 /** Where the emailed dismantlers are now. Stages move on the Dismantlers page; a send moves Found to Talking. */
-function DismantlerFunnel({ funnel }: { funnel: NonNullable<CampaignDetail["dismantler_funnel"]> }) {
+function DismantlerFunnel({ funnel }: { funnel: NonNullable<MailCampaignDetail["dismantler_funnel"]> }) {
   const steps: Array<[string, number]> = [["Emailed", funnel.emailed], ["Replied", funnel.replied],
     ...JOURNEY.map((stage): [string, number] => [stage, funnel.stages[stage] ?? 0]), ["Parked", funnel.stages.Parked ?? 0]];
   return (

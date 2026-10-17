@@ -81,6 +81,27 @@ def state(target):
         return load(db,target)[1][0]['state']
 
 
+def test_live_cohort_select_function_cannot_write(env, tmp_path):
+    """Retain live CLI's transaction-level guard, not just the SELECT prefix check."""
+    import psycopg2
+    sql_file = tmp_path / 'cohort.sql'
+    with connection() as db, db.cursor() as cur:
+        cur.execute("""create function mail_test_writable_cohort() returns text language plpgsql as $$
+          begin update crm_people set first_name='Changed' where id=current_setting('mail.test_person',true);
+          return 'unused'; end $$""")
+    sql_file.write_text('select mail_test_writable_cohort() as person_id')
+    try:
+        with connection() as db:
+            with pytest.raises(psycopg2.errors.ReadOnlySqlTransaction):
+                campaign.cohort(db, {'person_ids': None, 'cohort_sql': str(sql_file)})
+        with connection(read_only=True) as db, db.cursor() as cur:
+            cur.execute('select first_name from crm_people where id=%s', (env+'0',))
+            assert cur.fetchone()[0] == 'Buyer'
+    finally:
+        with connection() as db, db.cursor() as cur:
+            cur.execute('drop function mail_test_writable_cohort()')
+
+
 def test_exact_message_approval_duplicate_and_role_address(env):
     row=one(env)
     with pytest.raises(Refused,match='approval_missing'):

@@ -1,6 +1,6 @@
 -- Mail log: one authoritative store for every message ReBattery sends or receives, both directions,
 -- all transports (Gmail, Postmark broadcast, Postmark transactional). Replaces the legacy
--- inbox and campaign ledgers (dropped in 038 after the one-time load).
+-- inbox and campaign ledgers (dropped in 051 after the one-time load).
 -- Apply only after a current verified pg_dump and explicit schema approval.
 --
 -- Ownership:
@@ -9,6 +9,14 @@
 --   * Human-owned: mail_approval (approved_by is a named human), mail_identity signatures, mail_template copy.
 --   * `campaigns` stays the campaign record (platform-synced metrics live there). It gains the mail columns below.
 begin;
+-- Live migrations through 049 did not persist rendered campaign copy. Keep the
+-- importer projection identical for both historical schema variants.
+alter table if exists crm_campaign_sends
+  add column if not exists personalization jsonb not null default '{}'::jsonb,
+  add column if not exists rendered_subject text,
+  add column if not exists rendered_html text,
+  add column if not exists rendered_text text;
+alter table crm_people add column if not exists opening text;
 set local lock_timeout = '5s';
 
 create table if not exists mail_identity (

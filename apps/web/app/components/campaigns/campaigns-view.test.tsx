@@ -93,7 +93,7 @@ describe("CampaignsView", () => {
     expect(within(table).getAllByRole("row")[1].textContent).toContain("1151133241321");
     view.rerender(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
-    for (const [key, value] of Object.entries(counts)) {expect(within(metrics).getByText(key, { exact: true }).parentElement).toHaveTextContent(String(value));}
+    for (const [key, value] of Object.entries(counts)) {expect(within(metrics).getByText(key[0].toUpperCase() + key.slice(1), { exact: true }).parentElement).toHaveTextContent(String(value));}
     expect(screen.getByRole("note")).toHaveTextContent("Scanner evidence: recorded · Proxy evidence: recorded");
     expect(within(screen.getByRole("region", { name: "Tracked links" })).getByRole("link", { name: "offer" })).toHaveAttribute("href", "https://example.test/offer");
   });

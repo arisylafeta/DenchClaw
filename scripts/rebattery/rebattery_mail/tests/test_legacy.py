@@ -15,7 +15,7 @@ from rebattery_mail.legacy import SOURCES, import_legacy
 ROOT = Path(__file__).resolve().parents[4]
 SQL = ROOT / 'apps/web/lib/crm-postgres'
 VIEWS = ('crm_relation_links', 'crm_bulk_trade_buyer_waiting',
-         'crm_buyer_engagement', 'crm_person_campaign_activity')
+         'crm_buyer_engagement', 'crm_person_campaign_activity', 'crm_bulk_trade_seller_candidates')
 
 
 @pytest.fixture(scope='module')
@@ -87,14 +87,28 @@ def test_import_reconciliation_and_clean_cutover(db):
             values ('legacy_identity','legacy_accepted','to',2), ('legacy_owner','legacy_accepted','cc',1);
           insert into crm_interactions (id,email_message_id) values ('legacy_interaction','legacy_in');
         """)
+        cur.execute("""
+          insert into crm_companies(id,name,purpose) values ('legacy_seller','Synthetic Yard',array['Dismantler']);
+          insert into crm_people(id,company_id,email) values ('legacy_supplier','legacy_seller','supplier@example.test');
+          insert into crm_bulk_trade_lots(id,title,lot_kind,summary,observed_outcome,confidence)
+            values ('legacy_lot','Synthetic stock','supply','','','confirmed');
+          insert into crm_bulk_trade_contacts(id,lot_id,name,email)
+            values ('legacy_contact','legacy_lot','Supplier','supplier@example.test');
+          insert into crm_bulk_trade_threads(thread_key,lot_id,verdict)
+            values ('gmail:gmail-legacy','legacy_lot','trade');
+          insert into crm_email_messages(id,thread_id,subject,sent_at,from_person_id,from_email,body_preview)
+            values ('legacy_stock','legacy_thread','Stock available','2026-10-02T13:00:00Z',
+                    'legacy_supplier','supplier@example.test','We have packs available');
+        """)
     before = snapshot(db)
     assert before['crm_bulk_trade_buyer_waiting']
     assert before['crm_person_campaign_activity']
+    assert before['crm_bulk_trade_seller_candidates']
 
     # Missing history prevents a destructive cutover and the transaction rolls back.
     with pytest.raises(psycopg2.Error, match='unloaded rows'):
         with db.cursor() as cur:
-            cur.execute((SQL / 'migrations/038_mail_cutover.sql').read_text())
+            cur.execute((SQL / 'migrations/051_mail_cutover.sql').read_text())
     db.rollback()
     with db.cursor() as cur:
         cur.execute('rollback')
@@ -158,7 +172,7 @@ def test_import_reconciliation_and_clean_cutover(db):
     def refused_cutover():
         with pytest.raises(psycopg2.Error, match='mismatched'):
             with db.cursor() as cur:
-                cur.execute((SQL / 'migrations/038_mail_cutover.sql').read_text())
+                cur.execute((SQL / 'migrations/051_mail_cutover.sql').read_text())
         with db.cursor() as cur:
             cur.execute('rollback')
         assert rows(db, "select to_regclass('crm_campaign_sends') as name")[0]['name']
@@ -222,13 +236,13 @@ def test_import_reconciliation_and_clean_cutover(db):
     before = snapshot(db)
 
     # Apply to this module's throwaway database using the deployment command.
-    cutover = subprocess.run(['psql', os.environ['DENCH_MAIL_DSN'], '-X', '-v', 'ON_ERROR_STOP=1', '-f', str(SQL/'migrations/038_mail_cutover.sql')], capture_output=True, text=True)
+    cutover = subprocess.run(['psql', os.environ['DENCH_MAIL_DSN'], '-X', '-v', 'ON_ERROR_STOP=1', '-f', str(SQL/'migrations/051_mail_cutover.sql')], capture_output=True, text=True)
     assert cutover.returncode == 0, cutover.stderr
     assert snapshot(db) == before
     for source, *_ in SOURCES:
         assert rows(db, 'select to_regclass(%s) as name', (source,))[0]['name'] is None
     assert rows(db, "select to_regprocedure('crm_mark_campaign_send()') as name")[0]['name'] is None
-    assert len(rows(db, "select viewname from pg_views where schemaname='public' and viewname=any(%s)", (list(VIEWS),))) == 4
+    assert len(rows(db, "select viewname from pg_views where schemaname='public' and viewname=any(%s)", (list(VIEWS),))) == len(VIEWS)
     assert rows(db, "select confrelid::regclass::text as target from pg_constraint where conrelid='crm_interactions'::regclass and conname='crm_interactions_email_message_id_fkey'")[0]['target'] == 'mail_message'
     with db.cursor() as cur:
         cur.execute("update crm_interactions set email_message_id='legacy_in' where id='legacy_interaction'")

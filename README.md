@@ -91,7 +91,18 @@ npx denchclaw start --skip-daemon-install
 
 ## Campaign engagement
 
-Open the campaign list at `/?path=campaign` or from **Campaigns** in the sidebar.
+The mail port follows the production migration chain through 049: apply
+`050_mail_log.sql`, run the approved legacy import, then apply
+`051_mail_cutover.sql` and `052_mail_agent_role.sql`. The cutover recreates the
+live seller-candidate view and retains accepted-send dismantler progression,
+follow-up dates and campaign events on the new log. The disposable harness loads
+the full chain and retains `mail_pre_cutover_test` for synthetic import/cutover
+regressions. This is not a production-data rehearsal: a fresh verified,
+restore-tested production backup and a separately approved real-data run remain
+required before deployment.
+
+Open the campaign list at `/?path=campaign` or from the **Campaigns** view under
+**Mail** in the sidebar.
 Campaigns use Dismantlers' compact rows, square controls and palette. The list's
 search sits directly on the page body; its table is full width without an
 enclosing card.

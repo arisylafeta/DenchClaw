@@ -402,14 +402,14 @@ class FullRun(unittest.TestCase):
               insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
                 select 'inbound', 'gmail', 'received', true, 'msg_known', 'Batch update', now(), 'More packs for the run trade batch are ready.',
                        'g-msg-known', 'new.person@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_small', 'Three hybrid packs', now(), 'We have three Toyota Prius hybrid packs to sell.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_small', 'Three hybrid packs', now(), 'We have three Toyota Prius hybrid packs to sell.',
                        'g-msg-small', 'sophie@dismantler.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_recy', 'Recycling quote', now(), 'We can recycle the LMO packs for EUR 2,500 per tonne.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_recy', 'Recycling quote', now(), 'We can recycle the LMO packs for EUR 2,500 per tonne.',
                        'g-msg-recy', 'quotes@recycler.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_two', 'Two packs wanted', now(), 'I need two 60 kWh packs for testing.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_two', 'Two packs wanted', now(), 'I need two 60 kWh packs for testing.',
                        'g-msg-two', 'massimo@lab.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
 

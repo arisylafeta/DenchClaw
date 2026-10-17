@@ -11,6 +11,12 @@ description: Read, search, synchronise, draft, approve, send and reconcile ReBat
 
 Run `python3 scripts/rebattery/rebattery-mail.py` from this repository. The package `scripts/rebattery/rebattery_mail/` is the shared implementation. Set and verify `DENCH_MAIL_DSN` explicitly before operating; never let an unexamined default select a database. Production schema changes, legacy import, deployment, credentials and sends each retain their separate approval boundaries. Read nearest project instructions first. Copy rules belong to `writing-emails`.
 
+The production-stack port follows migrations through 049 with `050_mail_log.sql`,
+the separately approved `legacy import`, `051_mail_cutover.sql`, then
+`052_mail_agent_role.sql`. Synthetic harness checks are not a production-data
+rehearsal; the real cutover still requires a fresh verified, restore-tested backup
+and its own approval.
+
 | Store | Meaning and ownership |
 | --- | --- |
 | `mail_message` | Frozen copy, sender, recipients, purpose, transport, thread and campaign links. Preparation writes draft/frozen content. Provider state, IDs and timestamps are written only by send claims/receipt reconciliation, sync and webhooks. |
