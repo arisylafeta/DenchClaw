@@ -7,7 +7,7 @@ import { parseUnifiedDiff, summarizeToolRun, toolTarget } from "@/lib/hermes-cha
 import { DiffCard } from "../diff-viewer";
 import { liveToolPhrase, toolRunPhrase } from "./phrases";
 
-export const cardClass = "rounded-lg border border-[var(--color-border)] p-3 space-y-2 text-sm";
+export const cardClass = "rounded-lg border border-[var(--color-border)] p-3 space-y-2 text-[13px] leading-5";
 export const buttonClass = "rounded border border-[var(--color-border)] px-3 py-1 focus-visible:outline-2 disabled:opacity-50";
 export interface ElapsedProps { startedAt: number; completedAt?: number; seconds?: number | null }
 export function Elapsed({ startedAt, completedAt, seconds }: ElapsedProps) {
