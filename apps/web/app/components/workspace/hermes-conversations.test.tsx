@@ -112,7 +112,7 @@ describe("Hermes unified chat UI", () => {
     await screen.findByText("Alpha solo");
     expect(screen.queryByText("Daily digest · 09:00")).not.toBeInTheDocument();
     expect(screen.queryByText("Incoming webhook")).not.toBeInTheDocument();
-    screen.getByRole("button", { name: "Chat view" }).focus();
+    screen.getByRole("button", { name: "Filter and group chats" }).focus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Scheduled 1" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("menuitemcheckbox", { name: "Webhook 1" })).toHaveAttribute("aria-checked", "false");
@@ -137,7 +137,7 @@ describe("Hermes unified chat UI", () => {
     const user = userEvent.setup(); render(<Harness />);
     await screen.findByText("Channel chat");
     await user.click(screen.getByRole("button", { name: "Scheduled and Webhook hidden" }));
-    screen.getByRole("button", { name: "Chat view" }).focus();
+    screen.getByRole("button", { name: "Filter and group chats" }).focus();
     await user.keyboard("{ArrowDown}");
     await user.click(screen.getByRole("menuitemradio", { name: label }));
     await user.keyboard("{Escape}");
@@ -149,7 +149,7 @@ describe("Hermes unified chat UI", () => {
     const first = render(<Harness />);
     await screen.findByText("Alpha solo");
     await user.click(screen.getByRole("button", { name: "Scheduled and Webhook hidden" }));
-    screen.getByRole("button", { name: "Chat view" }).focus();
+    screen.getByRole("button", { name: "Filter and group chats" }).focus();
     await user.keyboard("{ArrowDown}");
     await user.click(screen.getByRole("menuitemradio", { name: "Channel" }));
     await user.keyboard("{Escape}");
@@ -172,7 +172,7 @@ describe("Hermes unified chat UI", () => {
     const user = userEvent.setup(); render(<Harness />);
     await screen.findByText("Alpha solo");
     await user.type(screen.getByRole("searchbox", { name: "Search chats" }), "missing");
-    screen.getByRole("button", { name: "Chat view" }).focus();
+    screen.getByRole("button", { name: "Filter and group chats" }).focus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Scheduled 0" })).toHaveAttribute("aria-checked", "false");
     await user.click(screen.getByRole("menuitemcheckbox", { name: "Scheduled 0" }));
