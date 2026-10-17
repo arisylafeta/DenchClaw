@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 vi.hoisted(() => { if (process.env.BULK_TRADES_TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.BULK_TRADES_TEST_DATABASE_URL; });
 import { queryPg, pgPool } from '../postgres';
-import { searchMail, readMailThread, listMailFollowups, mailCampaignCounts, readMailCampaign } from './mail';
+import { searchMail, readMailThread, listMailFollowups, mailCampaignCounts, readMailCampaign, listMailCampaigns } from './mail';
 import { getPostgresObjectData } from './object-read';
 import { getPostgresEntryData } from './entry-read';
 import { getPostgresInbox } from './inbox';
@@ -14,6 +14,7 @@ describe.skipIf(!enabled)('unified mail log', () => {
   const [user] = await queryPg<{id:string}>(`insert into crm_users(email,display_name,password_hash) values ($1,'Synthetic mail','x') returning id`,[`${prefix}@example.test`]); owner=user.id;
   await queryPg(`insert into campaigns(id,campaign_name) values ($1,'Synthetic mail campaign')`,[prefix]);
   await queryPg(`insert into mail_thread(id,subject,mailbox_owner_id,crm_visible) values ($1,'Battery reply',$2,true)`,[prefix,owner]);
+  await queryPg(`insert into mail_thread(id,subject,mailbox_owner_id,crm_visible) values ($1||'_paging','Second conversation',$2,true)`,[prefix,owner]);
   await queryPg(`insert into mail_message(id,direction,transport,purpose,state,thread_id,mailbox_owner_id,crm_visible,subject,from_email,body_text,sent_at) values
    ($1||'_a','inbound','gmail',null,'received',$1,$2,true,'Battery reply','buyer@example.test','packs','2026-01-01T10:00:00Z'),
    ($1||'_b','inbound','gmail',null,'received',$1,$2,false,'Private note','private@example.test','private','2026-01-01T10:00:00Z')`,[prefix,owner]);
@@ -28,8 +29,30 @@ describe.skipIf(!enabled)('unified mail log', () => {
  });
  afterAll(async () => { await queryPg('delete from mail_followup where id=$1',[prefix]); await queryPg('delete from mail_message where id like $1',[`${prefix}%`]); await queryPg('delete from mail_thread where id like $1',[`${prefix}%`]); await queryPg('delete from campaigns where id=$1',[prefix]); await queryPg('delete from crm_users where id=$1',[owner]); await pgPool.end(); });
  it('excludes bulk deliveries but retains inbound campaign replies and filters the CRM subset',async () => {
-  const all=await searchMail({mailboxOwnerId:owner,view:'conversations'}); expect(all.items.map(m=>m.id).sort()).toEqual([`${prefix}_a`,`${prefix}_b`]);
+  const all=await searchMail({mailboxOwnerId:owner,view:'conversations'}); expect(all.items.map(m=>m.id)).toEqual([`${prefix}_b`]); expect(all.items[0].message_count).toBe(2);
   const crm=await searchMail({mailboxOwnerId:owner,crmOnly:true}); expect(crm.items.map(m=>m.id).sort()).toEqual([`${prefix}_a`,`${prefix}_c`]);
+ });
+ it('keeps campaigns visible in CRM-only lists and Sent without changing visibility flags',async () => {
+  expect((await listMailCampaigns({crmOnly:true})).some(c=>c.id===prefix)).toBe(true);
+  expect((await readMailCampaign(prefix,{crmOnly:true}))?.counts.total).toBe(2);
+  expect((await searchMail({mailboxOwnerId:owner,view:'sent',crmOnly:true})).items.map(m=>m.id).sort()).toEqual([`${prefix}_c`,`${prefix}_d`]);
+  expect((await queryPg<{crm_visible:boolean}>('select crm_visible from mail_message where id=$1',[`${prefix}_d`]))[0].crm_visible).toBe(false);
+ });
+ it('returns one latest row per inbound thread, real counts and participants, and no list bodies',async () => {
+  await queryPg(`insert into mail_message(id,thread_id,mailbox_owner_id,direction,transport,purpose,state,crm_visible,from_email,to_emails,subject,body_text,sent_at)
+    values ($1||'_latest',$1,$2,'outbound','gmail','personal','accepted',true,'alex@rebattery.io',array['buyer@example.test'],'Latest reply','Full reply body','2026-01-02'),
+      ($1||'_blast',$1||'_bulk',$2,'outbound','gmail','marketing','accepted',true,'alex@rebattery.io',array['buyer@example.test'],'Unlinked Gmail bulk send','Bulk body','2026-01-03')`,[prefix,owner]);
+  try {
+   const page=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});
+   expect(page.items).toHaveLength(1); expect(page.nextCursor).toBeNull();
+   expect(page.items[0]).toMatchObject({id:`${prefix}_latest`,thread_id:prefix,message_count:3,subject:'Latest reply'});
+   expect(page.items[0].participants).toEqual(expect.arrayContaining([expect.objectContaining({email:'alex@rebattery.io',is_self:true}),expect.objectContaining({email:'buyer@example.test',is_self:false})]));
+   for (const view of ['conversations','sent'] as const) {
+    const rows=(await searchMail({mailboxOwnerId:owner,view})).items;
+    for(const row of rows){expect(row).not.toHaveProperty('body_text');expect(row).not.toHaveProperty('body_html');}
+   }
+   expect((await readMailThread(prefix,owner))?.messages.at(-1)?.body_text).toBe('Full reply body');
+  } finally {await queryPg('delete from mail_message where id=any($1)',[[`${prefix}_latest`,`${prefix}_blast`]]);}
  });
  it('keeps the CRM inbox campaign-free and reads only visible thread messages',async () => {
   const inbox=await getPostgresInbox({search:'',senderFilter:'all',personId:null,limit:50,offset:0},owner);
@@ -67,15 +90,17 @@ describe.skipIf(!enabled)('unified mail log', () => {
   expect(payload).toContain(`${prefix}_a`);expect(payload).not.toContain(`${prefix}_b`);
  });
  it('preserves microseconds in pagination cursors',async () => {
+  await queryPg(`update mail_message set thread_id=$1||'_paging' where id=$1||'_b'`,[prefix]);
   await queryPg(`update mail_message set sent_at=case when id=$1||'_b' then '2026-01-01T10:00:00.123900Z'::timestamptz else '2026-01-01T10:00:00.123800Z'::timestamptz end where id in ($1||'_a',$1||'_b')`,[prefix]);
   const first=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});
   expect(Buffer.from(first.nextCursor!,'base64url').toString()).toContain('.1239');
   expect((await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1,cursor:first.nextCursor!})).items[0].id).toBe(`${prefix}_a`);
   await queryPg(`update mail_message set sent_at='2026-01-01T10:00:00Z' where id in ($1||'_a',$1||'_b')`,[prefix]);
+  await queryPg(`update mail_message set thread_id=$1 where id=$1||'_b'`,[prefix]);
  });
  it('filters campaign counts, recipients, links and scanner evidence together',async () => {
   const detail=await readMailCampaign(prefix,{crmOnly:true,event:'bounced'});
-  expect(detail?.counts.total).toBe(0); expect(detail?.delivery_rows).toEqual([]); expect(detail?.recipients).toEqual([]); expect(detail?.links).toEqual([]); expect(detail?.scanner_evidence).toBe(false);
+  expect(detail?.counts.total).toBe(1); expect(detail?.delivery_rows.map(row=>row.id)).toEqual([`${prefix}_d`]); expect(detail?.recipients).toHaveLength(1); expect(detail?.links).toEqual([]); expect(detail?.scanner_evidence).toBe(false);
  });
  it('selects external recipients before internal recipients, including cc and CRM names',async () => {
   await queryPg(`insert into crm_people(id,full_name,email) values ($1,'Synthetic counterparty','counterparty@example.test')`,[prefix]);
@@ -126,9 +151,11 @@ describe.skipIf(!enabled)('unified mail log', () => {
   } finally { await client.query('rollback');client.release(); }
  });
  it('paginates tied timestamps deterministically without repeats',async () => {
+  await queryPg(`update mail_message set thread_id=$1||'_paging' where id=$1||'_b'`,[prefix]);
   const first=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});
   const second=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1,cursor:first.nextCursor!});
   expect(first.items[0].id).toBe(`${prefix}_b`); expect(second.items[0].id).toBe(`${prefix}_a`); expect(second.nextCursor).toBeNull();
   await expect(searchMail({cursor:'not-json'})).rejects.toThrow('invalid_cursor');
+  await queryPg(`update mail_message set thread_id=$1 where id=$1||'_b'`,[prefix]);
  });
 });

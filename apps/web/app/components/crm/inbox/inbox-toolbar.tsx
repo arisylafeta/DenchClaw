@@ -51,7 +51,7 @@ export const InboxToolbar = forwardRef<
           onChange={(e: ChangeEvent<HTMLInputElement>) => onSearchChange(e.target.value)}
           className="h-8 flex-1 text-[13px]"
         />}
-        {hideSearch && <span aria-label="Unread conversations" className="flex-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>{unreadCount} unread conversations</span>}
+        {hideSearch && <span aria-label="Unread conversations" className="flex-1 text-[11px] font-normal" style={{ color: "var(--color-text-muted)" }}>{unreadCount} unread conversations</span>}
         <button
           type="button"
           onClick={onOpenShortcuts}

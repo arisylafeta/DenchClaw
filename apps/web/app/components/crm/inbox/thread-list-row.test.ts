@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Thread } from "./types";
 import { pickSenderDisplay, ThreadListRow } from "./thread-list-row";
+import { ParticipantChips } from "./participant-chips";
 
 function makeThread(overrides: Partial<Thread>): Thread {
   return {
@@ -24,6 +25,16 @@ function makeThread(overrides: Partial<Thread>): Thread {
 }
 
 describe("pickSenderDisplay", () => {
+  it("prefers the external participant when a self address has a misleading CRM name", () => {
+    const participants = [
+      {id:"self",name:"Harry Ferson",email:"alex@rebattery.io",avatar_url:null,is_self:true},
+      {id:"buyer",name:"Morgan Lee",email:"buyer@example.test",avatar_url:null,is_self:false},
+    ];
+    expect(pickSenderDisplay(makeThread({is_self:true,counterparty:{email:"alex@rebattery.io",name:"Harry Ferson"},participants}))).toMatchObject({name:"Morgan Lee",email:"buyer@example.test"});
+    render(createElement(ParticipantChips,{participants,variant:"named"}));
+    expect(screen.getByText("You (alex@rebattery.io)")).toBeInTheDocument();
+    expect(screen.queryByText("Harry Ferson")).not.toBeInTheDocument();
+  });
   it("shows a wide-log counterparty without requiring a CRM person", () => {
     expect(pickSenderDisplay(makeThread({ primary_sender_email: "synthetic@example.test" }))).toMatchObject({ email: "synthetic@example.test" });
   });

@@ -14,7 +14,7 @@ import {
   useStarredThreads,
 } from "@/lib/crm-inbox-state";
 import type { Thread } from "./types";
-import type { MailMessageRow, MailPage } from "@/lib/mail-types";
+import type { MailMessageListRow, MailPage } from "@/lib/mail-types";
 import { mailCounterparty } from "@/lib/mail-counterparty";
 
 const DEFAULT_LIMIT = 100;
@@ -79,16 +79,14 @@ export function ConversationsView({
           signal,
         });
         if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
-        const body = (await res.json()) as MailPage<MailMessageRow>;
+        const body = (await res.json()) as MailPage<MailMessageListRow>;
         if (signal.aborted) {return;}
         const grouped = new Map<string, Thread>();
         for (const message of body.items) {
-          if ((message.campaign_id && message.direction === "outbound") || !message.thread_id) {continue;}
-          const previous = grouped.get(message.thread_id);
-          if (previous) {previous.message_count = (previous.message_count ?? 0) + 1; continue;}
+          if (!message.thread_id) {continue;}
           grouped.set(message.thread_id, {
             id: message.thread_id, subject: message.subject, last_message_at: message.sent_at ?? message.created_at,
-            message_count: 1, gmail_thread_id: null, participants: [], participant_ids: [],
+            message_count: message.message_count ?? 1, gmail_thread_id: null, participants: message.participants ?? [], participant_ids: message.participants?.map((person) => person.id) ?? [],
             snippet: message.body_preview, primary_sender_type: null, is_self: message.is_self,
             primary_sender_id: message.from_person_id, primary_sender_name: message.is_self ? null : message.counterparty?.name ?? null, primary_sender_email: message.from_email,
             counterparty: mailCounterparty(message),
@@ -97,10 +95,7 @@ export function ConversationsView({
         setThreads((current) => {
           if (!cursor) {return Array.from(grouped.values());}
           const combined = new Map(current.map((thread) => [thread.id, thread]));
-          for (const [id, thread] of grouped) {
-            const previous = combined.get(id);
-            combined.set(id, previous ? { ...previous, message_count: (previous.message_count ?? 0) + (thread.message_count ?? 0) } : thread);
-          }
+          for (const [id, thread] of grouped) {combined.set(id, thread);}
           return Array.from(combined.values());
         });
         setNextCursor(body.nextCursor);

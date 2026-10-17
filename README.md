@@ -93,13 +93,19 @@ npx denchclaw start --skip-daemon-install
 
 Mail combines Conversations, Campaigns, Sent and Follow-ups. Search stays visible;
 the Filters button reveals all advanced filters and removable active-filter chips.
-CRM-only is on by default. Conversation rows use a small sender line above the
-subject and preview; unread senders and subjects are bold with an unread dot.
+CRM-only is on by default; campaigns ignore this switch, and Sent includes campaign
+deliveries even when their message-level CRM flag is off. Conversations are paged
+by thread, show its latest message and real message count, and require an inbound
+message; outbound-only threads remain in Sent. List APIs return previews, never
+full bodies; opening a thread loads its full messages. Conversation rows use a
+small sender line above the subject and preview; unread senders and subjects are
+bold with a quiet accent dot.
 Server-provided `is_self` recognizes every case-insensitive `@rebattery.io` address
 and configured mail identity. Own messages show “To:” and the first non-self
 recipient (or first recipient for internal mail), using a CRM name when known.
 Missing inbound addresses show “Unknown sender”. No person/self category is shown.
-Campaign deliveries do not increase the unread conversation count.
+Unread state is per thread. Self participants display as “You (address)” regardless
+of any mismatched CRM name; the header prefers the external counterparty.
 Sending and unknown outcomes retain their reconciliation warnings; quick reply
 only copies a CLI draft command and never saves or sends mail.
 

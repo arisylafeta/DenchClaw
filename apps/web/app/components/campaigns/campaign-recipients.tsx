@@ -4,7 +4,7 @@ import tableStyles from "../ui/data-table.module.css";
 import { TableCell } from "../ui/table-cell";
 import { useMemo, useRef, useState } from "react";
 import type { CampaignRecipient } from "@/lib/campaigns";
-import type { MailMessageRow } from "@/lib/mail-types";
+import type { MailMessageListRow } from "@/lib/mail-types";
 import { Card, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import { StageTag } from "../dismantlers/dismantler-ui";
@@ -15,7 +15,7 @@ const FILTERS = ["All", "Replied", "Opened", "Clicked", "Bounced", "Tracking pen
 type RecipientFilter = typeof FILTERS[number];
 
 /** Outreach campaigns retain dismantler stage and the frozen subject. */
-export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePerson, outreach = false }: { recipients: CampaignRecipient[]; deliveryRows?: MailMessageRow[]; onNavigatePerson: (id: string) => void; outreach?: boolean }) {
+export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePerson, outreach = false }: { recipients: CampaignRecipient[]; deliveryRows?: MailMessageListRow[]; onNavigatePerson: (id: string) => void; outreach?: boolean }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<RecipientFilter>("All");
   const [page, setPage] = useState(0);

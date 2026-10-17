@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { MailFilters, MailFollowup, MailMessageRow, MailPage } from "@/lib/mail-types";
+import type { MailFilters, MailFollowup, MailMessageListRow, MailPage } from "@/lib/mail-types";
 import { ConversationsView } from "./conversations-view";
 import { CampaignsView } from "../../campaigns/campaigns-view";
 import { Mail, Search, SlidersHorizontal, X } from "lucide-react";
@@ -64,7 +64,7 @@ export function InboxView({ onOpenPerson, initialView, initialCampaignId }: { on
         <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
         <input aria-label="Search mail" placeholder="Search mail…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
       </label>
-      <button type="button" aria-expanded={filtersOpen} aria-controls="mail-filter-options" className={`${styles.control} ${styles.button}`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden />Filters{activeFilters.length > 0 && <span className="text-[11px]">{activeFilters.length}</span>}</button>
+      <button type="button" aria-expanded={filtersOpen} aria-controls="mail-filter-options" className={`${styles.control} ${styles.button}`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden />Filters{activeFilters.length > 0 && <span aria-label={`${activeFilters.length} active filters`} className="inline-flex min-w-4 items-center justify-center rounded bg-[var(--color-surface-hover)] px-1 text-[10px] font-medium">{activeFilters.length}</span>}</button>
       <label className="ml-1 flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.crmOnly} onChange={(event) => update("crmOnly", event.target.checked)} />CRM-only</label>
       {activeFilters.map(([key, value]) => <button key={key} className={styles.chip} aria-label={`Remove ${key} filter`} onClick={() => update(key, "")}><span className="capitalize">{key}</span>: {String(value)}<X size={11} aria-hidden /></button>)}
     </div>
@@ -81,7 +81,7 @@ export function InboxView({ onOpenPerson, initialView, initialCampaignId }: { on
   </div>;
 }
 function MailLogRows({ view, query }: { view: "sent" | "followups"; query: string }) {
-  const [rows, setRows] = useState<(MailMessageRow | MailFollowup)[]>([]);
+  const [rows, setRows] = useState<(MailMessageListRow | MailFollowup)[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -93,7 +93,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
     const endpoint = view === "followups" ? "followups" : "messages";
     void fetch(`/api/mail/${endpoint}?${query}`, { signal: controller.signal }).then(async (response) => {
       if (!response.ok) {throw new Error(`HTTP ${response.status}`);}
-      const page = await response.json() as MailPage<MailMessageRow | MailFollowup>;
+      const page = await response.json() as MailPage<MailMessageListRow | MailFollowup>;
       if (!controller.signal.aborted) {setRows(page.items); setNextCursor(page.nextCursor ?? null);}
     }).catch((failure: Error) => {if (!controller.signal.aborted) {setError(failure.message);}}).finally(() => {if (!controller.signal.aborted) {setLoading(false);}});
     return () => controller.abort();
@@ -103,7 +103,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
     try {
       const response = await fetch(`/api/mail/messages?${query}&cursor=${encodeURIComponent(nextCursor!)}`);
       if (!response.ok) {throw new Error(`HTTP ${response.status}`);}
-      const page = await response.json() as MailPage<MailMessageRow>;
+      const page = await response.json() as MailPage<MailMessageListRow>;
       if (latestQuery.current === snapshot) {setRows((current) => [...current, ...page.items]); setNextCursor(page.nextCursor);}
     } catch (failure) {setError(failure instanceof Error ? failure.message : "Could not load mail.");}
   }
@@ -122,7 +122,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
         </div>
         <div data-mail-line="subject" className="mt-1 flex min-w-0 items-center gap-2 whitespace-nowrap pl-[22px]">
           <span className="max-w-[65%] shrink-0 truncate text-[14px] font-normal">{row.subject || "(No subject)"}</span><span className="min-w-0 flex-1 truncate" style={{ color: "var(--color-text-muted)" }}>{row.body_preview && `— ${row.body_preview}`}</span>
-          <details className={styles.activity}><summary className={`${styles.chip} cursor-pointer`} aria-label={`Delivery activity: ${row.subject || "(No subject)"}`}>{row.state} · Activity</summary><div className={styles.activityPanel}><p>{["sent", "delivered", "bounced", "opened", "clicked", "replied"].map((event) => `${event}: ${row[`${event}_at` as keyof MailMessageRow] ?? "not recorded"}`).join(" · ")}</p><p className="mt-1">Unsubscribed: {row.events?.some((event) => event.type === "unsubscribed") ? "recorded" : "not recorded"}</p></div></details>
+          <details className={styles.activity}><summary className={`${styles.chip} cursor-pointer`} aria-label={`Delivery activity: ${row.subject || "(No subject)"}`}>{row.state} · Activity</summary><div className={styles.activityPanel}><p>{(["sent", "delivered", "bounced", "opened", "clicked", "replied"] as const).map((event) => `${event}: ${row[`${event}_at`] ?? "not recorded"}`).join(" · ")}</p><p className="mt-1">Unsubscribed: {row.events?.some((event) => event.type === "unsubscribed") ? "recorded" : "not recorded"}</p></div></details>
         </div>
         {["unknown", "sending"].includes(row.state) && <p role="status" className="mt-2 pl-[22px] text-[12px]" style={{ color: "var(--bt-amber, #a16207)" }}>Reconcile before retrying: {row.state}</p>}
       </> : <><div className="flex items-center gap-2"><span className={styles.chip}>{row.state === "pending" && Date.parse(row.due_at) <= Date.now() ? "Due" : row.state}</span><span className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.identity_key}</span><span className="ml-auto text-[12px]" title={formatAbsoluteDate(row.due_at)}>Due {formatRelativeDate(row.due_at)}</span></div><p className="mt-2 truncate text-[14px]">{row.note}</p>{row.paused_reason && <p className="mt-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Paused: {row.paused_reason}</p>}</>}

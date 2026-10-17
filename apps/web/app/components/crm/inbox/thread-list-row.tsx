@@ -45,12 +45,12 @@ export function ThreadListRow({
       onClick={onSelect}
       data-thread-id={thread.id}
       data-thread-row="true"
-      className="group relative w-full grid items-center gap-x-2 gap-y-1 px-4 py-2.5 text-left transition-colors"
+      className="group relative w-full grid items-center gap-x-2 gap-y-0.5 px-4 py-2 text-left transition-colors"
       style={{
         gridTemplateColumns: "20px 16px minmax(0, 1fr) auto",
         gridTemplateRows: "18px 20px",
         background: selected
-          ? "var(--color-accent-light)"
+          ? "color-mix(in oklab, var(--color-text) 4%, transparent)"
           : inBulkSelection
             ? "color-mix(in oklab, var(--color-accent) 5%, transparent)"
             : "transparent",
@@ -143,12 +143,12 @@ export function ThreadListRow({
         >
           {thread.is_self && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>To: </span>}
           {sender.name ?? sender.email ?? "Unknown"}
-          {thread.participants.length > 1 && (
+          {(thread.message_count ?? 0) > 1 && (
             <span
               className="ml-1 text-[11px] tabular-nums"
               style={{ color: "var(--color-text-muted)", fontWeight: 400 }}
             >
-              ({thread.participants.length})
+              ({thread.message_count})
             </span>
           )}
         </span>
@@ -164,7 +164,7 @@ export function ThreadListRow({
               width: 6,
               height: 6,
               borderRadius: 99,
-              background: "var(--color-accent-fill)",
+              background: "var(--color-accent)",
             }}
           />
         )}
@@ -228,7 +228,10 @@ export function pickSenderDisplay(thread: Thread): {
     : undefined;
   if (thread.counterparty) {
     const participant = thread.participants.find((person) => person.email?.toLowerCase() === thread.counterparty?.email?.toLowerCase());
-    return { ...thread.counterparty, avatar_url: participant?.avatar_url ?? null };
+    const selfCounterparty = participant?.is_self || thread.counterparty.email?.toLowerCase().endsWith("@rebattery.io");
+    const external = selfCounterparty ? thread.participants.find((person) => person.email && !person.is_self && !person.email.toLowerCase().endsWith("@rebattery.io")) : undefined;
+    if (external) {return { name: external.name ?? external.email, email: external.email, avatar_url: external.avatar_url };}
+    return { ...thread.counterparty, name: selfCounterparty ? thread.counterparty.email : thread.counterparty.name, avatar_url: participant?.avatar_url ?? null };
   }
   if (thread.is_self || primaryParticipant?.is_self) {
     const recipient = thread.participants.find((person) => !person.is_self && !person.email?.toLowerCase().endsWith("@rebattery.io"))
