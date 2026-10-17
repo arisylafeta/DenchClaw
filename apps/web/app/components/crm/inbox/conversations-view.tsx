@@ -15,6 +15,7 @@ import {
 } from "@/lib/crm-inbox-state";
 import type { Thread } from "./types";
 import type { MailMessageRow, MailPage } from "@/lib/mail-types";
+import { mailCounterparty } from "@/lib/mail-counterparty";
 
 const DEFAULT_LIMIT = 100;
 
@@ -89,7 +90,8 @@ export function ConversationsView({
             id: message.thread_id, subject: message.subject, last_message_at: message.sent_at ?? message.created_at,
             message_count: 1, gmail_thread_id: null, participants: [], participant_ids: [],
             snippet: message.body_preview, primary_sender_type: null, is_self: message.is_self,
-            primary_sender_id: message.from_person_id, primary_sender_name: message.is_self ? "You" : null, primary_sender_email: message.from_email,
+            primary_sender_id: message.from_person_id, primary_sender_name: message.is_self ? null : message.counterparty?.name ?? null, primary_sender_email: message.from_email,
+            counterparty: mailCounterparty(message),
           });
         }
         setThreads((current) => {

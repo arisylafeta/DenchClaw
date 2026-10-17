@@ -27,7 +27,7 @@ describe("pickSenderDisplay", () => {
   it("shows a wide-log counterparty without requiring a CRM person", () => {
     expect(pickSenderDisplay(makeThread({ primary_sender_email: "synthetic@example.test" }))).toMatchObject({ email: "synthetic@example.test" });
   });
-  it("shows You when the server classifies the latest sender as self", () => {
+  it("shows the counterparty when the server classifies the latest sender as self", () => {
     const thread = makeThread({
       primary_sender_id: "p_rebattery",
       primary_sender_name: "Alex",
@@ -41,8 +41,8 @@ describe("pickSenderDisplay", () => {
     });
 
     expect(pickSenderDisplay(thread)).toEqual({
-      name: "You",
-      email: "alex@rebattery.io",
+      name: "Jake Carpenter",
+      email: "jake.carpenter@gmail.com",
       avatar_url: null,
     });
   });
@@ -81,6 +81,16 @@ describe("two-line thread row", () => {
     expect(container.querySelector('[data-mail-line="subject"]')).toContainElement(screen.getByText("subject"));
     expect(screen.getByText("— snippet")).toHaveStyle({ color: "var(--color-text-muted)" });
     expect(container.querySelectorAll('[data-mail-line="subject"] > [aria-hidden]')).toHaveLength(read ? 0 : 1);
+  });
+  it.each(["buyer@example.test", "ari@rebattery.io"])("shows To: %s, never You, for self-sent mail", (email) => {
+    const { container } = row(true, { is_self: true, counterparty: { email, name: email } });
+    expect(container.querySelector('[data-mail-line="sender"]')).toHaveTextContent(`To: ${email}`);
+    expect(screen.queryByText("You")).not.toBeInTheDocument();
+    expect(screen.getByText("To:")).toHaveStyle({ fontWeight: "400", color: "var(--color-text-muted)" });
+  });
+  it("does not substitute a participant for a missing inbound sender", () => {
+    row(false, { primary_sender_email: null, participants: [{ id: "recipient", name: "Alex", email: "alex@rebattery.io", avatar_url: null }] });
+    expect(screen.getByText("Unknown sender")).toBeInTheDocument();
   });
   it.each(["Person", "person", "self"])("does not show a %s chip", (primary_sender_type) => {
     row(false, { primary_sender_type });

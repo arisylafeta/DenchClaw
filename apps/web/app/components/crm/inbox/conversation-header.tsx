@@ -1,6 +1,7 @@
 "use client";
 
 import { ParticipantChips, type Participant } from "./participant-chips";
+import { SenderAvatar } from "../sender-avatar";
 
 /**
  * Sticky header at the top of the conversation pane. Subject in
@@ -15,6 +16,8 @@ export function ConversationHeader({
   onToggleStar,
   onOpenPerson,
   onClose,
+  sender,
+  isTo = false,
 }: {
   subject: string | null;
   participants: ReadonlyArray<Participant>;
@@ -25,6 +28,8 @@ export function ConversationHeader({
   onOpenPerson?: (id: string) => void;
   /** Single-pane drilldown: back-to-list affordance. */
   onClose?: () => void;
+  sender?: { email: string | null; name: string | null; avatar_url: string | null };
+  isTo?: boolean;
 }) {
   const headline = subject?.trim() || "(no subject)";
 
@@ -62,6 +67,10 @@ export function ConversationHeader({
           >
             {headline}
           </h1>
+          {sender && <div className="mt-2 flex items-center gap-1.5 text-[13px]">
+            <SenderAvatar email={sender.email} name={sender.name} avatarUrl={sender.avatar_url} size="sm" className="!h-4 !w-4 !text-[9px]" />
+            <span>{isTo && <span style={{ color: "var(--color-text-muted)" }}>To: </span>}{sender.name ?? sender.email ?? "Unknown sender"}</span>
+          </div>}
           {participants.length > 0 && (
             <div className="mt-2.5 flex items-center gap-3">
               <ParticipantChips

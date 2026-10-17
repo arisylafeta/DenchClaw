@@ -8,6 +8,7 @@ export type MailMessageRow = {
   direction: 'inbound' | 'outbound'; transport: MailTransport; purpose: MailPurpose | null; state: string;
   subject: string | null; from_email: string | null; from_person_id: string | null;
   is_self: boolean;
+  counterparty?: { email: string; name: string | null } | null;
   to_emails: string[]; cc_emails: string[]; recipient_email: string | null; person_id: string | null;
   body_text: string | null; body_html: string | null; body_preview: string | null;
   sent_at: string | null; created_at: string; accepted_at: string | null; delivered_at: string | null;

@@ -141,6 +141,7 @@ export function ThreadListRow({
           }}
           title={sender.email ?? sender.name ?? undefined}
         >
+          {thread.is_self && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>To: </span>}
           {sender.name ?? sender.email ?? "Unknown"}
           {thread.participants.length > 1 && (
             <span
@@ -225,8 +226,14 @@ export function pickSenderDisplay(thread: Thread): {
   const primaryParticipant = thread.primary_sender_id
     ? thread.participants.find((x) => x.id === thread.primary_sender_id)
     : undefined;
+  if (thread.counterparty) {
+    const participant = thread.participants.find((person) => person.email?.toLowerCase() === thread.counterparty?.email?.toLowerCase());
+    return { ...thread.counterparty, avatar_url: participant?.avatar_url ?? null };
+  }
   if (thread.is_self || primaryParticipant?.is_self) {
-    return { name: "You", email: thread.primary_sender_email, avatar_url: primaryParticipant?.avatar_url ?? null };
+    const recipient = thread.participants.find((person) => !person.is_self && !person.email?.toLowerCase().endsWith("@rebattery.io"))
+      ?? thread.participants.find((person) => person.id !== thread.primary_sender_id);
+    return { name: recipient?.name ?? recipient?.email ?? "Unknown recipient", email: recipient?.email ?? null, avatar_url: recipient?.avatar_url ?? null };
   }
 
   if (thread.primary_sender_name || thread.primary_sender_email) {
@@ -235,10 +242,6 @@ export function pickSenderDisplay(thread: Thread): {
       email: thread.primary_sender_email,
       avatar_url: primaryParticipant?.avatar_url ?? null,
     };
-  }
-  const first = thread.participants[0];
-  if (first) {
-    return { name: first.name, email: first.email, avatar_url: first.avatar_url };
   }
   return { name: "Unknown sender", email: null, avatar_url: null };
 }

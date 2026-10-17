@@ -9,6 +9,7 @@ import { Mail, Search, SlidersHorizontal, X } from "lucide-react";
 import { SenderAvatar } from "../sender-avatar";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
+import { mailCounterparty } from "@/lib/mail-counterparty";
 
 export type MailView = NonNullable<MailFilters["view"]>;
 const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", sent: "Sent", followups: "Follow-ups" };
@@ -110,11 +111,13 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
     {loading && <p role="status" className="px-8 py-6" style={{ color: "var(--color-text-muted)" }}>Loading {views[view].toLowerCase()}…</p>}
     {error && <p role="alert" className="px-8 py-6">{error}</p>}
     {!loading && !error && !rows.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No {views[view].toLowerCase()} match these filters.</p>}
-    <ul>{rows.map((row) => <li key={row.id} className={styles.logRow}>
+    <ul>{rows.map((row) => {
+      const counterparty = "direction" in row ? mailCounterparty(row) : null;
+      return <li key={row.id} className={styles.logRow}>
       {"direction" in row ? <>
         <div data-mail-line="sender" className="flex min-w-0 items-center gap-1.5 text-[12px]">
-          <SenderAvatar email={row.from_email} name={row.is_self ? "You" : row.from_email} size="sm" className="!h-4 !w-4 !text-[9px]" />
-          <span className="truncate">{row.is_self ? "You" : row.from_email ?? row.identity_key} <span style={{ color: "var(--color-text-muted)" }}>→ {row.recipient_email ?? row.to_emails.join(", ")}</span></span>
+          <SenderAvatar email={counterparty?.email} name={counterparty?.name} size="sm" className="!h-4 !w-4 !text-[9px]" />
+          <span className="truncate">{row.is_self && <span style={{ color: "var(--color-text-muted)" }}>To: </span>}{counterparty?.name ?? counterparty?.email}</span>
           <span className="ml-auto shrink-0 text-[11px]" style={{ color: "var(--color-text-muted)" }} title={formatAbsoluteDate(row.sent_at ?? row.created_at)}>{formatRelativeDate(row.sent_at ?? row.created_at)}</span>
         </div>
         <div data-mail-line="subject" className="mt-1 flex min-w-0 items-center gap-2 whitespace-nowrap pl-[22px]">
@@ -123,7 +126,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
         </div>
         {["unknown", "sending"].includes(row.state) && <p role="status" className="mt-2 pl-[22px] text-[12px]" style={{ color: "var(--bt-amber, #a16207)" }}>Reconcile before retrying: {row.state}</p>}
       </> : <><div className="flex items-center gap-2"><span className={styles.chip}>{row.state === "pending" && Date.parse(row.due_at) <= Date.now() ? "Due" : row.state}</span><span className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.identity_key}</span><span className="ml-auto text-[12px]" title={formatAbsoluteDate(row.due_at)}>Due {formatRelativeDate(row.due_at)}</span></div><p className="mt-2 truncate text-[14px]">{row.note}</p>{row.paused_reason && <p className="mt-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Paused: {row.paused_reason}</p>}</>}
-    </li>)}</ul>
+    </li>;})}</ul>
     {nextCursor && <button onClick={() => void more()} className={`${styles.control} m-4`}>Load more</button>}
   </div>;
 }

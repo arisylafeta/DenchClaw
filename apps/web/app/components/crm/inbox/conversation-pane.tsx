@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { ConversationHeader } from "./conversation-header";
 import { ThreadMessages } from "./thread-messages";
 import type { Thread } from "./types";
+import { pickSenderDisplay } from "./thread-list-row";
 
 /**
  * Right pane (or full-pane on mobile) of the Inbox.
@@ -65,8 +66,8 @@ export function ConversationPane({
   // Slide-in animation: bump a key on every thread change so the entire
   // pane re-mounts with the keyframe.
   const animationKey = selectedThread.id;
-  const recipientName =
-    selectedThread.primary_sender_name ?? selectedThread.primary_sender_email ?? null;
+  const sender = pickSenderDisplay(selectedThread);
+  const recipientName = sender.name ?? sender.email;
 
   return (
     <div
@@ -82,6 +83,8 @@ export function ConversationPane({
       `}</style>
       <ConversationHeader
         subject={selectedThread.subject}
+        sender={sender}
+        isTo={Boolean(selectedThread.is_self)}
         participants={selectedThread.participants}
         gmailThreadId={selectedThread.gmail_thread_id}
         threadId={selectedThread.id}

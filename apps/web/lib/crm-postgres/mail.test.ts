@@ -77,6 +77,20 @@ describe.skipIf(!enabled)('unified mail log', () => {
   const detail=await readMailCampaign(prefix,{crmOnly:true,event:'bounced'});
   expect(detail?.counts.total).toBe(0); expect(detail?.delivery_rows).toEqual([]); expect(detail?.recipients).toEqual([]); expect(detail?.links).toEqual([]); expect(detail?.scanner_evidence).toBe(false);
  });
+ it('selects external recipients before internal recipients, including cc and CRM names',async () => {
+  await queryPg(`insert into crm_people(id,full_name,email) values ($1,'Synthetic counterparty','counterparty@example.test')`,[prefix]);
+  try {
+   await queryPg(`update mail_message set from_email='admin@rebattery.io',to_emails=array['alex@rebattery.io'],cc_emails=array['counterparty@example.test'] where id=$1||'_a'`,[prefix]);
+   expect((await searchMail({mailboxOwnerId:owner,thread:prefix})).items.find(m=>m.id===`${prefix}_a`)?.counterparty).toEqual({email:'counterparty@example.test',name:'Synthetic counterparty'});
+   await queryPg(`update mail_message set cc_emails='{}',to_emails=array['ari@rebattery.io','alex@rebattery.io'] where id=$1||'_a'`,[prefix]);
+   expect((await readMailThread(prefix,owner))?.messages[0].counterparty?.email).toBe('ari@rebattery.io');
+   await queryPg(`update mail_message set from_email=null where id=$1||'_a'`,[prefix]);
+   expect((await searchMail({mailboxOwnerId:owner,thread:prefix})).items.find(m=>m.id===`${prefix}_a`)?.counterparty).toBeNull();
+  } finally {
+   await queryPg(`update mail_message set from_email='buyer@example.test',to_emails='{}',cc_emails='{}' where id=$1||'_a'`,[prefix]);
+   await queryPg('delete from crm_people where id=$1',[prefix]);
+  }
+ });
  it('classifies complete ReBattery domains and configured identities on messages and participants',async () => {
   const addresses = ['admin@rebattery.io','alex@rebattery.io','ANY@ReBattery.IO','x@rebattery.io.evil.com','x@notrebattery.io','buyer@example.test'];
   for (const address of addresses) {
