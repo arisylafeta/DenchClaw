@@ -167,7 +167,7 @@ export async function listConversations() {
     // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
       const page = await (await nativeFetch(profile, "/api/sessions?limit=200&offset=0")).json() as { data: NativeSession[] };
-      return page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
+      return page.data.filter((row) => row.source !== "cron" && row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
   if (hermesChatTransport() === "gateway") {

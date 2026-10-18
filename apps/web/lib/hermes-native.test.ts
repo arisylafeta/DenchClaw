@@ -92,7 +92,7 @@ describe("native Hermes conversations", () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = new URL(input); const alpha = url.pathname.includes("/alpha/");
       if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2, source: "webhook" }], has_more: false });
-      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3, source: "cron" }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
+      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3, source: "web" }, { id: "scheduled-run", source: "cron" }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
     });
     vi.stubGlobal("fetch", fetchMock);
     handler = (method, params) => method === "groups.list" ? { rooms: [room], next_offset: params.offset === 0 ? 100 : null } : { room, driver_status: { running: true, working: false, blocked: true } };
@@ -103,7 +103,8 @@ describe("native Hermes conversations", () => {
     expect(data.sessions.find((r) => r.kind === "group")).toMatchObject({ working: false, blocked: true });
     expect(data.sessions.find((r) => r.kind === "solo")?.working).toBeNull();
     expect(data.sessions.find((r) => r.profile === "alpha")).toMatchObject({ source: "webhook" });
-    expect(data.sessions.find((r) => r.profile === "default")).toMatchObject({ source: "cron" });
+    expect(data.sessions.find((r) => r.profile === "default")).toMatchObject({ source: "web" });
+    expect(data.sessions.some((r) => r.source === "cron")).toBe(false);
     expect(data.warnings).toEqual([]);
     expect(filterConversations(data.sessions, "alpha").map((r) => r.title)).toEqual(["Alpha and Sol", "Alpha chat"]);
     expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=200&offset=0"))).toBe(true);
@@ -180,10 +181,11 @@ describe("native Hermes conversations", () => {
   it("reads all pages of native solo history without copying or rewriting it", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = new URL(input);
-      if (!url.pathname.endsWith("/messages")) return Response.json({ session: { id: "history", title: "History" } });
+      if (!url.pathname.endsWith("/messages")) return Response.json({ session: { id: "history", title: "History", source: "cron" } });
       return Response.json({ data: url.searchParams.get("offset") === "0" ? Array.from({ length: 500 }, (_, i) => ({ id: i, role: "user", content: `line ${i}` })) : [{ id: 501, role: "assistant", content: [{ type: "text", text: "continued" }] }] });
     }));
     const detail = await readConversation(conversationKey("solo", "history", "alpha"));
+    expect(detail.conversation.source).toBe("cron");
     expect(detail.messages).toHaveLength(501); expect(detail.messages.at(-1)?.text).toBe("continued");
   });
   it("rejects unknown profiles before network access and protects gateway credentials", async () => {
