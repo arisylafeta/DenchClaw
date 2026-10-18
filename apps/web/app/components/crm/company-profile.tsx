@@ -5,6 +5,7 @@ import { TableCell } from "../ui/table-cell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
 import type { CompanyContextNote } from "@/lib/crm-postgres/company-context";
+import { CompanyContext } from "../bulk-trades/company-context";
 import { BuyerTab, type BuyerData } from "./company-buyer-tab";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -356,10 +357,7 @@ function OverviewTab({ data }: { data: CompanyResponse }) {
   const urgentCount = commercial.summary.urgent_supply_count + commercial.summary.urgent_demand_count;
   return (
     <div className="space-y-6">
-      <section aria-label="Context notes">
-        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>Context notes</h3>
-        {data.context_notes?.length ? <ul className="space-y-3">{data.context_notes.map((note) => <li key={note.id}><p className="whitespace-pre-wrap text-[13px]" style={{ color: "var(--color-text)" }}>{note.note}</p><p className="mt-1 text-[13px]" style={{ color: "var(--color-text-muted)" }}>{[note.source_kind, note.observed_on].filter(Boolean).join(" · ")}</p></li>)}</ul> : <p className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>No context notes yet.</p>}
-      </section>
+      <CompanyContext notes={data.context_notes ?? []} filterable />
       <section>
         <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--color-text-muted)" }}>
           At a glance

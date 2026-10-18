@@ -10,21 +10,24 @@ export const STALE_DAYS = 60;
 /** Estimated buy-boxes (our research) older than this show as "Re-research". */
 export const RESEARCH_STALE_DAYS = 180;
 
-export const CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "expired", "other", "duplicate", "moved_to_profile", "moved_to_lot", "recycling", "supply", "not_demand"] as const;
+export const CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "expired", "duplicate", "offer_reply", "moved_to_profile", "research_profile", "recycling", "supply", "not_demand", "other", "moved_to_lot"] as const;
 export type ClosedReason = (typeof CLOSED_REASONS)[number];
 export const CLOSED_REASON_LABEL: Record<ClosedReason, string> = {
-  bought_from_us: "Bought from us",
-  bought_elsewhere: "Bought elsewhere",
-  no_longer_needed: "No longer needed",
-  expired: "Past its date",
+  bought_from_us: "Sold",
+  bought_elsewhere: "Lost",
+  no_longer_needed: "Dropped",
+  expired: "Expired",
   other: "Other",
   duplicate: "Duplicate",
-  moved_to_profile: "Moved to buyer profile",
-  moved_to_lot: "Moved to lot",
+  moved_to_profile: "Moved to profile",
+  moved_to_lot: "Offer reply",
+  offer_reply: "Offer reply",
+  research_profile: "Research profile",
   recycling: "Recycling",
-  supply: "Supply",
+  supply: "Seller",
   not_demand: "Not demand",
 };
+export const HISTORY_CATEGORIES = CLOSED_REASONS.filter((reason) => reason !== "moved_to_lot");
 
 export const KINDS = ["request", "standing"] as const;
 export type DemandKind = (typeof KINDS)[number];

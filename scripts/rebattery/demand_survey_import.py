@@ -445,7 +445,8 @@ def insert(cur, row):
               kind = excluded.kind, basis = excluded.basis, needed_by = excluded.needed_by,
               updated_at = now()
             -- Only an unfinished survey answer that nobody has touched since is replaced by the finished one.
-            where crm_bulk_trade_demand.note like 'Unfinished survey.%%' and excluded.note is distinct from crm_bulk_trade_demand.note
+            where crm_bulk_trade_demand.status in ('open', 'qualifying')
+              and crm_bulk_trade_demand.note like 'Unfinished survey.%%' and excluded.note is distinct from crm_bulk_trade_demand.note
               and (crm_bulk_trade_demand.basis = 'stated' or crm_bulk_trade_demand.kind = 'request')
               and crm_bulk_trade_demand.updated_at = crm_bulk_trade_demand.created_at
             returning id""",

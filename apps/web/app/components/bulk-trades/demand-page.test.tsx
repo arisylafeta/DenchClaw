@@ -76,6 +76,28 @@ function setup(rows: Demand[]) {
   return fetchMock;
 }
 describe("Demand visualization", () => {
+  it("filters History categories without swamping All with research and patches only the category", async () => {
+    const fetchMock = setup([
+      row({ id: "live", buyer: "Live buyer" }),
+      row({ id: "reply", buyer: "Reply buyer", status: "closed", closed_reason: "offer_reply" }),
+      row({ id: "research", buyer: "Research buyer", status: "closed", closed_reason: "research_profile" }),
+    ]);
+    await screen.findByRole("button", { name: /Live buyer/ });
+    await userEvent.click(screen.getByRole("button", { name: "History 2" }));
+    expect(screen.getByRole("button", { name: "All 2" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /Research buyer/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Research profile 1" }));
+    expect(screen.getByRole("button", { name: /Research buyer/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reply buyer/ })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox"), "unmatched");
+    expect(screen.queryByRole("button", { name: /Research buyer/ })).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByRole("searchbox"));
+    await userEvent.click(screen.getByRole("button", { name: /Research buyer/ }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category" }), "duplicate");
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/demand/research",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ action: "category", reason: "duplicate" }) }));
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeInTheDocument();
+  });
   it("keeps status actions and the activity composer working behind the visual sheet", async () => {
     const fetchMock = setup([row({})]);
     await userEvent.click(

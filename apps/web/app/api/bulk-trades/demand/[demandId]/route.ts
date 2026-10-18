@@ -1,5 +1,5 @@
 import { BASES, CLOSED_REASONS, parseDemandInput, type Basis, type ClosedReason } from "@/lib/bulk-demand";
-import { closeDemand, confirmDemand, makeStanding, setBasis, updateDemand } from "@/lib/crm-postgres/bulk-demand";
+import { categorizeDemand, closeDemand, confirmDemand, makeStanding, setBasis, updateDemand } from "@/lib/crm-postgres/bulk-demand";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ demand
   } else if (body?.action === "close") {
     if (!(CLOSED_REASONS as readonly unknown[]).includes(body.reason)) return badRequest(`reason must be one of: ${CLOSED_REASONS.join(", ")}.`);
     demand = await closeDemand(demandId, body.reason as ClosedReason);
+  } else if (body?.action === "category") {
+    if (!(CLOSED_REASONS as readonly unknown[]).includes(body.reason)) return badRequest(`reason must be one of: ${CLOSED_REASONS.join(", ")}.`);
+    demand = await categorizeDemand(demandId, body.reason as ClosedReason);
   } else if (body?.action === "basis") {
     if (!(BASES as readonly unknown[]).includes(body.basis)) return badRequest(`basis must be one of: ${BASES.join(", ")}.`);
     demand = await setBasis(demandId, body.basis as Basis);
