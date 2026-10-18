@@ -175,4 +175,29 @@ describe("matchDemand", () => {
     expect(plan.sellers.map((x) => x.units)).toEqual([8, 2]);
     expect(plan.units).toBe(10);
   });
+
+  it("rejects other cell sizes wherever the name states them, and cells whose energy cannot be that size", () => {
+    const ask = demand({ wants: "500,000 Samsung 50E (21700) cylindrical cells", quantity: "500,000 cells", spec: { formats: ["Cells"], cell_formats: ["Cylindrical"] } });
+    const cell = (o: Partial<Candidate>) => unit({ format: "Cells", units: 100_000, ...o });
+    const result = matchDemand(ask, [
+      cell({ title: "Samsung INR21700-50E", kwh: 0.018 }),
+      cell({ title: "Voltaplex INR18650-26E", kwh: 0.0096 }),
+      cell({ title: "Dalian CBAK 26650FS3 cells" }),
+      cell({ title: "BMW 340Wh 93Ah 3,65V", kwh: 0.34 }),
+      cell({ title: "EVE LF105 cells" }),
+      cell({ title: "SK On E603 61.2ah cells" }),
+      unit({ key: "trade:x", source: "trade", format: null, title: "Armex BESS decommissioning tender", ai: { strength: "partial", reason: "storage" } }),
+    ]);
+    expect(result.groups.flatMap((g) => g.matches.map((m) => m.candidate.title))).toEqual(["Samsung INR21700-50E"]);
+  });
+
+  it("hides lots under 1% of a bulk ask and keeps them out of the best line", () => {
+    const ask = demand({ wants: "21700 cells", quantity: "500,000 cells", spec: { formats: ["Cells"] } });
+    const result = matchDemand(ask, [
+      unit({ format: "Cells", title: "LISHEN LR21700LH", units: 1, kwh: 0.011 }),
+      unit({ format: "Cells", title: "Panasonic 2170 lot", units: 680_000, seller: "Big lot" }),
+    ]);
+    expect(result.groups.map((g) => g.small)).toEqual([false, true]);
+    expect(bestLine(result)?.text).toContain("Panasonic");
+  });
 });

@@ -31,7 +31,7 @@ function groupView(g: MatchGroup, verdicts: Map<string, MatchVerdict>): SupplyGr
   const sellers = bySeller(g.matches);
   return {
     key: g.key, label: g.label, verdict: g.verdict, units: g.units, sellers: g.sellers, sources: g.sources,
-    eurPerKwh: g.eurPerKwh, bestMarginPct: g.bestMarginPct, covers: g.covers, checks: g.matches[0].checks,
+    eurPerKwh: g.eurPerKwh, bestMarginPct: g.bestMarginPct, covers: g.covers, small: g.small, checks: g.matches[0].checks,
     items: g.matches.slice(0, UNITS_PER_GROUP).map((m) => unitView(m, verdicts)), more: Math.max(0, g.matches.length - UNITS_PER_GROUP),
     bySeller: sellers.map(({ matches, ...seller }) => ({
       ...seller, items: matches.slice(0, UNITS_PER_SELLER).map((m) => unitView(m, verdicts)), more: Math.max(0, matches.length - UNITS_PER_SELLER),
@@ -52,9 +52,11 @@ export async function demandSupply(demand: Demand): Promise<DemandSupply> {
       pinned: r.pinned, unitsNeeded: r.unitsNeeded, kwhNeeded: r.kwhNeeded, buyerEurPerKwh: r.buyerEurPerKwh,
       buyerEurPerUnit: r.buyerEurPerUnit, country: r.country,
     },
-    groups: result.groups.slice(0, GROUPS_SHOWN).map((g) => groupView(g, verdicts)),
-    totalGroups: result.groups.length,
-    totalUnits: all.reduce((s, m) => s + (m.candidate.units ?? 1), 0),
+    groups: [...result.groups.filter((g) => !g.small).slice(0, GROUPS_SHOWN), ...result.groups.filter((g) => g.small).slice(0, 20)]
+      .map((g) => groupView(g, verdicts)),
+    totalGroups: result.groups.filter((g) => !g.small).length,
+    smallGroups: result.groups.filter((g) => g.small).length,
+    totalUnits: result.groups.filter((g) => !g.small).reduce((s, g) => s + g.units, 0),
     considered: {
       marketplace: candidates.filter((c) => c.source === "marketplace").length,
       stock: candidates.filter((c) => c.source === "stock").length,
@@ -97,7 +99,7 @@ export function bestMatchLines(fresh = false): Promise<Record<string, BestMatchL
         const result = matchDemand(row, [...feed, ...base], hidden);
         const line = bestLine(result);
         out[row.id] = line
-          ? { ...line, groups: result.groups.length, shortlisted: [...verdicts.values()].filter((v) => v.verdict === "shortlist").length }
+          ? { ...line, groups: result.groups.filter((g) => !g.small).length, shortlisted: [...verdicts.values()].filter((v) => v.verdict === "shortlist").length }
           : { verdict: null, text: result.blocked ? "Too vague to match" : "No match in our inventory", groups: 0,
             shortlisted: [...verdicts.values()].filter((v) => v.verdict === "shortlist").length };
       }

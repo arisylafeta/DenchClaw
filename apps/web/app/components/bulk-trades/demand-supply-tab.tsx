@@ -13,6 +13,9 @@ export const SOURCE_LABEL: Record<SourceKind, string> = { marketplace: "Marketpl
 export const eur = (n: number | null | undefined, digits = 0) =>
   n == null ? "—" : `€${n >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : n.toLocaleString("en-GB", { maximumFractionDigits: digits })}`;
 export const perKwh = (n: number | null | undefined) => (n == null ? "—" : `€${n < 10 ? n.toFixed(1) : Math.round(n)}/kWh`);
+/** Whole counts, shortened once they stop fitting a column: 680,000 → 680k, 10,000,000 → 10M. */
+export const count = (n: number) =>
+  n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M` : n >= 100_000 ? `${Math.round(n / 1000)}k` : n.toLocaleString("en-GB");
 export const pct = (n: number | null | undefined) => (n == null ? "—" : `${Math.round(n * 100)}%`);
 const money = (amount: number | null, currency: string | null) =>
   amount == null ? "—" : `${amount.toLocaleString("en-GB", { maximumFractionDigits: amount < 10 ? 2 : 0 })} ${currency ?? ""}`.trim();
@@ -144,7 +147,7 @@ function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerVie
                   <SourceTags sources={seller.sources} />
                 </div>
               </div>
-              <span className={css.num}><strong>{seller.units.toLocaleString("en-GB")}</strong><span className={css.numSub}>{unitWord}</span></span>
+              <span className={css.num}><strong>{count(seller.units)}</strong><span className={css.numSub}>{unitWord}</span></span>
               <span className={css.num}>
                 {seller.kwh ? (Math.round(seller.kwh.min) === Math.round(seller.kwh.max) ? `${seller.kwh.min < 1 ? `${Math.round(seller.kwh.min * 1000)} Wh` : `${Math.round(seller.kwh.min * 10) / 10} kWh`}` : `${Math.round(seller.kwh.min)}–${Math.round(seller.kwh.max)} kWh`) : "—"}
                 <span className={css.numSub}>{seller.withPhotos ? `${seller.withPhotos} with photos` : "no photos"}</span>
@@ -177,7 +180,7 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
           <div className="text-[14px] font-semibold">{group.label}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
             <span>
-              {group.units.toLocaleString("en-GB")} {unitWord} · {group.bySeller.length === 1 ? group.bySeller[0].name : `${group.bySeller.length} sellers`}
+              {count(group.units)} {unitWord} · {group.bySeller.length === 1 ? group.bySeller[0].name : `${group.bySeller.length} sellers`}
               {countries.length ? ` · ${countries.join(", ")}` : ""}
             </span>
             <SourceTags sources={group.sources} />
@@ -195,7 +198,7 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
         </div>
         <span className={css.num}>
           <strong style={{ color: covered ? "var(--bt-green)" : undefined }}>
-            {group.covers ? `${Math.min(group.units, 99_999).toLocaleString("en-GB")} / ${group.covers.need.toLocaleString("en-GB")}` : group.units.toLocaleString("en-GB")}
+            {group.covers ? `${count(group.units)} / ${count(group.covers.need)}` : count(group.units)}
           </strong>
           <span className={css.numSub}>{group.covers ? (covered ? "covers ask" : "units") : "units"}</span>
         </span>
@@ -209,7 +212,10 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
         </span>
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
       </button>
-      {open && <SellerList sellers={group.bySeller} unitWord={unitWord} onVerdict={onVerdict} busy={busy} />}
+      {/* One seller: the header already names them, so open straight onto the packs. */}
+      {open && (group.bySeller.length === 1
+        ? <UnitTable items={group.bySeller[0].items} more={group.bySeller[0].more} hideSeller onVerdict={onVerdict} busy={busy} />
+        : <SellerList sellers={group.bySeller} unitWord={unitWord} onVerdict={onVerdict} busy={busy} />)}
     </div>
   );
 }
@@ -235,6 +241,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
   const [sort, setSort] = useState<Sort>("match");
   const [open, setOpen] = useState<string | null>(null);
   const [shown, setShown] = useState(5);
+  const [showSmall, setShowSmall] = useState(false);
   const [copied, setCopied] = useState(false);
   const groups = useMemo(() => {
     if (!supply) return [];
@@ -247,11 +254,11 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
         return { ...seller, items, units: source === "all" ? seller.units : items.reduce((n, u) => n + (u.units ?? 1), 0) };
       }).filter((seller) => seller.items.length);
       return { ...g, items: g.items.filter(keep), bySeller, units: source === "all" ? g.units : bySeller.reduce((n, x) => n + x.units, 0) };
-    }).filter((g) => g.bySeller.length);
+    }).filter((g) => g.bySeller.length && (showSmall || !g.small));
     if (sort === "price") list.sort((a, b) => (a.eurPerKwh?.min ?? 1e9) - (b.eurPerKwh?.min ?? 1e9));
     if (sort === "units") list.sort((a, b) => b.units - a.units);
     return list;
-  }, [supply, source, sort]);
+  }, [supply, source, sort, showSmall]);
   if (loading && !supply) return <p className={css.empty}>Checking marketplace listings, stock lists and trades…</p>;
   if (error && !supply) return <p role="alert" className={css.empty} style={{ color: "var(--bt-red)" }}>{error}</p>;
   if (!supply) return null;
@@ -298,6 +305,12 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
             ))}
             {!groups.length && source !== "starred" && <p className={css.empty}>Nothing in our inventory matches{source !== "all" ? " from this source" : ""}.</p>}
           </div>
+          {supply.smallGroups > 0 && (
+            <button type="button" className={`${rowFocus} self-start text-[12px] underline`} style={{ color: "var(--bt-muted)" }}
+              onClick={() => setShowSmall(!showSmall)}>
+              {showSmall ? "Hide small lots" : `Show ${supply.smallGroups} small lot${supply.smallGroups === 1 ? "" : "s"} (under 1% of the ask)`}
+            </button>
+          )}
           {groups.length > shown && (
             <button type="button" className={`${buttonClass} self-start`} style={buttonStyle} onClick={() => setShown(shown + 10)}>
               Show {Math.min(10, groups.length - shown)} more of {groups.length - shown}

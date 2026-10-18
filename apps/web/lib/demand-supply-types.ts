@@ -41,7 +41,7 @@ export type SupplyUnitView = {
 export type SellerView = Omit<SellerGroup, "matches"> & { items: SupplyUnitView[]; more: number };
 
 export type SupplyGroupView = Pick<MatchGroup, "key" | "label" | "verdict" | "units" | "sellers" | "sources" | "eurPerKwh"
-  | "bestMarginPct" | "covers"> & { checks: Check[]; items: SupplyUnitView[]; more: number;
+  | "bestMarginPct" | "covers" | "small"> & { checks: Check[]; items: SupplyUnitView[]; more: number;
     /** The group split by seller, and the fewest sellers that fill the ask. */
     bySeller: SellerView[]; fill: FillPlan | null };
 
@@ -56,6 +56,8 @@ export type DemandSupply = {
   };
   groups: SupplyGroupView[];
   totalGroups: number;
+  /** Groups under 1% of a bulk ask, sent after the rest and hidden until asked for. */
+  smallGroups: number;
   totalUnits: number;
   considered: { marketplace: number; stock: number; trades: number };
   hiddenCount: number;

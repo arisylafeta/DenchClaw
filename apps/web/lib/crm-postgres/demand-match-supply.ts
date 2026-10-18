@@ -204,7 +204,8 @@ export async function feedCandidates(demandId: string): Promise<Candidate[]> {
       seller: row.seller,
       make: null,
       model: null,
-      format: toFormat(units?.[2]) ?? (/\bcells?\b/i.test(row.title) ? "Cells" : /\bmodules?\b/i.test(row.title) ? "Modules" : null),
+      format: toFormat(units?.[2]) ?? (/\bcells?\b/i.test(row.title) ? "Cells" : /\bmodules?\b/i.test(row.title) ? "Modules"
+        : /\b(bess|container|tender)\b/i.test(row.title) ? "Systems" : /\b(packs?|batteries)\b/i.test(row.title) ? "Packs" : null),
       chemistry: /\blfp\b/i.test(row.title) ? "LFP" : /\bnmc\b/i.test(row.title) ? "NMC" : null,
       cellFormat: null,
       kwh: kwhText && "options" in kwhText && kwhText.options.length === 1 ? kwhText.options[0] : null,

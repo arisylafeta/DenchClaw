@@ -81,6 +81,8 @@ export type MatchGroup = {
   bestMarginPct: number | null;
   /** Units the group can cover against the ask, when the ask has a unit count. */
   covers: { have: number; need: number } | null;
+  /** Under 1% of a bulk ask (50+ units): too small to matter, hidden unless asked for. */
+  small: boolean;
   matches: Match[];
 };
 
@@ -255,7 +257,8 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
       if (!products.some((p) => p.phrase === phrase || p.anyOf.includes(word))) products.push({ phrase, anyOf: [phrase], not: [] });
     }
   }
-  const cellTokens = [...new Set([...t.matchAll(/ (18650|21700|26650|32700|4680|2170|\d{2}e) /g)].map((m) => m[1] === "2170" ? "21700" : m[1]))];
+  const cellTokens = [...new Set([...t.matchAll(/(?<![0-9])(18650|21700|26650|32700|4680|2170)(?![0-9])| (\d{2}e) /g)]
+    .map((m) => (m[1] === "2170" ? "21700" : m[1] ?? m[2])))];
   const kwh = spec.kwh_min != null || spec.kwh_max != null
     ? { min: spec.kwh_min ?? 0, max: spec.kwh_max ?? 10_000 }
     : kwhFromText(text) ?? (platformKwh ? { options: platformKwh } : null);
@@ -320,6 +323,14 @@ function kwhFits(req: Requirement, kwh: number): CheckState {
 const kwhLabel = (kwh: number) => `${Math.round(kwh * 10) / 10} kWh`;
 const PRODUCT_CHECKS = new Set<CheckKey>(["product", "capacity", "chemistry", "format"]);
 
+// Energy a cylindrical cell of each size can hold, in Wh. A "21700" listing at 340 Wh is a mislabelled prismatic.
+const CELL_WH: Record<string, [number, number]> = { "18650": [5, 13], "21700": [9, 26], "26650": [8, 22], "32700": [12, 25], "4680": [70, 110] };
+/** The cylindrical size a name states anywhere ("INR18650-26E", "26650FS3", "Panasonic 2170"), if any. */
+export function statedCellSize(text: string): string | null {
+  const m = text.match(/(?<![0-9])(18650|21700|26650|32700|4680|2170)(?![0-9])/);
+  return m ? (m[1] === "2170" ? "21700" : m[1]) : null;
+}
+
 /** Judges one candidate: null when it is clearly not what was asked for, else Exact or Check with its economics. */
 export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
   const checks: Check[] = [];
@@ -327,11 +338,21 @@ export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
 
   // Product: named models must appear; else named makes; else the trade/supply AI judgement.
   if (req.cellTokens.length) {
-    const hit = req.cellTokens.find((tok) => text.includes(tok) || (tok === "21700" && text.includes("2170")));
     if (c.format && c.format !== "Cells") return null;
+    const sizes = req.cellTokens.filter((tok) => tok in CELL_WH);
+    const size = statedCellSize(text);
     // A different stated cell size is a different product.
-    if (!hit && / (18650|21700|2170|26650|32700|4680) /.test(text)) return null;
+    if (size && sizes.length && !sizes.includes(size)) return null;
+    // So is a cell whose energy cannot fit the size asked for, or one that says it is prismatic or pouch.
+    if (sizes.length && c.kwh != null && !sizes.some((tok) => c.kwh! * 1000 >= CELL_WH[tok][0] && c.kwh! * 1000 <= CELL_WH[tok][1])) return null;
+    if (sizes.length && / (prismatic|pouch|blade|lf\d{2,3}) /.test(text)) return null;
+    // Small cylindrical cells hold at most about 6 Ah; a 40 Ah or 61.2 Ah cell is prismatic or pouch.
+    const ah = text.match(/(\d+(?:\.\d+)?) ?ah\b/);
+    if (sizes.some((tok) => tok !== "4680") && ah && Number(ah[1]) > 6) return null;
+    // A trade or batch that never says cells (packs, a BESS tender) is not a cell lot, whatever the inbox AI linked.
+    if (!c.format && !/ cells? /.test(text)) return null;
     if (req.cellFormats.length && c.cellFormat && !req.cellFormats.some((f) => c.cellFormat!.toLowerCase().includes(f.toLowerCase()))) return null;
+    const hit = size && sizes.includes(size) ? size : req.cellTokens.find((tok) => !(tok in CELL_WH) && text.includes(tok));
     checks.push({ key: "product", label: "Cell type", state: hit ? "pass" : "unknown", detail: hit ? `${hit} cells` : "Cell size not stated" });
   } else if (req.products.length) {
     const hit = req.products.find((p) => p.anyOf.some((m) => text.includes(` ${m} `) || text.includes(` ${m.replace(/\s/g, "")} `))
@@ -440,12 +461,14 @@ const groupLabel = (m: Match) => {
 };
 
 const FIT_RANK: Record<Match["verdict"], number> = { exact: 0, check: 1 };
+/** A lot under this share of a bulk ask is noise next to the ask (one cell against 500,000). */
+export const SMALL_SHARE = 0.01;
 const priceOf = (m: Match) => m.economics.sellerEurPerKwh ?? 1e9;
 
 /** One rule: Exact before Check, then cheapest €/kWh (priced before unpriced), then the group that covers more of the ask. */
 export function compareGroups(a: MatchGroup, b: MatchGroup): number {
   const covers = (g: MatchGroup) => (g.covers ? Math.min(1, g.covers.have / g.covers.need) : 0);
-  return FIT_RANK[a.verdict] - FIT_RANK[b.verdict] || (a.eurPerKwh?.min ?? 1e9) - (b.eurPerKwh?.min ?? 1e9) || covers(b) - covers(a) || b.units - a.units;
+  return Number(a.small) - Number(b.small) || FIT_RANK[a.verdict] - FIT_RANK[b.verdict] || (a.eurPerKwh?.min ?? 1e9) - (b.eurPerKwh?.min ?? 1e9) || covers(b) - covers(a) || b.units - a.units;
 }
 
 /** Filters our inventory to what fits, groups the same product across sellers, and sorts Exact then cheapest. */
@@ -478,6 +501,7 @@ export function matchDemand(demand: Demand, candidates: Candidate[], hidden: Set
       eurPerKwh: priced.length ? { min: priced[0].economics.sellerEurPerKwh!, max: priced[priced.length - 1].economics.sellerEurPerKwh! } : null,
       bestMarginPct: margins.length ? Math.max(...margins) : null,
       covers: need ? { have: units, need } : null,
+      small: !!need && need >= 50 && units < need * SMALL_SHARE,
       matches: list,
     });
   }
@@ -585,7 +609,7 @@ export function fewestSellers(sellers: SellerGroup[], need: number | null): Fill
 
 /** The one-line answer for the demand list's Next column. */
 export function bestLine(result: MatchResult): { text: string; verdict: Match["verdict"] } | null {
-  const top = result.groups[0];
+  const top = result.groups.find((g) => !g.small);
   if (!top) return null;
   const margin = top.bestMarginPct != null ? ` · ${Math.round(top.bestMarginPct * 100)}% margin` : "";
   const units = top.covers ? ` · ${Math.min(top.units, top.covers.need)}/${top.covers.need}` : top.units > 1 ? ` · ${top.units} units` : "";
