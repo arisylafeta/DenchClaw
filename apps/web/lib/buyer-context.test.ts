@@ -52,6 +52,8 @@ describe("buyer context validation", () => {
     { pilot_quantities_observed: [{ packs: 2, date: "2026-02-30", source: "Call" }] },
     { sources: [{ kind: "url", label: "Unsafe", url: "javascript:alert(1)" }] },
     { unknown: true },
+    { reviewed_at: "2026-02-30T10:00:00Z" },
+    { sources: [{ kind: "url", label: " ", url: "https://example.test" }] },
   ])("rejects malformed fields: %j", (context) => {
     expect(parseBuyerContext(context)).toHaveProperty("error");
   });

@@ -1,6 +1,6 @@
 import type { Parsed } from "./bulk-trade-details";
 
-/** Decision-relevant context, separate from matching criteria and narrative notes. */
+/** Decision-relevant context. When supplied in a PATCH, replaces the full context object. */
 export type BuyerContext = {
   application?: string;
   min_usable_energy_kwh_per_pack?: number;
@@ -73,7 +73,7 @@ export function parseBuyerContext(value: unknown): Parsed<BuyerContext> {
       case "reviewed_at":
         valid =
           typeof raw === "string" &&
-          (date(raw) || (/^\d{4}-\d{2}-\d{2}T/.test(raw) && !Number.isNaN(Date.parse(raw))));
+          (date(raw) || (date(raw.slice(0, 10)) && /^\d{4}-\d{2}-\d{2}T/.test(raw) && !Number.isNaN(Date.parse(raw))));
         break;
       case "pilot_quantities_observed":
         valid =
@@ -88,7 +88,7 @@ export function parseBuyerContext(value: unknown): Parsed<BuyerContext> {
               Number.isInteger(item.packs) &&
               item.packs > 0 &&
               date(item.date) &&
-              typeof item.source === "string" &&
+              typeof item.source === "string" && item.source.trim().length > 0 &&
               (item.source_ref === undefined || typeof item.source_ref === "string"),
           );
         break;
@@ -99,8 +99,8 @@ export function parseBuyerContext(value: unknown): Parsed<BuyerContext> {
             (item) =>
               object(item) &&
               Object.keys(item).every((k) => ["kind", "id", "url", "label"].includes(k)) &&
-              typeof item.kind === "string" &&
-              typeof item.label === "string" &&
+              typeof item.kind === "string" && item.kind.trim().length > 0 &&
+              typeof item.label === "string" && item.label.trim().length > 0 &&
               (item.id === undefined || typeof item.id === "string") &&
               (item.url === undefined ||
                 (typeof item.url === "string" && !!safeContextUrl(item.url))),

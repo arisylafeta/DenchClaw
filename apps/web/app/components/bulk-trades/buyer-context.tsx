@@ -7,7 +7,7 @@ export function BuyerContext({ context }: { context?: Context }) {
   const yesNo = (value: boolean | undefined) =>
     value === undefined ? null : value ? "Required" : "Not required";
   const facts = [
-    ["Application", context.application],
+    ["Application", context.application?.replaceAll("_", " ")],
     [
       "Minimum usable energy",
       context.min_usable_energy_kwh_per_pack == null
