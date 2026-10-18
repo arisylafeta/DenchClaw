@@ -6,6 +6,8 @@ export type HermesConversation = {
   id: string;
   profile?: string;
   title: string;
+  /** Safe leaf label from explicit session project metadata, never a raw path. */
+  project?: string;
   updatedAt: number;
   participants: HermesParticipant[];
   working: boolean | null;
@@ -47,9 +49,10 @@ function scheduledJob(row: HermesConversation) {
   return row.source === "cron" ? row.title.split(" · ")[0] : conversationChannel(row).label;
 }
 export type GroupBy = "source" | "none" | "channel" | "agent" | "day" | "job";
-export type ChatView = { hidden: string[]; groupBy: GroupBy; version?: 2; pins?: string[]; collapsed?: string[] };
+export type SortBy = "recent" | "project";
+export type ChatView = { hidden: string[]; groupBy: GroupBy; sortBy?: SortBy; version?: 2; pins?: string[]; collapsed?: string[] };
 /** Automation is discoverable, but closed until deliberately opened. */
-export const DEFAULT_VIEW: ChatView = { version: 2, hidden: [], groupBy: "source", pins: [], collapsed: ["automation"] };
+export const DEFAULT_VIEW: ChatView = { version: 2, hidden: [], groupBy: "source", sortBy: "recent", pins: [], collapsed: ["automation"] };
 export type ChatSection = { key: string; label: string | null; rows: HermesConversation[] };
 const MESSAGING = new Set(["discord", "whatsapp", "telegram", "slack", "signal", "matrix", "mattermost", "sms", "email"]);
 export function messagingConversation(row: HermesConversation) { return row.kind === "solo" && MESSAGING.has(row.source ?? ""); }
@@ -67,6 +70,7 @@ export function parseChatView(value: unknown): ChatView {
   const strings = (item: unknown): item is string[] => Array.isArray(item) && item.length <= 5000 && item.every((id) => typeof id === "string" && id.length <= 2000);
   if (!strings(v.hidden) || !["source", "none", "channel", "agent", "day", "job"].includes(String(v.groupBy))) return { ...DEFAULT_VIEW };
   return { version: 2, hidden: [...new Set(v.hidden)], groupBy: v.groupBy === "none" ? "source" : v.groupBy as GroupBy,
+    sortBy: v.sortBy === "project" ? "project" : "recent",
     pins: strings(v.pins) ? [...new Set(v.pins)] : [], collapsed: strings(v.collapsed) ? [...new Set(v.collapsed)] : ["automation"] };
 }
 function dayBucket(ms: number, now: Date) {
@@ -88,7 +92,15 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
     : view.groupBy === "day" ? dayBucket(row.updatedAt, now) : scheduledJob(row);
   const sections = new Map<string, ChatSection>();
   const pins = new Set(view.pins ?? []);
-  for (const row of shown) {
+  const sorted = [...shown].sort((a, b) => {
+    if (view.sortBy === "project") {
+      // Unknown projects stay last. Titles and message text never supply projects.
+      const projectOrder = Number(!a.project) - Number(!b.project) || (a.project ?? "").localeCompare(b.project ?? "", undefined, { sensitivity: "base" });
+      if (projectOrder) return projectOrder;
+    }
+    return b.updatedAt - a.updatedAt || a.key.localeCompare(b.key);
+  });
+  for (const row of sorted) {
     const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
       : automation(row) ? sourceSection(row)
       : view.groupBy === "source" || view.groupBy === "none" ? sourceSection(row) : { key: `view:${keyOf(row)}`, label: keyOf(row) };

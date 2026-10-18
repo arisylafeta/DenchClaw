@@ -5,6 +5,8 @@ import { conversationKey, filterConversations, parseConversationKey } from "./he
 vi.mock("./workspace", () => ({ discoverWorkspaces: () => [{ name: "default" }, { name: "alpha" }] }));
 vi.mock("./hermes-session-names", () => ({ sessionDisplayNames: vi.fn(async () => ({})) }));
 import { sessionDisplayNames } from "./hermes-session-names";
+vi.mock("./hermes-session-projects", () => ({ sessionProjectLabels: vi.fn(async () => ({})) }));
+import { sessionProjectLabels } from "./hermes-session-projects";
 import { createConversation, groupRpc, listConversations, nativeFetch, readConversation } from "./hermes-native";
 import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
@@ -129,10 +131,14 @@ describe("native Hermes conversations", () => {
     const recent = Array.from({ length: 200 }, (_, index) => ({ id: `recent-${index}`, source: "discord", title: `Recent ${index}` }));
     const olderPin = { id: "older-pinned", source: "whatsapp", title: "Older pinned chat", pinned: true };
     vi.mocked(sessionDisplayNames).mockClear();
+    vi.mocked(sessionProjectLabels).mockClear();
+    vi.mocked(sessionProjectLabels).mockImplementation(async (profile, ids): Promise<Record<string, string>> => profile === "default" && ids.includes(olderPin.id) ? { [olderPin.id]: "Harbour" } : {});
     vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({ data: input.includes("/alpha/") ? [] : [...recent, olderPin] })));
     const result = await listConversations();
     expect(result.sessions).toHaveLength(201);
-    expect(result.sessions.find((row) => row.id === olderPin.id)).toMatchObject({ profile: "default", title: olderPin.title });
+    expect(result.sessions.find((row) => row.id === olderPin.id)).toMatchObject({ profile: "default", title: olderPin.title, project: "Harbour" });
+    expect(vi.mocked(sessionProjectLabels).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids.length)).toEqual([200, 1]);
+    vi.mocked(sessionProjectLabels).mockImplementation(async () => ({}));
     const batches = vi.mocked(sessionDisplayNames).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids);
     expect(batches.map((ids) => ids.length)).toEqual([200, 1]);
     expect(batches.flat()).toContain(olderPin.id);

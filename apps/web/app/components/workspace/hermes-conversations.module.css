@@ -1,0 +1,82 @@
+/* Sidebar-only overrides: do not alter the shared menu primitives. */
+.filterMenu.filterMenu {
+  width: 216px;
+  max-width: calc(100vw - 24px);
+  padding: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  backdrop-filter: none;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+}
+
+.filterMenu [data-slot="dropdown-menu-label"] {
+  padding: 7px 8px 4px;
+  color: var(--color-chat-sidebar-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.filterMenu [role="menuitemradio"],
+.filterMenu [role="menuitemcheckbox"] {
+  min-height: 32px;
+  border-radius: 5px;
+  padding-block: 6px;
+  padding-right: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: none;
+}
+
+.filterMenu [aria-checked="true"] {
+  background: var(--color-surface-hover);
+}
+
+.filterMenu [data-highlighted],
+.filterMenu [role^="menuitem"]:focus-visible {
+  background: var(--color-surface-hover);
+  outline: 1px solid var(--color-text-muted);
+  outline-offset: -2px;
+}
+
+.filterMenu [data-slot="dropdown-menu-separator"] {
+  margin: 5px 3px;
+  background: var(--color-border);
+}
+
+@property --hermes-sidebar-orbit {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.running::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(from var(--hermes-sidebar-orbit), rgb(34 197 94 / 15%) 0deg, rgb(34 197 94 / 15%) 230deg, rgb(74 222 128 / 80%) 290deg, rgb(34 197 94 / 15%) 360deg);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  filter: drop-shadow(0 0 2px rgb(34 197 94 / 20%));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .running::after { animation: sidebar-orbit 4s linear infinite; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running::after { background: rgb(34 197 94 / 45%); }
+}
+
+@keyframes sidebar-orbit {
+  to { --hermes-sidebar-orbit: 360deg; }
+}
