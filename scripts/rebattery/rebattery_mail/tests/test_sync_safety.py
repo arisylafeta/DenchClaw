@@ -185,14 +185,14 @@ def test_pre_send_mailbox_refresh_is_always_bounded(monkeypatch):
     from rebattery_mail import sync
 
     seen = []
-    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None: seen.append(since) or {'counts': {'replies': 0}})
+    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None, skip_known=False: seen.append((since, skip_known)) or {'counts': {'replies': 0}})
     # The query itself subtracts one day from the thread's first message (2026-10-01), so it returns 09-30.
     monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(datetime(2026, 9, 30, 9, 0, tzinfo=timezone.utc)))
     sync.recheck_thread('thread-1', 'alex@rebattery.io')
-    assert seen[-1] == '2026/09/30'  # the window starts the day before the thread's first message
+    assert seen[-1] == ('2026/09/30', True)  # window starts the day before the thread's first message; known mail is not refetched
     monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(None))
     sync.recheck_thread(None, 'alex@rebattery.io')
-    assert seen[-1] is not None and len(seen[-1]) == 10  # never None: fallback window, not the whole mailbox
+    assert seen[-1][0] is not None and len(seen[-1][0]) == 10  # never None: fallback window, not the whole mailbox
 
 
 def test_first_message_skips_reply_refresh(monkeypatch):
@@ -250,3 +250,34 @@ def test_hermes_secret_runs_in_a_subprocess_and_returns_only_the_value(monkeypat
 
     monkeypatch.setattr(drivers.subprocess, 'run', boom)
     assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') is None
+
+
+def test_gmail_reply_sends_only_the_reply_anchor_and_usage_errors_are_definite():
+    """gog rejects --thread-id together with --reply-to-message-id; exit code 2 means nothing was submitted."""
+    import subprocess
+    import pytest
+    from rebattery_mail.core import ProviderError, UnknownOutcome
+    from rebattery_mail.drivers import GmailSendDriver
+
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout='{"id":"gmail-1"}', stderr='')
+
+    identity = {'gmail_account': 'alex@rebattery.io', 'address': 'supply@rebattery.io'}
+    message = {'to_emails': ['ari@rebattery.io'], 'subject': 's', 'body_text': 'b', 'thread_id': 'log-thread',
+               'gmail_thread_id': 'gthread', 'personalization': {'reply_gmail_message_id': 'anchor'}}
+    import os
+    os.environ['DENCH_MAIL_LIVE_SEND'] = '1'
+    try:
+        GmailSendDriver(runner=runner).send(identity, message)
+        assert '--reply-to-message-id' in calls[-1] and '--thread-id' not in calls[-1]
+        GmailSendDriver(runner=runner).send(identity, {**message, 'thread_id': None, 'personalization': {}})
+        assert '--thread-id' in calls[-1] and '--reply-to-message-id' not in calls[-1]
+        with pytest.raises(ProviderError, match='gmail_send_rejected'):
+            GmailSendDriver(runner=lambda a, **k: subprocess.CompletedProcess(a, 2, stdout='', stderr='usage')).send(identity, message)
+        with pytest.raises(UnknownOutcome):
+            GmailSendDriver(runner=lambda a, **k: subprocess.CompletedProcess(a, 1, stdout='', stderr='boom')).send(identity, message)
+    finally:
+        os.environ.pop('DENCH_MAIL_LIVE_SEND', None)

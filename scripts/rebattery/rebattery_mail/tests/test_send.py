@@ -414,7 +414,7 @@ def test_threaded_draft_binds_rfc_headers_and_gmail_anchor(env):
         receipt=GmailSendDriver(runner).send({'gmail_account':'alex@rebattery.io','address':'alex@rebattery.io'},row)
     assert receipt['gmail_message_id']=='fake-gmail-receipt'
     assert calls[0][calls[0].index('--reply-to-message-id')+1]=='gmail-anchor'
-    assert calls[0][calls[0].index('--thread-id')+1]=='gmail-thread'
+    assert '--thread-id' not in calls[0]  # gog rejects both flags together; the anchor already implies the thread
 
 
 def test_review_1_pilot_scope_requires_cap(env):

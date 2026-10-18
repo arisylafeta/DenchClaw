@@ -14,7 +14,7 @@ def stable_id(prefix, value):
     return prefix + hashlib.sha256(value.encode()).hexdigest()[:32]
 
 
-def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None):
+def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None, skip_known=False):
     driver = driver or GmailDriver()
     stats = dict(found=0, fetched=0, imported=0, linked=0, crm_visible=0, auto_created=0, drafts_skipped=0, replies=0, html_missing=0)
     with db.cursor() as cur:
@@ -40,7 +40,16 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
     triaged_ids = {r['id'] for r in driver.search(account, '(label:Deal OR label:Inbound) -label:DRAFT' + (' after:'+str(since) if since else '')) if r.get('id')}
     stats['found'] = len(hits)
     prepared = []
+    known = set()
+    if skip_known:
+        # Pre-send reply rechecks only need mail that is not in the log yet; re-fetching every message
+        # of the day made a send preflight take minutes.
+        with db.cursor() as cur:
+            cur.execute('select gmail_message_id from mail_message where mailbox_owner_id=%s and gmail_message_id is not null',(owner_id,))
+            known = {r[0] for r in cur.fetchall()}
     for gmail_id in sorted(hits):
+        if gmail_id in known:
+            continue
         full = driver.fetch(account,gmail_id)
         stats['fetched'] += 1
         raw = full.get('message',{})

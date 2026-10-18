@@ -133,16 +133,20 @@ class GmailSendDriver:
             args += ['--reply-to',identity['reply_to']]
         if message.get('body_html'):
             args += ['--body-html',message['body_html']]
-        if message.get('gmail_thread_id'):
-            args += ['--thread-id',message['gmail_thread_id']]
         anchor = message.get('personalization', {}).get('reply_gmail_message_id')
         if message.get('thread_id') or anchor:
             if not anchor:
                 raise Refused('gmail_reply_anchor_missing')
-            # gog resolves the Gmail message and derives In-Reply-To/References from its RFC headers.
+            # gog resolves the Gmail message and derives In-Reply-To/References and the thread from its RFC
+            # headers. It rejects --thread-id together with --reply-to-message-id, so send only the anchor.
             args += ['--reply-to-message-id',anchor]
+        elif message.get('gmail_thread_id'):
+            args += ['--thread-id',message['gmail_thread_id']]
         try:
             response = self.runner(args, capture_output=True, text=True, timeout=30)
+            if response.returncode == 2:
+                # gog exit code 2 is a usage error raised before any API call: nothing was submitted.
+                raise ProviderError('gmail_send_rejected', returncode=2)
             if response.returncode:
                 raise UnknownOutcome('gmail_send_uncertain')
             payload = json.loads(response.stdout)

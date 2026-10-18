@@ -122,7 +122,7 @@ def recheck_thread(thread_id, account, driver=None):
             since = first.strftime('%Y/%m/%d') if first else None
         if since is None:
             since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y/%m/%d')
-        result = sync_gmail(db,account,since=since,apply=True,driver=driver)
+        result = sync_gmail(db,account,since=since,apply=True,driver=driver,skip_known=True)
         if thread_id is None:
             return bool(result['counts']['replies'])
         with db.cursor() as cur:
