@@ -78,7 +78,7 @@ describe("native transcript", () => {
     const cb = callbacks();
     const { container, rerender } = render(<NativeTranscript state={live} callbacks={cb} />);
     expect(container.querySelector('[data-segment="work"]')).toHaveAttribute("open");
-    expect(screen.getAllByText(/^Working/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/^Thinking/)).toHaveTextContent(/^Thinking \d+s$/);
     const running = events([["tool.start", { tool_id: "t", name: "terminal", args: { command: "pwd" } }]], live);
     rerender(<NativeTranscript state={running} callbacks={cb} />);
     expect(screen.getByText("Running a quick command")).toBeInTheDocument();

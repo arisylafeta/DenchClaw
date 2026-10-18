@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Brain, ChevronRight, CircleAlert, LoaderCircle, type LucideIcon } from "lucide-react";
+import { Brain, ChevronRight, CircleAlert, type LucideIcon } from "lucide-react";
+import { PixelGrid } from "./thinking";
 import type { ToolSegment } from "@/lib/hermes-chat/reducer";
 import { describeTool } from "./describe";
 import { buildPreview } from "./preview";
@@ -25,10 +26,10 @@ export const chipClass = "min-w-0 rounded-md bg-[var(--color-surface-hover)] px-
 export function TraceStep({ state, icon, label, detail, body, muted, connectPrevious, connectNext, children, ...rest }: {
   state: StepState; icon?: LucideIcon; label: string; detail?: React.ReactNode; body?: React.ReactNode; muted?: boolean; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
-  const Icon = state === "error" ? CircleAlert : state === "done" ? (icon ?? Brain) : LoaderCircle;
+  const Icon = state === "error" ? CircleAlert : state === "done" ? (icon ?? Brain) : null;
   const row = <>
     <span aria-hidden="true" className="absolute -left-7 flex size-3.5 items-center justify-center bg-[var(--color-main-bg)] text-[var(--color-text-muted)]">
-      <Icon className={`size-3.5 ${state === "running" ? "animate-spin motion-reduce:animate-none" : ""} ${state === "error" ? "text-[var(--color-error)]" : ""}`} />
+      {Icon ? <Icon className={`size-3.5 ${state === "error" ? "text-[var(--color-error)]" : ""}`} /> : <PixelGrid />}
     </span>
     {label && <span className={muted ? "min-w-0 text-[12px] text-[var(--color-text-muted)]" : "text-[12px] font-medium text-[var(--color-text)]"}>{label}</span>}
     {detail !== undefined && <span className={chipClass}>{detail}</span>}

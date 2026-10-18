@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Brain, ChevronRight, LoaderCircle, MessageSquareText } from "lucide-react";
+import { Brain, ChevronRight, MessageSquareText } from "lucide-react";
+import { ThinkingIndicator } from "./thinking";
 import type { ChatMessage, Segment, TextSegment } from "@/lib/hermes-chat/reducer";
 import { Elapsed, ToolRow, TraceStep } from "./tool-run";
 
@@ -57,8 +58,9 @@ export function WorkBlock({ work, live, answerStartedAt }: WorkBlockProps) {
   return <details className="group/work w-full min-w-0" data-segment="work" open={disclosure.open} onToggle={disclosure.onToggle}>
     <summary className="flex min-h-6 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
       <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/work:rotate-90" />
-      {live ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin text-[var(--color-text-muted)] motion-reduce:animate-none" /> : <Brain aria-hidden="true" className="size-3.5 text-[var(--color-text-muted)]" />}
-      <span className="font-medium">{live ? <>Working <Elapsed startedAt={started} /></> : seconds >= 1 ? `Thought for ${formatDuration(seconds)}` : "Thought"}</span>
+      {live
+        ? <ThinkingIndicator>Thinking <Elapsed startedAt={started} /></ThinkingIndicator>
+        : <><Brain aria-hidden="true" className="size-3.5 text-[var(--color-text-muted)]" /><span className="font-medium">{seconds >= 1 ? `Thought for ${formatDuration(seconds)}` : "Thought"}</span></>}
     </summary>
     <div className="mt-1 ml-1.5">
       {items.map((segment, index) => {
