@@ -117,7 +117,7 @@ def refresh_replies(message,author,driver=None):
             cur.execute('select u.email from mail_thread t join crm_users u on u.id=t.mailbox_owner_id where t.id=%s',(thread_id,))
             owner = cur.fetchone()
             account = owner['email'] if owner else None
-    if not account:
+    if not account and not fresh:
         raise Refused('reply_mailbox_unavailable',reply_to=reply_to)
     if driver is not None and hasattr(driver,'refresh_replies'):
         driver.refresh_replies(author,message)
