@@ -67,7 +67,7 @@ Search also accepts `--identity`, `--campaign` and events `opened|clicked|replie
 
 `sync health` returns read-only freshness JSON; inspect `problems` even when other providers are current.
 `sync postmark --recent-days N --apply` re-reads recent sends plus unresolved sends within Postmark's 44-day retention window; omit `--account` for all streams.
-Default-profile no-agent cron runs Postmark events every 15 minutes, a 21-day sweep daily at 05:30 UTC, and mail health every 30 minutes.
+Default-profile no-agent cron runs Postmark events every 15 minutes, a locked 14-day sweep daily at 05:30 UTC, and mail health every 30 minutes.
 Gmail sync runs hourly for Ari and Alex with a rolling three-day window; sync commands never send mail.
 
 ## Folder-backed templates
