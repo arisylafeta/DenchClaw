@@ -244,3 +244,12 @@ describe("durable history shape", () => {
     expect(screen.getByText("Because of X.")).toBeInTheDocument();
   });
 });
+
+describe("emoji", () => {
+  it("strips emoji from narration lines and status text", async () => {
+    const { stripEmoji } = await import("./work-block");
+    expect(stripEmoji("🔍 Searching the web… 🚀")).toBe("Searching the web…");
+    expect(stripEmoji("Done ✅ 👍🏽 ok")).toBe("Done ok");
+    expect(stripEmoji("Plain text 1.")).toBe("Plain text 1.");
+  });
+});
