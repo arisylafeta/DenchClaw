@@ -4,6 +4,7 @@ import type { PriceBasis, Reputation } from "./bulk-demand-score";
 import specConfig from "./buy-box-spec.json";
 import type { CompanyContextNote } from "./crm-postgres/company-context";
 import type { SupplyFeedRow } from "./bulk-supply";
+import { parseBuyerContext, type BuyerContext } from "./buyer-context";
 
 /** Stated and agreed buy-boxes not confirmed for this long show as "Still wanted?". */
 export const STALE_DAYS = 60;
@@ -82,6 +83,7 @@ export type Demand = {
   price_currency: string | null;
   price_unit: string | null;
   spec: Spec;
+  context: BuyerContext;
   source_kind: string | null;
   source_label: string | null;
   source_url: string | null;
@@ -139,7 +141,7 @@ export type SuggestedBuyer = {
 export type DemandInput = Partial<Pick<Demand,
   "kind" | "basis" | "buyer" | "company_id" | "person_id" | "contact" | "email" | "wants" | "quantity" | "location" | "note"
   | "confirmed_on" | "needed_by" | "volume" | "volume_unit" | "max_price" | "price_currency" | "price_unit" | "spec"
-  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to" | "priority">>;
+  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to" | "priority" | "context">>;
 
 /** Only compute a euro fee when amount, currency and compatible units are known. */
 export function demandFee(input: DemandInput): number | null {
@@ -215,6 +217,12 @@ export function parseDemandInput(body: unknown, creating: boolean): Parsed<Deman
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Body must be an object." };
   const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
   const extra: DemandInput = {};
+  if ("context" in rest) {
+    const context = parseBuyerContext(rest.context);
+    if ("error" in context) return context;
+    extra.context = context.value;
+    delete rest.context;
+  }
   if ("priority" in rest) {
     if (typeof rest.priority !== "boolean") return { error: "priority must be true or false." };
     extra.priority = rest.priority;

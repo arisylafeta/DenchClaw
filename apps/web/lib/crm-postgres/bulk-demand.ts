@@ -31,7 +31,7 @@ const DEMAND_SELECT = `
       from (${ELIGIBLE_INVENTORY}) inventory), '[]'::json) end as inventory_matches,
     demand.email, demand.wants, demand.quantity, demand.location, demand.note,
     to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, demand.volume::float8 as volume, demand.volume_unit,
-    demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.source_kind,
+    demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.context, demand.source_kind,
     demand.source_label, demand.source_url, demand.source_quote, to_char(demand.observed_on, 'YYYY-MM-DD') as observed_on,
     demand.status, demand.closed_reason, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on, demand.updated_at,
     demand.product_family, demand.fee_eur::float8 as fee_eur, demand.price_basis, demand.reputation,
@@ -152,7 +152,7 @@ const INSERT_KEYS = [
   "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
   "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
   "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question", "qualify_asked_on",
-  "priority",
+  "priority", "context",
 ] as const;
 
 export async function addDemand(input: DemandInput & { buyer: string; wants: string }, userId: string | null, source: Source = {}) {
@@ -164,6 +164,7 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
     basis: kind === "standing" ? input.basis ?? "stated" : null,
     needed_by: kind === "request" ? input.needed_by ?? null : null,
     spec: JSON.stringify(input.spec ?? {}),
+    context: JSON.stringify(input.context ?? {}),
     observed_on: input.observed_on ?? input.confirmed_on ?? todayInLondon(),
     // Our own estimate is not a confirmation from the buyer.
     confirmed_on: input.confirmed_on ?? (input.basis === "estimated" ? null : todayInLondon()),
@@ -188,6 +189,7 @@ export async function updateDemand(id: string, input: DemandInput, source: Sourc
     patch.moved_to = null;
   }
   if ("spec" in patch) patch.spec = JSON.stringify(patch.spec ?? {});
+  if ("context" in patch) patch.context = JSON.stringify(patch.context);
   const keys = Object.keys(patch);
   // Turning a request into a standing buy-box keeps any basis it has, else it becomes stated.
   const basisFix = input.kind === "standing" && !("basis" in input) ? ", basis = coalesce(basis, 'stated')" : "";
