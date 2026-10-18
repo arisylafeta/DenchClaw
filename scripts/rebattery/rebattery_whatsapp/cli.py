@@ -11,6 +11,7 @@ from .ingest import ingest
 from .commands_read import COMMANDS, dispatch_read_command, register_read_commands
 from .screening import register_screen_command, screen
 
+from .retention import retain
 
 def parser():
     root = argparse.ArgumentParser(prog='rebattery-whatsapp')
@@ -22,6 +23,10 @@ def parser():
     commands.add_parser('status')
     register_read_commands(commands)
     register_screen_command(commands)
+    retention = commands.add_parser('retention')
+    retention.add_argument('--path', required=True)
+    retention.add_argument('--account', required=True)
+    retention.add_argument('--apply', action='store_true')
     identities = commands.add_parser('identity').add_subparsers(dest='action', required=True)
     for action in ('propose', 'list', 'link', 'unlink'):
         sub = identities.add_parser(action)
@@ -40,6 +45,8 @@ def parser():
 
 
 def dispatch(args):
+    if args.command == 'retention':
+        return retain(args.path, args.account, args.apply)
     if args.command == 'ingest':
         return ingest(args.path, args.apply, args.account)
     if args.command == 'screen':
