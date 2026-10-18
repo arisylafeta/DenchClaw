@@ -168,7 +168,7 @@ export class HermesChatService {
     try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
     const retained = this.retainedKey(key);
     return this.manager.serialize(retained, async () => {
-      // Re-check inside the critical section: never stage an image into another queued send.
+      // Re-check inside the critical section: never stage an image into another send.
       await this.writable(key);
       let resume: SessionResumeResult | undefined;
       if (!this.manager.session(retained)?.runtimeId) resume = await this.manager.resumeSession(retained);
@@ -223,7 +223,14 @@ export class HermesChatService {
           else if (["message.start", "message.delta", "message.interim", "reasoning.delta", "reasoning.available", "tool.start", "tool.complete", "message.complete"].includes(event.type)) { claimed = true; settle(); }
         });
         try {
-          const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text, queued: true });
+          // Steer, never queue: a busy turn gets the text injected after its next tool result without
+          // being interrupted. An idle turn rejects the steer and the same text starts a normal turn.
+          // Images cannot ride a steer, so they go as a plain submit (Hermes decides how to merge it).
+          if (!attached.length) {
+            const steer = await this.manager.callSession(retained, "session.steer", { session_id: "", text });
+            if (steer.status !== "rejected") return { status: "steered" as const, autoContinue: Boolean(resume?.auto_continue) };
+          }
+          const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text });
           if (attached.length && result.status === "streaming" && !claimed) {
             // Accepted prompts may wait 600s for agent construction. Ownership has no
             // local deadline: later staging waits until claim or confirmed failure.

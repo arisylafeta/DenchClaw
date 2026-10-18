@@ -14,7 +14,7 @@ export type HermesConversation = {
   /** Group needs attention in Hermes (approval, retry or cancellation). */
   blocked?: boolean | null;
 };
-export type HermesMessage = { id: string; role: string; timestamp?: number; text: string; content?: string; parts?: Record<string, unknown>[]; profile?: string; name?: string };
+export type HermesMessage = { id: string; role: string; timestamp?: number; displayKind?: string; displayMetadata?: unknown; text: string; content?: string; parts?: Record<string, unknown>[]; profile?: string; name?: string };
 export function conversationKey(kind: "solo" | "group", id: string, profile = ""): string {
   return encodeURIComponent(JSON.stringify([kind, profile, id]));
 }
