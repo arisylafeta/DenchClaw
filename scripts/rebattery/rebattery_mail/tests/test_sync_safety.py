@@ -225,3 +225,28 @@ def test_first_message_skips_reply_refresh(monkeypatch):
     monkeypatch.setattr(sync, 'recheck_thread', lambda *a, **k: called.append(a))
     send.refresh_replies({'id': 'new', 'personalization': {}, 'thread_id': None}, {'address': 'supply@rebattery.io', 'gmail_account': 'alex@rebattery.io'}, None)
     assert called == []
+
+
+def test_hermes_secret_runs_in_a_subprocess_and_returns_only_the_value(monkeypatch):
+    """Importing the Hermes loader in-process re-executes into a Python without psycopg2 and broke the first live Postmark send."""
+    import subprocess
+    from rebattery_mail import drivers
+
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen['command'] = command
+        out = '  Bitwarden Secrets Manager: applied 58 secrets\n' + drivers._SECRET_MARKER + 'synthetic-token\n'
+        return subprocess.CompletedProcess(command, 0, stdout=out, stderr='')
+
+    monkeypatch.setattr(drivers.subprocess, 'run', fake_run)
+    assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') == 'synthetic-token'
+    assert seen['command'][0] == drivers.HERMES_PYTHON
+    monkeypatch.setattr(drivers.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout='noise only', stderr=''))
+    assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') is None
+
+    def boom(*a, **k):
+        raise OSError('missing interpreter')
+
+    monkeypatch.setattr(drivers.subprocess, 'run', boom)
+    assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') is None

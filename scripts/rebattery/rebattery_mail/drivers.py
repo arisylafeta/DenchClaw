@@ -17,21 +17,40 @@ def live_gate():
         raise Refused('live_send_disabled')
 
 
+HERMES_PYTHON = '/usr/local/lib/hermes-agent/venv/bin/python3'
+_SECRET_MARKER = 'REBATTERY_MAIL_SECRET='
+_SECRET_CODE = (
+    "import sys\n"
+    "sys.path.insert(0, '/usr/local/lib/hermes-agent')\n"
+    "import hermes_bootstrap\n"
+    "from hermes_cli.env_loader import load_hermes_dotenv\n"
+    "from agent.secret_scope import get_secret\n"
+    "load_hermes_dotenv(hermes_home='/root/.hermes')\n"
+    "print('" + _SECRET_MARKER + "' + (get_secret(sys.argv[1]) or ''))\n"
+)
+
+
+def hermes_secret(name):
+    """Read one approved secret through the Hermes secret loader in Hermes' own interpreter.
+
+    Importing the loader in this process re-executes the script into the Hermes Python, which lacks
+    psycopg2, so the loader runs in a subprocess and only the value is returned. Never logged."""
+    try:
+        result = subprocess.run([HERMES_PYTHON, '-c', _SECRET_CODE, name], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith(_SECRET_MARKER):
+            return line[len(_SECRET_MARKER):].strip() or None
+    return None
+
+
 def postmark(path, method='GET', payload=None):
     if method != 'GET':
         live_gate()
     token = os.environ.get('POSTMARK_SERVER_TOKEN')
     if not token:
-        try:
-            if '/usr/local/lib/hermes-agent' not in sys.path:
-                sys.path.insert(0, '/usr/local/lib/hermes-agent')
-            import hermes_bootstrap  # noqa: F401
-            from hermes_cli.env_loader import load_hermes_dotenv
-            from agent.secret_scope import get_secret
-            load_hermes_dotenv(hermes_home='/root/.hermes')
-            token = get_secret('POSTMARK_SERVER_TOKEN')
-        except ImportError:
-            token = None
+        token = hermes_secret('POSTMARK_SERVER_TOKEN')
     if not token:
         raise ProviderError('postmark_credentials_missing')
     request = urllib.request.Request('https://api.postmarkapp.com' + path,
