@@ -135,12 +135,16 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   const snapshotVersion = JSON.stringify(snapshot)
   if (!state.hydrating && state.snapshotVersion === snapshotVersion) return state
   const base = stateFromSnapshot(snapshot, ctx)
-  // Keep durable rows which slid off the front of the server's newest window.
+  // Keep durable rows which slid off the front of the server's newest window. A snapshot
+  // without olderCursor is the whole transcript: nothing slid off, and an in-place compaction
+  // re-IDs its head rows, so an old row id below the window's minimum is a superseded copy.
   const firstRow = Math.min(...base.messages.flatMap(message => message.rowId === undefined ? [] : [message.rowId]))
   const ids = new Set(base.messages.map(message => message.id))
   const overlappingWindow = state.messages.some(message => message.source === 'durable' && ids.has(message.id))
-  base.messages.unshift(...state.messages.filter(message => message.source === 'durable' && message.rowId !== undefined
-    && overlappingWindow && Number.isFinite(firstRow) && message.rowId < firstRow && !ids.has(message.id)))
+  if (snapshot.olderCursor) {
+    base.messages.unshift(...state.messages.filter(message => message.source === 'durable' && message.rowId !== undefined
+      && overlappingWindow && Number.isFinite(firstRow) && message.rowId < firstRow && !ids.has(message.id)))
+  }
   // Resolve ownership across the whole snapshot before retaining event-only detail.
   // A completion receipt may move a tool from the final live message to an earlier row.
   const claimed = new Set<object>()

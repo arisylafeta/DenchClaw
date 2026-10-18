@@ -116,10 +116,10 @@ it('does not replay a turn already committed after the snapshot watermark', () =
 })
 it('keeps durable rows displaced by successive newest-200 windows', () => {
   const rows = (start: number, end: number) => Array.from({ length: end - start + 1 }, (_, i) => ({ id: String(start + i), role: 'assistant', text: String(start + i) }))
-  let state = applySnapshot(initial(), snapshot({ messages: rows(201, 400) }), 0, ctx)
+  let state = applySnapshot(initial(), snapshot({ olderCursor: '200', messages: rows(201, 400) }), 0, ctx)
   const older = applySnapshot(initial(), snapshot({ messages: rows(1, 200) }), 0, ctx).messages
   state = { ...state, messages: [...older, ...state.messages] }
-  state = applySnapshot(state, snapshot({ seq: 1, messages: rows(202, 401) }), 0, ctx)
+  state = applySnapshot(state, snapshot({ seq: 1, olderCursor: '201', messages: rows(202, 401) }), 0, ctx)
   expect(state.messages.map(message => message.id)).toEqual(rows(1, 401).map(row => row.id))
 })
 it('retains child-mirror completed detail without receipts, then merges equivalent durable detail', () => {

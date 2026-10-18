@@ -221,6 +221,19 @@ describe("native Hermes conversations", () => {
     const detail = await readConversation(conversationKey("solo", "history", "alpha"));
     expect(detail.messages).toHaveLength(501); expect(detail.messages.at(-1)?.text).toBe("continued");
   });
+  it("reads a compacted session's summarized turns from the display history", async () => {
+    // Hermes in-place compaction: active rows are the model's head+tail copies; the summarized
+    // middle stays visible only in the display projection.
+    const active = [{ id: 10, role: "user", content: "first" }, { id: 11, role: "assistant", content: "one" }, { id: 12, role: "assistant", display_kind: "hidden", content: "" }, { id: 13, role: "user", content: "latest" }, { id: 14, role: "assistant", content: "answer" }];
+    const display = [active[0], active[1], { id: 3, role: "user", content: "middle" }, { id: 4, role: "assistant", content: "two" }, active[3], active[4]];
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (!url.pathname.endsWith("/messages")) {return Response.json({ session: { id: "compacted", title: "Compacted" } });}
+      return Response.json({ data: url.searchParams.get("include_compacted") === "true" ? display : active });
+    }));
+    const detail = await readConversation(conversationKey("solo", "compacted", "alpha"));
+    expect(detail.messages.map((m) => m.text)).toEqual(["first", "one", "middle", "two", "latest", "answer"]);
+  });
   it("rejects unknown profiles before network access and protects gateway credentials", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     await expect(nativeFetch("../default", "/api/sessions")).rejects.toThrow("Unknown"); expect(fetchMock).not.toHaveBeenCalled();
