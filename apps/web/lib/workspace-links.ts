@@ -418,10 +418,9 @@ export function buildCrmLink(view: CrmView): string {
 
 function tryParseAppUrl(href: string): URL | null {
   try {
-    if (href.startsWith("/")) {
-      return new URL(href, "http://localhost");
-    }
-    const u = new URL(href);
+    const origin = typeof window === "undefined" ? "https://crm.rebattery.io" : window.location.origin;
+    const u = new URL(href, origin);
+    if (u.origin !== origin || u.username || u.password) return null;
     if (u.pathname === "/" || u.pathname === "/workspace") return u;
   } catch { /* invalid */ }
   return null;
@@ -467,6 +466,8 @@ export function parseWorkspaceLink(href: string): WorkspaceLink | null {
 /** Check if an href is an app-internal workspace link (root, legacy /workspace, or @entry/). */
 export function isWorkspaceLink(href: string): boolean {
   if (href.startsWith("@entry/")) return true;
+  if (!tryParseAppUrl(href)) return false;
+  if (/^https?:/.test(href)) return true;
   // Legacy /workspace links
   if (
     href === "/workspace" ||

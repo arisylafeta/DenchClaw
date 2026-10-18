@@ -1611,7 +1611,7 @@ function WorkspacePageInner() {
         !inputPath.startsWith("./") &&
         !inputPath.startsWith("../")
       ) {
-        const node = resolveNode(tree, inputPath);
+        const node = findNode(tree, inputPath);
         if (node) {
           return openNode(node);
         }
@@ -1632,7 +1632,7 @@ function WorkspacePageInner() {
         if (workspaceRoot && (info.path === workspaceRoot || info.path.startsWith(`${workspaceRoot}/`))) {
           const relPath = info.path === workspaceRoot ? "" : info.path.slice(workspaceRoot.length + 1);
           if (relPath) {
-            const node = resolveNode(tree, relPath);
+            const node = findNode(tree, relPath);
             if (node) {
               return openNode(node);
             }
@@ -2165,11 +2165,8 @@ function WorkspacePageInner() {
           return;
         }
         // File/object link -- resolve using the path from the URL
-        const node = resolveNode(tree, parsed.path);
-        if (node) {
-          handleNodeSelect(node);
-          return;
-        }
+        void handleFilePathClickFromChat(parsed.path);
+        return;
       }
 
       // Fallback: treat as a raw relative path (legacy links)
@@ -2178,7 +2175,7 @@ function WorkspacePageInner() {
         handleNodeSelect(node);
       }
     },
-    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject],
+    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject, handleFilePathClickFromChat],
   );
 
   // Refresh callback for the currently displayed object — exposed via the
