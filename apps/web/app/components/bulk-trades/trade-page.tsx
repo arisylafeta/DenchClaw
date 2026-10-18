@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { WhatsappContext } from "../crm/whatsapp-context";
 import { HOLD_STAGE, TRADE_STAGES, holdLabel, type BulkTrade, type TradeOwner, type TradePatch, type TradeStage } from "@/lib/bulk-trades";
 import { shortDate, type Buyer, type Contact, type HistoryStatus, type TradeDetail, type TradeField, type TradeFile } from "@/lib/bulk-trade-details";
 import { TradeData } from "./trade-data";
@@ -11,7 +12,7 @@ import { InboxUpdates } from "./inbox-updates";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
 
-type Tab = "buyers" | "details" | "activity";
+type Tab = "buyers" | "details" | "activity" | "whatsapp";
 
 type Props = {
   tradeId: string;
@@ -74,7 +75,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
       aria-selected={tab === value}
       onClick={() => {
         setTab(value);
-        if (value === "activity") void load();
+        if (value === "activity") {void load();}
       }}
       className="border-b-2 px-3.5 py-3 text-sm"
       style={tab === value
@@ -102,8 +103,8 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             onChange={(event) => {
               const stage = event.target.value as TradeStage;
               setHoldError(null);
-              if (stage === HOLD_STAGE) setHolding(true);
-              else patchTrade({ trade_stage: stage }).catch((err) => setHoldError(err instanceof Error ? err.message : "Could not change stage."));
+              if (stage === HOLD_STAGE) {setHolding(true);}
+              else {patchTrade({ trade_stage: stage }).catch((err) => setHoldError(err instanceof Error ? err.message : "Could not change stage."));}
             }}>
             {TRADE_STAGES.map((stage) => <option key={stage}>{stage}</option>)}
           </select>
@@ -143,6 +144,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           {tabButton("buyers", "Buyers")}
           {tabButton("details", "Details")}
           {tabButton("activity", "Activity")}
+          {tabButton("whatsapp", "WhatsApp")}
         </div>
       </header>
 
@@ -173,7 +175,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             <ContactsCard trade={trade} contacts={detail.contacts} onContacts={(contacts) => update((current) => ({ ...current, contacts }))} />
           </div>
           </div>
-        ) : (
+        ) : tab === "whatsapp" ? <WhatsappContext key={tradeId} tradeId={tradeId} /> : (
           <div className="flex flex-col gap-3">
             {!!detail.proposals?.length && <section aria-label="Pending updates" className="border" style={{ borderColor: "var(--bt-border)" }}>
               {detail.proposals.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={() => void load()} />)}
@@ -232,7 +234,7 @@ function HistoryButton({ tradeId, history, onRefresh }: {
   const running = history?.status === "running" || starting;
 
   useEffect(() => {
-    if (!running) return;
+    if (!running) {return;}
     const timer = setInterval(() => { void onRefresh().then(() => setStarting(false)); }, 8000);
     return () => clearInterval(timer);
   }, [running, onRefresh]);

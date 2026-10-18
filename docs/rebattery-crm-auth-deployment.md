@@ -421,3 +421,26 @@ Only missing rows are inserted; existing lot buyers with empty demand links are
 re-linked to their restored original demand IDs. Replaying inserts zero rows.
 The survey importer refreshes unfinished answers only while open or qualifying;
 closed History evidence cannot be overwritten by a later survey refresh.
+
+## Captured WhatsApp context
+
+Person and company profiles have a WhatsApp tab beside email history. Group
+discovery uses active identity links to observed members and shows the whole
+group as shared context, not as private correspondence or trade attribution.
+`/whatsapp/threads/[id]` is read only and uses canonical local database IDs.
+It shows sender uncertainty, replies, edit/delete markers, undownloaded media,
+capture-time fallback and incomplete history. Imported capture status is a
+saved observation, not a live provider check.
+
+`/whatsapp/identities` lists unmatched identities first. Confirm an existing
+person or search for another; unlink a wrong decision before reassignment.
+The decision ledger retains its actor and validity interval. No contact is
+created and no CRM phone field is changed. Shared/company-only links supported
+by the identity API follow the same rules as the local importer.
+
+Bulk Trades show only explicitly linked live evidence. Conversation and message
+trade-link controls write many-to-many `whatsapp_live_thread` and
+`whatsapp_live_message` references, never copies of messages or legacy export
+IDs. Membership alone never creates a trade link. All WhatsApp API entry points
+use `canReadWhatsapp`, the single future role-flag boundary; authenticated
+operators currently all have access. These routes never send or fetch media.

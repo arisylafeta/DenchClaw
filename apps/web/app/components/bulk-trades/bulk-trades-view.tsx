@@ -47,6 +47,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [creating, setCreating] = useState(false);
   const [check, setCheck] = useState<CheckStatus>(null);
   const [possible, setPossible] = useState<Proposal[]>([]);
+  const [acceptedDemand, setAcceptedDemand] = useState<Proposal[]>([]);
   const [showPossible, setShowPossible] = useState(false);
   const [openTradeId, setOpenTradeId] = useState<string | null>(null);
   const [openDemandId, setOpenDemandId] = useState<string | null>(null);
@@ -67,12 +68,13 @@ export function BulkTradesView({ onOpenEntry }: Props) {
     try {
       const [data, inbox] = await Promise.all([
         request<{ trades: BulkTrade[]; owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades"),
-        request<{ possible?: Proposal[] }>("/api/bulk-trades/demand"),
+        request<{ possible?: Proposal[]; accepted?: Proposal[] }>("/api/bulk-trades/demand"),
       ]);
       setTrades(data.trades);
       setOwners(data.owners);
       setCheck(data.check ?? null);
       setPossible([...new Map([...(data.possible ?? []), ...(inbox.possible ?? [])].map((item) => [item.id, item])).values()]);
+      setAcceptedDemand(inbox.accepted ?? []);
       setLoadError(null);
       setTradesLoaded(true);
     } catch (err) {
@@ -191,6 +193,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
       <Dialog open={showPossible} onOpenChange={setShowPossible}>
         <DialogContent aria-describedby={undefined} showCloseButton={false} className="bulk-trades top-0 left-auto right-0 h-full max-w-2xl translate-x-0 translate-y-0 overflow-auto rounded-none sm:max-w-2xl block" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           <header className="mb-4 flex items-center justify-between"><DialogTitle>Inbox · {possible.length}</DialogTitle><button type="button" onClick={() => setShowPossible(false)}>Close</button></header>
+          <ErrorText error={actionError} />
           {!possible.length && <p className="text-sm">Inbox clear.</p>}
           {possible.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={(decided, action, lotId) => {
             setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
@@ -200,6 +203,20 @@ export function BulkTradesView({ onOpenEntry }: Props) {
               if (lotId) { setOpenTradeId(lotId); setShowPossible(false); }
             }
           }} />)}
+          {!!acceptedDemand.length && <section className="mt-6" aria-label="Accepted demand">
+            <h3 className="mb-2 text-sm">Accepted demand</h3>
+            {acceptedDemand.map((proposal) => <div key={proposal.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span>{proposal.summary} {proposal.source_url && <a className="underline" href={proposal.source_url}>Source</a>}</span>
+              <button type="button" className={buttonClass} style={buttonStyle} onClick={async () => {
+                try {
+                  await request(`/api/bulk-trades/proposals/${proposal.id}`, {method:"POST",body:JSON.stringify({action:"undo"})});
+                  setActionError(null);
+                  setDemandRevision(revision => revision + 1);
+                  await load();
+                } catch (err) { setActionError(err instanceof Error ? err.message : "Undo refused."); }
+              }}>Undo</button>
+            </div>)}
+          </section>}
         </DialogContent>
       </Dialog>
 

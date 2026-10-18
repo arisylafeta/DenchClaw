@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
+import { WhatsappContext } from "./whatsapp-context";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Mail } from "lucide-react";
 import { Button } from "../ui/button";
 import tableStyles from "../ui/data-table.module.css";
@@ -117,11 +118,12 @@ type PersonResponse = {
 // Tabs
 // ---------------------------------------------------------------------------
 
-export type PersonProfileTab = "overview" | "emails" | "calendar" | "activity" | "campaigns" | "notes";
+export type PersonProfileTab = "overview" | "emails" | "whatsapp" | "calendar" | "activity" | "campaigns" | "notes";
 
 const TABS: ReadonlyArray<{ id: PersonProfileTab; label: string; getCount?: (data: PersonResponse) => number | null }> = [
   { id: "overview", label: "Overview" },
   { id: "emails", label: "Emails", getCount: (d) => d.threads.length },
+  { id: "whatsapp", label: "WhatsApp" },
   { id: "calendar", label: "Meetings", getCount: (d) => d.events.length },
   { id: "activity", label: "Activity", getCount: (d) => d.interactions_summary.total },
   { id: "campaigns", label: "Campaigns", getCount: (d) => new Set(d.campaigns?.map((send) => send.campaign_id)).size },
@@ -129,7 +131,7 @@ const TABS: ReadonlyArray<{ id: PersonProfileTab; label: string; getCount?: (dat
 ];
 
 function isPersonProfileTab(value: string | undefined): value is PersonProfileTab {
-  return value === "overview" || value === "emails" || value === "calendar" || value === "activity" || value === "campaigns" || value === "notes";
+  return value === "overview" || value === "emails" || value === "whatsapp" || value === "calendar" || value === "activity" || value === "campaigns" || value === "notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +313,7 @@ export function PersonProfile({
             <OverviewTab data={data} onOpenCompany={onOpenCompany} />
           )}
           {tab === "emails" && <EmailsTab data={data} onOpenPerson={onOpenPerson} />}
+          {tab === "whatsapp" && <WhatsappContext key={personId} personId={personId} />}
           {tab === "calendar" && (
             <CalendarTab
               data={data}

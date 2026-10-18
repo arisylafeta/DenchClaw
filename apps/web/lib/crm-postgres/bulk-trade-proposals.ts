@@ -5,8 +5,7 @@ import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
 import { createBulkTrade, updateBulkTrade } from "./bulk-trades";
 import { addBuyer, addContact, recordFile, setField, updateBuyer } from "./bulk-trade-details";
-import { addDemand, crmIdsForEmail, getDemand, updateDemand } from "./bulk-demand";
-import { cleanSpec, demandFee, parseDemandInput, type DemandInput } from "../bulk-demand";
+import { acceptDemand, reverseDemand } from "./demand-proposal";
 
 const PROPOSAL_SELECT = `
   select id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url, source_label,
@@ -86,6 +85,22 @@ export async function decideProposal(
   action: "accept" | "ignore",
   user: { id: string; email: string },
 ): Promise<Decision> {
+  // Demand claims, source validation, business writes and undo snapshots are one transaction.
+  if (action === "accept") {
+    try {
+      const demand = await withPgTransaction(async (client) => {
+        const { rows } = await client.query(`select *,to_char(source_at,'YYYY-MM-DD') as source_date
+          from crm_bulk_trade_proposals where id=$1 and status='new' and kind='possible_demand' for update`, [id]);
+        if (!rows[0]) return null;
+        await acceptDemand(client, rows[0], user.id);
+        await client.query("update crm_bulk_trade_proposals set decided_at=now(),decided_by=$2 where id=$1", [id,user.id]);
+        return { lot_id: rows[0].lot_id as string | null };
+      });
+      if (demand) return { ok:true, lot_id:demand.lot_id };
+    } catch (err) {
+      return { ok:false, status:422, error:err instanceof Error ? err.message : "Could not apply demand." };
+    }
+  }
   const claimed = await withPgTransaction(async (client) => {
     const { rows } = await client.query(
       `update crm_bulk_trade_proposals set status = $2, decided_at = now(), decided_by = $3
@@ -197,71 +212,12 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
     }
     case "needs_triage":
       return lotId; // Acknowledged; Alex handles the thread by hand.
+    case "possible_demand":
+      throw new Error("Demand must be accepted in its source-validation transaction.");
     case "bid":
       throw new Error("Bids from email are added automatically.");
     case "possible_supply":
       throw new Error("Supply batches from email are added automatically.");
-    case "possible_demand": {
-      const wants = text(proposed.wants);
-      const source = {
-        source_kind: p.source_kind === "granola" ? "call" : "email",
-        source_label: p.source_label, source_url: p.source_url, source_quote: p.quote,
-      };
-      // Only what the email states; an update never blanks a value it does not mention.
-      const details = Object.fromEntries(Object.entries({
-        wants, quantity: text(proposed.quantity), location: text(proposed.location), confirmed_on: p.source_date,
-        observed_on: p.source_date,
-      }).filter(([, value]) => value)) as DemandInput;
-      // The structured part (kind, date, volume, price, spec) is kept only when it passes validation.
-      const structured = Object.fromEntries(["kind", "needed_by", "volume", "volume_unit", "max_price", "price_currency",
-        "price_unit", "product_family", "fee_eur", "price_basis", "reputation"].map((key) => [key, proposed[key]])
-        .filter(([, value]) => value !== null && value !== undefined && value !== ""));
-      const spec = cleanSpec(proposed.spec);
-      if (Object.keys(spec).length) structured.spec = spec;
-      const family = text(proposed.product_family);
-      const email = text(proposed.email);
-      const ids = { ...(await crmIdsForEmail(email)),
-        ...(text(proposed.company_id) ? { company_id: text(proposed.company_id) } : {}),
-        ...(text(proposed.person_id) ? { person_id: text(proposed.person_id) } : {}) };
-      const [duplicate] = await queryPg<{ id: string }>(
-        `select id from crm_bulk_trade_demand where status in ('open', 'qualifying')
-          and lower(product_family) = lower($1)
-          and (($2::text is not null and company_id = $2) or ($3::text is not null and person_id = $3)
-               or ($4::text is not null and lower(email) = lower($4)))
-          order by observed_on desc nulls last limit 1`,
-        [family, ids.company_id, ids.person_id, email]);
-      const demandId = duplicate?.id ?? text(proposed.existing_demand_id) ?? text(proposed.demand_id);
-      if (demandId) {
-        const existing = await getDemand(demandId);
-        if (!existing) throw new Error("That demand row no longer exists.");
-        if (existing.status === "closed") throw new Error("That demand is closed; review a fresh request instead.");
-        details.status = (family || existing.product_family)
-          && (details.quantity || existing.quantity || structured.volume || existing.volume)
-          && (structured.max_price || existing.max_price) ? "open" : "qualifying";
-        details.qualify_question = details.status === "qualifying"
-          ? (!(family || existing.product_family) ? "What product family, quantity and unit price?" : "What quantity and unit price?") : null;
-        // An email never changes what kind of row this is; a standing buy-box has no needed-by date.
-        delete structured.kind;
-        if (existing.kind === "standing") delete structured.needed_by;
-        if (structured.spec && typeof structured.spec === "object") structured.spec = { ...existing.spec, ...structured.spec };
-        const parsed = parseDemandInput({ ...details, ...structured }, false);
-        if ("error" in parsed) throw new Error(parsed.error);
-        parsed.value.fee_eur = demandFee({ ...existing, ...parsed.value });
-        await updateDemand(demandId, parsed.value, source);
-        return null;
-      }
-      const buyer = text(proposed.buyer);
-      if (!buyer || !wants) throw new Error("The demand has no buyer or no want.");
-      const status = family && (details.quantity || structured.volume) && structured.max_price ? "open" : "qualifying";
-      const base = { ...details, wants, buyer, contact: text(proposed.contact), email, ...ids,
-        status, qualify_question: status === "qualifying"
-          ? (!family ? "What product family, quantity and unit price?" : "What quantity and unit price?") : null };
-      const parsed = parseDemandInput({ ...base, ...structured }, true);
-      if ("error" in parsed) throw new Error(parsed.error);
-      parsed.value.fee_eur = demandFee(parsed.value);
-      await addDemand(parsed.value as DemandInput & { buyer: string; wants: string }, user.id, source);
-      return null;
-    }
     case "link_auction": {
       // The auction sync fills in its people on its next run.
       const linked = await queryPg(
@@ -290,6 +246,7 @@ type Undo = {
   value?: string;
   id?: string;
   conflict?: boolean;
+  demand_id?: string;
 };
 
 type AppliedRow = Proposal & { undo: Undo | null };
@@ -309,19 +266,24 @@ export async function undoChange(id: string, userId: string): Promise<Decision> 
         [id],
       );
       const change = rows[0] as AppliedRow | undefined;
-      if (!change?.lot_id || !change.undo) return null;
-      await reverse(client, change.lot_id, change, change.undo);
+      if (!change?.undo || (!change.lot_id && change.kind !== "possible_demand")) return undefined;
+      if (change.kind === "possible_demand") {
+        try { await reverseDemand(client, change.undo); }
+        catch (err) { throw new Changed(err instanceof Error ? err.message : "Demand undo refused."); }
+      } else {
+        await reverse(client, change.lot_id!, change, change.undo);
+      }
       await client.query(
         "update crm_bulk_trade_proposals set status = 'undone', decided_at = now(), decided_by = $2 where id = $1",
         [id, userId],
       );
-      await client.query(
+      if (change.lot_id) await client.query(
         "insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, 'auto_undone', $2, $3)",
-        [change.lot_id, JSON.stringify({ proposal_id: change.id, kind: change.kind, summary: change.summary, undo: change.undo }), userId],
+        [change.lot_id, JSON.stringify({ proposal_id: change.id, kind: change.kind, summary: change.summary }), userId],
       );
       return change.lot_id;
     });
-    return lotId ? { ok: true, lot_id: lotId } : { ok: false, status: 404, error: "Already undone or not found." };
+    return lotId !== undefined ? { ok: true, lot_id: lotId } : { ok: false, status: 404, error: "Already undone or not found." };
   } catch (err) {
     if (err instanceof Changed) return { ok: false, status: 409, error: err.message };
     throw err;

@@ -110,6 +110,58 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect((await pg.queryPg("select fee_eur from crm_bulk_trade_demand where id = $1", [first.id]))[0].fee_eur).toBeNull();
   });
 
+  it("undoes demand inserts and updates without a trade, and refuses conflicting human edits", async () => {
+    const email = `undo-demand-${crypto.randomUUID()}@example.test`;
+    const first = await propose("possible_demand", null, {
+      buyer:"Synthetic undo buyer",email,wants:"100 cells",quantity:"100 cells",product_family:"lfp cells",
+    }, null);
+    expect(await proposals.decideProposal(first,"accept",user)).toEqual({ok:true,lot_id:null});
+    const [created] = await pg.queryPg<{id:string}>("select id from crm_bulk_trade_demand where email=$1",[email]);
+    const update = await propose("possible_demand",null,{
+      buyer:"Synthetic undo buyer",email,wants:"200 cells",quantity:"200 cells",product_family:"lfp cells",
+    },null);
+    expect(await proposals.decideProposal(update,"accept",user)).toEqual({ok:true,lot_id:null});
+    expect(await proposals.undoChange(update,user.id)).toEqual({ok:true,lot_id:null});
+    expect((await pg.queryPg("select wants from crm_bulk_trade_demand where id=$1",[created.id]))[0].wants).toBe("100 cells");
+    // Restoring the exact before snapshot permits undoing the earlier insert too.
+    expect(await proposals.undoChange(first,user.id)).toEqual({ok:true,lot_id:null});
+    expect(await pg.queryPg("select id from crm_bulk_trade_demand where id=$1",[created.id])).toEqual([]);
+    const conflict = await propose("possible_demand",null,{buyer:"Synthetic undo buyer",email,wants:"300 cells"},null);
+    expect((await proposals.decideProposal(conflict,"accept",user)).ok).toBe(true);
+    await pg.queryPg("update crm_bulk_trade_demand set wants='Human edit',updated_at=now() where email=$1",[email]);
+    expect(await proposals.undoChange(conflict,user.id)).toMatchObject({ok:false,status:409});
+    expect((await pg.queryPg("select wants from crm_bulk_trade_demand where email=$1",[email]))[0].wants).toBe("Human edit");
+  });
+
+  it("revalidates WhatsApp source versions and identity mapping at acceptance", async () => {
+    const key = crypto.randomUUID();
+    const person = `wa-person-${key}`, identity = `wa-identity-${key}`, thread = `wa-thread-${key}`, message = `wa-message-${key}`;
+    await pg.queryPg("insert into crm_people(id,full_name) values($1,'Synthetic mapped buyer')",[person]);
+    await pg.queryPg("insert into whatsapp_account(id,account_jid) values($1,$2)",[key,`${key}@synthetic.test`]);
+    await pg.queryPg("insert into whatsapp_identity(id,account_id,canonical_jid) values($1,$2,$3)",[identity,key,`${key}@lid`]);
+    await pg.queryPg(`insert into whatsapp_identity_link(id,account_id,identity_id,person_id,method,confidence,evidence,actor)
+      values($1,$2,$3,$4,'manual','confirmed','{}','test')`,[key,key,identity,person]);
+    await pg.queryPg(`insert into whatsapp_thread(id,account_id,canonical_chat_id,identity_id,kind,first_captured_at,last_captured_at)
+      values($1,$2,$3,$4,'direct',now(),now())`,[thread,key,`${key}@lid`,identity]);
+    await pg.queryPg(`insert into whatsapp_message(id,account_id,thread_id,provider_message_id,sender_identity_id,direction,captured_at,body)
+      values($1,$2,$3,'synthetic-message',$4,'inbound',now(),'Synthetic request for LFP cells')`,[message,key,thread,identity]);
+    const [{version}] = await pg.queryPg<{version:string}>("select whatsapp_source_version(m) as version from whatsapp_message m where id=$1",[message]);
+    const [{id}] = await pg.queryPg<{id:string}>(`insert into crm_bulk_trade_proposals(kind,proposed,summary,quote,source_kind,source_id,source_label)
+      values('possible_demand',$1,'Synthetic request','Synthetic request','whatsapp',$2,'WhatsApp') returning id::text`,[
+      JSON.stringify({buyer:"Synthetic mapped buyer",person_id:person,wants:"LFP cells",source_version:version}),message]);
+    await pg.queryPg("update whatsapp_identity_link set valid_to=now() where id=$1",[key]);
+    expect(await proposals.decideProposal(id,"accept",user)).toMatchObject({ok:false,status:422});
+    await pg.queryPg("update whatsapp_identity_link set valid_to=null where id=$1",[key]);
+    expect(await proposals.decideProposal(id,"accept",user)).toEqual({ok:true,lot_id:null});
+    expect((await pg.queryPg("select source_kind,source_id from crm_bulk_trade_demand where person_id=$1",[person]))[0])
+      .toEqual({source_kind:"whatsapp",source_id:message});
+    expect(await proposals.undoChange(id,user.id)).toEqual({ok:true,lot_id:null});
+    await pg.queryPg("update crm_bulk_trade_proposals set status='new' where id=$1",[id]);
+    await pg.queryPg("update whatsapp_message set body='Edited synthetic request',edit_version=1 where id=$1",[message]);
+    expect((await pg.queryPg("select status,quote from crm_bulk_trade_proposals where id=$1",[id]))[0]).toEqual({status:"ignored",quote:""});
+    expect(await proposals.decideProposal(id,"accept",user)).toMatchObject({ok:false,status:404});
+  });
+
   it("puts a proposal back to new when it can no longer apply", async () => {
     const id = await propose("buyer_update", "btb_gone", { status: "Won" });
     const result = await proposals.decideProposal(id, "accept", user);

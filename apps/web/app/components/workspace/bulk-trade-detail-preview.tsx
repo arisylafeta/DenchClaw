@@ -2,6 +2,7 @@
 
 import type { RegisteredEntryDetail } from "@/lib/crm-postgres/registered-entry-detail";
 import { displayObjectName } from "@/lib/object-display-name";
+import { WhatsappContext } from "../crm/whatsapp-context";
 
 type Props = {
   detail: Extract<RegisteredEntryDetail, { kind: "bulk_trade" }>;
@@ -9,15 +10,15 @@ type Props = {
 };
 
 function text(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value == null) {return "";}
+  if (typeof value === "string") {return value;}
+  if (typeof value === "number" || typeof value === "boolean") {return String(value);}
   return "";
 }
 
 function shortDate(value: unknown): string {
   const raw = text(value);
-  if (!raw) return "";
+  if (!raw) {return "";}
   const date = new Date(raw);
   return Number.isNaN(date.getTime())
     ? raw
@@ -183,6 +184,7 @@ export function BulkTradeDetailPreview({ detail, onNavigateEntry }: Props) {
             <div className="rounded-xl border border-dashed p-4 text-sm" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>No evidence is linked.</div>
           )}
         </div>
+        {detail.tradeId && <WhatsappContext tradeId={detail.tradeId} />}
       </div>
     </section>
   );

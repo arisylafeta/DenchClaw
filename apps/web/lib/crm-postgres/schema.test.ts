@@ -33,4 +33,17 @@ describe("crm postgres schema", () => {
     expect(runner).toContain('"004_stock_commercial_fields.sql"');
     expect(runner).toContain('"005_stock_enrichment_state.sql"');
   });
+
+  it("discovers the additive WhatsApp context migration", () => {
+    const runner = readFileSync(join(process.cwd(), "scripts/apply-postgres-schema.ts"), "utf-8");
+    expect(runner).toContain("readdirSync(migrationsDir)");
+    const migration = readFileSync(
+      join(process.cwd(), "lib/crm-postgres/migrations/055_whatsapp_context.sql"), "utf-8",
+    );
+    for (const family of ["account", "identity", "identity_alias", "identity_link", "thread",
+      "thread_member", "message", "event", "ingest_cursor"]) {
+      expect(migration).toContain(`create table if not exists whatsapp_${family} (`);
+    }
+    expect(migration).toContain("can_read_whatsapp boolean not null default true");
+  });
 });

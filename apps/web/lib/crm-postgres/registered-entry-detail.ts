@@ -57,6 +57,7 @@ export type BulkTradeOpportunityEvidence = {
 
 export type RegisteredEntryDetail = {
   kind: "bulk_trade";
+  tradeId?: string;
   parties: BulkTradeParty[];
   whatsappMessages: BulkTradeWhatsAppEvidence[];
   gmailThreads: BulkTradeGmailEvidence[];
@@ -130,7 +131,7 @@ async function readBulkTradeDetail(entryId: string, userId: string): Promise<Reg
     [entryId],
   );
 
-  return { kind: "bulk_trade", parties, whatsappMessages, gmailThreads, opportunities };
+  return { kind: "bulk_trade", tradeId: entryId, parties, whatsappMessages, gmailThreads, opportunities };
 }
 
 
