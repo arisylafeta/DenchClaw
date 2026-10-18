@@ -240,8 +240,12 @@ def test_hermes_secret_runs_in_a_subprocess_and_returns_only_the_value(monkeypat
         return subprocess.CompletedProcess(command, 0, stdout=out, stderr='')
 
     monkeypatch.setattr(drivers.subprocess, 'run', fake_run)
+    monkeypatch.setattr(drivers, '_SECRET_CACHE', {})
     assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') == 'synthetic-token'
     assert seen['command'][0] == drivers.HERMES_PYTHON
+    monkeypatch.setattr(drivers.subprocess, 'run', lambda *a, **k: (_ for _ in ()).throw(AssertionError('cached value must not respawn the loader')))
+    assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') == 'synthetic-token'
+    monkeypatch.setattr(drivers, '_SECRET_CACHE', {})
     monkeypatch.setattr(drivers.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout='noise only', stderr=''))
     assert drivers.hermes_secret('POSTMARK_SERVER_TOKEN') is None
 

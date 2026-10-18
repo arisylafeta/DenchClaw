@@ -200,6 +200,20 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(sync_postmark(self.db,apply=True,client=Client())['inserted_events'],0)
         self.assertEqual(status(self.db,'read-sync')['counts']['delivered'],1)
 
+    def test_postmark_sync_never_asks_postmark_about_gmail_ids(self):
+        """A Gmail receipt filed under a Postmark transport made Postmark return 400 and aborted the whole sync."""
+        self.add_message('read-gmail-id',provider_message_id='gmail:abc123')
+        self.add_message('read-pm-id',provider_message_id='provider-ok')
+        asked = []
+        class Client:
+            def details(self,id):
+                asked.append(id)
+                return {'MessageEvents':[]}
+            def suppressions(self,stream):
+                return {}
+        sync_postmark(self.db,client=Client())
+        self.assertEqual(asked,['provider-ok'])
+
 
 if __name__ == '__main__':
     unittest.main()

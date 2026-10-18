@@ -30,18 +30,27 @@ _SECRET_CODE = (
 )
 
 
+_SECRET_CACHE = {}
+
+
 def hermes_secret(name):
     """Read one approved secret through the Hermes secret loader in Hermes' own interpreter.
 
     Importing the loader in this process re-executes the script into the Hermes Python, which lacks
-    psycopg2, so the loader runs in a subprocess and only the value is returned. Never logged."""
+    psycopg2, so the loader runs in a subprocess and only the value is returned. Never logged.
+    Successful lookups are cached for the life of the process (a lookup costs ~2.5 s); failures are not."""
+    if name in _SECRET_CACHE:
+        return _SECRET_CACHE[name]
     try:
         result = subprocess.run([HERMES_PYTHON, '-c', _SECRET_CODE, name], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     for line in result.stdout.splitlines():
         if line.startswith(_SECRET_MARKER):
-            return line[len(_SECRET_MARKER):].strip() or None
+            value = line[len(_SECRET_MARKER):].strip() or None
+            if value:
+                _SECRET_CACHE[name] = value
+            return value
     return None
 
 

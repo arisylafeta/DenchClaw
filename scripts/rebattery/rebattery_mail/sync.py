@@ -45,7 +45,7 @@ class PostmarkClient:
 def sync_postmark(db, campaign=None, since=None, apply=False, client=None, account=None):
     from .drivers import sync_suppressions
     client = client or PostmarkClient()
-    clauses = ["m.transport like 'postmark-%%'", 'm.provider_message_id is not null']
+    clauses = ["m.transport like 'postmark-%%'", 'm.provider_message_id is not null', "m.provider_message_id not like 'gmail:%%'"]
     params = []
     if account:
         with db.cursor() as cur:
