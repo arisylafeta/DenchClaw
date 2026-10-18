@@ -5,7 +5,7 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
-import { NativeTranscript, ReadOnlyNotice } from "./chat-native";
+import { NativeTranscript, PromptDock, ReadOnlyNotice } from "./chat-native";
 import { GroupAuthor } from "./workspace/group-chat";
 import { Fragment } from "react";
 import {
@@ -2563,6 +2563,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
 		) : (
 			<>
+				{nativeGateway && <PromptDock state={nativeChat.state} subagents={nativeChat.subagents} tails={nativeChat.tails} callbacks={{
+					onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
+					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
+					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
+				}} />}
 				{!nativeGateway && queuedMessages.length > 0 && (
 					<div className={compact ? "px-2 pt-2" : "px-3 pt-3"}>
 						<div
@@ -2955,7 +2960,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									if (container) container.scrollTop = top + container.scrollHeight - height;
 								});
 							}}>{nativeChat.loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}</button>}
-							<NativeTranscript state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} subagentTails={nativeChat.tails} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
+							<NativeTranscript state={nativeChat.state} todos={nativeChat.todos} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
 								onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 								onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
 								onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,

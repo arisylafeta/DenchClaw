@@ -150,7 +150,7 @@ describe("gateway ChatPanel solo transport", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run once" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/approval`, expect.objectContaining({ body: JSON.stringify({ request_id: "approval-payload", choice: "once" }) })));
     FakeEventSource.instance.emit("request", { key, id: "srq-clarify", method: "clarify", params: { questions: [{ qid: "direction", question: "Which route?", choices: ["North", "East", "South", "West"] }] } });
-    fireEvent.click(screen.getByRole("button", { name: "West" }));
+    fireEvent.click(screen.getByRole("radio", { name: /West/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/clarify`, expect.objectContaining({ body: JSON.stringify({ request_id: "srq-clarify", answers: { direction: "West" } }) })));
   });
   it("renders subagent progress and sends queued prompts directly; Stop interrupts", async () => {
