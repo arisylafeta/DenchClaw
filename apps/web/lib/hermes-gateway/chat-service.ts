@@ -10,6 +10,7 @@ import { assertProfile, nativeFetch, readConversation, soloConversation } from "
 import { getHermesGatewayManager, type HermesGatewayManager, type LiveSessionSnapshot, type PendingServerRequest } from "./manager";
 import { lookupMessageHtml, saveMessageHtml, type MessageHtmlRecord } from "./message-html-store";
 import type { SessionResumeResult } from "../../vendor/hermes-gateway/gateway-events";
+import { JsonRpcGatewayError } from "../../vendor/hermes-gateway/json-rpc-channel";
 import { resolveAgentWorkspacePrefix } from "../workspace";
 
 export class ChatServiceError extends Error {
@@ -227,7 +228,12 @@ export class HermesChatService {
           // being interrupted. An idle turn rejects the steer and the same text starts a normal turn.
           // Images cannot ride a steer, so they go as a plain submit (Hermes decides how to merge it).
           if (!attached.length) {
-            const steer = await this.manager.callSession(retained, "session.steer", { session_id: "", text });
+            // A resumed session whose agent is not built yet answers 4010 instead of "rejected";
+            // there is no turn to steer, so the text starts (or queues behind) a normal turn.
+            const steer = await this.manager.callSession(retained, "session.steer", { session_id: "", text }).catch((error: unknown) => {
+              if (error instanceof JsonRpcGatewayError && error.code === 4010) {return { status: "rejected" as const };}
+              throw error;
+            });
             if (steer.status !== "rejected") return { status: "steered" as const, autoContinue: Boolean(resume?.auto_continue) };
           }
           const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text });

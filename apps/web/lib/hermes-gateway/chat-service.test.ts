@@ -23,6 +23,7 @@ class FakeSocket implements GatewaySocket {
   failPrompt = false;
   busy = false;
   autoContinue = false;
+  steerUnsupported = false;
   addEventListener(type: string, handler: (event: unknown) => void) { (this.listeners[type] ??= []).push(handler); }
   deferConsumption = false;
   activeRows: { id: string; session_key: string; status: string }[] = [];
@@ -36,6 +37,7 @@ class FakeSocket implements GatewaySocket {
     if (!frame.method || frame.method === "event") return;
     if (frame.method === "subagent.list") this.onChildren?.();
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
+    if (frame.method === "session.steer" && this.steerUnsupported) { this.receive({ id: frame.id, error: { code: 4010, message: "agent does not support steer" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
       : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { profile_name: "ari", lazy: false, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
@@ -120,6 +122,12 @@ describe("gateway chat service", () => {
     expect(started.status).toBe("streaming");
     expect(socket.frames.map(frame => frame.method).filter(method => ["session.steer", "prompt.submit"].includes(method ?? ""))).toEqual(["session.steer", "prompt.submit"]);
     expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params?.queued).toBeUndefined();
+  });
+  it("submits the text when a resumed session has no agent to steer yet", async () => {
+    socket.steerUnsupported = true;
+    const started = await service.sendPrompt(key, { text: "let's continue" });
+    expect(started.status).toBe("streaming");
+    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params).toMatchObject({ text: "let's continue" });
   });
   it("allows a freshly created CRM runtime before its first durable row exists", async () => {
     const conversation = await service.createGatewayConversation(["ari"]);
