@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import { WhatsappContext } from "./whatsapp-context";
 import { TableCell } from "../ui/table-cell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommercialOpportunity, CommercialProfile, CommercialSummary } from "@/lib/crm-postgres/company-profile";
@@ -91,7 +92,7 @@ type CompanyResponse = {
   buyer?: BuyerData;
 };
 
-export type CompanyProfileTab = "overview" | "team" | "buyer" | "opportunities" | "emails" | "meetings";
+export type CompanyProfileTab = "overview" | "team" | "buyer" | "opportunities" | "emails" | "whatsapp" | "meetings";
 
 const TABS: ReadonlyArray<{ id: CompanyProfileTab; label: string; count: (d: CompanyResponse) => number | null }> = [
   { id: "overview", label: "Overview", count: () => null },
@@ -99,11 +100,12 @@ const TABS: ReadonlyArray<{ id: CompanyProfileTab; label: string; count: (d: Com
   { id: "buyer", label: "Buyer", count: (d) => d.buyer?.demand.filter((row) => row.status === "open").length ?? null },
   { id: "opportunities", label: "Opportunities", count: (d) => d.commercial.opportunities.length },
   { id: "emails", label: "Emails", count: (d) => d.summary.thread_count },
+  { id: "whatsapp", label: "WhatsApp", count: () => null },
   { id: "meetings", label: "Meetings", count: (d) => d.summary.event_count },
 ];
 
 function isCompanyProfileTab(value: string | undefined): value is CompanyProfileTab {
-  return value === "overview" || value === "team" || value === "buyer" || value === "opportunities" || value === "emails" || value === "meetings";
+  return value === "overview" || value === "team" || value === "buyer" || value === "opportunities" || value === "emails" || value === "whatsapp" || value === "meetings";
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +249,7 @@ export function CompanyProfile({
           {tab === "buyer" && data.buyer && <BuyerTab key={data.company.id} companyId={data.company.id} buyer={data.buyer} people={data.people} onSaved={() => void load()} />}
           {tab === "opportunities" && <OpportunitiesTab data={data} />}
           {tab === "emails" && <EmailsTab data={data} onOpenPerson={onOpenPerson} />}
+          {tab === "whatsapp" && <WhatsappContext key={companyId} companyId={companyId} />}
           {tab === "meetings" && (
             <MeetingsTab
               data={data}

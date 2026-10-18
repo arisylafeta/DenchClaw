@@ -14,7 +14,7 @@ function buildCompanyResponse(
   } = {},
 ) {
   return {
-    context_notes: [{ id: "context-1", company_id: id, note: "Budget confirmed in founder review.", source_kind: "founder_review", source_ref: null, observed_on: "2026-10-16", created_at: "2026-10-16T00:00:00Z" }],
+    context_notes: [{ id: "context-1", company_id: id, category: "note", source_url: null, note: "Budget confirmed in founder review.", source_kind: "founder_review", source_ref: null, observed_on: "2026-10-16", created_at: "2026-10-16T00:00:00Z" }],
     company: {
       id,
       name,
@@ -185,7 +185,7 @@ function mockFetchForCompany() {
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "PATCH") return Promise.resolve(new Response("{}", { status: 200 }));
+      if (init?.method === "PATCH") {return Promise.resolve(new Response("{}", { status: 200 }));}
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const match = url.match(/\/api\/crm\/companies\/([^/?]+)/);
       const id = match ? decodeURIComponent(match[1]) : "unknown";
@@ -225,7 +225,7 @@ describe("CompanyProfile tab reset on entry change", () => {
   it("shows sourced company context notes in Overview", async () => {
     render(<CompanyProfile companyId="acme" />);
     expect(await screen.findByText("Budget confirmed in founder review.")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Context notes" })).toHaveTextContent("founder_review · 2026-10-16");
+    expect(screen.getByRole("region", { name: "Company context notes" })).toHaveTextContent("founder_review · 2026-10-16");
   });
 
   it("resets the active tab to Overview when switching from one company to another", async () => {
@@ -310,8 +310,10 @@ describe("CompanyProfile tab reset on entry change", () => {
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith("/api/workspace/objects/company/entries/acme", expect.objectContaining({ method: "PATCH" }));
     });
-    const patch = fetchSpy.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")!;
-    expect(JSON.parse(String((patch[1] as RequestInit).body))).toEqual({ fields: {
+    const patch = fetchSpy.mock.calls.find(([, init]) => (init)?.method === "PATCH")!;
+    const body = patch[1]?.body;
+    expect(typeof body).toBe("string");
+    expect(JSON.parse(typeof body === "string" ? body : "")).toEqual({ fields: {
       "Buyer Capabilities": ["Test and grade", "Recycle"],
       "Buyer Can Receive Waste": false,
       "Buyer Accepts Standard Terms": "Yes",
