@@ -60,16 +60,54 @@ function SourceTags({ sources }: { sources: SourceKind[] }) {
 
 type Verdict = (unit: SupplyUnitView, verdict: "shortlist" | "not_a_fit" | "clear") => void;
 
+function UnitActions({ unit, onVerdict, busy }: { unit: SupplyUnitView; onVerdict: Verdict; busy: boolean }) {
+  return (
+    <span className="inline-flex gap-1">
+      <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-pressed={unit.userVerdict === "shortlist"}
+        aria-label={unit.userVerdict === "shortlist" ? "Remove from shortlist" : "Shortlist"} title="Shortlist"
+        onClick={(event) => { event.stopPropagation(); onVerdict(unit, unit.userVerdict === "shortlist" ? "clear" : "shortlist"); }}>
+        <Star size={14} />
+      </button>
+      <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-label="Not a fit" title="Not a fit"
+        onClick={(event) => { event.stopPropagation(); onVerdict(unit, "not_a_fit"); }}>
+        <X size={14} />
+      </button>
+      <a href={unit.href} target={unit.href.startsWith("http") ? "_blank" : undefined} rel="noreferrer"
+        className={`${rowFocus} ${css.iconButton}`} aria-label="Open" title="Open" onClick={(event) => event.stopPropagation()}>
+        <ExternalLink size={14} />
+      </a>
+    </span>
+  );
+}
+
+const evidenceOf = (unit: SupplyUnitView) =>
+  [unit.soh != null ? `SOH ${unit.soh}%` : null, unit.photos ? `${unit.photos} photo${unit.photos > 1 ? "s" : ""}` : null,
+    unit.year ? String(unit.year) : null, unit.partNumber].filter(Boolean).join(" · ");
+
+/** Packs one by one. Columns nobody filled are left out, and what the header already says is not repeated. */
 function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
   items: SupplyUnitView[]; more?: number; hideSeller?: boolean; onVerdict: Verdict; busy: boolean;
 }) {
+  const has = {
+    where: items.some((u) => u.country || u.location),
+    kwh: items.some((u) => u.kwh != null),
+    price: items.some((u) => u.price != null),
+    perKwh: items.some((u) => u.eurPerKwh != null),
+    evidence: items.some((u) => evidenceOf(u) || u.ai),
+  };
+  const oneSource = new Set(items.map((u) => [u.source, ...u.alsoIn].join("+"))).size === 1;
   return (
     <div className={css.units}>
       <table>
         <thead>
           <tr>
-            <th>{hideSeller ? "Pack" : "Seller"}</th><th>Where</th><th className="r">kWh</th><th className="r">Price</th><th className="r">€/kWh</th>
-            <th>Evidence</th><th className="r"><span className="sr-only">Actions</span></th>
+            <th>{hideSeller ? "Pack" : "Seller"}</th>
+            {has.where && <th>Where</th>}
+            {has.kwh && <th className="r">kWh</th>}
+            {has.price && <th className="r">Price</th>}
+            {has.perKwh && <th className="r">€/kWh</th>}
+            {has.evidence && <th>Evidence</th>}
+            <th className="r"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -77,49 +115,40 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
             <tr key={unit.key} style={{ opacity: unit.userVerdict === "not_a_fit" ? 0.5 : 1 }}>
               <td>
                 {!hideSeller && <div className="font-medium">{unit.seller ?? "Unknown seller"}</div>}
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                  <SourceTags sources={[unit.source, ...unit.alsoIn]} />
-                  {unit.units && unit.units > 1 ? <span className={css.note}>{unit.units.toLocaleString("en-GB")} units</span> : null}
-                </div>
-                <div className={`${css.note} mt-1 max-w-[220px] truncate`} title={unit.title}>{unit.title}</div>
-              </td>
-              <td>{unit.country ?? "—"}<div className={`${css.note} max-w-[140px] truncate`} title={unit.location ?? ""}>{unit.location}</div></td>
-              <td className="r">{unit.kwh == null ? "—" : `${unit.kwhEstimated ? "~" : ""}${unit.kwh < 1 ? unit.kwh.toFixed(3) : Math.round(unit.kwh * 10) / 10}`}</td>
-              <td className="r">
-                {money(unit.price, unit.currency)}
-                {unit.currencyAssumed && unit.price != null && <div className={css.note}>currency assumed</div>}
-              </td>
-              <td className="r">
-                <strong>{perKwh(unit.eurPerKwh)}</strong>
-                {unit.cheapestRank === 0 && unit.peers > 1 && <div style={{ color: "var(--bt-green)" }} className="text-[11px]">Cheapest of {unit.peers}</div>}
-                {unit.marginPct != null && (
-                  <div className="text-[11px]" style={{ color: unit.marginPct >= 0 ? "var(--bt-green)" : "var(--bt-red)" }}>
-                    {unit.marginPct >= 0 ? `${pct(unit.marginPct)} margin` : `${pct(-unit.marginPct)} over`}
+                <div className="max-w-[260px] truncate" title={unit.title}>{unit.title}</div>
+                {(!hideSeller || !oneSource || (unit.units ?? 1) > 1) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {(!hideSeller || !oneSource) && <SourceTags sources={[unit.source, ...unit.alsoIn]} />}
+                    {unit.units && unit.units > 1 ? <span className={css.note}>{count(unit.units)} units</span> : null}
                   </div>
                 )}
               </td>
-              <td className="max-w-[140px]">
-                {[unit.soh != null ? `SOH ${unit.soh}%` : null, unit.photos ? `${unit.photos} photo${unit.photos > 1 ? "s" : ""}` : null,
-                  unit.year ? String(unit.year) : null, unit.partNumber].filter(Boolean).join(" · ") || <span className={css.note}>None</span>}
-                {unit.ai && <div className={`${css.note} mt-1`}>AI: {unit.ai.reason}</div>}
-              </td>
-              <td className="r">
-                <span className="inline-flex gap-1">
-                  <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-pressed={unit.userVerdict === "shortlist"}
-                    aria-label={unit.userVerdict === "shortlist" ? "Remove from shortlist" : "Shortlist"} title="Shortlist"
-                    onClick={() => onVerdict(unit, unit.userVerdict === "shortlist" ? "clear" : "shortlist")}>
-                    <Star size={14} />
-                  </button>
-                  <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-label="Not a fit" title="Not a fit"
-                    onClick={() => onVerdict(unit, "not_a_fit")}>
-                    <X size={14} />
-                  </button>
-                  <a href={unit.href} target={unit.href.startsWith("http") ? "_blank" : undefined} rel="noreferrer"
-                    className={`${rowFocus} ${css.iconButton}`} aria-label="Open" title="Open">
-                    <ExternalLink size={14} />
-                  </a>
-                </span>
-              </td>
+              {has.where && <td>{unit.country ?? ""}<div className={`${css.note} max-w-[140px] truncate`} title={unit.location ?? ""}>{unit.location}</div></td>}
+              {has.kwh && <td className="r">{unit.kwh == null ? "" : `${unit.kwhEstimated ? "~" : ""}${unit.kwh < 1 ? unit.kwh.toFixed(3) : Math.round(unit.kwh * 10) / 10}`}</td>}
+              {has.price && (
+                <td className="r">
+                  {unit.price == null ? "" : money(unit.price, unit.currency)}
+                  {unit.currencyAssumed && unit.price != null && <div className={css.note}>currency assumed</div>}
+                </td>
+              )}
+              {has.perKwh && (
+                <td className="r">
+                  <strong>{unit.eurPerKwh == null ? "" : perKwh(unit.eurPerKwh)}</strong>
+                  {unit.cheapestRank === 0 && unit.peers > 1 && <div style={{ color: "var(--bt-green)" }} className="text-[11px]">Cheapest of {unit.peers}</div>}
+                  {unit.marginPct != null && (
+                    <div className="text-[11px]" style={{ color: unit.marginPct >= 0 ? "var(--bt-green)" : "var(--bt-red)" }}>
+                      {unit.marginPct >= 0 ? `${pct(unit.marginPct)} margin` : `${pct(-unit.marginPct)} over`}
+                    </div>
+                  )}
+                </td>
+              )}
+              {has.evidence && (
+                <td className="max-w-[220px]">
+                  {evidenceOf(unit)}
+                  {unit.ai && <div className={`${css.note} truncate`} title={unit.ai.reason}>AI: {unit.ai.reason}</div>}
+                </td>
+              )}
+              <td className="r"><UnitActions unit={unit} onVerdict={onVerdict} busy={busy} /></td>
             </tr>
           ))}
         </tbody>
@@ -172,9 +201,13 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
   const countries = [...new Set(group.bySeller.map((u) => u.country).filter(Boolean))];
   const unitWord = group.items[0]?.format === "Cells" ? "cells" : group.items[0]?.format === "Modules" ? "modules" : "packs";
   const covered = group.covers ? group.covers.have >= group.covers.need : null;
+  // One seller with one lot (most trades and supply batches): nothing to open, so the row carries the lot itself.
+  const lot = group.bySeller.length === 1 && group.items.length === 1 && !group.more && !group.bySeller[0].more ? group.items[0] : null;
+  const Row = lot ? "div" : "button";
   return (
     <div className={css.group}>
-      <button type="button" className={`${rowFocus} ${css.groupRow}`} aria-expanded={open} onClick={onToggle}>
+      <Row {...(lot ? {} : { type: "button" as const, "aria-expanded": open, onClick: onToggle })}
+        className={`${lot ? "" : rowFocus} ${css.groupRow} ${lot ? css.groupRowLot : ""}`}>
         <FitBadge verdict={group.verdict} />
         <div className="min-w-0">
           <div className="text-[14px] font-semibold">{group.label}</div>
@@ -194,7 +227,12 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
             </div>
           )}
           {/* Anything listed passed the basics; only what needs a look gets a chip. */}
-          <Checks checks={group.checks.filter((c) => c.key !== "quantity" && c.key !== "price" && c.state !== "pass")} />
+          <Checks checks={group.checks.filter((c) => c.key !== "quantity" && c.key !== "price" && c.state !== "pass" && !(lot?.ai && c.detail.startsWith("AI:")))} />
+          {lot && (evidenceOf(lot) || lot.ai) && (
+            <p className="mt-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
+              {[evidenceOf(lot), lot.ai ? `AI: ${lot.ai.reason}` : null].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
         <span className={css.num}>
           <strong style={{ color: covered ? "var(--bt-green)" : undefined }}>
@@ -210,10 +248,10 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
               group.bestMarginPct >= 0 ? `up to ${pct(group.bestMarginPct)} margin` : `${pct(-group.bestMarginPct)} over budget`}
           </span>
         </span>
-        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-      </button>
+        {lot ? <UnitActions unit={lot} onVerdict={onVerdict} busy={busy} /> : open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </Row>
       {/* One seller: the header already names them, so open straight onto the packs. */}
-      {open && (group.bySeller.length === 1
+      {open && !lot && (group.bySeller.length === 1
         ? <UnitTable items={group.bySeller[0].items} more={group.bySeller[0].more} hideSeller onVerdict={onVerdict} busy={busy} />
         : <SellerList sellers={group.bySeller} unitWord={unitWord} onVerdict={onVerdict} busy={busy} />)}
     </div>
