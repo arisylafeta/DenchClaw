@@ -39,6 +39,11 @@ export type Message = {
   from_email?: string | null;
   to_person_ids: string[];
   cc_person_ids: string[];
+  delivered_at?: string | null;
+  opened_at?: string | null;
+  clicked_at?: string | null;
+  replied_at?: string | null;
+  events?: { type: string; occurred_at: string }[];
 };
 
 export type SenderFilter = "person" | "all" | "automated";

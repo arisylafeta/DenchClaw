@@ -116,6 +116,8 @@ Execution takes an audience lock, claims each message/idempotency key before sub
 ```bash
 sync gmail --account alex@rebattery.io --since 2026-10-01
 sync gmail --account alex@rebattery.io --since 2026-10-01 --apply
+backfill-html --account alex@rebattery.io --since 2026/10/01 --limit 100 --crm-only
+backfill-html --account alex@rebattery.io --limit 100 --sleep 0.2 --apply
 sync postmark --campaign synthetic-update --since 2026-10-01
 sync postmark --account broadcast --apply
 followup list
@@ -128,6 +130,8 @@ legacy import --apply
 ```
 
 Sync is idempotent provider reconciliation, not approval to send. Address-level suppressions are retained in `mail_suppression` and checked on both transports, even when there is no contact or prior message. Postmark suppression sync also opts out matching CRM people on Supply update; HardBounce/SpamComplaint additionally set global opt-out. Reasons, origins and provider calendar dates are retained. Missing suppressions never restore consent; unmatched addresses never create contacts. Daily schedulers use this same CLI, not a second suppression wrapper.
+
+Gmail sync stores raw MIME HTML (including nested alternatives) and fills only missing HTML; existing HTML, especially approved outbound copy, is never replaced. Sanitise at rendering, not ingestion. `backfill-html` fetches only missing-HTML rows for one mailbox, prioritising CRM-visible rows then newest sent dates. `--crm-only` restricts selection; `--since` uses YYYY/MM/DD. Dry-run reports counts and the first five IDs; `--apply` changes only missing HTML, attachment presence and `updated_at`. Plain-text-only rows remain unmarked and appear in `no_html_ids` for optional rechecks. Fetches are sequential with configurable `--sleep`; five consecutive errors abort with exit 3, preserving completed updates.
 
 A follow-up draft requires an existing pending `mail_followup` row and a usable originating reply anchor. It never schedules or sends automatically, and preserves the original transport. The shared reply-mailbox refresh runs before taking a follow-up row lock, then rereads reply evidence under the lock. Both Gmail and Postmark routes use the configured reply mailbox; missing routing is refused rather than inferred empty. An arrival race remains after the final check. `legacy import` is a separately authorised one-time cutover, dry-run with rollback, reconciling source/loaded counts and evidence. It refuses after legacy tables have been removed.
 

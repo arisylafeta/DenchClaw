@@ -86,7 +86,7 @@ export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnl
   const values = mailboxOwnerId ? [id, mailboxOwnerId] : [id];
   const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? 'and mailbox_owner_id = $2::uuid' : ''}`, values);
   if (!thread) return null;
-  const messages = await queryPg<MailMessageRow>(`select m.*, ${selfAddressSql('m.from_email')} as is_self, ${counterpartySql()}, m.body_text as body, m.body_preview as preview,
+  const messages = await queryPg<MailMessageRow>(`select m.*, ${selfAddressSql('m.from_email')} as is_self, ${counterpartySql()}, coalesce(nullif(m.body_text,''),m.body_html) as body, m.body_preview as preview,
     coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events,
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'to'),'{}') as to_person_ids,
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'cc'),'{}') as cc_person_ids

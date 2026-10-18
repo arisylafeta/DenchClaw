@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from .core import Refused, dict_cursor
 from .gmail_driver import GmailDriver
+from .gmail_body import extract_bodies
 from .crm_visibility import normalize_email, parse_email_addresses, ensure_person, visibility, is_common_email_provider, reply_matches
 
 
@@ -15,7 +16,7 @@ def stable_id(prefix, value):
 
 def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None):
     driver = driver or GmailDriver()
-    stats = dict(found=0, fetched=0, imported=0, linked=0, crm_visible=0, auto_created=0, drafts_skipped=0, replies=0)
+    stats = dict(found=0, fetched=0, imported=0, linked=0, crm_visible=0, auto_created=0, drafts_skipped=0, replies=0, html_missing=0)
     with db.cursor() as cur:
         cur.execute('select id from crm_users where lower(email)=lower(%s) and is_active', (account,))
         owners = cur.fetchall()
@@ -82,6 +83,8 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
         visible,reason = visibility(parties,people,own_addresses,labelled,gmail_id in triaged_ids or bool({'Deal','Inbound'} & set(labels)))
         stats['imported'] += 1
         stats['crm_visible'] += int(visible)
+        body, body_html, has_attachments = extract_bodies(full)
+        stats['html_missing'] += int(not body_html)
         rfc_id = headers.get('message-id')
         with db.cursor() as cur:
             cur.execute('''select id from mail_message where (gmail_message_id=%s and (mailbox_owner_id=%s or mailbox_owner_id is null)) or (%s is not null and rfc_message_id=%s and direction=%s and (mailbox_owner_id=%s or mailbox_owner_id is null)) order by id limit 1''', (gmail_id,owner_id,rfc_id,rfc_id,direction,owner_id))
@@ -111,9 +114,9 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
             cur.execute('''insert into mail_thread(id,subject,gmail_thread_id,mailbox_owner_id,last_message_at,crm_visible) values(%s,%s,%s,%s,%s,%s)
                 on conflict(mailbox_owner_id,gmail_thread_id) where gmail_thread_id is not null do update set subject=excluded.subject,last_message_at=greatest(mail_thread.last_message_at,excluded.last_message_at),crm_visible=mail_thread.crm_visible or excluded.crm_visible returning id''', (thread_pk,headers.get('subject'),raw['threadId'],owner_id,date,visible))
             thread_pk = cur.fetchone()[0]
-            body = full.get('body','') or ''
+            # Store raw MIME content; sanitisation belongs to the reader.
             preview = re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',body)).strip()[:500]
-            fields = {'thread_id':thread_pk,'mailbox_owner_id':owner_id,'gmail_message_id':gmail_id,'rfc_message_id':rfc_id,'in_reply_to':headers.get('in-reply-to'),'rfc_references':headers.get('references'),'subject':headers.get('subject'),'body_text':body,'body_preview':preview,'body_html':full.get('html') or full.get('bodyHtml'),'from_email':sender,'from_person_id':from_person,'to_emails':recipients['to'],'cc_emails':recipients['cc'],'bcc_emails':recipients['bcc'],'labels':labels,'has_attachments':bool(full.get('attachments')),'sent_at':date,'crm_visible':visible,'crm_visible_reason':reason}
+            fields = {'thread_id':thread_pk,'mailbox_owner_id':owner_id,'gmail_message_id':gmail_id,'rfc_message_id':rfc_id,'in_reply_to':headers.get('in-reply-to'),'rfc_references':headers.get('references'),'subject':headers.get('subject'),'body_text':body,'body_preview':preview,'body_html':body_html,'from_email':sender,'from_person_id':from_person,'to_emails':recipients['to'],'cc_emails':recipients['cc'],'bcc_emails':recipients['bcc'],'labels':labels,'has_attachments':has_attachments,'sent_at':date,'crm_visible':visible,'crm_visible_reason':reason}
             if not outbound:
                 fields['personalization'] = json.dumps({'provider_headers':headers})
             if existing:
@@ -123,6 +126,10 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
                     observed_fields = ('thread_id','mailbox_owner_id','gmail_message_id','rfc_message_id','labels','sent_at','crm_visible','crm_visible_reason')
                     fields = {key:fields[key] for key in observed_fields}
                     fields.update(state='accepted',accepted_at=date)
+                # HTML is gap-filling only, including for frozen outbound copies.
+                fields.pop('body_html', None)
+                if body_html:
+                    cur.execute("update mail_message set body_html=%s where id=%s and coalesce(body_html,'')=''", (body_html,message_id))
                 cur.execute('update mail_message set '+','.join(k+'=%s' for k in fields)+',last_synced_at=now(),updated_at=now() where id=%s', (*fields.values(),message_id))
             else:
                 fields.update(id=message_id,direction=direction,transport='gmail',purpose='personal' if outbound else None,identity_key=identity,state='accepted' if outbound else 'received',accepted_at=date if outbound else None)

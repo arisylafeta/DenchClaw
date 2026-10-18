@@ -104,10 +104,15 @@ Server-provided `is_self` recognizes every case-insensitive `@rebattery.io` addr
 and configured mail identity. Own messages show “To:” and the first non-self
 recipient (or first recipient for internal mail), using a CRM name when known.
 Missing inbound addresses show “Unknown sender”. No person/self category is shown.
-Unread state is per thread. Self participants display as “You (address)” regardless
-of any mismatched CRM name; the header prefers the external counterparty.
-Sending and unknown outcomes retain their reconciliation warnings; quick reply
-only copies a CLI draft command and never saves or sends mail.
+Unread state is per thread. The detail header has one compact participant line:
+all self identities are grouped as “You”, with actual addresses in Details and
+initials taken from the real name/address. It shows message count, first/last dates
+and the linked CRM profile where available. Messages use the native CRM sans-serif
+body, flat dividers and compact tracking chips. The newest is open; older messages
+expand from a one-line summary. Conventional quoted history and signatures stay
+behind “Show quoted text”; HTML keeps its sanitized, opaque-origin iframe.
+The footer prepares a CLI reply command only; it never saves or sends mail.
+Sending and unknown outcomes retain their reconciliation warnings.
 
 ## Campaign engagement
 
@@ -187,6 +192,17 @@ refreshes receipts and reconciles the complete stream suppression set.
 Use `python3 scripts/rebattery/rebattery-mail.py` for every mail operation.
 Preparation and execution are dry-run unless `--apply` is present. Output is JSON;
 named refusals go to stdout and human diagnostics go to stderr.
+
+Gmail sync stores raw HTML from MIME parts and fills missing HTML on reruns without
+replacing existing HTML (including approved outbound copy). Sanitisation happens
+when rendering. For historical gaps, use `backfill-html --account <account>
+--since 2026/10/01 --limit 100 --crm-only` to preview counts and the first five
+message IDs; add `--apply` to update only missing HTML and attachment presence.
+CRM-visible mail is prioritised by default, newest first within each group.
+`--sleep 0.2` controls sequential fetch pacing. Plain-text-only IDs are reported
+in `no_html_ids`, not marked with sentinels, so future runs may recheck them.
+Individual provider errors are counted; five consecutive errors stop with exit
+code 3 while preserving completed updates.
 
 Create a one-off with `draft --identity alex --to buyer@example.test --subject
 "Subject" --body "Copy" --verification '{"buyer@example.test":{"status":"valid"}}'

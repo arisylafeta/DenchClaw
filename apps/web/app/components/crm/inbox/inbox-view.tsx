@@ -46,7 +46,7 @@ export function InboxView({ onOpenPerson, initialView, initialCampaignId }: { on
       if (value !== null) {next.set(key, value);} else {next.delete(key);}
     }
     if (campaignId) {next.set("campaignDetail", campaignId);} else {next.delete("campaignDetail");}
-    router.replace(`/?${next.toString()}`, { scroll: false });
+    if (next.toString() !== params.toString()) {router.replace(`/?${next.toString()}`, { scroll: false });}
   // URL is written from this page's state, not used as a second state owner.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, campaignId, router]);
