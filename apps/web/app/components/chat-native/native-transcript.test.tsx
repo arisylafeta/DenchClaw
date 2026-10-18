@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within, waitFor } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { initialState, reduce, type ChatState } from "@/lib/hermes-chat/reducer";
 import type { GatewayEvent } from "@/lib/hermes-chat/events";
-import { NativeTranscript, ApprovalCard, ClarifyCard, ReadOnlyNotice } from "./index";
+import { NativeTranscript, ApprovalCard, ClarifyCard, PromptDock, ReadOnlyNotice } from "./index";
 import type { NativeTranscriptCallbacks } from "./types";
 import { stateFromSnapshot, type GatewayChatSnapshot } from "@/lib/hermes-chat/snapshot";
 
@@ -117,20 +117,21 @@ describe("native transcript", () => {
     expect(onApproval).toHaveBeenCalledWith(request, "always");
   });
 
-  it("retains a withdrawn approval without actionable buttons", () => {
+  it("drops a withdrawn approval from the dock so nothing actionable is left", () => {
     const state = events([["approval.request", { command: "danger" }, "srq-1"]]);
     const cb = callbacks();
-    const { rerender } = render(<NativeTranscript state={state} callbacks={cb} />);
-    rerender(<NativeTranscript state={events([["request.cancel", { id: "srq-1" }]], state)} callbacks={cb} />);
-    expect(screen.getByText("Resolved or withdrawn")).toBeInTheDocument();
+    const { container, rerender } = render(<PromptDock state={state} subagents={state.subagents} callbacks={cb} />);
+    expect(screen.getByRole("button", { name: "Run once" })).toBeInTheDocument();
+    rerender(<PromptDock state={events([["request.cancel", { id: "srq-1" }]], state)} subagents={state.subagents} callbacks={cb} />);
     expect(screen.queryByRole("button", { name: "Run once" })).not.toBeInTheDocument();
+    expect(container.querySelector("[data-prompt-dock]")).toBeNull();
   });
 
   it("answers the four-option question with one click", () => {
     const request = clarify([{ qid: "direction", question: "Which route?", choices: ["North", "East", "South", "West"] }]);
     const onClarify = vi.fn();
     render(<ClarifyCard request={request} onClarify={onClarify} />);
-    fireEvent.click(screen.getByRole("button", { name: "East" }));
+    fireEvent.click(screen.getByRole("radio", { name: /East/ }));
     expect(onClarify).toHaveBeenCalledWith(request, { direction: "East" });
   });
 
@@ -138,9 +139,9 @@ describe("native transcript", () => {
     const request = clarify([{ qid: "colors", question: "Colors?", choices: ["Red", "Blue"], multi_select: true }, { qid: "note", question: "Why?" }, { qid: "optional", question: "Anything else?" }]);
     const onClarify = vi.fn();
     render(<ClarifyCard request={request} onClarify={onClarify} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Red" })); fireEvent.click(screen.getByRole("checkbox", { name: "Blue" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Red/ })); fireEvent.click(screen.getByRole("checkbox", { name: /Blue/ }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("Question 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText("2 of 3")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Readable" } });
     fireEvent.click(screen.getByRole("button", { name: "Next" })); fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     expect(onClarify).toHaveBeenCalledWith(request, { colors: "Red, Blue", note: "Readable", optional: null });
@@ -150,9 +151,9 @@ describe("native transcript", () => {
     const onClarify = vi.fn();
     const request = clarify([{ qid: "q", question: "Choose", choices: ["Default", "Other"] }]);
     render(<ClarifyCard request={request} onClarify={onClarify} />);
-    fireEvent.click(screen.getByRole("button", { name: "Other" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Other/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "Other" }), { target: { value: "Custom" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Other" }), { key: "Enter" });
     expect(onClarify).toHaveBeenCalledWith(request, { q: "Custom" });
   });
 
@@ -163,7 +164,7 @@ describe("native transcript", () => {
       ["subagent.complete", { subagent_id: "child", status: "completed", summary: "Sources read" }],
     ]);
     const cb = callbacks();
-    render(<NativeTranscript state={state} callbacks={cb} subagentTails={{ parent: "Tail content" }} />);
+    render(<PromptDock state={state} subagents={state.subagents} callbacks={cb} tails={{ parent: "Tail content" }} />);
     const parent = screen.getByRole("region", { name: "Subagent: Research" });
     const child = within(parent).getByRole("region", { name: "Subagent: Read sources" });
     expect(within(child).queryByRole("button", { name: "Stop" })).toBeNull();
@@ -251,5 +252,20 @@ describe("emoji", () => {
     expect(stripEmoji("🔍 Searching the web… 🚀")).toBe("Searching the web…");
     expect(stripEmoji("Done ✅ 👍🏽 ok")).toBe("Done ok");
     expect(stripEmoji("Plain text 1.")).toBe("Plain text 1.");
+  });
+});
+
+describe("dock", () => {
+  it("keeps questions and subagents out of the transcript and answers with number keys", () => {
+    const state = events([["subagent.start", { subagent_id: "s", goal: "Research" }], ["clarify.request", { questions: [{ qid: "q", question: "Which route?", choices: ["North", "East", "South", "West"] }] }, "srq-9"]]);
+    const cb = callbacks();
+    const transcript = render(<NativeTranscript state={state} callbacks={cb} />);
+    expect(transcript.container.querySelector('[aria-label="Clarification"]')).toBeNull();
+    expect(transcript.container.querySelector("[data-subagent-id]")).toBeNull();
+    transcript.unmount();
+    render(<PromptDock state={state} subagents={state.subagents} callbacks={cb} />);
+    fireEvent.keyDown(screen.getByRole("radiogroup"), { key: "3" });
+    expect(cb.onClarify).toHaveBeenCalledWith(state.pendingRequests[0], { q: "South" });
+    expect(screen.getByLabelText("Subagents")).toBeInTheDocument();
   });
 });

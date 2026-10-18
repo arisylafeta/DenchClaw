@@ -17,6 +17,7 @@ export { NativeTranscript } from "./native-transcript";
 export { splitTurn, WorkBlock } from "./work-block";
 export type { WorkBlockProps } from "./work-block";
 export { ApprovalCard, ClarifyCard } from "./requests";
+export { PromptDock } from "./prompt-dock";
 export type { ApprovalCardProps, ClarifyCardProps } from "./requests";
 export { SubagentCard, TodoPanel, ErrorCard, ReadOnlyNotice } from "./panels";
 export type { SubagentCardProps, TodoPanelProps, ErrorCardProps, ReadOnlyNoticeProps } from "./panels";
