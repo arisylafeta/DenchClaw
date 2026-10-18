@@ -97,7 +97,9 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
         stats['html_missing'] += int(not body_html)
         rfc_id = headers.get('message-id')
         with db.cursor() as cur:
-            cur.execute('''select id from mail_message where (gmail_message_id=%s and (mailbox_owner_id=%s or mailbox_owner_id is null)) or (%s is not null and rfc_message_id=%s and direction=%s and (mailbox_owner_id=%s or mailbox_owner_id is null)) order by id limit 1''', (gmail_id,owner_id,rfc_id,rfc_id,direction,owner_id))
+            # Prefer the row that already holds this Gmail id: linking a send-log row by RFC id while another row owns the
+            # id violates mail_message_owner_gmail_uidx and aborted every later sync of the mailbox.
+            cur.execute('''select id from mail_message where (gmail_message_id=%s and (mailbox_owner_id=%s or mailbox_owner_id is null)) or (%s is not null and rfc_message_id=%s and direction=%s and (mailbox_owner_id=%s or mailbox_owner_id is null)) order by (gmail_message_id=%s) desc nulls last, id limit 1''', (gmail_id,owner_id,rfc_id,rfc_id,direction,owner_id,gmail_id))
             existing = cur.fetchone()
         message_id = existing[0] if existing else stable_id('gmail_msg_',account.lower()+':'+gmail_id)
         stats['linked'] += int(bool(existing))

@@ -13,7 +13,7 @@ from rebattery_mail.read import search, status, message, thread, person
 from rebattery_mail.identity import identities
 from rebattery_mail.gmail_sync import sync_gmail
 from rebattery_mail.ingest import ingest_postmark_event
-from rebattery_mail.sync import sync_postmark
+from rebattery_mail.sync import sync_postmark, sync_health
 from rebattery_mail.crm_visibility import normalize_email, is_common_email_provider
 
 
@@ -213,6 +213,33 @@ class DatabaseTests(unittest.TestCase):
                 return {}
         sync_postmark(self.db,client=Client())
         self.assertEqual(asked,['provider-ok'])
+
+    def test_postmark_recent_window_keeps_unreported_old_sends(self):
+        now = self.rows('select now()')[0][0]
+        from datetime import timedelta
+        self.add_message('read-recent',provider_message_id='provider-recent',sent_at=now)
+        self.add_message('read-old-pending',provider_message_id='provider-old-pending',sent_at=now-timedelta(days=10))
+        self.add_message('read-old-delivered',provider_message_id='provider-old-delivered',sent_at=now-timedelta(days=10),delivered_at=now-timedelta(days=9))
+        asked = []
+        class Client:
+            def details(self,id):
+                asked.append(id)
+                return {'MessageEvents':[]}
+            def suppressions(self,stream):
+                return {}
+        sync_postmark(self.db,recent_days=2,client=Client())
+        self.assertCountEqual(asked,['provider-recent','provider-old-pending'])
+
+    def test_postmark_health_clears_stale_problem_after_refresh(self):
+        now = self.rows('select now()')[0][0]
+        self.add_message('read-health',provider_message_id='provider-health',sent_at=now)
+        stale = sync_health(self.db)
+        self.assertFalse(stale['healthy'])
+        self.assertTrue(any(problem.startswith('postmark_sync_stale:') for problem in stale['problems']))
+        with self.db.cursor() as cur:
+            cur.execute("update mail_message set last_synced_at=now() where id='read-health'")
+        refreshed = sync_health(self.db)
+        self.assertFalse(any(problem.startswith('postmark_sync_stale:') for problem in refreshed['problems']))
 
 
 if __name__ == '__main__':

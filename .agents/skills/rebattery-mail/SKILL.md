@@ -65,6 +65,11 @@ status message-id
 
 Search also accepts `--identity`, `--campaign` and events `opened|clicked|replied|bounced`. `--limit` is 1 to 1000. `thread`, `message` and `person` expose associated log history. `status` returns distinct sent, delivered, bounced, opened, clicked, unsubscribed and replied counts, with scanner/proxy evidence separately. Gmail acceptance is not delivery. Opens/clicks are observations, not verified people or site visits.
 
+`sync health` returns read-only freshness JSON; inspect `problems` even when other providers are current.
+`sync postmark --recent-days N --apply` re-reads recent sends plus unresolved sends within Postmark's 44-day retention window; omit `--account` for all streams.
+Default-profile no-agent cron runs Postmark events every 15 minutes, a 21-day sweep daily at 05:30 UTC, and mail health every 30 minutes.
+Gmail sync runs hourly for Ari and Alex with a rolling three-day window; sync commands never send mail.
+
 ## Folder-backed templates
 
 The mailvin profile's `workspace/email-templates/` is the copy source of truth

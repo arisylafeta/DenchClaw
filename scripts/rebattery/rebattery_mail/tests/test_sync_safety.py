@@ -62,6 +62,17 @@ def test_postmark_rfc_identity_links_gmail_reply(db):
     sync_gmail(db,'alex@rebattery.io',apply=True,driver=FakeGmail({'reply':reply}))
     assert row(db,"select state from mail_followup where message_id='safe-out'")['state']=='paused'
 
+def test_gmail_sync_prefers_the_row_that_already_owns_the_gmail_id(db):
+    """A Postmark send-log row and an earlier Gmail copy of the same email: linking by RFC id hit the unique Gmail id and aborted every sync."""
+    owner = row(db,"select id from crm_users where email='alex@rebattery.io'")['id']
+    outbound(db,id='a-send-log',rfc_message_id='<dup@test>')
+    outbound(db,id='b-gmail-copy',transport='gmail',identity_key='alex',gmail_message_id='dupg',mailbox_owner_id=owner,from_email='alex@rebattery.io')
+    full = gmail('dupg',sender='alex@rebattery.io',to='buyer@example.test',labels=['SENT'],rfc='<dup@test>')
+    sync_gmail(db,'alex@rebattery.io',apply=True,driver=FakeGmail({'dupg':full}))
+    assert row(db,"select rfc_message_id from mail_message where id='b-gmail-copy'")['rfc_message_id']=='<dup@test>'
+    assert row(db,"select gmail_message_id from mail_message where id='a-send-log'")['gmail_message_id'] is None
+
+
 
 def test_address_suppression_survives_without_person_or_message(db):
     payload={'RecordType':'SubscriptionChange','Recipient':' Stranger@Unknown.test ','ChangedAt':'2026-10-16T10:00:00Z','SuppressSending':True}

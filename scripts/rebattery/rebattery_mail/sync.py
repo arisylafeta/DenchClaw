@@ -42,7 +42,7 @@ class PostmarkClient:
         return stream_suppressions(stream, client=self.request)
 
 
-def sync_postmark(db, campaign=None, since=None, apply=False, client=None, account=None):
+def sync_postmark(db, campaign=None, since=None, apply=False, client=None, account=None, recent_days=None):
     from .drivers import sync_suppressions
     client = client or PostmarkClient()
     clauses = ["m.transport like 'postmark-%%'", 'm.provider_message_id is not null', "m.provider_message_id not like 'gmail:%%'"]
@@ -59,6 +59,11 @@ def sync_postmark(db, campaign=None, since=None, apply=False, client=None, accou
     if campaign:
         clauses.append('m.campaign_id=%s')
         params.append(campaign)
+    if recent_days is not None:
+        # Incremental window: recent sends, plus any send Postmark has not yet reported on, so a missed
+        # delivery or bounce is retried on every run until it resolves.
+        clauses.append("(coalesce(m.sent_at,m.created_at) >= now() - make_interval(days => %s) or (m.delivered_at is null and m.bounced_at is null and coalesce(m.sent_at,m.created_at) >= now() - interval '44 days'))")
+        params.append(int(recent_days))
     with dict_cursor(db) as cur:
         cur.execute('select m.id,m.provider_message_id,i.postmark_stream from mail_message m left join mail_identity i on i.key=m.identity_key where '+' and '.join(clauses)+' order by m.id',params)
         messages = [dict(r) for r in cur.fetchall()]
@@ -91,12 +96,45 @@ def sync_postmark(db, campaign=None, since=None, apply=False, client=None, accou
     if apply:
         with db.cursor() as cur:
             for receipt in receipts:
-                if receipt['rfc_message_id']:
-                    cur.execute('update mail_message set rfc_message_id=coalesce(rfc_message_id,%s),last_synced_at=now() where id=%s',(receipt['rfc_message_id'],receipt['message_id']))
+                cur.execute('update mail_message set rfc_message_id=coalesce(rfc_message_id,%s),last_synced_at=now() where id=%s',(receipt['rfc_message_id'],receipt['message_id']))
     results = [ingest_postmark_event(db,payload,apply=apply) for payload in payloads]
     inserted_events = len({event_id for result in results for event_id in result.get('event_ids',[])})
     return {'dry_run':not apply,'receipts':receipts,'suppressions':suppression_results,'event_count':len(payloads),'inserted_events':inserted_events}
 
+
+def sync_health(db, postmark_max_age_hours=1, gmail_max_age_hours=6):
+    """Read-only freshness report. `problems` is empty when every provider sync is current.
+
+    Postmark is stale when a send from the last 3 days was not re-read recently. A send Postmark
+    has not reported on after 2 hours is unreconciled. Gmail is stale when no message has been
+    touched by a Gmail sync lately. A send row in `sending` or `unknown` blocks launches."""
+    with dict_cursor(db) as cur:
+        cur.execute("""
+            select
+              (select max(occurred_at) from mail_event where source='postmark') as last_postmark_event,
+              (select count(*) from mail_message where transport like 'postmark-%%' and provider_message_id not like 'gmail:%%'
+                 and coalesce(sent_at,created_at) >= now() - interval '3 days'
+                 and (last_synced_at is null or last_synced_at < now() - make_interval(hours => %s))) as postmark_stale,
+              (select count(*) from mail_message where transport like 'postmark-%%' and provider_message_id not like 'gmail:%%'
+                 and delivered_at is null and bounced_at is null
+                 and coalesce(sent_at,created_at) between now() - interval '44 days' and now() - interval '2 hours') as postmark_unreconciled,
+              (select max(last_synced_at) from mail_message where transport='gmail') as last_gmail_sync,
+              (select count(*) from mail_message where direction='outbound' and state in ('sending','unknown')) as stuck_sends,
+              now() as checked_at
+        """,(postmark_max_age_hours,))
+        row = dict(cur.fetchone())
+    problems = []
+    if row['postmark_stale']:
+        problems.append('postmark_sync_stale: %d recent sends not re-read in the last %dh' % (row['postmark_stale'],postmark_max_age_hours))
+    if row['postmark_unreconciled']:
+        problems.append('postmark_unreconciled: %d sends with no delivery or bounce report after 2h' % row['postmark_unreconciled'])
+    gmail = row['last_gmail_sync']
+    if gmail is None or (row['checked_at']-gmail).total_seconds() > gmail_max_age_hours*3600:
+        problems.append('gmail_sync_stale: last Gmail sync %s' % (gmail.isoformat() if gmail else 'never'))
+    if row['stuck_sends']:
+        problems.append('stuck_sends: %d outbound rows in sending/unknown' % row['stuck_sends'])
+    return {'healthy':not problems,'problems':problems,'last_postmark_event':row['last_postmark_event'],'last_gmail_sync':gmail,
+            'postmark_unreconciled':row['postmark_unreconciled'],'checked_at':row['checked_at']}
 
 def sync_postmark_suppressions(db, stream, apply=False, client=None):
     """Reconcile one Broadcast dump without reading or changing message receipts."""
@@ -134,8 +172,10 @@ def handle(args):
     with connection(read_only=not args.apply) as db:
         if args.provider == 'postmark-suppressions':
             return sync_postmark_suppressions(db,args.stream,args.apply)
+        if args.provider == 'health':
+            return sync_health(db)
         if args.provider == 'postmark':
-            return sync_postmark(db,args.campaign,args.since,args.apply,account=args.account)
+            return sync_postmark(db,args.campaign,args.since,args.apply,account=args.account,recent_days=args.recent_days)
         if args.account:
             accounts = [args.account]
         else:
@@ -151,10 +191,14 @@ def register(subparsers):
     parser.add_argument('--stream',required=True)
     parser.add_argument('--apply',action='store_true')
     parser.set_defaults(handler=handle)
+    parser = providers.add_parser('health',help='Read-only report of how current the Postmark and Gmail syncs are')
+    parser.set_defaults(handler=handle,apply=False)
     for name in ('gmail','postmark'):
         parser = providers.add_parser(name)
         parser.add_argument('--account')
         parser.add_argument('--campaign')
         parser.add_argument('--since')
+        if name == 'postmark':
+            parser.add_argument('--recent-days',type=int,help='Only re-read sends from the last N days, plus sends Postmark has not yet reported on')
         parser.add_argument('--apply',action='store_true')
         parser.set_defaults(handler=handle)
