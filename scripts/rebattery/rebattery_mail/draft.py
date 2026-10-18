@@ -4,6 +4,7 @@ from uuid import uuid4
 from .core import connection, dict_cursor, Refused, PURPOSES
 from . import policy
 from .templating import render_message as _render_message
+from .templating import compose, template_variables
 from .digest import digest, load
 
 
@@ -26,9 +27,12 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
             tpl = cur.fetchone()
         if not tpl:
             raise Refused('template_not_found')
-        if purpose not in tpl['allowed_purposes'] or (tpl['allowed_identities'] and identity_key not in tpl['allowed_identities']):
-            raise Refused('purpose_not_allowed_for_identity')
-        rendered = render_message(tpl,variables)
+        rendered = compose(tpl, variables, author, purpose, transport)
+        meta = tpl.get('meta') or {}
+        if 'source_body_html' in meta:
+            values = template_variables(tpl, variables)
+            values.update(signature_html='', signature_text='', unsubscribe_html='', unsubscribe_text='', preview=variables.get('preview', ''))
+            campaign_body = render_message({'html': meta['source_body_html'], 'text_body': meta['source_body_text']}, values)
     else:
         if subject is None or body is None:
             raise Refused('missing_variable', 'Provide a template or subject and body')
@@ -36,10 +40,12 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
     row = {'id':message_id or uuid4().hex,'direction':'outbound','state':'draft','identity_key':identity_key,
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
            'cc_emails':[],'bcc_emails':[],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
-           'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if author.get('signature_text') else ''),
-           'body_html':rendered['html'] + (author.get('signature_html') or ''),'thread_id':thread,'campaign_id':campaign,
+           'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and author.get('signature_text') else ''),
+           'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template else ''),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
                               'identity_snapshot':{key:author.get(key) for key in ('address','display_name','reply_to','gmail_account','postmark_stream')}},'links':[]}
+    if template and 'source_body_html' in (tpl.get('meta') or {}):
+        row['personalization']['template_link_scope'] = campaign_body
     if not row['to_emails']:
         raise Refused('recipient_unverified')
     if thread:

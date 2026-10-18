@@ -6,6 +6,20 @@ from .core import Refused, dict_cursor
 UNSUBSCRIBE = '{{{ pm:unsubscribe }}}'
 
 
+def unsubscribe(author, purpose, transport):
+    """Return the policy-owned footer, never caller-supplied merge content."""
+    if purpose != 'marketing':
+        return '', ''
+    if transport == 'postmark-broadcast':
+        return UNSUBSCRIBE, UNSUBSCRIBE
+    if transport != 'gmail':
+        raise Refused('postmark_broadcast_stream_required')
+    import html
+    url = 'mailto:' + author['address'] + '?subject=unsubscribe'
+    return ('<p><a href="' + html.escape(url, quote=True) + '">Unsubscribe</a></p>',
+            'Unsubscribe: ' + url)
+
+
 def identity(db, key, purpose, transport=None):
     with dict_cursor(db) as cur:
         cur.execute('select * from mail_identity where key=%s', (key,))

@@ -212,6 +212,35 @@ only `status=valid` is eligible, including role-based addresses. Invalid,
 inconclusive and missing results are reported with reasons and cannot be sent.
 No verification API is called implicitly.
 
+The folder `/root/.hermes/profiles/mailvin/workspace/email-templates/` is the
+template source of truth. Prefix these commands with the CLI invocation above:
+
+```bash
+template validate --dir /root/.hermes/profiles/mailvin/workspace/email-templates
+template preview --dir /root/.hermes/profiles/mailvin/workspace/email-templates --out /root/.hermes/profiles/mailvin/workspace/email-templates/previews --identity alex
+template sync --dir /root/.hermes/profiles/mailvin/workspace/email-templates
+# After reviewing the dry-run diff against an explicitly selected database:
+template sync --dir /root/.hermes/profiles/mailvin/workspace/email-templates --apply
+```
+
+Validation and preview are local and need no database. Sync requires additive
+migration `053_mail_template_meta.sql`, stores composed shell/body HTML and text,
+and changes only templates plus Alex/Ari signature fields. It never sends.
+`template list` exposes category, sendability and required/optional variables.
+A changed `(name, version)` is refused: bump the version, never rewrite history.
+`sendable: false` snapshots are preview-only and cannot be drafted or frozen.
+Identity and purpose restrictions are enforced separately. Required values must
+be present; optional values default to empty strings. Double braces escape HTML;
+raw triple braces are limited to `content`, `signature_html`, `unsubscribe_html`
+and `body_html`. Postmark tokens remain provider-owned.
+
+Template drafts and campaign freezes insert the sending identity's signature
+inside the rendered copy before hashing. Other identities have no catalogue
+signature. Marketing adds the Broadcast unsubscribe token in both formats or
+Gmail's `Unsubscribe: mailto:<sender>?subject=unsubscribe` line and HTML link.
+Only template body CTAs are campaign-tracked; shared shell/signature links are
+still part of the exact approved copy.
+
 Use `campaign create --id <id> --name <name> --identity <key> --template <name>
 --person-ids <comma-separated-ids> --verification <json> --apply`, or
 `--cohort-sql <read-only-select-file>` for the audience. The SELECT must return
