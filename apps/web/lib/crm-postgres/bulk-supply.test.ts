@@ -70,6 +70,8 @@ describe.skipIf(!TEST_URL)("supply list", () => {
       insert into crm_company_context_notes (id, company_id, note, source_kind, source_ref, observed_on) values
         ('context_feed_old', 'company_feed_context', 'Earlier call', 'call', 'transcript:earlier', '2026-09-01'),
         ('context_feed_new', 'company_feed_context', 'Latest call', 'call', 'transcript:latest', '2026-10-16');
+      update crm_company_context_notes set category='bid', source_url='https://example.com/evidence'
+        where id='context_feed_new';
       update crm_bulk_trade_supply set company_id = 'company_feed_context' where id = 'bts_sup_1';
       update crm_bulk_trade_demand set company_id = 'company_feed_context' where id = 'btd_sup_a';
     `);
@@ -77,7 +79,7 @@ describe.skipIf(!TEST_URL)("supply list", () => {
     const { listCompanyContextNotes } = await import("./company-context");
     const notes = await listCompanyContextNotes("company_feed_context");
     expect(notes.map((note) => note.note)).toEqual(["Latest call", "Earlier call"]);
-    expect(notes[0]).toMatchObject({ source_ref: "transcript:latest", observed_on: "2026-10-16" });
+    expect(notes[0]).toMatchObject({ category: "bid", source_url: "https://example.com/evidence", source_ref: "transcript:latest", observed_on: "2026-10-16" });
     expect((await supply.getSupply("bts_sup_1"))?.context_notes).toEqual(notes);
     expect((await demand.getDemand("btd_sup_a"))?.context_notes).toEqual(notes);
     expect(await listCompanyContextNotes("company_missing")).toEqual([]);

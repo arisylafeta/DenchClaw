@@ -283,6 +283,21 @@ the company, not a new actionable ask. Demand's **Missing to move this** section
 surfaces missing price, quantity, request timeline, unsent qualification question
 or eligible supply match. These are action gaps, not automatic closures.
 
+Migration `049` categorises context as `ask`, `bid`, `offer_reply`, `project`,
+`preference`, `trading_style`, `past_deal` or `note`, with optional evidence URLs.
+All surfaces show muted category chips and newest-first dates; company profiles
+also filter by category. These internal notes can contain commercial terms and
+must not be forwarded as buyer-facing copy.
+
+For the October audit repair, restore the pre-simplify dump into a separate
+scratch database, then run `uv run --with 'psycopg[binary]'
+scripts/rebattery/restore_demand_context.py --source-db audit_old` (dry-run).
+`--apply` commits the reviewed context and exact teaser-linked lot buyers in one
+transaction with read-back. It prints one decision per original row, preserves
+original observation dates and demand IDs, and never reopens demand. Deterministic
+IDs prevent duplicate notes on rerun; existing repaired notes are not overwritten.
+Drop the scratch database afterward; never restore the dump into `denchclaw`.
+
 Migration `044` separates current sourcing work from buyer discovery. **Demand**
 is a buyer's own dated, actionable request or standing ask with an identified
 buyer, product family and quantity. **Qualifying** holds a specific need that
