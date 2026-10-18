@@ -10,6 +10,10 @@ export type Participant = {
   is_self?: boolean;
 };
 
+export function participantLabel(person: Participant): string {
+  return person.is_self ? `You${person.email ? ` (${person.email})` : ""}` : person.name?.trim() || person.email || "Unknown";
+}
+
 /**
  * Avatar pile + name chips for a thread's participants. Compact mode
  * shows up to N avatars + overflow "+M"; expanded mode lists everyone
@@ -42,12 +46,12 @@ export function ParticipantChips({
             type="button"
             onClick={() => onOpenPerson?.(p.id)}
             disabled={!onOpenPerson}
-            title={p.name ?? p.email ?? undefined}
+            title={participantLabel(p)}
             className="rounded-full ring-2 ring-[var(--color-bg)] disabled:cursor-default"
           >
             <PersonAvatar
               src={p.avatar_url}
-              name={p.name ?? p.email}
+              name={participantLabel(p)}
               seed={p.email ?? p.id}
               size="sm"
             />
@@ -82,12 +86,12 @@ export function ParticipantChips({
         >
           <PersonAvatar
             src={p.avatar_url}
-            name={p.name ?? p.email}
+            name={participantLabel(p)}
             seed={p.email ?? p.id}
             size="sm"
           />
           <span className="truncate max-w-[140px]">
-            {p.name?.trim() || p.email || "Unknown"}
+            {participantLabel(p)}
           </span>
         </button>
       ))}

@@ -19,6 +19,7 @@ export type Thread = {
   primary_sender_name: string | null;
   primary_sender_email: string | null;
   is_self?: boolean;
+  counterparty?: { email: string | null; name: string | null };
 };
 
 export type Message = {

@@ -36,14 +36,33 @@ describe("merged mail", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns?"), expect.anything());
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/followups?"), expect.anything());
   });
-  it("excludes campaign deliveries from unread but retains inbound campaign replies", async () => {
-    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({}), message({ id: "bulk", thread_id: "bulk-thread", campaign_id: "campaign", subject: "Bulk campaign", direction: "outbound" }), message({ id: "campaign-reply", thread_id: "reply-thread", campaign_id: "campaign", subject: "Campaign reply" })], nextCursor: null })));
+  it("counts unread per server thread, keeps real message totals and includes latest outbound replies", async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [
+      {...message({}),message_count:3},
+      {...message({ id: "latest", thread_id: "replied-thread", campaign_id: "campaign", subject: "Latest outbound reply", direction: "outbound", is_self:true }),message_count:7},
+      {...message({ id: "campaign-reply", thread_id: "reply-thread", campaign_id: "campaign", subject: "Campaign reply" }),message_count:2},
+    ], nextCursor: null })));
     render(<InboxView />);
     expect(await screen.findByLabelText("Unread conversations")).toHaveTextContent("0 unread conversations");
     await screen.findByText("Synthetic conversation");
     expect(screen.getByLabelText("Unread conversations")).toHaveTextContent("2 unread conversations");
     expect(screen.getByText("Campaign reply")).toBeInTheDocument();
-    expect(screen.queryByText("Bulk campaign")).not.toBeInTheDocument();
+    expect(screen.getByText("Latest outbound reply")).toBeInTheDocument();
+    expect(screen.getByText("(7)")).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+  });
+  it.each(["conversations", "sent"] as const)("shows counterparties instead of You in %s", async (view) => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ items: [
+      message({ id: "out", thread_id: "out", is_self: true, direction: "outbound", from_email: "admin@rebattery.io", to_emails: ["alex@rebattery.io", "buyer@example.test"], counterparty: { email: "buyer@example.test", name: "Synthetic Buyer" } }),
+      message({ id: "internal", thread_id: "internal", is_self: true, from_email: "alex@rebattery.io", to_emails: ["ari@rebattery.io"], counterparty: { email: "ari@rebattery.io", name: null } }),
+      message({ id: "missing", thread_id: "missing", from_email: null }),
+    ], nextCursor: null })));
+    render(<InboxView initialView={view} />);
+    await screen.findByText("Synthetic Buyer");
+    expect(screen.getByText("Unknown sender")).toBeInTheDocument();
+    expect(screen.queryByText("You")).not.toBeInTheDocument();
+    expect(screen.getAllByText("To:")).toHaveLength(2);
+    expect(screen.getByText("ari@rebattery.io")).toBeInTheDocument();
   });
   it("maps all filters to API query parameters including whole-log scope", async () => {
     render(<InboxView initialView="sent" />);
