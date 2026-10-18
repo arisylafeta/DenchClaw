@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, conversationKey, type HermesConversation } from "@/lib/hermes-conversations";
 import { chatStatus, HermesConversationList, HermesNewChatDialog, useHermesConversations } from "./hermes-conversations";
@@ -197,5 +197,31 @@ describe("chat view edge cases", () => {
     const result = applyChatView([{ ...solo, source: "cron" }, { ...solo, key: "other", source: "discord", title: "Unmatched", participants: [{ profile: "beta", name: "Beta" }] }], DEFAULT_VIEW, " alpha ");
     expect(result).toMatchObject({ sections: [], shown: 0, hiddenCount: 1 });
     expect(result.channels).toEqual([{ id: "cron", label: "Scheduled", count: 1 }, { id: "webhook", label: "Webhook", count: 0 }]);
+  });
+});
+
+describe("useHermesConversations loading and deep links", () => {
+  it("is not ready until the first listing settles, even when the backend is not Hermes", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ backend: "legacy" }));
+    const { result } = renderHook(() => useHermesConversations());
+    expect(result.current).toMatchObject({ ready: false, enabled: false });
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.enabled).toBe(false);
+  });
+
+  it("opens a conversation missing from the listing and reports one that cannot be loaded", async () => {
+    const { result } = renderHook(() => useHermesConversations());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const detail = { ...solo, key: "older", title: "Older chat" };
+    fetchMock.mockImplementation(async (url: string) => url.endsWith("/missing")
+      ? Response.json({ error: "Could not load Hermes conversation" }, { status: 502 })
+      : Response.json({ conversation: detail, messages: [] }));
+    let opened = false;
+    await act(async () => { opened = await result.current.selectKey("older"); });
+    expect(opened).toBe(true);
+    expect(result.current.selected?.title).toBe("Older chat");
+    await act(async () => { opened = await result.current.selectKey("missing"); });
+    expect(opened).toBe(false);
+    expect(result.current.selected?.title).toBe("Older chat");
   });
 });

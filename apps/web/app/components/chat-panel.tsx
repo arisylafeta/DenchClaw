@@ -32,6 +32,7 @@ import type {
 	SidebarSubagentInfo,
 	WebSession,
 } from "./workspace/chat-sessions-sidebar";
+import { ChatTranscriptSkeleton } from "./chat-loading-skeleton";
 import { UnicodeSpinner } from "./unicode-spinner";
 import { Dialog, DialogContent } from "./ui/dialog";
 import type { ChatPanelRuntimeState } from "@/lib/chat-session-registry";
@@ -993,7 +994,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const [currentSessionId, setCurrentSessionId] = useState<
 			string | null
 		>(null);
-		const [loadingSession, setLoadingSession] = useState(false);
+		// A panel opened on an existing session starts in the loading state so the home screen never flashes.
+		const [loadingSession, setLoadingSession] = useState(() => !!initialSessionId && !subagentSessionKey && !gatewaySessionKey);
 
 		// ── Attachment state ──
 		const [attachedFiles, setAttachedFiles] = useState<
@@ -2550,10 +2552,20 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		});
 		const showStreamActivity = isStreaming && !!streamActivityLabel;
 
+		// Gateway chats get their transcript from a snapshot after mount; until it lands the
+		// message list is empty, which must not be mistaken for a new conversation.
+		const nativeHydrating =
+			nativeGateway &&
+			nativeChat.state.hydrating &&
+			nativeChat.state.messages.length === 0 &&
+			!nativeChat.state.busy &&
+			nativeChat.connection !== "lost";
+		const transcriptLoading = loadingSession || nativeHydrating;
+
 		const showHeroState =
 			(nativeGateway ? nativeChat.state.messages.length === 0 && !nativeChat.state.busy && nativeChat.state.pendingRequests.length === 0 : messages.length === 0) &&
 			!isSubagentMode &&
-			!loadingSession &&
+			!transcriptLoading &&
 			optimisticUserText === null;
 
 		// ── Input bar content (shared between hero and bottom positions) ──
@@ -2627,7 +2639,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+					disabled={transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 					compact={compact}
 					searchFn={searchFn}
 				/>
@@ -2667,7 +2679,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
 							compact={compact}
-							disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+							disabled={transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 							preferServerTranscription={preferServerVoiceInput}
 							onTranscript={handleVoiceTranscript}
 						/>
@@ -2689,7 +2701,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								onClick={() => editorRef.current?.submit()}
 								disabled={
 									(editorEmpty && attachedFiles.length === 0) ||
-									loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
+									transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
 								style={{
@@ -2901,24 +2913,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				<div
 					className={compact ? "px-3" : "px-6"}
 				>
-					{loadingSession ? (
-						<div className="flex items-center justify-center h-full min-h-[60vh]">
-							<div className="text-center">
-								<UnicodeSpinner
-									name="braille"
-									className="block text-2xl mx-auto mb-3"
-									style={{ color: "var(--color-text-muted)" }}
-								/>
-								<p
-									className="text-xs"
-									style={{
-										color: "var(--color-text-muted)",
-									}}
-								>
-									Loading session...
-								</p>
-							</div>
-						</div>
+					{transcriptLoading ? (
+						<ChatTranscriptSkeleton compact={compact} />
 					) : (showHeroState && !mounted) ? (
 						<div className={`flex items-center justify-center h-full ${compact ? "min-h-[40vh]" : "min-h-[60vh]"}`} />
 					) : showHeroState ? (

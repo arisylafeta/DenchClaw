@@ -43,6 +43,8 @@ export function useHermesConversations() {
   const [creating, setCreating] = useState(false);
   const [dialog, setDialog] = useState<NewChatMode | null>(null);
   const [seen, setSeen] = useState<Record<string, number>>({});
+  // False until the first listing request settles; separates "still asking" from "not a Hermes backend".
+  const [ready, setReady] = useState(false);
   const newChat = useCallback((mode: NewChatMode = "solo") => setDialog(mode), []);
   const closeDialog = useCallback(() => setDialog(null), []);
   const clear = useCallback(() => setSelected(null), []);
@@ -51,6 +53,7 @@ export function useHermesConversations() {
       const data = await jsonResponse(await fetch("/api/hermes/conversations"));
       if (data.backend === "hermes") setListing(data);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load chats"); }
+    finally { setReady(true); }
   }, []);
   useEffect(() => { void reload(); const timer = setInterval(() => void reload(), 10_000); return () => clearInterval(timer); }, [reload]);
   useEffect(() => { setSeen(loadSeen()); }, []);
@@ -66,6 +69,15 @@ export function useHermesConversations() {
     });
   }, [listing, selected?.key]);
   const select = (row: HermesConversation) => { setSelected(row); setDialog(null); setError(null); };
+  /** Opens a conversation that is not in the listing (deep link, old chat). Resolves false when it cannot be loaded. */
+  const selectKey = useCallback(async (key: string): Promise<boolean> => {
+    try {
+      const data = await jsonResponse(await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}`));
+      if (!data.conversation) return false;
+      setSelected(data.conversation); setDialog(null); setError(null);
+      return true;
+    } catch { return false; }
+  }, []);
   const create = async (profiles: string[]) => {
     if (creating) return;
     setCreating(true); setError(null);
@@ -85,9 +97,9 @@ export function useHermesConversations() {
       return true;
     } catch (e) { setError(e instanceof Error ? e.message : "Could not rename chat"); return false; }
   };
-  return { enabled: listing?.backend === "hermes", listing, filter, setFilter, selected,
+  return { enabled: listing?.backend === "hermes", ready, listing, filter, setFilter, selected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    seen, error, creating, dialog, newChat, closeDialog, clear, select, create, rename, reload };
+    seen, error, creating, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; done means unseen output. */

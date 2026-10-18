@@ -2059,6 +2059,32 @@ label {
   animation: dench-shimmer 3s linear infinite;
 }
 
+/* Loading placeholders: a soft highlight sweeps across a muted block. */
+@keyframes dench-skeleton-sweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dench-skeleton {
+  background-color: var(--color-surface-hover);
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-text) 9%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: dench-skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dench-skeleton {
+    animation: none;
+    background-image: none;
+  }
+}
+
 @keyframes drawer-fade-in {
   from {
     opacity: 0;
