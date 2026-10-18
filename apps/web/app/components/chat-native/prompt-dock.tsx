@@ -12,19 +12,22 @@ import type { NativeTranscriptCallbacks } from "./types";
  * Everything the agent needs from you, or is running on the side, docks on top of the input box instead of
  * scrolling away in the transcript: questions, approvals, and subagents with their own activity.
  */
-export function PromptDock({ state, subagents, tails, callbacks }: {
+export function PromptDock({ state, subagents, tails, callbacks, composerTarget, disabled }: {
   state: Pick<ChatState, "pendingRequests" | "sessionId">;
   subagents: SubagentState;
   tails?: Readonly<Record<string, string>>;
   callbacks: NativeTranscriptCallbacks;
+  composerTarget?: HTMLElement | null;
+  disabled?: boolean;
 }) {
   const requests = state.pendingRequests;
+  const front = requests.find(request => request.kind === "clarify");
   const roots = buildSubagentTree(subagents.items);
   if (!requests.length && !roots.length) return null;
   return <div className="w-full" data-prompt-dock>
     {requests.map(request => request.kind === "approval"
       ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} />
-      : <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} />)}
+      : request === front || composerTarget === undefined ? <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} composerTarget={composerTarget} disabled={disabled} /> : <p key={request.id} className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">Another question is waiting</p>)}
     {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} />}
   </div>;
 }
@@ -37,9 +40,9 @@ function SubagentGroup({ roots, callbacks, tails }: { roots: readonly SubagentNo
   const finished = all.length - running;
   const plural = (count: number) => `${count} ${count === 1 ? "subagent" : "subagents"}`;
   const label = running ? `${plural(running)} running${finished ? ` · ${finished} done` : ""}` : `${plural(all.length)} finished`;
-  return <details className="group/agents bg-gradient-to-b from-[var(--color-surface-hover)] to-transparent px-3 pt-1 pb-2" aria-label="Subagents">
+  return <details className="group/agents px-3 pt-1 pb-2" aria-label="Subagents">
     <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
-      <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/agents:rotate-90" />
+      <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform motion-reduce:transition-none group-open/agents:rotate-90" />
       {running ? <ThinkingIndicator>{label}</ThinkingIndicator> : <span className="font-medium text-[var(--color-text-muted)]">{label}</span>}
     </summary>
     <div className="max-h-[40dvh] overflow-y-auto pb-1">{roots.map(agent => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={tails} />)}</div>

@@ -5,7 +5,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
-vi.mock("./tiptap/chat-editor", () => ({ ChatEditor: ({ onSubmit, onNativeFileDrop }: { onSubmit: (text: string, files: unknown[], html: string) => void; onNativeFileDrop?: (files: FileList) => void }) => <><button onClick={() => onSubmit("Continue native", [], "<p>Continue native</p>")}>Submit fixture</button><button onClick={() => onNativeFileDrop?.([new File(["picture"], "pic.png", { type: "image/png" })] as unknown as FileList)}>Attach image fixture</button></> }));
+vi.mock("./tiptap/chat-editor", async () => {
+  const { forwardRef, useState, useImperativeHandle } = await import("react");
+  return { ChatEditor: forwardRef(function EditorFixture({ onSubmit, onNativeFileDrop }: { onSubmit: (text: string, files: unknown[], html: string) => void; onNativeFileDrop?: (files: FileList) => void }, ref) {
+    const [draft, setDraft] = useState("");
+    useImperativeHandle(ref, () => ({ focus() {}, setText: setDraft, appendText: (text: string) => setDraft(previous => previous + text), insertFileMention() {}, clear: () => setDraft(""), isEmpty: () => !draft, submit: () => onSubmit(draft, [], "") }));
+    return <><textarea aria-label="Ordinary draft fixture" value={draft} onChange={event => setDraft(event.target.value)} /><button onClick={() => onSubmit("Continue native", [], "<p>Continue native</p>")}>Submit fixture</button><button onClick={() => onNativeFileDrop?.([new File(["picture"], "pic.png", { type: "image/png" })] as unknown as FileList)}>Attach image fixture</button></>;
+  }) };
+});
 vi.mock("./chat-message", () => ({ ChatMessage: ({ message }: { message: unknown }) => <pre data-testid="rich-message">{JSON.stringify(message)}</pre> }));
 vi.mock("./hero-suggestions", () => ({ HeroSuggestions: () => null }));
 vi.mock("./chat-voice-input-button", () => ({ ChatVoiceInputButton: () => null }));
@@ -168,6 +175,57 @@ describe("gateway ChatPanel solo transport", () => {
     fireEvent.click(screen.getByRole("radio", { name: /West/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/clarify`, expect.objectContaining({ body: JSON.stringify({ request_id: "srq-clarify", answers: { direction: "West" } }) })));
   });
+  it("routes the main composer's free answer to the exact clarify request, never prompt/steer, and resumes ordinary sends", async () => {
+    const ref = React.createRef<ChatPanelHandle>();
+    const { container } = render(<ChatPanel ref={ref} nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    openGateway({ running: true });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ordinary draft fixture" }), { target: { value: "Keep my ordinary draft" } });
+    FakeEventSource.instance.emit("request", { key, id: "srq-free", method: "clarify", params: { request_id: "payload-free", questions: [{ qid: "route", question: "Which route?", choices: ["North", "Other"] }] } });
+    const answer = screen.getByRole("textbox", { name: "Other" });
+    expect(answer.closest("[data-chat-drop-target]")).not.toBeNull();
+    expect(container.querySelector("[data-prompt-dock] textarea")).toBeNull();
+    expect((answer.closest("[data-chat-drop-target]") as HTMLElement).style.background).toContain("linear-gradient");
+    expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit fixture" })).toBeNull();
+    await act(() => ref.current!.sendNewMessage("Must not steer"));
+    fireEvent.change(answer, { target: { value: "A quieter route" } });
+    fireEvent.keyDown(answer, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(answer, { key: "Enter", isComposing: true });
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/clarify") || url.endsWith("/prompt") || url.endsWith("/steer"))).toBe(false);
+    fireEvent.keyDown(answer, { key: "Enter" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/clarify`, expect.objectContaining({ body: JSON.stringify({ request_id: "srq-free", answers: { route: "A quieter route" } }) })));
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/prompt") || url.endsWith("/steer"))).toBe(false);
+    await screen.findByRole("button", { name: "Submit fixture" });
+    expect(screen.getByRole("textbox", { name: "Ordinary draft fixture" })).toHaveValue("Keep my ordinary draft");
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === `${endpoint}/prompt`)).toBe(true));
+  });
+
+  it("retains the answer on failure and retries the same identity without sending saved attachments", async () => {
+    let fail = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/workspace/upload") return Response.json({ ok: true, path: "uploads/pic.png" });
+      if (url.endsWith("/clarify") && fail) return Response.json({ error: "Try again" }, { status: 500 });
+      return Response.json({});
+    });
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    openGateway({ running: true });
+    fireEvent.click(screen.getByRole("button", { name: "Attach image fixture" }));
+    await waitFor(() => expect(screen.getByAltText("pic.png")).toHaveStyle({ opacity: "1" }));
+    FakeEventSource.instance.emit("request", { key, id: "retry", method: "clarify", params: { questions: [{ qid: "why", question: "Why?" }] } });
+    expect(screen.getByText(/Attachments are saved/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Keep this answer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await screen.findByRole("textbox", { name: "Your answer" });
+    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Keep this answer");
+    expect(screen.getAllByRole("alert").some(node => node.textContent?.includes("Try again"))).toBe(true);
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/clarify"))).toHaveLength(2));
+    for (const [, init] of fetchMock.mock.calls.filter(([url]) => url.endsWith("/clarify"))) expect(JSON.parse(init.body)).toEqual({ request_id: "retry", answers: { why: "Keep this answer" } });
+    await waitFor(() => expect(screen.getByAltText("pic.png")).toBeVisible());
+  });
+
   it("renders subagent progress and sends queued prompts directly; Stop interrupts", async () => {
     render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
     openGateway({ running: true });

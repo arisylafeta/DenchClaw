@@ -1175,6 +1175,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		}, [nativeConversationKey]);
 		const nativeGateway = nativeTransport === "gateway" && !!nativeConversationKey && !groupKey;
 		const nativeChat = useNativeHermesChat({ conversationKey: nativeConversationKey, enabled: nativeGateway && visible !== false });
+		const pendingNativeRequest = nativeGateway && nativeChat.state.pendingRequests.length > 0;
+		const clarificationOpen = nativeGateway && nativeChat.state.pendingRequests.some(request => request.kind === "clarify");
+		const [clarifyComposerTarget, setClarifyComposerTarget] = useState<HTMLDivElement | null>(null);
+		const pendingRequestRef = useRef(pendingNativeRequest);
+		pendingRequestRef.current = pendingNativeRequest;
+
 		const groupCursorRef = useRef(0);
 		const [groupWorking, setGroupWorking] = useState(false);
 		const [groupSending, setGroupSending] = useState(false);
@@ -1916,7 +1922,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				html: string,
 				overrideAttachments?: AttachedFile[],
 			) => {
-				if (nativeGateway && (nativeChat.readOnly || nativeChat.connection === "lost")) return;
+				if (nativeGateway && (pendingRequestRef.current || nativeChat.readOnly || nativeChat.connection === "lost")) return;
 				const hasText = text.trim().length > 0;
 				const hasMentions = mentionedFiles.length > 0;
 				// Use override attachments (from queue) or current state
@@ -2484,6 +2490,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		 *  Shows files instantly with a local preview, then uploads in the background. */
 		const uploadAndAttachNativeFiles = useCallback(
 			async (files: FileList) => {
+				if (pendingRequestRef.current) return;
 				setAttachmentError(null);
 				const {
 					files: preparedFiles,
@@ -2583,11 +2590,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
 		) : (
 			<>
-				{nativeGateway && <PromptDock state={nativeChat.state} subagents={nativeChat.subagents} tails={nativeChat.tails} callbacks={{
+				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} tails={nativeChat.tails} callbacks={{
 					onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
 					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
 				}} />}
+				<div ref={setClarifyComposerTarget} hidden={!clarificationOpen} />
+				{clarificationOpen && <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">
+					{attachedFiles.length > 0 && <p>Attachments are saved for your next message. Answers are text only.</p>}
+					{isStreaming && <button type="button" onClick={() => handleStop()} className="min-h-9 rounded-md px-2 focus-visible:outline-2">Stop generating</button>}
+				</div>}
+				{/* Keep the ordinary editor and attachment draft mounted, never reuse them as an answer. */}
+				<div hidden={clarificationOpen}>
 				{!nativeGateway && queuedMessages.length > 0 && (
 					<div className={compact ? "px-2 pt-2" : "px-3 pt-3"}>
 						<div
@@ -2647,7 +2661,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+					disabled={pendingNativeRequest || transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 					compact={compact}
 					searchFn={searchFn}
 				/>
@@ -2670,6 +2684,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								/>
 								<button
 									type="button"
+									disabled={pendingNativeRequest}
 									onClick={() => fileInputRef.current?.click()}
 									className="p-1.5 rounded-lg hover:opacity-80 transition-opacity"
 									style={{
@@ -2687,7 +2702,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
 							compact={compact}
-							disabled={transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+							disabled={pendingNativeRequest || transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 							preferServerTranscription={preferServerVoiceInput}
 							onTranscript={handleVoiceTranscript}
 						/>
@@ -2708,7 +2723,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								type="button"
 								onClick={() => editorRef.current?.submit()}
 								disabled={
-									(editorEmpty && attachedFiles.length === 0) ||
+									pendingNativeRequest || (editorEmpty && attachedFiles.length === 0) ||
 									transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -2726,15 +2741,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						)}
 					</div>
 				</div>
+				</div>
 			</>
 		);
 
 		const inputBarContainer = (onDragOverHandler: React.DragEventHandler, onDragLeaveHandler: React.DragEventHandler, onDropHandler: React.DragEventHandler) => (
 			<div
 				data-chat-drop-target=""
-				className={`${compact ? "rounded-2xl" : "rounded-3xl"} overflow-hidden border shadow-[0_0_32px_rgba(0,0,0,0.07)] transition-[outline,box-shadow,border-color] duration-150 ease-out focus-within:border-[var(--color-border-strong)]! data-drag-hover:outline-2 data-drag-hover:outline-dashed data-drag-hover:outline-(--color-accent) data-drag-hover:-outline-offset-2 data-drag-hover:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-accent)_15%,transparent),0_0_32px_rgba(0,0,0,0.07)]!`}
+				className={`${compact ? "rounded-2xl" : "rounded-3xl"} overflow-hidden border shadow-[0_0_32px_rgba(0,0,0,0.07)] transition-[outline,box-shadow,border-color] motion-reduce:transition-none duration-150 ease-out focus-within:border-[var(--color-border-strong)]! data-drag-hover:outline-2 data-drag-hover:outline-dashed data-drag-hover:outline-(--color-accent) data-drag-hover:-outline-offset-2 data-drag-hover:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-accent)_15%,transparent),0_0_32px_rgba(0,0,0,0.07)]!`}
 				style={{
-					background: "color-mix(in srgb, var(--color-surface) 75%, transparent)",
+					background: nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0)
+						? "linear-gradient(to bottom, var(--color-surface-hover) 0%, var(--color-bg) min(300px, 70%), var(--color-bg) 100%)"
+						: "color-mix(in srgb, var(--color-surface) 75%, transparent)",
 					backdropFilter: "blur(16px) saturate(180%)",
 					WebkitBackdropFilter: "blur(16px) saturate(180%)",
 					borderColor: "var(--color-border)",
@@ -2748,6 +2766,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		);
 
 		const handleInputDragOver: React.DragEventHandler = (e) => {
+			if (pendingRequestRef.current) { e.preventDefault(); return; }
 			if (
 				e.dataTransfer?.types.includes("application/x-file-mention") ||
 				e.dataTransfer?.types.includes("Files")
@@ -2763,6 +2782,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			}
 		};
 		const handleInputDrop: React.DragEventHandler = (e) => {
+			if (pendingRequestRef.current) { e.preventDefault(); return; }
 			(e.currentTarget as HTMLElement).removeAttribute("data-drag-hover");
 			const data = e.dataTransfer?.getData("application/x-file-mention");
 			if (data) {
