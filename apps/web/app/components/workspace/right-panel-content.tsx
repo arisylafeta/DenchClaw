@@ -40,6 +40,8 @@ import type {
   ContentTab,
   WorkspaceTabsState,
 } from "@/lib/workspace-tabs";
+import { DocumentDirtyContext } from "./document-dirty-context";
+import type { SubscribeWorkspaceChanges } from "../../hooks/use-workspace-watcher";
 import { useTabContent } from "../../workspace/use-tab-content";
 import type { ContentState } from "../../workspace/content-state";
 
@@ -51,6 +53,7 @@ export type EntryModalState = {
 export type RightPanelContentProps = {
   /** Source-of-truth tabs state. */
   tabsState: WorkspaceTabsState;
+  subscribeChanges?: SubscribeWorkspaceChanges;
   /** Currently-active content tab (already selected by the parent). */
   activeContentTab: ContentTab | null;
 
@@ -156,11 +159,17 @@ export function RightPanelContent(props: RightPanelContentProps) {
     renderPlaceholder,
   } = props;
 
-  const { content, refreshActive } = useTabContent(activeContentTab, {
+  const { content, refreshActive, invalidateFile, setDirty, pendingExternalUpdate, externalVersion } = useTabContent(activeContentTab, {
+    tabs: tabsState.contentTabs,
+    workspaceRoot,
     tree,
     cronJobs,
     onDuckDBMissing,
   });
+  const reportDirty = useCallback((dirty: boolean) => {
+    if (activeContentTab) setDirty(activeContentTab.id, dirty);
+  }, [activeContentTab?.id, setDirty]);
+  useEffect(() => props.subscribeChanges?.(invalidateFile), [props.subscribeChanges, invalidateFile]);
   const entryTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -207,7 +216,12 @@ export function RightPanelContent(props: RightPanelContentProps) {
 
         {activeContentTab && content.kind !== "none" ? (
           <div className="flex-1 overflow-y-auto">
-            {renderContent(content, activeContentTab)}
+            {pendingExternalUpdate && <div role="status" className="px-4 py-2 text-sm border-b">This file changed on disk. Your unsaved edits are preserved. Saving uses the existing overwrite behavior.</div>}
+            <DocumentDirtyContext.Provider value={reportDirty}>
+              <div key={`${activeContentTab.id}:${externalVersion}`} className="h-full">
+                {renderContent(content, activeContentTab)}
+              </div>
+            </DocumentDirtyContext.Provider>
           </div>
         ) : (
           <div className="flex-1 min-w-0 flex items-center justify-center">

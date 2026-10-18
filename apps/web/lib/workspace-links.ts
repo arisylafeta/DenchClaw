@@ -418,10 +418,9 @@ export function buildCrmLink(view: CrmView): string {
 
 function tryParseAppUrl(href: string): URL | null {
   try {
-    if (href.startsWith("/")) {
-      return new URL(href, "http://localhost");
-    }
-    const u = new URL(href);
+    const origin = typeof window === "undefined" ? "https://crm.rebattery.io" : window.location.origin;
+    const u = new URL(href, origin);
+    if (u.origin !== origin || u.username || u.password) return null;
     if (u.pathname === "/" || u.pathname === "/workspace") return u;
   } catch { /* invalid */ }
   return null;
@@ -467,6 +466,8 @@ export function parseWorkspaceLink(href: string): WorkspaceLink | null {
 /** Check if an href is an app-internal workspace link (root, legacy /workspace, or @entry/). */
 export function isWorkspaceLink(href: string): boolean {
   if (href.startsWith("@entry/")) return true;
+  if (!tryParseAppUrl(href)) return false;
+  if (/^https?:/.test(href)) return true;
   // Legacy /workspace links
   if (
     href === "/workspace" ||
@@ -478,6 +479,21 @@ export function isWorkspaceLink(href: string): boolean {
   if (href.startsWith("/?")) return true;
   if (href.startsWith("/#")) return true;
   return false;
+}
+
+/** Existing workspace container click seam, shared with synthetic DOM regressions. */
+export function interceptWorkspaceLinkClick(
+  event: { target: EventTarget | null; preventDefault: () => void; stopPropagation: () => void },
+  navigate: (href: string) => void,
+): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const href = target.closest("a")?.getAttribute("href");
+  if (!href || !isWorkspaceLink(href)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  navigate(href);
+  return true;
 }
 
 /** Check if an href is a workspace-internal link (not external URL). */

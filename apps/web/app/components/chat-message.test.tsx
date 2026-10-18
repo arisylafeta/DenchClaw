@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMessage } from "./chat-message";
@@ -35,6 +35,12 @@ afterEach(() => {
 });
 
 describe("ChatMessage", () => {
+  it.each(["https://foreign.test/?path=report.md", "//foreign.test/?path=report.md"])("does not treat a foreign app-looking link as a local file: %s", href => {
+    const onFilePathClick = vi.fn();
+    render(<ChatMessage message={{ id: "synthetic-link", role: "assistant", parts: [{ type: "text", text: `[Foreign document](${href})` }] }} onFilePathClick={onFilePathClick} />);
+    expect(fireEvent.click(screen.getByRole("link", { name: "Foreign document" }))).toBe(true);
+    expect(onFilePathClick).not.toHaveBeenCalled();
+  });
   it("shows the speaker action for completed assistant text when voice playback is enabled", () => {
     render(
       <ChatMessage
