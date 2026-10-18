@@ -69,8 +69,8 @@ const POSTGRES_TABLE_BY_OBJECT: Record<string, string> = {
   companies: "crm_companies",
   opportunity: "crm_commercial_opportunities",
   opportunities: "crm_commercial_opportunities",
-  email_thread: "crm_email_threads",
-  email_message: "crm_email_messages",
+  email_thread: "mail_thread",
+  email_message: "mail_message",
   calendar_event: "crm_calendar_events",
   interaction: "crm_interactions",
 };
@@ -144,12 +144,12 @@ async function buildPostgresEntryItems(
     if (!tableName) {continue;}
     const existingColumns = await getTableColumns(tableName);
     const rowScope =
-      obj.name === "email_thread" || obj.name === "email_message"
-        ? "where mailbox_owner_id = $1::uuid"
+      ["mail_thread", "mail_message"].includes(tableName)
+        ? "where crm_visible = true and mailbox_owner_id = $1::uuid"
         : obj.name === "work_task"
           ? "where assignee_id = $1::uuid"
           : obj.name === "interaction"
-            ? "where email_message_id is null or exists (select 1 from crm_email_messages scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $1::uuid)"
+            ? "where email_message_id is null or exists (select 1 from mail_message scoped_message where scoped_message.id = crm_interactions.email_message_id and scoped_message.mailbox_owner_id = $1::uuid)"
             : "";
     const entries = await queryPg<Record<string, unknown>>(
       `select ${buildPostgresEntrySelect(fields, existingColumns)}

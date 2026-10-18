@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+import pytest
 
 spec = importlib.util.spec_from_file_location("check", Path(__file__).with_name("bulk_trade_inbox_check.py"))
 check = importlib.util.module_from_spec(spec)
@@ -375,10 +376,10 @@ class History(unittest.TestCase):
         self.assertEqual(kept[0]["proposed"], {"name": "New Person", "email": "new.person@supplier.test"})
 
 
-TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
+TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ.get("DENCH_MAIL_DSN")
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class FullRun(unittest.TestCase):
     """End to end against a throwaway database with every migration, the model mocked."""
 
@@ -391,24 +392,24 @@ class FullRun(unittest.TestCase):
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
                 values ('bt_run', 'supply', 'Run trade', '', '', 'confirmed', 'With buyers', 'packs') on conflict do nothing;
               insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_run', 'bt_run', 'Sam', 'sam-fullrun@supplier.test') on conflict do nothing;
-              insert into crm_email_threads (id, subject, gmail_thread_id) values ('thr_run', 'Stock', 'g-thr-run') on conflict do nothing;
-              insert into crm_email_messages (id, thread_id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_run', 'thr_run', 'Stock', now(), 'Manufacturing dates: 2021 to 2025. Packs in Turin.', 'g-msg-run',
+              insert into mail_thread (id, subject, gmail_thread_id, crm_visible) values ('thr_run', 'Stock', 'g-thr-run', true) on conflict do nothing;
+              insert into mail_message (direction, transport, state, crm_visible, id, thread_id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_run', 'thr_run', 'Stock', now(), 'Manufacturing dates: 2021 to 2025. Packs in Turin.', 'g-msg-run',
                        'sam-fullrun@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_new', 'Offer: 400 Leaf packs in Leeds', now(), '400 Nissan Leaf battery packs available in Leeds, 40 kWh.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_new', 'Offer: 400 Leaf packs in Leeds', now(), '400 Nissan Leaf battery packs available in Leeds, 40 kWh.',
                        'g-msg-new', 'seller@unknown.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_known', 'Batch update', now(), 'More packs for the run trade batch are ready.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_known', 'Batch update', now(), 'More packs for the run trade batch are ready.',
                        'g-msg-known', 'new.person@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_small', 'Three hybrid packs', now(), 'We have three Toyota Prius hybrid packs to sell.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_small', 'Three hybrid packs', now(), 'We have three Toyota Prius hybrid packs to sell.',
                        'g-msg-small', 'sophie@dismantler.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_recy', 'Recycling quote', now(), 'We can recycle the LMO packs for EUR 2,500 per tonne.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_recy', 'Recycling quote', now(), 'We can recycle the LMO packs for EUR 2,500 per tonne.',
                        'g-msg-recy', 'quotes@recycler.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_two', 'Two packs wanted', now(), 'I need two 60 kWh packs for testing.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_two', 'Two packs wanted', now(), 'I need two 60 kWh packs for testing.',
                        'g-msg-two', 'massimo@lab.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
 
@@ -511,7 +512,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(runs[-1][2], 0)
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class HistoryRun(unittest.TestCase):
     def test_reads_all_of_a_trades_mail_oldest_first_and_keeps_the_latest_value(self):
         import psycopg2
@@ -522,17 +523,17 @@ class HistoryRun(unittest.TestCase):
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage)
                 values ('bt_hist', 'supply', 'History trade', '', '', 'confirmed', 'Needs info') on conflict do nothing;
               insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_hist', 'bt_hist', 'Nic', 'nic@oem.test') on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select v.id, 'Batch', v.at::timestamptz, now(), v.body, v.gid, 'nic@oem.test', u.id
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, created_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, v.id, 'Batch', v.at::timestamptz, now(), v.body, v.gid, 'nic@oem.test', u.id
                 from crm_users u, (values
                   ('h1', '2025-05-01', 'We have 600 packs of 23.8 kWh. ' || repeat('Older context. ', 1200), 'g-h1'),
                   ('h2', '2026-09-20', 'Update: 580 packs remain available.', 'g-h2')) as v(id, at, body, gid)
                 where u.email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'h-other', 'Other', now(), now(), 'Unrelated 999 packs', 'g-other', 'someone@else.test', id
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, created_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'h-other', 'Other', now(), now(), 'Unrelated 999 packs', 'g-other', 'someone@else.test', id
                 from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'h-serbia', 'Serbian packs for Ecovip', '2026-03-26', now(), 'Customer is Ecovip. 300 Serbian packs.', 'g-serbia',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, created_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'h-serbia', 'Serbian packs for Ecovip', '2026-03-26', now(), 'Customer is Ecovip. 300 Serbian packs.', 'g-serbia',
                        'nic@oem.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
         seen, placed = [], []
@@ -579,7 +580,7 @@ class HistoryRun(unittest.TestCase):
         self.assertEqual(run, ("history", "ok", 3))
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class DemandRun(unittest.TestCase):
     def test_new_sender_with_matching_name_does_not_reuse_another_buyer(self):
         from demand_lifecycle import resolve_entity
@@ -1026,14 +1027,14 @@ class DemandRun(unittest.TestCase):
                 ('btd_w', 'standing', 'agreed', 'Waiting Energy', 'p_wait', 'co_wait', 'LFP packs', null, '2026-01-05'),
                 ('btd_d', 'standing', 'stated', 'Answered Ltd', 'p_done', null, 'Modules', null, %(today)s),
                 ('btd_o', 'request', null, 'Away GmbH', 'p_ooo', null, 'CATL cells', %(soon)s, %(today)s) on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email) values
-                ('m_out_w', 'Offer', now() - interval '5 days', null, 'alex@rebattery.io'),
-                ('m_in_w', 'Re: Offer, can you do 40 packs?', now() - interval '3 days', 'p_wait', 'wanda@waiting.example'),
-                ('m_in_d', 'Question', now() - interval '3 days', 'p_done', 'dan@answered.example'),
-                ('m_out_d', 'Re: Question', now() - interval '2 days', null, 'ari@rebattery.io'),
-                ('m_out_o', 'Cells', now() - interval '2 days', null, 'alex@rebattery.io'),
-                ('m_in_o', 'Automatic reply: Cells', now() - interval '1 day', 'p_ooo', 'otto@away.example') on conflict do nothing;
-              insert into crm_email_message_recipients (message_id, person_id, recipient_type) values
+              insert into mail_message (direction,transport,purpose,state,crm_visible,id,subject,sent_at,from_person_id,from_email) values
+                ('outbound','gmail','personal','accepted',true,'m_out_w', 'Offer', now() - interval '5 days', null, 'alex@rebattery.io'),
+                ('inbound','gmail','personal','received',true,'m_in_w', 'Re: Offer, can you do 40 packs?', now() - interval '3 days', 'p_wait', 'wanda@waiting.example'),
+                ('inbound','gmail','personal','received',true,'m_in_d', 'Question', now() - interval '3 days', 'p_done', 'dan@answered.example'),
+                ('outbound','gmail','personal','accepted',true,'m_out_d', 'Re: Question', now() - interval '2 days', null, 'ari@rebattery.io'),
+                ('outbound','gmail','personal','accepted',true,'m_out_o', 'Cells', now() - interval '2 days', null, 'alex@rebattery.io'),
+                ('inbound','gmail','personal','received',true,'m_in_o', 'Automatic reply: Cells', now() - interval '1 day', 'p_ooo', 'otto@away.example') on conflict do nothing;
+              insert into mail_message_recipient (message_id, person_id, recipient_type) values
                 ('m_out_w', 'p_wait', 'to'), ('m_out_d', 'p_done', 'cc'), ('m_out_o', 'p_ooo', 'to') on conflict do nothing;
               -- Added to a trade but not contacted yet: still no offer.
               insert into crm_bulk_trade_buyers (id, lot_id, name, status, demand_id) values ('b_sum', 'bt_sum', 'Away GmbH', 'To contact', 'btd_o')
@@ -1050,7 +1051,7 @@ class DemandRun(unittest.TestCase):
         self.assertIn("Buy-boxes to reconfirm: Waiting Energy (agreed)", text)
         self.assertNotIn("Answered Ltd", text.split("Buy-boxes to reconfirm:")[1])
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class HoldSummary(unittest.TestCase):
     def test_a_hold_ending_within_a_week_is_named_and_held_trades_are_still_watched(self):
         import psycopg2

@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from uuid import uuid4
+import pytest
 
 spec = importlib.util.spec_from_file_location("sync", Path(__file__).with_name("bulk_trade_auction_sync.py"))
 sync = importlib.util.module_from_spec(spec)
@@ -49,10 +50,10 @@ class FakePlatform:
         return [v for v in self._views if v["auction_id"] in ids]
 
 
-TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
+TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ.get("DENCH_MAIL_DSN")
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class SyncRun(unittest.TestCase):
     def test_multilot_invites_and_clicks_follow_only_the_matching_destination(self):
         import psycopg2
@@ -66,13 +67,13 @@ class SyncRun(unittest.TestCase):
                 cur.execute("insert into crm_people (id, full_name, email) values (%s, 'Fixture Buyer', %s)", (prefix, email))
                 cur.execute("insert into campaigns (id, campaign_name) values (%s, 'Synthetic multilot')", (prefix,))
                 cur.execute("""
-                    insert into crm_campaign_sends
-                      (id, campaign_id, person_id, listing_id, auction_url, recipient_email, state, accepted_at, provider_link_clicked_at)
-                    values (%s, %s, %s, %s, 'https://example.test/a', %s, 'accepted',
+                    insert into mail_message
+                      (direction, transport, purpose, id, campaign_id, person_id, listing_id, auction_url, recipient_email, state, accepted_at, clicked_at)
+                    values ('outbound', 'postmark-broadcast', 'marketing', %s, %s, %s, %s, 'https://example.test/a', %s, 'accepted',
                             '2026-09-24T09:00:00Z', '2026-09-24T10:00:00Z')
                 """, (prefix, prefix, prefix, primary, email))
                 cur.execute("""
-                    insert into crm_campaign_send_links (id, send_id, cta_key, destination_url, listing_id, first_clicked_at) values
+                    insert into mail_message_link (id, message_id, cta_key, destination_url, listing_id, first_clicked_at) values
                       (%s, %s, 'primary', 'https://example.test/a', %s, null),
                       (%s, %s, 'secondary', 'https://example.test/b', %s, null),
                       (%s, %s, 'sourcing', 'https://example.test/form', null, '2026-09-24T10:00:00Z')
@@ -84,8 +85,8 @@ class SyncRun(unittest.TestCase):
                 self.assertIsNone(first[email]["clicked_at"])
                 self.assertIsNone(second[email]["clicked_at"])
                 cur.execute("""
-                    update crm_campaign_send_links set first_clicked_at='2026-09-24T11:00:00Z'
-                    where send_id=%s and listing_id=%s
+                    update mail_message_link set first_clicked_at='2026-09-24T11:00:00Z'
+                    where message_id=%s and listing_id=%s
                 """, (prefix, secondary))
                 first = sync.collect_people(cur, "fixture-lot-a", primary, "fixture-auction-a", [], [])
                 second = sync.collect_people(cur, "fixture-lot-b", secondary, "fixture-auction-b", [], [])

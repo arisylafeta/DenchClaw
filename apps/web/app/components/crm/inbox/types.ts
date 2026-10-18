@@ -1,6 +1,6 @@
 /**
- * Shared types for the CRM inbox components. Keep in sync with
- * /api/crm/inbox/route.ts and /api/crm/inbox/[threadId]/route.ts.
+ * Conversation presentation types, populated from /api/mail/messages and
+ * /api/mail/threads/[id]. Provider metadata stays in the shared mail types.
  */
 
 import type { Participant } from "./participant-chips";
@@ -18,14 +18,20 @@ export type Thread = {
   primary_sender_id: string | null;
   primary_sender_name: string | null;
   primary_sender_email: string | null;
+  is_self?: boolean;
+  counterparty?: { email: string | null; name: string | null };
 };
 
 export type Message = {
   id: string;
+  direction?: "inbound" | "outbound";
+  is_self?: boolean;
+  to_emails?: string[];
   subject: string | null;
   sent_at: string | null;
   preview: string | null;
   body: string | null;
+  body_html?: string | null;
   has_attachments: boolean;
   gmail_message_id: string | null;
   sender_type: string | null;
@@ -34,6 +40,11 @@ export type Message = {
   from_email?: string | null;
   to_person_ids: string[];
   cc_person_ids: string[];
+  delivered_at?: string | null;
+  opened_at?: string | null;
+  clicked_at?: string | null;
+  replied_at?: string | null;
+  events?: { type: string; occurred_at: string }[];
 };
 
 export type SenderFilter = "person" | "all" | "automated";

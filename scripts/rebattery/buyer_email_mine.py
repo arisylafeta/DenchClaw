@@ -9,7 +9,7 @@ extract writes a run folder under /root/.hermes/workspace/artifacts/buyer-email-
 proposal with its evidence), review.md (the sheet Alex approves) and gaps.md (useful facts the CRM has no field
 for). Nothing is written to the CRM.
 
-Sources: Alex's mailbox only (crm_email_messages.mailbox_owner_id), every thread with an external participant,
+Sources: Alex's mailbox only (CRM-visible mail_message.mailbox_owner_id), every thread with an external participant,
 both directions, oldest first. Quoted replies and signatures are cut. Each company's history goes to the model
 in one call (the Hermes gateway), and every proposed value must quote a message exactly or it is dropped.
 
@@ -149,13 +149,13 @@ def company_history(cur, mailbox, person_ids):
     """Every message in Alex's mailbox on a thread where one of these people wrote or was addressed, oldest first."""
     cur.execute(
         """with threads as (
-             select distinct m.thread_id from crm_email_messages m
-             where m.mailbox_owner_id = %(mb)s and m.thread_id is not null
+             select distinct m.thread_id from mail_message m
+             where m.crm_visible and m.mailbox_owner_id = %(mb)s and m.thread_id is not null
                and (m.from_person_id = any(%(p)s)
-                    or exists (select 1 from crm_email_message_recipients r where r.message_id = m.id and r.person_id = any(%(p)s))))
-           select m.id, m.thread_id, m.subject, m.sent_at, m.from_email, m.body, m.body_preview
-           from crm_email_messages m join threads t on t.thread_id = m.thread_id
-           where m.mailbox_owner_id = %(mb)s
+                    or exists (select 1 from mail_message_recipient r where r.message_id = m.id and r.person_id = any(%(p)s))))
+           select m.id, m.thread_id, m.subject, m.sent_at, m.from_email, m.body_text as body, m.body_preview
+           from mail_message m join threads t on t.thread_id = m.thread_id
+           where m.crm_visible and m.mailbox_owner_id = %(mb)s
            order by m.sent_at nulls first, m.id""", {"mb": mailbox, "p": list(person_ids)})
     return cur.fetchall()
 
@@ -190,9 +190,9 @@ def busiest(cur, mailbox, limit, skip):
     """Companies whose inbound mail in Alex's mailbox most often uses buying language, excluding ReBattery,
     free-mail pseudo-companies and companies already done."""
     cur.execute(
-        """select p.company_id as id, c.name, m.body
-           from crm_email_messages m join crm_people p on p.id = m.from_person_id join crm_companies c on c.id = p.company_id
-           where m.mailbox_owner_id = %s and coalesce(m.from_email, '') !~* '@rebattery\\.io$'
+        """select p.company_id as id, c.name, m.body_text as body
+           from mail_message m join crm_people p on p.id = m.from_person_id join crm_companies c on c.id = p.company_id
+           where m.crm_visible and m.mailbox_owner_id = %s and coalesce(m.from_email, '') !~* '@rebattery\\.io$'
              and c.name !~* 'rebattery' and not (p.company_id = any(%s))""", (mailbox, list(skip)))
     hits = {}
     for r in cur.fetchall():

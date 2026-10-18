@@ -25,8 +25,8 @@ const COLUMNS = `
   (select to_char(max(p.last_interaction_at) at time zone 'Europe/London', 'YYYY-MM-DD')
      from crm_people p where p.company_id = d.company_id) as last_contact,
   to_char(campaign.at at time zone 'Europe/London', 'YYYY-MM-DD') as campaign_emailed_on,
-  (select to_char(min(m.sent_at) at time zone 'Europe/London', 'YYYY-MM-DD') from crm_email_messages m
-    where campaign.at is not null and m.sent_at > campaign.at
+  (select to_char(min(m.sent_at) at time zone 'Europe/London', 'YYYY-MM-DD') from mail_message m
+    where m.direction = 'inbound' and campaign.at is not null and m.sent_at > campaign.at
       and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
       and exists (select 1 from crm_people fp where fp.company_id = d.company_id
                    and (fp.id = m.from_person_id or lower(fp.email) = lower(m.from_email)))) as campaign_replied_on,
@@ -38,8 +38,8 @@ const FROM = `
   left join crm_users owner on owner.id = d.owner_user_id
   left join crm_people person on person.id = d.next_step_person_id
   left join lateral (
-    select max(s.accepted_at) as at from crm_campaign_sends s left join crm_people sp on sp.id = s.person_id
-     where s.accepted_at is not null and coalesce(s.company_id, sp.company_id) = d.company_id
+    select max(s.accepted_at) as at from mail_message s left join crm_people sp on sp.id = s.person_id
+     where s.direction = 'outbound' and s.campaign_id is not null and s.accepted_at is not null and coalesce(s.company_id, sp.company_id) = d.company_id
   ) campaign on true`;
 
 const select = (where: string) => `select ${COLUMNS} from ${FROM} ${where}`;
@@ -111,13 +111,13 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
     queryPg<{ at: string; subject: string | null; from: string | null; outgoing: boolean }>(
       `select m.sent_at as at, m.subject, m.from_email as from,
               not exists (select 1 from crm_people p where p.id = m.from_person_id and p.company_id = $2) as outgoing
-         from crm_email_messages m
-        where m.mailbox_owner_id = $1::uuid
+         from mail_message m
+        where m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $1::uuid
           and exists (
             select 1 from crm_people p
              where p.company_id = $2
                and (p.id = m.from_person_id
-                 or exists (select 1 from crm_email_message_recipients r where r.message_id = m.id and r.person_id = p.id)))
+                 or exists (select 1 from mail_message_recipient r where r.message_id = m.id and r.person_id = p.id)))
         order by m.sent_at desc nulls last limit 20`,
       [viewerId, dismantler.company_id],
     ),
@@ -132,18 +132,18 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
     ),
     // Replies count from any synced mailbox, like campaign pages; only their date is shown here.
     queryPg<Record<keyof OutreachSend, unknown>>(
-      `select s.campaign_id, c.campaign_name as campaign, s.recipient_email as recipient, s.rendered_subject as subject,
-              s.rendered_text as text, s.state, s.accepted_at, s.delivered_at, s.bounced_at,
-              s.provider_opened_at as opened_at, s.provider_link_clicked_at as clicked_at,
-              (select min(m.sent_at) from crm_email_messages m
-                where s.accepted_at is not null and m.sent_at > s.accepted_at
+      `select s.campaign_id, c.campaign_name as campaign, s.recipient_email as recipient, s.subject,
+              s.body_text as text, s.state, s.accepted_at, s.delivered_at, s.bounced_at,
+              s.opened_at, s.clicked_at,
+              (select min(m.sent_at) from mail_message m
+                where m.direction = 'inbound' and s.accepted_at is not null and m.sent_at > s.accepted_at
                   and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
                   and exists (select 1 from crm_people fp where fp.company_id = $1
                                and (fp.id = m.from_person_id or lower(fp.email) = lower(m.from_email)))) as replied_at
-         from crm_campaign_sends s
+         from mail_message s
          join campaigns c on c.id = s.campaign_id
          left join crm_people sp on sp.id = s.person_id
-        where coalesce(s.company_id, sp.company_id) = $1
+        where s.direction = 'outbound' and coalesce(s.company_id, sp.company_id) = $1
         order by coalesce(s.accepted_at, s.created_at) desc limit 10`,
       [dismantler.company_id],
     ),

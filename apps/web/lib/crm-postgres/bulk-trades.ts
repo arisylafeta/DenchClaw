@@ -15,7 +15,7 @@ const TRADE_COLUMNS = `
   to_char(greatest(lot.last_touched,
     (select max(event.occurred_at)::date from crm_bulk_trade_events event where event.lot_id = lot.id),
     (select max(buyer.last_touch_on) from crm_bulk_trade_buyers buyer where buyer.lot_id = lot.id),
-    (select max(thread.last_message_at)::date from crm_email_threads thread where
+    (select max(thread.last_message_at)::date from mail_thread thread where thread.crm_visible and
       (not exists(select 1 from crm_bulk_trade_threads attributed
         where attributed.thread_key = 'gmail:' || thread.gmail_thread_id)
        or exists(select 1 from crm_bulk_trade_threads attributed where attributed.lot_id = lot.id
@@ -27,10 +27,10 @@ const TRADE_COLUMNS = `
         (evidence.evidence_kind = 'gmail_thread'
           and evidence.evidence_id in (thread.id, thread.gmail_thread_id, 'gmail:' || thread.gmail_thread_id))
         or (evidence.evidence_kind = 'gmail_message' and exists(
-          select 1 from crm_email_messages message where message.thread_id = thread.id
+          select 1 from mail_message message where message.crm_visible and message.thread_id = thread.id
             and evidence.evidence_id in (message.id, message.gmail_message_id, 'gmail:' || message.gmail_message_id)))
       ))
-      or exists(select 1 from crm_email_thread_participants participant
+      or exists(select 1 from mail_thread_participant participant
         join crm_people person on person.id = participant.person_id
         left join crm_companies company on company.id = person.company_id
         where participant.thread_id = thread.id and (

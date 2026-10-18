@@ -1,0 +1,50 @@
+.page { background: var(--color-main-bg); color: var(--color-text); font-size: 13px; }
+.header { padding: 20px 32px 0; border-bottom: 1px solid var(--color-border); }
+.tabs { display: flex; gap: 24px; margin-top: 14px; }
+.tab { padding: 0 0 12px; border-bottom: 2px solid transparent; color: var(--color-text-muted); font-size: 13px; }
+.tab[aria-selected="true"] { color: var(--color-text); border-color: var(--color-accent); font-weight: 600; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 32px; border-bottom: 1px solid var(--color-border); }
+.control { height: 32px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); color: var(--color-text); padding: 0 10px; font: inherit; }
+.control:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.button:hover { background: var(--color-surface-hover); }
+.filters { display: grid; grid-template-columns: repeat(auto-fit,minmax(170px,1fr)); gap: 12px; padding: 16px 32px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.filter { display: flex; flex-direction: column; gap: 5px; color: var(--color-text-muted); font-size: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--color-border); border-radius: 5px; padding: 3px 7px; color: var(--color-text-muted); font-size: 11px; }
+.logRow { border-bottom: 1px solid var(--color-border); padding: 12px 32px; }
+.logRow:hover { background: var(--color-surface-hover); }
+.activity { position: relative; flex-shrink: 0; margin-left: auto; }
+.activityPanel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: min(360px, 65vw); padding: 12px; white-space: normal; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-muted); box-shadow: var(--shadow-md); font-size: 11px; }
+@media (max-width: 640px) { .header { padding-left: 16px; padding-right: 16px; } .toolbar, .filters, .logRow { padding-left: 16px; padding-right: 16px; } .tabs { gap: 16px; } }
+
+.thread { --color-main-bg: var(--bt-surface); --color-surface: var(--bt-surface); --color-surface-hover: var(--bt-row-hover); --color-bg: var(--bt-bg); --color-border: var(--bt-border); --color-border-strong: var(--bt-border-strong); --color-text: var(--bt-text); --color-text-muted: var(--bt-muted); --color-accent: var(--bt-link); background: var(--bt-surface); color: var(--bt-text); font-family: "Inter", system-ui, sans-serif; }
+.threadHeader { flex-shrink: 0; padding: 16px 24px 14px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.threadTitle { font-size: 20px; line-height: 1.3; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.threadAction { display: inline-flex; width: 30px; height: 30px; flex-shrink: 0; align-items: center; justify-content: center; border: 1px solid var(--color-border); color: var(--color-text-muted); background: var(--color-surface); }
+.threadAction:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.threadMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.participantsLine { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 12px; font-size: 12px; }
+.participant { display: inline-flex; min-width: 0; align-items: center; gap: 5px; }
+.participantDetails { position: relative; color: var(--color-text-muted); font-size: 11px; }
+.participantDetails > summary { cursor: pointer; list-style: none; }
+.participantPanel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; min-width: 240px; max-width: min(400px, 75vw); padding: 12px; border: 1px solid var(--color-border); background: var(--color-surface); box-shadow: var(--shadow-md); overflow-wrap: anywhere; }
+.threadScroller { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px 20px; }
+.message { border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.messageHeading { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 14px 0; text-align: left; font-family: inherit; }
+.messageHeading:hover { background: var(--color-surface-hover); }
+.messageSender { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.messagePreview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); font-size: 12px; }
+.messageTime { margin-left: auto; flex-shrink: 0; color: var(--color-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.messagePanel { padding: 0 0 18px 26px; }
+.messageRecipients { display: flex; flex-wrap: wrap; gap: 4px; margin: -5px 0 12px; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.messageStatuses { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 12px; }
+.messageStatus { border: 1px solid var(--color-border); padding: 2px 5px; color: var(--color-text-muted); font-size: 10px; line-height: 1.4; }
+.messageText { font-family: "Inter", system-ui, sans-serif; font-size: 14px; line-height: 1.55; color: var(--color-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.quoteToggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; padding: 3px 0; color: var(--color-text-muted); font-family: "Inter", system-ui, sans-serif; font-size: 11px; }
+.quoteToggle:hover { color: var(--color-text); text-decoration: underline; }
+.quotedText { margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--color-border); color: var(--color-text-muted); }
+.replyFooter { margin-top: 20px; }
+.replyButton { display: flex; align-items: center; gap: 8px; border: 1px solid var(--color-border); padding: 8px 12px; background: var(--color-surface); color: var(--color-text); font-family: inherit; font-size: 13px; font-weight: 500; }
+.replyButton:hover { background: var(--color-surface-hover); }
+.replyEditor { border: 1px solid var(--color-border); padding: 14px; background: var(--color-surface); font-family: "Inter", system-ui, sans-serif; }
+@media (max-width: 640px) { .threadHeader { padding: 14px 16px; } .threadScroller { padding: 0 16px 16px; } .messagePanel { padding-left: 0; } .threadTitle { font-size: 18px; } .messageSender { max-width: 135px; } }

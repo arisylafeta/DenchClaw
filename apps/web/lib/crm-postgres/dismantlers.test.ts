@@ -59,10 +59,10 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     const d = await db.createDismantler({ company_id: `oc-${s}`, patch: {} }, userId);
     await pg.queryPg("insert into campaigns (id, campaign_name, type, source_system) values ($1, 'Dismantler outreach test', 'dismantler_outreach', 'dench-campaign')", [`oc-${s}`]);
     await pg.queryPg(
-      `insert into crm_campaign_sends (id, campaign_id, person_id, company_id, recipient_email, rendered_subject, rendered_text)
-       values ($1, $1, $2, $3, $4, 'Your Kona packs', 'Hi Pat, could you price the 4 Kona packs?')`,
+      `insert into mail_message (direction, transport, state, purpose, id, campaign_id, person_id, company_id, recipient_email, subject, body_text)
+       values ('outbound', 'postmark-broadcast', 'frozen', 'marketing', $1, $1, $2, $3, $4, 'Your Kona packs', 'Hi Pat, could you price the 4 Kona packs?')`,
       [`oc-${s}`, `op-${s}`, `oc-${s}`, `pat-${s}@yard.example.test`]);
-    await pg.queryPg("update crm_campaign_sends set state = 'accepted', accepted_at = now() - interval '1 hour' where id = $1", [`oc-${s}`]);
+    await pg.queryPg("update mail_message set state = 'accepted', accepted_at = now() - interval '1 hour' where id = $1", [`oc-${s}`]);
 
     const sent = await db.getDismantler(d.id);
     expect(sent).toMatchObject({ stage: "Talking", next_step: "Follow up if no reply", next_step_person_id: `op-${s}`,
@@ -70,13 +70,16 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     expect((await events(d.id)).at(-1)).toMatchObject({ kind: "campaign_email", changes: { subject: "Your Kona packs", stage: ["Found", "Talking"] } });
 
     await pg.queryPg(
-      `insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email, mailbox_owner_id)
-       values ($1, 'Re: Your Kona packs', now(), null, $2, $3::uuid)`, [`om-${s}`, `PAT-${s}@yard.example.test`, otherUserId]);
+      `insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, from_person_id, from_email, mailbox_owner_id)
+       values ('inbound', 'gmail', 'received', true, $1, 'Re: Your Kona packs', now(), null, $2, $3::uuid)`, [`om-${s}`, `PAT-${s}@yard.example.test`, otherUserId]);
     expect(await db.getDismantler(d.id)).toMatchObject({ campaign_replied_on: today });
     const detail = await db.getDismantlerDetail(d.id, userId);
     expect(detail?.outreach).toEqual([expect.objectContaining({
       campaign: "Dismantler outreach test", subject: "Your Kona packs", text: "Hi Pat, could you price the 4 Kona packs?",
       state: "accepted", replied_at: expect.any(String) })]);
+    // Load after beforeAll selects the disposable DATABASE_URL, never at module import.
+    const { mailCampaignCounts } = await import("./mail");
+    expect((await mailCampaignCounts(`oc-${s}`))[0]).toMatchObject({ sent: 1, replied: 1 });
   });
 
   it("logs stage moves, parks with where it came from, and brings it back", async () => {
@@ -155,9 +158,8 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     expect((await db.listDismantlers()).dismantlers.find((row) => row.id === d.id)!.last_contact).toBe("2026-09-29");
 
     await pg.queryPg(
-      `insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email, mailbox_owner_id) values
-         ($1, 'Their reply', '2026-09-20T10:00:00Z', $3, 'mo@example.test', $4::uuid),
-         ($2, 'Colleague thread', '2026-09-28T10:00:00Z', $3, 'mo@example.test', $5::uuid)`,
+      `insert into mail_message (direction,transport,purpose,crm_visible,state,id, subject, sent_at, from_person_id, from_email, mailbox_owner_id) values ('inbound','gmail',null,true,'received',$1, 'Their reply', '2026-09-20T10:00:00Z', $3, 'mo@example.test', $4::uuid),
+         ('inbound','gmail',null,true,'received',$2, 'Colleague thread', '2026-09-28T10:00:00Z', $3, 'mo@example.test', $5::uuid)`,
       [`e1-${s}`, `e2-${s}`, `mo-${s}`, userId, otherUserId],
     );
     const detail = (await db.getDismantlerDetail(d.id, userId))!;

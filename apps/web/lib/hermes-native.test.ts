@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { conversationKey, filterConversations, parseConversationKey } from "./hermes-conversations";
 vi.mock("./workspace", () => ({ discoverWorkspaces: () => [{ name: "default" }, { name: "alpha" }] }));
 import { createConversation, groupRpc, listConversations, nativeFetch, readConversation } from "./hermes-native";
+import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
 let server: WebSocketServer | undefined;
 let handler: (method: string, params: Record<string, unknown>) => unknown;
@@ -32,6 +33,53 @@ beforeEach(() => {
 afterEach(async () => {
   if (server) { for (const client of server.clients) client.terminate(); await new Promise<void>((resolve) => server!.close(() => resolve())); server = undefined; }
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
+  vi.useRealTimers(); vi.restoreAllMocks();
+});
+it("uses gateway status for hidden solo chats with profile-colliding stored ids", async () => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "same", title: "Solo" }] })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [{ id: "runtime-alpha", session_key: "same", status: "waiting" }] } as never);
+  const attach = vi.spyOn(manager, "attachLive").mockImplementation(async key => key.includes("alpha") ? { session_id: "runtime-alpha", session_key: "same", running: true, info: { lazy: true, cwd: "/workspace", branch: "", model: "test", skills: {}, tools: {} } } as never : undefined);
+  const requests = vi.spyOn(manager, "pendingRequests").mockReturnValue([{ id: "srq", method: "clarify", params: {} }]);
+  try {
+    const result = await listConversations();
+    expect(result.sessions.find(row => row.profile === "alpha")).toMatchObject({ working: true, blocked: true });
+    expect(result.sessions.find(row => row.profile === "default")).toMatchObject({ working: false, blocked: false });
+    expect(call).toHaveBeenCalledTimes(1);
+    call.mockRejectedValue(new Error("offline"));
+    vi.advanceTimersByTime(5_001);
+    const offline = await listConversations();
+    expect(offline.sessions.every(row => row.working === null)).toBe(true);
+  } finally { call.mockRestore(); attach.mockRestore(); requests.mockRestore(); }
+});
+it("shares a short TTL status poll and caps parallel warm attachments", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.advanceTimersByTime(20_000);
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: Array.from({ length: 20 }, (_, i) => ({ id: `session-${i}`, title: "Solo" })) })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: Array.from({ length: 20 }, (_, i) => ({ id: `runtime-${i}`, session_key: `session-${i}`, status: "idle" })) } as never);
+  let inFlight = 0, peak = 0;
+  const attach = vi.spyOn(manager, "attachLive").mockImplementation(async (_key, id) => {
+    peak = Math.max(peak, ++inFlight);
+    await Promise.resolve(); await Promise.resolve();
+    inFlight--;
+    return { session_id: id, session_key: id.replace("runtime-", "session-"), running: false, info: { lazy: true } } as never;
+  });
+  vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
+  await Promise.all([listConversations(), listConversations(), listConversations()]);
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(attach).toHaveBeenCalledTimes(8);
+  expect(peak).toBeGreaterThan(1);
+  expect(peak).toBeLessThanOrEqual(4);
+  await listConversations();
+  expect(call).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(5_001);
+  await listConversations();
+  expect(call).toHaveBeenCalledTimes(2);
+  expect(attach).toHaveBeenCalledTimes(16);
 });
 describe("native Hermes conversations", () => {
   it("keeps profile-scoped identities stable and filtering never rewrites them", () => {
@@ -43,8 +91,8 @@ describe("native Hermes conversations", () => {
   it("lists the newest page per profile, hides execution sessions, and uses actual working not worker presence", async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = new URL(input); const alpha = url.pathname.includes("/alpha/");
-      if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2 }], has_more: false });
-      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3 }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
+      if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2, source: "webhook" }], has_more: false });
+      return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3, source: "cron" }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
     });
     vi.stubGlobal("fetch", fetchMock);
     handler = (method, params) => method === "groups.list" ? { rooms: [room], next_offset: params.offset === 0 ? 100 : null } : { room, driver_status: { running: true, working: false, blocked: true } };
@@ -54,9 +102,11 @@ describe("native Hermes conversations", () => {
     expect(data.sessions.filter((r) => r.id === "shared-id")).toHaveLength(2);
     expect(data.sessions.find((r) => r.kind === "group")).toMatchObject({ working: false, blocked: true });
     expect(data.sessions.find((r) => r.kind === "solo")?.working).toBeNull();
+    expect(data.sessions.find((r) => r.profile === "alpha")).toMatchObject({ source: "webhook" });
+    expect(data.sessions.find((r) => r.profile === "default")).toMatchObject({ source: "cron" });
     expect(data.warnings).toEqual([]);
     expect(filterConversations(data.sessions, "alpha").map((r) => r.title)).toEqual(["Alpha and Sol", "Alpha chat"]);
-    expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=100&offset=0"))).toBe(true);
+    expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=200&offset=0"))).toBe(true);
   });
   it("keeps other profiles' chats when one profile's sessions cannot be read", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => input.includes("/alpha/") ? new Response("{}", { status: 401 }) : Response.json({ data: [{ id: "sol", title: "Sol chat" }] })));

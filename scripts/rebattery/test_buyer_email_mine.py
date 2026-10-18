@@ -1,6 +1,9 @@
 import importlib.util
+import os
 import unittest
 from pathlib import Path
+from uuid import uuid4
+import pytest
 
 spec = importlib.util.spec_from_file_location("mine", Path(__file__).with_name("buyer_email_mine.py"))
 mine = importlib.util.module_from_spec(spec)
@@ -81,6 +84,49 @@ class Validate(unittest.TestCase):
                                            "date": "2026-09-21"}, {"topic": "sites and capacity", "value": "x", "date": "d"}],
                                      "Develops second-life storage.")
         self.assertEqual(values, {"buyer_projects": "10 MW BESS in Brandenburg (2026-09-21)", "about": "Develops second-life storage."})
+
+
+@pytest.mark.usefixtures("db_after_cutover")
+class MailHistory(unittest.TestCase):
+    def test_reads_visible_history_in_order_without_private_mail(self):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        conn = psycopg2.connect(os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ["DENCH_MAIL_DSN"])
+        key = "mine_" + uuid4().hex
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("insert into crm_users (email,display_name,password_hash) values (%s,'Fixture','x') returning id",
+                            (key + "@rebattery.io",))
+                owner = cur.fetchone()["id"]
+                cur.execute("insert into crm_companies (id,name) values (%s,'Synthetic Cell Buyer')", (key,))
+                cur.execute("insert into crm_people (id,full_name,email,company_id) values (%s,'Fixture Buyer',%s,%s)",
+                            (key, key + "@example.test", key))
+                cur.execute("insert into mail_thread (id,crm_visible) values (%s,true)", (key,))
+                cur.execute("""
+                  insert into mail_message (id,thread_id,mailbox_owner_id,direction,transport,purpose,state,
+                    from_person_id,from_email,body_text,sent_at,crm_visible)
+                  values (%s,%s,%s,'inbound','gmail','personal','received',%s,%s,
+                          'We need 100 battery packs','2026-10-02',true),
+                         (%s,%s,%s,'outbound','gmail','personal','accepted',null,%s,
+                          'Reply with a quote','2026-10-01',true),
+                         (%s,%s,%s,'inbound','gmail','personal','received',%s,%s,
+                          'We need 200 battery packs privately','2026-10-03',false)
+                """, (key+"_in",key,owner,key,key+"@example.test",
+                      key+"_out",key,owner,key+"@rebattery.io",
+                      key+"_private",key,owner,key,key+"@example.test"))
+                cur.execute("insert into mail_message_recipient (message_id,person_id,recipient_type) values (%s,%s,'to')",
+                            (key+"_out",key))
+                history = mine.company_history(cur, owner, [key])
+                self.assertEqual([r["id"] for r in history], [key+"_out",key+"_in"])
+                self.assertEqual(history[-1]["body"], "We need 100 battery packs")
+                self.assertEqual(mine.busiest(cur, owner, 10, []), [key])
+                self.assertEqual(mine.busiest(cur, owner, 10, [key]), [])
+                cur.execute("update mail_message set crm_visible=false where id=%s", (key+"_in",))
+                self.assertEqual(mine.busiest(cur, owner, 10, []), [])
+        finally:
+            conn.rollback()
+            conn.close()
 
 
 if __name__ == "__main__":

@@ -89,9 +89,45 @@ npx denchclaw start --skip-daemon-install
 
 ---
 
+## Mail workspace
+
+Mail combines Conversations, Campaigns, Sent and Follow-ups. Search stays visible;
+the Filters button reveals all advanced filters and removable active-filter chips.
+CRM-only is on by default; campaigns ignore this switch, and Sent includes campaign
+deliveries even when their message-level CRM flag is off. Conversations are paged
+by thread, show its latest message and real message count, and require an inbound
+message; outbound-only threads remain in Sent. List APIs return previews, never
+full bodies; opening a thread loads its full messages. Conversation rows use a
+small sender line above the subject and preview; unread senders and subjects are
+bold with a quiet accent dot.
+Server-provided `is_self` recognizes every case-insensitive `@rebattery.io` address
+and configured mail identity. Own messages show “To:” and the first non-self
+recipient (or first recipient for internal mail), using a CRM name when known.
+Missing inbound addresses show “Unknown sender”. No person/self category is shown.
+Unread state is per thread. The detail header has one compact participant line:
+all self identities are grouped as “You”, with actual addresses in Details and
+initials taken from the real name/address. It shows message count, first/last dates
+and the linked CRM profile where available. Messages use the native CRM sans-serif
+body, flat dividers and compact tracking chips. The newest is open; older messages
+expand from a one-line summary. Conventional quoted history and signatures stay
+behind “Show quoted text”; HTML keeps its sanitized, opaque-origin iframe.
+The footer prepares a CLI reply command only; it never saves or sends mail.
+Sending and unknown outcomes retain their reconciliation warnings.
+
 ## Campaign engagement
 
-Open the campaign list at `/?path=campaign` or from **Campaigns** in the sidebar.
+The mail port follows the production migration chain through 049: apply
+`050_mail_log.sql`, run the approved legacy import, then apply
+`051_mail_cutover.sql` and `052_mail_agent_role.sql`. The cutover recreates the
+live seller-candidate view and retains accepted-send dismantler progression,
+follow-up dates and campaign events on the new log. The disposable harness loads
+the full chain and retains `mail_pre_cutover_test` for synthetic import/cutover
+regressions. This is not a production-data rehearsal: a fresh verified,
+restore-tested production backup and a separately approved real-data run remain
+required before deployment.
+
+Open the campaign list at `/?path=campaign` or from the **Campaigns** view under
+**Mail** in the sidebar.
 Campaigns use Dismantlers' compact rows, square controls and palette. The list's
 search sits directly on the page body; its table is full width without an
 enclosing card.
@@ -140,15 +176,122 @@ snapshots are not a conversion rate or a human/bot classification.
 In PostgreSQL-backed workspaces, a person's **Campaigns** tab shows lifetime
 accepted-send, delivery, tracked-open and tracked-click totals, listing clicks
 across updates, and each update's CTA activity. Counts use existing
-`crm_campaign_sends` and `crm_campaign_send_links` records; multiple links in one
+`mail_message` campaign deliveries and `mail_message_link` records; multiple links in one
 email do not multiply the send count, and multiple CTAs for one listing count
 once per update. General CTAs are not listing engagement.
 
 Counts measure emails with observed activity, not repeated opens/clicks or
 verified human visits. Unsynced sends show pending tracking; each synced update
 shows its last sync time. Email clicks do not establish site visits. This view
-does not add interaction rows or change relationship scores. The campaign
-`sync --campaign-id <id> --apply` command remains the existing data-refresh path.
+does not add interaction rows or change relationship scores. The shared
+`rebattery-mail sync postmark --campaign <id> --account <stream> --apply`
+refreshes receipts and reconciles the complete stream suppression set.
+
+### Mail preparation, approvals and sends
+
+Use `python3 scripts/rebattery/rebattery-mail.py` for every mail operation.
+Preparation and execution are dry-run unless `--apply` is present. Output is JSON;
+named refusals go to stdout and human diagnostics go to stderr.
+
+Gmail sync stores raw HTML from MIME parts and fills missing HTML on reruns without
+replacing existing HTML (including approved outbound copy). Sanitisation happens
+when rendering. For historical gaps, use `backfill-html --account <account>
+--since 2026/10/01 --limit 100 --crm-only` to preview counts and the first five
+message IDs; add `--apply` to update only missing HTML and attachment presence.
+CRM-visible mail is prioritised by default, newest first within each group.
+`--sleep 0.2` controls sequential fetch pacing. Plain-text-only IDs are reported
+in `no_html_ids`, not marked with sentinels, so future runs may recheck them.
+Individual provider errors are counted; five consecutive errors stop with exit
+code 3 while preserving completed updates.
+
+Create a one-off with `draft --identity alex --to buyer@example.test --subject
+"Subject" --body "Copy" --verification '{"buyer@example.test":{"status":"valid"}}'
+--apply`. Use `--template <name> --vars <json>` instead of raw copy for a versioned
+template. Verification is an explicit imported ZeroBounce result per address;
+only `status=valid` is eligible, including role-based addresses. Invalid,
+inconclusive and missing results are reported with reasons and cannot be sent.
+No verification API is called implicitly.
+
+Use `campaign create --id <id> --name <name> --identity <key> --template <name>
+--person-ids <comma-separated-ids> --verification <json> --apply`, or
+`--cohort-sql <read-only-select-file>` for the audience. The SELECT must return
+exactly `person_id`, with 1 to 500 distinct candidates. `--personalization
+'{"first_name":"first_name"}'` maps variables to `first_name`, `last_name` or
+`opening`. `--vars` supplies shared values. `--links` is a JSON array of
+`{"key":"stock","url":"https://www.rebattery.io/stock","listing_id":"optional"}`.
+Every HTTPS CTA in HTML and text must match a tracked destination exactly;
+approved hosts are `www.rebattery.io` and `form.typeform.com`. Auction URLs are
+optional. Supply Updates must use the supply identity and reply mailbox.
+
+`campaign freeze <id> --apply` renders each recipient once into `mail_message`
+and `mail_message_link`, excluding suppressed, opted-out, bounced or unverified
+addresses before the digest is computed. Failed or incomplete suppression dumps
+and fully excluded audiences stop the freeze. Freeze never changes consent.
+`preview <message-or-campaign-id>` shows frozen copy, signatures, recipients,
+exclusions and the exact SHA256. Identity signatures are stored in the copy;
+sender and reply-mailbox settings are also bound to the digest.
+
+`approve <id> --sha256 <digest> --approved-by "Named human" --apply` records
+approval for the exact content, recipients and identity. Agent names, blank
+approvers, stale content and changed recipients are refused. `send <message-id>
+--apply` requires the same approval, including personal one-offs.
+
+`launch <campaign-id> --approved-sha256 <digest> --max-recipients 5 --apply`
+sends a capped pilot and stops with `next_gate=pilot_review`. Sending the remainder
+requires a NEW named-human `approve` row after the pilot, binding the same frozen
+digest and the remaining recipient count, then a separate launch. Approval defaults
+to `--scope pilot`, requiring a cap; an uncapped launch needs `--scope full`.
+Every provider call rechecks approval, suppression and replies after its claim.
+The live gate is checked before claiming; preflight failures become definite
+failed/non-submitted rows rather than unknown receipts.
+Any `sending` or `unknown` row blocks the whole audience; ambiguous sends exit 4 and are never
+retried automatically. `recover <campaign-id> --apply` reconciles exact provider
+receipts, leaving missing receipts unresolved.
+
+Real Gmail and Postmark sends additionally require `DENCH_MAIL_LIVE_SEND=1`.
+Gmail's no-send restriction remains effective. Marketing requires an unsubscribe
+path on both transports; Postmark marketing requires an explicit Broadcast
+stream, with `{{{ pm:unsubscribe }}}` in both bodies. `followup draft` prepares a
+threaded draft only. A reply pauses it instead of sending another chase.
+
+### Postmark suppressions and scheduling
+
+`sync postmark --account <stream>` inspects changes without writes; add `--apply`
+only for an approved reconciliation. With no campaign filter it reconciles all
+logged receipts for the stream as well as suppressions. The complete, unpaginated
+[Postmark suppression dump](https://postmarkapp.com/developer/api/suppressions-api)
+is mapped to the **Supply update** list. Every matched address is opted out on
+that list; `SpamComplaint` and `HardBounce` also set global `email_opted_out`.
+Provider reason, origin and calendar date are retained. Other lists are unchanged,
+missing suppressions never restore consent, and unmatched addresses never create contacts.
+
+Recipient unsubscribes (`ManualSuppression` with `Origin=Recipient`), customer/admin
+manual suppressions and unknown reasons do not set the global opt-out flag.
+Existing global opt-outs are never cleared. Dates retain the provider's calendar
+date rather than the sync date, including timestamps with a timezone offset.
+Frozen personalised subjects and bodies are reused at launch, never re-rendered;
+missing `first_name`, `last_name` or `opening` values stop freeze rather than
+sending incomplete copy.
+
+For suppression-only reconciliation, use `sync postmark-suppressions --stream
+broadcast --apply`; this requires no campaign and never reads or updates receipts.
+Schedulers must invoke that shared CLI directly, not the retired suppression wrapper.
+Configure the database
+DSN explicitly and load credentials through the approved Hermes secret loader
+or `POSTMARK_SERVER_TOKEN`; never store them in a job definition. Existing jobs
+need their entrypoint changed before reactivation. Verify a fresh backup and
+inspect an approved dry run before enabling a real scheduler.
+
+Focused fake-provider regressions create and drop an isolated `mail_test_*`
+database per module, cloned from the migrated synthetic `denchclaw` template.
+The harness defaults to test Postgres on `127.0.0.1:55470`; override
+`DENCH_MAIL_TEST_ADMIN_DSN` for another local, non-5432 test endpoint.
+No `DENCH_MAIL_DSN` is needed, and production-looking targets are refused.
+
+```bash
+cd scripts/rebattery
+python3 -m pytest rebattery_mail/tests test_bulk_trade_inbox_check.py test_buyer_email_mine.py test_bulk_trade_auction_sync.py -q
+```
 
 ## Troubleshooting
 

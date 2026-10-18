@@ -52,9 +52,14 @@ if (
   throw new Error("PROJECTS_MVP_WORKSPACE_ROOT must be isolated unless production is explicitly approved after backup.");
 }
 
-const schema = fileURLToPath(
-  new URL("../../apps/web/lib/crm-postgres/schema.sql", import.meta.url),
-);
+// Apply only this fixture to an already provisioned CRM. Never replay the
+// historical base schema over a database that has completed mail cutover.
+const ready = spawnSync("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", "-c",
+  "do $$ begin if to_regclass('projects') is null or to_regclass('work_tasks') is null or to_regclass('crm_documents') is null then raise exception 'Provision the CRM database before the projects fixture'; end if; end $$;"], {
+  stdio: "inherit",
+});
+if (ready.error) throw ready.error;
+if (ready.status !== 0) throw new Error("CRM database is not provisioned.");
 const fixture = fileURLToPath(new URL("./projects-mvp-fixture.sql", import.meta.url));
 const manifestPath = fileURLToPath(new URL("./projects-mvp-manifest.json", import.meta.url));
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -124,7 +129,7 @@ for (const task of manifest.tasks) {
   writeScratchWorkspaceFile(task.document.file_path, match[1]);
 }
 
-for (const file of [schema, fixture]) {
+for (const file of [fixture]) {
   const result = spawnSync("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", "-f", file], {
     stdio: "inherit",
   });

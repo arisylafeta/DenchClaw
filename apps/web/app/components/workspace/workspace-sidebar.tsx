@@ -395,25 +395,14 @@ export function WorkspaceSidebar({
 			),
 		},
 		{
-			id: "crm-campaigns" as const,
-			label: "Campaigns",
-			target: "campaigns" as const,
-			icon: (
-				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-					<path d="m3 11 13-5v12L3 13z" />
-					<path d="M7 14v5h3l1-4M19 9a4 4 0 0 1 0 6" />
-				</svg>
-			),
-		},
-    {
       id: "crm-leaderboard" as const,
       label: "Leaderboard",
       target: "leaderboard" as const,
       icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M4 20V12h4v8M10 20V4h4v16M16 20V8h4v12" /></svg>,
     },
-		{
+    {
 			id: "crm-inbox" as const,
-			label: "Inbox",
+			label: "Mail",
 			target: "inbox" as const,
 			icon: (
 				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

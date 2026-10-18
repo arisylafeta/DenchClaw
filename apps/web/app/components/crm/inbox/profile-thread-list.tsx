@@ -101,10 +101,8 @@ function ProfileThreadListItem({
     thread.primary_sender_email ??
     null;
   const senderEmail = thread.primary_sender_email ?? null;
-  const senderTypeColor =
-    thread.primary_sender_type && thread.primary_sender_type !== "Person"
-      ? SENDER_TYPE_COLOR[thread.primary_sender_type] ?? "#94a3b8"
-      : null;
+  const senderTypeColor = thread.primary_sender_type
+    ? SENDER_TYPE_COLOR[thread.primary_sender_type] ?? null : null;
 
   const gmailHref = thread.gmail_thread_id
     ? `https://mail.google.com/mail/u/0/#all/${thread.gmail_thread_id}`

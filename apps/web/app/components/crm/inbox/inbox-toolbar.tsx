@@ -21,6 +21,8 @@ export const InboxToolbar = forwardRef<
     onClearSelection: () => void;
     onBulkAction: (action: "read" | "star" | "archive") => void;
     onOpenShortcuts: () => void;
+    hideSearch?: boolean;
+    unreadCount?: number;
   }
 >(function InboxToolbar(
   {
@@ -30,6 +32,8 @@ export const InboxToolbar = forwardRef<
     onClearSelection,
     onBulkAction,
     onOpenShortcuts,
+    hideSearch = false,
+    unreadCount = 0,
   },
   searchInputRef,
 ) {
@@ -40,13 +44,14 @@ export const InboxToolbar = forwardRef<
     >
       {/* Top row: search + shortcuts */}
       <div className="flex items-center gap-2 px-4 py-2">
-        <Input
+        {!hideSearch && <Input
           ref={searchInputRef as RefObject<HTMLInputElement>}
           placeholder="Search subject + sender…"
           value={search}
           onChange={(e: ChangeEvent<HTMLInputElement>) => onSearchChange(e.target.value)}
           className="h-8 flex-1 text-[13px]"
-        />
+        />}
+        {hideSearch && <span aria-label="Unread conversations" className="flex-1 text-[11px] font-normal" style={{ color: "var(--color-text-muted)" }}>{unreadCount} unread conversations</span>}
         <button
           type="button"
           onClick={onOpenShortcuts}

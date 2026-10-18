@@ -41,11 +41,41 @@ return `404 Unknown or unconfigured profile`. Inspect
 `hermes gateway migrate --multiplex --dry-run`, back up affected settings, and
 resolve credential ownership before an authorized migration/restart.
 
+Each named profile also needs an explicitly provisioned `API_SERVER_KEY` that
+authorizes the trusted DenchClaw service's `HERMES_API_KEY`. Hermes deliberately
+does not inherit the gateway owner's API key for `/p/<profile>/` requests.
+This local API authorization is separate from Discord or provider credentials;
+do not copy those credentials to resolve an API authentication failure.
+
 The Hermes adapter emits AI SDK `UIMessageChunk` events. An error chunk contains
 `type: "error"` and `errorText`, not an HTTP `status` property. Preserve the
 upstream failure text without turning it into a client schema-validation error.
 The adapter regressions parse the stream through `DefaultChatTransport`, the
 same strict validator used by the chat client.
+
+## CRM sidebar icons
+
+Sidebar icons are profile-local workspace settings, read from the `icon` key in
+`<workspace>/<object>/.object.yaml`. The live workspace files are intentionally
+Git-ignored; keep the non-secret icon choices here rather than committing CRM
+data or complete profile directories.
+
+| Object | Lucide icon |
+| --- | --- |
+| Bulk Trades (`bulk_trade`) | `handshake` |
+| Dismantlers (`dismantler`) | `wrench` |
+| Stocks (`stock`) | `boxes` |
+| Work Tasks (`work_task`) | `clipboard-check` |
+
+These settings are applied to all four objects in the default and outbounder
+workspaces, and to the existing Bulk Trades and Work Tasks objects in the
+the-enricher workspace. Preserve every other YAML key and do not create missing
+objects merely to set an icon.
+
+Use the CRM icon picker or authenticated `PATCH /api/workspace/objects/<name>/icon`
+with `{"icon":"<Lucide icon>"}` for the active profile. The sidebar retains its
+existing 16px outline style. Refresh the CRM after changing metadata; no build
+or redeploy is required.
 
 ## Shared CRM discovery views
 
@@ -155,7 +185,7 @@ the marketplace provider. Technical fields and notes are shown only under
 Details. This page adds no schema, sending, tracking capture or scoring changes.
 
 Lot-buyer email tracking and auction synchronization attribute clicks only through
-`crm_campaign_send_links.first_clicked_at` for the matching listing. The provider's
+`mail_message_link.first_clicked_at` for the matching listing. The provider's
 message-wide click timestamp must never stand in for a listing click. A multi-lot
 send supplies invitation evidence for its primary listing and every listing CTA;
 general links supply neither listing clicks nor extra listing invitations. The

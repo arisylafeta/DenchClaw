@@ -90,12 +90,12 @@ export function ThreadList({
       {groups.map((group) => (
         <section key={group.label}>
           <h3
-            className="sticky top-0 z-10 px-4 py-1.5 font-semibold uppercase"
+            className="sticky top-0 z-10 px-4 py-1.5 font-normal uppercase"
             style={{
               color: "var(--color-text-muted)",
               background: "var(--color-bg)",
               borderBottom: "1px solid var(--color-border)",
-              letterSpacing: "0.16em",
+              letterSpacing: "0.08em",
               fontSize: "10px",
             }}
           >
@@ -107,7 +107,7 @@ export function ThreadList({
                 <ThreadListRow
                   thread={thread}
                   selected={selectedThreadId === thread.id}
-                  read={isRead(thread.id)}
+                  read={Boolean(thread.is_self) || isRead(thread.id)}
                   starred={isStarred(thread.id)}
                   inBulkSelection={selectedIds.has(thread.id)}
                   onSelect={() => onSelect(thread)}

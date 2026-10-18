@@ -1,70 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GET } from "./route";
-
-vi.mock("@/lib/auth", () => ({
-  currentUser: vi.fn(async () => ({
-    id: "11111111-1111-4111-8111-111111111111",
-    email: "ari@rebattery.io",
-    displayName: "Ari",
-  })),
-}));
-
-const { loadCrmFieldMapsMock, safeQueryMock } = vi.hoisted(() => ({
-  loadCrmFieldMapsMock: vi.fn(),
-  safeQueryMock: vi.fn(),
-}));
-
-const { getPostgresInboxMock } = vi.hoisted(() => ({
-  getPostgresInboxMock: vi.fn(),
-}));
-
-vi.mock("@/lib/crm-queries", () => ({
-  buildEntryProjection: vi.fn(() => "projection"),
-  loadCrmFieldMaps: loadCrmFieldMapsMock,
-  safeQuery: safeQueryMock,
-}));
-
-vi.mock("@/lib/crm-postgres/inbox", () => ({
-  getPostgresInbox: getPostgresInboxMock,
-}));
-
-describe("CRM inbox API", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    delete process.env.CRM_DB_BACKEND;
-  });
-
-  it("uses the Postgres inbox reader when CRM_DB_BACKEND is postgres", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
-    getPostgresInboxMock.mockResolvedValue({
-      threads: [],
-      total: 0,
-      limit: 25,
-      offset: 5,
-      sender: "person",
-    });
-
-    const res = await GET(new Request("http://localhost/api/crm/inbox?sender=person&limit=25&offset=5&q=solar"));
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      threads: [],
-      total: 0,
-      limit: 25,
-      offset: 5,
-      sender: "person",
-    });
-    expect(getPostgresInboxMock).toHaveBeenCalledWith(
-      {
-        search: "solar",
-        senderFilter: "person",
-        personId: null,
-        limit: 25,
-        offset: 5,
-      },
-      "11111111-1111-4111-8111-111111111111",
-    );
-    expect(loadCrmFieldMapsMock).not.toHaveBeenCalled();
-    expect(safeQueryMock).not.toHaveBeenCalled();
-  });
+import { expect, it } from 'vitest';
+import { GET } from './route';
+it('permanently redirects to the unified mail API and preserves filters',async () => {
+ const response = await GET(new Request('http://localhost/api/old?q=battery'));
+ expect(response.status).toBe(308);
+ expect(response.headers.get('location')).toBe('http://localhost/api/mail/messages?q=battery');
 });

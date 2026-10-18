@@ -2,6 +2,7 @@ export type ChatPanelRuntimeState = {
   sessionId: string | null;
   sessionKey: string | null;
   isStreaming: boolean;
+  awaiting?: boolean;
   status: string;
   isReconnecting: boolean;
   loadingSession: boolean;
@@ -26,6 +27,7 @@ export function mergeChatRuntimeSnapshot(
     current.sessionId === snapshot.sessionId &&
     current.sessionKey === snapshot.sessionKey &&
     current.isStreaming === snapshot.isStreaming &&
+    current.awaiting === snapshot.awaiting &&
     current.status === snapshot.status &&
     current.isReconnecting === snapshot.isReconnecting &&
     current.loadingSession === snapshot.loadingSession

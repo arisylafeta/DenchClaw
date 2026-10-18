@@ -12,6 +12,8 @@ import {
 import { resolveAgentBackend, resolveHermesConfig } from "@/lib/agent-backend";
 import { createHermesChatStream } from "@/lib/hermes-client";
 import { currentUser } from "@/lib/auth";
+import { hermesChatTransport } from "@/lib/hermes-gateway/transport-flag";
+import { nativeFetch, hermesProfiles } from "@/lib/hermes-native";
 
 export const runtime = "nodejs";
 
@@ -26,6 +28,13 @@ export async function POST(req: Request) {
 	if (!sessionKey || !message?.trim()) {
 		return new Response("sessionKey and message are required", { status: 400 });
 	}
+  if (resolveAgentBackend() === "hermes" && hermesChatTransport() === "gateway") {
+    const existing = await Promise.all(hermesProfiles().map(async profile => {
+      const response = await nativeFetch(profile, `/api/sessions/${encodeURIComponent(sessionKey)}`, {}, [404]);
+      return response.status !== 404;
+    }));
+    if (existing.some(Boolean)) return Response.json({ error: "gateway_transport" }, { status: 409 });
+  }
 	const imageHydration = hydrateMessageImageAttachments(message);
 	const imageHydrationError = buildChatImageHydrationErrorMessage(
 		imageHydration.skipped,

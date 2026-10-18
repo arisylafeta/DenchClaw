@@ -1,0 +1,246 @@
+// @vitest-environment jsdom
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { initialState, reduce, type ChatState } from "@/lib/hermes-chat/reducer";
+import type { GatewayEvent } from "@/lib/hermes-chat/events";
+import { NativeTranscript, ApprovalCard, ClarifyCard, ReadOnlyNotice } from "./index";
+import type { NativeTranscriptCallbacks } from "./types";
+import { stateFromSnapshot, type GatewayChatSnapshot } from "@/lib/hermes-chat/snapshot";
+
+function events(frames: Array<[string, GatewayEvent["payload"], (string | number)?]>, base = initialState("chat")): ChatState {
+  let id = 0;
+  return frames.reduce((state, [type, payload, requestId], index) => reduce(state, { type, payload, requestId }, { now: () => 1000 + index * 1000, id: () => `m-${++id}` }), base);
+}
+function callbacks(): NativeTranscriptCallbacks {
+  return { onApproval: vi.fn(), onClarify: vi.fn(), onSubagentTail: vi.fn(), onSubagentSteer: vi.fn(), onSubagentInterrupt: vi.fn(), onRetry: vi.fn() };
+}
+function approval() {
+  return events([["approval.request", { command: "rm generated.txt", tool_name: "terminal", choices: ["once", "session", "always", "deny"], allow_session: true, allow_permanent: true }, "srq-1"]]).pendingRequests[0];
+}
+function clarify(questions: NonNullable<NonNullable<GatewayEvent["payload"]>["questions"]>) {
+  return events([["clarify.request", { questions }, "srq-2"]]).pendingRequests[0];
+}
+
+describe("native transcript", () => {
+  it("preserves prose, reasoning, grouped tools, and interim ordering", () => {
+    const state = events([
+      ["client.submit", { text: "Research CRM", id: "user" }],
+      ["message.start", {}], ["message.delta", { text: "First narration" }],
+      ["reasoning.delta", { text: "Think carefully" }],
+      ["tool.start", { tool_id: "read", name: "read_file", args: { path: "README" } }],
+      ["tool.complete", { tool_id: "read", name: "read_file", result: "read" }],
+      ["tool.start", { tool_id: "shell", name: "terminal", args: { command: "pwd" } }],
+      ["tool.complete", { tool_id: "shell", name: "terminal", result: { exit_code: 0 } }],
+      ["message.delta", { text: "Last narration" }],
+      ["message.interim", { text: "Last narration" }],
+    ]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} queuedMessageIds={["user"]} userHtml={() => '<span class="mention" onclick="bad()">CRM</span><script>unsafe()</script>'} />);
+    expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["work", "interim", "reasoning", "interim"]);
+    expect(screen.getByText("Read README")).toBeInTheDocument();
+    expect(screen.getByText("Ran a quick command")).toBeInTheDocument();
+    expect(screen.queryByText(/pwd/)).not.toBeInTheDocument();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+    expect(screen.getByText("CRM")).not.toHaveAttribute("onclick");
+    expect(container.querySelector("script")).toBeNull();
+  });
+
+  it("folds a finished turn's reasoning, tool calls and narration into one 'Thought' accordion above the answer", () => {
+    const state = events([
+      ["client.submit", { text: "Why?", id: "u" }],
+      ["message.start", {}],
+      ["message.delta", { text: "Let me check the schema." }],
+      ["tool.start", { tool_id: "a", name: "read_file", args: { path: "/x/schema.sql" } }],
+      ["tool.complete", { tool_id: "a", name: "read_file", result: { content: "1|create table x" }, duration_s: 1 }],
+      ["message.delta", { text: "Now the callers." }],
+      ["tool.start", { tool_id: "b", name: "terminal", args: { command: "git status" } }],
+      ["tool.complete", { tool_id: "b", name: "terminal", result: { output: "clean", exit_code: 0 } }],
+      ["message.delta", { text: "Final answer text." }],
+      ["message.complete", { text: "Final answer text.", status: "complete" }],
+    ]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    const work = container.querySelectorAll('[data-segment="work"]');
+    expect(work).toHaveLength(1);
+    expect(work[0]).not.toHaveAttribute("open");
+    expect(within(work[0] as HTMLElement).getByText(/^Thought/)).toBeInTheDocument();
+    expect(within(work[0] as HTMLElement).queryByText(/steps?$/)).toBeNull();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
+    expect(within(work[0] as HTMLElement).getByText("Let me check the schema.")).toBeInTheDocument();
+    expect(within(work[0] as HTMLElement).queryByText("Final answer text.")).toBeNull();
+    expect(screen.getByText("Final answer text.")).toBeInTheDocument();
+    // The answer is rendered after the folded work, with no stray empty blocks between tool calls.
+    const answer = container.querySelector('[data-segment="text"]')!;
+    expect(work[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("updates a running tool to done and collapses completed reasoning", () => {
+    const live = events([["message.start", {}], ["reasoning.delta", { text: "Plan" }]]);
+    const cb = callbacks();
+    const { container, rerender } = render(<NativeTranscript state={live} callbacks={cb} />);
+    expect(container.querySelector('[data-segment="work"]')).toHaveAttribute("open");
+    expect(screen.getAllByText(/^Working/).length).toBeGreaterThan(0);
+    const running = events([["tool.start", { tool_id: "t", name: "terminal", args: { command: "pwd" } }]], live);
+    rerender(<NativeTranscript state={running} callbacks={cb} />);
+    expect(screen.getByText("Running a quick command")).toBeInTheDocument();
+    expect(screen.queryByText(/pwd/)).not.toBeInTheDocument();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(1);
+    const done = events([["tool.complete", { tool_id: "t", name: "terminal", result: { exit_code: 0 }, duration_s: 2 }]], running);
+    rerender(<NativeTranscript state={done} callbacks={cb} />);
+    expect(screen.queryByText("Running a quick command")).not.toBeInTheDocument();
+    expect(screen.getByText("Ran a quick command")).toBeInTheDocument();
+    expect(screen.getByText("2s")).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(1);
+  });
+
+  it("shows tool errors inline as a flat trace step", () => {
+    const state = events([["tool.complete", { tool_id: "edit", name: "edit_file", inline_diff: "--- a/file.ts\n+++ b/file.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n+extra", result: { error: "Permission denied" } }]]);
+    render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    expect(screen.getByText("Permission denied", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it.each(["Run once", "Allow for session", "Deny"])("submits %s with the wire choice", label => {
+    const onApproval = vi.fn();
+    const request = approval();
+    render(<ApprovalCard request={request} onApproval={onApproval} />);
+    expect(screen.getByRole("region", { name: "Approval required" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(onApproval).toHaveBeenCalledWith(request, ({ "Run once": "once", "Allow for session": "session", Deny: "deny" })[label]);
+  });
+
+  it("requires inline confirmation before always allowing", () => {
+    const onApproval = vi.fn(); const request = approval();
+    render(<ApprovalCard request={request} onApproval={onApproval} />);
+    fireEvent.click(screen.getByRole("button", { name: "Always allow" }));
+    expect(onApproval).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm always allow" }));
+    expect(onApproval).toHaveBeenCalledWith(request, "always");
+  });
+
+  it("retains a withdrawn approval without actionable buttons", () => {
+    const state = events([["approval.request", { command: "danger" }, "srq-1"]]);
+    const cb = callbacks();
+    const { rerender } = render(<NativeTranscript state={state} callbacks={cb} />);
+    rerender(<NativeTranscript state={events([["request.cancel", { id: "srq-1" }]], state)} callbacks={cb} />);
+    expect(screen.getByText("Resolved or withdrawn")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run once" })).not.toBeInTheDocument();
+  });
+
+  it("answers the four-option question with one click", () => {
+    const request = clarify([{ qid: "direction", question: "Which route?", choices: ["North", "East", "South", "West"] }]);
+    const onClarify = vi.fn();
+    render(<ClarifyCard request={request} onClarify={onClarify} />);
+    fireEvent.click(screen.getByRole("button", { name: "East" }));
+    expect(onClarify).toHaveBeenCalledWith(request, { direction: "East" });
+  });
+
+  it("supports multi-select, progress, free text and skip", () => {
+    const request = clarify([{ qid: "colors", question: "Colors?", choices: ["Red", "Blue"], multi_select: true }, { qid: "note", question: "Why?" }, { qid: "optional", question: "Anything else?" }]);
+    const onClarify = vi.fn();
+    render(<ClarifyCard request={request} onClarify={onClarify} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Red" })); fireEvent.click(screen.getByRole("checkbox", { name: "Blue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Question 2 of 3")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Readable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" })); fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(onClarify).toHaveBeenCalledWith(request, { colors: "Red, Blue", note: "Readable", optional: null });
+  });
+
+  it("submits free text and Other", () => {
+    const onClarify = vi.fn();
+    const request = clarify([{ qid: "q", question: "Choose", choices: ["Default", "Other"] }]);
+    render(<ClarifyCard request={request} onClarify={onClarify} />);
+    fireEvent.click(screen.getByRole("button", { name: "Other" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Other" }), { target: { value: "Custom" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(onClarify).toHaveBeenCalledWith(request, { q: "Custom" });
+  });
+
+  it("nests subagents, queues steer, opens tail and disables terminal controls", async () => {
+    const state = events([
+      ["subagent.start", { subagent_id: "parent", goal: "Research", model: "model-a" }],
+      ["subagent.start", { subagent_id: "child", parent_id: "parent", goal: "Read sources" }],
+      ["subagent.complete", { subagent_id: "child", status: "completed", summary: "Sources read" }],
+    ]);
+    const cb = callbacks();
+    render(<NativeTranscript state={state} callbacks={cb} subagentTails={{ parent: "Tail content" }} />);
+    const parent = screen.getByRole("region", { name: "Subagent: Research" });
+    const child = within(parent).getByRole("region", { name: "Subagent: Read sources" });
+    expect(within(child).queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(within(child).queryByRole("button", { name: "Steer" })).toBeNull();
+    expect(within(child).getByText("Sources read")).toBeInTheDocument();
+    fireEvent.click(within(parent).getAllByRole("button", { name: "Steer" })[0]);
+    fireEvent.change(within(parent).getByRole("textbox", { name: "Steer subagent" }), { target: { value: "Check dates" } });
+    fireEvent.click(within(parent).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByText("Steer queued, not yet delivered")).toBeInTheDocument());
+    expect(cb.onSubagentSteer).toHaveBeenCalledWith("parent", "Check dates");
+    fireEvent.click(within(parent).getAllByRole("button", { name: "View output" })[0]);
+    expect(cb.onSubagentTail).toHaveBeenCalledWith("parent");
+    await waitFor(() => expect(within(parent).getAllByRole("button", { name: "Stop" })[0]).toBeEnabled());
+    fireEvent.click(within(parent).getAllByRole("button", { name: "Stop" })[0]);
+    expect(cb.onSubagentInterrupt).toHaveBeenCalledWith("parent");
+    expect(screen.getByText("Tail content")).toBeInTheDocument();
+  });
+
+  it("opens a finished tool's result preview as an accordion, and offers none while running", () => {
+    const running = events([["tool.start", { tool_id: "r", name: "read_file", args: { path: "/a/plan.md" } }]]);
+    const { container, rerender } = render(<NativeTranscript state={running} callbacks={callbacks()} />);
+    expect(container.querySelector("[data-tool-id] details")).toBeNull();
+    const done = events([["tool.complete", { tool_id: "r", name: "read_file", result: { content: "1|first line\n2|second line" } }]], running);
+    rerender(<NativeTranscript state={done} callbacks={callbacks()} />);
+    const details = container.querySelector("[data-tool-id] details") as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(within(details).getByText("Read plan.md")).toBeInTheDocument();
+    expect(within(details).getByText("2|second line")).toBeInTheDocument();
+    expect(within(details).getByText("2 lines")).toBeInTheDocument();
+    expect(container.querySelector('[data-preview="code"]')).not.toBeNull();
+  });
+
+  it("nests todos and never shows token or context usage in the transcript", () => {
+    const state = events([["todo.updated", { todos: [{ id: "p", content: "Ship", status: "in_progress" }, { id: "c", parent: "p", content: "Review", status: "completed" }] }], ["session.usage", { usage: { input: 10, output: 20, context_used: 50, context_max: 100, cost_usd: 0.02 } }]]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    expect(container.querySelector('[data-todo-id="p"] [data-todo-id="c"]')).not.toBeNull();
+    expect(screen.getByText("Tasks · 1/2 done")).toBeInTheDocument();
+    expect(screen.queryByText(/tokens in/)).toBeNull();
+    expect(screen.queryByRole("meter")).toBeNull();
+    expect(screen.queryByText("$0.0200")).toBeNull();
+  });
+
+  it.each([true, false])("only offers explicit retry for retryable=%s", retryable => {
+    const cb = callbacks();
+    const state = events([["message.complete", { status: "error", error: "Rate limited", partial: true, text: "Retained", error_surface: { layer: "provider", code: "429", retryable, resets_at: 1800000000 } }]]);
+    render(<NativeTranscript state={state} callbacks={cb} />);
+    expect(screen.getByText("Partial response retained")).toBeInTheDocument();
+    if (retryable) { fireEvent.click(screen.getByRole("button", { name: "Retry" })); expect(cb.onRetry).toHaveBeenCalledOnce(); }
+    else expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("offers a branch action for read-only automation", () => {
+    const onBranch = vi.fn(); render(<ReadOnlyNotice source="cron" onBranch={onBranch} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue as new chat" }));
+    expect(onBranch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("durable history shape", () => {
+  it("shows N consecutive assistant rows from Hermes (one per tool round) as one turn with one work block", () => {
+    const row = (id: string, role: string, parts: Record<string, unknown>[], timestamp: number) => ({ id, role, text: "", content: "", parts, timestamp });
+    const snapshot = {
+      key: "k", conversation: { id: "s", profile: "p", title: "T", working: false }, generation: 1, seq: 0, running: false, pendingRequests: [], html: [],
+      messages: [
+        row("1", "user", [{ type: "text", text: "Why?" }], 1_000_000),
+        row("2", "assistant", [{ type: "tool-invocation", toolCallId: "a", toolName: "read_file", args: { path: "/x/a.ts" }, result: "ok" }], 1_020_000),
+        row("3", "assistant", [{ type: "reasoning", text: "hmm" }, { type: "tool-invocation", toolCallId: "b", toolName: "terminal", args: { command: "git status" }, result: "clean" }], 1_050_000),
+        row("4", "assistant", [{ type: "text", text: "Because of X." }], 1_090_000),
+      ],
+    } as unknown as GatewayChatSnapshot;
+    const state = stateFromSnapshot(snapshot, { now: () => 0, id: () => "x" });
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    expect(container.querySelectorAll("article")).toHaveLength(2);
+    expect(container.querySelectorAll('[data-segment="work"]')).toHaveLength(1);
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
+    expect(screen.getByText("Thought for 1m 30s")).toBeInTheDocument(); // prompt sent at 1000s, answer row at 1090s
+    expect(screen.getByText("Because of X.")).toBeInTheDocument();
+  });
+});

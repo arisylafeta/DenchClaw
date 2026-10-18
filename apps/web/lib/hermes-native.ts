@@ -5,6 +5,8 @@ import { resolveHermesConfig } from "./agent-backend";
 import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
 import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
+import { hermesChatTransport } from "./hermes-gateway/transport-flag";
+import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
 type NativeSession = { id: string; source?: string; title?: string; last_active?: number; started_at?: number; hidden?: boolean; is_internal_child?: boolean };
 type Member = { profile: string; member_id: string; display_name?: string; handle?: string };
@@ -36,7 +38,7 @@ export function groupsConfigured() {
 let dashboardSession: { token: string; expiresAt: number } | undefined;
 let dashboardLogin: Promise<string> | undefined;
 let dashboardRetryAt = 0;
-async function dashboardToken(url: URL): Promise<string> {
+export async function dashboardToken(url: URL): Promise<string> {
   if (process.env.HERMES_GATEWAY_TOKEN) return process.env.HERMES_GATEWAY_TOKEN;
   if (dashboardSession && dashboardSession.expiresAt > Date.now()) return dashboardSession.token;
   if (Date.now() < dashboardRetryAt) throw new Error("Hermes dashboard sign-in temporarily unavailable");
@@ -66,6 +68,11 @@ async function dashboardToken(url: URL): Promise<string> {
     throw new Error("Hermes dashboard sign-in failed");
   }).finally(() => { dashboardLogin = undefined; });
   return dashboardLogin;
+}
+/** Forget a rejected dashboard credential; healthy sockets do not call this. */
+export function invalidateDashboardToken(): void {
+  dashboardSession = undefined;
+  dashboardRetryAt = 0;
 }
 // One native dashboard socket multiplexes list/state/log/send RPCs, including concurrent refreshes.
 let gateway: { url: string; socket: WebSocket; pending: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }> } | undefined;
@@ -116,12 +123,42 @@ export async function groupRpc<T>(method: string, params: Record<string, unknown
 export function soloConversation(profile: string, s: NativeSession): HermesConversation {
   return { key: conversationKey("solo", s.id, profile), kind: "solo", id: s.id, profile,
     title: s.title || "Untitled chat", updatedAt: (s.last_active || s.started_at || 0) * 1000,
-    participants: [{ profile, name: profile }], working: nativeHermesWorking(profile, s.id) };
+    participants: [{ profile, name: profile }], working: nativeHermesWorking(profile, s.id), source: s.source };
 }
 export function roomConversation(room: Room, working: boolean | null = null): HermesConversation {
   return { key: conversationKey("group", room.room_id), kind: "group", id: room.room_id,
     title: room.name, updatedAt: room.updated_at * 1000, working,
     participants: room.members.map((m) => ({ profile: m.profile, memberId: m.member_id, name: m.display_name || m.handle || m.profile, handle: m.handle })) };
+}
+const gatewayListCache = new WeakMap<HermesGatewayManager, { expires: number; pending: Promise<Record<string, { working: boolean | null; blocked: boolean | null }>> }>();
+function gatewayListStatus(rows: HermesConversation[]) {
+  const manager = getHermesGatewayManager();
+  const cached = gatewayListCache.get(manager);
+  if (cached && cached.expires > Date.now()) return cached.pending;
+  const pending = (async () => {
+    const result: Record<string, { working: boolean | null; blocked: boolean | null }> = {};
+    const active = await manager.call("session.active_list", {});
+    for (const row of rows) result[row.key] = { working: false, blocked: false };
+    const candidates = rows.flatMap(row => active.sessions.filter(live => live.session_key === row.id).map(live => ({ row, live })));
+    // A list poll must not attach the entire runtime pool. Four workers, eight
+    // warm activations maximum, with excess candidates explicitly unknown.
+    for (const { row } of candidates) result[row.key] = { working: null, blocked: null };
+    const selected = candidates.slice(0, 8);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, selected.length) }, async () => {
+      while (next < selected.length) {
+        const { row, live } = selected[next++];
+        const retained = manager.retainSession(row.participants[0].profile, row.id);
+        const snapshot = await manager.attachLive(retained, live.id);
+        if (snapshot) result[row.key] = { working: Boolean(snapshot.running || live.status !== "idle"), blocked: Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval) };
+        else if (result[row.key].working === null) result[row.key] = { working: false, blocked: false };
+      }
+    }));
+    return result;
+  })();
+  gatewayListCache.set(manager, { expires: Date.now() + 5_000, pending });
+  void pending.catch(() => gatewayListCache.delete(manager));
+  return pending;
 }
 export async function listConversations() {
   const warnings: string[] = [];
@@ -129,10 +166,21 @@ export async function listConversations() {
   const soloLists = await Promise.all(profiles.map(async (profile) => {
     // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
-      const page = await (await nativeFetch(profile, "/api/sessions?limit=100&offset=0")).json() as { data: NativeSession[] };
+      const page = await (await nativeFetch(profile, "/api/sessions?limit=200&offset=0")).json() as { data: NativeSession[] };
       return page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
+  if (hermesChatTransport() === "gateway") {
+    const rows = soloLists.flat();
+    for (const row of rows) { row.working = null; row.blocked = null; }
+    try {
+      const statuses = await gatewayListStatus(rows);
+      for (const row of rows) {
+        const status = statuses[row.key];
+        if (status) { row.working = status.working; row.blocked = status.blocked; }
+      }
+    } catch { /* Unknown status is not idle. */ }
+  }
   const rooms = new Map<string, HermesConversation>();
   if (groupsConfigured()) {
     try {
@@ -220,7 +268,7 @@ export async function readConversation(key: string, sinceSeq = 0) {
         const part: Record<string, unknown> = { type: "tool-invocation", toolCallId: call.id, toolName: call.function?.name ?? call.name ?? "unknown", args, state: "call" };
         tools.set(call.id, part); parts.push(part);
       }
-      messages.push({ id: String(m.id), role: m.role, text, content: text, parts, profile: m.role === "assistant" ? identity.profile : undefined });
+      messages.push({ id: String(m.id), role: m.role, timestamp: Number(m.timestamp) > 0 ? Math.round(Number(m.timestamp) * 1000) : undefined, text, content: text, parts, profile: m.role === "assistant" ? identity.profile : undefined });
     }
     if (page.data.length < 500) break;
     offset += 500;

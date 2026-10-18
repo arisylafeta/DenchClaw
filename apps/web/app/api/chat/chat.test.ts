@@ -1,5 +1,8 @@
 import type { PathOrFileDescriptor } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { resolveAgentBackend as backendForCutover } from "@/lib/agent-backend";
+import { createHermesChatStream as streamForCutover } from "@/lib/hermes-client";
+import { POST as submitChat } from "./route";
 
 // Mock active-runs module
 vi.mock("@/lib/active-runs", () => ({
@@ -154,6 +157,17 @@ describe("Chat API routes", () => {
   // ─── POST /api/chat ──────────────────────────────────────────────
 
   describe("POST /api/chat", () => {
+    it("rejects native submissions at the real endpoint in gateway mode", async () => {
+      vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+      vi.mocked(backendForCutover).mockReturnValue("hermes");
+      vi.mocked(streamForCutover).mockClear();
+      try {
+        const response = await submitChat(new Request("http://local/api/chat", { method: "POST", body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "alpha", messages: [{ id: "u", role: "user", parts: [{ type: "text", text: "old client" }] }] }) }));
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({ error: "gateway_transport" });
+        expect(streamForCutover).not.toHaveBeenCalled();
+      } finally { vi.unstubAllEnvs(); }
+    });
     it("continues native Hermes through the existing authenticated route with pinned profile and no Dench history writes", async () => {
       const { resolveAgentBackend } = await import("@/lib/agent-backend");
       const { createHermesChatStream } = await import("@/lib/hermes-client");

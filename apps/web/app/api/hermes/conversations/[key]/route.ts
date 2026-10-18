@@ -2,6 +2,7 @@ import { resolveAgentBackend } from "@/lib/agent-backend";
 import { stopNativeHermesStream } from "@/lib/hermes-client";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import { assertProfile, groupRpc, nativeFetch, readConversation } from "@/lib/hermes-native";
+import { hermesChatTransport } from "@/lib/hermes-gateway/transport-flag";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 type Context = { params: Promise<{ key: string }> };
@@ -44,6 +45,7 @@ export async function POST(req: Request, context: Context) {
     const body = await req.json();
     if (identity.kind === "solo") {
       assertProfile(identity.profile);
+      if (hermesChatTransport() === "gateway" && body.action !== "stop") return Response.json({ error: "gateway_transport" }, { status: 409 });
       if (body.action !== "stop") return Response.json({ error: "Solo chats use /api/chat" }, { status: 405 });
       return Response.json({ aborted: stopNativeHermesStream(identity.profile, identity.id) });
     }

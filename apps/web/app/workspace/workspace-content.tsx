@@ -33,7 +33,7 @@ import { RichDocumentEditor, isDocxFile, isTxtFile, textToHtml } from "../compon
 import { Breadcrumbs } from "../components/workspace/breadcrumbs";
 import { EmptyState } from "../components/workspace/empty-state";
 import { ReportViewer } from "../components/charts/report-viewer";
-import { InboxView } from "../components/crm/inbox-view";
+import { InboxView } from "../components/crm/inbox/inbox-view";
 import { CalendarView } from "../components/crm/calendar-view";
 import { PersonProfile } from "../components/crm/person-profile";
 import { CompanyProfile } from "../components/crm/company-profile";
@@ -42,7 +42,6 @@ import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
-import { CampaignsView } from "../components/campaigns/campaigns-view";
 import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
@@ -97,7 +96,7 @@ import {
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
-import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog } from "../components/workspace/hermes-conversations";
+import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
 import { GroupBadge } from "../components/workspace/group-chat";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
@@ -143,6 +142,20 @@ const TerminalDrawer = dynamic(
   () => import("../components/terminal/terminal-drawer"),
   { ssr: false },
 );
+
+/** Only the visible panel has a current subscription; hidden panels use the server listing. */
+export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId, onOpen }: {
+  chats: HermesChatsController;
+  snapshots: Record<string, ChatTabRuntimeSnapshot>;
+  visibleTabId: string | null;
+  /** Called when a chat is clicked, so a hidden chat pane is shown again. */
+  onOpen?: () => void;
+}) {
+  const visible = Object.values(snapshots).filter(snapshot => snapshot.tabId === visibleTabId && snapshot.sessionId);
+  return <HermesConversationList chats={chats} onOpen={onOpen}
+    workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming).map(snapshot => snapshot.sessionId!))}
+    awaitingKeys={new Set(visible.filter(snapshot => snapshot.awaiting).map(snapshot => snapshot.sessionId!))} />;
+}
 
 // --- Types ---
 
@@ -953,6 +966,12 @@ function WorkspacePageInner() {
         setFileTreeCollapsed(true);
       }
     }
+    // Direct mail links must reveal the page, even in a fresh workspace.
+    if (new URLSearchParams(window.location.search).get("crm") === "inbox") {
+      setRightPanelCollapsed(false);
+      setRightPanelWidth(clamp(window.innerWidth - LEFT_SIDEBAR_COMPACT_WIDTH - CENTER_PANEL_MIN, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX));
+      if (!isDesktopWorkspaceViewport()) {setMobileRightPanelOpen(true);}
+    }
   }, [isMobile]);
 
   // Whether the left sidebar is in compact (icon-only) mode.
@@ -1377,7 +1396,7 @@ function WorkspacePageInner() {
         cloud: { path: "~cloud", name: "Cloud" },
         skills: { path: "~skills", name: "Skills" },
         cron: { path: "~cron", name: "Cron" },
-        "crm-inbox": { path: "~crm/inbox", name: "Inbox" },
+        "crm-inbox": { path: "~crm/inbox", name: "Mail" },
         "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
@@ -2417,7 +2436,7 @@ function WorkspacePageInner() {
       { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
     ] : undefined,
     chatsPanel: (
-      hermesChats.enabled ? <HermesConversationList chats={hermesChats} workingKeys={new Set(Object.values(chatRuntimeSnapshots).filter((snapshot) => snapshot.isStreaming && snapshot.sessionId).map((snapshot) => snapshot.sessionId!))} /> : <ChatSessionsSidebar
+      hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2796,6 +2815,8 @@ function WorkspacePageInner() {
                   gatewaySessionId={isGateway ? tab.sessionId : undefined}
                   gatewayChannel={isGateway ? tab.channel : undefined}
                   visible={isVisible}
+                  nativeTransport={hermesChats.listing?.transport}
+                  onBranched={(conversation) => { hermesChats.select(conversation); void hermesChats.reload(); }}
                   searchFn={searchIndex}
                   fileContext={isVisible ? fileContext : undefined}
                   onFileChanged={handleFileChanged}
@@ -3009,11 +3030,11 @@ function ContentRenderer({
 
     case "campaigns":
       return (
-        <CampaignsView
-          campaignId={content.campaignId}
-          onOpenCampaign={(id) => onOpenEntry("campaign", id)}
-          onBack={() => onNavigateToObject("campaign")}
-          onNavigatePerson={(id) => onOpenEntry("people", id)}
+        <InboxView
+          key={`mail-campaign:${content.campaignId ?? "list"}`}
+          initialView="campaigns"
+          initialCampaignId={content.campaignId}
+          onOpenPerson={(id) => onOpenEntry("people", id)}
         />
       );
 
@@ -3236,7 +3257,7 @@ function ContentRenderer({
       return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
     case "crm-inbox":
-      return <InboxView onOpenPerson={(id) => onOpenEntry("people", id)} />;
+      return <InboxView key="mail-conversations" onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
     case "crm-calendar":
       return (

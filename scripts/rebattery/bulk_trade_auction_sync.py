@@ -14,7 +14,7 @@ dench-platform-admin.env) and writes to the CRM database:
    model. A published auction with no trade gets a new one, filled from the listing. When several
    trades could match, Alex gets a "link auction" card instead of a guess.
 2. People. For each auction trade it collects, by email: the auction invite email (sent and
-   clicked, from crm_campaign_sends), offers, buy-now requests and messages
+   clicked, from campaign mail_message rows), offers, buy-now requests and messages
    (public.auction_submissions) and signed-in page views (public.auction_views). They are kept in
    crm_bulk_trade_auction_people for the trade page.
 3. Buyers. Someone who clicked the invite, viewed the auction signed in, messaged or made an offer
@@ -263,9 +263,9 @@ def collect_people(cur, lot_id, listing_id, auction_id, submissions, views):
         cur.execute(
             """select lower(send.recipient_email) as email, min(send.accepted_at) as invited_at,
                       min(link.first_clicked_at) as clicked_at
-               from crm_campaign_sends send
-               left join crm_campaign_send_links link on link.send_id = send.id and link.listing_id = %s
-               where send.accepted_at is not null and (send.listing_id = %s or link.listing_id is not null)
+               from mail_message send
+               left join mail_message_link link on link.message_id = send.id and link.listing_id = %s
+               where send.campaign_id is not null and send.accepted_at is not null and (send.listing_id = %s or link.listing_id is not null)
                group by 1""", (listing_id, listing_id))
         for row in cur.fetchall():
             p = person(row["email"])

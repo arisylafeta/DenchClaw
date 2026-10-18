@@ -27,7 +27,7 @@ const EXTRA_CANONICAL_FIELDS: Record<string, Record<string, string>> = {
     "Sent At": "sent_at",
     From: "from_person_id",
     "Body Preview": "body_preview",
-    Body: "body",
+    Body: "body_text",
     "Has Attachments": "has_attachments",
     "Gmail Message ID": "gmail_message_id",
   },
@@ -84,8 +84,6 @@ const ENTITY_IMPORTS = [
       linkedin_url: "LinkedIn URL",
     },
   },
-  { objectName: "email_thread", table: "crm_email_threads", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.email_thread) },
-  { objectName: "email_message", table: "crm_email_messages", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.email_message) },
   { objectName: "calendar_event", table: "crm_calendar_events", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.calendar_event) },
   { objectName: "interaction", table: "crm_interactions", columns: invertFieldMap(EXTRA_CANONICAL_FIELDS.interaction) },
 ] as const;
@@ -217,7 +215,7 @@ async function duckRows(dbPath: string, sql: string): Promise<Row[]> {
 export async function buildMigrationPlan(): Promise<MigrationPlan> {
   const dbPath = await duckdbPathAsync();
   if (!dbPath) { throw new Error("DuckDB database not found"); }
-  const objects = ["people", "company", "email_thread", "email_message", "calendar_event", "interaction"];
+  const objects = ["people", "company", "calendar_event", "interaction"];
   const counts: Record<string, number> = {};
   for (const objectName of objects) {
     const view = pivotViewIdentifier(objectName);
@@ -238,13 +236,15 @@ export async function applyMigration(): Promise<MigrationApplyResult> {
   const objectNameById = new Map(objects.map((obj) => [String(obj.id), String(obj.name)]));
 
   return withPgTransaction(async (client) => {
+    const mail = await client.query<{ available: boolean }>("select to_regclass('mail_message') is not null as available");
+    if (mail.rows[0]?.available) {
+      throw new Error("DuckDB replacement import is disabled after mail-log cutover; use the dedicated importers.");
+    }
     const inserted: Record<string, number> = {};
     await client.query(`truncate
       crm_documents,
       crm_interactions,
       crm_calendar_events,
-      crm_email_messages,
-      crm_email_threads,
       crm_people,
       crm_companies,
       crm_fields,

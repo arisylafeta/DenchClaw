@@ -57,8 +57,7 @@ describe.skipIf(!TEST_URL)("classification rules (migration 029)", () => {
     await pg.queryPg(`insert into crm_companies (id, name, purpose) values ('cr_intro', 'Intro Buyer', '{Buyer}');
       insert into crm_people (id, full_name, email, company_id) values ('p_cr_intro', 'Ivy', 'ivy@intro.example', 'cr_intro');
       insert into campaigns (id, campaign_name, type) values ('c_cr_intro', 'Intro', 'intro')`);
-    await pg.queryPg(`insert into crm_campaign_sends (id, campaign_id, person_id, company_id, listing_id, auction_url, recipient_email, state)
-      values ('s_cr_intro', 'c_cr_intro', 'p_cr_intro', 'cr_intro', 'intro', 'https://example.test', 'ivy@intro.example', 'accepted')`);
+    await pg.queryPg(`insert into mail_message (direction,transport,purpose,crm_visible,id, campaign_id, person_id, company_id, listing_id, auction_url, recipient_email, state) values ('outbound','postmark-broadcast','marketing',true,'s_cr_intro', 'c_cr_intro', 'p_cr_intro', 'cr_intro', 'intro', 'https://example.test', 'ivy@intro.example', 'accepted')`);
     expect(await company("cr_intro")).toMatchObject({ stage: "Contacted", buyer_stage: "Contacted" });
   });
 });
