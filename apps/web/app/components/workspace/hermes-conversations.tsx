@@ -155,12 +155,12 @@ export function StatusDot({ status }: { status: ChatStatus }) {
 }
 export function ParticipantIcons({ row }: { row: HermesConversation }) {
   return <span className="inline-flex shrink-0 -space-x-2" aria-label={`Participants: ${row.participants.map((p) => p.name).join(", ")}`}>
-    {row.participants.slice(0, 2).map((p, index) => <span key={p.memberId || p.profile} className="rounded-full ring-2 ring-[var(--color-bg)]" style={{ zIndex: row.participants.length - index }} title={p.name}><ProfileAvatar name={p.profile} className={row.participants.length > 1 ? "h-6 w-6" : "h-7 w-7"} /></span>)}
+    {row.participants.slice(0, 2).map((p, index) => <span key={p.memberId || p.profile} className="rounded-full ring-2 ring-[var(--color-bg)]" style={{ zIndex: row.participants.length - index }} title={p.name}><ProfileAvatar name={p.profile} className={row.participants.length > 1 ? "h-5 w-5" : "h-6 w-6"} /></span>)}
   </span>;
 }
 function SourceIcon({ source }: { source: string }) {
   const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "chats" ? MessageCircle : Hash;
-  return <Icon size={14} aria-hidden="true" className="shrink-0" />;
+  return <Icon size={12} aria-hidden="true" className="shrink-0" />;
 }
 function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmit: (title: string) => Promise<boolean>; onCancel: () => void }) {
   const [value, setValue] = useState(initial);
@@ -241,7 +241,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
             {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
             <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
               <span className="block truncate text-[12px] font-medium">{row.title}</span>
-              <span className="block truncate text-[10px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", view.groupBy !== "agent" ? row.participants.map((p) => p.name).join(", ") : "", section.key === "pinned" ? conversationChannel(row).label : "", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
+              <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", section.key === "pinned" ? conversationChannel(row).label : "", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
             </button>}
           </div>
           <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
