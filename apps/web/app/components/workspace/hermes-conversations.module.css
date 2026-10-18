@@ -3,7 +3,7 @@
   width: 216px;
   max-width: calc(100vw - 24px);
   padding: 5px;
-  border: 1px solid var(--color-border);
+  border: none;
   border-radius: 8px;
   background: var(--color-bg);
   backdrop-filter: none;
