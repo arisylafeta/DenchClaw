@@ -4,6 +4,8 @@ import { applyTodos } from './todos'
 import type { MessageHtmlRow } from './html-map'
 
 export interface SnapshotRow {
+  /** Row time in milliseconds when the history source provides it. */
+  timestamp?: number
   id: string; role: string; text?: string; content?: string
   parts?: Record<string, unknown>[]; profile?: string; name?: string
   pending?: 'inflight' | 'queued'; clientMessageId?: string
@@ -35,11 +37,12 @@ export const normalizeMessageText = (text: string): string => text.replace(/\s+/
 
 function rowMessage(row: SnapshotRow): SourcedMessage | null {
   if (row.role !== 'user' && row.role !== 'assistant') return null
+  const at = Number(row.timestamp) > 0 ? Number(row.timestamp) : 0
   const segments: Segment[] = []
   for (const [index, part] of (row.parts ?? []).entries()) {
     const id = `${row.id}:part:${index}`
     if (part.type === 'text' || part.type === 'reasoning') {
-      segments.push({ type: part.type, id, text: stringValue(part.text), startedAt: 0, completedAt: 0 })
+      segments.push({ type: part.type, id, text: stringValue(part.text), startedAt: at, completedAt: at })
     } else if (part.type === 'tool-invocation') {
       const tool = { ...asRecord(part.toolInvocation), ...part }
       const error = toolError(tool)
@@ -47,14 +50,14 @@ function rowMessage(row: SnapshotRow): SourcedMessage | null {
         name: stringValue(tool.toolName) || 'tool', args: asRecord(tool.args),
         ...(Object.hasOwn(tool, 'result') ? { result: tool.result } : {}),
         error, status: error ? 'error' : Object.hasOwn(tool, 'result') ? 'done' : 'running',
-        startedAt: 0, ...(Object.hasOwn(tool, 'result') ? { completedAt: 0 } : {}) })
+        startedAt: at, ...(Object.hasOwn(tool, 'result') ? { completedAt: at } : {}) })
     }
   }
   if (!segments.some(segment => segment.type === 'text') && (row.text || row.content)) {
-    segments.push({ type: 'text', id: `${row.id}:text`, text: row.text || row.content || '', startedAt: 0, completedAt: 0 })
+    segments.push({ type: 'text', id: `${row.id}:text`, text: row.text || row.content || '', startedAt: at, completedAt: at })
   }
   const rowId = Number(row.id)
-  return { id: row.id, role: row.role, source: row.pending === 'queued' ? 'queued' : 'durable', segments, startedAt: 0, completedAt: 0,
+  return { id: row.id, role: row.role, source: row.pending === 'queued' ? 'queued' : 'durable', segments, startedAt: at, completedAt: at,
     clientIds: row.clientMessageId ? [row.clientMessageId] : undefined,
     pending: Boolean(row.pending), status: 'complete', ...(Number.isSafeInteger(rowId) && rowId > 0 ? { rowId } : {}) }
 }

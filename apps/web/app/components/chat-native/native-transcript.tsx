@@ -8,7 +8,7 @@ import { buildSubagentTree } from "@/lib/hermes-chat/subagents";
 import type { NativeTranscriptProps } from "./types";
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { ErrorCard, SubagentCard, TodoPanel, UsageMeter } from "./panels";
-import { splitTurn, WorkBlock } from "./work-block";
+import { displayTurns, splitTurn, WorkBlock } from "./work-block";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
   const [content, setContent] = useState<ReactNode>(text);
@@ -36,7 +36,7 @@ export function NativeTranscript({ state, subagents = state.subagents, todos = s
   useEffect(() => { setRequests(state.pendingRequests); }, [state.sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   const visibleRequests = [...requests.filter(old => !state.pendingRequests.some(current => current.id === old.id)), ...state.pendingRequests];
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
-    {state.messages.map(message => <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
+    {displayTurns(state.messages).map(message => <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? <div className="flex flex-col items-end gap-1 py-2"><div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}><UserContent html={userHtml?.(message.id)} text={message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join("")} /></div>{queuedMessageIds.includes(message.id) && <span className="text-xs text-[var(--color-text-muted)]">Queued</span>}</div> : (() => {
         const { work, answer } = splitTurn(message.segments);
         return <Fragment key={message.id}>

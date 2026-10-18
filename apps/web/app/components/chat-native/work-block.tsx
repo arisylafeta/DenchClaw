@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Brain, ChevronRight, LoaderCircle, MessageSquareText } from "lucide-react";
-import type { Segment, TextSegment } from "@/lib/hermes-chat/reducer";
-import { chipClass, Elapsed, ToolRow, TraceStep } from "./tool-run";
+import type { ChatMessage, Segment, TextSegment } from "@/lib/hermes-chat/reducer";
+import { Elapsed, ToolRow, TraceStep } from "./tool-run";
 
 /** Everything before the final answer is "work": reasoning, tool calls and the narration between them. */
 export function splitTurn(segments: readonly Segment[]): { work: Segment[]; answer: TextSegment[] } {
@@ -11,6 +11,27 @@ export function splitTurn(segments: readonly Segment[]): { work: Segment[]; answ
   segments.forEach((segment, index) => { if (segment.type !== "text") lastWork = index; });
   const visible = (segment: Segment) => segment.type === "tool" || segment.text.trim() !== "";
   return { work: segments.slice(0, lastWork + 1).filter(visible), answer: segments.slice(lastWork + 1).filter((segment): segment is TextSegment => segment.type !== "tool" && visible(segment)) };
+}
+
+/**
+ * Hermes stores one assistant row per model call, so a turn with N tool rounds is N consecutive assistant
+ * messages. For the reader that is one turn: merge them, starting at the moment the prompt was sent when known.
+ */
+export function displayTurns(messages: readonly ChatMessage[]): ChatMessage[] {
+  const turns: ChatMessage[] = [];
+  for (const message of messages) {
+    const previous = turns.at(-1);
+    if (message.role !== "assistant") { turns.push(message); continue; }
+    if (previous?.role === "assistant") {
+      turns[turns.length - 1] = { ...previous, segments: [...previous.segments, ...message.segments], pending: message.pending, completedAt: message.completedAt,
+        error: message.error ?? previous.error, error_surface: message.error_surface ?? previous.error_surface, partial: message.partial ?? previous.partial, status: message.status ?? previous.status };
+      continue;
+    }
+    const first = message.segments[0];
+    const asked = previous?.role === "user" ? previous.startedAt : 0;
+    turns.push(first && asked > 0 && first.startedAt > asked ? { ...message, segments: [{ ...first, startedAt: asked }, ...message.segments.slice(1)] } : message);
+  }
+  return turns;
 }
 function useLiveDisclosure(live: boolean) {
   const [open, setOpen] = useState(live);
@@ -30,13 +51,12 @@ export function WorkBlock({ work, live, answerStartedAt }: WorkBlockProps) {
   const items = work.filter(segment => segment.type !== "reasoning" || live || (segment.completedAt ?? segment.startedAt) - segment.startedAt >= 1000);
   const started = work[0]?.startedAt ?? 0;
   const ended = Math.max(...work.map(segment => segment.completedAt ?? segment.startedAt), answerStartedAt ?? 0);
-  const steps = work.filter(segment => segment.type === "tool").length;
+  const seconds = (ended - started) / 1000;
   return <details className="group/work w-full min-w-0" data-segment="work" open={disclosure.open} onToggle={disclosure.onToggle}>
     <summary className="flex min-h-6 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
       <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/work:rotate-90" />
       {live ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin text-[var(--color-text-muted)] motion-reduce:animate-none" /> : <Brain aria-hidden="true" className="size-3.5 text-[var(--color-text-muted)]" />}
-      <span className="font-medium">{live ? "Working" : "Thought for"} {live ? <Elapsed startedAt={started} /> : formatDuration((ended - started) / 1000)}</span>
-      {steps > 0 && <span className={chipClass}>{steps} {steps === 1 ? "step" : "steps"}</span>}
+      <span className="font-medium">{live ? <>Working <Elapsed startedAt={started} /></> : seconds >= 1 ? `Thought for ${formatDuration(seconds)}` : "Thought"}</span>
     </summary>
     <div className="mt-1 ml-1.5">
       {items.map((segment, index) => {

@@ -5,6 +5,7 @@ import { initialState, reduce, type ChatState } from "@/lib/hermes-chat/reducer"
 import type { GatewayEvent } from "@/lib/hermes-chat/events";
 import { NativeTranscript, ApprovalCard, ClarifyCard, ReadOnlyNotice } from "./index";
 import type { NativeTranscriptCallbacks } from "./types";
+import { stateFromSnapshot, type GatewayChatSnapshot } from "@/lib/hermes-chat/snapshot";
 
 function events(frames: Array<[string, GatewayEvent["payload"], (string | number)?]>, base = initialState("chat")): ChatState {
   let id = 0;
@@ -44,7 +45,7 @@ describe("native transcript", () => {
     expect(container.querySelector("script")).toBeNull();
   });
 
-  it("folds a finished turn's reasoning, tool calls and narration into one 'Thought for' accordion above the answer", () => {
+  it("folds a finished turn's reasoning, tool calls and narration into one 'Thought' accordion above the answer", () => {
     const state = events([
       ["client.submit", { text: "Why?", id: "u" }],
       ["message.start", {}],
@@ -61,8 +62,8 @@ describe("native transcript", () => {
     const work = container.querySelectorAll('[data-segment="work"]');
     expect(work).toHaveLength(1);
     expect(work[0]).not.toHaveAttribute("open");
-    expect(within(work[0] as HTMLElement).getByText(/^Thought for/)).toBeInTheDocument();
-    expect(within(work[0] as HTMLElement).getByText("2 steps")).toBeInTheDocument();
+    expect(within(work[0] as HTMLElement).getByText(/^Thought/)).toBeInTheDocument();
+    expect(within(work[0] as HTMLElement).queryByText(/steps?$/)).toBeNull();
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
     expect(within(work[0] as HTMLElement).getByText("Let me check the schema.")).toBeInTheDocument();
     expect(within(work[0] as HTMLElement).queryByText("Final answer text.")).toBeNull();
@@ -219,5 +220,27 @@ describe("native transcript", () => {
     const onBranch = vi.fn(); render(<ReadOnlyNotice source="cron" onBranch={onBranch} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue as new chat" }));
     expect(onBranch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("durable history shape", () => {
+  it("shows N consecutive assistant rows from Hermes (one per tool round) as one turn with one work block", () => {
+    const row = (id: string, role: string, parts: Record<string, unknown>[], timestamp: number) => ({ id, role, text: "", content: "", parts, timestamp });
+    const snapshot = {
+      key: "k", conversation: { id: "s", profile: "p", title: "T", working: false }, generation: 1, seq: 0, running: false, pendingRequests: [], html: [],
+      messages: [
+        row("1", "user", [{ type: "text", text: "Why?" }], 1_000_000),
+        row("2", "assistant", [{ type: "tool-invocation", toolCallId: "a", toolName: "read_file", args: { path: "/x/a.ts" }, result: "ok" }], 1_020_000),
+        row("3", "assistant", [{ type: "reasoning", text: "hmm" }, { type: "tool-invocation", toolCallId: "b", toolName: "terminal", args: { command: "git status" }, result: "clean" }], 1_050_000),
+        row("4", "assistant", [{ type: "text", text: "Because of X." }], 1_090_000),
+      ],
+    } as unknown as GatewayChatSnapshot;
+    const state = stateFromSnapshot(snapshot, { now: () => 0, id: () => "x" });
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    expect(container.querySelectorAll("article")).toHaveLength(2);
+    expect(container.querySelectorAll('[data-segment="work"]')).toHaveLength(1);
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
+    expect(screen.getByText("Thought for 1m 30s")).toBeInTheDocument(); // prompt sent at 1000s, answer row at 1090s
+    expect(screen.getByText("Because of X.")).toBeInTheDocument();
   });
 });
