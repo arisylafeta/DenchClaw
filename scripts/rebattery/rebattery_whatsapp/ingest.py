@@ -149,6 +149,11 @@ def project(cur, account, raw, provenance):
     source_at = instant(source) if source else captured
     target = record.get('targetId') if kind in ('edit', 'revoke', 'reaction') else record.get('messageId')
     message = stable_id(account, thread, target) if target and thread else None
+    cur.execute("select metadata->>'retention_erased' as erased from whatsapp_message where id=%s", (message,))
+    existing = cur.fetchone()
+    retention_erased = existing and existing['erased'] == 'true'
+    if retention_erased:
+        record = {**record, 'body': None, 'attachment': None, 'contentRedacted': True}
     cur.execute('''insert into whatsapp_event(id,account_id,thread_id,message_id,kind,logical_key,envelope_id,target_provider_id,source_at,captured_at,payload,provenance)
       values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) on conflict(account_id,logical_key) do nothing returning id''',
       (stable_id(account, key), account, thread, message, kind, key, record.get('envelopeId') or
@@ -189,6 +194,10 @@ def project(cur, account, raw, provenance):
           coalesce(metadata->'reactions','{}'::jsonb) || %s::jsonb) where id=%s
           and coalesce(metadata->'reactions'->%s->>'order','') < %s''',
           (Json({sender: {'text': record.get('body'), 'at': source_at.isoformat(), 'order': order}}), message, sender, order))
+    if retention_erased:
+        cur.execute("""update whatsapp_message set body=null,attachment=null,
+          metadata=jsonb_build_object('content_redacted',true,'retention_erased',true) where id=%s""", (message,))
+        cur.execute("update whatsapp_event set payload='{}'::jsonb where message_id=%s", (message,))
     # Resolve both forward and backwards references after every arrival.
     cur.execute('''update whatsapp_message reply set reply_to_message_id=target.id from whatsapp_message target
       where reply.account_id=%s and reply.thread_id=%s and target.account_id=reply.account_id
@@ -247,6 +256,9 @@ def ingest(path, apply=False, expected_account=None, db=None, after_record=None)
             end = finish
             try:
                 record = json.loads(line)
+                if isinstance(record, dict) and record.get('retentionErased') is True:
+                    rows.append((start, finish, record, None))
+                    continue
                 account = validate(record)
                 if expected and account != expected:
                     raise Refused('unexpected_account')
@@ -321,7 +333,8 @@ def ingest(path, apply=False, expected_account=None, db=None, after_record=None)
                           (stable_id(expected, key), expected, key, Json({'sha256': digest, 'reason': 'malformed_record'}), Json(provenance)))
                         quarantined += cur.rowcount
                     else:
-                        imported += int(project(cur, expected, record, provenance))
+                        if not record.get('retentionErased'):
+                            imported += int(project(cur, expected, record, provenance))
                     complete = finish
                     if after_record:
                         after_record()
