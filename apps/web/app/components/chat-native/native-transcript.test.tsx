@@ -34,7 +34,7 @@ describe("native transcript", () => {
       ["message.interim", { text: "Last narration" }],
     ]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} queuedMessageIds={["user"]} userHtml={() => '<span class="mention" onclick="bad()">CRM</span><script>unsafe()</script>'} />);
-    expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["interim", "reasoning", "tool-run", "interim"]);
+    expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["work", "interim", "reasoning", "interim"]);
     expect(screen.getByText("Read README")).toBeInTheDocument();
     expect(screen.getByText("Ran a quick command")).toBeInTheDocument();
     expect(screen.queryByText(/pwd/)).not.toBeInTheDocument();
@@ -44,11 +44,40 @@ describe("native transcript", () => {
     expect(container.querySelector("script")).toBeNull();
   });
 
+  it("folds a finished turn's reasoning, tool calls and narration into one 'Thought for' accordion above the answer", () => {
+    const state = events([
+      ["client.submit", { text: "Why?", id: "u" }],
+      ["message.start", {}],
+      ["message.delta", { text: "Let me check the schema." }],
+      ["tool.start", { tool_id: "a", name: "read_file", args: { path: "/x/schema.sql" } }],
+      ["tool.complete", { tool_id: "a", name: "read_file", result: { content: "1|create table x" }, duration_s: 1 }],
+      ["message.delta", { text: "Now the callers." }],
+      ["tool.start", { tool_id: "b", name: "terminal", args: { command: "git status" } }],
+      ["tool.complete", { tool_id: "b", name: "terminal", result: { output: "clean", exit_code: 0 } }],
+      ["message.delta", { text: "Final answer text." }],
+      ["message.complete", { text: "Final answer text.", status: "complete" }],
+    ]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    const work = container.querySelectorAll('[data-segment="work"]');
+    expect(work).toHaveLength(1);
+    expect(work[0]).not.toHaveAttribute("open");
+    expect(within(work[0] as HTMLElement).getByText(/^Thought for/)).toBeInTheDocument();
+    expect(within(work[0] as HTMLElement).getByText("2 steps")).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
+    expect(within(work[0] as HTMLElement).getByText("Let me check the schema.")).toBeInTheDocument();
+    expect(within(work[0] as HTMLElement).queryByText("Final answer text.")).toBeNull();
+    expect(screen.getByText("Final answer text.")).toBeInTheDocument();
+    // The answer is rendered after the folded work, with no stray empty blocks between tool calls.
+    const answer = container.querySelector('[data-segment="text"]')!;
+    expect(work[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("updates a running tool to done and collapses completed reasoning", () => {
     const live = events([["message.start", {}], ["reasoning.delta", { text: "Plan" }]]);
     const cb = callbacks();
     const { container, rerender } = render(<NativeTranscript state={live} callbacks={cb} />);
-    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(container.querySelector('[data-segment="work"]')).toHaveAttribute("open");
+    expect(screen.getAllByText(/^Working/).length).toBeGreaterThan(0);
     const running = events([["tool.start", { tool_id: "t", name: "terminal", args: { command: "pwd" } }]], live);
     rerender(<NativeTranscript state={running} callbacks={cb} />);
     expect(screen.getByText("Running a quick command")).toBeInTheDocument();

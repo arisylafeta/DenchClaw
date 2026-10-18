@@ -22,15 +22,15 @@ export function Elapsed({ startedAt, completedAt, seconds }: ElapsedProps) {
 export type StepState = "running" | "done" | "error";
 export const chipClass = "min-w-0 rounded-md bg-[var(--color-surface-hover)] px-2 py-1 font-mono text-[10px] text-[var(--color-text-muted)]";
 /** One trace step in the rebattery-platform style: status node on a connector line, label, detail chip. No disclosure. */
-export function TraceStep({ state, icon, label, detail, body, connectPrevious, connectNext, children, ...rest }: {
-  state: StepState; icon?: LucideIcon; label: string; detail?: React.ReactNode; body?: React.ReactNode; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
+export function TraceStep({ state, icon, label, detail, body, muted, connectPrevious, connectNext, children, ...rest }: {
+  state: StepState; icon?: LucideIcon; label: string; detail?: React.ReactNode; body?: React.ReactNode; muted?: boolean; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const Icon = state === "error" ? CircleAlert : state === "done" ? (icon ?? Brain) : LoaderCircle;
   const row = <>
     <span aria-hidden="true" className="absolute -left-7 flex size-3.5 items-center justify-center bg-[var(--color-main-bg)] text-[var(--color-text-muted)]">
       <Icon className={`size-3.5 ${state === "running" ? "animate-spin motion-reduce:animate-none" : ""} ${state === "error" ? "text-[var(--color-error)]" : ""}`} />
     </span>
-    {label && <span className="text-[12px] font-medium text-[var(--color-text)]">{label}</span>}
+    {label && <span className={muted ? "min-w-0 text-[12px] text-[var(--color-text-muted)]" : "text-[12px] font-medium text-[var(--color-text)]"}>{label}</span>}
     {detail !== undefined && <span className={chipClass}>{detail}</span>}
     {body !== undefined && <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/step:rotate-90" />}
   </>;
@@ -53,10 +53,4 @@ export function ToolRow({ tool, connectPrevious, connectNext }: ToolRowProps) {
   return <TraceStep data-tool-id={tool.id} state={state} icon={icon} label={label} detail={detail} body={preview ? <ResultPreviewView preview={preview} tool={tool} /> : undefined} connectPrevious={connectPrevious} connectNext={connectNext}>
     {tool.error && <p role="alert" className="mt-1 text-[11px] text-[var(--color-error)]">{typeof tool.error === "string" ? tool.error : tool.message || "Tool failed"}</p>}
   </TraceStep>;
-}
-export interface ToolRunProps { tools: readonly ToolSegment[]; live?: boolean }
-export function ToolRun({ tools }: ToolRunProps) {
-  return <div className="w-full min-w-0" data-segment="tool-run">
-    {tools.map((tool, index) => <ToolRow key={tool.id} tool={tool} connectPrevious={index > 0} connectNext={index < tools.length - 1} />)}
-  </div>;
 }
