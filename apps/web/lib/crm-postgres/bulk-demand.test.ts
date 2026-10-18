@@ -32,6 +32,17 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     await pg.pgPool.end();
   });
 
+  it.skipIf(!process.env.HISTORY_RESTORE_TEST)("lists the complete restored audit cohort without active work", async () => {
+    const rows = await demand.listDemand();
+    const restored = rows.filter((row) => row.note?.includes("Restored to History 18 Oct from the 16 Oct audit (was:"));
+    expect(restored).toHaveLength(573);
+    expect(restored.filter((row) => row.closed_reason === "research_profile")).toHaveLength(417);
+    expect(restored.every((row) => row.status === "closed" && !row.priority && !row.missing.length &&
+      !row.inventory_matches.length && !row.fits.length && row.score === null && row.expected_fee === null && !row.waiting)).toBe(true);
+    expect(rows.filter((row) => row.status === "open")).toHaveLength(12);
+    expect(rows.filter((row) => row.status === "qualifying")).toHaveLength(8);
+  });
+
   it("adds, edits, confirms and closes demand", async () => {
     const row = await demand.addDemand({ buyer: "Green Voltage", wants: "Matched packs in repeat batches", confirmed_on: "2026-05-01" }, user.id);
     expect(row).toMatchObject({ status: "open", confirmed_on: "2026-05-01", fits: [] });
@@ -44,6 +55,28 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.closeDemand(row.id, "bought_elsewhere")).toMatchObject({ status: "closed", closed_reason: "bought_elsewhere" });
     expect(await demand.confirmDemand(row.id)).toMatchObject({ status: "open", closed_reason: null });
     expect(await demand.updateDemand("btd_missing", { note: "x" })).toBeNull();
+  });
+
+  it("lists closed History inertly and categorizes without reopening or confirming it", async () => {
+    const row = await demand.addDemand({ buyer: "History buyer", wants: "Historical packs",
+      fee_eur: 10000, price_basis: "buyer", reputation: "paid" }, user.id);
+    await pg.queryPg("insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason) values ($1,$2,'strong','historical match')", [row.id, lotId]);
+    await demand.closeDemand(row.id, "research_profile");
+    const before = await demand.getDemand(row.id);
+    expect((await demand.listDemand()).find((item) => item.id === row.id)).toMatchObject({
+      status: "closed", closed_reason: "research_profile", missing: [], inventory_matches: [],
+      fits: [], score: null, expected_fee: null, has_stock: false, waiting: null,
+    });
+    expect((await demand.suggestedBuyers(lotId)).some((item) => item.demand_id === row.id)).toBe(false);
+    expect(await demand.categorizeDemand(row.id, "offer_reply")).toMatchObject({
+      status: "closed", closed_reason: "offer_reply", confirmed_on: before?.confirmed_on,
+    });
+    // DATABASE_URL is assigned in beforeAll; static imports would initialize the production pool.
+    const activity = await import("./bulk-demand-activity");
+    expect((await activity.listDemandActivity(row.id)).some((item) => item.title === "Category · offer_reply")).toBe(true);
+    const active = await demand.addDemand({ buyer: "Not history", wants: "Live packs" }, user.id);
+    expect(await demand.categorizeDemand(active.id, "duplicate")).toBeNull();
+    expect((await demand.getDemand(active.id))?.status).toBe("open");
   });
 
   it("ranks priority inside its score and status bands and computes missing qualification and matches", async () => {

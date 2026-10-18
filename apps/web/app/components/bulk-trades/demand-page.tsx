@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
-import { priceLabel, volumeLabel, specLines } from "@/lib/bulk-demand";
+import { CLOSED_REASON_LABEL, HISTORY_CATEGORIES, priceLabel, volumeLabel, specLines } from "@/lib/bulk-demand";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { buildEntryLink } from "@/lib/workspace-links";
@@ -127,6 +127,7 @@ export function DemandPage({
   const [demand, setDemand] = useState<Demand[]>([]);
   const [filter, setFilter] = useState("open");
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
   const [selectedId, setSelectedId] = useState(initialDemandId ?? null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,11 +155,14 @@ export function DemandPage({
       demand.filter(
         (row) =>
           row.status === filter &&
+          (filter !== "closed" || (category === "all"
+            ? row.closed_reason !== "research_profile"
+            : (row.closed_reason === "moved_to_lot" ? "offer_reply" : row.closed_reason) === category)) &&
           `${row.buyer} ${row.wants} ${row.product_family ?? ""}`
             .toLowerCase()
             .includes(query.toLowerCase()),
       ),
-    [demand, filter, query],
+    [demand, filter, query, category],
   );
   const selected = demand.find((row) => row.id === selectedId);
   const columns =
@@ -209,6 +213,37 @@ export function DemandPage({
           Add demand
         </button>
       </div>
+      {filter === "closed" && (
+        <div role="group" aria-label="History categories" className="flex flex-wrap gap-2">
+          {["all", ...HISTORY_CATEGORIES].map((reason) => (
+            <button key={reason} type="button" aria-pressed={category === reason}
+              className={`${rowFocus} ${styles.chip} px-3 py-2`}
+              style={{ background: category === reason ? "var(--bt-row-hover)" : undefined }}
+              onClick={() => setCategory(reason)}>
+              {reason === "all" ? "All" : CLOSED_REASON_LABEL[reason as keyof typeof CLOSED_REASON_LABEL]}{" "}
+              {demand.filter((row) => row.status === "closed" && (reason === "all" ||
+                (row.closed_reason === "moved_to_lot" ? "offer_reply" : row.closed_reason) === reason)).length}
+            </button>
+          ))}
+        </div>
+      )}
+      {filter === "closed" ? (
+        <Card label="History">
+          <div className="px-4 py-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--bt-muted)" }}>Buyer / ask</div>
+          {shown.map((row) => (
+            <button key={row.id} type="button" onClick={() => setSelectedId(row.id)}
+              className={`${rowFocus} flex w-full items-center gap-3 border-t px-4 py-3 text-left hover:bg-[var(--bt-row-hover)]`}
+              style={{ borderColor: "var(--bt-divider)" }}>
+              <span className="min-w-0 flex-1 truncate text-[13px]"><strong>{row.buyer}</strong>{" — "}{row.wants}</span>
+              <span className="hidden text-[12px] sm:block" style={{ color: "var(--bt-muted)" }}>
+                {row.asked_on ? shortDate(row.asked_on) : ""} {row.source_label ?? row.source_kind}
+              </span>
+              <span className={`${styles.chip} shrink-0`}>{row.closed_reason ? CLOSED_REASON_LABEL[row.closed_reason] : "Other"}</span>
+            </button>
+          ))}
+          {!shown.length && <p className="p-4 text-[13px]" style={{ color: "var(--bt-muted)" }}>{loading ? "Loading history…" : "No history here."}</p>}
+        </Card>
+      ) : (
       <Card label="Demand" className="overflow-x-auto">
         <div className="min-w-[850px]">
           <div
@@ -279,6 +314,7 @@ export function DemandPage({
           )}
         </div>
       </Card>
+      )}
       {selected && (
         <DemandPanel
           key={selected.id}
@@ -321,6 +357,8 @@ function DemandPanel({
 }) {
   const [tab, setTab] = useState("Overview");
   const [editing, setEditing] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [savingCategory, setSavingCategory] = useState(false);
   return (
     <DetailSheet title="Demand detail" onClose={onClose}>
       <header className="flex gap-3 pr-6">
@@ -348,6 +386,30 @@ function DemandPanel({
           </div>
         </div>
       </header>
+      <ErrorText error={categoryError} />
+      {demand.status === "closed" && (
+        <label className="flex items-center gap-3 text-[11px] uppercase" style={{ color: "var(--bt-muted)" }}>
+          Category
+          <select aria-label="Category" disabled={savingCategory}
+            className={`${rowFocus} border px-3 py-2 text-[13px] normal-case`}
+            style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)", color: "var(--bt-text)" }}
+            value={demand.closed_reason === "moved_to_lot" ? "offer_reply" : demand.closed_reason ?? "other"}
+            onChange={async (event) => {
+              setSavingCategory(true);
+              setCategoryError(null);
+              try {
+                await request(`/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`, {
+                  method: "PATCH", body: JSON.stringify({ action: "category", reason: event.target.value }),
+                });
+                onChanged();
+              } catch (err) {
+                setCategoryError(err instanceof Error ? err.message : "Could not change category.");
+              } finally { setSavingCategory(false); }
+            }}>
+            {HISTORY_CATEGORIES.map((reason) => <option key={reason} value={reason}>{CLOSED_REASON_LABEL[reason]}</option>)}
+          </select>
+        </label>
+      )}
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
         {demand.wants}
       </p>

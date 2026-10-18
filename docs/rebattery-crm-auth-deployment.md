@@ -400,3 +400,24 @@ The scheduled importer and inbox checker use the detached
 `/root/denchclaw/scripts-live` worktree. `saved_search_import.py` defaults to a
 rollback-only dry run; `--apply` is reserved for the scheduled gate or an
 explicitly authorized import.
+
+### Demand History restoration (18 October 2026)
+
+`053_demand_history.sql` adds `offer_reply` and `research_profile` categories
+and records category-only changes in status activity without reopening a row.
+History includes every closed category. All counts every closed row but hides
+Research profile rows until that category is selected. Category changes are
+available in the detail header; Reopen remains an explicit separate action.
+Closed rows have no qualification gaps, score, expected fee or supply suggestions.
+
+`scripts/rebattery/restore_demand_history.py` reads a separately restored
+pre-audit database. It defaults to an exact-write/read-back dry run with rollback;
+`--apply` commits one transaction. It preserves original fields and dates,
+nulls dangling identity links, matching hashes and moved-to pointers, clears
+priority, and appends provenance. Original `moved_to_lot` becomes `offer_reply`;
+research-origin `moved_to_profile` becomes `research_profile`. Unique source
+collisions are reported, not overwritten. Existing context notes remain intact.
+Only missing rows are inserted; existing lot buyers with empty demand links are
+re-linked to their restored original demand IDs. Replaying inserts zero rows.
+The survey importer refreshes unfinished answers only while open or qualifying;
+closed History evidence cannot be overwritten by a later survey refresh.
