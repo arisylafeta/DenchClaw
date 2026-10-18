@@ -19,3 +19,24 @@ it("preserves legacy explicit hiding and migrates only the old ungrouped default
   expect(parseChatView({ hidden: "cron", groupBy: "invalid" })).toEqual(DEFAULT_VIEW);
   expect(parseChatView(null)).toEqual(DEFAULT_VIEW);
 });
+it("sorts inside existing sections, keeping pins first and missing projects last without text inference", () => {
+  const rows = [
+    { ...row("web"), key: "unknown", updatedAt: 500, title: "Beacon project" },
+    { ...row("web"), key: "beacon-old", project: "Beacon", updatedAt: 100 },
+    { ...row("web"), key: "harbour", project: "Harbour", updatedAt: 400 },
+    { ...row("web"), key: "beacon-new", project: "Beacon", updatedAt: 200 },
+    { ...row("discord"), project: "Beacon", updatedAt: 600 },
+    { ...row("cron"), project: "Beacon", updatedAt: 700 },
+  ];
+  const view = { ...DEFAULT_VIEW, pins: ["harbour"] };
+  const recent = applyChatView(rows, view, "");
+  expect(recent.sections.map((s) => s.label)).toEqual(["Pinned", "Chats", "Discord", "Automation"]);
+  expect(recent.sections[1].rows.map((r) => r.key)).toEqual(["unknown", "beacon-new", "beacon-old"]);
+  const project = applyChatView([...rows, rows[2]], { ...view, sortBy: "project" }, "");
+  expect(project.sections.map((s) => s.label)).toEqual(recent.sections.map((s) => s.label));
+  expect(project.sections[1].rows.map((r) => r.key)).toEqual(["beacon-new", "beacon-old", "unknown"]);
+  expect(project.sections.flatMap((s) => s.rows)).toHaveLength(rows.length);
+  expect(applyChatView(rows, { ...view, sortBy: "project", pins: [] }, "").sections[0].rows.map((r) => r.key)).toEqual(["beacon-new", "beacon-old", "harbour", "unknown"]);
+  expect(parseChatView({ ...view, sortBy: "project" }).sortBy).toBe("project");
+  expect(parseChatView({ ...view, sortBy: "broken" }).sortBy).toBe("recent");
+});

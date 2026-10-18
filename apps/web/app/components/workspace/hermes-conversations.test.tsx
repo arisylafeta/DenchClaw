@@ -129,6 +129,42 @@ describe("Hermes unified chat UI", () => {
     expect(screen.queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => !init?.method)).toBe(true);
   });
+  it("persists project sorting without rerouting and keeps hidden sources in the filter without notice copy", async () => {
+    localStorage.setItem("hermes-chats-view", JSON.stringify({ ...DEFAULT_VIEW, hidden: ["webhook", "cron"] }));
+    sessions = [{ ...solo, key: "unknown", title: "Recent chat", updatedAt: 900 }, { ...solo, key: "project", title: "Project chat", project: "Beacon" }];
+    const user = userEvent.setup(); const first = render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "Open Recent chat" }));
+    expect(screen.queryByText(/Webhook and Scheduled hidden|Scheduled and Webhook hidden/)).not.toBeInTheDocument();
+    screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Webhook 0" })).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByRole("menuitemradio", { name: /^Project$/ })); await user.keyboard("{Escape}");
+    expect(screen.getAllByRole("button", { name: /^Open / }).map((button) => button.getAttribute("aria-label"))).toEqual(["Open Project chat", "Open Recent chat"]);
+    expect(screen.getByRole("button", { name: "Open Recent chat" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "Open Recent chat" })).toHaveTextContent("No project");
+    expect(JSON.parse(localStorage.getItem("hermes-chats-view")!)).toMatchObject({ sortBy: "project", hidden: ["webhook", "cron"] });
+    first.unmount(); render(<Harness />);
+    expect(await screen.findByRole("button", { name: "Open Project chat" })).toHaveTextContent("Beacon");
+    screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
+    await user.click(screen.getByRole("menuitemradio", { name: "Most recent" })); await user.keyboard("{Escape}");
+    expect(screen.getAllByRole("button", { name: /^Open / }).map((button) => button.getAttribute("aria-label"))).toEqual(["Open Recent chat", "Open Project chat"]);
+  });
+  it("adds the flowing border only for confirmed running rows, never unknown, idle, unread or blocked", async () => {
+    sessions = [
+      { ...solo, key: "running", title: "Running chat", working: true },
+      { ...solo, key: "blocked", title: "Blocked chat", working: true, blocked: true },
+      { ...solo, key: "unknown", title: "Unknown chat", working: null },
+      { ...solo, key: "idle", title: "Idle chat", working: false },
+      { ...solo, key: "unread", title: "Unread chat", working: false, updatedAt: 500 },
+    ];
+    localStorage.setItem("hermes-chats-seen", JSON.stringify({ unread: 100 }));
+    render(<Harness />);
+    await screen.findByRole("button", { name: "Open Running chat" });
+    for (const [name, status] of [["Running", "running"], ["Blocked", "awaiting"], ["Unknown", "idle"], ["Idle", "idle"], ["Unread", "done"]]) {
+      const row = screen.getByRole("button", { name: `Open ${name} chat` }).closest("[data-conversation-key]")!;
+      expect(row).toHaveAttribute("data-status", status);
+      expect(row.className.includes("running")).toBe(status === "running");
+    }
+  });
   it("migrates explicit hidden choices and keeps searched zero-count sources toggleable", async () => {
     localStorage.setItem("hermes-chats-view", JSON.stringify({ hidden: ["discord", "cron", "webhook"], groupBy: "none" }));
     sessions = [solo, { ...group, source: "discord", kind: "solo", title: "Hidden channel" }];

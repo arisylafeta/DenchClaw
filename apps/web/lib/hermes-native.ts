@@ -6,6 +6,7 @@ import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
 import { conversationKey, messagingConversation, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
 import { sessionDisplayNames } from "./hermes-session-names";
+import { sessionProjectLabels } from "./hermes-session-projects";
 import { hermesChatTransport } from "./hermes-gateway/transport-flag";
 import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
@@ -177,6 +178,11 @@ export async function listConversations() {
         Object.assign(names, await sessionDisplayNames(profile, messagingIds.slice(offset, offset + 200)));
       }
       for (const row of rows) if (Object.hasOwn(names, row.id)) row.title = names[row.id];
+      const projects: Record<string, string> = {};
+      for (let offset = 0; offset < rows.length; offset += 200) {
+        Object.assign(projects, await sessionProjectLabels(profile, rows.slice(offset, offset + 200).map((row) => row.id)));
+      }
+      for (const row of rows) if (Object.hasOwn(projects, row.id)) row.project = projects[row.id];
       return rows;
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
@@ -285,6 +291,8 @@ export async function readConversation(key: string, sinceSeq = 0) {
     page = await (await nativeFetch(identity.profile, `${root}/messages?order=oldest&limit=500&offset=${offset}`)).json();
   }
   const conversation = soloConversation(identity.profile, session.session ?? session);
+  const projects = await sessionProjectLabels(identity.profile, [identity.id]);
+  if (Object.hasOwn(projects, identity.id)) conversation.project = projects[identity.id];
   if (messagingConversation(conversation)) {
     const names = await sessionDisplayNames(identity.profile, [identity.id]);
     if (Object.hasOwn(names, identity.id)) conversation.title = names[identity.id];

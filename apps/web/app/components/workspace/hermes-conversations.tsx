@@ -5,6 +5,7 @@ import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil }
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { ProfileAvatar } from "./profile-avatar";
+import styles from "./hermes-conversations.module.css";
 
 type Listing = { backend: string; transport?: "gateway" | "sse"; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
 export type NewChatMode = "solo" | "group";
@@ -179,7 +180,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
     try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
   };
   const result = applyChatView(rows, view, query);
-  const hiddenLabels = view.hidden.map((id) => result.channels.find((channel) => channel.id === id)!.label);
+
   const togglePin = (key: string) => updateView({ ...view, pins: view.pins?.includes(key) ? view.pins.filter((id) => id !== key) : [...(view.pins ?? []), key] });
   const toggleSection = (key: string) => updateView({ ...view, collapsed: view.collapsed?.includes(key) ? view.collapsed.filter((id) => id !== key) : [...(view.collapsed ?? []), key] });
   return <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-2 text-[var(--color-text)]" aria-label="Hermes conversations">
@@ -188,9 +189,17 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
       <DropdownMenu>
         <DropdownMenuTrigger aria-label="Filter and group chats" title="Filter and group" className="relative flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z" /></svg>
-          {hiddenLabels.length > 0 && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--color-text)]" />}
+          {view.hidden.length > 0 && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--color-text)]" />}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="text-[11px]">
+        <DropdownMenuContent align="end" className={styles.filterMenu}>
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={view.sortBy ?? "recent"} onValueChange={(value) => updateView({ ...view, sortBy: value === "project" ? "project" : "recent" })}>
+              <DropdownMenuRadioItem value="recent">Most recent</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="project">Project</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-[10px]">Channels</DropdownMenuLabel>
             {result.channels.map((channel) => <DropdownMenuCheckboxItem key={channel.id} className="text-[11px]" checked={!view.hidden.includes(channel.id)} onCheckedChange={(checked) => updateView({ ...view, hidden: checked ? view.hidden.filter((id) => id !== channel.id) : [...view.hidden, channel.id] })}>
@@ -207,7 +216,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-    {hiddenLabels.length > 0 && <button type="button" onClick={() => updateView({ ...view, hidden: [] })} title="Show all sources" className="min-h-9 px-2 pb-2 text-left text-[11px] text-[var(--color-chat-sidebar-muted)] underline underline-offset-2 focus-visible:outline focus-visible:outline-2">{hiddenLabels.join(" and ")} hidden</button>}
+
     {chats.error && <div role="alert" className="mb-2 rounded-md border border-[var(--color-border)] p-2 text-xs"><p>{chats.error}</p><button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => void chats.reload()}>Retry loading chats</button></div>}
     {chats.listing?.warnings.map((warning) => <p key={warning} role="status" className="text-[11px] p-2 text-amber-700">{warning}</p>)}
     {!chats.ready && <div role="status" aria-label="Loading chats" className="space-y-3 p-2 motion-safe:animate-pulse">{[0, 1, 2, 3].map((n) => <div key={n} className="h-9 rounded-md bg-[var(--color-surface-hover)]" />)}</div>}
@@ -220,7 +229,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
         const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
         const pinned = view.pins?.includes(row.key) ?? false;
         const PinIcon = pinned ? PinOff : Pin;
-        return <div key={row.key} data-conversation-key={row.key} className={`group relative flex min-w-0 items-center rounded-lg hover:bg-[var(--color-surface-hover)] focus-within:bg-[var(--color-surface-hover)] ${chats.selected?.key === row.key ? "bg-[var(--color-surface-hover)]" : ""}`}>
+        return <div key={row.key} data-conversation-key={row.key} data-status={status} className={`group relative flex min-w-0 items-center rounded-lg hover:bg-[var(--color-surface-hover)] focus-within:bg-[var(--color-surface-hover)] ${status === "running" ? styles.running : ""} ${chats.selected?.key === row.key ? "bg-[var(--color-surface-hover)]" : ""}`}>
           <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2">
             <span className="group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0">{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
             <PinIcon size={15} aria-hidden="true" className="absolute opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100" />
@@ -229,7 +238,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
             {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
             <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
               <span className="block truncate text-[12px] font-medium">{row.title}</span>
-              <span className="block truncate text-[10px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.groupBy !== "agent" ? row.participants.map((p) => p.name).join(", ") : "", section.key === "pinned" ? conversationChannel(row).label : "", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
+              <span className="block truncate text-[10px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", view.groupBy !== "agent" ? row.participants.map((p) => p.name).join(", ") : "", section.key === "pinned" ? conversationChannel(row).label : "", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
             </button>}
           </div>
           <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
