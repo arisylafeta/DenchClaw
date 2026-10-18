@@ -67,16 +67,6 @@ export function TodoPanel({ todos }: TodoPanelProps) {
   const renderItems = (rows: TodoItem[], ancestors: string[]) => <ul className="ml-4 space-y-1">{rows.filter(item => !ancestors.includes(item.id)).map(item => <li key={item.id} data-todo-id={item.id}><span>{item.content} · {item.status.replace("_", " ")}</span>{renderItems(items.filter(child => child.parent === item.id), [...ancestors, item.id])}</li>)}</ul>;
   return <section aria-label="Tasks" className={cardClass}><h3>Tasks · {items.filter(item => item.status === "completed").length}/{items.length} done</h3>{renderItems(roots, [])}</section>;
 }
-export interface UsageMeterProps { usage: Usage | null }
-export function UsageMeter({ usage }: UsageMeterProps) {
-  if (!usage) return null;
-  const percent = usage.context_percent ?? (usage.context_used != null && usage.context_max ? usage.context_used / usage.context_max * 100 : null);
-  return <section aria-label="Usage" className="flex flex-wrap gap-3 text-sm text-[var(--color-text-muted)]">
-    <span>{usage.input ?? usage.prompt ?? 0} tokens in / {usage.output ?? usage.completion ?? 0} out</span>
-    {percent != null && <label>Context {percent.toFixed(1)}% <meter min={0} max={100} value={percent} aria-label="Context usage" /></label>}
-    {usage.cost_usd != null && <span>${usage.cost_usd.toFixed(4)}</span>}
-  </section>;
-}
 export interface ErrorCardProps { error: ErrorSurface; message?: string; partial?: boolean; onRetry: NativeTranscriptCallbacks["onRetry"] }
 export function ErrorCard({ error, message, partial, onRetry }: ErrorCardProps) {
   const [retrying, setRetrying] = useState(false);

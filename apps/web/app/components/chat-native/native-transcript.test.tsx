@@ -197,14 +197,14 @@ describe("native transcript", () => {
     expect(container.querySelector('[data-preview="code"]')).not.toBeNull();
   });
 
-  it("nests todos and renders usage fields", () => {
+  it("nests todos and never shows token or context usage in the transcript", () => {
     const state = events([["todo.updated", { todos: [{ id: "p", content: "Ship", status: "in_progress" }, { id: "c", parent: "p", content: "Review", status: "completed" }] }], ["session.usage", { usage: { input: 10, output: 20, context_used: 50, context_max: 100, cost_usd: 0.02 } }]]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
     expect(container.querySelector('[data-todo-id="p"] [data-todo-id="c"]')).not.toBeNull();
     expect(screen.getByText("Tasks · 1/2 done")).toBeInTheDocument();
-    expect(screen.getByText("10 tokens in / 20 out")).toBeInTheDocument();
-    expect(screen.getByRole("meter")).toHaveAttribute("value", "50");
-    expect(screen.getByText("$0.0200")).toBeInTheDocument();
+    expect(screen.queryByText(/tokens in/)).toBeNull();
+    expect(screen.queryByRole("meter")).toBeNull();
+    expect(screen.queryByText("$0.0200")).toBeNull();
   });
 
   it.each([true, false])("only offers explicit retry for retryable=%s", retryable => {

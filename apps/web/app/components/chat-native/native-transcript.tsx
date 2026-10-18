@@ -7,7 +7,7 @@ import type { PendingRequest } from "@/lib/hermes-chat/reducer";
 import { buildSubagentTree } from "@/lib/hermes-chat/subagents";
 import type { NativeTranscriptProps } from "./types";
 import { ApprovalCard, ClarifyCard } from "./requests";
-import { ErrorCard, SubagentCard, TodoPanel, UsageMeter } from "./panels";
+import { ErrorCard, SubagentCard, TodoPanel } from "./panels";
 import { displayTurns, splitTurn, WorkBlock } from "./work-block";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
@@ -48,7 +48,7 @@ export function NativeTranscript({ state, subagents = state.subagents, todos = s
     </article>)}
     {visibleRequests.map(request => request.kind === "approval" ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} active={state.pendingRequests.some(current => current.id === request.id)} onApproval={callbacks.onApproval} /> : <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} active={state.pendingRequests.some(current => current.id === request.id)} onClarify={callbacks.onClarify} />)}
     {buildSubagentTree(subagents.items).map((agent, index, roots) => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={subagentTails} connectPrevious={index > 0} connectNext={index < roots.length - 1} />)}
-    <TodoPanel todos={todos} /><UsageMeter usage={state.usage} />
+    <TodoPanel todos={todos} />
     <p role="status">{state.pendingRequests.some(request => request.kind === "approval") ? "Waiting for approval" : state.pendingRequests.some(request => request.kind === "clarify") ? "Waiting for your answer" : state.interrupted ? "Interrupted" : state.busy ? "Working" : ""}</p>
     {state.status && <p className="text-sm text-[var(--color-text-muted)]">{state.status}</p>}
   </div>;
