@@ -264,6 +264,8 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     case 'reasoning.delta': appendText(s, 'reasoning', text, ctx, now); return s
     case 'reasoning.available': {
       const message = selectCurrentMessage(s)
+      // A late block after the turn settled would open a phantom pending message after the answer.
+      if (!message && !s.busy && !s.live) return s
       if (message && messageText(message).trim()) return s
       if (message) updateMessage(s, { ...message, segments: message.segments.filter(seg => seg.type !== 'reasoning') })
       appendText(s, 'reasoning', text, ctx, now); return s

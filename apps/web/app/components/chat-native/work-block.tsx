@@ -8,10 +8,19 @@ import { Elapsed, ToolRow, TraceStep } from "./tool-run";
 
 /** Everything before the final answer is "work": reasoning, tool calls and the narration between them. */
 export function splitTurn(segments: readonly Segment[]): { work: Segment[]; answer: TextSegment[] } {
-  let lastWork = -1;
-  segments.forEach((segment, index) => { if (segment.type !== "text") lastWork = index; });
   const visible = (segment: Segment) => segment.type === "tool" || segment.text.trim() !== "";
-  return { work: segments.slice(0, lastWork + 1).filter(visible), answer: segments.slice(lastWork + 1).filter((segment): segment is TextSegment => segment.type !== "tool" && visible(segment)) };
+  // Reasoning that arrives after the answer text (late summaries) is still work; it must not demote the answer.
+  let end = segments.length;
+  const lastAnswer = segments.findLastIndex(segment => segment.type !== "tool" && segment.type !== "reasoning" && visible(segment));
+  if (lastAnswer >= 0 && segments.slice(lastAnswer + 1).every(segment => segment.type === "reasoning")) end = lastAnswer + 1;
+  const body = segments.slice(0, end);
+  const trailing = segments.slice(end);
+  let lastWork = -1;
+  body.forEach((segment, index) => { if (segment.type !== "text") lastWork = index; });
+  return {
+    work: [...body.slice(0, lastWork + 1), ...trailing].filter(visible),
+    answer: body.slice(lastWork + 1).filter((segment): segment is TextSegment => segment.type !== "tool" && visible(segment)),
+  };
 }
 
 /**
