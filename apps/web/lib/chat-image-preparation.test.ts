@@ -29,8 +29,15 @@ function makeCanvasTools(
 }
 
 describe("prepareFilesForChatUpload", () => {
-	it("keeps model-safe image files unchanged", async () => {
-		const file = new File(["small"], "small.png", { type: "image/png" });
+	it.each([
+		["small.png", "image/png"],
+		["small.jpg", "image/jpeg"],
+		["small.gif", "image/gif"],
+		["small.webp", "image/webp"],
+		["small.bmp", "image/bmp"],
+		["small.PNG", ""],
+	])("keeps model-safe image files unchanged (%s, %s)", async (name, type) => {
+		const file = new File(["small"], name, { type });
 
 		const result = await prepareFilesForChatUpload([file]);
 

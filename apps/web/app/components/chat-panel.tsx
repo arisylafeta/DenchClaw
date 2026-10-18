@@ -2529,24 +2529,29 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						method: "POST",
 						body: form,
 					})
-						.then((res) => res.ok ? res.json() : null)
-						.then((json: { ok?: boolean; path?: string } | null) => {
-							if (json?.ok && json.path) {
-								// Replace placeholder with the real uploaded file
-								setAttachedFiles((prev) =>
-									prev.map((f) =>
-										f.id === placeholderId
-											? { ...f, path: json.path!, uploading: false }
-											: f,
-									),
-								);
-							} else {
-								// Upload failed — remove the placeholder
-								setAttachedFiles((prev) => prev.filter((f) => f.id !== placeholderId));
-								if (localUrl) {URL.revokeObjectURL(localUrl);}
+						.then(async (res) => {
+							const json = await res.json().catch(() => null) as { ok?: boolean; path?: string; error?: string } | null;
+							if (!res.ok) {
+								throw new Error(json?.error || `Upload failed (HTTP ${res.status})`);
 							}
+							if (!json?.ok || typeof json.path !== "string" || !json.path) {
+								throw new Error("Upload response did not include a file path");
+							}
+							return json.path;
 						})
-						.catch(() => {
+						.then((path) => {
+							// Replace placeholder with the real uploaded file
+							setAttachedFiles((prev) =>
+								prev.map((f) =>
+									f.id === placeholderId
+										? { ...f, path, uploading: false }
+										: f,
+								),
+							);
+						})
+						.catch((cause: unknown) => {
+							const detail = cause instanceof Error ? cause.message : "Upload failed. Please try again.";
+							setAttachmentError(`${file.name}: ${detail}`);
 							setAttachedFiles((prev) => prev.filter((f) => f.id !== placeholderId));
 							if (localUrl) {URL.revokeObjectURL(localUrl);}
 						});
@@ -3093,6 +3098,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				{/* Transport / attachment error display */}
 				{(error || streamError || attachmentError) && (
 					<div
+						role="alert"
 						className="px-3 py-2 flex items-center gap-2 sticky bottom-[72px] z-10"
 						style={{
 							background: `color-mix(in srgb, var(--color-error) 6%, var(--color-surface))`,
