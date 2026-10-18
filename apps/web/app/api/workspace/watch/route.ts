@@ -131,6 +131,11 @@ export async function GET(req: Request) {
 
       listeners.add(listener);
       await ensureWatcher(root);
+      // Abort/cancel may precede the asynchronous watcher import completing.
+      if (closed) {
+        stopWatcherIfIdle();
+        return;
+      }
 
       if (!sharedWatcher) {
         controller.enqueue(

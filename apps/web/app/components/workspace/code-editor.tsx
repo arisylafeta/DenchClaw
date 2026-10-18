@@ -215,6 +215,7 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 	const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const currentContentRef = useRef(content);
+	const saveInFlightRef = useRef(false);
 
 	const language = monacoLangFromFilename(filename);
 	const canSave = !!filePath;
@@ -233,7 +234,8 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 	}, []);
 
 	const saveFile = useCallback(async () => {
-		if (!filePath || !editorRef.current) {return;}
+		if (!filePath || !editorRef.current || saveInFlightRef.current) {return;}
+		saveInFlightRef.current = true;
 		const value = editorRef.current.getValue();
 		setSaveState("saving");
 		try {
@@ -251,6 +253,8 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 			setSaveState("error");
 			if (saveTimeoutRef.current) {clearTimeout(saveTimeoutRef.current);}
 			saveTimeoutRef.current = setTimeout(() => setSaveState("dirty"), 3000);
+		} finally {
+			saveInFlightRef.current = false;
 		}
 	}, [filePath]);
 
@@ -272,6 +276,13 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 
 		// Track dirty state
 		ed.onDidChangeModelContent(() => {
+			// Even undoing to the old disk baseline is an unsaved reversal while
+			// another version is being written. Do not expose a clean interval.
+			if (saveInFlightRef.current) {
+				setSaveState("saving");
+				onDirty?.();
+				return;
+			}
 			const current = ed.getValue();
 			if (current !== currentContentRef.current) {
 				setSaveState("dirty");

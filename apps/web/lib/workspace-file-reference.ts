@@ -40,9 +40,14 @@ export async function resolveWorkspaceFileReference(
   if (!info.path || !info.name || !["file", "directory"].includes(info.type ?? "")) return null;
   let nodePath = info.path;
   if (workspaceRoot && info.path.startsWith(`${workspaceRoot}/`)) {
-    nodePath = info.path.slice(workspaceRoot.length + 1);
-    const node = findExactNode(tree, nodePath);
-    if (node) return node;
+    const relative = info.path.slice(workspaceRoot.length + 1);
+    // A literal leading ~ is a filename, not a virtual workspace alias.
+    // Preserve absolute identity so reading/saving cannot target another file.
+    if (!relative.startsWith("~")) {
+      nodePath = relative;
+      const node = findExactNode(tree, nodePath);
+      if (node) return node;
+    }
   }
   if (info.type === "directory") return { name: info.name, path: nodePath, type: "folder" };
   const extension = info.name.split(".").pop()?.toLowerCase();

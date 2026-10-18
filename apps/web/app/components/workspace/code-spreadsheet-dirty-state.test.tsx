@@ -13,7 +13,7 @@ vi.mock("react-spreadsheet", async importOriginal => ({
 }));
 afterEach(() => vi.unstubAllGlobals());
 
-it("Monaco reports dirty, remains dirty through in-flight edits, and clears only after the latest content is saved", async () => {
+it.each(["edited during save", "original"])("Monaco preserves pending edits including undo to the old baseline: %s", async pendingValue => {
   const dirty = vi.fn();
   let finish!: (response: Response) => void;
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
@@ -27,7 +27,8 @@ it("Monaco reports dirty, remains dirty through in-flight edits, and clears only
   act(() => { value = "edited"; changed(); });
   expect(dirty).toHaveBeenLastCalledWith(true);
   act(() => save());
-  act(() => { value = "edited during save"; changed(); });
+  act(() => { value = pendingValue; changed(); });
+  expect(dirty).toHaveBeenLastCalledWith(true);
   await act(async () => finish(new Response("", { status: 200 })));
   expect(dirty).toHaveBeenLastCalledWith(true);
   act(() => save());

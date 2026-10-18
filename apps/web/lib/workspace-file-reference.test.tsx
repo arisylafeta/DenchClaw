@@ -4,7 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildFileLink, interceptWorkspaceLinkClick, parseWorkspaceLink } from "./workspace-links";
 import { resolveWorkspaceFileReference } from "./workspace-file-reference";
-import { workspaceTabsReducer, type WorkspaceTabsState } from "./workspace-tabs";
+import { contentTabFromUrl, workspaceTabsReducer, type WorkspaceTabsState } from "./workspace-tabs";
+import { parseUrlState } from "./workspace-links";
 
 const initial: WorkspaceTabsState = { contentTabs: [], chatTabs: [], activeContentId: null, activeChatId: null };
 afterEach(() => vi.unstubAllGlobals());
@@ -25,6 +26,18 @@ function FileLinkHarness({ href }: { href: string }) {
 }
 
 describe("generated document chat link seam", () => {
+  it("hydrates a direct Markdown URL as an editable document without a tree", () => {
+    const path = "/synthetic/workspace/new report.md";
+    const tab = contentTabFromUrl(parseUrlState(new URL(buildFileLink(path), window.location.origin).search), { resolveKind: () => null });
+    expect(tab).toMatchObject({ path, kind: "document" });
+  });
+
+  it("preserves absolute identity for literal virtual-alias filenames", async () => {
+    const path = "/synthetic/workspace/~workspace/report.md";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ path, name: "report.md", type: "file" })));
+    const node = await resolveWorkspaceFileReference(path, [], "/synthetic/workspace");
+    expect(node).toMatchObject({ path, type: "document" });
+  });
   it.each([false, true])("opens a new exact file via state before the tree exists (full URL=%s)", async full => {
     const path = "/synthetic/workspace/generated/new report.md";
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ path, name: "new report.md", type: "file" })));

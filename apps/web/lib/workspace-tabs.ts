@@ -352,6 +352,8 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
+  // Direct/generated links must open the same editor before tree hydration.
+  if (/\.(md|mdx)$/i.test(path)) return "document";
   return "file";
 }
 

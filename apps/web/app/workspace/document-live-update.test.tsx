@@ -16,6 +16,13 @@ beforeEach(() => vi.stubGlobal("fetch", vi.fn(async () => response("old"))));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("document cache external updates", () => {
+  it("normalizes an absolute lexical alias for live updates", async () => {
+    const active = tab(`${root}/reports/../report.csv`);
+    const { result } = renderHook(() => useTabContent(active, { ...deps, tabs: [active] }));
+    await waitFor(() => expect(result.current.content.kind).toBe("spreadsheet"));
+    act(() => result.current.invalidateFile(change("report.csv")));
+    await waitFor(() => expect(result.current.externalVersion).toBe(1));
+  });
   it("reloads a matching clean active document only, preserving unrelated state", async () => {
     const { result } = renderHook(() => useTabContent(a, deps));
     await waitFor(() => expect(result.current.content.kind).toBe("document"));

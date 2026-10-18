@@ -12,6 +12,16 @@ vi.mock("chokidar", () => ({ watch: () => ({
 }) }));
 import { GET } from "./route";
 
+it("stops initialization if the connection aborts before the watcher is ready", async () => {
+  fake.close.mockClear();
+  const abort = new AbortController();
+  const pending = GET(new Request("http://synthetic.test/api/workspace/watch", { signal: abort.signal }));
+  abort.abort();
+  const response = await pending;
+  await vi.waitFor(() => expect(fake.close).toHaveBeenCalled());
+  await response.body!.cancel();
+});
+
 it("emits both paths in a rapid batch with resolved root and tears down on cancel", async () => {
   const response = await GET(new Request("http://synthetic.test/api/workspace/watch"));
   const reader = response.body!.getReader();

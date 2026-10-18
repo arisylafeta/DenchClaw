@@ -298,14 +298,23 @@ export function useTabContent(
 
   const invalidateFile = useCallback((event: { path: string; root: string }) => {
     if (!event.root.startsWith("/") || !event.path || event.path.startsWith("/") || event.path.split("/").some(part => part === ".." || part === "." || !part)) return;
-    const absolute = `${event.root.replace(/\/$/, "")}/${event.path}`;
+    const normalize = (path: string) => {
+      const parts: string[] = [];
+      for (const part of path.split("/")) {
+        if (!part || part === ".") continue;
+        if (part === "..") parts.pop();
+        else parts.push(part);
+      }
+      return "/" + parts.join("/");
+    };
+    const absolute = normalize(`${event.root.replace(/\/$/, "")}/${event.path}`);
     for (const target of deps.tabs ?? (tab ? [tab] : [])) {
       if (!["document", "file"].includes(target.kind)) continue;
       // Relative paths refer to this event's resolved workspace. Absolute paths
       // and ~workspace aliases must resolve to exactly the same identity.
       if (!target.path.startsWith("/") && deps.workspaceRoot && deps.workspaceRoot !== event.root) continue;
       const targetPath = target.path.startsWith("/") ? target.path : `${event.root.replace(/\/$/, "")}/${target.path.replace(/^~workspace\//, "")}`;
-      if (targetPath !== absolute) continue;
+      if (normalize(targetPath) !== absolute) continue;
       if (dirtyRef.current.has(target.id)) {
         setPending(previous => ({ ...previous, [target.id]: true }));
       } else if (target.id === tab?.id) {
