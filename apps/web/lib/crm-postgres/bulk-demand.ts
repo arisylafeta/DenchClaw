@@ -20,18 +20,18 @@ const ELIGIBLE_INVENTORY = `
 const DEMAND_SELECT = `
   select demand.id, demand.kind, demand.basis, demand.buyer, demand.company_id, demand.person_id, demand.contact,
     demand.priority, ${companyContextSql("demand.company_id")} as context_notes,
-    array_remove(array[
+    case when demand.status = 'closed' then '{}'::text[] else array_remove(array[
       case when demand.max_price is null then 'no price' end,
       case when nullif(trim(demand.quantity), '') is null and demand.volume is null then 'no quantity' end,
       case when demand.kind = 'request' and demand.needed_by is null then 'no timeline' end,
       case when nullif(trim(demand.qualify_question), '') is not null and demand.qualify_asked_on is null then 'question not sent' end,
       case when not exists(${ELIGIBLE_INVENTORY}) then 'no supply match' end
-    ]::text[], null) as missing,
-    coalesce((select json_agg(row_to_json(inventory) order by inventory.strength desc, inventory.title)
-      from (${ELIGIBLE_INVENTORY}) inventory), '[]'::json) as inventory_matches,
+    ]::text[], null) end as missing,
+    case when demand.status = 'closed' then '[]'::json else coalesce((select json_agg(row_to_json(inventory) order by inventory.strength desc, inventory.title)
+      from (${ELIGIBLE_INVENTORY}) inventory), '[]'::json) end as inventory_matches,
     demand.email, demand.wants, demand.quantity, demand.location, demand.note,
     to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, demand.volume::float8 as volume, demand.volume_unit,
-    demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.source_kind,
+    demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.context, demand.source_kind,
     demand.source_label, demand.source_url, demand.source_quote, to_char(demand.observed_on, 'YYYY-MM-DD') as observed_on,
     demand.status, demand.closed_reason, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on, demand.updated_at,
     demand.product_family, demand.fee_eur::float8 as fee_eur, demand.price_basis, demand.reputation,
@@ -41,11 +41,11 @@ const DEMAND_SELECT = `
     (select count(*)::int from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as activity_count,
     (select max(activity.occurred_at)::text from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as last_activity_at,
     to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on,
-    bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
-      greatest(demand.observed_on, demand.confirmed_on)) as score,
-    bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
-      greatest(demand.observed_on, demand.confirmed_on))::float8 as expected_fee,
-    (demand.product_family is not null and (
+    case when demand.status <> 'closed' then bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
+      greatest(demand.observed_on, demand.confirmed_on)) end as score,
+    case when demand.status <> 'closed' then bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
+      greatest(demand.observed_on, demand.confirmed_on))::float8 end as expected_fee,
+    (demand.status <> 'closed' and demand.product_family is not null and (
       exists(select 1 from crm_stock_items stock where stock.stock_status not in ('sold', 'unavailable')
         and concat_ws(' ', stock.make, stock.model, stock.description) ilike '%' || demand.product_family || '%')
       or exists(select 1 from crm_bulk_trade_lots stock where stock.origin = 'supply'
@@ -56,7 +56,7 @@ const DEMAND_SELECT = `
       select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'strength', m.strength, 'reason', m.reason,
         'buyer_id', m.buyer_id) order by m.strength desc, lot.title)
       from crm_bulk_trade_demand_matches m join crm_bulk_trade_lots lot on lot.id = m.lot_id
-      where m.demand_id = demand.id and not m.hidden
+      where m.demand_id = demand.id and demand.status = 'open' and not m.hidden
         and lot.trade_stage in ('Needs info', 'With buyers', 'Closing')
     ), '[]'::json) as fits,
     coalesce((
@@ -152,7 +152,7 @@ const INSERT_KEYS = [
   "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
   "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
   "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question", "qualify_asked_on",
-  "priority",
+  "priority", "context",
 ] as const;
 
 export async function addDemand(input: DemandInput & { buyer: string; wants: string }, userId: string | null, source: Source = {}) {
@@ -164,6 +164,7 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
     basis: kind === "standing" ? input.basis ?? "stated" : null,
     needed_by: kind === "request" ? input.needed_by ?? null : null,
     spec: JSON.stringify(input.spec ?? {}),
+    context: JSON.stringify(input.context ?? {}),
     observed_on: input.observed_on ?? input.confirmed_on ?? todayInLondon(),
     // Our own estimate is not a confirmation from the buyer.
     confirmed_on: input.confirmed_on ?? (input.basis === "estimated" ? null : todayInLondon()),
@@ -188,6 +189,7 @@ export async function updateDemand(id: string, input: DemandInput, source: Sourc
     patch.moved_to = null;
   }
   if ("spec" in patch) patch.spec = JSON.stringify(patch.spec ?? {});
+  if ("context" in patch) patch.context = JSON.stringify(patch.context);
   const keys = Object.keys(patch);
   // Turning a request into a standing buy-box keeps any basis it has, else it becomes stated.
   const basisFix = input.kind === "standing" && !("basis" in input) ? ", basis = coalesce(basis, 'stated')" : "";
@@ -246,6 +248,15 @@ export async function confirmDemand(id: string): Promise<Demand | null> {
 export async function closeDemand(id: string, reason: ClosedReason): Promise<Demand | null> {
   const rows = await queryPg(
     "update crm_bulk_trade_demand set status = 'closed', closed_reason = $2, updated_at = now() where id = $1 returning id",
+    [id, reason],
+  );
+  return rows.length ? getDemand(id) : null;
+}
+
+/** Categorizing History never confirms, reopens or changes matching state. */
+export async function categorizeDemand(id: string, reason: ClosedReason): Promise<Demand | null> {
+  const rows = await queryPg(
+    "update crm_bulk_trade_demand set closed_reason = $2, updated_at = now() where id = $1 and status = 'closed' returning id",
     [id, reason],
   );
   return rows.length ? getDemand(id) : null;

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { categorizeSidebarObjects, WorkspaceSidebar } from "./workspace-sidebar";
 
 vi.mock("./profile-switcher", () => ({
@@ -17,14 +17,44 @@ const objects = [
   { name: "automation_loop_run", icon: "history" },
   { name: "campaign", icon: "megaphone" },
 ];
+beforeEach(() => {
+  localStorage.clear();
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({})));
+});
+afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
 
 describe("workspace sidebar navigation", () => {
-  it("opens Campaigns from the fixed CRM navigation even when hidden objects are absent", () => {
+  it("makes Chats the first and default sidebar view without navigating content", () => {
+    const navigate = vi.fn();
+    render(<WorkspaceSidebar chatsPanel={<p>Conversation fixture</p>} onNavigate={navigate} />);
+    const tabs = within(screen.getByRole("group", { name: "Sidebar views" })).getAllByRole("button");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Chats", "Home"]);
+    expect(tabs[0]).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Conversation fixture")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+  it("restores an intentional Home view and never resets it after file/deep-link navigation", () => {
+    localStorage.setItem("dench-sidebar-view", "home");
+    window.history.replaceState({}, "", "/workspace?path=fixture.md&chat=exact-profile-key");
+    const navigate = vi.fn(); const select = vi.fn();
+    const view = render(<WorkspaceSidebar activePath="fixture.md" chatsPanel={<p>Conversation fixture</p>} onNavigate={navigate} onSelect={select} />);
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Conversation fixture")).not.toBeInTheDocument();
+    view.rerender(<WorkspaceSidebar activePath="other.md" activeCrmTarget="people" chatsPanel={<p>Refreshed chats</p>} onNavigate={navigate} onSelect={select} />);
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+    expect(location.search).toBe("?path=fixture.md&chat=exact-profile-key");
+    expect(navigate).not.toHaveBeenCalled(); expect(select).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    expect(localStorage.getItem("dench-sidebar-view")).toBe("home");
+    expect(screen.queryByText("Refreshed chats")).not.toBeInTheDocument();
+  });
+  it("opens People from the fixed CRM navigation even when hidden objects are absent", () => {
     const onNavigate = vi.fn();
     render(<WorkspaceSidebar onNavigate={onNavigate} customCrmObjects={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
-    expect(onNavigate).toHaveBeenCalledWith("crm-campaigns");
+    fireEvent.click(screen.getByRole("button", { name: "People" }));
+    expect(onNavigate).toHaveBeenCalledWith("crm-people");
 
   });
 
@@ -104,7 +134,7 @@ describe("workspace sidebar navigation", () => {
     const crmGroup = screen.getByRole("group", { name: "CRM" });
     const adminGroup = screen.getByRole("group", { name: "Admin" });
     const workspaceGroup = screen.getByRole("group", { name: "Workspace" });
-    expect(crmGroup).toContainElement(screen.getByRole("button", { name: "Campaigns" }));
+    expect(crmGroup).toContainElement(screen.getByRole("button", { name: "People" }));
     expect(adminGroup).toContainElement(screen.getByRole("button", { name: "Listings" }));
     expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Work Tasks" }));
     expect(workspaceGroup).toContainElement(screen.getByRole("button", { name: "Automation Loops" }));

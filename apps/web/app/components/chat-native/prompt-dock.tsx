@@ -37,7 +37,7 @@ function SubagentGroup({ roots, callbacks, tails }: { roots: readonly SubagentNo
   const finished = all.length - running;
   const plural = (count: number) => `${count} ${count === 1 ? "subagent" : "subagents"}`;
   const label = running ? `${plural(running)} running${finished ? ` · ${finished} done` : ""}` : `${plural(all.length)} finished`;
-  return <details className="group/agents border-b border-[var(--color-border)] bg-[var(--color-surface-hover)] px-3 py-1" aria-label="Subagents">
+  return <details className="group/agents bg-gradient-to-b from-[var(--color-surface-hover)] to-transparent px-3 pt-1 pb-2" aria-label="Subagents">
     <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
       <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/agents:rotate-90" />
       {running ? <ThinkingIndicator>{label}</ThinkingIndicator> : <span className="font-medium text-[var(--color-text-muted)]">{label}</span>}

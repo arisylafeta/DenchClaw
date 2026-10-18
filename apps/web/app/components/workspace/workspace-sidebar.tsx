@@ -21,6 +21,7 @@ import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 import { NavUser, type NavUserData } from "./nav-user";
 import type { SearchIndexItem } from "@/lib/search-index";
 import { displayObjectName } from "@/lib/object-display-name";
+import { Skeleton } from "../ui/skeleton";
 import { CrmObjectIcon } from "./crm-object-icon";
 
 /** Descriptor for a custom CRM table rendered in the sidebar's CRM section. */
@@ -155,6 +156,8 @@ type WorkspaceSidebarProps = {
   onNewChatSession?: () => void;
   /** When set, the "+" opens this menu instead of calling onNewChatSession. */
   newChatOptions?: { label: string; onSelect: () => void }[];
+  /** True until the conversation backend has answered, so the header does not flash a stale name. */
+  chatsLoading?: boolean;
 };
 
 function SearchIcon() {
@@ -327,13 +330,26 @@ export function WorkspaceSidebar({
   chatsPanel,
   onNewChatSession,
   newChatOptions,
+  chatsLoading = false,
 }: WorkspaceSidebarProps) {
 	const width = mobile ? "280px" : (widthProp ?? 260);
 	const isCompact = !mobile && compact;
 	const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
 	// Top-level tab: "home" shows the workspace / CRM / bottom nav. "chats"
 	// swaps the body with a chat history list provided by the host.
-	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
+	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("chats");
+	// This is only the sidebar view, never the selected content/chat tab.
+	// Restore an intentional choice without resetting it on route changes.
+	useEffect(() => {
+		try {
+			const saved = localStorage.getItem("dench-sidebar-view");
+			if (saved === "home" || saved === "chats") setSidebarTab(saved);
+		} catch { /* Chats remains the default with unavailable storage. */ }
+	}, []);
+	const chooseSidebarTab = (tab: "home" | "chats") => {
+		setSidebarTab(tab);
+		try { localStorage.setItem("dench-sidebar-view", tab); } catch { /* Keep navigation usable. */ }
+	};
 	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
 	const [adminTreeOpen, setAdminTreeOpen] = useState(false);
 	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(false);
@@ -565,7 +581,7 @@ export function WorkspaceSidebar({
 							className="w-7 h-7 mx-auto rounded-lg overflow-hidden flex items-center justify-center transition-opacity hover:opacity-90"
 							title={`${orgName || "Workspace"}${workspaceName ? ` — ${workspaceName}` : ""}`}
 						>
-							{workspaceName ? <ProfileAvatar key={workspaceName} name={workspaceName} className="h-7 w-7" /> : <span aria-label="All chats">∀</span>}
+							{chatsLoading ? <Skeleton className="h-7 w-7 rounded-lg" /> : workspaceName ? <ProfileAvatar key={workspaceName} name={workspaceName} className="h-7 w-7" /> : <span aria-label="All chats">∀</span>}
 						</button>
 					)}
 				/>
@@ -576,7 +592,7 @@ export function WorkspaceSidebar({
 				<div className="flex flex-col items-center gap-0.5 pt-1 pb-1">
 					{loading ? (
 						Array.from({ length: 7 }, (_, index) => (
-							<div key={index} className="m-1 h-7 w-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
+							<Skeleton key={index} className="m-1 h-7 w-7 rounded-lg" />
 						))
 					) : (<>
 					<div role="group" aria-label="CRM" className="flex flex-col items-center gap-0.5">
@@ -668,8 +684,8 @@ export function WorkspaceSidebar({
 								onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
 								title="Switch workspace"
 							>
-								{workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-6 w-6" />}
-								<span className="truncate font-semibold">{workspaceName ?? (conversationFilter ? "All chats" : "Workspace")}</span>
+								{chatsLoading ? <Skeleton className="h-6 w-6 shrink-0 rounded-full" /> : workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-6 w-6" />}
+								{chatsLoading ? <Skeleton className="h-3.5 w-24" /> : <span className="truncate font-semibold">{workspaceName ?? (conversationFilter ? "All chats" : "Workspace")}</span>}
 								<span className="flex-1" />
 								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
 									<path d="m6 9 6 6 6-6" />
@@ -698,17 +714,18 @@ export function WorkspaceSidebar({
 
 		{/* Tab switcher: Home (workspace nav) vs. Chats (session history) */}
 		{chatsPanel && (
-			<div className="px-2 pt-1 pb-1 flex items-center gap-1">
+			<div role="group" aria-label="Sidebar views" className="px-2 pt-1 pb-1 flex items-center gap-1">
 				{([
-					{ id: "home", label: "Home" },
 					{ id: "chats", label: "Chats" },
+					{ id: "home", label: "Home" },
 				] as const).map((tab) => {
 					const active = sidebarTab === tab.id;
 					return (
 						<button
 							key={tab.id}
 							type="button"
-							onClick={() => setSidebarTab(tab.id)}
+							onClick={() => chooseSidebarTab(tab.id)}
+							aria-pressed={active}
 							className="flex-1 px-2 py-1 rounded-md text-[12px] font-medium transition-colors cursor-pointer"
 							style={{
 								color: active ? "var(--color-text)" : "var(--color-text-muted)",
@@ -759,9 +776,19 @@ export function WorkspaceSidebar({
 		{onNavigate && (
 			<div className="px-2 pt-1 pb-1">
 				{loading ? (
-					<div className="space-y-1 px-2 pt-2" aria-label="Loading navigation">
-						{Array.from({ length: 8 }, (_, index) => (
-							<div key={index} className="h-7 animate-pulse rounded-lg" style={{ background: "var(--color-surface-hover)" }} />
+					<div role="status" aria-label="Loading navigation" className="px-2 pt-2">
+						{[6, 3, 3].map((rows, group) => (
+							<div key={group} className={group ? "pt-4" : ""}>
+								<Skeleton className="mb-2 h-2.5 w-10" />
+								<div className="space-y-1">
+									{Array.from({ length: rows }, (_, index) => (
+										<div key={index} className="flex items-center gap-2.5 px-2 py-1.5">
+											<Skeleton className="h-4 w-4 shrink-0 rounded" />
+											<Skeleton className={`h-3 ${["w-24", "w-20", "w-28", "w-16", "w-24", "w-20"][index]}`} />
+										</div>
+									))}
+								</div>
+							</div>
 						))}
 					</div>
 				) : (<>

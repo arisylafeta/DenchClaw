@@ -36,6 +36,16 @@ describe('ordered Hermes stream', () => {
     expect(h.state).toMatchObject({ busy: false, live: false, awaitingResponse: false })
   })
 
+  it('ignores a reasoning block that arrives after the turn settled instead of opening a phantom message', () => {
+    const h = harness(); start(h)
+    h.send('message.delta', { text: 'Answer' })
+    h.send('message.complete', { text: 'Answer' })
+    h.send('reasoning.available', { text: 'late summary' })
+    expect(assistant(h)).toHaveLength(1)
+    expect(assistant(h)[0].segments.map(p => p.type)).toEqual(['text'])
+    expect(h.state).toMatchObject({ busy: false, live: false })
+  })
+
   it('uses stable ids, oldest contextual fallback, sparse args, and fresh identities across turns', () => {
     const h = harness(); start(h)
     h.send('tool.start', { tool_id: 'one', name: 'read_file', context: 'a', args: { path: 'a', offset: 1 } })

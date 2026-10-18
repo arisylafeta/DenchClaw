@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ChatPanelTerminalButton } from "./chat-panel";
 
 describe("ChatPanelTerminalButton", () => {
-  it("keeps the terminal action visible and toggles the drawer", async () => {
+  it("is an icon-only button that toggles the drawer", async () => {
     const user = userEvent.setup();
     const onToggleTerminal = vi.fn();
 
@@ -15,7 +15,7 @@ describe("ChatPanelTerminalButton", () => {
     );
 
     const button = screen.getByRole("button", { name: "Open terminal" });
-    expect(button).toHaveTextContent("Terminal");
+    expect(button).toHaveTextContent("");
     expect(button).toHaveAttribute("aria-pressed", "false");
     expect(button).toHaveAttribute("title", "Open terminal (Cmd/Ctrl+J)");
 

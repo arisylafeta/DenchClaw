@@ -37,7 +37,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 };
 export function conversationChannel(row: HermesConversation): { id: string; label: string } {
   const id = row.kind === "group" ? "group" : row.source || "other";
-  return { id, label: CHANNEL_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1) };
+  return { id, label: Object.hasOwn(CHANNEL_LABELS, id) ? CHANNEL_LABELS[id] : id.charAt(0).toUpperCase() + id.slice(1) };
 }
 export function automation(row: HermesConversation): boolean {
   return row.kind === "solo" && (row.source === "cron" || row.source === "webhook");
@@ -46,11 +46,29 @@ export function automation(row: HermesConversation): boolean {
 function scheduledJob(row: HermesConversation) {
   return row.source === "cron" ? row.title.split(" · ")[0] : conversationChannel(row).label;
 }
-export type GroupBy = "none" | "channel" | "agent" | "day" | "job";
-export type ChatView = { hidden: string[]; groupBy: GroupBy };
-/** Unattended automation starts hidden, but remains available in the channel menu. */
-export const DEFAULT_VIEW: ChatView = { hidden: ["cron", "webhook"], groupBy: "none" };
+export type GroupBy = "source" | "none" | "channel" | "agent" | "day" | "job";
+export type ChatView = { hidden: string[]; groupBy: GroupBy; version?: 2; pins?: string[]; collapsed?: string[] };
+/** Automation is discoverable, but closed until deliberately opened. */
+export const DEFAULT_VIEW: ChatView = { version: 2, hidden: [], groupBy: "source", pins: [], collapsed: ["automation"] };
 export type ChatSection = { key: string; label: string | null; rows: HermesConversation[] };
+const MESSAGING = new Set(["discord", "whatsapp", "telegram", "slack", "signal", "matrix", "mattermost", "sms", "email"]);
+export function messagingConversation(row: HermesConversation) { return row.kind === "solo" && MESSAGING.has(row.source ?? ""); }
+export function sourceSection(row: HermesConversation) {
+  if (automation(row)) return { key: "automation", label: "Automation" };
+  if (row.kind === "group") return { key: "group", label: "Groups" };
+  if (messagingConversation(row) || (row.source && !["web", "crm", "api_server", "desktop", "cli", "tui", "ios", "other"].includes(row.source))) {
+    const channel = conversationChannel(row); return { key: messagingConversation(row) ? channel.id : `source:${channel.id}`, label: channel.label };
+  }
+  return { key: "chats", label: "Chats" };
+}
+export function parseChatView(value: unknown): ChatView {
+  if (!value || typeof value !== "object") return { ...DEFAULT_VIEW };
+  const v = value as Record<string, unknown>;
+  const strings = (item: unknown): item is string[] => Array.isArray(item) && item.length <= 5000 && item.every((id) => typeof id === "string" && id.length <= 2000);
+  if (!strings(v.hidden) || !["source", "none", "channel", "agent", "day", "job"].includes(String(v.groupBy))) return { ...DEFAULT_VIEW };
+  return { version: 2, hidden: [...new Set(v.hidden)], groupBy: v.groupBy === "none" ? "source" : v.groupBy as GroupBy,
+    pins: strings(v.pins) ? [...new Set(v.pins)] : [], collapsed: strings(v.collapsed) ? [...new Set(v.collapsed)] : ["automation"] };
+}
 function dayBucket(ms: number, now: Date) {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   if (ms >= startOfToday) return "Today";
@@ -59,19 +77,25 @@ function dayBucket(ms: number, now: Date) {
 }
 export function applyChatView(rows: HermesConversation[], view: ChatView, query: string, now = new Date()) {
   const needle = query.trim().toLowerCase();
-  const searched = needle ? rows.filter((row) => row.title.toLowerCase().includes(needle) || row.participants.some((p) => p.name.toLowerCase().includes(needle))) : rows;
-  const counts: Record<string, { id: string; label: string; count: number }> = {};
+  const unique = [...new Map(rows.map((row) => [row.key, row])).values()];
+  const searched = needle ? unique.filter((row) => row.title.toLowerCase().includes(needle) || row.participants.some((p) => p.name.toLowerCase().includes(needle))) : unique;
+  const counts: Record<string, { id: string; label: string; count: number }> = Object.create(null);
   for (const row of searched) { const c = conversationChannel(row); (counts[c.id] ??= { ...c, count: 0 }).count++; }
-  for (const id of view.hidden) counts[id] ??= { id, label: CHANNEL_LABELS[id] ?? id, count: 0 };
+  for (const id of view.hidden) counts[id] ??= { id, label: Object.hasOwn(CHANNEL_LABELS, id) ? CHANNEL_LABELS[id] : id, count: 0 };
   const shown = searched.filter((row) => !view.hidden.includes(conversationChannel(row).id));
   const keyOf = (row: HermesConversation) => view.groupBy === "channel" ? conversationChannel(row).label
     : view.groupBy === "agent" ? (row.kind === "group" ? "Groups" : row.profile ?? "Other")
     : view.groupBy === "day" ? dayBucket(row.updatedAt, now) : scheduledJob(row);
   const sections = new Map<string, ChatSection>();
+  const pins = new Set(view.pins ?? []);
   for (const row of shown) {
-    const label = view.groupBy === "none" ? null : keyOf(row);
-    const section = sections.get(label ?? "") ?? { key: label ?? "", label, rows: [] };
-    section.rows.push(row); sections.set(label ?? "", section);
+    const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
+      : automation(row) ? sourceSection(row)
+      : view.groupBy === "source" || view.groupBy === "none" ? sourceSection(row) : { key: `view:${keyOf(row)}`, label: keyOf(row) };
+    const section = sections.get(bucket.key) ?? { ...bucket, rows: [] };
+    section.rows.push(row); sections.set(bucket.key, section);
   }
-  return { sections: [...sections.values()], channels: Object.values(counts).sort((a, b) => b.count - a.count), shown: shown.length, hiddenCount: searched.length - shown.length };
+  const order = ["pinned", "chats", "group", "discord", "whatsapp"];
+  const rank = (key: string) => key === "automation" ? 1000 : order.includes(key) ? order.indexOf(key) : 10;
+  return { sections: [...sections.values()].sort((a, b) => rank(a.key) - rank(b.key)), channels: Object.values(counts).sort((a, b) => b.count - a.count), shown: shown.length, hiddenCount: searched.length - shown.length };
 }

@@ -3,6 +3,8 @@ import { WebSocketServer } from "ws";
 import { once } from "node:events";
 import { conversationKey, filterConversations, parseConversationKey } from "./hermes-conversations";
 vi.mock("./workspace", () => ({ discoverWorkspaces: () => [{ name: "default" }, { name: "alpha" }] }));
+vi.mock("./hermes-session-names", () => ({ sessionDisplayNames: vi.fn(async () => ({})) }));
+import { sessionDisplayNames } from "./hermes-session-names";
 import { createConversation, groupRpc, listConversations, nativeFetch, readConversation } from "./hermes-native";
 import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
@@ -34,6 +36,20 @@ afterEach(async () => {
   if (server) { for (const client of server.clients) client.terminate(); await new Promise<void>((resolve) => server!.close(() => resolve())); server = undefined; }
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
   vi.useRealTimers(); vi.restoreAllMocks();
+});
+it("enriches only requested messaging IDs and uses the same name on deep-link readback", async () => {
+  const lookup = vi.mocked(sessionDisplayNames);
+  lookup.mockImplementation(async (profile, ids): Promise<Record<string, string>> => ids.includes("room") && profile === "alpha" ? { room: "Harbour / #stock" } : {});
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/messages") ? Response.json({ data: [] }) : url.includes("/api/sessions?") ? Response.json({ data: [{ id: "room", title: "Stored title", source: "discord", origin_json: "private", user_id: "private" }, { id: "plain", title: "Direct", source: "web" }] }) : Response.json({ session: { id: "room", title: "Stored title", source: "discord" } })));
+  try {
+    const listing = await listConversations();
+    expect(listing.sessions.find((row) => row.profile === "alpha" && row.id === "room")?.title).toBe("Harbour / #stock");
+    expect(listing.sessions.find((row) => row.profile === "default" && row.id === "room")?.title).toBe("Stored title");
+    expect(lookup).toHaveBeenCalledWith("alpha", ["room"]);
+    expect(JSON.stringify(listing)).not.toContain("private");
+    const detail = await readConversation(conversationKey("solo", "room", "alpha"));
+    expect(detail.conversation.title).toBe("Harbour / #stock");
+  } finally { lookup.mockImplementation(async () => ({})); }
 });
 it("uses gateway status for hidden solo chats with profile-colliding stored ids", async () => {
   vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
@@ -107,6 +123,19 @@ describe("native Hermes conversations", () => {
     expect(data.warnings).toEqual([]);
     expect(filterConversations(data.sessions, "alpha").map((r) => r.title)).toEqual(["Alpha and Sol", "Alpha chat"]);
     expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=200&offset=0"))).toBe(true);
+  });
+  it("preserves older pinned backfill beyond the recent window and batches metadata reads", async () => {
+    vi.stubEnv("HERMES_CHAT_TRANSPORT", "sse");
+    const recent = Array.from({ length: 200 }, (_, index) => ({ id: `recent-${index}`, source: "discord", title: `Recent ${index}` }));
+    const olderPin = { id: "older-pinned", source: "whatsapp", title: "Older pinned chat", pinned: true };
+    vi.mocked(sessionDisplayNames).mockClear();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({ data: input.includes("/alpha/") ? [] : [...recent, olderPin] })));
+    const result = await listConversations();
+    expect(result.sessions).toHaveLength(201);
+    expect(result.sessions.find((row) => row.id === olderPin.id)).toMatchObject({ profile: "default", title: olderPin.title });
+    const batches = vi.mocked(sessionDisplayNames).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids);
+    expect(batches.map((ids) => ids.length)).toEqual([200, 1]);
+    expect(batches.flat()).toContain(olderPin.id);
   });
   it("keeps other profiles' chats when one profile's sessions cannot be read", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => input.includes("/alpha/") ? new Response("{}", { status: 401 }) : Response.json({ data: [{ id: "sol", title: "Sol chat" }] })));

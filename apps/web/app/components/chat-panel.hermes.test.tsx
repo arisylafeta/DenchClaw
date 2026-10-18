@@ -141,6 +141,21 @@ describe("gateway ChatPanel solo transport", () => {
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/chat" || url === endpoint)).toBe(false);
   });
+  it("shows a loading skeleton until the snapshot lands, then the transcript or the home screen", async () => {
+    const { container, unmount } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    expect(screen.getByRole("status", { name: "Loading conversation" })).toBeInTheDocument();
+    expect(container.querySelector("h1")).toBeNull();
+    openGateway();
+    expect(screen.queryByRole("status", { name: "Loading conversation" })).toBeNull();
+    expect(container.querySelectorAll("[data-tool-id]").length).toBeGreaterThan(0);
+    unmount();
+
+    const empty = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    expect(screen.getByRole("status", { name: "Loading conversation" })).toBeInTheDocument();
+    openGateway({ messages: [] });
+    expect(screen.queryByRole("status", { name: "Loading conversation" })).toBeNull();
+    await waitFor(() => expect(empty.container.querySelector("h1")).not.toBeNull());
+  });
   it("answers approvals and four-option clarify questions using request identities", async () => {
     const runtime = vi.fn();
     render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onRuntimeStateChange={runtime} />);

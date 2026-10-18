@@ -50,6 +50,7 @@ function row(overrides: Partial<Demand>): Demand {
     priority: false,
     missing: [],
     context_notes: [],
+    context: {},
     inventory_matches: [],
     id: "btd_1",
     kind: "standing",

@@ -313,6 +313,21 @@ the company, not a new actionable ask. Demand's **Missing to move this** section
 surfaces missing price, quantity, request timeline, unsent qualification question
 or eligible supply match. These are action gaps, not automatic closures.
 
+Migration `049` categorises context as `ask`, `bid`, `offer_reply`, `project`,
+`preference`, `trading_style`, `past_deal` or `note`, with optional evidence URLs.
+All surfaces show muted category chips and newest-first dates; company profiles
+also filter by category. These internal notes can contain commercial terms and
+must not be forwarded as buyer-facing copy.
+
+For the October audit repair, restore the pre-simplify dump into a separate
+scratch database, then run `uv run --with 'psycopg[binary]'
+scripts/rebattery/restore_demand_context.py --source-db audit_old` (dry-run).
+`--apply` commits the reviewed context and exact teaser-linked lot buyers in one
+transaction with read-back. It prints one decision per original row, preserves
+original observation dates and demand IDs, and never reopens demand. Deterministic
+IDs prevent duplicate notes on rerun; existing repaired notes are not overwritten.
+Drop the scratch database afterward; never restore the dump into `denchclaw`.
+
 Migration `044` separates current sourcing work from buyer discovery. **Demand**
 is a buyer's own dated, actionable request or standing ask with an identified
 buyer, product family and quantity. **Qualifying** holds a specific need that
@@ -385,3 +400,24 @@ The scheduled importer and inbox checker use the detached
 `/root/denchclaw/scripts-live` worktree. `saved_search_import.py` defaults to a
 rollback-only dry run; `--apply` is reserved for the scheduled gate or an
 explicitly authorized import.
+
+### Demand History restoration (18 October 2026)
+
+`053_demand_history.sql` adds `offer_reply` and `research_profile` categories
+and records category-only changes in status activity without reopening a row.
+History includes every closed category. All counts every closed row but hides
+Research profile rows until that category is selected. Category changes are
+available in the detail header; Reopen remains an explicit separate action.
+Closed rows have no qualification gaps, score, expected fee or supply suggestions.
+
+`scripts/rebattery/restore_demand_history.py` reads a separately restored
+pre-audit database. It defaults to an exact-write/read-back dry run with rollback;
+`--apply` commits one transaction. It preserves original fields and dates,
+nulls dangling identity links, matching hashes and moved-to pointers, clears
+priority, and appends provenance. Original `moved_to_lot` becomes `offer_reply`;
+research-origin `moved_to_profile` becomes `research_profile`. Unique source
+collisions are reported, not overwritten. Existing context notes remain intact.
+Only missing rows are inserted; existing lot buyers with empty demand links are
+re-linked to their restored original demand IDs. Replaying inserts zero rows.
+The survey importer refreshes unfinished answers only while open or qualifying;
+closed History evidence cannot be overwritten by a later survey refresh.

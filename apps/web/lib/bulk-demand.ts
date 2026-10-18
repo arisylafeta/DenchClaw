@@ -4,27 +4,31 @@ import type { PriceBasis, Reputation } from "./bulk-demand-score";
 import specConfig from "./buy-box-spec.json";
 import type { CompanyContextNote } from "./crm-postgres/company-context";
 import type { SupplyFeedRow } from "./bulk-supply";
+import { parseBuyerContext, type BuyerContext } from "./buyer-context";
 
 /** Stated and agreed buy-boxes not confirmed for this long show as "Still wanted?". */
 export const STALE_DAYS = 60;
 /** Estimated buy-boxes (our research) older than this show as "Re-research". */
 export const RESEARCH_STALE_DAYS = 180;
 
-export const CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "expired", "other", "duplicate", "moved_to_profile", "moved_to_lot", "recycling", "supply", "not_demand"] as const;
+export const CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "expired", "duplicate", "offer_reply", "moved_to_profile", "research_profile", "recycling", "supply", "not_demand", "other", "moved_to_lot"] as const;
 export type ClosedReason = (typeof CLOSED_REASONS)[number];
 export const CLOSED_REASON_LABEL: Record<ClosedReason, string> = {
-  bought_from_us: "Bought from us",
-  bought_elsewhere: "Bought elsewhere",
-  no_longer_needed: "No longer needed",
-  expired: "Past its date",
+  bought_from_us: "Sold",
+  bought_elsewhere: "Lost",
+  no_longer_needed: "Dropped",
+  expired: "Expired",
   other: "Other",
   duplicate: "Duplicate",
-  moved_to_profile: "Moved to buyer profile",
-  moved_to_lot: "Moved to lot",
+  moved_to_profile: "Moved to profile",
+  moved_to_lot: "Offer reply",
+  offer_reply: "Offer reply",
+  research_profile: "Research profile",
   recycling: "Recycling",
-  supply: "Supply",
+  supply: "Seller",
   not_demand: "Not demand",
 };
+export const HISTORY_CATEGORIES = CLOSED_REASONS.filter((reason) => reason !== "moved_to_lot");
 
 export const KINDS = ["request", "standing"] as const;
 export type DemandKind = (typeof KINDS)[number];
@@ -79,6 +83,7 @@ export type Demand = {
   price_currency: string | null;
   price_unit: string | null;
   spec: Spec;
+  context: BuyerContext;
   source_kind: string | null;
   source_label: string | null;
   source_url: string | null;
@@ -136,7 +141,7 @@ export type SuggestedBuyer = {
 export type DemandInput = Partial<Pick<Demand,
   "kind" | "basis" | "buyer" | "company_id" | "person_id" | "contact" | "email" | "wants" | "quantity" | "location" | "note"
   | "confirmed_on" | "needed_by" | "volume" | "volume_unit" | "max_price" | "price_currency" | "price_unit" | "spec"
-  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to" | "priority">>;
+  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to" | "priority" | "context">>;
 
 /** Only compute a euro fee when amount, currency and compatible units are known. */
 export function demandFee(input: DemandInput): number | null {
@@ -212,6 +217,12 @@ export function parseDemandInput(body: unknown, creating: boolean): Parsed<Deman
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Body must be an object." };
   const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
   const extra: DemandInput = {};
+  if ("context" in rest) {
+    const context = parseBuyerContext(rest.context);
+    if ("error" in context) return context;
+    extra.context = context.value;
+    delete rest.context;
+  }
   if ("priority" in rest) {
     if (typeof rest.priority !== "boolean") return { error: "priority must be true or false." };
     extra.priority = rest.priority;

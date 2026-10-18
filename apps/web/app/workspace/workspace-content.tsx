@@ -97,8 +97,9 @@ import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
 import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
+import { ChatListSkeleton, ChatPaneSkeleton } from "../components/chat-loading-skeleton";
 import { GroupBadge } from "../components/workspace/group-chat";
-import { parseConversationKey } from "@/lib/hermes-conversations";
+import { automation, parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
   DropdownMenu,
@@ -554,6 +555,19 @@ function WorkspacePageInner() {
 
   // Chat session state
   const hermesChats = useHermesConversations();
+  // `?chat=KEY` with nothing else is a deep link. Until that chat is open the centre pane shows a
+  // skeleton, not the draft tab's home screen or the "select a chat" placeholder.
+  const [deepLinkPending, setDeepLinkPending] = useState(() => {
+    const url = parseUrlState(searchParams);
+    return !!url.chat && !url.path && !url.crm && !url.entry && !url.subagent;
+  });
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (!deepLinkPending) return;
+    const opened = hermesChats.enabled ? !!hermesChats.selected : hermesChats.ready && hydrated;
+    if (opened) setDeepLinkPending(false);
+  }, [deepLinkPending, hermesChats.enabled, hermesChats.ready, hermesChats.selected, hydrated]);
+  const chatPaneLoading = !hermesChats.ready || (deepLinkPending && !hermesChats.selected);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<WebSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -742,7 +756,10 @@ function WorkspacePageInner() {
     const tab = tabsState.chatTabs.find((entry) => entry.id === activeChatTabId);
     const row = hermesChats.listing?.sessions.find((entry) => entry.key === tab?.sessionId);
     if (row && row.key !== hermesChats.selected?.key) hermesChats.select(row);
-    else if (!tab?.sessionId && hermesChats.selected) hermesChats.clear();
+    else if (!row && tab?.sessionId && hermesChats.selected?.key !== tab.sessionId) {
+      // Not in the listing (deep link or older chat): load it directly instead of leaving the pane empty.
+      void hermesChats.selectKey(tab.sessionId).then((opened) => { if (!opened) setDeepLinkPending(false); });
+    } else if (!tab?.sessionId && hermesChats.selected) hermesChats.clear();
   }, [activeChatTabId, tabsState.chatTabs, hermesChats]);
 
   const openSubagentChatTab = useCallback((params: {
@@ -1921,7 +1938,9 @@ function WorkspacePageInner() {
     if (tabLoadedForWorkspace.current !== (workspaceName || null)) return;
 
     const urlState = parseUrlState(searchParams);
-    if (tree.length === 0 && urlState.path !== "campaign"
+    // A chat-only link needs no tree to resolve, so an empty tree must not block it.
+    const chatOnly = !!urlState.chat && !urlState.path && !urlState.crm && !urlState.entry;
+    if (tree.length === 0 && !chatOnly && urlState.path !== "campaign"
       && urlState.entry?.objectName !== "campaign" && urlState.entry?.objectName !== "campaigns") {return;}
     const shell = buildShellUrlState();
     dispatch({ type: "applyUrl", url: urlState, shell });
@@ -1953,6 +1972,7 @@ function WorkspacePageInner() {
 
     postHydrationRender.current = true;
     hydrationPhase.current = "hydrated";
+    setHydrated(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs exactly once
   }, [tree, treeLoading, searchParams, workspaceName]);
 
@@ -2435,8 +2455,9 @@ function WorkspacePageInner() {
       { label: "Solo chat…", onSelect: () => hermesChats.newChat("solo") },
       { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
     ] : undefined,
+    chatsLoading: !hermesChats.ready,
     chatsPanel: (
-      hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
+      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2465,7 +2486,7 @@ function WorkspacePageInner() {
   // Shared props for the chat-panel header history dropdown.
   // Defined here so all open ChatPanel tabs see the same up-to-date data.
   const chatHistoryPanelProps = {
-    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
+    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).filter((row) => !automation(row)).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
     historyStreamingSessionIds: streamingSessionIds,
     historySubagents: subagents,
     historyActiveSubagentKey: activeSubagentKey,
@@ -2712,7 +2733,8 @@ function WorkspacePageInner() {
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
-          {hermesChats.enabled && !hermesChats.selected && <HermesConversationPanel chats={hermesChats} />}
+          {chatPaneLoading && <ChatPaneSkeleton />}
+          {!chatPaneLoading && hermesChats.enabled && !hermesChats.selected && <HermesConversationPanel chats={hermesChats} />}
           {hermesChats.enabled && <HermesNewChatDialog chats={hermesChats} />}
           {mainChatTabs.map((tab) => {
             let nativeKey: string | undefined;
@@ -2725,7 +2747,8 @@ function WorkspacePageInner() {
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
               : null;
-            const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || hermesChats.selected?.key === nativeKey);
+            // Before the backend is known the draft tab would flash the home screen; keep it mounted but hidden.
+            const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || hermesChats.selected?.key === nativeKey) && !(chatPaneLoading && !hermesChats.enabled);
             const showLeftToggle = !isMobile && leftSidebarCollapsed;
             const showRightToggle = !isMobile && rightPanelCollapsed;
             const headerLeftSlot = showLeftToggle ? (

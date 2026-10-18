@@ -2,15 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
-import { priceLabel, volumeLabel, specLines } from "@/lib/bulk-demand";
+import { CLOSED_REASON_LABEL, HISTORY_CATEGORIES } from "@/lib/bulk-demand";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
-import { buildEntryLink } from "@/lib/workspace-links";
-import { Card, DetailSheet, ErrorText, request } from "./trade-ui";
+import type { BestMatchLine } from "@/lib/demand-supply-types";
+import { Card, ErrorText, request } from "./trade-ui";
 import styles from "./bulk-detail.module.css";
-import { DemandActions } from "./demand-actions";
 import { DemandDialog } from "./demand-editor";
-import { CompanyContext } from "./company-context";
+import { DemandPanel } from "./demand-panel";
+import { FitBadge } from "./demand-supply-tab";
 
 const MISSING_ORDER = [
   "no supply match",
@@ -19,10 +19,31 @@ const MISSING_ORDER = [
   "no timeline",
   "question not sent",
 ];
-function NextChip({ demand }: { demand: Demand }) {
+/** Next column: the best inventory match when there is one, else the first gap that blocks the deal. */
+function NextChip({ demand, best }: { demand: Demand; best?: BestMatchLine }) {
+  // Qualifying rows: the open question is the next thing to do, not the match.
+  if (demand.status === "qualifying") {
+    return (
+      <span className="min-w-0 text-[12px]">
+        <span className="break-words">{demand.qualify_question ?? "Question not written yet"}</span>
+        <span className="block" style={{ color: demand.qualify_asked_on ? "var(--bt-muted)" : "var(--color-warning)" }}>
+          {demand.qualify_asked_on ? `Asked ${shortDate(demand.qualify_asked_on)}` : "Not asked yet"}
+        </span>
+      </span>
+    );
+  }
+  if (best?.verdict) {
+    return (
+      <span className="min-w-0 text-[12px]">
+        {best.verdict && <span className="mr-1.5 inline-block align-middle"><FitBadge verdict={best.verdict} /></span>}
+        <span className="break-words">{best.text}</span>
+        {best.shortlisted > 0 && <span style={{ color: "var(--bt-muted)" }}> · {best.shortlisted} shortlisted</span>}
+      </span>
+    );
+  }
   const count = demand.inventory_matches?.length ?? 0;
   const missing = MISSING_ORDER.find((gap) => demand.missing?.includes(gap));
-  if (!count && !missing) return null;
+  if (!count && !missing) return best ? <span className="text-[12px]" style={{ color: "var(--color-warning)" }}>{best.text}</span> : null;
   return (
     <span
       className={`${styles.chip} justify-self-start`}
@@ -59,10 +80,12 @@ export function SheetTabs({
   tabs,
   value,
   onChange,
+  labels,
 }: {
   tabs: string[];
   value: string;
   onChange: (tab: string) => void;
+  labels?: Record<string, string>;
 }) {
   return (
     <nav
@@ -82,7 +105,7 @@ export function SheetTabs({
             color: value === tab ? "var(--bt-text)" : "var(--bt-muted)",
           }}
         >
-          {tab}
+          {labels?.[tab] ?? tab}
         </button>
       ))}
     </nav>
@@ -127,10 +150,22 @@ export function DemandPage({
   const [demand, setDemand] = useState<Demand[]>([]);
   const [filter, setFilter] = useState("open");
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
   const [selectedId, setSelectedId] = useState(initialDemandId ?? null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [best, setBest] = useState<Record<string, BestMatchLine>>({});
+  const loadBest = useCallback(async () => {
+    try {
+      setBest((await request<{ matches?: Record<string, BestMatchLine> }>("/api/bulk-trades/demand/matches")).matches ?? {});
+    } catch {
+      setBest({});
+    }
+  }, []);
+  useEffect(() => {
+    void loadBest();
+  }, [loadBest]);
   const load = useCallback(async () => {
     try {
       const data = await request<{ demand: Demand[] }>(
@@ -154,15 +189,32 @@ export function DemandPage({
       demand.filter(
         (row) =>
           row.status === filter &&
+          (filter !== "closed" || (category === "all"
+            ? row.closed_reason !== "research_profile"
+            : (row.closed_reason === "moved_to_lot" ? "offer_reply" : row.closed_reason) === category)) &&
           `${row.buyer} ${row.wants} ${row.product_family ?? ""}`
             .toLowerCase()
             .includes(query.toLowerCase()),
       ),
-    [demand, filter, query],
+    [demand, filter, query, category],
   );
   const selected = demand.find((row) => row.id === selectedId);
   const columns =
     "grid-cols-[52px_minmax(250px,2fr)_100px_90px_minmax(180px,1fr)]";
+  if (selected) {
+    return (
+      <DemandPanel
+        key={selected.id}
+        demand={selected}
+        today={today}
+        onChanged={load}
+        onClose={() => setSelectedId(null)}
+        onOpenTrade={onOpenTrade}
+        onOpenSupply={onOpenSupply}
+        onOpenDemand={setSelectedId}
+      />
+    );
+  }
   return (
     <div className="space-y-5">
       <ErrorText error={error} />
@@ -209,6 +261,37 @@ export function DemandPage({
           Add demand
         </button>
       </div>
+      {filter === "closed" && (
+        <div role="group" aria-label="History categories" className="flex flex-wrap gap-2">
+          {["all", ...HISTORY_CATEGORIES].map((reason) => (
+            <button key={reason} type="button" aria-pressed={category === reason}
+              className={`${rowFocus} ${styles.chip} px-3 py-2`}
+              style={{ background: category === reason ? "var(--bt-row-hover)" : undefined }}
+              onClick={() => setCategory(reason)}>
+              {reason === "all" ? "All" : CLOSED_REASON_LABEL[reason as keyof typeof CLOSED_REASON_LABEL]}{" "}
+              {demand.filter((row) => row.status === "closed" && (reason === "all" ||
+                (row.closed_reason === "moved_to_lot" ? "offer_reply" : row.closed_reason) === reason)).length}
+            </button>
+          ))}
+        </div>
+      )}
+      {filter === "closed" ? (
+        <Card label="History">
+          <div className="px-4 py-2 text-[11px] uppercase tracking-wider" style={{ color: "var(--bt-muted)" }}>Buyer / ask</div>
+          {shown.map((row) => (
+            <button key={row.id} type="button" onClick={() => setSelectedId(row.id)}
+              className={`${rowFocus} flex w-full items-center gap-3 border-t px-4 py-3 text-left hover:bg-[var(--bt-row-hover)]`}
+              style={{ borderColor: "var(--bt-divider)" }}>
+              <span className="min-w-0 flex-1 truncate text-[13px]"><strong>{row.buyer}</strong>{" — "}{row.wants}</span>
+              <span className="hidden text-[12px] sm:block" style={{ color: "var(--bt-muted)" }}>
+                {row.asked_on ? shortDate(row.asked_on) : ""} {row.source_label ?? row.source_kind}
+              </span>
+              <span className={`${styles.chip} shrink-0`}>{row.closed_reason ? CLOSED_REASON_LABEL[row.closed_reason] : "Other"}</span>
+            </button>
+          ))}
+          {!shown.length && <p className="p-4 text-[13px]" style={{ color: "var(--bt-muted)" }}>{loading ? "Loading history…" : "No history here."}</p>}
+        </Card>
+      ) : (
       <Card label="Demand" className="overflow-x-auto">
         <div className="min-w-[850px]">
           <div
@@ -222,7 +305,7 @@ export function DemandPage({
             <span>Buyer / ask</span>
             <span className="text-right">Fee</span>
             <span>Asked</span>
-            <span>Next</span>
+            <span>{filter === "qualifying" ? "Open question" : "Best match"}</span>
           </div>
           {shown.map((row) => (
             <button
@@ -266,7 +349,7 @@ export function DemandPage({
               >
                 {row.asked_on ? shortDate(row.asked_on) : ""}
               </span>
-              <NextChip demand={row} />
+              <NextChip demand={row} best={best[row.id]} />
             </button>
           ))}
           {!shown.length && (
@@ -279,16 +362,6 @@ export function DemandPage({
           )}
         </div>
       </Card>
-      {selected && (
-        <DemandPanel
-          key={selected.id}
-          demand={selected}
-          today={today}
-          onChanged={load}
-          onClose={() => setSelectedId(null)}
-          onOpenTrade={onOpenTrade}
-          onOpenSupply={onOpenSupply}
-        />
       )}
       {adding && (
         <DemandDialog
@@ -302,237 +375,5 @@ export function DemandPage({
         />
       )}
     </div>
-  );
-}
-function DemandPanel({
-  demand,
-  today,
-  onChanged,
-  onClose,
-  onOpenTrade,
-  onOpenSupply,
-}: {
-  demand: Demand;
-  today: string;
-  onChanged: () => void;
-  onClose: () => void;
-  onOpenTrade: (id: string) => void;
-  onOpenSupply?: (id: string) => void;
-}) {
-  const [tab, setTab] = useState("Overview");
-  const [editing, setEditing] = useState(false);
-  return (
-    <DetailSheet title="Demand detail" onClose={onClose}>
-      <header className="flex gap-3 pr-6">
-        <ScorePill score={demand.score} />
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[20px] font-semibold">
-              {demand.company_id ? (
-                <a
-                  href={buildEntryLink("company", demand.company_id)}
-                  className={rowFocus}
-                >
-                  {demand.buyer}
-                </a>
-              ) : (
-                demand.buyer
-              )}
-            </h2>
-            <span className={styles.status}>{demand.status}</span>
-          </div>
-          <div className="mt-2 flex gap-2">
-            {demand.product_family && (
-              <span className={styles.chip}>{demand.product_family}</span>
-            )}
-          </div>
-        </div>
-      </header>
-      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        {demand.wants}
-      </p>
-      <SheetTabs
-        tabs={["Overview", "Suitable supply", "Activity"]}
-        value={tab}
-        onChange={setTab}
-      />
-      {tab === "Overview" && (
-        <>
-          {!!demand.missing?.length && (
-            <section
-              className="border p-4"
-              style={{
-                borderColor: "var(--bt-amber)",
-                color: "var(--bt-amber)",
-              }}
-            >
-              <h3 className="text-[14px] font-semibold">
-                Missing to move this
-              </h3>
-              <ul className="mt-2 space-y-1 text-[13px]">
-                {demand.missing.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-              {demand.qualify_question && (
-                <p className="mt-3 text-[13px]">{demand.qualify_question}</p>
-              )}
-            </section>
-          )}
-          <dl className={styles.facts}>
-            {[
-              ["Quantity", volumeLabel(demand) ?? demand.quantity],
-              ["Price", priceLabel(demand)],
-              [
-                "Fee",
-                demand.fee_eur == null ? null : formatFee(demand.fee_eur),
-              ],
-              [
-                "Timeline",
-                demand.needed_by ? shortDate(demand.needed_by) : null,
-              ],
-              ["Location", demand.location],
-              ["Asked", demand.asked_on ? shortDate(demand.asked_on) : null],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <dt>{label}</dt>
-                <dd>{value ?? ""}</dd>
-              </div>
-            ))}
-          </dl>
-          {demand.note && (
-            <p className="whitespace-pre-wrap text-[13px]">{demand.note}</p>
-          )}
-          {specLines(demand.spec).map((line) => (
-            <p className="text-[13px]" key={line}>
-              {line}
-            </p>
-          ))}
-          {demand.source_quote && (
-            <blockquote
-              className="border-l-2 pl-3 text-[13px]"
-              style={{
-                color: "var(--bt-muted)",
-                borderColor: "var(--bt-border)",
-              }}
-            >
-              {demand.source_quote}
-            </blockquote>
-          )}
-        </>
-      )}
-      {tab === "Overview" && <CompanyContext notes={demand.context_notes} />}
-      {tab === "Suitable supply" && (
-        <>
-          <section>
-            <h3
-              className="text-[11px] uppercase tracking-wider"
-              style={{ color: "var(--bt-muted)" }}
-            >
-              In our inventory
-            </h3>
-            {(demand.inventory_matches ?? []).map((fit) => (
-              <a
-                key={fit.id}
-                href={fit.href}
-                className={`${rowFocus} flex w-full items-start gap-3 border-b py-4 text-left`}
-                style={{ borderColor: "var(--bt-divider)" }}
-                onClick={(event) => {
-                  if (fit.kind === "trade") {
-                    event.preventDefault();
-                    onOpenTrade(fit.id.replace(/^trade:/, ""));
-                  }
-                  if (fit.kind === "supply" && onOpenSupply) {
-                    event.preventDefault();
-                    onOpenSupply(fit.id.replace(/^supply:/, ""));
-                  }
-                }}
-              >
-                <div className="flex-1">
-                  <p className="text-[14px] font-semibold">{fit.title}</p>
-                  <p
-                    className="mt-1 text-[13px]"
-                    style={{ color: "var(--bt-muted)" }}
-                  >
-                    {fit.reason}
-                  </p>
-                </div>
-                <span
-                  className={styles.chip}
-                  style={{
-                    color:
-                      fit.strength === "strong"
-                        ? "var(--bt-green)"
-                        : "var(--bt-amber)",
-                  }}
-                >
-                  {fit.strength === "strong" ? "Strong fit" : "Verify"}
-                </span>
-              </a>
-            ))}
-            {demand.has_stock && (
-              <p
-                className="border-b py-4 text-[13px]"
-                style={{ borderColor: "var(--bt-divider)" }}
-              >
-                Stock available in this product family{" "}
-                <span
-                  className={styles.chip}
-                  style={{ color: "var(--bt-amber)" }}
-                >
-                  Verify
-                </span>
-                <a href="/?path=stock" className={`${rowFocus} ml-2 underline`}>
-                  View stock summaries
-                </a>
-              </p>
-            )}
-            {!demand.inventory_matches?.length && !demand.has_stock && (
-              <p
-                className="py-4 text-[13px]"
-                style={{ color: "var(--bt-muted)" }}
-              >
-                No inventory matches yet.
-              </p>
-            )}
-          </section>
-          <section>
-            <h3
-              className="text-[11px] uppercase tracking-wider"
-              style={{ color: "var(--bt-muted)" }}
-            >
-              In the market
-            </h3>
-            <p
-              className="mt-3 text-[13px]"
-              style={{ color: "var(--bt-muted)" }}
-            >
-              No market candidates yet
-            </p>
-          </section>
-        </>
-      )}
-      <DemandActions
-        section={tab}
-        demand={demand}
-        today={today}
-        onChanged={onChanged}
-        onClose={onClose}
-        onEdit={() => setEditing(true)}
-        onOpenTrade={onOpenTrade}
-        onOpenSupply={onOpenSupply}
-      />
-      {editing && (
-        <DemandDialog
-          demand={demand}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            onChanged();
-          }}
-        />
-      )}
-      <ChatHint id={demand.id} />
-    </DetailSheet>
   );
 }

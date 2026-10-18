@@ -32,6 +32,8 @@ import type {
 	SidebarSubagentInfo,
 	WebSession,
 } from "./workspace/chat-sessions-sidebar";
+import { ChatTranscriptSkeleton } from "./chat-loading-skeleton";
+import { ProfileAvatar } from "./workspace/profile-avatar";
 import { UnicodeSpinner } from "./unicode-spinner";
 import { Dialog, DialogContent } from "./ui/dialog";
 import type { ChatPanelRuntimeState } from "@/lib/chat-session-registry";
@@ -828,7 +830,7 @@ export function ChatPanelTerminalButton({
 		<button
 			type="button"
 			onClick={onToggleTerminal}
-			className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors"
+			className="flex items-center p-1.5 rounded-lg cursor-pointer transition-colors"
 			style={{
 				color: open ? "var(--color-text)" : "var(--color-text-muted)",
 				background: open ? "var(--color-surface-hover)" : "transparent",
@@ -843,7 +845,6 @@ export function ChatPanelTerminalButton({
 				<polyline points="4 17 10 11 4 5" />
 				<line x1="12" y1="19" x2="20" y2="19" />
 			</svg>
-			<span className="text-xs font-medium">Terminal</span>
 		</button>
 	);
 }
@@ -986,6 +987,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		},
 		ref,
 	) {
+		// Solo Hermes chats show their agent's avatar before the title; groups carry their own badge.
+		const agentProfile = useMemo(() => {
+			if (!nativeConversationKey) return null;
+			try {
+				const identity = parseConversationKey(nativeConversationKey);
+				return identity.kind === "solo" ? identity.profile : null;
+			} catch { return null; }
+		}, [nativeConversationKey]);
 		const isSubagentMode = !!subagentSessionKey;
 		const isGatewayMode = !!gatewaySessionKey;
 		const editorRef = useRef<ChatEditorHandle>(null);
@@ -993,7 +1002,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const [currentSessionId, setCurrentSessionId] = useState<
 			string | null
 		>(null);
-		const [loadingSession, setLoadingSession] = useState(false);
+		// A panel opened on an existing session starts in the loading state so the home screen never flashes.
+		const [loadingSession, setLoadingSession] = useState(() => !!initialSessionId && !subagentSessionKey && !gatewaySessionKey);
 
 		// ── Attachment state ──
 		const [attachedFiles, setAttachedFiles] = useState<
@@ -2550,10 +2560,20 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		});
 		const showStreamActivity = isStreaming && !!streamActivityLabel;
 
+		// Gateway chats get their transcript from a snapshot after mount; until it lands the
+		// message list is empty, which must not be mistaken for a new conversation.
+		const nativeHydrating =
+			nativeGateway &&
+			nativeChat.state.hydrating &&
+			nativeChat.state.messages.length === 0 &&
+			!nativeChat.state.busy &&
+			nativeChat.connection !== "lost";
+		const transcriptLoading = loadingSession || nativeHydrating;
+
 		const showHeroState =
 			(nativeGateway ? nativeChat.state.messages.length === 0 && !nativeChat.state.busy && nativeChat.state.pendingRequests.length === 0 : messages.length === 0) &&
 			!isSubagentMode &&
-			!loadingSession &&
+			!transcriptLoading &&
 			optimisticUserText === null;
 
 		// ── Input bar content (shared between hero and bottom positions) ──
@@ -2627,7 +2647,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+					disabled={transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 					compact={compact}
 					searchFn={searchFn}
 				/>
@@ -2667,7 +2687,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
 							compact={compact}
-							disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+							disabled={transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 							preferServerTranscription={preferServerVoiceInput}
 							onTranscript={handleVoiceTranscript}
 						/>
@@ -2689,7 +2709,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								onClick={() => editorRef.current?.submit()}
 								disabled={
 									(editorEmpty && attachedFiles.length === 0) ||
-									loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
+									transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
 								style={{
@@ -2804,6 +2824,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="min-w-0 flex-1">
 						{currentSessionId ? (
 							<div className="flex min-w-0 items-center gap-2">
+								{agentProfile && <ProfileAvatar name={agentProfile} className="h-5 w-5" />}
 								<h2
 									className="text-sm font-semibold truncate"
 									style={{
@@ -2901,24 +2922,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				<div
 					className={compact ? "px-3" : "px-6"}
 				>
-					{loadingSession ? (
-						<div className="flex items-center justify-center h-full min-h-[60vh]">
-							<div className="text-center">
-								<UnicodeSpinner
-									name="braille"
-									className="block text-2xl mx-auto mb-3"
-									style={{ color: "var(--color-text-muted)" }}
-								/>
-								<p
-									className="text-xs"
-									style={{
-										color: "var(--color-text-muted)",
-									}}
-								>
-									Loading session...
-								</p>
-							</div>
-						</div>
+					{transcriptLoading ? (
+						<ChatTranscriptSkeleton compact={compact} />
 					) : (showHeroState && !mounted) ? (
 						<div className={`flex items-center justify-center h-full ${compact ? "min-h-[40vh]" : "min-h-[60vh]"}`} />
 					) : showHeroState ? (
