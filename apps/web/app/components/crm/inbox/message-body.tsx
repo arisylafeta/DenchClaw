@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { splitQuotedText, hasQuotedHtml } from "./quoted-message";
+import styles from "./mail.module.css";
 
 /**
  * Renders a single message body with format detection:
@@ -33,37 +35,20 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
  */
 export function MessageBody({ body, preview }: { body: string | null; preview: string | null }) {
   const text = body?.trim() || preview?.trim() || "";
-  const isHtml = useMemo(() => looksLikeHtml(text), [text]);
+  if (!text) {return <p className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>(empty body)</p>;}
+  return looksLikeHtml(text) ? <SandboxedHtmlBody html={text} /> : <PlainTextBody text={text} />;
+}
 
-  if (!text) {
-    return (
-      <p
-        className="text-[13px] italic"
-        style={{
-          color: "var(--color-text-muted)",
-          fontFamily: '"Bookerly", Georgia, "Times New Roman", serif',
-        }}
-      >
-        (empty body)
-      </p>
-    );
-  }
-
-  if (isHtml) {
-    return <SandboxedHtmlBody html={text} />;
-  }
-
-  return (
-    <div
-      className="text-[14px] leading-[1.65] whitespace-pre-wrap break-words"
-      style={{
-        color: "var(--color-text)",
-        fontFamily: '"Bookerly", Georgia, "Times New Roman", serif',
-      }}
-    >
-      {text}
-    </div>
-  );
+function PlainTextBody({ text }: { text: string }) {
+  const folded = useMemo(() => splitQuotedText(text), [text]);
+  const [showQuoted, setShowQuoted] = useState(false);
+  return <div>
+    {folded.visible && <div className={styles.messageText}>{folded.visible}</div>}
+    {folded.hidden && <>
+      <button type="button" className={styles.quoteToggle} aria-expanded={showQuoted} onClick={() => setShowQuoted((show) => !show)}>{showQuoted ? "Hide quoted text" : "Show quoted text"}</button>
+      {showQuoted && <div className={`${styles.messageText} ${styles.quotedText}`}>{folded.hidden}</div>}
+    </>}
+  </div>;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +70,8 @@ function looksLikeHtml(input: string): boolean {
 function SandboxedHtmlBody({ html }: { html: string }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [height, setHeight] = useState<number>(160);
+  const [showQuoted, setShowQuoted] = useState(false);
+  const hasQuoted = hasQuotedHtml(html);
 
   // Per-instance token. The in-iframe measurement script tags every
   // postMessage with this token, and the parent listener only accepts
@@ -96,7 +83,7 @@ function SandboxedHtmlBody({ html }: { html: string }) {
     [reactId],
   );
 
-  const srcdoc = useMemo(() => buildSrcdoc(html, token), [html, token]);
+  const srcdoc = useMemo(() => buildSrcdoc(html, token, showQuoted), [html, token, showQuoted]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -127,7 +114,7 @@ function SandboxedHtmlBody({ html }: { html: string }) {
     return () => window.removeEventListener("message", onMessage);
   }, [token]);
 
-  return (
+  return <div>
     <iframe
       ref={iframeRef}
       title="Email body"
@@ -154,7 +141,8 @@ function SandboxedHtmlBody({ html }: { html: string }) {
         display: "block",
       }}
     />
-  );
+    {hasQuoted && <button type="button" className={styles.quoteToggle} aria-expanded={showQuoted} onClick={() => setShowQuoted((show) => !show)}>{showQuoted ? "Hide quoted text" : "Show quoted text"}</button>}
+  </div>;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,77 +230,38 @@ window.addEventListener('load', measure);
 })();</script>`;
 }
 
-function buildSrcdoc(html: string, token: string): string {
-  // Real marketing emails (MJML, Gmail-rendered HTML, etc.) almost always
-  // come as a complete HTML document — `<!doctype><html><head><style>…
-  // </style></head><body>…</body></html>`. If we naively wrap that inside
-  // our own `<html><body>`, the parser treats the nested <html>/<body>
-  // tags as invalid and the email's content lands in unexpected places
-  // in the DOM (and `body.scrollHeight` reports a tiny value).
-  //
-  // So: if the body is already a full document, surgically inject our
-  // additions (base href + image clamp + measurement script) into its
-  // own <head>. Otherwise, wrap the fragment in a styled shell.
+export function buildSrcdoc(html: string, token: string, showQuoted = false): string {
+  // Preserve the existing sanitizer and opaque-origin sandbox. Only our height script executes.
   const sanitized = stripScripts(html.trim());
-  const isFullDoc = /^\s*(?:<!doctype|<html\b)/i.test(sanitized);
-  const measureScript = buildMeasureScript(token);
-
-  if (isFullDoc) {
-    // Minimal head injection — we deliberately don't add a base stylesheet
-    // because the email ships its own; piling our font/padding on top
-    // tends to make marketing layouts look broken.
-    const HEAD_INJECT = `<base target="_blank"><style>
-  img, video { max-width: 100% !important; height: auto !important; }
-  table { max-width: 100%; }
-  img[width="1"][height="1"] { display: none !important; }
-</style>${measureScript}`;
-
-    const headOpen = sanitized.match(/<head\b[^>]*>/i);
-    if (headOpen?.index !== undefined) {
-      const cut = headOpen.index + headOpen[0].length;
-      return sanitized.slice(0, cut) + HEAD_INJECT + sanitized.slice(cut);
-    }
-    const htmlOpen = sanitized.match(/<html\b[^>]*>/i);
-    if (htmlOpen?.index !== undefined) {
-      const cut = htmlOpen.index + htmlOpen[0].length;
-      return `${sanitized.slice(0, cut)}<head>${HEAD_INJECT}</head>${sanitized.slice(cut)}`;
-    }
-    // Doctype-only with no <html> tag — extremely unusual; fall through to wrap.
-  }
-
-  // Fragment path: wrap in our editorial shell.
-  const STYLE = `
+  const style = `
     :root { color-scheme: light; }
-    html, body {
-      margin: 0;
-      padding: 16px 18px;
-      background: #ffffff;
-      color: #1c1c1a;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      font-size: 14px;
-      line-height: 1.55;
-      word-wrap: break-word;
-      overflow-wrap: anywhere;
+    html, body { margin:0!important; padding:0!important; min-height:0!important; background:#fff; color:#1a1a1a; overflow-wrap:anywhere; }
+    body, body p, body div, body span, body td, body a, body li {
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif!important;
+      font-size:14px!important; line-height:1.55!important;
     }
-    body * { max-width: 100% !important; }
-    img, video { max-width: 100% !important; height: auto !important; }
-    table { border-collapse: collapse; max-width: 100% !important; }
-    a { color: #687000; text-decoration: underline; }
-    blockquote { margin: 0 0 0 8px; padding-left: 12px; border-left: 2px solid rgba(0,0,0,0.12); color: #555; }
-    pre, code { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; }
-    pre { white-space: pre-wrap; }
-    /* Hide tracking pixels — common 1x1 invisible images. */
-    img[width="1"][height="1"] { display: none !important; }
-  `.trim();
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<base target="_blank">
-<style>${STYLE}</style>
-${measureScript}
-</head>
-<body>${sanitized}</body>
-</html>`;
+    p { margin:0 0 10px!important; }
+    img, video { max-width:100%!important; height:auto!important; }
+    table { max-width:100%; }
+    a { color:#1e40af; }
+    pre, code { font-family:monospace!important; font-size:13px!important; white-space:pre-wrap; }
+    img[width="1"][height="1"] { display:none!important; }
+    ${showQuoted ? "" : "html body blockquote, html body .gmail_quote, html body .gmail_signature, html body #divRplyFwdMsg, html body .OutlookMessageHeader { display:none!important; }"}
+  `;
+  const inject = `<base target="_blank"><style>${style}</style>${buildMeasureScript(token)}`;
+  const headClose = sanitized.match(/<\/head\s*>/i);
+  if (headClose?.index !== undefined) {
+    return sanitized.slice(0, headClose.index) + inject + sanitized.slice(headClose.index);
+  }
+  const headOpen = sanitized.match(/<head\b[^>]*>/i);
+  if (headOpen?.index !== undefined) {
+    const cut = headOpen.index + headOpen[0].length;
+    return sanitized.slice(0, cut) + inject + sanitized.slice(cut);
+  }
+  const htmlOpen = sanitized.match(/<html\b[^>]*>/i);
+  if (htmlOpen?.index !== undefined) {
+    const cut = htmlOpen.index + htmlOpen[0].length;
+    return `${sanitized.slice(0, cut)}<head>${inject}</head>${sanitized.slice(cut)}`;
+  }
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${inject}</head><body>${sanitized}</body></html>`;
 }

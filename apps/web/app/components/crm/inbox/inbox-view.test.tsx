@@ -25,6 +25,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("merged mail", () => {
+  it("does not navigate again when the Mail URL is already synchronized", async () => {
+    navigation.params = new URLSearchParams("crm=inbox&view=conversations&crmOnly=true");
+    render(<InboxView />);
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    await screen.findByRole("combobox", { name: "identity" });
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
   it("switches all four views and loads the matching shared-store APIs", async () => {
     render(<InboxView />);
     expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute("aria-selected", "true");
@@ -100,7 +107,7 @@ describe("merged mail", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(<QuickReply threadId="thread-synthetic" recipientName="Synthetic Buyer" recipientEmail="buyer@example.test" subject="Battery enquiry" />);
-    fireEvent.click(screen.getByRole("button", { name: /Prepare draft to/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Prepare reply to/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "Draft reply" }), { target: { value: "Buyer's reply\n$(touch /tmp/not-run)" } });
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(await screen.findByRole("status")).toHaveTextContent("No draft has been saved or sent");
@@ -111,7 +118,7 @@ describe("merged mail", () => {
   it("quotes every shell argument and does not invent a missing reply address", () => {
     expect(draftCommand("thread'unsafe", "ari", "buyer@example.test", "Subject", "`id`")).toContain(`--thread 'thread'\"'\"'unsafe'`);
     render(<QuickReply threadId="thread" recipientEmail={null} subject={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /Prepare draft reply/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare reply" }));
     expect(screen.getByRole("button", { name: "Copy" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("No reply address");
     expect(fetch).not.toHaveBeenCalled();
