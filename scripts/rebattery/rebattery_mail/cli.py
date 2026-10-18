@@ -8,7 +8,7 @@ import sys
 from . import core
 
 MODULES = (
-    "identity", "template", "read", "sync", "draft", "campaign", "send", "followup", "legacy",
+    "identity", "template", "read", "sync", "backfill", "draft", "campaign", "send", "followup", "legacy",
 )
 
 

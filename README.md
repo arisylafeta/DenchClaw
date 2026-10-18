@@ -193,6 +193,17 @@ Use `python3 scripts/rebattery/rebattery-mail.py` for every mail operation.
 Preparation and execution are dry-run unless `--apply` is present. Output is JSON;
 named refusals go to stdout and human diagnostics go to stderr.
 
+Gmail sync stores raw HTML from MIME parts and fills missing HTML on reruns without
+replacing existing HTML (including approved outbound copy). Sanitisation happens
+when rendering. For historical gaps, use `backfill-html --account <account>
+--since 2026/10/01 --limit 100 --crm-only` to preview counts and the first five
+message IDs; add `--apply` to update only missing HTML and attachment presence.
+CRM-visible mail is prioritised by default, newest first within each group.
+`--sleep 0.2` controls sequential fetch pacing. Plain-text-only IDs are reported
+in `no_html_ids`, not marked with sentinels, so future runs may recheck them.
+Individual provider errors are counted; five consecutive errors stop with exit
+code 3 while preserving completed updates.
+
 Create a one-off with `draft --identity alex --to buyer@example.test --subject
 "Subject" --body "Copy" --verification '{"buyer@example.test":{"status":"valid"}}'
 --apply`. Use `--template <name> --vars <json>` instead of raw copy for a versioned
