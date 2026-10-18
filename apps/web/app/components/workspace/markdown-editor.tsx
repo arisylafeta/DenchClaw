@@ -1,5 +1,7 @@
 "use client";
 
+import { useDocumentDirty } from "./document-dirty-context";
+
 import { useEditor, EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -58,6 +60,7 @@ export function MarkdownEditor({
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [isDirty, setIsDirty] = useState(false);
+  useDocumentDirty(isDirty);
   // Tracks the `content` prop so we can detect external updates (parent re-fetch).
   // Only updated when the prop itself changes -- never on save.
   const lastPropContentRef = useRef(content);
@@ -294,6 +297,7 @@ export function MarkdownEditor({
   const handleSave = useCallback(async () => {
     if (!editor || saving) {return;}
 
+    const savedHtml = editor.getHTML();
     setSaving(true);
     setSaveStatus("idle");
 
@@ -323,7 +327,7 @@ export function MarkdownEditor({
 
       if (res.ok) {
         setSaveStatus("saved");
-        setIsDirty(false);
+        setIsDirty(editor.getHTML() !== savedHtml);
         // Sync the prop tracker to the body we just saved so the external-update
         // effect doesn't see a mismatch and reset the editor.
         lastPropContentRef.current = content;

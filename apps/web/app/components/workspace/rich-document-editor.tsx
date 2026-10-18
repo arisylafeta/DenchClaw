@@ -1,5 +1,7 @@
 "use client";
 
+import { useDocumentDirty } from "./document-dirty-context";
+
 import { useEditor, EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -77,6 +79,7 @@ export function RichDocumentEditor({
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [isDirty, setIsDirty] = useState(false);
+  useDocumentDirty(isDirty);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -193,6 +196,7 @@ export function RichDocumentEditor({
   // --- Save ---
   const handleSave = useCallback(async () => {
     if (!editor || saving) {return;}
+    const savedHtml = editor.getHTML();
     setSaving(true);
     setSaveStatus("idle");
 
@@ -225,7 +229,7 @@ export function RichDocumentEditor({
       }
 
       setSaveStatus("saved");
-      setIsDirty(false);
+      setIsDirty(editor.getHTML() !== savedHtml);
       onSave?.();
       if (saveTimerRef.current) {clearTimeout(saveTimerRef.current);}
       saveTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2000);

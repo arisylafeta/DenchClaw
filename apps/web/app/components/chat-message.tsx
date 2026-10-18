@@ -783,7 +783,7 @@ function createMarkdownComponents(
 				rawHref && (rawHref.startsWith("http://") || rawHref.startsWith("https://") || rawHref.startsWith("//"));
 			const isWorkspaceAppLink = rawHref.startsWith("/workspace") || rawHref.startsWith("/?");
 			const isLocalPathLink =
-				!isWorkspaceAppLink &&
+				!isExternal && !isWorkspaceAppLink &&
 				(Boolean(rawHref.startsWith("file://")) ||
 					looksLikeFilePath(normalizedHref));
 			return (
