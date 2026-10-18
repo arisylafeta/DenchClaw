@@ -281,3 +281,15 @@ def test_gmail_reply_sends_only_the_reply_anchor_and_usage_errors_are_definite()
             GmailSendDriver(runner=lambda a, **k: subprocess.CompletedProcess(a, 1, stdout='', stderr='boom')).send(identity, message)
     finally:
         os.environ.pop('DENCH_MAIL_LIVE_SEND', None)
+
+
+def test_gog_underscored_header_keys_are_stored_as_rfc_identity(db):
+    """gog returns message_id / in_reply_to, not message-id / in-reply-to; the log kept them null, so threads and replies could not be matched."""
+    full = gmail('underscored', sender='buyer@example.test', to='alex@rebattery.io')
+    full['headers'] = {'from': 'buyer@example.test', 'to': 'alex@rebattery.io', 'subject': 'S', 'date': 'Fri, 16 Oct 2026 10:00:00 +0000',
+                       'message_id': '<underscored@test>', 'in_reply_to': '<parent@test>', 'references': '<root@test> <parent@test>'}
+    sync_gmail(db, 'alex@rebattery.io', apply=True, driver=FakeGmail({'underscored': full}))
+    stored = row(db, "select rfc_message_id,in_reply_to,rfc_references from mail_message where gmail_message_id='underscored'")
+    assert stored['rfc_message_id'] == '<underscored@test>'
+    assert stored['in_reply_to'] == '<parent@test>'
+    assert '<root@test>' in stored['rfc_references']

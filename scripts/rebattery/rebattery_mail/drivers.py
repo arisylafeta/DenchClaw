@@ -168,7 +168,7 @@ class GmailSendDriver:
         for candidate in sorted(value for value in candidates if value):
             full = reader.fetch(identity['gmail_account'],candidate)
             raw = full.get('message',{})
-            headers = {key.lower():value for key,value in full.get('headers',{}).items()}
+            headers = {key.lower().replace('_','-'):value for key,value in full.get('headers',{}).items()}
             recipients = {address.lower() for _,address in getaddresses([headers[key] for key in ('to','cc','bcc') if headers.get(key)]) if address}
             senders = {address.lower() for _,address in getaddresses([headers.get('from','')])}
             if raw.get('id') == candidate and recipients == expected and identity['address'].lower() in senders:

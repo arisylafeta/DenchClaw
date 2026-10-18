@@ -59,7 +59,8 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
         if any(str(label).upper()=='DRAFT' for label in labels):
             stats['drafts_skipped'] += 1
             continue
-        headers = {k.lower():v for k,v in full.get('headers',{}).items()}
+        # gog returns underscored keys (message_id, in_reply_to); the rest of the code uses RFC names.
+        headers = {k.lower().replace('_','-'):v for k,v in full.get('headers',{}).items()}
         date = None
         try:
             date = parsedate_to_datetime(headers.get('date',''))
@@ -170,10 +171,20 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
         cur.execute("select provider_event_id from mail_event where source='gmail' and type='replied'")
         observed_replies = {r[0] for r in cur.fetchall()}
         outgoing = [row for row in planned.values() if row['direction']=='outbound']
+        # reply_matches() requires the sender of the incoming message to be one of the outgoing message's
+        # counterparties, so index outgoing mail by those addresses instead of testing every pair. The
+        # all-pairs loop cost about 70 seconds of CPU per sync (42M comparisons) and ran on every send.
+        by_counterparty = {}
+        for row in outgoing:
+            addresses = {normalize_email(email) for field in ('to_emails','cc_emails','bcc_emails') for email in row.get(field,[])}
+            addresses.add(normalize_email(row.get('recipient_email')))
+            for address in addresses:
+                if address:
+                    by_counterparty.setdefault(address,[]).append(row)
         for incoming in planned.values():
             if incoming['direction'] != 'inbound':
                 continue
-            for original in outgoing:
+            for original in by_counterparty.get(normalize_email(incoming.get('from_email')),()):
                 if not reply_matches(incoming,original,owner_id,account):
                     continue
                 event_id = 'reply:'+original['id']+':'+incoming['id']
