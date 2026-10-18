@@ -250,6 +250,8 @@ def execute(args, driver=None, campaign_mode=False):
             if bool(campaign) != campaign_mode:
                 raise Refused('wrong_subject_type')
             eligible = [row for row in rows if row['state'] in CLAIMABLE]
+            if campaign:
+                eligible.sort(key=lambda row:row['recipient_email'])
             if not eligible:
                 raise Refused('duplicate_idempotency_key')
             approval = approval_row(guard,target)

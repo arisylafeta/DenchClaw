@@ -69,8 +69,9 @@ def approved(target,scope='full'):
     return sha
 
 
-def frozen(prefix):
+def frozen(prefix,**content):
     args=NS(identity='alex',purpose='personal',transport=None,template=None,vars='{}',subject='Hello {{name}}',body='Synthetic',html='',verification=__import__('json').dumps({prefix+str(i)+'@example.test':{'status':'valid'} for i in range(3)}),id=prefix+'campaign',name='Synthetic',person_ids=','.join(prefix+str(i) for i in range(3)),cohort_sql=None,links='[]',personalization='{"name":"first_name"}',listing_id=None,auction_url=None,type='correspondence',apply=True)
+    vars(args).update(content)
     campaign.create(args)
     campaign.freeze(NS(target=args.id,apply=True),Fake())
     return args.id,approved(args.id)
@@ -637,3 +638,164 @@ def test_review_5_provider_metadata_does_not_change_approval_digest(env):
     observed['personalization']={**row['personalization'],'provider_observation':'not approved copy'}
     assert digest([observed])==approved_sha
     assert digest([{**observed,'body_text':'Changed approved body'}])!=approved_sha
+
+
+@pytest.mark.parametrize('marker',[
+    {'name':'Supply Update: October'},
+    {'name':'SUPPLY_update October'},
+    {'name':'supply-update October'},
+    {'id':'supply-update'},
+    {'id':'SUPPLY-UPDATE20261008'},
+    {'type':'supply_update'},
+])
+@pytest.mark.parametrize('author',[
+    {'address':'alex@rebattery.io','reply_to':'supply@rebattery.io'},
+    {'address':'supply@rebattery.io','reply_to':'alex@rebattery.io'},
+    {'address':'alex@rebattery.io','reply_to':None},
+])
+def test_supply_update_markers_independently_pin_sender_and_reply_to(marker,author):
+    config={'id':'october','name':'October','type':'correspondence','purpose':'marketing',**marker}
+    with pytest.raises(Refused,match='supply_update_identity_required'):
+        campaign.campaign_policy(config,author)
+    for reply_to in ('supply@rebattery.io',None):
+        campaign.campaign_policy(config,{'address':'supply@rebattery.io','reply_to':reply_to})
+
+
+def test_founder_intro_keeps_own_mailbox():
+    campaign.campaign_policy({'id':'founder-intro','name':'Founder intro','type':'intro','purpose':'marketing'},
+                             {'address':'alex@rebattery.io','reply_to':'alex@rebattery.io'})
+
+
+def test_bounded_launch_uses_recipient_email_order_not_message_hash(env):
+    target,sha=frozen(env)
+    with connection(read_only=True) as db:
+        rows=load(db,target)[1]
+    # Deliberately reverse the loader order: neither hashed IDs nor database
+    # collation should select the pilot's recipients.
+    shuffled=sorted(rows,key=lambda row:row['recipient_email'],reverse=True)
+    fake=Fake()
+    with patch.object(send,'check',return_value=(
+            {'id':target,'mail_state':'approved'},shuffled,sha)):
+        result=send.launch(NS(target=target,approved_sha256=sha,max_recipients=2,apply=False),fake)
+    expected=sorted(rows,key=lambda row:row['recipient_email'])[:2]
+    assert result['message_ids']==[row['id'] for row in expected]
+    assert not fake.calls
+
+
+@pytest.mark.parametrize('apply',[False,True])
+def test_suppression_only_sync_never_reads_or_changes_receipts(env,apply):
+    from rebattery_mail.sync import sync_postmark_suppressions
+    target,_=frozen(env)
+    with connection() as db,db.cursor() as cur:
+        cur.execute("""update mail_message set state='accepted',provider_message_id=id,
+            delivered_at='2026-10-01T12:00:00Z',last_synced_at='2026-10-01T13:00:00Z'
+            where campaign_id=%s""",(target,))
+    with connection(read_only=True) as db,dict_cursor(db) as cur:
+        cur.execute('select * from mail_message where campaign_id=%s order by id',(target,))
+        before=[dict(row) for row in cur.fetchall()]
+    calls=[]
+    class Client:
+        def request(self,path):
+            calls.append(path)
+            if path=='/message-streams/broadcast':
+                return {'MessageStreamType':'Broadcasts','SubscriptionManagementConfiguration':{'UnsubscribeHandlingType':'Postmark'}}
+            assert path=='/message-streams/broadcast/suppressions/dump'
+            return {'Suppressions':[{'EmailAddress':env+'0@example.test','SuppressionReason':'HardBounce',
+                                     'Origin':'Recipient','CreatedAt':'2026-10-01T23:30:00-05:00'}]}
+    with connection(read_only=not apply) as db:
+        result=sync_postmark_suppressions(db,'broadcast',apply,Client())
+    assert calls==['/message-streams/broadcast','/message-streams/broadcast/suppressions/dump']
+    assert result['dry_run'] is not apply
+    assert result['stream']=='broadcast' and result['list']=='Supply update'
+    assert result['suppressions'][0]['global_opt_out'] is True
+    with connection(read_only=True) as db,dict_cursor(db) as cur:
+        cur.execute('select * from mail_message where campaign_id=%s order by id',(target,))
+        assert [dict(row) for row in cur.fetchall()]==before
+        cur.execute("select status,since from crm_subscriptions where person_id=%s and list='Supply update'",(env+'0',))
+        subscription=cur.fetchone()
+        assert bool(subscription) is apply
+        if apply:
+            assert subscription['status']=='Opted out' and str(subscription['since'])=='2026-10-01'
+        cur.execute('select email_opted_out from crm_people where id=%s',(env+'0',))
+        assert bool(cur.fetchone()['email_opted_out']) is apply
+
+
+@pytest.mark.parametrize('stream',['','outbound'])
+def test_suppression_only_sync_requires_explicit_broadcast_stream(stream):
+    from rebattery_mail.sync import sync_postmark_suppressions
+    with pytest.raises(Refused,match='postmark_broadcast_stream_required'):
+        sync_postmark_suppressions(None,stream)
+
+
+def test_suppression_only_sync_rejects_transactional_stream_before_writes():
+    from rebattery_mail.sync import sync_postmark_suppressions
+    class Client:
+        def request(self,path):
+            assert path=='/message-streams/custom'
+            return {'MessageStreamType':'Transactional'}
+    with pytest.raises(Refused,match='postmark_stream_type_mismatch'):
+        sync_postmark_suppressions(None,'custom',True,Client())
+
+
+def test_frozen_personalization_is_escaped_bound_and_not_rerendered_at_send(env):
+    with connection() as db,db.cursor() as cur:
+        cur.execute('update crm_people set first_name=%s where id like %s',('<Buyer & Co>',env+'%'))
+    target,sha=frozen(env,subject='{{name}}: {{stock}}',body='Hello {{name}}: {{stock}}',
+                      html='<p>Hello {{name}}: {{stock}}</p>',vars='{"stock":"Modules & packs"}')
+    with connection(read_only=True) as db:
+        rows=load(db,target)[1]
+    assert all(row['subject']=='<Buyer & Co>: Modules & packs' for row in rows)
+    assert all('Hello <Buyer & Co>: Modules & packs' in row['body_text'] for row in rows)
+    assert all('<p>Hello &lt;Buyer &amp; Co&gt;: Modules &amp; packs</p>' in row['body_html'] for row in rows)
+    assert digest(rows)==sha
+    changed=[{**rows[0],'body_html':'Changed'},*rows[1:]]
+    assert digest(changed)!=sha
+    with connection() as db,db.cursor() as cur:
+        cur.execute("update crm_people set first_name='Changed after approval' where id like %s",(env+'%',))
+    class Capture(Fake):
+        sent=[]
+        def send(self,identity,message):
+            self.sent.append(message)
+            return super().send(identity,message)
+    fake=Capture()
+    send.launch(NS(target=target,approved_sha256=sha,max_recipients=1,apply=True),fake)
+    assert len(fake.sent)==1
+    assert fake.sent[0]['subject']=='<Buyer & Co>: Modules & packs'
+    assert '<p>Hello &lt;Buyer &amp; Co&gt;: Modules &amp; packs</p>' in fake.sent[0]['body_html']
+
+
+def test_missing_personalization_stops_before_any_frozen_messages(env):
+    with connection() as db,db.cursor() as cur:
+        cur.execute('update crm_people set first_name=null where id=%s',(env+'1',))
+    with pytest.raises(Refused,match='missing_variable'):
+        frozen(env)
+    with connection(read_only=True) as db,db.cursor() as cur:
+        cur.execute('select count(*) from mail_message where campaign_id=%s',(env+'campaign',))
+        assert cur.fetchone()[0]==0
+
+
+@pytest.mark.parametrize('dump',[{}, {'Suppressions':None}, {'Suppressions':[{}]}])
+def test_suppression_only_incomplete_dump_stops_before_database_writes(dump):
+    from rebattery_mail import sync
+    from rebattery_mail.core import ProviderError
+    class Client:
+        def request(self,path):
+            if path.endswith('/dump'):
+                return dump
+            return {'MessageStreamType':'Broadcasts','SubscriptionManagementConfiguration':{'UnsubscribeHandlingType':'Postmark'}}
+    with patch('rebattery_mail.drivers.sync_suppressions') as reconcile:
+        with pytest.raises(ProviderError,match='incomplete_suppression'):
+            sync.sync_postmark_suppressions(None,'broadcast',True,Client())
+        reconcile.assert_not_called()
+
+
+def test_suppression_only_cli_defaults_to_dry_run_and_requires_stream():
+    import argparse
+    from rebattery_mail import sync
+    parser=argparse.ArgumentParser()
+    sync.register(parser.add_subparsers(dest='command',required=True))
+    args=parser.parse_args(['sync','postmark-suppressions','--stream','broadcast'])
+    assert args.provider=='postmark-suppressions' and args.stream=='broadcast'
+    assert args.apply is False and args.handler is sync.handle
+    with pytest.raises(SystemExit):
+        parser.parse_args(['sync','postmark-suppressions'])

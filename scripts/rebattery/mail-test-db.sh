@@ -4,7 +4,7 @@
 #   scripts/rebattery/mail-test-db.sh up     # start, load schema.sql and every migration, print the DSN
 #   scripts/rebattery/mail-test-db.sh down   # stop and delete it
 #
-# Seed core objects before object-layout migrations; the live chain has no 034.
+# Seed core objects before object-layout migrations.
 set -euo pipefail
 
 NAME="${MAIL_TEST_DB_NAME:-crm-test-mail}"
