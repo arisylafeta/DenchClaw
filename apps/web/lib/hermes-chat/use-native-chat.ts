@@ -23,6 +23,8 @@ export interface NativeHermesChat {
   olderCursor: string | null
   loadingEarlier: boolean
   loadEarlier(): Promise<void>
+  setModel(model: string, provider?: string, confirm?: boolean): Promise<Record<string, unknown>>
+  setReasoning(effort: string): Promise<Record<string, unknown>>
   send(prompt: NativePrompt): Promise<void>
   interrupt(): Promise<void>
   steer(text: string): Promise<void>
@@ -199,6 +201,26 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   }
   return {
     state, subagents: state.subagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
+    setModel: async (model, provider, confirm) => {
+      const key = conversationKey
+      const result = await post('model', { model, provider, confirm })
+      if (activeKey.current === key && !result.confirm_required) {
+        update(previous => ({
+          ...previous, model: typeof result.value === 'string' ? result.value : model, provider: provider ?? previous.provider,
+        }))
+      }
+      return result
+    },
+    setReasoning: async (effort) => {
+      const key = conversationKey
+      const result = await post('reasoning', { effort })
+      if (activeKey.current === key) {
+        update(previous => ({
+          ...previous, reasoningEffort: typeof result.value === 'string' ? result.value : effort, reasoningEffortWire: null,
+        }))
+      }
+      return result
+    },
     retry: async () => {
       const lastUser = current.current.messages.findLast(message => message.role === 'user')
       if (lastUser) await send({ text: messageText(lastUser), html: html.get(lastUser.id) })

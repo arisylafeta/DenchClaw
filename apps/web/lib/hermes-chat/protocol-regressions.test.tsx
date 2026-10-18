@@ -309,3 +309,24 @@ it('shows each turn once after Hermes compacts in place mid-turn and re-IDs the 
     .toEqual(['user:first question', 'assistant:first answer', 'user:second question', 'assistant:second answer', 'user:build it', 'assistant:Final answer'])
   expect(result.current.state.busy).toBe(false)
 })
+
+it('posts model confirmation and reasoning changes without adopting an unconfirmed model', async () => {
+  const { result } = mount()
+  Source.current.emit('snapshot', snap())
+  gw('session.info', { model: 'small', provider: 'openai', reasoning_effort: 'medium' }, 1)
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ confirm_required: true, value: 'expensive' }))
+  await act(async () => { await result.current.setModel('expensive', 'openai') })
+  expect(result.current.state.model).toBe('small')
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ value: 'expensive', deferred: true }))
+  await act(async () => { await result.current.setModel('expensive', 'openai', true) })
+  expect(fetch).toHaveBeenLastCalledWith('/api/hermes/conversations/key/model', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ model: 'expensive', provider: 'openai', confirm: true }),
+  }))
+  expect(result.current.state.model).toBe('expensive')
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ value: 'high' }))
+  await act(async () => { await result.current.setReasoning('high') })
+  expect(fetch).toHaveBeenLastCalledWith('/api/hermes/conversations/key/reasoning', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ effort: 'high' }),
+  }))
+  expect(result.current.state.reasoningEffort).toBe('high')
+})

@@ -24,6 +24,8 @@ class FakeSocket implements GatewaySocket {
   busy = false;
   autoContinue = false;
   steerUnsupported = false;
+  configResults: Record<string, unknown>[] = [];
+  failConfig = false;
   addEventListener(type: string, handler: (event: unknown) => void) { (this.listeners[type] ??= []).push(handler); }
   deferConsumption = false;
   activeRows: { id: string; session_key: string; status: string }[] = [];
@@ -38,6 +40,7 @@ class FakeSocket implements GatewaySocket {
     if (frame.method === "subagent.list") this.onChildren?.();
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     if (frame.method === "session.steer" && this.steerUnsupported) { this.receive({ id: frame.id, error: { code: 4010, message: "agent does not support steer" } }); return; }
+    if (frame.method === "config.set" && this.failConfig) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
       : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { profile_name: "ari", lazy: false, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
@@ -46,6 +49,9 @@ class FakeSocket implements GatewaySocket {
       : frame.method === "session.interrupt" ? { status: "interrupted" }
       : frame.method === "session.steer" ? { status: this.busy ? "queued" : "rejected" }
       : frame.method === "prompt.submit" ? { status: this.busy ? "queued" : "streaming" }
+      : frame.method === "model.options" ? { model: "test", provider: "openai", providers: [{ slug: "openai", name: "OpenAI", models: ["test", "expensive"], capabilities: { test: { fast: false, reasoning: true } } }] }
+      : frame.method === "config.get" ? { value: "high", display: "hide" }
+      : frame.method === "config.set" ? this.configResults.shift() ?? { key: frame.params?.key, value: frame.params?.value }
       : frame.method === "session.events.since" ? { events: this.replayEvents, latest_seq: 100, epoch: "e" } : {};
     this.receive({ id: frame.id, result });
     if (frame.method === "prompt.submit" && !this.busy && !this.deferConsumption) this.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: this.frames.length, payload: {} } });
@@ -67,6 +73,79 @@ beforeEach(async () => {
 });
 afterEach(() => { manager.shutdown(); vi.useRealTimers(); });
 describe("gateway chat service", () => {
+  it("returns native model inventory and live reasoning from only the conversation runtime", async () => {
+    manager.retainSession("ari", "one", "runtime-one");
+    manager.retainSession("ari", "two", "runtime-two");
+    const result = await service.modelOptions(key);
+    expect(result).toMatchObject({ model: "test", provider: "openai", reasoning: { value: "high", display: "hide" }, providers: [{ capabilities: { test: { reasoning: true } } }] });
+    expect(socket.frames.filter(frame => ["model.options", "config.get"].includes(frame.method ?? "")).map(frame => frame.params)).toEqual([
+      { session_id: "runtime-one", profile: "ari" },
+      { session_id: "runtime-one", profile: "ari", key: "reasoning" },
+    ]);
+    expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
+  });
+  it("forwards session flags, provider and explicit expensive-model confirmation without changing native results", async () => {
+    manager.retainSession("ari", "one", "runtime-one");
+    const warning = { key: "model", value: "expensive", warning: "Costs more", confirm_required: true, confirm_message: "Costs more", scope: "session", deferred: false };
+    const accepted = { key: "model", value: "expensive", warning: "", confirm_required: false, confirm_message: "", scope: "session", deferred: true };
+    socket.configResults.push(warning, accepted);
+    expect(await service.command(key, "model", { model: "expensive", provider: "custom:team" })).toEqual(warning);
+    expect(await service.command(key, "model", { model: "expensive", provider: "custom:team", confirm: true })).toEqual(accepted);
+    expect(socket.frames.filter(frame => frame.method === "config.set").map(frame => frame.params)).toEqual([
+      { session_id: "runtime-one", profile: "ari", key: "model", value: "expensive --provider custom:team --session", scope: "session", confirm_expensive_model: false },
+      { session_id: "runtime-one", profile: "ari", key: "model", value: "expensive --provider custom:team --session", scope: "session", confirm_expensive_model: true },
+    ]);
+  });
+  it("forwards reasoning effort with explicit session scope and preserves the native result", async () => {
+    manager.retainSession("ari", "one", "runtime-one");
+    expect(await service.command(key, "reasoning", { effort: "none" })).toEqual({ key: "reasoning", value: "none" });
+    expect(socket.frames.find(frame => frame.method === "config.set")?.params).toEqual({ session_id: "runtime-one", profile: "ari", key: "reasoning", value: "none", scope: "session" });
+  });
+  it("reads an idle chat's models without resuming it, and resumes only to apply a session-scoped pick", async () => {
+    vi.mocked(nativeFetch).mockImplementation(async () => Response.json({ session: { source: "crm", model: "stored-model" } }));
+    expect(await service.modelOptions(key)).toMatchObject({ model: "stored-model" });
+    expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
+    expect(socket.frames.find(frame => frame.method === "model.options")?.params).toMatchObject({ profile: "ari" });
+    await service.command(key, "reasoning", { effort: "high" });
+    expect(socket.frames.map(frame => frame.method).filter(method => ["session.resume", "config.set"].includes(method ?? ""))).toEqual(["session.resume", "config.set"]);
+    expect(socket.frames.find(frame => frame.method === "config.set")?.params).toMatchObject({ key: "reasoning", value: "high", scope: "session" });
+  });
+  it.each(["cron", "webhook"])("blocks model and reasoning controls for read-only %s conversations", async source => {
+    manager.retainSession("ari", "one", "runtime-one");
+    vi.mocked(nativeFetch).mockImplementation(async () => Response.json({ session: { source } }));
+    await expect(service.modelOptions(key)).rejects.toMatchObject({ status: 409, message: "automation_read_only" });
+    await expect(service.command(key, "model", { model: "test" })).rejects.toMatchObject({ status: 409, message: "automation_read_only" });
+    await expect(service.command(key, "reasoning", { effort: "high" })).rejects.toMatchObject({ status: 409, message: "automation_read_only" });
+    expect(socket.frames.some(frame => ["model.options", "config.get", "config.set"].includes(frame.method ?? ""))).toBe(false);
+  });
+  it("rejects profile access before touching Hermes", async () => {
+    const foreign = conversationKey("solo", "one", "foreign");
+    await expect(service.modelOptions(foreign)).rejects.toMatchObject({ status: 404 });
+    await expect(service.command(foreign, "model", { model: "test" })).rejects.toMatchObject({ status: 404 });
+    await expect(service.command(foreign, "reasoning", { effort: "high" })).rejects.toMatchObject({ status: 404 });
+    expect(nativeFetch).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["model", { model: "test --global" }],
+    ["model", { model: "--once" }],
+    ["model", { model: "—global" }],
+    ["model", { model: "test", provider: "openai --global" }],
+    ["model", { model: "test", confirm: "true" }],
+    ["model", { model: "test", scope: "global" }],
+    ["reasoning", { effort: "show" }],
+    ["reasoning", { effort: "high", scope: "global" }],
+  ] as [string, Record<string, unknown>][])("rejects unsafe %s input %j before config.set", async (action, body) => {
+    manager.retainSession("ari", "one", "runtime-one");
+    await expect(service.command(key, action, body)).rejects.toMatchObject({ status: 400 });
+    expect(socket.frames.some(frame => frame.method === "config.set")).toBe(false);
+  });
+  it("does not replay a stale config mutation into another runtime", async () => {
+    manager.retainSession("ari", "one", "runtime-one");
+    socket.failConfig = true;
+    await expect(service.command(key, "model", { model: "test" })).rejects.toThrow("session_not_live");
+    expect(socket.frames.filter(frame => frame.method === "config.set")).toHaveLength(1);
+    expect(manager.session(JSON.stringify(["ari", "one"]))?.runtimeId).toBeUndefined();
+  });
   it("does not resume an idle history view", async () => {
     await service.openForView("ari", "one");
     expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);

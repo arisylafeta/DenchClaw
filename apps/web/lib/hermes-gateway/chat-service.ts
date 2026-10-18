@@ -69,6 +69,14 @@ export function authorizeConversation(key: string) {
   return identity;
 }
 
+// config.set model parses CLI flags, not a structured model/provider object. Keep browser picks
+// single tokens so they cannot inject --global/--once or other model-switch options.
+const modelToken = z.string().trim().min(1).max(1024).regex(/^[^\s\p{Cc}]+$/u).refine(value => !/^[-\u2012-\u2015]/.test(value));
+const modelSelectionSchema = z.object({ model: modelToken, provider: modelToken.optional(), confirm: z.boolean().optional() }).strict();
+const reasoningSelectionSchema = z.object({
+  effort: z.enum(["none", "false", "disabled", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
+}).strict();
+
 export class HermesChatService {
   // session.create mints a runtime before Hermes persists the first user row.
   private readonly newConversations = new Map<string, HermesConversation>();
@@ -268,12 +276,55 @@ export class HermesChatService {
     this.manager.retainSession(identity.profile, result.stored_session_id, result.session_id);
     return soloConversation(identity.profile, { id: result.stored_session_id, source: "crm", started_at: Date.now() / 1000 });
   }
-  async command(key: string, action: string, body: Record<string, unknown>) {
+  private async liveControls(key: string): Promise<string> {
     const retained = this.retainedKey(key);
     await this.writable(key);
     try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
-    // Commands act only on an existing runtime; viewing/interrupting must not cold-resume.
-    if (!this.manager.session(retained)?.runtimeId) throw new ChatServiceError(409, "session_not_live");
+    return retained;
+  }
+  async modelOptions(key: string) {
+    const identity = authorizeConversation(key);
+    const retained = await this.liveControls(key);
+    if (this.manager.session(retained)?.runtimeId) {
+      const [options, reasoning] = await Promise.all([
+        this.manager.callSession(retained, "model.options", { session_id: "" }),
+        this.manager.callSession(retained, "config.get", { session_id: "", key: "reasoning" }),
+      ]);
+      return { ...options, reasoning };
+    }
+    // Idle chat: read the profile's catalogue without resuming it; the stored row names its model.
+    const [options, reasoning, stored] = await Promise.all([
+      this.manager.call("model.options", { profile: identity.profile }),
+      this.manager.call("config.get", { profile: identity.profile, key: "reasoning" }),
+      nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, {}, [404]).then(response => response.ok ? response.json() : null),
+    ]);
+    const model = typeof stored?.session?.model === "string" && stored.session.model ? stored.session.model : options.model;
+    const provider = model === options.model ? options.provider : options.providers.find(row => row.models?.includes(model))?.slug ?? options.provider;
+    return { ...options, model, provider, reasoning };
+  }
+  async command(key: string, action: string, body: Record<string, unknown>) {
+    const retained = await this.liveControls(key);
+    if (action === "model" || action === "reasoning") {
+      // A pick is an explicit intent to use this chat, so an idle chat resumes like a send would.
+      await this.manager.serialize(retained, async () => {
+        if (!this.manager.session(retained)?.runtimeId) {await this.manager.resumeSession(retained);}
+      });
+    } else if (!this.manager.session(retained)?.runtimeId) {
+      throw new ChatServiceError(409, "session_not_live");
+    }
+    if (action === "model") {
+      const parsed = modelSelectionSchema.safeParse(body);
+      if (!parsed.success) { throw new ChatServiceError(400, "invalid_model"); }
+      const { model, provider, confirm } = parsed.data;
+      // Model persistence is controlled by CLI flags, not the RPC scope field. Pin both.
+      const value = `${model}${provider ? ` --provider ${provider}` : ""} --session`;
+      return this.manager.callSession(retained, "config.set", { session_id: "", key: "model", value, scope: "session", confirm_expensive_model: confirm ?? false });
+    }
+    if (action === "reasoning") {
+      const parsed = reasoningSelectionSchema.safeParse(body);
+      if (!parsed.success) { throw new ChatServiceError(400, "invalid_reasoning"); }
+      return this.manager.callSession(retained, "config.set", { session_id: "", key: "reasoning", value: parsed.data.effort, scope: "session" });
+    }
     if (action === "interrupt") {
       const result = await this.manager.callSession(retained, "session.interrupt", { session_id: "" });
       if (result.status === "interrupted") this.mediaWaits.get(retained)?.(new ChatServiceError(409, "prompt_cancelled"));

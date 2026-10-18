@@ -27,14 +27,14 @@ export type ChatModelSelectorOption = ChatModelOption & {
 	isRecommended?: boolean;
 };
 
-function ProviderIcon({
-	model,
+export function ProviderIcon({
+	provider,
 	className,
 }: {
-	model: ChatModelOption;
+	provider: string;
 	className?: string;
 }) {
-	const normalized = model.provider.trim().toLowerCase();
+	const normalized = provider.trim().toLowerCase();
 	const iconStyle: CSSProperties = { color: "currentColor" };
 
 	if (normalized === "minimax" || normalized === "mini-max") {
@@ -141,7 +141,7 @@ function ProviderIcon({
 					aria-hidden
 					data-provider-icon="fallback"
 				>
-					{model.provider.slice(0, 1).toUpperCase()}
+					{provider.slice(0, 1).toUpperCase()}
 				</span>
 			);
 	}
@@ -201,7 +201,7 @@ export function ChatModelSelector({
 			>
 				{activeModel ? (
 					<ProviderIcon
-						model={activeModel}
+						provider={activeModel.provider}
 						className="h-3.5 w-3.5 shrink-0"
 					/>
 				) : (
@@ -242,7 +242,7 @@ export function ChatModelSelector({
 					{models.map((model) => (
 						<DropdownMenuRadioItem key={model.stableId} value={model.stableId} disabled={disabled}>
 							<ProviderIcon
-								model={model}
+								provider={model.provider}
 								className="h-4 w-4 shrink-0"
 							/>
 							<div className="min-w-0 flex-1">

@@ -82,6 +82,9 @@ export interface EventPayload {
   usage?: Usage | null
   running?: boolean
   stored_session_id?: string
+  provider?: string | null
+  reasoning_effort?: string | null
+  reasoning_effort_wire?: string | null
   request_id?: string
   questions?: ClarifyQuestion[]
   question?: string

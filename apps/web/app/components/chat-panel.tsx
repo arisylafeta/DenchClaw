@@ -6,6 +6,7 @@ import { parseConversationKey } from "@/lib/hermes-conversations";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
 import { NativeTranscript, PromptDock, ReadOnlyNotice } from "./chat-native";
+import { NativeModelControls } from "./chat-native/model-controls";
 import { GroupAuthor } from "./workspace/group-chat";
 import { Fragment } from "react";
 import {
@@ -2673,7 +2674,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				/>
 
 				<div className={`flex items-center justify-between ${compact ? "px-2 pb-1.5" : "px-3 pb-2.5"}`}>
-					<div className="flex items-center gap-0.5">
+					<div className="flex min-w-0 items-center gap-1">
 						{!isSubagentMode && (
 							<>
 								<input
@@ -2704,6 +2705,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								</button>
 							</>
 						)}
+						{nativeGateway && nativeConversationKey && <NativeModelControls key={nativeConversationKey} conversationKey={nativeConversationKey} chat={nativeChat} disabled={transcriptLoading || nativeChat.state.hydrating} />}
 					</div>
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
