@@ -1589,12 +1589,14 @@ function WorkspacePageInner() {
         const node = await resolveWorkspaceFileReference(inputPath, tree, workspaceRoot);
         if (!node) return false;
         handleNodeSelect(node);
+        ensureRightPanelOpenWide();
+        if (isMobile) {setMobileRightPanelOpen(true);}
         return true;
       } catch {
         return false;
       }
     },
-    [tree, handleNodeSelect, workspaceRoot],
+    [tree, handleNodeSelect, workspaceRoot, ensureRightPanelOpenWide, isMobile],
   );
 
   // Paths that should stay out of the CRM nav because they already have
