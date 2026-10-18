@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 // own dev watcher for the macOS per-process file-descriptor limit.
 // ---------------------------------------------------------------------------
 
-type Listener = (type: string, relPath: string) => void;
+type Listener = (type: string, relPath: string, root: string) => void;
 
 let listeners = new Set<Listener>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,7 +59,7 @@ async function ensureWatcher(root: string) {
       const rel = filePath.startsWith(root)
         ? filePath.slice(root.length + 1)
         : filePath;
-      for (const fn of listeners) {fn(eventType, rel);}
+      for (const fn of listeners) {fn(eventType, rel, root);}
     });
 
     sharedWatcher.once("ready", () => {_watcherReady = true;});
@@ -95,22 +95,20 @@ export async function GET(req: Request) {
   const encoder = new TextEncoder();
   let closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let cleanup = () => {};
 
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(encoder.encode("event: connected\ndata: {}\n\n"));
 
-      const listener: Listener = (_type, _rel) => {
-        if (closed) {return;}
-        if (debounceTimer) {clearTimeout(debounceTimer);}
-        debounceTimer = setTimeout(() => {
-          if (closed) {return;}
-          try {
-            const data = JSON.stringify({ type: _type, path: _rel });
-            controller.enqueue(encoder.encode(`event: change\ndata: ${data}\n\n`));
-          } catch { /* stream closed */ }
-        }, 300);
+      const listener: Listener = (_type, _rel, eventRoot) => {
+        if (closed || eventRoot !== root) {return;}
+        try {
+          // Preserve every changed path. Tree refetches are already debounced
+          // by the client; debouncing here silently lost all but the last file.
+          const data = JSON.stringify({ type: _type, path: _rel, root });
+          controller.enqueue(encoder.encode(`event: change\ndata: ${data}\n\n`));
+        } catch { /* stream closed */ }
       };
 
       heartbeat = setInterval(() => {
@@ -125,10 +123,10 @@ export async function GET(req: Request) {
         closed = true;
         listeners.delete(listener);
         if (heartbeat) {clearInterval(heartbeat);}
-        if (debounceTimer) {clearTimeout(debounceTimer);}
         stopWatcherIfIdle();
       }
 
+      cleanup = teardown;
       req.signal.addEventListener("abort", teardown, { once: true });
 
       listeners.add(listener);
@@ -141,7 +139,7 @@ export async function GET(req: Request) {
       }
     },
     cancel() {
-      closed = true;
+      cleanup();
     },
   });
 

@@ -19,7 +19,7 @@
  *    without manual invalidation.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { TreeNode } from "../components/workspace/file-manager-tree";
 import { isCodeFile } from "@/lib/report-utils";
 import { isDocxFile, isTxtFile, textToHtml } from "../components/workspace/rich-document-editor";
@@ -88,7 +88,7 @@ function cacheReducer(state: CacheState, action: CacheAction): CacheState {
     case "set": {
       const existing = state.entries[action.id];
       // Drop late-arriving responses for cancelled / restarted fetches.
-      if (existing && existing.generation !== action.generation) return state;
+      if (!existing || existing.generation !== action.generation) return state;
       const order = state.order.includes(action.id)
         ? state.order.filter((id) => id !== action.id).concat(action.id)
         : [...state.order, action.id];
@@ -128,6 +128,8 @@ const INITIAL_CACHE: CacheState = { order: [], entries: {} };
 export type UseTabContentDeps = {
   /** Live workspace tree — drives directory-tab children and node-type lookups. */
   tree: TreeNode[];
+  tabs?: ContentTab[];
+  workspaceRoot?: string | null;
   /** Cron jobs — drives cron-job tab content without needing a fetch. */
   cronJobs: CronJob[];
   /**
@@ -154,6 +156,10 @@ export type UseTabContentResult = {
   dropFromCache: (id: string) => void;
   /** Wipe the whole cache. Used on workspace switches. */
   clearCache: () => void;
+  invalidateFile: (event: { path: string; root: string }) => void;
+  setDirty: (id: string, dirty: boolean) => void;
+  pendingExternalUpdate: boolean;
+  externalVersion: number;
 };
 
 /**
@@ -177,13 +183,16 @@ export function useTabContent(
   // The currently-running fetch generation per tab id, used to drop late
   // responses when the user clicks faster than the network.
   const generationRef = useRef<Map<string, number>>(new Map());
+  const dirtyRef = useRef(new Set<string>());
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [externalVersions, setExternalVersions] = useState<Record<string, number>>({});
   const onDuckDBMissingRef = useRef(deps.onDuckDBMissing);
   useEffect(() => {
     onDuckDBMissingRef.current = deps.onDuckDBMissing;
   }, [deps.onDuckDBMissing]);
 
   const startFetch = useCallback(
-    (target: ContentTab, signal: AbortSignal) => {
+    (target: ContentTab, signal: AbortSignal, external = false) => {
       const gen = (generationRef.current.get(target.id) ?? 0) + 1;
       generationRef.current.set(target.id, gen);
       dispatch({ type: "loading", id: target.id, generation: gen });
@@ -191,13 +200,22 @@ export function useTabContent(
       void (async () => {
         try {
           const next = await fetchContent(target, signal);
-          if (signal.aborted) return;
+          if (signal.aborted || generationRef.current.get(target.id) !== gen) return;
+          if (dirtyRef.current.has(target.id)) {
+            if (external) setPending(previous => ({ ...previous, [target.id]: true }));
+            return;
+          }
           if (next.kind === "duckdb-missing") {
             onDuckDBMissingRef.current?.();
           }
           dispatch({ type: "set", id: target.id, content: next, generation: gen });
+          if (external) setExternalVersions(previous => ({ ...previous, [target.id]: (previous[target.id] ?? 0) + 1 }));
         } catch (err) {
-          if (signal.aborted) return;
+          if (signal.aborted || generationRef.current.get(target.id) !== gen) return;
+          if (dirtyRef.current.has(target.id)) {
+            if (external) setPending(previous => ({ ...previous, [target.id]: true }));
+            return;
+          }
           if ((err as { name?: string })?.name === "AbortError") return;
           dispatch({
             type: "set",
@@ -210,6 +228,18 @@ export function useTabContent(
     },
     [],
   );
+
+  // The existing panel unmounts editors on tab navigation. Do not retain a
+  // phantom dirty flag or a stale cached payload after that buffer is gone.
+  useEffect(() => {
+    const id = tab?.id;
+    return () => {
+      if (!id || !dirtyRef.current.delete(id)) return;
+      generationRef.current.set(id, (generationRef.current.get(id) ?? 0) + 1);
+      dispatch({ type: "drop", id });
+      setPending(previous => ({ ...previous, [id]: false }));
+    };
+  }, [tab?.id]);
 
   // When the active tab changes, ensure its payload is loading or loaded.
   useEffect(() => {
@@ -243,14 +273,51 @@ export function useTabContent(
   }, [tab, startFetch]);
 
   const dropFromCache = useCallback((id: string) => {
+    generationRef.current.set(id, (generationRef.current.get(id) ?? 0) + 1);
     dispatch({ type: "drop", id });
   }, []);
 
   const clearCache = useCallback(() => {
+    for (const [id, generation] of generationRef.current) generationRef.current.set(id, generation + 1);
+    dirtyRef.current.clear();
+    setPending({});
+    setExternalVersions({});
     dispatch({ type: "clear" });
   }, []);
 
-  return { content, refreshActive, dropFromCache, clearCache };
+  const setDirty = useCallback((id: string, dirty: boolean) => {
+    const wasDirty = dirtyRef.current.has(id);
+    if (dirty) dirtyRef.current.add(id);
+    else {
+      dirtyRef.current.delete(id);
+      setPending(previous => previous[id] ? { ...previous, [id]: false } : previous);
+      // Cache the saved bytes without remounting the editor.
+      if (wasDirty && tab?.id === id) startFetch(tab, new AbortController().signal);
+    }
+  }, [tab, startFetch]);
+
+  const invalidateFile = useCallback((event: { path: string; root: string }) => {
+    if (!event.root.startsWith("/") || !event.path || event.path.startsWith("/") || event.path.split("/").some(part => part === ".." || part === "." || !part)) return;
+    const absolute = `${event.root.replace(/\/$/, "")}/${event.path}`;
+    for (const target of deps.tabs ?? (tab ? [tab] : [])) {
+      if (!["document", "file"].includes(target.kind)) continue;
+      // Relative paths refer to this event's resolved workspace. Absolute paths
+      // and ~workspace aliases must resolve to exactly the same identity.
+      if (!target.path.startsWith("/") && deps.workspaceRoot && deps.workspaceRoot !== event.root) continue;
+      const targetPath = target.path.startsWith("/") ? target.path : `${event.root.replace(/\/$/, "")}/${target.path.replace(/^~workspace\//, "")}`;
+      if (targetPath !== absolute) continue;
+      if (dirtyRef.current.has(target.id)) {
+        setPending(previous => ({ ...previous, [target.id]: true }));
+      } else if (target.id === tab?.id) {
+        startFetch(target, new AbortController().signal, true);
+      } else {
+        dropFromCache(target.id);
+      }
+    }
+  }, [deps.tabs, deps.workspaceRoot, tab, startFetch, dropFromCache]);
+
+  return { content, refreshActive, dropFromCache, clearCache, invalidateFile, setDirty,
+    pendingExternalUpdate: !!(tab && pending[tab.id]), externalVersion: tab ? externalVersions[tab.id] ?? 0 : 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +513,7 @@ async function fetchDocumentContent(
   tab: ContentTab,
   signal: AbortSignal,
 ): Promise<ContentState> {
-  const res = await fetch(fileApiUrl(tab.path), { signal });
+  const res = await fetch(fileApiUrl(tab.path), { signal, cache: "no-store" });
   if (!res.ok) return { kind: "none" };
   const data: FileData = await res.json();
   return {
@@ -473,7 +540,7 @@ async function fetchFileContent(
   }
 
   if (isDocxFile(filename)) {
-    const rawRes = await fetch(rawFileUrl(filePath), { signal });
+    const rawRes = await fetch(rawFileUrl(filePath), { signal, cache: "no-store" });
     if (!rawRes.ok) return { kind: "none" };
     const arrayBuffer = await rawRes.arrayBuffer();
     if (signal.aborted) return { kind: "none" };
@@ -484,7 +551,7 @@ async function fetchFileContent(
   }
 
   if (isTxtFile(filename)) {
-    const res = await fetch(fileApiUrl(filePath), { signal });
+    const res = await fetch(fileApiUrl(filePath), { signal, cache: "no-store" });
     if (!res.ok) return { kind: "none" };
     const data: FileData = await res.json();
     return { kind: "richDocument", html: textToHtml(data.content), filePath, mode: "txt" };
@@ -511,7 +578,7 @@ async function fetchFileContent(
     };
   }
 
-  const res = await fetch(fileApiUrl(filePath), { signal });
+  const res = await fetch(fileApiUrl(filePath), { signal, cache: "no-store" });
   if (!res.ok) return { kind: "none" };
   const data: FileData = await res.json();
   if (isCodeFile(filename)) {

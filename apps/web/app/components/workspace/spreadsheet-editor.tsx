@@ -1,5 +1,7 @@
 "use client";
 
+import { useDocumentDirty } from "./document-dirty-context";
+
 import {
   useState,
   useEffect,
@@ -406,9 +408,12 @@ export function SpreadsheetEditor({
   onDirty,
 }: SpreadsheetEditorProps) {
   const [sheets, setSheets] = useState<SheetState[] | null>(null);
+  const latestSheets = useRef(sheets);
+  latestSheets.current = sheets;
   const [activeSheet, setActiveSheet] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  useDocumentDirty(dirty);
   const [saving, setSaving] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
   const [activeCell, setActiveCell] = useState<Point | null>(null);
@@ -434,7 +439,7 @@ export function SpreadsheetEditor({
     setUndoStack([]);
     setRedoStack([]);
 
-    fetch(url)
+    fetch(url, { cache: "no-store" })
       .then((res) => {
         if (!res.ok) {throw new Error(`Failed to load file (${res.status})`);}
         return res.arrayBuffer();
@@ -531,8 +536,10 @@ export function SpreadsheetEditor({
       next[entry.sheetIdx] = { ...next[entry.sheetIdx], data: entry.data };
       return next;
     });
+    setDirty(true);
+    onDirty?.();
     if (entry.sheetIdx !== activeSheet) {setActiveSheet(entry.sheetIdx);}
-  }, [undoStack, sheets, activeSheet]);
+  }, [undoStack, sheets, activeSheet, onDirty]);
 
   const redo = useCallback(() => {
     if (redoStack.length === 0 || !sheets) {return;}
@@ -548,8 +555,10 @@ export function SpreadsheetEditor({
       next[entry.sheetIdx] = { ...next[entry.sheetIdx], data: entry.data };
       return next;
     });
+    setDirty(true);
+    onDirty?.();
     if (entry.sheetIdx !== activeSheet) {setActiveSheet(entry.sheetIdx);}
-  }, [redoStack, sheets, activeSheet]);
+  }, [redoStack, sheets, activeSheet, onDirty]);
 
   // Row/col operations
   const insertRow = useCallback(
@@ -644,7 +653,7 @@ export function SpreadsheetEditor({
         );
         if (!res.ok) {throw new Error("Save failed");}
       }
-      setDirty(false);
+      setDirty(latestSheets.current !== sheets);
       setSaveFlash(true);
       setTimeout(() => setSaveFlash(false), 1500);
     } catch (err) {

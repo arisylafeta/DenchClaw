@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { WorkspaceSidebar } from "../components/workspace/workspace-sidebar";
 import { FileManagerTree, type TreeNode } from "../components/workspace/file-manager-tree";
 import { useWorkspaceWatcher } from "../hooks/use-workspace-watcher";
+import { resolveWorkspaceFileReference } from "@/lib/workspace-file-reference";
 import { RightPanelContent } from "../components/workspace/right-panel-content";
 import type {
   ContentState,
@@ -46,7 +47,7 @@ import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
-  isWorkspaceLink,
+  interceptWorkspaceLinkClick,
   parseUrlState,
   buildUrl,
   serializeUrlState,
@@ -134,7 +135,6 @@ import {
   fileReadUrl as fileApiUrl,
   rawFileReadUrl as rawFileUrl,
   isAbsolutePath,
-  isHomeRelativePath,
   isVirtualPath,
 } from "@/lib/workspace-paths";
 import dynamic from "next/dynamic";
@@ -427,15 +427,6 @@ function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   }
 }
 
-/** Infer a tree node type from filename extension for ad-hoc path previews. */
-function inferNodeTypeFromFileName(fileName: string): TreeNode["type"] {
-  if (fileName.endsWith(".dench.app")) return "app";
-  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "md" || ext === "mdx") {return "document";}
-  if (ext === "duckdb" || ext === "sqlite" || ext === "sqlite3" || ext === "db") {return "database";}
-  return "file";
-}
-
 /** Normalize chat path references (supports file:// URLs). */
 function normalizeChatPath(path: string): string {
   const trimmed = path.trim();
@@ -544,7 +535,7 @@ function WorkspacePageInner() {
     reconnect: reconnectWorkspaceWatcher,
     browseDir, setBrowseDir, parentDir: browseParentDir, workspaceRoot, openclawDir,
     activeWorkspace: workspaceName,
-    showHidden, setShowHidden,
+    showHidden, setShowHidden, subscribeChanges,
   } = useWorkspaceWatcher();
 
   // The multi-megabyte search index loads only when search is first used.
@@ -1136,14 +1127,9 @@ function WorkspacePageInner() {
     return { path: activePath, filename, isDirectory, tableSelection: tableSelectionContext ?? undefined };
   }, [activePath, activeContentTab?.kind, tableSelectionContext]);
 
-  // Live reload from the agent: ContentRenderer/useTabContent owns the live
-  // file payload now, so this stub simply forces a refresh of the active tab
-  // when the file under it changes on disk. The cache is invalidated lazily
-  // by the SSE-driven tree refresh.
-  const handleFileChanged = useCallback((_newContent: string) => {
-    // No-op: `useTabContent` re-fetches when its tab changes; live in-place
-    // edits during streaming are handled inside ContentRenderer's children.
-  }, []);
+  // Legacy chat streaming callback. Disk changes are routed by the workspace
+  // watcher directly to RightPanelContent's cache owner, with dirty protection.
+  const handleFileChanged = useCallback((_newContent: string) => {}, []);
 
   const refreshContext = useCallback(async () => {
     try {
@@ -1599,64 +1585,14 @@ function WorkspacePageInner() {
       const inputPath = normalizeChatPath(rawPath);
       if (!inputPath) {return false;}
 
-      const openNode = (node: TreeNode) => {
+      try {
+        const node = await resolveWorkspaceFileReference(inputPath, tree, workspaceRoot);
+        if (!node) return false;
         handleNodeSelect(node);
         return true;
-      };
-
-      // For workspace-relative paths, prefer the live tree so we preserve semantics.
-      if (
-        !isAbsolutePath(inputPath) &&
-        !isHomeRelativePath(inputPath) &&
-        !inputPath.startsWith("./") &&
-        !inputPath.startsWith("../")
-      ) {
-        const node = findNode(tree, inputPath);
-        if (node) {
-          return openNode(node);
-        }
-      }
-
-      try {
-        const res = await fetch(`/api/workspace/path-info?path=${encodeURIComponent(inputPath)}`);
-        if (!res.ok) {return false;}
-        const info = await res.json() as {
-          path?: string;
-          name?: string;
-          type?: "file" | "directory" | "other";
-        };
-        if (!info.path || !info.name || !info.type) {return false;}
-
-        // If this absolute path is inside the current workspace, map it
-        // back to a workspace-relative node first.
-        if (workspaceRoot && (info.path === workspaceRoot || info.path.startsWith(`${workspaceRoot}/`))) {
-          const relPath = info.path === workspaceRoot ? "" : info.path.slice(workspaceRoot.length + 1);
-          if (relPath) {
-            const node = findNode(tree, relPath);
-            if (node) {
-              return openNode(node);
-            }
-          }
-        }
-
-        if (info.type === "directory") {
-          const dirNode: TreeNode = { name: info.name, path: info.path, type: "folder" };
-          return openNode(dirNode);
-        }
-
-        if (info.type === "file") {
-          const fileNode: TreeNode = {
-            name: info.name,
-            path: info.path,
-            type: inferNodeTypeFromFileName(info.name),
-          };
-          return openNode(fileNode);
-        }
       } catch {
-        // Ignore -- chat message bubble shows inline error state.
+        return false;
       }
-
-      return false;
     },
     [tree, handleNodeSelect, workspaceRoot],
   );
@@ -1862,7 +1798,8 @@ function WorkspacePageInner() {
   /** Build a URL kind resolver that uses the live workspace tree. */
   const buildShellUrlState = useCallback(() => ({
     resolveKind: (path: string): ContentTabKind | null => {
-      const node = resolveNode(tree, path);
+      // Generated document links carry exact absolute identity, never aliases.
+      const node = isAbsolutePath(path) ? findNode(tree, path) : resolveNode(tree, path);
       if (node) return nodeToContentTabKind(node.type, node.path);
       // CRM legacy paths route through the canonical object names.
       if (path.startsWith("~crm/")) {
@@ -2169,6 +2106,8 @@ function WorkspacePageInner() {
         return;
       }
 
+      // Never reinterpret an external URL as a legacy fuzzy file/object name.
+      if (/^(https?:)?\/\//.test(href)) return;
       // Fallback: treat as a raw relative path (legacy links)
       const node = resolveNode(tree, href);
       if (node) {
@@ -2204,17 +2143,7 @@ function WorkspacePageInner() {
   // to prevent full-page navigation and handle via client-side state instead.
   const handleContainerClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      const target = event.target as HTMLElement;
-      const link = target.closest("a");
-      if (!link) {return;}
-      const href = link.getAttribute("href");
-      if (!href) {return;}
-      // Intercept /workspace?... links to handle them in-app
-      if (isWorkspaceLink(href)) {
-        event.preventDefault();
-        event.stopPropagation();
-        handleEditorNavigate(href);
-      }
+      interceptWorkspaceLinkClick(event, handleEditorNavigate);
     },
     [handleEditorNavigate],
   );
@@ -2877,6 +2806,8 @@ function WorkspacePageInner() {
             />
             <RightPanel>
               <RightPanelContent
+                key={workspaceRoot ?? "workspace"}
+                subscribeChanges={subscribeChanges}
                 tabsState={tabsState}
                 activeContentTab={activeContentTab}
                 chatPanelCollapsed={chatPanelCollapsed}
@@ -2923,6 +2854,8 @@ function WorkspacePageInner() {
             <div className="flex flex-col h-full">
               <RightPanel>
                 <RightPanelContent
+                  key={workspaceRoot ?? "workspace"}
+                  subscribeChanges={subscribeChanges}
                   tabsState={tabsState}
                   activeContentTab={activeContentTab}
                   chatPanelCollapsed={false}

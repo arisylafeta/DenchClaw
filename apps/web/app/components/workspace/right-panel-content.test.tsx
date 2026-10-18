@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentTab, WorkspaceTabsState } from "@/lib/workspace-tabs";
 import { RightPanelContent } from "./right-panel-content";
+import { cloneElement, useState } from "react";
+import { useDocumentDirty } from "./document-dirty-context";
+import type { WorkspaceFileChange } from "../../hooks/use-workspace-watcher";
+
+afterEach(() => vi.unstubAllGlobals());
 
 const activeTab: ContentTab = {
   id: "workspace/work_task",
@@ -70,6 +75,44 @@ function renderRightPanel(
 ) {
   return render(rightPanelElement(entryModal, onCloseEntryDetail));
 }
+
+function SyntheticEditor({ body }: { body: string }) {
+  const [text, setText] = useState(body);
+  const [dirty, setDirty] = useState(false);
+  useDocumentDirty(dirty);
+  return <><input aria-label="document" value={text} onChange={event => { setText(event.target.value); setDirty(true); }} /><button onClick={() => setDirty(false)}>Saved clean</button></>;
+}
+
+it("routes SSE into clean editor reload, preserves dirty input, and clears the pending notice after save", async () => {
+  const tab: ContentTab = { ...activeTab, id: "report.md", path: "report.md", title: "report.md", kind: "document" };
+  let listener: ((event: WorkspaceFileChange) => void) | undefined;
+  let disk = "original";
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: disk, type: "markdown" })));
+  render(cloneElement(rightPanelElement(null), {
+    tabsState: { ...tabsState, contentTabs: [tab], activeContentId: tab.id },
+    activeContentTab: tab,
+    workspaceRoot: "/synthetic/workspace",
+    subscribeChanges: (next: (event: WorkspaceFileChange) => void) => { listener = next; return () => { listener = undefined; }; },
+    renderContent: (content: import("../../workspace/content-state").ContentState) => content.kind === "document" ? <SyntheticEditor body={content.data.content} /> : <div>Loading</div>,
+  }));
+  await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("original"));
+  const event = { type: "change", root: "/synthetic/workspace", path: "report.md" };
+  disk = "external clean";
+  act(() => listener!(event));
+  await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("external clean"));
+  const editor = screen.getByRole("textbox");
+  fireEvent.change(editor, { target: { value: "unsaved local edits" } });
+  disk = "external dirty";
+  act(() => listener!(event));
+  expect(screen.getByRole("status")).toHaveTextContent("unsaved edits are preserved");
+  expect(screen.getByRole("textbox")).toBe(editor);
+  expect(editor).toHaveValue("unsaved local edits");
+  fireEvent.click(screen.getByRole("button", { name: "Saved clean" }));
+  await waitFor(() => expect(screen.queryByText(/unsaved edits are preserved/)).not.toBeInTheDocument());
+  disk = "next clean update";
+  act(() => listener!(event));
+  await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("next clean update"));
+});
 
 describe("RightPanelContent entry details", () => {
   it("keeps the active table visible behind a right-side details sheet", () => {

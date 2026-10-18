@@ -481,6 +481,21 @@ export function isWorkspaceLink(href: string): boolean {
   return false;
 }
 
+/** Existing workspace container click seam, shared with synthetic DOM regressions. */
+export function interceptWorkspaceLinkClick(
+  event: { target: EventTarget | null; preventDefault: () => void; stopPropagation: () => void },
+  navigate: (href: string) => void,
+): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const href = target.closest("a")?.getAttribute("href");
+  if (!href || !isWorkspaceLink(href)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  navigate(href);
+  return true;
+}
+
 /** Check if an href is a workspace-internal link (not external URL). */
 export function isInternalLink(href: string): boolean {
   return (

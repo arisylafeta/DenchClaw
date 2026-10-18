@@ -1,5 +1,7 @@
 "use client";
 
+import { useDocumentDirty } from "./document-dirty-context";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -209,6 +211,7 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 	const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
 	const [theme, setTheme] = useState<string>(isDarkMode() ? "denchclaw-dark" : "denchclaw-light");
 	const [saveState, setSaveState] = useState<SaveState>("clean");
+  useDocumentDirty(saveState === "dirty" || saveState === "saving" || saveState === "error");
 	const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const currentContentRef = useRef(content);
@@ -241,9 +244,9 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 			});
 			if (!res.ok) {throw new Error("Save failed");}
 			currentContentRef.current = value;
-			setSaveState("saved");
+			setSaveState(editorRef.current?.getValue() === value ? "saved" : "dirty");
 			if (saveTimeoutRef.current) {clearTimeout(saveTimeoutRef.current);}
-			saveTimeoutRef.current = setTimeout(() => setSaveState("clean"), 2000);
+			saveTimeoutRef.current = setTimeout(() => setSaveState(state => state === "saved" ? "clean" : state), 2000);
 		} catch {
 			setSaveState("error");
 			if (saveTimeoutRef.current) {clearTimeout(saveTimeoutRef.current);}
