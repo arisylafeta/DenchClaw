@@ -146,3 +146,82 @@ def test_gmail_driver_never_wraps_ingested_content(monkeypatch):
     gmail_driver.GmailDriver().call('ari@rebattery.io', 'gmail', 'messages', 'search', 'in:anywhere')
     assert '--wrap-untrusted' not in seen['command']
     assert '--json' in seen['command']
+
+
+class _FakeCursor:
+    def __init__(self, first):
+        self.first = first
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, *args):
+        pass
+
+    def fetchone(self):
+        return (self.first,)
+
+
+class _FakeDb:
+    def __init__(self, first):
+        self.first = first
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def cursor(self):
+        return _FakeCursor(self.first)
+
+
+def test_pre_send_mailbox_refresh_is_always_bounded(monkeypatch):
+    """An unbounded in:anywhere sync inside a send preflight hung the first live send for minutes."""
+    from datetime import datetime, timezone
+    from rebattery_mail import sync
+
+    seen = []
+    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None: seen.append(since) or {'counts': {'replies': 0}})
+    # The query itself subtracts one day from the thread's first message (2026-10-01), so it returns 09-30.
+    monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(datetime(2026, 9, 30, 9, 0, tzinfo=timezone.utc)))
+    sync.recheck_thread('thread-1', 'alex@rebattery.io')
+    assert seen[-1] == '2026/09/30'  # the window starts the day before the thread's first message
+    monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(None))
+    sync.recheck_thread(None, 'alex@rebattery.io')
+    assert seen[-1] is not None and len(seen[-1]) == 10  # never None: fallback window, not the whole mailbox
+
+
+def test_first_message_skips_reply_refresh(monkeypatch):
+    """A first-contact draft has no thread and no earlier outbound mail, so there is nothing to refresh."""
+    from rebattery_mail import send, sync
+
+    class _Cur:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, *a):
+            pass
+        def fetchone(self):
+            return None
+        def fetchall(self):
+            return []
+
+    class _Db:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def cursor(self, *a, **k):
+            return _Cur()
+
+    monkeypatch.setattr(send, 'connection', lambda *a, **k: _Db())
+    monkeypatch.setattr(send, 'dict_cursor', lambda db: _Cur())
+    called = []
+    monkeypatch.setattr(sync, 'recheck_thread', lambda *a, **k: called.append(a))
+    send.refresh_replies({'id': 'new', 'personalization': {}, 'thread_id': None}, {'address': 'supply@rebattery.io', 'gmail_account': 'alex@rebattery.io'}, None)
+    assert called == []

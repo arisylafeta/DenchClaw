@@ -104,6 +104,9 @@ def refresh_replies(message,author,driver=None):
         cur.execute('select m.id,m.thread_id,m.transport,m.rfc_message_id,m.provider_message_id,u.email as owner_email from mail_message m left join crm_users u on u.id=m.mailbox_owner_id where m.id=%s',(origin or message['id'],))
         source = cur.fetchone()
         thread_id = (source['thread_id'] if source else None) or message.get('thread_id')
+        # A first message has no thread and no earlier outbound mail to be answered, so the real mailbox
+        # sync is skipped for it (an injected driver refresh hook still runs).
+        fresh = not thread_id and not origin
         reply_to = author.get('reply_to') or author['address']
         cur.execute('select distinct gmail_account from mail_identity where active and gmail_account is not null and lower(address)=lower(%s)',(reply_to,))
         accounts = {row['gmail_account'] for row in cur.fetchall()}
@@ -132,7 +135,8 @@ def refresh_replies(message,author,driver=None):
                 raise Refused('reply_anchor_missing','The originating Postmark RFC Message-ID is not yet available')
             with connection() as db,db.cursor() as cur:
                 cur.execute('update mail_message set rfc_message_id=%s where id=%s and rfc_message_id is null',(rfc_id,source['id']))
-        recheck_thread(thread_id,account)
+        if not fresh:
+            recheck_thread(thread_id,account)
     # Sync may have linked a previously unthreaded accepted message.
     with connection(read_only=True) as db, db.cursor() as cur:
         cur.execute('select m.thread_id,t.gmail_thread_id from mail_message m left join mail_thread t on t.id=m.thread_id where m.id=%s',(message['id'],))

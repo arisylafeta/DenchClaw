@@ -1,7 +1,7 @@
 """Pull provider truth into one mail log; dry-run is the default."""
 from urllib.parse import quote
 from urllib.error import URLError
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.parser import Parser
 from .core import connection, dict_cursor, Refused, ProviderError
 from .gmail_sync import sync_gmail
@@ -111,8 +111,18 @@ def sync_postmark_suppressions(db, stream, apply=False, client=None):
 def recheck_thread(thread_id, account, driver=None):
     with connection() as db:
         # References and Postmark-origin replies may cross Gmail threads, and
-        # accepted sends may not have any provider thread linkage yet.
-        result = sync_gmail(db,account,apply=True,driver=driver)
+        # accepted sends may not have any provider thread linkage yet. The refresh must stay
+        # bounded: an unbounded `in:anywhere` sync of a whole mailbox can run for many minutes
+        # inside a send preflight. Look back from just before the thread's first message.
+        since = None
+        if thread_id:
+            with db.cursor() as cur:
+                cur.execute("select min(coalesce(sent_at,created_at)) - interval '1 day' from mail_message where thread_id=%s",(thread_id,))
+                first = cur.fetchone()[0]
+            since = first.strftime('%Y/%m/%d') if first else None
+        if since is None:
+            since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y/%m/%d')
+        result = sync_gmail(db,account,since=since,apply=True,driver=driver)
         if thread_id is None:
             return bool(result['counts']['replies'])
         with db.cursor() as cur:
