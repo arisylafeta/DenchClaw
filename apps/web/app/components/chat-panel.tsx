@@ -33,6 +33,7 @@ import type {
 	WebSession,
 } from "./workspace/chat-sessions-sidebar";
 import { ChatTranscriptSkeleton } from "./chat-loading-skeleton";
+import { ProfileAvatar } from "./workspace/profile-avatar";
 import { UnicodeSpinner } from "./unicode-spinner";
 import { Dialog, DialogContent } from "./ui/dialog";
 import type { ChatPanelRuntimeState } from "@/lib/chat-session-registry";
@@ -829,7 +830,7 @@ export function ChatPanelTerminalButton({
 		<button
 			type="button"
 			onClick={onToggleTerminal}
-			className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors"
+			className="flex items-center p-1.5 rounded-lg cursor-pointer transition-colors"
 			style={{
 				color: open ? "var(--color-text)" : "var(--color-text-muted)",
 				background: open ? "var(--color-surface-hover)" : "transparent",
@@ -844,7 +845,6 @@ export function ChatPanelTerminalButton({
 				<polyline points="4 17 10 11 4 5" />
 				<line x1="12" y1="19" x2="20" y2="19" />
 			</svg>
-			<span className="text-xs font-medium">Terminal</span>
 		</button>
 	);
 }
@@ -987,6 +987,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		},
 		ref,
 	) {
+		// Solo Hermes chats show their agent's avatar before the title; groups carry their own badge.
+		const agentProfile = useMemo(() => {
+			if (!nativeConversationKey) return null;
+			try {
+				const identity = parseConversationKey(nativeConversationKey);
+				return identity.kind === "solo" ? identity.profile : null;
+			} catch { return null; }
+		}, [nativeConversationKey]);
 		const isSubagentMode = !!subagentSessionKey;
 		const isGatewayMode = !!gatewaySessionKey;
 		const editorRef = useRef<ChatEditorHandle>(null);
@@ -2816,6 +2824,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="min-w-0 flex-1">
 						{currentSessionId ? (
 							<div className="flex min-w-0 items-center gap-2">
+								{agentProfile && <ProfileAvatar name={agentProfile} className="h-5 w-5" />}
 								<h2
 									className="text-sm font-semibold truncate"
 									style={{

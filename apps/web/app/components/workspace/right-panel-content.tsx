@@ -454,6 +454,35 @@ function ContentTabStrip({
       className="flex items-center h-10 shrink-0 border-b min-w-0"
       style={{ borderColor: "var(--color-border)" }}
     >
+      <button
+        type="button"
+        onClick={onCollapseRightPanel}
+        className="p-1.5 ml-2 rounded-md cursor-pointer shrink-0"
+        style={{ color: "var(--color-text-muted)" }}
+        title="Hide right panel (⌘⇧B)"
+        aria-label="Hide right panel"
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "transparent";
+        }}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <rect width="18" height="18" x="3" y="3" rx="2" />
+          <path d="M15 3v18" />
+        </svg>
+      </button>
       <div className="no-scrollbar flex-1 flex items-center gap-1 px-2 min-w-0 h-full overflow-x-auto">
         {chatPanelCollapsed && (
           <button
@@ -513,7 +542,7 @@ function ContentTabStrip({
             >
               <path d="M4 4h5l2 2h9a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
             </svg>
-            Files
+            <span className="sr-only">Files</span>
           </button>
         )}
         {tabs.map((tab, tabIdx) => {
@@ -593,34 +622,6 @@ function ContentTabStrip({
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={onCollapseRightPanel}
-        className="p-1.5 mr-1 rounded-md cursor-pointer shrink-0"
-        style={{ color: "var(--color-text-muted)" }}
-        title="Hide right panel (⌘⇧B)"
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "transparent";
-        }}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <rect width="18" height="18" x="3" y="3" rx="2" />
-          <path d="M15 3v18" />
-        </svg>
-      </button>
     </div>
   );
 }
