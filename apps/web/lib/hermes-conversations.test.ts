@@ -13,6 +13,20 @@ it("orders source sections, keeps native groups distinct and emits each composit
   expect(applyChatView(rows, { ...view, hidden: ["discord"] }, "").sections.some((s) => s.key === "pinned")).toBe(false);
   expect(applyChatView(rows, { ...view, pins: [] }, "").sections.find((s) => s.key === "discord")?.rows).toHaveLength(2);
 });
+it("keeps Day and Agent section order when project order differs from recency", () => {
+  const now = new Date(2026, 9, 18, 12);
+  const rows = [
+    { ...row("web", "recent-agent"), project: "Zulu", updatedAt: now.getTime() },
+    { ...row("web", "old-agent"), project: "Alpha", updatedAt: new Date(2026, 0, 1).getTime() },
+  ];
+  for (const groupBy of ["day", "agent"] as const) {
+    const view = { ...DEFAULT_VIEW, groupBy };
+    const recent = applyChatView(rows, view, "", now);
+    const project = applyChatView(rows, { ...view, sortBy: "project" }, "", now);
+    expect(project.sections.map(section => section.label)).toEqual(recent.sections.map(section => section.label));
+    expect(project.sections[0].rows[0].profile).toBe("recent-agent");
+  }
+});
 it("preserves legacy explicit hiding and migrates only the old ungrouped default", () => {
   expect(parseChatView({ hidden: ["discord", "cron", "webhook"], groupBy: "none" })).toEqual({ ...DEFAULT_VIEW, hidden: ["discord", "cron", "webhook"] });
   expect(parseChatView({ hidden: [], groupBy: "day" }).groupBy).toBe("day");
