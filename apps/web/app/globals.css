@@ -2622,3 +2622,26 @@ td:has(> div > :empty) {
   --viz-muted-bar: #5c5c5c;
   --viz-neutral: #c3c2b7;
 }
+
+/* Chat thinking indicator: pixel-grid wavefront + shimmering label (ported from rebattery-platform LoadingState). */
+@keyframes chat-pixel-on {
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 1; }
+}
+@keyframes chat-shimmer-text {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.chat-pixel-cell { animation: chat-pixel-on 650ms ease-in-out infinite; }
+.chat-shimmer-label {
+  background-image: linear-gradient(90deg, var(--color-text-muted) 35%, var(--color-text) 50%, var(--color-text-muted) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chat-shimmer-text 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-pixel-cell { animation: none; opacity: 0.6; }
+  .chat-shimmer-label { animation: none; background-image: none; color: var(--color-text-muted); }
+}

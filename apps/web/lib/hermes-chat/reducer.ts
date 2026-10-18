@@ -17,6 +17,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+import type { Notice } from './notice'
 import { asRecord, stringValue, type ErrorSurface, type EventPayload, type GatewayEvent, type PersistedTurn, type Usage } from './events'
 import { initialSubagents, pruneFinishedSubagents, reduceSubagents, type SubagentState } from './subagents'
 import { applyTodos, expireTodos, initialTodos, isTodoToolName, settleTodos, type TodoState } from './todos'
@@ -32,6 +33,8 @@ export interface ToolSegment {
 }
 export type Segment = TextSegment | ToolSegment
 export interface ChatMessage {
+  /** A system event stored as a user row; shown as a notice line, not a bubble. */
+  notice?: Notice
   id: string; role: 'user' | 'assistant'; segments: Segment[]; startedAt: number
   completedAt?: number; pending: boolean; interim?: boolean; interrupted?: boolean
   error?: string; error_surface?: ErrorSurface | null; status?: 'complete' | 'error' | 'interrupted'

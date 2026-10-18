@@ -1,3 +1,4 @@
+import { noticeForRow } from './notice'
 import { asRecord, stringValue, type ErrorSurface, type EventPayload } from './events'
 import { initialState, toolError, type ChatMessage, type ChatState, type ReducerContext, type Segment } from './reducer'
 import { applyTodos } from './todos'
@@ -6,6 +7,7 @@ import type { MessageHtmlRow } from './html-map'
 export interface SnapshotRow {
   /** Row time in milliseconds when the history source provides it. */
   timestamp?: number
+  displayKind?: string; displayMetadata?: unknown
   id: string; role: string; text?: string; content?: string
   parts?: Record<string, unknown>[]; profile?: string; name?: string
   pending?: 'inflight' | 'queued'; clientMessageId?: string
@@ -57,7 +59,8 @@ function rowMessage(row: SnapshotRow): SourcedMessage | null {
     segments.push({ type: 'text', id: `${row.id}:text`, text: row.text || row.content || '', startedAt: at, completedAt: at })
   }
   const rowId = Number(row.id)
-  return { id: row.id, role: row.role, source: row.pending === 'queued' ? 'queued' : 'durable', segments, startedAt: at, completedAt: at,
+  const notice = noticeForRow({ role: row.role, displayKind: row.displayKind, displayMetadata: row.displayMetadata, text: row.text || row.content })
+  return { id: row.id, ...(notice ? { notice } : {}), role: row.role, source: row.pending === 'queued' ? 'queued' : 'durable', segments, startedAt: at, completedAt: at,
     clientIds: row.clientMessageId ? [row.clientMessageId] : undefined,
     pending: Boolean(row.pending), status: 'complete', ...(Number.isSafeInteger(rowId) && rowId > 0 ? { rowId } : {}) }
 }
