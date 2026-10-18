@@ -31,6 +31,7 @@ export type Message = {
   sent_at: string | null;
   preview: string | null;
   body: string | null;
+  body_html?: string | null;
   has_attachments: boolean;
   gmail_message_id: string | null;
   sender_type: string | null;

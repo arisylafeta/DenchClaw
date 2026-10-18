@@ -43,6 +43,7 @@ describe.skipIf(!enabled)('unified mail log', () => {
     values ($1||'_latest',$1,$2,'outbound','gmail','personal','accepted',true,'alex@rebattery.io',array['buyer@example.test'],'Latest reply','Full reply body','2026-01-02'),
       ($1||'_blast',$1||'_bulk',$2,'outbound','gmail','marketing','accepted',true,'alex@rebattery.io',array['buyer@example.test'],'Unlinked Gmail bulk send','Bulk body','2026-01-03')`,[prefix,owner]);
   try {
+   await queryPg('update mail_message set body_html=$2 where id=$1',[`${prefix}_latest`,'<p>HTML reply body</p>']);
    const page=await searchMail({mailboxOwnerId:owner,view:'conversations',limit:1});
    expect(page.items).toHaveLength(1); expect(page.nextCursor).toBeNull();
    expect(page.items[0]).toMatchObject({id:`${prefix}_latest`,thread_id:prefix,message_count:3,subject:'Latest reply'});
@@ -52,6 +53,7 @@ describe.skipIf(!enabled)('unified mail log', () => {
     for(const row of rows){expect(row).not.toHaveProperty('body_text');expect(row).not.toHaveProperty('body_html');}
    }
    expect((await readMailThread(prefix,owner))?.messages.at(-1)?.body_text).toBe('Full reply body');
+   expect((await readMailThread(prefix,owner))?.messages.at(-1)?.body_html).toBe('<p>HTML reply body</p>');
   } finally {await queryPg('delete from mail_message where id=any($1)',[[`${prefix}_latest`,`${prefix}_blast`]]);}
  });
  it('keeps the CRM inbox campaign-free and reads only visible thread messages',async () => {

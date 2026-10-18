@@ -6,6 +6,7 @@ type MessageRow = {
   sent_at: string | Date | null;
   preview: string | null;
   body: string | null;
+  body_html: string | null;
   has_attachments: boolean | null;
   gmail_message_id: string | null;
   from_person_id: string | null;
@@ -45,6 +46,7 @@ export async function getPostgresInboxThread(
            m.sent_at,
            m.body_preview as preview,
            m.body_text as body,
+           m.body_html,
            m.has_attachments,
            m.gmail_message_id,
            m.from_person_id,
@@ -113,6 +115,7 @@ export async function getPostgresInboxThread(
         sent_at: iso(message.sent_at),
         preview: message.preview,
         body: message.body,
+        body_html: message.body_html,
         has_attachments: Boolean(message.has_attachments),
         gmail_message_id: message.gmail_message_id,
         from_person_id: message.from_person_id,
