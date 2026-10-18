@@ -287,7 +287,25 @@ it('retains row 201 after loading all earlier history and sliding the snapshot w
   Source.current.emit('snapshot', snap({ olderCursor: '201', messages: rows.slice(200, 400) }))
   vi.mocked(fetch).mockResolvedValue(Response.json({ messages: rows.slice(0, 200), olderCursor: null }))
   await act(() => result.current.loadEarlier())
-  Source.current.emit('snapshot', snap({ seq: 1, messages: rows.slice(201) }))
+  Source.current.emit('snapshot', snap({ seq: 1, olderCursor: '201', messages: rows.slice(201) }))
   expect(result.current.olderCursor).toBeNull()
   expect(result.current.state.messages.map(row => row.id)).toEqual(rows.map(row => row.id))
+})
+
+it('shows each turn once after Hermes compacts in place mid-turn and re-IDs the head and tail rows', async () => {
+  const { result } = mount()
+  const row = (id: number, role: string, text: string, parts?: unknown[]) => ({ id: String(id), role, text, ...(parts ? { parts } : {}) })
+  Source.current.emit('snapshot', snap({ messages: [row(1, 'user', 'first question'), row(2, 'assistant', 'first answer'), row(3, 'user', 'second question'), row(4, 'assistant', 'second answer')] }))
+  await act(() => result.current.send({ text: 'build it' }))
+  gw('message.start', {}, 1)
+  gw('tool.complete', { tool_id: 't1', name: 'terminal', args: { command: 'ls' }, result: 'ok' }, 2)
+  gw('status.update', { kind: 'compacted', text: 'Context compaction complete — continuing turn...' }, 3)
+  gw('message.delta', { text: 'Final answer' }, 4)
+  gw('message.complete', { text: 'Final answer', status: 'complete', persisted_turn: { row_ids: [13, 14, 15], user_row_id: 13, final_assistant_row_id: 15, complete: false } }, 5)
+  // Whole display transcript: head copied to 10/11, middle archived under its own ids, tail copied to 13+.
+  Source.current.emit('snapshot', snap({ seq: 5, messages: [row(10, 'user', 'first question'), row(11, 'assistant', 'first answer'), row(3, 'user', 'second question'), row(4, 'assistant', 'second answer'),
+    row(13, 'user', 'build it'), row(14, 'assistant', '', [{ type: 'tool-invocation', toolCallId: 't1', toolName: 'terminal', args: { command: 'ls' }, result: 'ok' }]), row(15, 'assistant', 'Final answer')] }))
+  expect(result.current.state.messages.map(message => `${message.role}:${messageText(message)}`).filter(line => line !== 'assistant:'))
+    .toEqual(['user:first question', 'assistant:first answer', 'user:second question', 'assistant:second answer', 'user:build it', 'assistant:Final answer'])
+  expect(result.current.state.busy).toBe(false)
 })

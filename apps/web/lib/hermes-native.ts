@@ -259,7 +259,10 @@ export async function readConversation(key: string, sinceSeq = 0) {
     return { conversation, messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false };
   }
   const root = `/api/sessions/${encodeURIComponent(identity.id)}`;
-  const [sessionResponse, messagesResponse] = await Promise.all([nativeFetch(identity.profile, root), nativeFetch(identity.profile, `${root}/messages?order=oldest&limit=500&offset=0`)]);
+  // Display history, not the model's working set: after Hermes compacts in place, only
+  // include_compacted returns the summarized turns (and re-ID'd copies once, in display order).
+  const historyPage = (offset: number) => `${root}/messages?order=oldest&limit=500&offset=${offset}&include_compacted=true`;
+  const [sessionResponse, messagesResponse] = await Promise.all([nativeFetch(identity.profile, root), nativeFetch(identity.profile, historyPage(0))]);
   const session = await sessionResponse.json();
   const messages: HermesMessage[] = [];
   const tools = new Map<string, Record<string, unknown>>();
@@ -288,7 +291,7 @@ export async function readConversation(key: string, sinceSeq = 0) {
     }
     if (page.data.length < 500) break;
     offset += 500;
-    page = await (await nativeFetch(identity.profile, `${root}/messages?order=oldest&limit=500&offset=${offset}`)).json();
+    page = await (await nativeFetch(identity.profile, historyPage(offset))).json();
   }
   const conversation = soloConversation(identity.profile, session.session ?? session);
   const projects = await sessionProjectLabels(identity.profile, [identity.id]);
