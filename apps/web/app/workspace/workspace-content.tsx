@@ -99,7 +99,7 @@ import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/w
 import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
 import { ChatListSkeleton, ChatPaneSkeleton } from "../components/chat-loading-skeleton";
 import { GroupBadge } from "../components/workspace/group-chat";
-import { parseConversationKey } from "@/lib/hermes-conversations";
+import { automation, parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
   DropdownMenu,
@@ -2457,7 +2457,7 @@ function WorkspacePageInner() {
     ] : undefined,
     chatsLoading: !hermesChats.ready,
     chatsPanel: (
-      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
+      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2486,7 +2486,7 @@ function WorkspacePageInner() {
   // Shared props for the chat-panel header history dropdown.
   // Defined here so all open ChatPanel tabs see the same up-to-date data.
   const chatHistoryPanelProps = {
-    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
+    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).filter((row) => !automation(row)).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
     historyStreamingSessionIds: streamingSessionIds,
     historySubagents: subagents,
     historyActiveSubagentKey: activeSubagentKey,

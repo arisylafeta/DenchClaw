@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { resolveHermesConfig } from "./agent-backend";
 import { nativeHermesWorking } from "./hermes-client";
 import { discoverWorkspaces } from "./workspace";
-import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
+import { conversationKey, messagingConversation, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
+import { sessionDisplayNames } from "./hermes-session-names";
 import { hermesChatTransport } from "./hermes-gateway/transport-flag";
 import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
@@ -167,7 +168,16 @@ export async function listConversations() {
     // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
       const page = await (await nativeFetch(profile, "/api/sessions?limit=200&offset=0")).json() as { data: NativeSession[] };
-      return page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
+      const rows = page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
+      // The API may append older pinned sessions beyond its 200-row recency window.
+      // Preserve those rows and bound each metadata read, not the conversation list.
+      const messagingIds = rows.filter(messagingConversation).map((row) => row.id);
+      const names: Record<string, string> = {};
+      for (let offset = 0; offset < messagingIds.length; offset += 200) {
+        Object.assign(names, await sessionDisplayNames(profile, messagingIds.slice(offset, offset + 200)));
+      }
+      for (const row of rows) if (Object.hasOwn(names, row.id)) row.title = names[row.id];
+      return rows;
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
   if (hermesChatTransport() === "gateway") {
@@ -274,5 +284,10 @@ export async function readConversation(key: string, sinceSeq = 0) {
     offset += 500;
     page = await (await nativeFetch(identity.profile, `${root}/messages?order=oldest&limit=500&offset=${offset}`)).json();
   }
-  return { conversation: soloConversation(identity.profile, session.session ?? session), messages };
+  const conversation = soloConversation(identity.profile, session.session ?? session);
+  if (messagingConversation(conversation)) {
+    const names = await sessionDisplayNames(identity.profile, [identity.id]);
+    if (Object.hasOwn(names, identity.id)) conversation.title = names[identity.id];
+  }
+  return { conversation, messages };
 }

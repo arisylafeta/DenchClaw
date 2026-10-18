@@ -337,7 +337,19 @@ export function WorkspaceSidebar({
 	const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
 	// Top-level tab: "home" shows the workspace / CRM / bottom nav. "chats"
 	// swaps the body with a chat history list provided by the host.
-	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("home");
+	const [sidebarTab, setSidebarTab] = useState<"home" | "chats">("chats");
+	// This is only the sidebar view, never the selected content/chat tab.
+	// Restore an intentional choice without resetting it on route changes.
+	useEffect(() => {
+		try {
+			const saved = localStorage.getItem("dench-sidebar-view");
+			if (saved === "home" || saved === "chats") setSidebarTab(saved);
+		} catch { /* Chats remains the default with unavailable storage. */ }
+	}, []);
+	const chooseSidebarTab = (tab: "home" | "chats") => {
+		setSidebarTab(tab);
+		try { localStorage.setItem("dench-sidebar-view", tab); } catch { /* Keep navigation usable. */ }
+	};
 	const [crmTreeOpen, setCrmTreeOpen] = useState(true);
 	const [adminTreeOpen, setAdminTreeOpen] = useState(false);
 	const [workspaceTreeOpen, setWorkspaceTreeOpen] = useState(false);
@@ -702,17 +714,18 @@ export function WorkspaceSidebar({
 
 		{/* Tab switcher: Home (workspace nav) vs. Chats (session history) */}
 		{chatsPanel && (
-			<div className="px-2 pt-1 pb-1 flex items-center gap-1">
+			<div role="group" aria-label="Sidebar views" className="px-2 pt-1 pb-1 flex items-center gap-1">
 				{([
-					{ id: "home", label: "Home" },
 					{ id: "chats", label: "Chats" },
+					{ id: "home", label: "Home" },
 				] as const).map((tab) => {
 					const active = sidebarTab === tab.id;
 					return (
 						<button
 							key={tab.id}
 							type="button"
-							onClick={() => setSidebarTab(tab.id)}
+							onClick={() => chooseSidebarTab(tab.id)}
+							aria-pressed={active}
 							className="flex-1 px-2 py-1 rounded-md text-[12px] font-medium transition-colors cursor-pointer"
 							style={{
 								color: active ? "var(--color-text)" : "var(--color-text-muted)",
