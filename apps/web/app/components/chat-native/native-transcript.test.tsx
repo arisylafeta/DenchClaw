@@ -269,3 +269,20 @@ describe("dock", () => {
     expect(screen.getByLabelText("Subagents")).toBeInTheDocument();
   });
 });
+
+describe("subagent group", () => {
+  it("summarises many subagents on one closed line, with one closed accordion each and no activity trace", () => {
+    const state = events([
+      ["subagent.start", { subagent_id: "a", goal: "Research prices" }], ["subagent.tool", { subagent_id: "a", tool_name: "web_search", tool_preview: "battery" }],
+      ["subagent.start", { subagent_id: "b", goal: "Review plan" }], ["subagent.complete", { subagent_id: "b", status: "completed", summary: "Looks fine" }],
+    ]);
+    const { container } = render(<PromptDock state={state} subagents={state.subagents} callbacks={callbacks()} />);
+    const group = container.querySelector('details[aria-label="Subagents"]') as HTMLDetailsElement;
+    expect(group.open).toBe(false);
+    expect(within(group).getByText("1 subagent running · 1 done")).toBeInTheDocument();
+    const rows = group.querySelectorAll("details.group\\/agent");
+    expect(rows).toHaveLength(2);
+    rows.forEach(row => expect((row as HTMLDetailsElement).open).toBe(false));
+    expect(group.querySelector('[aria-label="Recent activity"]')).toBeNull();
+  });
+});
