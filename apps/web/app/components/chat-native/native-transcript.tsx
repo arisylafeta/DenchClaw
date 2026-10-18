@@ -8,7 +8,7 @@ import { buildSubagentTree } from "@/lib/hermes-chat/subagents";
 import type { NativeTranscriptProps } from "./types";
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { ErrorCard, SubagentCard, TodoPanel } from "./panels";
-import { displayTurns, splitTurn, WorkBlock } from "./work-block";
+import { displayTurns, splitTurn, stripEmoji, WorkBlock } from "./work-block";
 import { AttachmentChips } from "./attachment-chips";
 import { parseUserAttachments } from "./attachments";
 
@@ -52,6 +52,6 @@ export function NativeTranscript({ state, subagents = state.subagents, todos = s
     {buildSubagentTree(subagents.items).map((agent, index, roots) => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={subagentTails} connectPrevious={index > 0} connectNext={index < roots.length - 1} />)}
     <TodoPanel todos={todos} />
     <p role="status">{state.pendingRequests.some(request => request.kind === "approval") ? "Waiting for approval" : state.pendingRequests.some(request => request.kind === "clarify") ? "Waiting for your answer" : state.interrupted ? "Interrupted" : state.busy ? "Working" : ""}</p>
-    {state.status && <p className="text-sm text-[var(--color-text-muted)]">{state.status}</p>}
+    {state.status && stripEmoji(state.status) && <p className="text-sm text-[var(--color-text-muted)]">{stripEmoji(state.status)}</p>}
   </div>;
 }
