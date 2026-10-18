@@ -4,7 +4,9 @@ import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, filterCon
 import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
+import { motion } from "framer-motion";
 import { ProfileAvatar } from "./profile-avatar";
+import { useConversationReorderMotion } from "./use-conversation-reorder-motion";
 import styles from "./hermes-conversations.module.css";
 
 type Listing = { backend: string; transport?: "gateway" | "sse"; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
@@ -180,10 +182,11 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
     try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
   };
   const result = applyChatView(rows, view, query);
+  const reorderMotion = useConversationReorderMotion(result.sections, JSON.stringify([view, query, chats.filter, chats.ready]));
 
   const togglePin = (key: string) => updateView({ ...view, pins: view.pins?.includes(key) ? view.pins.filter((id) => id !== key) : [...(view.pins ?? []), key] });
   const toggleSection = (key: string) => updateView({ ...view, collapsed: view.collapsed?.includes(key) ? view.collapsed.filter((id) => id !== key) : [...(view.collapsed ?? []), key] });
-  return <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-2 text-[var(--color-text)]" aria-label="Hermes conversations">
+  return <motion.div layoutScroll className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-2 text-[var(--color-text)]" aria-label="Hermes conversations">
     <div className="flex items-center gap-1 pb-2">
       <input type="search" aria-label="Search chats" placeholder="Search chats" value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1" />
       <DropdownMenu>
@@ -229,7 +232,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
         const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
         const pinned = view.pins?.includes(row.key) ?? false;
         const PinIcon = pinned ? PinOff : Pin;
-        return <div key={row.key} data-conversation-key={row.key} data-status={status} className={`group relative flex min-w-0 items-center rounded-lg hover:bg-[var(--color-surface-hover)] focus-within:bg-[var(--color-surface-hover)] ${status === "running" ? styles.running : ""} ${chats.selected?.key === row.key ? "bg-[var(--color-surface-hover)]" : ""}`}>
+        return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} className={`group relative flex min-w-0 items-center rounded-lg hover:bg-[var(--color-surface-hover)] focus-within:bg-[var(--color-surface-hover)] ${status === "running" ? styles.running : ""} ${chats.selected?.key === row.key ? "bg-[var(--color-surface-hover)]" : ""}`}>
           <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2">
             <span className="group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0">{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
             <PinIcon size={15} aria-hidden="true" className="absolute opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100" />
@@ -243,11 +246,11 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
           </div>
           <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
           {renaming !== row.key && <button type="button" aria-label={`Rename ${row.title}`} title={messagingConversation(row) ? "Rename in this browser" : "Rename"} onClick={() => setRenaming(row.key)} className="flex h-11 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:w-11 [@media(hover:none)]:opacity-100 focus-visible:outline focus-visible:outline-2"><Pencil size={12} aria-hidden="true" /></button>}
-        </div>;
+        </motion.div>;
       })}
     </section>)}
     {chats.ready && !chats.error && !result.shown && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{(query || view.hidden.length > 0) && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => { setQuery(""); updateView({ ...view, hidden: [] }); }}>Clear search and source filters</button>}</div>}
-  </div>;
+  </motion.div>;
 }
 export function HermesNewChatDialog({ chats }: { chats: HermesChatsController }) {
   const [mode, setMode] = useState<NewChatMode>("solo");
