@@ -1,9 +1,11 @@
 "use client";
 
 import type { ChatState } from "@/lib/hermes-chat/reducer";
-import { buildSubagentTree, type SubagentState } from "@/lib/hermes-chat/subagents";
+import { buildSubagentTree, isTerminalSubagent, type Subagent, type SubagentNode, type SubagentState } from "@/lib/hermes-chat/subagents";
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { SubagentCard } from "./panels";
+import { ThinkingIndicator } from "./thinking";
+import { ChevronRight } from "lucide-react";
 import type { NativeTranscriptCallbacks } from "./types";
 
 /**
@@ -23,8 +25,23 @@ export function PromptDock({ state, subagents, tails, callbacks }: {
     {requests.map(request => request.kind === "approval"
       ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} />
       : <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} />)}
-    {roots.length > 0 && <div className="max-h-[40dvh] overflow-y-auto border-b border-[var(--color-border)] bg-[var(--color-surface-hover)] px-3 py-1" aria-label="Subagents">
-      {roots.map((agent, index) => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={tails} connectPrevious={index > 0} connectNext={index < roots.length - 1} />)}
-    </div>}
+    {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} />}
   </div>;
+}
+
+const flatten = (nodes: readonly SubagentNode[]): Subagent[] => nodes.flatMap(node => [node, ...flatten(node.children)]);
+/** All subagents behind one line: "2 subagents running · 1 done". Open it for one accordion per subagent. */
+function SubagentGroup({ roots, callbacks, tails }: { roots: readonly SubagentNode[]; callbacks: NativeTranscriptCallbacks; tails?: Readonly<Record<string, string>> }) {
+  const all = flatten(roots);
+  const running = all.filter(agent => !isTerminalSubagent(agent.status)).length;
+  const finished = all.length - running;
+  const plural = (count: number) => `${count} ${count === 1 ? "subagent" : "subagents"}`;
+  const label = running ? `${plural(running)} running${finished ? ` · ${finished} done` : ""}` : `${plural(all.length)} finished`;
+  return <details className="group/agents border-b border-[var(--color-border)] bg-[var(--color-surface-hover)] px-3 py-1" aria-label="Subagents">
+    <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
+      <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/agents:rotate-90" />
+      {running ? <ThinkingIndicator>{label}</ThinkingIndicator> : <span className="font-medium text-[var(--color-text-muted)]">{label}</span>}
+    </summary>
+    <div className="max-h-[40dvh] overflow-y-auto pb-1">{roots.map(agent => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={tails} />)}</div>
+  </details>;
 }
