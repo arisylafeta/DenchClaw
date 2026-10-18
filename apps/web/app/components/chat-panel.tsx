@@ -12,6 +12,7 @@ import {
 	forwardRef,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useImperativeHandle,
 	useMemo,
 	useRef,
@@ -2206,7 +2207,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// Keep the ref in sync so the interrupt path can call the latest
 		// handleEditorSubmit (the useCallback above is re-memoized when deps
 		// change, notably `isStreaming`).
-		useEffect(() => { handleEditorSubmitRef.current = handleEditorSubmit; }, [handleEditorSubmit]);
+		useLayoutEffect(() => { handleEditorSubmitRef.current = handleEditorSubmit; }, [handleEditorSubmit]);
 
 		const handleQuestionAnswer = useCallback(
 			(answerText: string) => {

@@ -5,7 +5,7 @@
 The sidebar helps Ari and Alex find the right conversation without mixing direct chats with background work. Match the existing CRM shell, avatars and compact neutral styling rather than introducing a new theme.
 
 - Reuse `--color-bg`, `--color-text`, `--color-text-muted`, `--color-border` and `--color-surface-hover`. Status colors retain the existing green working, amber attention and blue unread meanings.
-- Use the existing system typography. Conversation names are the primary text; time and agent are quiet secondary text. Avoid repeated source labels when a section already supplies them.
+- Use the existing system typography. Conversation names are the primary text; timestamps are smaller quiet secondary text. Use smaller agent avatars instead of repeating agent names in subtitles; keep participant names accessible through avatar labels and tooltips. Avoid repeated source labels when a section already supplies them.
 - Use compact rows, restrained rounded corners and no card shadows or decorative gradients. Selected rows use a quiet surface fill, with visible keyboard focus.
 - Chats is the first and default sidebar view on a fresh entry. Restore a user's explicit sidebar view choice independently; never rewrite content tabs, deep links or file-scoped chat routes to make Chats primary.
 - Present collapsible Pinned, Chats, Groups, Discord, WhatsApp and Automation sections. Show other messaging sources only when present. Automation is closed and hidden from ordinary conversation history by default.

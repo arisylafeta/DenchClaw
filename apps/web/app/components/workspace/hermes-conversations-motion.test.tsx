@@ -39,6 +39,18 @@ describe("conversation reorder motion", () => {
     expect(result.current.transition.layout.duration).toBe(0);
   });
 
+  it("baselines section membership and header reordering instead of crossing headers", () => {
+    const first = sections();
+    const { result, rerender } = renderHook(({ items }) => useConversationReorderMotion(items, "same-view"), { initialProps: { items: first } });
+    const added = sections([...rows, { ...rows[0], id: "added", key: "added", updatedAt: 500 }]);
+    rerender({ items: added });
+    expect(result.current.transition.layout.duration).toBe(0);
+    const grouped = [{ key: "first", label: "First", rows: [rows[0]] }, { key: "second", label: "Second", rows: [rows[1]] }];
+    rerender({ items: grouped });
+    rerender({ items: [...grouped].reverse() });
+    expect(result.current.transition.layout.duration).toBe(0);
+  });
+
   it.each([true, null])("disables layout travel for reduced/unknown preference %s", (reduced) => {
     preference.reduced = reduced;
     const { result, rerender } = renderHook(({ items }) => useConversationReorderMotion(items, "same-view"), { initialProps: { items: sections() } });
