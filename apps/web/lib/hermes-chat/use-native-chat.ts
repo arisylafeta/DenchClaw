@@ -143,7 +143,6 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     const wasBusy = current.current.busy
     const submittedAt = Date.now()
     const loadToken = current.current.loadToken
-    if (current.current.busy) queued.current.add(clientMessageId)
     if (prompt.html) optimisticHtml.current.set(clientMessageId, prompt.html)
     update(previous => submitOptimistic(wasBusy ? previous : { ...previous, interrupted: false, optimisticSentAt: submittedAt, streamId: null, heartbeatSettledStreamId: null, sawAssistantPayload: false, interimBoundaryPending: false }, { clientId: clientMessageId, text: prompt.text }))
     try {

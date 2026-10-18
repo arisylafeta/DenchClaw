@@ -42,6 +42,7 @@ class FakeSocket implements GatewaySocket {
       : frame.method === "image.attach_bytes" ? { attached: true, path: "/image" }
       : frame.method === "session.create" ? { session_id: "runtime-one", stored_session_id: "one" }
       : frame.method === "session.interrupt" ? { status: "interrupted" }
+      : frame.method === "session.steer" ? { status: this.busy ? "queued" : "rejected" }
       : frame.method === "prompt.submit" ? { status: this.busy ? "queued" : "streaming" }
       : frame.method === "session.events.since" ? { events: this.replayEvents, latest_seq: 100, epoch: "e" } : {};
     this.receive({ id: frame.id, result });
@@ -73,12 +74,12 @@ describe("gateway chat service", () => {
     await expect(service.sendPrompt(key, { text: "hello" })).rejects.toMatchObject({ status: 409, message: "automation_read_only" });
     expect(socket.frames.some(frame => frame.method === "prompt.submit")).toBe(false);
   });
-  it("serializes attachment staging and submits queued when busy", async () => {
+  it("serializes attachment staging; images cannot ride a steer so they submit plainly, never queued", async () => {
     socket.busy = true;
     const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
     await Promise.all([service.sendPrompt(key, { text: "first", images: [image] }), service.sendPrompt(key, { text: "second", images: [image] })]);
     expect(socket.frames.filter(frame => ["image.attach_bytes", "prompt.submit"].includes(frame.method ?? "")).map(frame => frame.method)).toEqual(["image.attach_bytes", "prompt.submit", "image.attach_bytes", "prompt.submit"]);
-    expect(socket.frames.filter(frame => frame.method === "prompt.submit").every(frame => frame.params?.queued)).toBe(true);
+    expect(socket.frames.filter(frame => frame.method === "prompt.submit").every(frame => frame.params?.queued === undefined)).toBe(true);
   });
   it("attaches matching prefix and explicit image bytes only once, retaining distinct images", async () => {
     const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
@@ -102,11 +103,23 @@ describe("gateway chat service", () => {
     expect(socket.frames.at(-1)).toMatchObject({ id: "srq-a", result: { choice: "once" } });
     expect(socket.frames.some(frame => frame.method === "approval.received" && frame.params?.request_id === "payload-a")).toBe(true);
   });
-  it("surfaces auto-continue and queues the deliberate send", async () => {
+  it("surfaces auto-continue when the send starts a turn", async () => {
     socket.autoContinue = true;
     const result = await service.sendPrompt(key, { text: "continue" });
     expect(result.autoContinue).toBe(true);
-    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params?.queued).toBe(true);
+    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params?.queued).toBeUndefined();
+  });
+  it("steers a busy turn instead of queueing, and starts a turn when idle", async () => {
+    socket.busy = true;
+    const steered = await service.sendPrompt(key, { text: "use the other API" });
+    expect(steered.status).toBe("steered");
+    expect(socket.frames.find(frame => frame.method === "session.steer")?.params).toMatchObject({ text: "use the other API" });
+    expect(socket.frames.some(frame => frame.method === "prompt.submit")).toBe(false);
+    socket.busy = false; socket.frames.length = 0;
+    const started = await service.sendPrompt(key, { text: "new turn" });
+    expect(started.status).toBe("streaming");
+    expect(socket.frames.map(frame => frame.method).filter(method => ["session.steer", "prompt.submit"].includes(method ?? ""))).toEqual(["session.steer", "prompt.submit"]);
+    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params?.queued).toBeUndefined();
   });
   it("allows a freshly created CRM runtime before its first durable row exists", async () => {
     const conversation = await service.createGatewayConversation(["ari"]);
@@ -144,7 +157,7 @@ describe("gateway chat service", () => {
   });
   it("resolves viewed files and image paths in the source workspace, not the bot workspace", async () => {
     await service.sendPrompt(key, { text: "inspect", context: { filePath: "doc.md" } });
-    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params).toMatchObject({ text: "[Context: workspace file '/source-workspace/doc.md']\n\ninspect", queued: true });
+    expect(socket.frames.find(frame => frame.method === "prompt.submit")?.params).toMatchObject({ text: "[Context: workspace file '/source-workspace/doc.md']\n\ninspect", });
     expect(hydrateMessageImageAttachments).toHaveBeenCalledWith("[Context: workspace file '/source-workspace/doc.md']\n\ninspect", "/source-workspace");
   });
   it("reads durable history when the gateway is unavailable", async () => {

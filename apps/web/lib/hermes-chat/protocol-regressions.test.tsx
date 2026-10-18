@@ -114,7 +114,7 @@ it('renders an unavailable subagent transcript explicitly', async () => {
 it('keeps already locked clarify answers on reconnect', async () => {
   const onClarify = vi.fn()
   render(<ClarifyCard request={{ id: 'r', kind: 'clarify', payload: { questions: [{ qid: 'a', question: 'First', choices: ['One'] }, { qid: 'b', question: 'Second', choices: ['Two'] }], answers: { a: 'One' } } }} onClarify={onClarify} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Two' }))
+  fireEvent.click(screen.getByRole('radio', { name: /Two/ }))
   expect(onClarify).toHaveBeenCalledWith(expect.anything(), { a: 'One', b: 'Two' })
 })
 it('does not clear an accepted run when an earlier idle submission rejects late', async () => {

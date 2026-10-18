@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import type { NativeTranscriptProps } from "./types";
 import { ErrorCard, TodoPanel } from "./panels";
 import { displayTurns, splitTurn, WorkBlock } from "./work-block";
+import { NoticeLine } from "./notice-line";
 import { AttachmentChips } from "./attachment-chips";
 import { parseUserAttachments } from "./attachments";
 
@@ -28,7 +29,7 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 }
 export function NativeTranscript({ state, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [] }: NativeTranscriptProps) {
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
-    {displayTurns(state.messages).map(message => <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
+    {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => { const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join("")); return <div className="flex flex-col items-end gap-1.5 py-2"><AttachmentChips attachments={attachments} />{(body || !attachments.length) && <div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}><UserContent html={attachments.length ? undefined : userHtml?.(message.id)} text={body} /></div>}{queuedMessageIds.includes(message.id) && <span className="text-xs text-[var(--color-text-muted)]">Queued</span>}</div>; })() : (() => {
         const { work, answer } = splitTurn(message.segments);
         return <Fragment key={message.id}>
