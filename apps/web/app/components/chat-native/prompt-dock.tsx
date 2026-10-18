@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import type { ChatState } from "@/lib/hermes-chat/reducer";
 import { buildSubagentTree, isTerminalSubagent, type Subagent, type SubagentNode, type SubagentState } from "@/lib/hermes-chat/subagents";
 import { ApprovalCard, ClarifyCard } from "./requests";
@@ -21,7 +22,10 @@ export function PromptDock({ state, subagents, tails, callbacks, composerTarget,
   disabled?: boolean;
 }) {
   const requests = state.pendingRequests;
-  const front = requests.find(request => request.kind === "clarify");
+  const activeKey = useRef<string | null>(null);
+  const front = requests.find(request => request.kind === "clarify" && `${state.sessionId}-${request.id}` === activeKey.current)
+    ?? requests.find(request => request.kind === "clarify");
+  activeKey.current = front ? `${state.sessionId}-${front.id}` : null;
   const roots = buildSubagentTree(subagents.items);
   if (!requests.length && !roots.length) return null;
   return <div className="w-full" data-prompt-dock>

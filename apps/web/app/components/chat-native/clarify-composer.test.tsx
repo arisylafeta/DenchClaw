@@ -38,6 +38,26 @@ it("keeps choices, text, locked answers and previous/skip anchored to their qids
   fireEvent.click(screen.getByRole("button", { name: "Skip" }));
   expect(onClarify).toHaveBeenCalledWith(pending, { locked: "Yes", parts: "Packs, Cells", note: null });
 });
+it("preserves the active answer and progress when pending requests replay in a new order", () => {
+  const first = request(); const second = request("request-2"); const onClarify = vi.fn();
+  const { rerender } = render(<Fixture requests={[first, second]} onClarify={onClarify} />);
+  fireEvent.click(screen.getByRole("checkbox", { name: /Packs/ }));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "Cells" } });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  const textbox = screen.getByRole("textbox");
+  fireEvent.change(textbox, { target: { value: "Berlin" } });
+  textbox.focus();
+  rerender(<Fixture requests={[second, { ...first }]} onClarify={onClarify} />);
+  expect(screen.getByRole("textbox")).toBe(textbox);
+  expect(textbox).toHaveValue("Berlin");
+  expect(textbox).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+  expect(screen.getByRole("checkbox", { name: /Packs/ })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("textbox")).toHaveValue("Cells");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+  expect(onClarify).toHaveBeenCalledWith(first, { locked: "Yes", parts: "Packs, Cells", note: "Berlin" });
+});
 it("isolates typed answers across request and exact conversation changes; queues other requests", () => {
   const first = request(); const second = request("request-2");
   const { rerender } = render(<Fixture requests={[first, second]} />);
