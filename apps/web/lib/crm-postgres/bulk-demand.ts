@@ -126,8 +126,16 @@ export async function possibleDemand(): Promise<Proposal[]> {
   return queryPg<Proposal>(
     `select id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url, source_label,
        source_at, created_at
-     from crm_bulk_trade_proposals where status = 'new' and kind = 'possible_demand' order by created_at desc limit 30`,
+     from crm_bulk_trade_proposals where status = 'new' and (kind = 'possible_demand'
+       or (source_kind='whatsapp' and kind='needs_triage')) order by created_at desc limit 30`,
   );
+}
+
+/** Accepted demand cards stay undoable even when no trade exists. */
+export async function acceptedDemandProposals(): Promise<Proposal[]> {
+  return queryPg<Proposal>(`select id::text as id,lot_id,kind,target,proposed,summary,quote,source_kind,source_url,
+    source_label,source_at,created_at from crm_bulk_trade_proposals
+    where status='applied' and kind='possible_demand' order by applied_at desc,id desc limit 30`);
 }
 
 /** The CRM person and company for an email address, when the CRM knows it. */

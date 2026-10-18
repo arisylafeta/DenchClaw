@@ -1235,7 +1235,7 @@ def demand_text(source):
     return f"{own[:2500]}\n\n[They are replying to:]\n{quoted[:800]}"
 
 
-def screen_demand(cur, sources, key, report):
+def screen_demand(cur, sources, key, report, model=None):
     """Possible-demand cards for new mail and calls that ask to buy in bulk, or that answer our outreach with what
     they buy. A buyer who already has an open demand row gets an update card for that row instead."""
     replied = outreach_contacts(cur, sources)
@@ -1251,15 +1251,23 @@ def screen_demand(cur, sources, key, report):
     existing = cur.fetchall()
     contexts = {}
     for s in candidates:
-        identities = [resolve_entity(cur, e) for e in sorted(s.get("participants") or [])]
-        company_ids = {e["company_id"] for e in identities if e["company_id"]}
+        identities = ([s["trusted_identity"]] if s.get("trusted_identity") else
+                      [resolve_entity(cur, e) for e in sorted(s.get("participants") or [])])
+        company_ids = {e["company_id"] for e in identities if e.get("company_id")}
         contexts[s["id"]] = {
             "existing_demand": [r for r in existing if r["company_id"] in company_ids
+                                or (s.get("trusted_identity", {}).get("person_id") and r["person_id"] == s["trusted_identity"]["person_id"])
                                 or r.get("email") in s.get("participants", set())],
             "offered_lots": [trade_card(t) for t in trades.values()
                              if s.get("participants", set()) & t["emails"] or s["key"] in t["threads"]]}
+        if s["kind"] == "whatsapp":
+            cur.execute("""select lot_id from crm_bulk_trade_evidence_links where
+              (evidence_kind='whatsapp_live_thread' and evidence_id=%s)
+              or (evidence_kind='whatsapp_live_message' and evidence_id=%s)""", (s["thread"], s["id"]))
+            contexts[s["id"]]["offered_lots"] = [trade_card(trades[r["lot_id"]]) for r in cur.fetchall()
+                                                if r["lot_id"] in trades]
     try:
-        raw = call_model(DEMAND_SYSTEM, json.dumps({"SOURCES": [
+        raw = (model or call_model)(DEMAND_SYSTEM, json.dumps({"SOURCES": [
             {"source_id": s["id"], "type": s["kind"], "date": s["at"].date().isoformat() if s["at"] else None,
              "from": s.get("from"), "reply_to_our_outreach": s.get("from") in replied, "text": demand_text(s),
              **contexts[s["id"]]}
@@ -1276,12 +1284,16 @@ def screen_demand(cur, sources, key, report):
         evidence = split_reply(source["text"])[0] if source and source["kind"] == "gmail" else source["text"] if source else ""
         if not source or not wants or not quote_ok(d.get("quote"), evidence):
             continue
-        email = str(d.get("contact_email") or source.get("from") or "").strip().lower() or None
+        trusted = source.get("trusted_identity")
+        if source["kind"] == "whatsapp" and not trusted:
+            continue
+        email = (trusted.get("email") if trusted else
+                 str(d.get("contact_email") or source.get("from") or "").strip().lower() or None)
         if email and email.endswith("@" + OWN_DOMAIN):
             continue
         company = str(d.get("buyer_company") or "").strip() or None
-        name = company or str(d.get("contact_name") or "").strip() or email or "Unknown buyer"
-        entity = resolve_entity(cur, email, d.get("contact_name"), company)
+        name = (source.get("trusted_name") if trusted else None) or company or str(d.get("contact_name") or "").strip() or email or "Unknown buyer"
+        entity = dict(trusted) if trusted else resolve_entity(cur, email, d.get("contact_name"), company)
         email = email or entity.get("email")
         family = family_key(d.get("product_family"))
         if not family:
@@ -1294,6 +1306,11 @@ def screen_demand(cur, sources, key, report):
             buyer = next((b for b in trades[lot_id]["buyers"] if norm(b["name"]) == norm(name)), None)
             base = {"quote": str(d["quote"]).strip()[:300], "source": source, "lot_id": lot_id,
                     "summary": f"{name} replied to offered stock"}
+            if source["kind"] == "whatsapp":
+                out.append({**base, "kind": "needs_triage", "target": None,
+                            "proposed": {"observation": "offered_stock_reply", "wants": wants,
+                                         **entity, "source_version": source["version"]}})
+                continue
             if not buyer:
                 out.append({**base, "kind": "new_buyer", "target": None,
                             "proposed": {"name": name, "contact": d.get("contact_name"),
@@ -1319,6 +1336,9 @@ def screen_demand(cur, sources, key, report):
                 proposed["price_unit"] = d["price_unit"]
             if proposed.get("volume") and d["currency"] == "EUR" and proposed.get("volume_unit", "").rstrip("s").lower() == str(d.get("price_unit", "")).rstrip("s").lower():
                 proposed["fee_eur"] = proposed["volume"] * price * .1
+        if source["kind"] == "whatsapp":
+            proposed["source_version"] = source["version"]
+            proposed["contact"] = source.get("trusted_contact")
         label = "needs" if proposed.get("kind") == "request" else "wants"
         out.append({"kind": "possible_demand", "target": None, "proposed": proposed,
                     "summary": f"{name} {label}: {wants}"[:300], "quote": str(d["quote"]).strip()[:300], "source": source})

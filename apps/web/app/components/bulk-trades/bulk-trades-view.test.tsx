@@ -170,6 +170,33 @@ describe("BulkTradesView", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/demand-proposal", expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "accept" }) }));
   });
 
+  it("keeps accepted no-trade demand source-linked and shows conflict-checked undo", async () => {
+    const proposal = {id:"accepted-demand",kind:"possible_demand",summary:"Synthetic accepted demand",
+      source_url:"/whatsapp/threads/synthetic#message-synthetic",source_kind:"whatsapp"};
+    let undone = false, conflict = true;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/bulk-trades/proposals/accepted-demand" && init?.method === "POST") {
+        if (conflict) return new Response(JSON.stringify({error:"That demand has changed since."}),{status:409});
+        undone = true;
+        return new Response(JSON.stringify({lot_id:null}));
+      }
+      if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({demand:[],possible:[],accepted:undone ? [] : [proposal]}));
+      return new Response(JSON.stringify({trades:TRADES,owners:[],possible:[]}));
+    });
+    vi.stubGlobal("fetch",fetchMock);
+    render(<BulkTradesView />);
+    await screen.findByText("Synthetic eBS37");
+    await userEvent.click(screen.getByRole("button",{name:/Inbox/}));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("link",{name:"Source"})).toHaveAttribute("href",proposal.source_url);
+    await userEvent.click(within(dialog).getByRole("button",{name:"Undo"}));
+    expect(await within(dialog).findByText("That demand has changed since.")).toBeInTheDocument();
+    conflict = false;
+    await userEvent.click(within(dialog).getByRole("button",{name:"Undo"}));
+    await waitFor(() => expect(within(dialog).queryByText(proposal.summary)).not.toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/accepted-demand",expect.objectContaining({body:JSON.stringify({action:"undo"})}));
+  });
+
   it("folds on-hold trades at the bottom of the list, and asks for a date and reason when a card is dropped on hold", async () => {
     const held = trade({ id: "bt_h", title: "Synthetic BESS portfolio", trade_stage: "On hold", hold_until: "2099-03-01",
       hold_reason: "Batteries stay on site until removal", hold_from_stage: "With buyers" });

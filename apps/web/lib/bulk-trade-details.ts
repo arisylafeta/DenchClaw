@@ -171,7 +171,7 @@ export type Proposal = {
   proposed: Record<string, unknown>;
   summary: string;
   quote: string;
-  source_kind: "gmail" | "granola";
+  source_kind: "gmail" | "granola" | "auction" | "whatsapp";
   source_url: string | null;
   source_label: string;
   source_at: string | null;
