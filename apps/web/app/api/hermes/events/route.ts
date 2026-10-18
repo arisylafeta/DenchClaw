@@ -33,15 +33,23 @@ export async function GET(req: Request) {
       let closed = false;
       const pending: { bytes: Uint8Array; offset: number; snapshot: boolean }[] = [];
       let bufferedEvents = 0;
+      // enqueue() can call pull() synchronously when a reader is already waiting. Without this
+      // guard the nested pump re-sent the same slice (its header newline landed mid-JSON on 64 KiB+ snapshots).
+      let pumping = false;
       pump = () => {
-        while (!closed && pending.length && (controller.desiredSize ?? 0) > 0) {
-          const item = pending[0];
-          const size = Math.min(item.bytes.byteLength - item.offset, controller.desiredSize ?? 0, 65_536);
-          controller.enqueue(item.bytes.subarray(item.offset, item.offset + size));
-          item.offset += size;
-          if (!item.snapshot) bufferedEvents -= size;
-          if (item.offset === item.bytes.byteLength) pending.shift();
-        }
+        if (pumping) return;
+        pumping = true;
+        try {
+          while (!closed && pending.length && (controller.desiredSize ?? 0) > 0) {
+            const item = pending[0];
+            const start = item.offset;
+            const size = Math.min(item.bytes.byteLength - start, controller.desiredSize ?? 0, 65_536);
+            item.offset += size;
+            if (!item.snapshot) bufferedEvents -= size;
+            if (item.offset === item.bytes.byteLength) pending.shift();
+            controller.enqueue(item.bytes.subarray(start, start + size));
+          }
+        } finally { pumping = false; }
       };
       const enqueue = (bytes: Uint8Array, snapshot = false) => {
         if (closed) return;

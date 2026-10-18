@@ -144,13 +144,15 @@ const TerminalDrawer = dynamic(
 );
 
 /** Only the visible panel has a current subscription; hidden panels use the server listing. */
-export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId }: {
+export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId, onOpen }: {
   chats: HermesChatsController;
   snapshots: Record<string, ChatTabRuntimeSnapshot>;
   visibleTabId: string | null;
+  /** Called when a chat is clicked, so a hidden chat pane is shown again. */
+  onOpen?: () => void;
 }) {
   const visible = Object.values(snapshots).filter(snapshot => snapshot.tabId === visibleTabId && snapshot.sessionId);
-  return <HermesConversationList chats={chats}
+  return <HermesConversationList chats={chats} onOpen={onOpen}
     workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming).map(snapshot => snapshot.sessionId!))}
     awaitingKeys={new Set(visible.filter(snapshot => snapshot.awaiting).map(snapshot => snapshot.sessionId!))} />;
 }
@@ -2434,7 +2436,7 @@ function WorkspacePageInner() {
       { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
     ] : undefined,
     chatsPanel: (
-      hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} /> : <ChatSessionsSidebar
+      hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}

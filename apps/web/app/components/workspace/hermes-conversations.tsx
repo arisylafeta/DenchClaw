@@ -120,7 +120,7 @@ function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmi
     onKeyDown={(e) => { if (e.key === "Enter") void submit(); else if (e.key === "Escape") { done.current = true; onCancel(); } }}
     className="w-full rounded border border-[var(--color-border)] bg-transparent px-1 text-xs font-medium" />;
 }
-export function HermesConversationList({ chats, workingKeys, awaitingKeys }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string> }) {
+export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpen }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string>; onOpen?: () => void }) {
   const rows = filterConversations(chats.listing?.sessions ?? [], chats.filter);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [view, setView] = useState<ChatView>(DEFAULT_VIEW);
@@ -134,39 +134,42 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys }: { c
   const hiddenLabels = view.hidden.map((id) => result.channels.find((channel) => channel.id === id)!.label);
   return <div className="flex-1 min-h-0 overflow-y-auto p-2" aria-label="Hermes conversations">
     <div className="flex items-center gap-1 pb-2">
-      <input type="search" aria-label="Search chats" placeholder="Search chats" value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-transparent px-2 py-1 text-xs" />
+      <input type="search" aria-label="Search chats" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px]" />
       <DropdownMenu>
-        <DropdownMenuTrigger className="rounded border border-[var(--color-border)] px-2 py-1 text-xs">Chat view</DropdownMenuTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuTrigger aria-label="Filter and group chats" title="Filter and group" className="relative rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z" /></svg>
+          {hiddenLabels.length > 0 && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--color-text)]" />}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="text-[11px]">
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Channels</DropdownMenuLabel>
-            {result.channels.map((channel) => <DropdownMenuCheckboxItem key={channel.id} checked={!view.hidden.includes(channel.id)} onCheckedChange={(checked) => updateView({ ...view, hidden: checked ? view.hidden.filter((id) => id !== channel.id) : [...view.hidden, channel.id] })}>
+            <DropdownMenuLabel className="text-[10px]">Channels</DropdownMenuLabel>
+            {result.channels.map((channel) => <DropdownMenuCheckboxItem key={channel.id} className="text-[11px]" checked={!view.hidden.includes(channel.id)} onCheckedChange={(checked) => updateView({ ...view, hidden: checked ? view.hidden.filter((id) => id !== channel.id) : [...view.hidden, channel.id] })}>
               {channel.label} {channel.count}
             </DropdownMenuCheckboxItem>)}
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Group by</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-[10px]">Group by</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={view.groupBy} onValueChange={(value) => updateView({ ...view, groupBy: value as GroupBy })}>
-              {GROUP_OPTIONS.map((option) => <DropdownMenuRadioItem key={option.value} value={option.value}>{option.label}</DropdownMenuRadioItem>)}
+              {GROUP_OPTIONS.map((option) => <DropdownMenuRadioItem key={option.value} className="text-[11px]" value={option.value}>{option.label}</DropdownMenuRadioItem>)}
             </DropdownMenuRadioGroup>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
     {hiddenLabels.length > 0 && <button type="button" onClick={() => updateView({ ...view, hidden: [] })} className="px-2 pb-2 text-left text-[10px] text-[var(--color-text-muted)]">{hiddenLabels.join(" and ")} hidden</button>}
-    {chats.listing?.warnings.map((warning) => <p key={warning} role="status" className="text-xs p-2 text-amber-700">{warning}</p>)}
+    {chats.listing?.warnings.map((warning) => <p key={warning} role="status" className="text-[11px] p-2 text-amber-700">{warning}</p>)}
     {result.sections.map((section) => <section key={section.key} aria-label={section.label ?? undefined}>
       {section.label && <h3 className="px-2 pt-3 pb-1 text-[10px] font-semibold text-[var(--color-text-muted)]">{section.label}</h3>}
       {section.rows.map((row) => {
       const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
       return <div key={row.key} className="group relative">
-        <button type="button" onClick={() => chats.select(row)} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="flex w-full items-center gap-2 p-2 rounded-lg text-left hover:bg-[var(--color-surface-hover)] aria-[current=true]:bg-[var(--color-surface-hover)]">
+        <button type="button" onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="flex w-full items-center gap-2 p-2 rounded-lg text-left hover:bg-[var(--color-surface-hover)] aria-[current=true]:bg-[var(--color-surface-hover)]">
           <ParticipantIcons row={row} />
           <span className="min-w-0 flex-1">
             {renaming === row.key
               ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} />
-              : <span className="block truncate text-xs font-medium">{row.title}</span>}
+              : <span className="block truncate text-[12px] font-medium">{row.title}</span>}
             <span className="block truncate text-[10px] text-[var(--color-text-muted)]">{[formatChatDate(row.updatedAt), view.groupBy !== "agent" ? row.participants.map((participant) => participant.name).join(", ") : "", view.groupBy !== "channel" ? conversationChannel(row).label : ""].filter(Boolean).join(" · ")}</span>
             {automation(row) && <span className="text-[9px] text-[var(--color-text-muted)]">read-only</span>}
           </span>

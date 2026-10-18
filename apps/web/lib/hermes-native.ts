@@ -268,7 +268,7 @@ export async function readConversation(key: string, sinceSeq = 0) {
         const part: Record<string, unknown> = { type: "tool-invocation", toolCallId: call.id, toolName: call.function?.name ?? call.name ?? "unknown", args, state: "call" };
         tools.set(call.id, part); parts.push(part);
       }
-      messages.push({ id: String(m.id), role: m.role, text, content: text, parts, profile: m.role === "assistant" ? identity.profile : undefined });
+      messages.push({ id: String(m.id), role: m.role, timestamp: Number(m.timestamp) > 0 ? Math.round(Number(m.timestamp) * 1000) : undefined, text, content: text, parts, profile: m.role === "assistant" ? identity.profile : undefined });
     }
     if (page.data.length < 500) break;
     offset += 500;

@@ -6,7 +6,8 @@ import type { SubagentNode } from "@/lib/hermes-chat/subagents";
 import { isTerminalSubagent } from "@/lib/hermes-chat/subagents";
 import type { TodoItem, TodoState } from "@/lib/hermes-chat/todos";
 import type { NativeTranscriptCallbacks } from "./types";
-import { buttonClass, cardClass, Elapsed } from "./tool-run";
+import { Bot } from "lucide-react";
+import { buttonClass, cardClass, Elapsed, type StepState, TraceStep } from "./tool-run";
 
 export interface SubagentCardProps {
   agent: SubagentNode;
@@ -14,33 +15,42 @@ export interface SubagentCardProps {
   tailText?: string;
   tails?: Readonly<Record<string, string>>;
 }
-export function SubagentCard({ agent, callbacks, tailText, tails }: SubagentCardProps) {
+const compact = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value);
+const actionClass = "rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-2 disabled:opacity-40";
+/** A running or finished subagent, shown as a step in the same trace as tool calls. */
+export function SubagentCard({ agent, callbacks, tailText, tails, connectPrevious, connectNext }: SubagentCardProps & { connectPrevious?: boolean; connectNext?: boolean }) {
   const [text, setText] = useState("");
   const [feedback, setFeedback] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [steering, setSteering] = useState(false);
   const [sending, setSending] = useState(false);
   const terminal = isTerminalSubagent(agent.status);
+  const state: StepState = agent.status === "failed" || agent.status === "interrupted" ? "error" : terminal ? "done" : "running";
   const act = async (action: () => void | Promise<void>, success: string) => {
     setSending(true);
     try { await action(); setFeedback(success); } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Action failed"); } finally { setSending(false); }
   };
-  return <section className={cardClass} aria-label={`Subagent: ${agent.goal}`} data-subagent-id={agent.id}>
-    <h3>{agent.goal}</h3><p><span>{agent.status}</span>{agent.model && ` · ${agent.model}`} · <Elapsed startedAt={agent.startedAt} completedAt={terminal ? agent.updatedAt : undefined} seconds={terminal ? agent.durationSeconds : undefined} /></p>
-    <p>{agent.toolCount ?? 0} tools · {agent.inputTokens ?? 0} tokens in / {agent.outputTokens ?? 0} out{agent.reasoningTokens !== undefined && ` / ${agent.reasoningTokens} reasoning`} · {agent.filesRead.length} files read / {agent.filesWritten.length} written</p>
-    {(agent.filesRead.length > 0 || agent.filesWritten.length > 0) && <details><summary>Files</summary><ul>{agent.filesRead.map(file => <li key={`read-${file}`}>Read: {file}</li>)}{agent.filesWritten.map(file => <li key={`write-${file}`}>Written: {file}</li>)}</ul></details>}
-    {agent.summary && <p>{agent.summary}</p>}
-    {agent.outputTail.length > 0 && <pre className="max-h-60 overflow-auto whitespace-pre-wrap">{agent.outputTail.map(row => `${row.is_error ? "Error · " : ""}${row.tool}: ${row.preview}`).join("\n")}</pre>}
-    <button type="button" className={buttonClass} disabled={sending} onClick={() => void act(() => callbacks.onSubagentTail(agent.id), "Tail requested")}>Open tail</button>
-    {(tailText ?? tails?.[agent.id]) !== undefined && <pre aria-label="Subagent tail" className="max-h-72 overflow-auto whitespace-pre-wrap">{tailText ?? tails?.[agent.id]}</pre>}
-    <ol aria-label="Recent activity">{agent.activity.slice(expanded ? -24 : -5).map((activity, index) => <li key={`${activity.at}-${index}`}>{activity.kind}: {activity.text}</li>)}</ol>
-    {agent.activity.length > 5 && <button type="button" className={buttonClass} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "Show latest 5" : "Show all activity"}</button>}
-    <form className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); if (!terminal && text.trim()) void act(() => callbacks.onSubagentSteer(agent.id, text.trim()), "Steer queued (not yet delivered)"); }}>
-      <label>Steer subagent<input className="block rounded border border-[var(--color-border)] bg-transparent p-2" disabled={terminal || sending} value={text} onChange={event => setText(event.target.value)} /></label>
-      <button className={buttonClass} type="submit" disabled={terminal || sending || !text.trim()}>Queue steer</button>
-      <button className={buttonClass} type="button" disabled={terminal || sending} onClick={() => void act(() => callbacks.onSubagentInterrupt(agent.id), "Interrupt requested")}>Interrupt</button>
-    </form>
-    <p role="status">{feedback}</p>
-    {agent.children.length > 0 && <div className="ml-4 space-y-2" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} />)}</div>}
+  const tail = tailText ?? tails?.[agent.id];
+  const latest = terminal ? agent.summary : agent.activity.at(-1)?.text;
+  const stats = [agent.toolCount ? `${agent.toolCount} ${agent.toolCount === 1 ? "tool" : "tools"}` : "", agent.filesRead.length ? `${agent.filesRead.length} read` : "", agent.filesWritten.length ? `${agent.filesWritten.length} written` : "", agent.inputTokens || agent.outputTokens ? `${compact((agent.inputTokens ?? 0) + (agent.outputTokens ?? 0))} tokens` : "", agent.model ?? ""].filter(Boolean).join(" · ");
+  const status = state === "running" ? "Running" : agent.status === "failed" ? "Failed" : agent.status === "interrupted" ? "Stopped" : "Done";
+  return <section aria-label={`Subagent: ${agent.goal}`} data-subagent-id={agent.id} className="w-full min-w-0">
+    <TraceStep state={state} icon={Bot} label={`Subagent · ${agent.goal.length > 80 ? `${agent.goal.slice(0, 79)}…` : agent.goal}`} connectPrevious={connectPrevious} connectNext={connectNext}
+      detail={<>{status} · <Elapsed startedAt={agent.startedAt} completedAt={terminal ? agent.updatedAt : undefined} seconds={terminal ? agent.durationSeconds : undefined} /></>}>
+      {stats && <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{stats}</p>}
+      {latest && <p className="mt-0.5 line-clamp-2 break-words text-[11px] text-[var(--color-text-muted)]">{state === "running" ? "Now: " : ""}{latest}</p>}
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        <button type="button" className={actionClass} disabled={sending} onClick={() => void act(() => callbacks.onSubagentTail(agent.id), "")}>View output</button>
+        {!terminal && <button type="button" className={actionClass} disabled={sending} aria-expanded={steering} onClick={() => setSteering(!steering)}>Steer</button>}
+        {!terminal && <button type="button" className={actionClass} disabled={sending} onClick={() => void act(() => callbacks.onSubagentInterrupt(agent.id), "Stop requested")}>Stop</button>}
+      </div>
+      {steering && !terminal && <form className="mt-1 flex items-center gap-1" onSubmit={event => { event.preventDefault(); if (text.trim()) void act(async () => { await callbacks.onSubagentSteer(agent.id, text.trim()); setText(""); setSteering(false); }, "Steer queued, not yet delivered"); }}>
+        <input aria-label="Steer subagent" autoFocus className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px]" disabled={sending} value={text} onChange={event => setText(event.target.value)} placeholder="Tell it what to do differently" />
+        <button className={actionClass} type="submit" disabled={sending || !text.trim()}>Send</button>
+      </form>}
+      {tail !== undefined && <pre aria-label="Subagent tail" className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-hover)] p-2 font-mono text-[11px] leading-5">{tail}</pre>}
+      <p role="status" className="text-[11px] text-[var(--color-text-muted)]">{feedback}</p>
+    </TraceStep>
+    {agent.children.length > 0 && <div className="ml-7 w-[calc(100%-1.75rem)]" aria-label="Child subagents">{agent.children.map((child, index) => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} connectPrevious={index > 0} connectNext={index < agent.children.length - 1} />)}</div>}
   </section>;
 }
 export interface TodoPanelProps { todos: TodoState }

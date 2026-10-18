@@ -13,12 +13,13 @@
  * and tail text are controller-owned props, never inferred from model prose.
  * ReadOnlyNotice is rendered by the owner when source policy forbids sending.
  */
-export { NativeTranscript, ReasoningBlock } from "./native-transcript";
-export type { ReasoningBlockProps } from "./native-transcript";
+export { NativeTranscript } from "./native-transcript";
+export { splitTurn, WorkBlock } from "./work-block";
+export type { WorkBlockProps } from "./work-block";
 export { ApprovalCard, ClarifyCard } from "./requests";
 export type { ApprovalCardProps, ClarifyCardProps } from "./requests";
 export { SubagentCard, TodoPanel, UsageMeter, ErrorCard, ReadOnlyNotice } from "./panels";
 export type { SubagentCardProps, TodoPanelProps, UsageMeterProps, ErrorCardProps, ReadOnlyNoticeProps } from "./panels";
-export { ToolRun, ToolRow, Elapsed } from "./tool-run";
-export type { ToolRunProps, ToolRowProps, ElapsedProps } from "./tool-run";
+export { ToolRow, Elapsed } from "./tool-run";
+export type { ToolRowProps, ElapsedProps } from "./tool-run";
 export type { NativeTranscriptProps, NativeTranscriptCallbacks, ApprovalChoice } from "./types";

@@ -2558,9 +2558,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		// ── Input bar content (shared between hero and bottom positions) ──
 
-		const inputBarContent = (
+		const inputBarContent = nativeGateway && nativeChat.readOnly ? (
+			// Read-only (cron/webhook) chats show no composer, attachments or voice input at all.
+			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
+		) : (
 			<>
-				{nativeGateway && nativeChat.readOnly && <ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />}
 				{nativeGateway && nativeChat.queuedMessageIds.length > 0 && <p role="status">{nativeChat.queuedMessageIds.length} queued</p>}
 				{!nativeGateway && queuedMessages.length > 0 && (
 					<div className={compact ? "px-2 pt-2" : "px-3 pt-3"}>
