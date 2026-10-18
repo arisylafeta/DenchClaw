@@ -286,6 +286,7 @@ def fetch_sourcing_requests(env_path=PLATFORM_ENV):
 
 
 
+
 def main():
     import psycopg2
     import psycopg2.extras

@@ -2,7 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { splitQuotedText } from "./quoted-message";
-import { MessageBody, buildSrcdoc } from "./message-body";
+import { MessageBody } from "./message-body";
+import { prepareEmail } from "./sanitize-email";
 import { MessageCard } from "./message-card";
 import { ConversationHeader } from "./conversation-header";
 import { groupThreadParticipants, participantAvatarName, type Participant } from "./participant-chips";
@@ -41,25 +42,21 @@ describe("quoted message folding", () => {
     fireEvent.click(screen.getByRole("button",{name:"Hide quoted text"}));
     expect(screen.queryByText(/Earlier message/)).not.toBeInTheDocument();
   });
-  it("hides Gmail/HTML quotes in the existing sanitized opaque iframe", () => {
-    const html='<p onclick="alert(1)">Current reply</p><div class="gmail_quote"><blockquote>Earlier message</blockquote></div><div class="gmail_signature">Footer</div><script>alert(1)</script><a href="javascript:alert(1)">bad</a>';
-    render(<MessageBody body={html} preview={null} />);
+  it("hides sanitized Gmail quotes until requested", () => {
+    const html='<p onclick="alert(1)">Current reply</p><div class="gmail_quote"><blockquote>Earlier message</blockquote></div><div class="gmail_signature">Footer</div><script>alert(1)</script>';
+    render(<MessageBody body="Text alternative" html={html} preview={null} />);
     const frame=screen.getByTitle("Email body");
-    expect(frame).toHaveAttribute("sandbox","allow-popups allow-popups-to-escape-sandbox allow-scripts");
-    expect(frame.getAttribute("srcdoc")).toContain("html body .gmail_quote");
-    expect(frame.getAttribute("srcdoc")).toContain("display:none!important");
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-scripts");
+    expect(frame.getAttribute("srcdoc")).not.toContain("Earlier message");
     expect(frame.getAttribute("srcdoc")).not.toContain("onclick=");
-    expect(frame.getAttribute("srcdoc")).not.toContain("javascript:");
-    expect(frame.getAttribute("srcdoc")).not.toContain("<script>alert(1)</script>");
+    expect(frame.getAttribute("srcdoc")).not.toContain("<script");
     fireEvent.click(screen.getByRole("button",{name:"Show quoted text"}));
-    expect(frame.getAttribute("srcdoc")).not.toContain("html body .gmail_quote");
     expect(frame.getAttribute("srcdoc")).toContain("Earlier message");
-    expect(frame.getAttribute("srcdoc")).toContain("font-size:14px!important");
   });
-  it("applies reader typography after the email's own head styles", () => {
-    const doc=buildSrcdoc('<html><head><style>p{font-family:serif;font-size:30px}</style></head><body><p>Hello</p></body></html>',"test");
-    expect(doc.indexOf("font-size:14px!important")).toBeGreaterThan(doc.indexOf("font-size:30px"));
-    expect(doc).toContain("denchclaw_email_height");
+  it("preserves email typography after reader defaults", () => {
+    const doc=prepareEmail('<html><head><style>p{font-family:serif;font-size:30px}</style></head><body><p>Hello</p></body></html>').srcdoc;
+    expect(doc.indexOf("font-size:30px")).toBeGreaterThan(doc.indexOf("font:14px"));
+    expect(doc).not.toContain("<script");
   });
 });
 

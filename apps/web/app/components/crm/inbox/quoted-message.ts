@@ -22,7 +22,3 @@ export function splitQuotedText(input: string): { visible: string; hidden: strin
   }
   return { visible: lines.slice(0, boundary).join("\n").trim(), hidden: lines.slice(boundary).join("\n").trim() };
 }
-
-export function hasQuotedHtml(html: string): boolean {
-  return /<blockquote\b|\b(?:gmail_quote|gmail_signature|divRplyFwdMsg|OutlookMessageHeader)\b/i.test(html);
-}

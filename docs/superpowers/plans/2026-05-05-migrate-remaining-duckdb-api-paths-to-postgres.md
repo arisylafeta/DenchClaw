@@ -514,7 +514,7 @@ select i.id, i.type, i.direction, i.occurred_at, i.email_message_id, i.calendar_
        m.thread_id, m.subject, m.body_preview, m.from_person_id,
        e.title, e.start_at, e.end_at, e.meeting_type
 from crm_interactions i
-left join crm_email_messages m on m.id = i.email_message_id
+left join mail_message m on m.id = i.email_message_id
 left join crm_calendar_events e on e.id = i.calendar_event_id
 where i.person_id = $1
 order by i.occurred_at desc nulls last

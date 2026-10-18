@@ -263,11 +263,20 @@ logged receipts for the stream as well as suppressions. The complete, unpaginate
 is mapped to the **Supply update** list. Every matched address is opted out on
 that list; `SpamComplaint` and `HardBounce` also set global `email_opted_out`.
 Provider reason, origin and calendar date are retained. Other lists are unchanged,
-missing suppressions never restore consent, and unmatched addresses never create
-contacts.
+missing suppressions never restore consent, and unmatched addresses never create contacts.
 
-Schedulers must invoke the shared CLI directly with `sync postmark --account
-broadcast --apply`, not the retired suppression wrapper. Configure the database
+Recipient unsubscribes (`ManualSuppression` with `Origin=Recipient`), customer/admin
+manual suppressions and unknown reasons do not set the global opt-out flag.
+Existing global opt-outs are never cleared. Dates retain the provider's calendar
+date rather than the sync date, including timestamps with a timezone offset.
+Frozen personalised subjects and bodies are reused at launch, never re-rendered;
+missing `first_name`, `last_name` or `opening` values stop freeze rather than
+sending incomplete copy.
+
+For suppression-only reconciliation, use `sync postmark-suppressions --stream
+broadcast --apply`; this requires no campaign and never reads or updates receipts.
+Schedulers must invoke that shared CLI directly, not the retired suppression wrapper.
+Configure the database
 DSN explicitly and load credentials through the approved Hermes secret loader
 or `POSTMARK_SERVER_TOKEN`; never store them in a job definition. Existing jobs
 need their entrypoint changed before reactivation. Verify a fresh backup and

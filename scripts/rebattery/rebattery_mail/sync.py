@@ -97,6 +97,17 @@ def sync_postmark(db, campaign=None, since=None, apply=False, client=None, accou
     inserted_events = len({event_id for result in results for event_id in result.get('event_ids',[])})
     return {'dry_run':not apply,'receipts':receipts,'suppressions':suppression_results,'event_count':len(payloads),'inserted_events':inserted_events}
 
+
+def sync_postmark_suppressions(db, stream, apply=False, client=None):
+    """Reconcile one Broadcast dump without reading or changing message receipts."""
+    from .drivers import stream_suppressions, sync_suppressions
+    if not isinstance(stream,str) or not stream.strip() or stream == 'outbound':
+        raise Refused('postmark_broadcast_stream_required')
+    client = client or PostmarkClient()
+    suppressions = stream_suppressions(stream,client=client.request,required_type='Broadcasts')
+    return {'dry_run':not apply,'stream':stream,'list':'Supply update',
+            'suppressions':sync_suppressions(stream,suppressions,apply,db=db)}
+
 def recheck_thread(thread_id, account, driver=None):
     with connection() as db:
         # References and Postmark-origin replies may cross Gmail threads, and
@@ -111,6 +122,8 @@ def recheck_thread(thread_id, account, driver=None):
 
 def handle(args):
     with connection(read_only=not args.apply) as db:
+        if args.provider == 'postmark-suppressions':
+            return sync_postmark_suppressions(db,args.stream,args.apply)
         if args.provider == 'postmark':
             return sync_postmark(db,args.campaign,args.since,args.apply,account=args.account)
         if args.account:
@@ -124,6 +137,10 @@ def handle(args):
 
 def register(subparsers):
     providers = subparsers.add_parser('sync').add_subparsers(dest='provider',required=True)
+    parser = providers.add_parser('postmark-suppressions')
+    parser.add_argument('--stream',required=True)
+    parser.add_argument('--apply',action='store_true')
+    parser.set_defaults(handler=handle)
     for name in ('gmail','postmark'):
         parser = providers.add_parser(name)
         parser.add_argument('--account')

@@ -36,7 +36,7 @@ Gmail sync can capture unrelated and personal mail into the log. Agents search t
 
 ### Identities and transports
 
-Launch identities are `alex`, `ari`, `supply`, `hello`, `support`, `enterprise`. `admin`, `sales`, `noreply`, `dev` are not launch identities. All six initially allow personal, marketing and transactional purposes, subject to policy. Supply Updates must use supply's sender and reply mailbox.
+Launch identities are `alex`, `ari`, `supply`, `hello`, `support`, `enterprise`. `admin`, `sales`, `noreply`, `dev` are not launch identities. All six initially allow personal, marketing and transactional purposes, subject to policy. Supply Updates must use `supply@rebattery.io` for both sender and reply mailbox. This applies independently to type `supply_update`, names starting with “Supply Update” (space, underscore or hyphen separators), and IDs starting with `supply-update`, even without a trailing hyphen. Founder intro outreach keeps its own mailbox.
 
 `identity list/show` returns `verified: null`: these are configured routes, not a completed provider verification. Inspect the actual mailbox/sender signature before a live approval. `gmail_account` selects Gmail through `gog`; `postmark_stream` selects Postmark. A missing route is refused. Marketing Postmark cannot use the `outbound` transactional stream. Provider preflight validates active stream type and Broadcast unsubscribe handling.
 
@@ -107,6 +107,8 @@ recover synthetic-update --apply
 
 Real sends additionally require `DENCH_MAIL_LIVE_SEND=1`; the gate is checked before claiming. Do not set it in an unattended agent or a test environment. Gmail no-send restrictions still block submission. Approval defaults to `--scope pilot`, which requires an explicit launch cap. Initial uncapped launch requires an explicit `--scope full` approval. A capped launch returns `next_gate: pilot_review` and stops. The remainder needs a NEW approval row recorded after that pilot, binding the same frozen digest, the remaining recipient count and the named human's full/pilot scope. It is never an automatic continuation. Campaign-member messages cannot be independently approved or sent to bypass this gate.
 
+Bounded launches select remaining frozen recipients in recipient-email order, independent of message hashes or database collation.
+
 Message states are `draft -> sending -> accepted`, or campaign `frozen -> sending -> accepted`; `approved` is also a claimable message state. Definite rejection becomes `failed`. Lost receipts or accepted-but-local-write-failed become `unknown` and exit 4. Inbound messages are `received`. Campaign mail states are draft, frozen, approved, pilot, launched, closed, or legacy.
 
 Execution takes an audience lock, claims each message/idempotency key before submission and rechecks approval expiry/revocation/digest/count/identity after provider reads immediately before each call. It also rechecks suppressions and the reply mailbox on both transports, even before thread linkage exists. Pre-submission failure after a claim becomes definite `failed`, with `send_failure.reason=preflight_error`, not unknown; prepare a fresh draft rather than reuse the key. Any sending/unknown row blocks the audience. Never reset those states or retry a lost receipt. Postmark recovery requires exact metadata and the full frozen recipient set. Gmail recovery can verify an exact receipt saved in `accepted_write_failed` through a read-only fetch and attach it to the original claim; missing receipts remain unresolved. A database outage may leave the durable claim sending instead.
@@ -120,6 +122,8 @@ backfill-html --account alex@rebattery.io --since 2026/10/01 --limit 100 --crm-o
 backfill-html --account alex@rebattery.io --limit 100 --sleep 0.2 --apply
 sync postmark --campaign synthetic-update --since 2026-10-01
 sync postmark --account broadcast --apply
+sync postmark-suppressions --stream broadcast
+sync postmark-suppressions --stream broadcast --apply
 followup list
 followup draft followup-id --subject 'Re: Battery enquiry' --body 'Synthetic chase'
 followup draft followup-id --template supplier-followup --vars '{"first_name":"Synthetic buyer"}' --apply
@@ -130,6 +134,8 @@ legacy import --apply
 ```
 
 Sync is idempotent provider reconciliation, not approval to send. Address-level suppressions are retained in `mail_suppression` and checked on both transports, even when there is no contact or prior message. Postmark suppression sync also opts out matching CRM people on Supply update; HardBounce/SpamComplaint additionally set global opt-out. Reasons, origins and provider calendar dates are retained. Missing suppressions never restore consent; unmatched addresses never create contacts. Daily schedulers use this same CLI, not a second suppression wrapper.
+
+For daily suppression-only reconciliation, use `sync postmark-suppressions --stream <broadcast-stream>`. It requires an explicit active Broadcast stream and a complete suppression dump, defaults to read-only dry-run, and neither fetches message details nor updates receipt timestamps. `--apply` requires the applicable CRM-write approval; scheduler configuration and credentials remain separate approvals.
 
 Gmail sync stores raw MIME HTML (including nested alternatives) and fills only missing HTML; existing HTML, especially approved outbound copy, is never replaced. Sanitise at rendering, not ingestion. `backfill-html` fetches only missing-HTML rows for one mailbox, prioritising CRM-visible rows then newest sent dates. `--crm-only` restricts selection; `--since` uses YYYY/MM/DD. Dry-run reports counts and the first five IDs; `--apply` changes only missing HTML, attachment presence and `updated_at`. Plain-text-only rows remain unmarked and appear in `no_html_ids` for optional rechecks. Fetches are sequential with configurable `--sleep`; five consecutive errors abort with exit 3, preserving completed updates.
 

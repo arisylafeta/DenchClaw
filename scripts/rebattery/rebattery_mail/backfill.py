@@ -79,6 +79,8 @@ def backfill_html(db, account, since=None, limit=None, crm_only=False, apply=Fal
         with db.cursor() as cur:
             cur.execute("update mail_message set body_html=%s,has_attachments=has_attachments or %s,updated_at=now() where id=%s and mailbox_owner_id=%s and coalesce(body_html,'')=''", (html, attachments, row['id'], owners[0][0]))
             result['updated'] += cur.rowcount
+            if result['updated'] % 25 == 0:
+                db.commit()  # keep progress if the run is interrupted; each row is independent and idempotent
     return result
 
 

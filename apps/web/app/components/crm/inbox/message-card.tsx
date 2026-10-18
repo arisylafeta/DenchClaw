@@ -54,7 +54,7 @@ export function MessageCard({ message, people, defaultExpanded, onOpenPerson }: 
         {!recipients[0].people.length && message.to_emails?.length ? <span>To: {message.to_emails.join(", ")}</span> : null}
       </div>}
       {observations.length > 0 && <div className={styles.messageStatuses} aria-label="Delivery tracking">{observations.map(({kind, at}) => <span key={kind} className={styles.messageStatus} title={formatAbsoluteDate(at)}>{kind[0].toUpperCase() + kind.slice(1)}</span>)}</div>}
-      <MessageBody body={message.body} preview={message.preview} />
+      <MessageBody body={message.body} html={message.body_html} preview={message.preview} />
       {message.has_attachments && <AttachmentStrip />}
     </div>}
   </article>;
