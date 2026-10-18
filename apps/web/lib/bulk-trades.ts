@@ -14,6 +14,11 @@ export type TradeKind = (typeof TRADE_KINDS)[number];
 export type BulkTrade = {
   id: string;
   title: string;
+  origin: "supply" | "demand";
+  seller_ref: string | null;
+  seller_name: string | null;
+  has_seller: boolean;
+  has_buyer: boolean;
   trade_stage: TradeStage;
   trade_kind: TradeKind | null;
   fact_line: string | null;
@@ -54,10 +59,10 @@ export type TradePatch = Partial<Pick<BulkTrade,
   | "title" | "trade_stage" | "trade_kind" | "fact_line" | "next_step" | "next_step_due"
   | "waiting_on" | "owner_user_id" | "value" | "last_touched" | "clear_by" | "ship_by"
   | "transport_class" | "tfs_needed" | "listing_id" | "next_step_contact_id" | "next_step_buyer_id"
-  | "hold_until" | "hold_reason"
+  | "hold_until" | "hold_reason" | "origin" | "seller_ref" | "seller_name"
 >>;
 
-const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class", "listing_id", "hold_reason"] as const;
+const TEXT_FIELDS = ["title", "fact_line", "next_step", "value", "transport_class", "listing_id", "hold_reason", "seller_name"] as const;
 const DATE_FIELDS = ["next_step_due", "last_touched", "clear_by", "ship_by", "hold_until"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -88,6 +93,13 @@ export function parseTradePatch(body: unknown): { patch: TradePatch } | { error:
       if (value === null || value === "") patch[key] = null;
       else if (typeof value === "string" && isValidDate(value)) patch[key] = value;
       else return { error: `${key} must be a YYYY-MM-DD date.` };
+    } else if (key === "origin") {
+      if (!oneOf(["supply", "demand"], value)) return { error: "origin must be supply or demand." };
+      patch[key] = value;
+    } else if (key === "seller_ref") {
+      if (value === null || value === "") patch[key] = null;
+      else if (typeof value === "string" && /^(company|supply|stock):.+$/.test(value)) patch[key] = value;
+      else return { error: "seller_ref must be a company:, supply: or stock: reference." };
     } else if (key === "trade_stage") {
       if (!oneOf(TRADE_STAGES, value)) return { error: "Unknown stage." };
       patch[key] = value;

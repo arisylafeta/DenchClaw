@@ -1,5 +1,9 @@
 import type { PathOrFileDescriptor } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAgentBackend as backendForCutover } from "@/lib/agent-backend";
+import { nativeFetch } from "@/lib/hermes-native";
+import { POST as bridgeSubmit } from "./route";
+vi.mock("@/lib/hermes-native", () => ({ hermesProfiles: () => ["alpha"], nativeFetch: vi.fn(async () => Response.json({ session: { id: "native-existing" } })) }));
 
 vi.mock("@/lib/active-runs", () => ({
 	startSubscribeRun: vi.fn(() => ({ status: "completed" })),
@@ -96,6 +100,19 @@ describe("POST /api/gateway/chat", () => {
 		vi.restoreAllMocks();
 	});
 
+  it("blocks an existing native session but preserves non-native submissions in gateway mode", async () => {
+    vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+    vi.mocked(backendForCutover).mockReturnValue("hermes");
+    try {
+      const request = () => new Request("http://local/api/gateway/chat", { method: "POST", body: JSON.stringify({ sessionKey: "native-existing", message: "old client" }) });
+      const response = await bridgeSubmit(request());
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "gateway_transport" });
+      vi.mocked(nativeFetch).mockResolvedValueOnce(new Response(null, { status: 404 }));
+      const allowed = await bridgeSubmit(request());
+      expect(allowed.status).toBe(200); await allowed.text();
+    } finally { vi.unstubAllEnvs(); }
+  });
 	it("hydrates attached images before reactivating the gateway run", async () => {
 		const { getActiveRun, reactivateSubscribeRun } = await import("@/lib/active-runs");
 		vi.mocked(getActiveRun).mockReturnValue({ status: "completed" } as never);

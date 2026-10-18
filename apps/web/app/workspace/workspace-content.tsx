@@ -33,7 +33,7 @@ import { RichDocumentEditor, isDocxFile, isTxtFile, textToHtml } from "../compon
 import { Breadcrumbs } from "../components/workspace/breadcrumbs";
 import { EmptyState } from "../components/workspace/empty-state";
 import { ReportViewer } from "../components/charts/report-viewer";
-import { InboxView } from "../components/crm/inbox-view";
+import { InboxView } from "../components/crm/inbox/inbox-view";
 import { CalendarView } from "../components/crm/calendar-view";
 import { PersonProfile } from "../components/crm/person-profile";
 import { CompanyProfile } from "../components/crm/company-profile";
@@ -41,7 +41,8 @@ import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../comp
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
-import { CampaignsView } from "../components/campaigns/campaigns-view";
+import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
+import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
@@ -95,6 +96,9 @@ import {
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
+import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
+import { GroupBadge } from "../components/workspace/group-chat";
+import { parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
 import {
   DropdownMenu,
@@ -138,6 +142,18 @@ const TerminalDrawer = dynamic(
   () => import("../components/terminal/terminal-drawer"),
   { ssr: false },
 );
+
+/** Only the visible panel has a current subscription; hidden panels use the server listing. */
+export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId }: {
+  chats: HermesChatsController;
+  snapshots: Record<string, ChatTabRuntimeSnapshot>;
+  visibleTabId: string | null;
+}) {
+  const visible = Object.values(snapshots).filter(snapshot => snapshot.tabId === visibleTabId && snapshot.sessionId);
+  return <HermesConversationList chats={chats}
+    workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming).map(snapshot => snapshot.sessionId!))}
+    awaitingKeys={new Set(visible.filter(snapshot => snapshot.awaiting).map(snapshot => snapshot.sessionId!))} />;
+}
 
 // --- Types ---
 
@@ -394,6 +410,7 @@ function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   if (path === "~cloud") return "cloud";
   if (path.startsWith("~platform-admin/")) return "platform-admin";
   if (path === "~crm/inbox") return "crm-inbox";
+  if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   switch (nodeType) {
     case "object": return "object";
@@ -534,6 +551,7 @@ function WorkspacePageInner() {
   const [context, setContext] = useState<WorkspaceContext | null>(null);
 
   // Chat session state
+  const hermesChats = useHermesConversations();
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<WebSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -688,19 +706,21 @@ function WorkspacePageInner() {
   // state is independent of which chat is shown in the center.
   const openBlankChatTab = useCallback(() => {
     const tab = createDraftChatTab();
+    if (hermesChats.enabled) { hermesChats.newChat(); return tab; }
     setActiveSessionId(null);
     setActiveSubagentKey(null);
     dispatch({ type: "openChat", tab: { ...tab, preview: true } });
     return tab;
-  }, []);
+  }, [hermesChats.enabled, hermesChats.newChat]);
 
   const openPermanentBlankChatTab = useCallback(() => {
     const tab = createDraftChatTab();
+    if (hermesChats.enabled) { hermesChats.newChat(); return tab; }
     setActiveSessionId(null);
     setActiveSubagentKey(null);
     dispatch({ type: "openChat", tab: { ...tab, preview: false } });
     return tab;
-  }, []);
+  }, [hermesChats.enabled, hermesChats.newChat]);
 
   const openSessionChatTab = useCallback((sessionId: string, title?: string) => {
     setActiveSessionId(sessionId);
@@ -708,6 +728,20 @@ function WorkspacePageInner() {
     const tab = createSessionChatTab({ sessionId, title });
     dispatch({ type: "openChat", tab: { ...tab, preview: true } });
   }, []);
+
+  useEffect(() => {
+    if (hermesChats.selected) openSessionChatTab(hermesChats.selected.key, hermesChats.selected.title);
+  }, [hermesChats.selected, openSessionChatTab]);
+
+  const lastHermesTab = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hermesChats.enabled || lastHermesTab.current === activeChatTabId) return;
+    lastHermesTab.current = activeChatTabId;
+    const tab = tabsState.chatTabs.find((entry) => entry.id === activeChatTabId);
+    const row = hermesChats.listing?.sessions.find((entry) => entry.key === tab?.sessionId);
+    if (row && row.key !== hermesChats.selected?.key) hermesChats.select(row);
+    else if (!tab?.sessionId && hermesChats.selected) hermesChats.clear();
+  }, [activeChatTabId, tabsState.chatTabs, hermesChats]);
 
   const openSubagentChatTab = useCallback((params: {
     sessionKey: string;
@@ -929,6 +963,12 @@ function WorkspacePageInner() {
       if (treeCollapsed === "1") {
         setFileTreeCollapsed(true);
       }
+    }
+    // Direct mail links must reveal the page, even in a fresh workspace.
+    if (new URLSearchParams(window.location.search).get("crm") === "inbox") {
+      setRightPanelCollapsed(false);
+      setRightPanelWidth(clamp(window.innerWidth - LEFT_SIDEBAR_COMPACT_WIDTH - CENTER_PANEL_MIN, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX));
+      if (!isDesktopWorkspaceViewport()) {setMobileRightPanelOpen(true);}
     }
   }, [isMobile]);
 
@@ -1178,6 +1218,13 @@ function WorkspacePageInner() {
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
+      if (hermesChats.enabled) {
+        const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+        if (!res.ok) return;
+        dispatch({ type: "closeChatsForSession", sessionId });
+        hermesChats.forget(sessionId);
+        return;
+      }
       const res = await fetch(`/api/web-sessions/${sessionId}`, { method: "DELETE" });
       if (!res.ok) {return;}
       const closedTabIds = new Set(
@@ -1206,7 +1253,7 @@ function WorkspacePageInner() {
       }
       void fetchSessions();
     },
-    [activeSessionId, sessions, fetchSessions, openBlankChatTab, openSessionChatTab],
+    [activeSessionId, sessions, fetchSessions, openBlankChatTab, openSessionChatTab, hermesChats],
   );
 
   const handleRenameSession = useCallback(
@@ -1218,7 +1265,7 @@ function WorkspacePageInner() {
       });
       void fetchSessions();
     },
-    [fetchSessions],
+    [fetchSessions, hermesChats],
   );
 
   // Poll for parent/subagent run state so tabs and sidebars can reflect
@@ -1311,6 +1358,7 @@ function WorkspacePageInner() {
         | "crm-people"
         | "crm-companies"
         | "crm-campaigns"
+        | "crm-leaderboard"
         | "crm-inbox"
         | "crm-calendar"
         | "platform-proposals"
@@ -1346,7 +1394,8 @@ function WorkspacePageInner() {
         cloud: { path: "~cloud", name: "Cloud" },
         skills: { path: "~skills", name: "Skills" },
         cron: { path: "~cron", name: "Cron" },
-        "crm-inbox": { path: "~crm/inbox", name: "Inbox" },
+        "crm-inbox": { path: "~crm/inbox", name: "Mail" },
+        "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-listings": { path: "~platform-admin/listings", name: "Listings" },
@@ -2197,8 +2246,9 @@ function WorkspacePageInner() {
   }, [activeSessionId, sessions]);
 
   useEffect(() => {
-    dispatch({ type: "syncChatTitles", sessions, subagents });
-  }, [sessions, subagents]);
+    if (hermesChats.enabled) dispatch({ type: "syncChatTitles", sessions: (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.title })), subagents: [] });
+    else dispatch({ type: "syncChatTitles", sessions, subagents });
+  }, [hermesChats.enabled, hermesChats.listing, sessions, subagents]);
 
   // Promote the active draft chat tab's title to the (newly named) active
   // session title once the backend assigns one.
@@ -2343,6 +2393,7 @@ function WorkspacePageInner() {
   const customCrmObjects = useMemo(() => collectCrmObjectNodes(sidebarNavTree), [sidebarNavTree]);
 
   const sidebarCommonProps = {
+    conversationFilter: hermesChats.enabled ? { value: hermesChats.filter, profiles: hermesChats.listing?.profiles ?? [], onChange: hermesChats.setFilter } : undefined,
     activePath: null,
     loading: treeLoading,
     orgName: context?.organization?.name,
@@ -2363,6 +2414,8 @@ function WorkspacePageInner() {
           ? "companies" as const
           : activeContentTab?.kind === "campaigns"
             ? "campaigns" as const
+          : activeContentTab?.kind === "crm-leaderboard"
+            ? "leaderboard" as const
           : activeContentTab?.kind === "crm-inbox"
             ? "inbox" as const
             : activeContentTab?.kind === "crm-calendar"
@@ -2375,9 +2428,13 @@ function WorkspacePageInner() {
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
     onNavigateToCrmObject: handleNavigateToObject,
-    onNewChatSession: () => openPermanentBlankChatTab(),
+    onNewChatSession: () => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(),
+    newChatOptions: hermesChats.enabled ? [
+      { label: "Solo chat…", onSelect: () => hermesChats.newChat("solo") },
+      { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
+    ] : undefined,
     chatsPanel: (
-      <ChatSessionsSidebar
+      hermesChats.enabled ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2406,7 +2463,7 @@ function WorkspacePageInner() {
   // Shared props for the chat-panel header history dropdown.
   // Defined here so all open ChatPanel tabs see the same up-to-date data.
   const chatHistoryPanelProps = {
-    historySessions: sessions,
+    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
     historyStreamingSessionIds: streamingSessionIds,
     historySubagents: subagents,
     historyActiveSubagentKey: activeSubagentKey,
@@ -2414,11 +2471,16 @@ function WorkspacePageInner() {
     historyGatewaySessions: gatewaySessions,
     historyActiveGatewaySessionKey: activeGatewaySessionKey,
     onSelectHistorySession: (sessionId: string) => {
+      if (hermesChats.enabled) {
+        const row = hermesChats.listing?.sessions.find((entry) => entry.key === sessionId);
+        if (row) hermesChats.select(row);
+        return;
+      }
       const session = sessions.find((entry) => entry.id === sessionId);
       openSessionChatTab(sessionId, session?.title);
     },
     onNewChatSession: () => {
-      openPermanentBlankChatTab();
+      if (hermesChats.enabled) hermesChats.newChat(); else openPermanentBlankChatTab();
     },
     onToggleTerminal: () => setTerminalOpen((open) => !open),
     terminalOpen,
@@ -2633,7 +2695,7 @@ function WorkspacePageInner() {
               </button>
               <button
                 type="button"
-                onClick={() => openPermanentBlankChatTab()}
+                onClick={() => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab()}
                 className="p-1.5 rounded-lg flex-shrink-0"
                 style={{ color: "var(--color-text-muted)" }}
                 title="New chat"
@@ -2648,12 +2710,20 @@ function WorkspacePageInner() {
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
+          {hermesChats.enabled && !hermesChats.selected && <HermesConversationPanel chats={hermesChats} />}
+          {hermesChats.enabled && <HermesNewChatDialog chats={hermesChats} />}
           {mainChatTabs.map((tab) => {
+            let nativeKey: string | undefined;
+            if (hermesChats.enabled) {
+              try { if (tab.sessionId) { parseConversationKey(tab.sessionId); nativeKey = tab.sessionId; } } catch { /* Legacy tabs are not native Hermes sessions. */ }
+              if (!nativeKey) return null;
+            }
+            const groupRow = nativeKey ? hermesChats.listing?.sessions.find((row) => row.key === nativeKey && row.kind === "group") : undefined;
             const isGateway = tab.variant === "gateway";
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
               : null;
-            const isVisible = tab.id === visibleMainChatTabId;
+            const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || hermesChats.selected?.key === nativeKey);
             const showLeftToggle = !isMobile && leftSidebarCollapsed;
             const showRightToggle = !isMobile && rightPanelCollapsed;
             const headerLeftSlot = showLeftToggle ? (
@@ -2717,11 +2787,13 @@ function WorkspacePageInner() {
                 className={isVisible ? "flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" : "hidden"}
               >
                 <ChatPanel
+                  nativeConversationKey={nativeKey}
+                  headerBadge={groupRow ? <GroupBadge row={groupRow} /> : undefined}
                   ref={(handle) => setMainChatPanelRef(tab.id, handle)}
                   sessionTitle={tab.title}
                   initialSessionId={isGateway ? undefined : (tab.sessionKey ? undefined : tab.sessionId ?? undefined)}
                   onActiveSessionChange={isGateway || tab.sessionKey ? undefined : (id) => handleChatTabSessionChange(tab.id, id)}
-                  onSessionsChange={isGateway ? undefined : refreshSessions}
+                  onSessionsChange={nativeKey ? () => void hermesChats.reload() : isGateway ? undefined : refreshSessions}
                   onConversationActivity={() => promoteTabById(tab.id)}
                   onSubagentClick={handleSubagentClickFromChat}
                   onFilePathClick={handleFilePathClickFromChat}
@@ -2741,6 +2813,8 @@ function WorkspacePageInner() {
                   gatewaySessionId={isGateway ? tab.sessionId : undefined}
                   gatewayChannel={isGateway ? tab.channel : undefined}
                   visible={isVisible}
+                  nativeTransport={hermesChats.listing?.transport}
+                  onBranched={(conversation) => { hermesChats.select(conversation); void hermesChats.reload(); }}
                   searchFn={searchIndex}
                   fileContext={isVisible ? fileContext : undefined}
                   onFileChanged={handleFileChanged}
@@ -2954,11 +3028,11 @@ function ContentRenderer({
 
     case "campaigns":
       return (
-        <CampaignsView
-          campaignId={content.campaignId}
-          onOpenCampaign={(id) => onOpenEntry("campaign", id)}
-          onBack={() => onNavigateToObject("campaign")}
-          onNavigatePerson={(id) => onOpenEntry("people", id)}
+        <InboxView
+          key={`mail-campaign:${content.campaignId ?? "list"}`}
+          initialView="campaigns"
+          initialCampaignId={content.campaignId}
+          onOpenPerson={(id) => onOpenEntry("people", id)}
         />
       );
 
@@ -2968,6 +3042,9 @@ function ContentRenderer({
       }
       if (content.data.object.name === "dismantler") {
         return <DismantlersView />;
+      }
+      if (content.data.object.name === "marketplace_pulse") {
+        return <MarketplacePulseView onOpenPerson={(id) => onOpenEntry("people", id)} />;
       }
       return (
         <ObjectView
@@ -3174,8 +3251,11 @@ function ContentRenderer({
         />
       );
 
+    case "crm-leaderboard":
+      return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
+
     case "crm-inbox":
-      return <InboxView onOpenPerson={(id) => onOpenEntry("people", id)} />;
+      return <InboxView key="mail-conversations" onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
     case "crm-calendar":
       return (

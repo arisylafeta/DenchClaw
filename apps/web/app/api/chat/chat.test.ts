@@ -1,5 +1,8 @@
 import type { PathOrFileDescriptor } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { resolveAgentBackend as backendForCutover } from "@/lib/agent-backend";
+import { createHermesChatStream as streamForCutover } from "@/lib/hermes-client";
+import { POST as submitChat } from "./route";
 
 // Mock active-runs module
 vi.mock("@/lib/active-runs", () => ({
@@ -52,6 +55,13 @@ vi.mock("@/lib/auth", () => ({
     email: "ari@rebattery.io",
     displayName: "Ari",
   })),
+}));
+
+vi.mock("@/lib/hermes-native", () => ({
+  assertProfile: vi.fn((profile: string) => {
+    if (profile !== "alpha") throw new Error("Unknown Hermes profile");
+    return { name: profile, workspaceDir: "/fixtures/alpha/workspace" };
+  }),
 }));
 
 // Mock workspace module
@@ -147,6 +157,50 @@ describe("Chat API routes", () => {
   // ─── POST /api/chat ──────────────────────────────────────────────
 
   describe("POST /api/chat", () => {
+    it("rejects native submissions at the real endpoint in gateway mode", async () => {
+      vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+      vi.mocked(backendForCutover).mockReturnValue("hermes");
+      vi.mocked(streamForCutover).mockClear();
+      try {
+        const response = await submitChat(new Request("http://local/api/chat", { method: "POST", body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "alpha", messages: [{ id: "u", role: "user", parts: [{ type: "text", text: "old client" }] }] }) }));
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({ error: "gateway_transport" });
+        expect(streamForCutover).not.toHaveBeenCalled();
+      } finally { vi.unstubAllEnvs(); }
+    });
+    it("continues native Hermes through the existing authenticated route with pinned profile and no Dench history writes", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      const { persistUserMessage } = await import("@/lib/active-runs");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes"); vi.mocked(persistUserMessage).mockClear();
+      const { POST } = await import("./route.js");
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "alpha", messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Continue this session" }] }] }) }));
+      expect(response.status).toBe(200); await response.text();
+      expect(createHermesChatStream).toHaveBeenCalledWith(expect.objectContaining({ profile: "alpha", existingSession: true, sessionKey: "native-existing", userId: "11111111-1111-4111-8111-111111111111", message: "Continue this session", signal: expect.any(AbortSignal) }));
+      expect(persistUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("keeps selected file context in its source workspace when another bot owns the chat", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      const { resolveAgentWorkspacePrefix } = await import("@/lib/workspace");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+      vi.mocked(resolveAgentWorkspacePrefix).mockReturnValue("/fixtures/source-workspace");
+      const { POST } = await import("./route.js");
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "alpha", workspaceContext: { filePath: "doc.md", isDirectory: false }, messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Read this" }] }] }) }));
+      expect(response.status).toBe(200); await response.text();
+      expect(createHermesChatStream).toHaveBeenCalledWith(expect.objectContaining({ profile: "alpha", message: expect.stringContaining("/fixtures/source-workspace/doc.md") }));
+      expect(vi.mocked(createHermesChatStream).mock.calls.at(-1)?.[0].message).not.toContain("/fixtures/alpha/workspace/doc.md");
+    });
+
+    it("rejects an unknown pinned Hermes profile before opening a provider stream", async () => {
+      const { resolveAgentBackend } = await import("@/lib/agent-backend");
+      const { createHermesChatStream } = await import("@/lib/hermes-client");
+      vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
+      const { POST } = await import("./route.js");
+      const response = await POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "native-existing", hermesProfile: "../default", messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }] }) }));
+      expect(response.status).toBe(400); expect(createHermesChatStream).not.toHaveBeenCalled();
+    });
     it("returns 400 when no user message text", async () => {
       const { POST } = await import("./route.js");
       const req = new Request("http://localhost/api/chat", {

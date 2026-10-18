@@ -3,15 +3,16 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CampaignActivity } from "@/lib/campaign-activity";
-import type { CampaignDetail } from "@/lib/campaigns";
+import type { MailCampaignDetail } from "@/lib/mail-types";
+import { JOURNEY } from "@/lib/dismantlers";
 import { buildFileLink } from "@/lib/workspace-links";
 import { request } from "../bulk-trades/trade-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../platform-admin/ui/tabs";
 import { CampaignRecipients } from "./campaign-recipients";
 import { CampaignListings, CampaignWebsiteActivity } from "./campaign-activity-panel";
-import { CampaignDate, MetricsStrip, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignDate, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
-type Props = { detail: CampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
+type Props = { detail: MailCampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
 type ActivityState = { campaignId: string; activity: CampaignActivity | null; failed: boolean };
 
 export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
@@ -23,7 +24,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
     setEvidence({ campaignId: campaign.id, activity: null, failed: false });
     async function load() {
       try {
-        const activity = await request<CampaignActivity>(`/api/campaigns/${encodeURIComponent(campaign.id)}/activity`, { signal: controller.signal });
+        const activity = await request<CampaignActivity>(`/api/mail/campaigns/${encodeURIComponent(campaign.id)}/activity`, { signal: controller.signal });
         if (!controller.signal.aborted && activity.campaign_id === campaign.id) {
           setEvidence({ campaignId: campaign.id, activity, failed: false });
         } else if (!controller.signal.aborted) {
@@ -47,7 +48,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
         </nav>
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="min-w-0 break-words text-[26px] font-semibold tracking-[-0.01em]">{campaign.name}</h1>
-          <StatusTag status={campaign.status} />
+          <StatusTag status={detail.mail_state ?? campaign.status} />
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]" style={{ color: "var(--bt-text-2)" }}>
           {campaign.type && <span>{humanize(campaign.type)}</span>}
@@ -55,9 +56,13 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
           <span>Audience: {campaign.audience ? humanize(campaign.audience) : "Unknown"}{campaign.audience_size != null ? ` · ${campaign.audience_size.toLocaleString("en-GB")}` : ""}</span>
           <span>Sent: <CampaignDate value={campaign.launched_at || campaign.last_invite_at} /></span>
         </div>
-        <MetricsStrip campaign={campaign} />
-        <p className="text-[13px]" style={mutedStyle}>Bounced: {campaign.metrics.bounced ?? "Unknown"} · Opted out: {campaign.metrics.opted_out ?? "Unknown"}</p>
+        <section aria-label="Campaign metrics" className="grid grid-cols-2 border sm:grid-cols-7" style={{ borderColor: "var(--bt-border)" }}>
+          {(["sent", "delivered", "bounced", "opened", "clicked", "unsubscribed", "replied"] as const).map((key) => <div key={key} className="p-3"><span className="bt-label">{humanize(key)}</span><p className="text-xl font-semibold">{campaign.channel === "email-gmail" && ["delivered", "opened", "clicked"].includes(key) ? "Not tracked" : detail[key] ?? "Unknown"}</p></div>)}
+        </section>
+        <p role="note" className="text-xs" style={mutedStyle}>Scanner evidence: {detail.scanner_evidence ? "recorded" : "not recorded"} · Proxy evidence: {detail.proxy_evidence ? "recorded" : "not recorded"}. Opens and clicks do not prove human engagement.</p>
+        {detail.dismantler_funnel && <DismantlerFunnel funnel={detail.dismantler_funnel} />}
         <section aria-label="Metrics provenance" className="flex flex-col gap-1 text-xs" style={mutedStyle}>
+          <p>The seven totals above come from the mail log. Historical snapshot metadata is kept separately below.</p>
           <p>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger totals"} · {campaign.metrics_basis === "snapshot" ? `Original sent: ${campaign.metrics.sent ?? "Unknown"} · ` : ""}Retained recipients: {campaign.recipient_count.toLocaleString("en-GB")}</p>
           <p>{campaign.metrics_basis === "snapshot" ? "Saved totals are preserved; the retained recipient ledger below may not cover every original send." : "Totals come from the retained send ledger and its available tracking observations."}</p>
           <p>{campaign.metrics_observed_at ? <>{campaign.metrics_basis === "snapshot" ? "Snapshot refreshed" : "Latest recipient check"}: <CampaignDate value={campaign.metrics_observed_at} withTime />. This does not mean every recipient was checked.</> : "Observation freshness is unknown."}</p>
@@ -72,7 +77,8 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
             {[["recipients", "Recipients"], ["listings", "Listings"], ["details", "Details"]].map(([value, label]) => <TabsTrigger key={value} value={value} className="h-auto flex-none rounded-none border-0 px-3.5 py-3 text-[13px] shadow-none hover:text-[var(--bt-text)] focus-visible:ring-[var(--bt-text)] data-[state=active]:bg-transparent data-[state=active]:text-[var(--bt-text)] data-[state=active]:font-semibold after:bg-[var(--bt-text)] group-data-[orientation=horizontal]/tabs:after:bottom-0" style={{ color: tab === value ? "var(--bt-text)" : "var(--bt-muted)" }}>{label}</TabsTrigger>)}
           </TabsList>
           <TabsContent value="recipients" forceMount hidden={tab !== "recipients"} className="data-[state=inactive]:hidden">
-            <CampaignRecipients recipients={detail.recipients} onNavigatePerson={onNavigatePerson} />
+            <CampaignRecipients recipients={detail.recipients} deliveryRows={detail.delivery_rows} onNavigatePerson={onNavigatePerson} outreach={!!detail.dismantler_funnel} />
+            <section aria-label="Tracked links" className="mt-4"><h2 className="font-semibold">Tracked links</h2><ul>{detail.links?.map((link) => <li key={link.id} className="py-1 text-sm"><a href={link.destination_url} target="_blank" rel="noreferrer" className="underline">{link.cta_key}</a> · {link.destination_url} · First click: <CampaignDate value={link.first_clicked_at} withTime /></li>)}</ul>{!detail.links?.length && <p>No tracked links recorded.</p>}</section>
           </TabsContent>
           <TabsContent value="listings">
             <CampaignListings detail={detail} activity={activity} loading={activityLoading} onNavigatePerson={onNavigatePerson} />
@@ -83,6 +89,20 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
         </Tabs>
       </main>
     </div>
+  );
+}
+
+/** Where the emailed dismantlers are now. Stages move on the Dismantlers page; a send moves Found to Talking. */
+function DismantlerFunnel({ funnel }: { funnel: NonNullable<MailCampaignDetail["dismantler_funnel"]> }) {
+  const steps: Array<[string, number]> = [["Emailed", funnel.emailed], ["Replied", funnel.replied],
+    ...JOURNEY.map((stage): [string, number] => [stage, funnel.stages[stage] ?? 0]), ["Parked", funnel.stages.Parked ?? 0]];
+  return (
+    <section aria-label="Dismantler progress" className="flex flex-col gap-1.5">
+      <span className="bt-label">Dismantlers from this campaign</span>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+        {steps.map(([label, count]) => <span key={label}><span style={mutedStyle}>{label}</span> <span className="bt-mono font-semibold">{count.toLocaleString("en-GB")}</span></span>)}
+      </div>
+    </section>
   );
 }
 

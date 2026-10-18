@@ -61,7 +61,7 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertIsNone(saved.map_saved_search(search(email="alex@rebattery.io")))
         self.assertIsNone(saved.map_saved_search(search(email="qa-buyer@example.com")))
 
-    def test_marks_unsubscribed_searches_for_closing(self):
+    def test_marks_unsubscribed_searches_for_skipping(self):
         self.assertTrue(saved.map_saved_search(search(status="unsubscribed"))["unsubscribed"])
         self.assertFalse(saved.map_saved_search(search(status="paused"))["unsubscribed"])
 
@@ -84,6 +84,7 @@ class SourcingRequestImportTest(unittest.TestCase):
         row = saved.map_sourcing_request(request())
         self.assertEqual(row["kind"], "request")
         self.assertIsNone(row["basis"])
+        self.assertEqual(row["status"], "qualifying")
         self.assertEqual(row["email"], "jan@solarbau.de")
         self.assertEqual(row["wants"], "Nissan Leaf 40kWh")
         self.assertEqual(row["quantity"], "2 to 10 units")

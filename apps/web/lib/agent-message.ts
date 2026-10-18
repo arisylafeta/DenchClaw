@@ -76,3 +76,12 @@ export function buildAgentMessage(args: {
 
 	return message;
 }
+
+/** Undo only the agent-only blocks emitted by buildAgentMessage; preserve attachment cards. */
+export function stripAgentMessageContext(text: string): string {
+	let remaining = text;
+	// Match the generated header, count, columns and preview lines, only at offset zero.
+	const table = /^\[Selected table (rows|cells): [^\n]+\]\n\d+ rows?(?: x \d+ columns?)? selected\.\nColumns: [^\n]*(?:\n- (?:row \d+ \([^\n]*|\.\.\.\d+ more selected (?:rows|cells)))*\n\n/;
+	remaining = remaining.replace(table, "");
+	return remaining.replace(/^\[Context: workspace (?:file|directory) '[^\n]*'\]\n\n/, "");
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the CRM Leaderboard activity snapshot daily
+
+[Timer]
+OnCalendar=*-*-* 05:30:00 UTC
+Persistent=true
+Unit=rebattery-leaderboard-snapshot.service
+
+[Install]
+WantedBy=timers.target

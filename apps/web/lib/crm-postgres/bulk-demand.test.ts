@@ -46,6 +46,95 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.updateDemand("btd_missing", { note: "x" })).toBeNull();
   });
 
+  it("ranks priority inside its score and status bands and computes missing qualification and matches", async () => {
+    const pinned = await demand.addDemand({ buyer: "Priority Buyer", wants: "Toyota packs", priority: true,
+      fee_eur: 1, qualify_question: "When do you need these?" }, user.id);
+    const scored = await demand.addDemand({ buyer: "Scored Buyer", wants: "Toyota packs", fee_eur: 2,
+      price_basis: "buyer", reputation: "paid" }, user.id);
+    const qualifying = await demand.addDemand({ buyer: "Qualifying Priority", wants: "Toyota packs",
+      status: "qualifying", priority: true }, user.id);
+    const hot = await demand.addDemand({ buyer: "Hot Buyer", wants: "Toyota packs", fee_eur: 10000,
+      price_basis: "buyer", reputation: "paid" }, user.id);
+    expect(pinned.missing).toEqual(["no price", "no quantity", "question not sent", "no supply match"]);
+    const ordered = (await demand.listDemand()).map((row) => row.id);
+    expect(ordered.indexOf(hot.id)).toBeLessThan(ordered.indexOf(pinned.id));
+    expect(ordered.indexOf(pinned.id)).toBeLessThan(ordered.indexOf(scored.id));
+    expect(ordered.indexOf(scored.id)).toBeLessThan(ordered.indexOf(qualifying.id));
+    const qualificationLot = await trades.createBulkTrade({ title: "Qualification-only Toyota lot" }, user.id);
+    await pg.queryPg(`insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason)
+      values ($1, $2, 'strong', 'Exact Toyota pack family')`, [pinned.id, qualificationLot.id]);
+    const complete = await demand.updateDemand(pinned.id, { kind: "request", basis: null, quantity: "10 packs", max_price: 1000,
+      price_currency: "EUR", price_unit: "pack", needed_by: "2027-01-01", qualify_asked_on: "2026-10-16" });
+    expect(complete?.missing).toEqual([]);
+    expect(complete?.inventory_matches).toMatchObject([{ id: qualificationLot.id, kind: "trade", strength: "strong" }]);
+    await pg.queryPg("update crm_bulk_trade_demand_matches set hidden = true where demand_id = $1", [pinned.id]);
+    expect((await demand.getDemand(pinned.id))?.missing).toEqual(["no supply match"]);
+  });
+
+  it("only requests need a date, and supply gaps follow the same auction eligibility as inventory", async () => {
+    const row = await demand.addDemand({ buyer: "Auction Eligibility Buyer", wants: "Battery packs" }, user.id);
+    expect(row.missing).not.toContain("no timeline");
+    expect((await demand.updateDemand(row.id, { kind: "request", basis: null }))?.missing).toContain("no timeline");
+    const auction = await trades.createBulkTrade({ title: "Eligibility-only auction" }, user.id);
+    await pg.queryPg(`update crm_bulk_trade_lots set auction_id = gen_random_uuid(), auction_status = 'withdrawn',
+      auction_closes_at = '2099-01-01' where id = $1`, [auction.id]);
+    await pg.queryPg(`insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason)
+      values ($1, $2, 'strong', 'Exact family')`, [row.id, auction.id]);
+    const withdrawn = await demand.getDemand(row.id);
+    expect(withdrawn?.inventory_matches).toEqual([]);
+    expect(withdrawn?.missing).toContain("no supply match");
+    await pg.queryPg("update crm_bulk_trade_lots set auction_status = 'published' where id = $1", [auction.id]);
+    const live = await demand.getDemand(row.id);
+    expect(live?.inventory_matches).toMatchObject([{ id: auction.id, kind: "auction" }]);
+    expect(live?.missing).not.toContain("no supply match");
+    await pg.queryPg("update crm_bulk_trade_lots set auction_closes_at = '2000-01-01' where id = $1", [auction.id]);
+    const expired = await demand.getDemand(row.id);
+    expect(expired?.inventory_matches).toEqual([]);
+    expect(expired?.missing).toContain("no supply match");
+  });
+
+  it("records activity, scopes deletion, counts it and stamps qualifying entries across writers", async () => {
+    // Load after DATABASE_URL is set: the Postgres pool is configured at module initialization.
+    const activity = await import("./bulk-demand-activity");
+    const row = await demand.addDemand({ buyer: "Activity Buyer", wants: "Leaf packs", status: "qualifying" }, user.id);
+    expect(row.qualify_entered_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(row.qualify_asked_on).toBeNull();
+    expect(row.activity_count).toBe(1);
+    const entry = await activity.addDemandActivity({ demandId: row.id, kind: "research", title: "  Found supplier  ",
+      body: "Checked stock", refKind: "url", refId: "https://supplier.test", data: { units: 12 }, actorUserId: user.id });
+    expect(entry).toMatchObject({ title: "Found supplier", kind: "research", actor_user_id: user.id, data: { units: 12 } });
+    expect((await activity.listDemandActivity(row.id))[0].id).toBe(entry.id);
+    expect(await demand.getDemand(row.id)).toMatchObject({ activity_count: 2, last_activity_at: entry.occurred_at });
+    expect(await activity.deleteDemandActivity("btd_other", entry.id)).toBe(false);
+    expect(await activity.deleteDemandActivity(row.id, entry.id)).toBe(true);
+    await expect(activity.addDemandActivity({ demandId: row.id, kind: "note", title: " " })).rejects.toThrow();
+    await demand.updateDemand(row.id, { qualify_asked_on: "2026-10-01" });
+    await demand.confirmDemand(row.id);
+    await demand.confirmDemand(row.id);
+    await demand.closeDemand(row.id, "bought_elsewhere");
+    await demand.updateDemand(row.id, { status: "qualifying" });
+    expect(await demand.getDemand(row.id)).toMatchObject({ status: "qualifying", qualify_asked_on: null });
+    expect((await activity.listDemandActivity(row.id)).map((a) => a.title)).toContain("Still wanted");
+    await pg.queryPg("delete from crm_bulk_trade_demand where id = $1", [row.id]);
+    expect(await activity.listDemandActivity(row.id)).toEqual([]);
+  });
+
+  it("invalidates matching when qualifying and when reopening through edits or confirmation", async () => {
+    const row = await demand.addDemand({ buyer: "Reconfirm Buyer", wants: "Leaf packs", status: "open" }, user.id);
+    const seed = () => pg.queryPg("update crm_bulk_trade_demand set match_hash = 'matched', supply_match_hash = 'matched' where id = $1", [row.id]);
+    const hashes = async () => (await pg.queryPg("select match_hash, supply_match_hash from crm_bulk_trade_demand where id = $1", [row.id]))[0];
+    await seed();
+    await demand.updateDemand(row.id, { status: "qualifying" });
+    expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
+    await seed();
+    await demand.updateDemand(row.id, { status: "open" });
+    expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
+    await demand.updateDemand(row.id, { status: "qualifying" });
+    await seed();
+    expect(await demand.confirmDemand(row.id)).toMatchObject({ status: "open" });
+    expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
+  });
+
   it("suggests matched open demand, adds it as a buyer once, and keeps Not a fit hidden", async () => {
     const nolden = await demand.addDemand({ buyer: "H. Nolden Investment", contact: "Markus", email: "markus@nolden.example", wants: "Tested EV packs 50 kWh+" }, user.id);
     const other = await demand.addDemand({ buyer: "Somerset EV", wants: "MEB modules" }, user.id);
@@ -79,12 +168,12 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     const first = await insert({ buyer: "Revoxa buyer", email: "dawid@revoxa.example", wants: "LFP packs, no pouch", quantity: "Large", location: "Romania" });
     expect(await proposals.decideProposal(first, "accept", user)).toEqual({ ok: true, lot_id: null });
     const [row] = (await demand.listDemand()).filter((d) => d.buyer === "Revoxa buyer");
-    expect(row).toMatchObject({ wants: "LFP packs, no pouch", location: "Romania", confirmed_on: "2026-08-17",
+    expect(row).toMatchObject({ status: "qualifying", product_family: null, wants: "LFP packs, no pouch", location: "Romania", confirmed_on: "2026-08-17",
       source_label: "Gmail · dawid@revoxa.example", source_quote: "We are looking for LFP packs" });
 
     const update = await insert({ buyer: "Revoxa buyer", wants: "LFP packs and blade cells", demand_id: row.id }, row.id);
     await proposals.decideProposal(update, "accept", user);
-    expect(await demand.getDemand(row.id)).toMatchObject({ wants: "LFP packs and blade cells", location: "Romania" });
+    expect(await demand.getDemand(row.id)).toMatchObject({ status: "qualifying", wants: "LFP packs and blade cells", location: "Romania" });
     expect((await demand.possibleDemand()).map((p) => p.id)).not.toContain(update);
   });
   it("keeps requests and standing buy-boxes apart, moves a buy-box through its bases, and makes a request standing", async () => {
@@ -198,20 +287,19 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
       [JSON.stringify({ buyer: "Rahul's buyer", wants: "1,000 LFP cells in three weeks", kind: "request", needed_by: "2026-10-20",
         volume: 1000, volume_unit: "cells", spec: { chemistries: ["LFP", "Unobtainium"], formats: ["Cells"] } })],
     );
-    await proposals.decideProposal(card.id, "accept", user);
+    expect(await proposals.decideProposal(card.id, "accept", user)).toMatchObject({ ok: true });
     const [row] = (await demand.listDemand()).filter((d) => d.buyer === "Rahul's buyer");
-    expect(row).toMatchObject({ kind: "request", basis: null, needed_by: "2026-10-20", volume: 1000, volume_unit: "cells",
+    expect(row).toMatchObject({ status: "qualifying", product_family: null, kind: "request", basis: null, needed_by: "2026-10-20", volume: 1000, volume_unit: "cells",
       spec: { chemistries: ["LFP"], formats: ["Cells"] }, source_kind: "call", observed_on: "2026-09-29" });
   });
   it("marks a buyer waiting on our reply until either founder writes back", async () => {
     await pg.queryPg(`insert into crm_people (id, full_name, email) values ('p_jc', 'Jonathan Cogman', 'jc@ce.example') on conflict do nothing`);
     const row = await demand.addDemand({ buyer: "Connected Energy", person_id: "p_jc", wants: "600+ packs of one type" }, user.id);
     expect(row.waiting).toBeNull();
-    await pg.queryPg(`insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email)
-      values ('m_jc_in', 'Continuity of supply', now() - interval '2 days', 'p_jc', 'jc@ce.example')`);
+    await pg.queryPg(`insert into mail_message (direction,transport,purpose,crm_visible,state,id, subject, sent_at, from_person_id, from_email) values ('inbound','gmail',null,true,'received','m_jc_in', 'Continuity of supply', now() - interval '2 days', 'p_jc', 'jc@ce.example')`);
     expect((await demand.getDemand(row.id))?.waiting).toMatchObject({ who: "Jonathan Cogman", subject: "Continuity of supply" });
-    await pg.queryPg(`insert into crm_email_messages (id, subject, sent_at, from_email) values ('m_jc_out', 'Re: Continuity', now(), 'ari@rebattery.io');
-      insert into crm_email_message_recipients (message_id, person_id, recipient_type) values ('m_jc_out', 'p_jc', 'to')`);
+    await pg.queryPg(`insert into mail_message (direction,transport,purpose,crm_visible,state,id, subject, sent_at, from_email) values ('inbound','gmail',null,true,'received','m_jc_out', 'Re: Continuity', now(), 'ari@rebattery.io');
+      insert into mail_message_recipient (message_id, person_id, recipient_type) values ('m_jc_out', 'p_jc', 'to')`);
     expect((await demand.getDemand(row.id))?.waiting).toBeNull();
   });
 });

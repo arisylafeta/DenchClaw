@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
-"""Imports marketplace saved searches and sourcing requests into Bulk Trades demand.
+"""Imports saved searches into stated company profiles and sourcing requests as qualifying demand.
 
-  saved_search_import.py                     # show what the platform's saved searches would add or close
-  saved_search_import.py --apply             # write them
-  saved_search_import.py --json FILE.json    # read saved searches from a file instead of the platform
-  saved_search_import.py --apply --announce  # scheduled run: print only a Discord note per new request
-
-A buyer who saves a catalogue search on rebattery.io ("Tesla · NMC · 80%+ health", emailed daily) has told
-us what they want to buy. Each confirmed saved search becomes one buy-box keyed by
-("import", "saved_search:<id>"), so a re-run adds nothing twice. Filters that map onto
-apps/web/lib/buy-box-spec.json go into the spec; the rest (brands outside the lists, year, country,
-search words) go into the note. When the buyer unsubscribes, the buy-box closes as no longer needed.
-Unconfirmed guest saves and ReBattery staff or QA emails are skipped. Each row is linked to the CRM
-person by email and to that person's company, exactly as the survey import does.
-
-A buyer who asks us to source a battery the marketplace doesn't have ("Ask us to source ..." under the
-search box, or "Find it for me" on an empty search) becomes a request buy-box keyed by
-("import", "sourcing_request:<id>"), with their words, quantity, timing, country and target price.
+Run without --apply to preview in a rolled-back transaction. --announce reports new requests only.
+Unsubscribing from alerts is not evidence that a buyer stopped buying; unsubscribed searches are skipped.
 """
 import argparse
 import datetime as dt
@@ -166,7 +152,10 @@ def map_saved_search(search):
 
 QUANTITIES = {"one": "1 unit", "few": "2 to 10 units", "many": "More than 10 units"}
 TIMINGS = {"now": "Now", "three_months": "Within 3 months", "browsing": "Just looking"}
-REQUEST_SOURCES = {"search_suggestion": "the search box", "no_results": "an empty search"}
+REQUEST_SOURCES = {
+    "search_suggestion": "the search box", "no_results": "an empty search",
+    "pack_page": "a battery pack page", "marketplace_nav": "the marketplace menu",
+}
 PRICE_UNITS = {"pack": "pack", "cell": "cell"}
 
 
@@ -198,7 +187,7 @@ def map_sourcing_request(request):
     notes.append(f"Asked us to source it from {asked_from} on rebattery.io.")
 
     return {
-        "kind": "request", "basis": None, "email": email, "contact": None,
+        "kind": "request", "basis": None, "status": "qualifying", "email": email, "contact": None,
         "wants": (request.get("wants") or "Battery").strip(),
         "quantity": QUANTITIES.get(request.get("quantity"), request.get("quantity")),
         "location": request.get("country"), "spec": spec, **structured,
@@ -295,14 +284,7 @@ def fetch_sourcing_requests(env_path=PLATFORM_ENV):
         {}, env_path)
 
 
-def close_unsubscribed(cur, row):
-    """Closes the buy-box of an unsubscribed search once, unless someone already closed it."""
-    cur.execute("""update crm_bulk_trade_demand set status = 'closed', closed_reason = 'no_longer_needed',
-                     note = coalesce(note || E'\\n', '') || %s, updated_at = now()
-                   where source_kind = 'import' and source_id = %s and status = 'open'
-                   returning id""",
-                (f"Unsubscribed from the alert on {dt.date.today().isoformat()}.", row["source_id"]))
-    return cur.fetchone() is not None
+
 
 
 def main():
@@ -344,14 +326,15 @@ def main():
     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         for row in rows:
             unsubscribed = row.pop("unsubscribed", False)
+            if unsubscribed:
+                continue
             survey.link(cur, row)
             new = survey.insert(cur, row)
             added += new
             request = requests_by_source.get(row["source_id"])
             if new and request and is_recent(request):
                 notes.append(announcement(request, row))
-            gone = close_unsubscribed(cur, row) if unsubscribed else False
-            closed += gone
+            gone = False
             if not args.quiet and not args.announce:
                 state = "add" if new else "already in"
                 print(f"{state}{' and close' if gone else ''}: {row['buyer']} | {row['wants'][:70]} | {row['source_id']}"

@@ -8,6 +8,7 @@ import {
 	ComboboxList,
 	ComboboxItem,
 } from "../ui/combobox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import {
 	IconFolderFilled,
 	IconFileFilled,
@@ -15,6 +16,7 @@ import {
 } from "@tabler/icons-react";
 import { type TreeNode } from "./file-manager-tree";
 import { ProfileSwitcher } from "./profile-switcher";
+import { ProfileAvatar } from "./profile-avatar";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 import { NavUser, type NavUserData } from "./nav-user";
 import type { SearchIndexItem } from "@/lib/search-index";
@@ -78,6 +80,7 @@ function indexItemToSuggestItem(item: SearchIndexItem): SuggestItem {
 }
 
 type WorkspaceSidebarProps = {
+  conversationFilter?: { value: string | null; profiles: string[]; onChange: (profile: string | null) => void };
 	// NOTE: v3 three-column refactor — file tree lives in the right panel now.
 	// `tree`, `activePath`, `onSelect`, etc. are accepted for API compatibility but unused here.
 	tree?: TreeNode[];
@@ -121,6 +124,7 @@ type WorkspaceSidebarProps = {
       | "crm-people"
       | "crm-companies"
       | "crm-campaigns"
+      | "crm-leaderboard"
       | "crm-inbox"
       | "crm-calendar"
       | "platform-proposals"
@@ -133,7 +137,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "people" | "companies" | "campaigns" | "inbox" | "calendar" | null;
+  activeCrmTarget?: "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "stock" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -149,6 +153,8 @@ type WorkspaceSidebarProps = {
   chatsPanel?: React.ReactNode;
   /** Invoked when the user hits the "+" next to the Chats tab. */
   onNewChatSession?: () => void;
+  /** When set, the "+" opens this menu instead of calling onNewChatSession. */
+  newChatOptions?: { label: string; onSelect: () => void }[];
 };
 
 function SearchIcon() {
@@ -311,6 +317,7 @@ export function WorkspaceSidebar({
 	onToggleCompact,
   activeWorkspace,
   onWorkspaceChanged,
+  conversationFilter,
   onNavigate,
   activeCrmTarget = null,
   activePlatformTarget = null,
@@ -319,6 +326,7 @@ export function WorkspaceSidebar({
   onNavigateToCrmObject,
   chatsPanel,
   onNewChatSession,
+  newChatOptions,
 }: WorkspaceSidebarProps) {
 	const width = mobile ? "280px" : (widthProp ?? 260);
 	const isCompact = !mobile && compact;
@@ -387,19 +395,14 @@ export function WorkspaceSidebar({
 			),
 		},
 		{
-			id: "crm-campaigns" as const,
-			label: "Campaigns",
-			target: "campaigns" as const,
-			icon: (
-				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-					<path d="m3 11 13-5v12L3 13z" />
-					<path d="M7 14v5h3l1-4M19 9a4 4 0 0 1 0 6" />
-				</svg>
-			),
-		},
-		{
+      id: "crm-leaderboard" as const,
+      label: "Leaderboard",
+      target: "leaderboard" as const,
+      icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M4 20V12h4v8M10 20V4h4v16M16 20V8h4v12" /></svg>,
+    },
+    {
 			id: "crm-inbox" as const,
-			label: "Inbox",
+			label: "Mail",
 			target: "inbox" as const,
 			icon: (
 				<svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -549,6 +552,7 @@ export function WorkspaceSidebar({
 			{/* Header: workspace switcher (icon-only). Click opens dropdown to switch workspaces. */}
 			<div className="flex items-center justify-center pb-0.5 shrink-0">
 				<ProfileSwitcher
+					conversationFilter={conversationFilter}
 					activeWorkspaceHint={activeWorkspace ?? null}
 					onWorkspaceSwitch={() => { onWorkspaceChanged?.(); }}
 					onWorkspaceDelete={() => { onWorkspaceChanged?.(); }}
@@ -561,13 +565,7 @@ export function WorkspaceSidebar({
 							className="w-7 h-7 mx-auto rounded-lg overflow-hidden flex items-center justify-center transition-opacity hover:opacity-90"
 							title={`${orgName || "Workspace"}${workspaceName ? ` — ${workspaceName}` : ""}`}
 						>
-							{/* eslint-disable-next-line @next/next/no-img-element */}
-							<img
-								src="/rebattery-workspace-icon.svg"
-								alt=""
-								className="w-7 h-7 object-cover"
-								draggable={false}
-							/>
+							{workspaceName ? <ProfileAvatar key={workspaceName} name={workspaceName} className="h-7 w-7" /> : <span aria-label="All chats">∀</span>}
 						</button>
 					)}
 				/>
@@ -654,6 +652,7 @@ export function WorkspaceSidebar({
 			>
 				<div className="flex-1 min-w-0">
 					<ProfileSwitcher
+						conversationFilter={conversationFilter}
 						activeWorkspaceHint={activeWorkspace ?? null}
 						onWorkspaceSwitch={() => { onWorkspaceChanged?.(); }}
 						onWorkspaceDelete={() => { onWorkspaceChanged?.(); }}
@@ -669,15 +668,8 @@ export function WorkspaceSidebar({
 								onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
 								title="Switch workspace"
 							>
-								<span className="truncate font-semibold">{orgName || "Workspace"}</span>
-								{workspaceName && (
-									<>
-										<span className="shrink-0 opacity-40">/</span>
-										<span className="truncate text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-											{workspaceName}
-										</span>
-									</>
-								)}
+								{workspaceName && <ProfileAvatar key={workspaceName} name={workspaceName} className="h-6 w-6" />}
+								<span className="truncate font-semibold">{workspaceName ?? (conversationFilter ? "All chats" : "Workspace")}</span>
 								<span className="flex-1" />
 								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
 									<path d="m6 9 6 6 6-6" />
@@ -735,22 +727,26 @@ export function WorkspaceSidebar({
 						</button>
 					);
 				})}
-				{sidebarTab === "chats" && onNewChatSession && (
-					<button
-						type="button"
-						onClick={onNewChatSession}
-						className="p-1 rounded-md transition-colors cursor-pointer shrink-0"
-						style={{ color: "var(--color-text-muted)" }}
-						onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-hover)"; }}
-						onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-						title="New chat"
-						aria-label="New chat"
-					>
+				{sidebarTab === "chats" && (newChatOptions?.length || onNewChatSession) && (() => {
+					const plus = (
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
 							<path d="M5 12h14" /><path d="M12 5v14" />
 						</svg>
-					</button>
-				)}
+					);
+					const buttonClass = "p-1 rounded-md transition-colors cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)]";
+					return newChatOptions?.length ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger className={buttonClass} style={{ color: "var(--color-text-muted)" }} title="New chat" aria-label="New chat">{plus}</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								{newChatOptions.map((option) => (
+									<DropdownMenuItem key={option.label} onClick={option.onSelect}>{option.label}</DropdownMenuItem>
+								))}
+							</DropdownMenuContent>
+						</DropdownMenu>
+					) : (
+						<button type="button" onClick={onNewChatSession} className={buttonClass} style={{ color: "var(--color-text-muted)" }} title="New chat" aria-label="New chat">{plus}</button>
+					);
+				})()}
 			</div>
 		)}
 

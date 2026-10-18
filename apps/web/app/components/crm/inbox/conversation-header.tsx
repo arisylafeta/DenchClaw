@@ -1,11 +1,10 @@
 "use client";
 
 import { ParticipantChips, type Participant } from "./participant-chips";
+import { formatAbsoluteDate } from "../format-relative-date";
+import styles from "./mail.module.css";
 
-/**
- * Sticky header at the top of the conversation pane. Subject in
- * Instrument Serif, participant strip below, action icons on the right.
- */
+/** Compact CRM detail header: one participant line, thread metadata, square actions. */
 export function ConversationHeader({
   subject,
   participants,
@@ -15,6 +14,9 @@ export function ConversationHeader({
   onToggleStar,
   onOpenPerson,
   onClose,
+  messageCount,
+  firstMessageAt,
+  lastMessageAt,
 }: {
   subject: string | null;
   participants: ReadonlyArray<Participant>;
@@ -25,16 +27,17 @@ export function ConversationHeader({
   onOpenPerson?: (id: string) => void;
   /** Single-pane drilldown: back-to-list affordance. */
   onClose?: () => void;
+  messageCount: number;
+  firstMessageAt?: string | null;
+  lastMessageAt?: string | null;
 }) {
   const headline = subject?.trim() || "(no subject)";
+  const linkedPerson = participants.find((person) => !person.is_self && !person.email?.toLowerCase().endsWith("@rebattery.io") && person.id !== person.email);
 
   return (
     <header
-      className="sticky top-0 z-20 px-6 pt-5 pb-3"
-      style={{
-        background: "var(--color-main-bg)",
-        borderBottom: "1px solid var(--color-border)",
-      }}
+      className={`${styles.threadHeader} sticky top-0 z-20`}
+      aria-label="Conversation header"
     >
       <div className="flex items-start gap-3">
         {onClose && (
@@ -42,36 +45,23 @@ export function ConversationHeader({
             type="button"
             onClick={onClose}
             title="Back to inbox"
-            className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-surface-hover)]"
+            className={styles.threadAction}
             style={{ color: "var(--color-text-muted)" }}
           >
             <ChevronLeft />
           </button>
         )}
         <div className="min-w-0 flex-1">
-          <h1
-            className="tracking-tight"
-            style={{
-              color: "var(--color-text)",
-              fontSize: "clamp(1.25rem, 2vw, 1.5rem)",
-              lineHeight: 1.25,
-              fontWeight: 600,
-              wordBreak: "break-word",
-            }}
-            title={headline}
-          >
-            {headline}
-          </h1>
-          {participants.length > 0 && (
-            <div className="mt-2.5 flex items-center gap-3">
-              <ParticipantChips
-                participants={participants}
-                max={5}
-                onOpenPerson={onOpenPerson}
-                variant="named"
-              />
-            </div>
-          )}
+          <h1 className={styles.threadTitle} title={headline}>{headline}</h1>
+          <div className="mt-2.5">
+            <ParticipantChips participants={participants} max={5} onOpenPerson={onOpenPerson} variant="compact" />
+          </div>
+          <div className={styles.threadMeta} aria-label="Thread metadata">
+            <span>{messageCount} {messageCount === 1 ? "message" : "messages"}</span>
+            {firstMessageAt && <time dateTime={firstMessageAt}>First: {formatAbsoluteDate(firstMessageAt)}</time>}
+            {lastMessageAt && <time dateTime={lastMessageAt}>Last: {formatAbsoluteDate(lastMessageAt)}</time>}
+            {linkedPerson && onOpenPerson && <button type="button" className="hover:underline" onClick={() => onOpenPerson(linkedPerson.id)}>CRM profile ↗</button>}
+          </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton
@@ -136,8 +126,7 @@ type IconButtonAsAnchor = IconButtonBaseProps & {
 
 function IconButton(props: IconButtonAsButton | IconButtonAsAnchor) {
   const { title, active, children } = props;
-  const baseClass =
-    "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors";
+  const baseClass = styles.threadAction;
   const style = {
     background: active ? "var(--color-surface-hover)" : "transparent",
     color: active ? "var(--color-text)" : "var(--color-text-muted)",

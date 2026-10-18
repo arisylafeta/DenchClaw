@@ -98,8 +98,8 @@ describe("getPostgresPersonProfile", () => {
         }];
       }
       if (sql.includes("to_regclass")) return [{ available: true, links_available: true }];
-      if (sql.includes("from crm_campaign_send_links")) return links;
-      if (sql.includes("from crm_campaign_sends")) return sends;
+      if (sql.includes("from mail_message_link")) return links;
+      if (sql.includes("from mail_message s")) return sends;
       return [];
     });
 
@@ -135,8 +135,8 @@ describe("getPostgresPersonProfile", () => {
         { listing_id: "cached", title: "  FPT battery modules  ", auction_slug: "fpt-battery-modules" },
         { listing_id: "bad-slug", title: "Battery lot", auction_slug: "../t/private-token" },
       ]; }
-      if (sql.includes("from crm_campaign_send_links")) { return [{ send_id: "cached", cta_key: "FPT", listing_id: "cached", destination_url: "https://rebattery.io/t/private-token", first_clicked_at: observedAt }, { send_id: "missing", cta_key: "missing", listing_id: "missing", destination_url: "https://rebattery.io/marketplace/listings/safe-lot?token=private-token#recipient", first_clicked_at: null }, { send_id: "unsafe", cta_key: "unsafe", listing_id: "unsafe", destination_url: "https://rebattery.io.evil.example/marketplace/auctions/private-token", first_clicked_at: null }, { send_id: "bad-slug", cta_key: "bad-slug", listing_id: "bad-slug", destination_url: "https://rebattery.io/t/private-token", first_clicked_at: null }]; }
-      if (sql.includes("from crm_campaign_sends")) { return listingIds.map((id) => ({
+      if (sql.includes("from mail_message_link")) { return [{ send_id: "cached", cta_key: "FPT", listing_id: "cached", destination_url: "https://rebattery.io/t/private-token", first_clicked_at: observedAt }, { send_id: "missing", cta_key: "missing", listing_id: "missing", destination_url: "https://rebattery.io/marketplace/listings/safe-lot?token=private-token#recipient", first_clicked_at: null }, { send_id: "unsafe", cta_key: "unsafe", listing_id: "unsafe", destination_url: "https://rebattery.io.evil.example/marketplace/auctions/private-token", first_clicked_at: null }, { send_id: "bad-slug", cta_key: "bad-slug", listing_id: "bad-slug", destination_url: "https://rebattery.io/t/private-token", first_clicked_at: null }]; }
+      if (sql.includes("from mail_message s")) { return listingIds.map((id) => ({
         send_id: id, campaign_id: "campaign", campaign_name: "Update", listing_id: id,
         auction_url: "https://rebattery.io/t/private-token", recipient_email: "buyer@example.com",
         state: "accepted", accepted_at: observedAt, delivered_at: null, bounced_at: null,

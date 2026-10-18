@@ -10,7 +10,7 @@ import {
   type TradePatch,
 } from "@/lib/bulk-trades";
 
-type Draft = Record<keyof TradePatch, string>;
+type Draft = Record<Exclude<keyof TradePatch, "origin" | "seller_ref" | "seller_name">, string>;
 
 const EMPTY: Draft = {
   title: "", trade_stage: "Needs info", trade_kind: "", fact_line: "", next_step: "", next_step_due: "",

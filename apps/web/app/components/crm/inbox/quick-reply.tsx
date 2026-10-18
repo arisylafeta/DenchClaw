@@ -1,143 +1,38 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CornerUpLeft } from "lucide-react";
+import styles from "./mail.module.css";
 
-/**
- * Visual composer at the bottom of the conversation pane. Looks and
- * feels like Gmail's "Reply" affordance — collapsed pill that expands
- * into a textarea — but the Send button is disabled with a tooltip.
- *
- * When two-way Gmail sync arrives, swap the disabled tooltip for an
- * actual `composeReply()` POST and the rest of the UI stays.
- */
-export function QuickReply({
-  recipientName,
-  onExpand,
-}: {
-  recipientName?: string | null;
-  onExpand?: () => void;
-}) {
+/** POSIX shell quoting, including apostrophes, newlines and command substitutions. */
+export function draftCommand(threadId: string, identity: string, recipient: string, subject: string, body: string): string {
+  const args = ["--thread", threadId, "--identity", identity, "--to", recipient, "--subject", subject, "--body", body];
+  return `rebattery-mail draft ${args.map((value, index) => index % 2 === 0 ? value : `'${value.replace(/'/g, `'"'"'`)}'`).join(" ")}`;
+}
+
+/** Prepares a command locally. This component never writes to the mail store. */
+export function QuickReply({ threadId, recipientName, recipientEmail, subject, onExpand }: { threadId: string; recipientName?: string | null; recipientEmail: string | null; subject: string | null; onExpand?: () => void }) {
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    if (expanded) {
-      textareaRef.current?.focus();
-      onExpand?.();
-    }
-  }, [expanded, onExpand]);
-
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="w-full flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors"
-        style={{
-          background: "var(--color-surface)",
-          borderColor: "var(--color-border)",
-          color: "var(--color-text-muted)",
-          fontFamily: '"Bookerly", Georgia, serif',
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.borderColor = "var(--color-border-strong)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.borderColor = "var(--color-border)";
-        }}
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <polyline points="9 17 4 12 9 7" />
-          <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
-        </svg>
-        <span className="text-[14px]">
-          Reply{recipientName ? ` to ${recipientName.split(" ")[0]}` : ""}…
-        </span>
-      </button>
-    );
+  const [body, setBody] = useState("");
+  const [identity, setIdentity] = useState("alex");
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {if (expanded) {textarea.current?.focus(); onExpand?.();}}, [expanded, onExpand]);
+  const command = recipientEmail && body.trim() ? draftCommand(threadId, identity, recipientEmail, subject ?? "", body) : "";
+  async function copy() {
+    setError(null); setResult(null);
+    try {await navigator.clipboard.writeText(command); setResult("Command copied. No draft has been saved or sent.");}
+    catch {setError("Clipboard unavailable. Select and copy the command below.");}
   }
-
-  return (
-    <div
-      className="rounded-xl border overflow-hidden"
-      style={{
-        background: "var(--color-surface)",
-        borderColor: "var(--color-border-strong)",
-        boxShadow: "var(--shadow-md)",
-      }}
-    >
-      <div
-        className="flex items-center gap-3 px-4 py-2"
-        style={{ borderBottom: "1px solid var(--color-border)" }}
-      >
-        <span className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-          To:
-        </span>
-        <span className="text-[13px] font-medium" style={{ color: "var(--color-text)" }}>
-          {recipientName ?? "—"}
-        </span>
-        <div className="flex-1" />
-        <button
-          type="button"
-          onClick={() => {
-            setExpanded(false);
-            setDraft("");
-          }}
-          className="text-[12px] rounded px-2 py-1 hover:bg-[var(--color-surface-hover)]"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          Discard
-        </button>
-      </div>
-      <textarea
-        ref={textareaRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder="Type a reply…"
-        className="w-full px-4 py-3 outline-none resize-none"
-        rows={6}
-        style={{
-          background: "var(--color-surface)",
-          color: "var(--color-text)",
-          fontFamily: '"Bookerly", Georgia, "Times New Roman", serif',
-          fontSize: 14,
-          lineHeight: 1.6,
-          border: "none",
-        }}
-      />
-      <div
-        className="flex items-center justify-between gap-3 px-4 py-2"
-        style={{ borderTop: "1px solid var(--color-border)" }}
-      >
-        <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-          <span>{draft.length} chars</span>
-          {draft.length > 0 && <span>·</span>}
-          {draft.length > 0 && <span>Read-only — not actually sent</span>}
-        </div>
-        <button
-          type="button"
-          disabled
-          title="Two-way Gmail sync is on the roadmap"
-          className="rounded-lg px-3 py-1.5 text-[12px] font-medium opacity-60 cursor-not-allowed"
-          style={{
-            background: "var(--color-accent-fill)",
-            color: "var(--color-accent-foreground)",
-          }}
-        >
-          Send
-        </button>
-      </div>
-    </div>
-  );
+  if (!expanded) {return <button type="button" className={styles.replyButton} onClick={() => setExpanded(true)}><CornerUpLeft size={14} aria-hidden />Prepare reply{recipientName ? ` to ${recipientName}` : ""}</button>;}
+  return <div className={styles.replyEditor}>
+    <div className="mb-3 flex flex-wrap items-center gap-3 text-[12px]"><span>To: {recipientEmail ?? "No reply address available"}</span><label className="flex items-center gap-1.5">From <select className={`${styles.control} !h-7 text-[12px]`} aria-label="Draft identity" value={identity} onChange={(event) => setIdentity(event.target.value)}>{["alex", "ari", "supply", "hello", "support", "enterprise"].map((key) => <option key={key}>{key}</option>)}</select></label></div>
+    <textarea ref={textarea} aria-label="Draft reply" placeholder="Type a reply…" rows={6} value={body} onChange={(event) => {setBody(event.target.value); setResult(null);}} className="w-full resize-y border p-3 text-[14px] leading-relaxed" style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }} />
+    <p className="my-2 text-xs" style={{ color: "var(--color-text-muted)" }}>Prepare this draft with rebattery-mail; approval and send happen in the CLI</p>
+    {!recipientEmail && <p role="alert">No reply address is recorded. Prepare the recipient explicitly in the CLI.</p>}
+    {command && <textarea aria-label="Draft CLI command" readOnly value={command} rows={4} className="w-full border p-2 font-mono text-xs" />}
+    {error && <p role="alert" className="text-sm">{error}</p>}{result && <p role="status" className="text-sm">{result}</p>}
+    <div className="mt-3 flex gap-2"><button disabled={!command} onClick={() => void copy()} className={`${styles.replyButton} disabled:opacity-50`}>Copy</button><button onClick={() => {setExpanded(false); setBody(""); setError(null); setResult(null);}} className="px-3 py-2 text-[13px]" style={{color:"var(--color-text-muted)"}}>Discard</button></div>
+  </div>;
 }

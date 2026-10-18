@@ -1,0 +1,225 @@
+import { asRecord, type GatewayEvent } from './events'
+import { initialState, messageText, reduce, type ChatState, type ReducerContext } from './reducer'
+import { normalizeMessageText, stateFromSnapshot, type GatewayChatSnapshot, type SnapshotChatState, type SourcedMessage } from './snapshot'
+
+export interface OptimisticSubmission { clientId: string; text: string }
+export interface PendingSubmission extends OptimisticSubmission { knownUserIds: string[]; resolvedMessageId?: string }
+export interface ReconcileState extends SnapshotChatState {
+  key: string | null; loadToken: number; hydrating: boolean; buffered: GatewayEvent[]
+  optimistic: PendingSubmission[]; clientToMessage: Record<string, string>; resyncRequired: boolean
+  overlay: GatewayEvent[]; snapshotVersion: string | null
+}
+export interface ResyncEvent { generation?: string | number; truncated?: boolean; payload?: unknown; type?: string }
+export function initialReconcileState(sessionId: string | null = null, key: string | null = sessionId): ReconcileState {
+  return { ...initialState(sessionId), key, loadToken: 0, hydrating: true, buffered: [], optimistic: [], clientToMessage: {}, resyncRequired: false, overlay: [], snapshotVersion: null }
+}
+/** Capture the returned token with the fetch. Switching sessions never interrupts work. */
+export function beginHydration(state: ReconcileState, sessionId: string | null = state.sessionId, key: string | null = state.key): ReconcileState {
+  const base = key === state.key ? state : initialReconcileState(sessionId, key)
+  if (base.hydrating && base.loadToken > 0) return base
+  return { ...base, loadToken: state.loadToken + 1, hydrating: true, buffered: base.buffered, resyncRequired: false }
+}
+export function needsResync(state: ChatState, event: ResyncEvent): boolean {
+  return event.truncated === true || asRecord(event.payload).truncated === true || event.type === 'resync'
+    || (event.generation !== undefined && event.generation !== state.generation)
+}
+/** Events are overlay-only. A changed generation must be hydrated, not reduced. */
+export function applyLive(state: ReconcileState, events: readonly GatewayEvent[], ctx: ReducerContext): ReconcileState {
+  if (state.hydrating) {
+    let next = { ...state, buffered: [...state.buffered, ...events] }
+    // Control frames establish acceptance even while their content waits for history.
+    // Otherwise a late POST failure can incorrectly settle a newly accepted turn.
+    for (const event of events) {
+      if (event.session_id && next.sessionId && event.session_id !== next.sessionId) continue
+      if (event.type === 'message.start') next = { ...next, busy: true, live: true, awaitingResponse: true, interrupted: false }
+      else if (event.type === 'message.complete') next = { ...next, busy: false, live: false, awaitingResponse: false }
+    }
+    return next
+  }
+  let next = state
+  const ordered: GatewayEvent[] = []
+  let sequenced: GatewayEvent[] = []
+  const flush = () => { ordered.push(...sequenced.sort((a, b) => a.seq! - b.seq!)); sequenced = [] }
+  for (const event of events) {
+    if (event.seq !== undefined) sequenced.push(event)
+    else { flush(); ordered.push(event) }
+  }
+  flush()
+  // A history read may include a turn committed after its live watermark.
+  // Receipts, not sequence numbers alone, prove that its replay is already durable.
+  const durableIds = new Set(next.messages.filter(message => message.source === 'durable').map(message => message.rowId))
+  const covered = new Set<number>()
+  let turnStart = 0
+  for (let index = 0; index < ordered.length; index++) {
+    const event = ordered[index]
+    if (event.type === 'message.start') turnStart = index
+    const receipt = event.type === 'message.complete' ? event.payload?.persisted_turn : null
+    if (!state.streamId && receipt?.complete && receipt.final_assistant_row_id && durableIds.has(receipt.final_assistant_row_id)
+      && receipt.row_ids.every(id => durableIds.has(id))
+      && (!receipt.user_row_id || durableIds.has(receipt.user_row_id))
+      && (!event.session_id || event.session_id === next.sessionId)
+      && (event.generation === undefined || event.generation === next.generation)) {
+      for (let cursor = turnStart; cursor <= index; cursor++) covered.add(cursor)
+    }
+    if (event.type === 'message.complete') turnStart = index + 1
+  }
+  for (const [index, event] of ordered.entries()) {
+    if (event.session_id && next.sessionId && event.session_id !== next.sessionId) continue
+    if (needsResync(next, event)) { next = { ...next, resyncRequired: true }; continue }
+    if (next.resyncRequired) continue
+    // Snapshot watermark applies even to frames delivered without a replay flag.
+    if (event.seq !== undefined && event.seq <= next.watermark) continue
+    if (covered.has(index) && /^(message\.|reasoning\.|thinking\.|tool\.)/.test(event.type)) {
+      next = { ...next, watermark: Math.max(next.watermark, event.seq ?? -1) }
+      continue
+    }
+    next = { ...reduce(next, event, ctx), overlay: [...next.overlay, event] } as ReconcileState
+  }
+  return next
+}
+/** clientId is stable CRM identity; no gateway user_row_id is needed. */
+export function submitOptimistic(state: ReconcileState, submission: OptimisticSubmission): ReconcileState {
+  if (state.optimistic.some(item => item.clientId === submission.clientId)) return state
+  const message: SourcedMessage = { id: submission.clientId, role: 'user', source: 'optimistic', clientIds: [submission.clientId],
+    pending: true, startedAt: 0, segments: [{ id: `${submission.clientId}:text`, type: 'text', text: submission.text, startedAt: 0 }] }
+  return { ...state, messages: [...state.messages, message], busy: true, awaitingResponse: true,
+    optimistic: [...state.optimistic, { ...submission, knownUserIds: state.messages.filter(item => item.role === 'user' && item.source === 'durable').map(item => item.id) }] }
+}
+/** Consume consecutive submissions in order, including the gateway's aggregate queue MERGE. */
+function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pick<ReconcileState, 'messages' | 'clientToMessage'> {
+  const messages = base.messages.slice()
+  const clientToMessage: Record<string, string> = {}
+  let cursor = 0
+  for (let i = 0; i < state.optimistic.length;) {
+    const first = state.optimistic[i]
+    const previousId = first.resolvedMessageId
+    if (previousId && !messages.some(message => message.id === previousId)) {
+      clientToMessage[first.clientId] = previousId
+      i++
+      continue
+    }
+    let match = -1
+    let consumed = 0
+    for (let row = cursor; row < messages.length && match < 0; row++) {
+      const message = messages[row]
+      if (message.role !== 'user' || first.knownUserIds.includes(message.id)) continue
+      if (message.clientIds?.includes(first.clientId)) { match = row; consumed = 1; break }
+      const target = normalizeMessageText(messageText(message))
+      let combined = ''
+      for (let end = i; end < state.optimistic.length; end++) {
+        if (state.optimistic[end].knownUserIds.includes(message.id)) break
+        combined += (end === i ? '' : '\n\n') + state.optimistic[end].text
+        if (normalizeMessageText(combined) === target) { match = row; consumed = end - i + 1; break }
+        if (!target.startsWith(normalizeMessageText(combined))) break
+      }
+    }
+    if (match >= 0) {
+      const ids = state.optimistic.slice(i, i + consumed).map(item => item.clientId)
+      messages[match] = { ...messages[match], clientIds: ids }
+      for (const id of ids) clientToMessage[id] = messages[match].id
+      cursor = match + 1
+      i += consumed
+    } else {
+      const old = state.messages.find(message => message.id === first.clientId)
+      if (old) messages.push(old)
+      else messages.push({ id: first.clientId, role: 'user', source: 'optimistic', clientIds: [first.clientId], pending: true,
+        startedAt: 0, segments: [{ id: `${first.clientId}:text`, type: 'text', text: first.text, startedAt: 0 }] })
+      i++
+    }
+  }
+  return { messages, clientToMessage }
+}
+/** Stale fetches are identity no-ops. Repeated snapshots replace the base identically. */
+export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapshot, loadToken: number, ctx: ReducerContext): ReconcileState {
+  if (loadToken !== state.loadToken || (state.key !== null && snapshot.key !== state.key)) return state
+  const snapshotVersion = JSON.stringify(snapshot)
+  if (!state.hydrating && state.snapshotVersion === snapshotVersion) return state
+  const base = stateFromSnapshot(snapshot, ctx)
+  // Keep durable rows which slid off the front of the server's newest window.
+  const firstRow = Math.min(...base.messages.flatMap(message => message.rowId === undefined ? [] : [message.rowId]))
+  const ids = new Set(base.messages.map(message => message.id))
+  const overlappingWindow = state.messages.some(message => message.source === 'durable' && ids.has(message.id))
+  base.messages.unshift(...state.messages.filter(message => message.source === 'durable' && message.rowId !== undefined
+    && overlappingWindow && Number.isFinite(firstRow) && message.rowId < firstRow && !ids.has(message.id)))
+  // Resolve ownership across the whole snapshot before retaining event-only detail.
+  // A completion receipt may move a tool from the final live message to an earlier row.
+  const claimed = new Set<object>()
+  const claimedTools = new Set<string>()
+  const sameReasoning = (a: typeof base.messages[number]['segments'][number], b: typeof a) =>
+    a.type === 'reasoning' && b.type === 'reasoning' &&
+    (normalizeMessageText(a.text) === normalizeMessageText(b.text) ||
+      (Boolean(a.text && b.text) && (a.text.startsWith(b.text) || b.text.startsWith(a.text))))
+  for (const old of state.messages) {
+    const identity = base.messages.find(item => item.source === 'durable' &&
+      (item.id === old.id || (old.rowId !== undefined && item.rowId === old.rowId)))
+    const oldUser = state.messages.findLast((item, index) => index < state.messages.indexOf(old) && item.role === 'user' && item.source !== 'queued')
+    const userIndex = oldUser ? base.messages.findLastIndex(item => item.role === 'user' &&
+      (item.id === oldUser.id || (oldUser.source !== 'durable' && normalizeMessageText(messageText(item)) === normalizeMessageText(messageText(oldUser))))) : -1
+    const nextUserIndex = base.messages.findIndex((item, index) => index > userIndex && item.role === 'user')
+    const sameTurn = !oldUser || userIndex >= 0
+    const active = !state.interrupted && sameTurn && snapshot.generation === state.generation && snapshot.running && old.id === state.streamId
+      ? base.messages.find(item => item.id === base.streamId) : undefined
+    const completed = !old.pending && old.role === 'assistant' && sameTurn
+      ? base.messages.findLast((item, index) => item.role === 'assistant' && index > userIndex &&
+        (nextUserIndex < 0 || index < nextUserIndex) && normalizeMessageText(messageText(item)) === normalizeMessageText(messageText(old)))
+      : undefined
+    let target = identity ?? active ?? completed
+    if (!target && old.source !== 'durable' && !old.pending && old.role === 'assistant' && old.segments.some(segment => segment.type === 'tool' || segment.type === 'reasoning')) {
+      target = { ...old, segments: [...old.segments] }
+      base.messages.splice(nextUserIndex < 0 ? base.messages.length : nextUserIndex, 0, target)
+    }
+    const targetIndex = target ? base.messages.indexOf(target) : -1
+    const turnStart = base.messages.findLastIndex((item, index) => index < targetIndex && item.role === 'user')
+    for (const detail of old.segments.filter(segment => segment.type === 'tool' || segment.type === 'reasoning')) {
+      if (detail.type === 'tool') {
+        if (claimedTools.has(detail.toolId)) continue
+        claimedTools.add(detail.toolId)
+      }
+      let owner: typeof base.messages[number] | undefined
+      let index = -1
+      for (const row of base.messages) {
+        index = row.segments.findIndex(segment => !claimed.has(segment) &&
+          (segment.id === detail.id || (segment.type === 'tool' && detail.type === 'tool' && segment.toolId === detail.toolId) ||
+            (base.messages.indexOf(row) > turnStart && base.messages.indexOf(row) <= targetIndex &&
+              (sameReasoning(segment, detail) || (segment.type === 'tool' && detail.type === 'tool' &&
+                segment.name === detail.name && JSON.stringify(segment.args) === JSON.stringify(detail.args) &&
+                JSON.stringify(segment.result) === JSON.stringify(detail.result))))))
+        if (index >= 0) { owner = row; break }
+      }
+      if (owner) {
+        const durable = owner.segments[index]
+        const merged = durable.type === 'tool' && detail.type === 'tool'
+          ? { ...durable, ...detail, id: durable.id, toolId: durable.toolId, ...(durable.status !== 'running'
+            ? { status: durable.status, result: durable.result, error: durable.error, completedAt: durable.completedAt } : {}) }
+          : durable.type === 'reasoning' && detail.type === 'reasoning'
+            ? { ...detail, ...durable, text: durable.text.length >= detail.text.length ? durable.text : detail.text } : durable
+        owner.segments[index] = merged
+        claimed.add(merged)
+      } else if (target) {
+        const textIndex = target.segments.findIndex(segment => segment.type === 'text')
+        target.segments.splice(textIndex < 0 ? target.segments.length : textIndex, 0, detail)
+        claimed.add(detail)
+      }
+    }
+    if (identity) {
+      identity.interrupted = old.interrupted
+      identity.error ??= old.error
+      if (old.status === 'interrupted' || old.status === 'error') identity.status = old.status
+    }
+  }
+  base.usage = state.usage
+  base.subagents = state.subagents
+  base.interrupted = !snapshot.running && state.interrupted
+  if (!snapshot.todo_state) base.todos = state.todos
+  const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
+    hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion }
+  merged.optimistic = state.optimistic.map(item => {
+    const id = merged.clientToMessage[item.clientId]
+    return id && merged.messages.some(message => message.id === id && message.source === 'durable')
+      ? { ...item, resolvedMessageId: id } : item
+  })
+  return applyLive(merged, [
+    ...state.overlay.filter(event => event.seq !== undefined && event.seq > base.watermark && (event.generation === undefined || event.generation === snapshot.generation)),
+    ...state.buffered.map(event => event.type === 'request.cancel' || event.type === 'approval.request' || event.type === 'clarify.request' ? { ...event, seq: undefined } : event),
+  ], ctx)
+}

@@ -20,6 +20,11 @@ function trade(overrides: Partial<BulkTrade>): BulkTrade {
   return {
     id: overrides.title ?? "t",
     title: "Trade",
+    origin: "supply",
+    seller_ref: null,
+    seller_name: null,
+    has_seller: false,
+    has_buyer: false,
     trade_stage: "With buyers",
     trade_kind: null,
     fact_line: null,

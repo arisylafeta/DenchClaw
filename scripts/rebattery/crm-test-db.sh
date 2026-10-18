@@ -24,6 +24,9 @@ case "${1:-}" in
     for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U postgres -q && break; sleep 1; done
     # schema.sql, then migrations in file-name order (two files share the 003 prefix; both load).
     for file in "$SQL_DIR/schema.sql" $(ls "$SQL_DIR"/migrations/*.sql | sort); do
+      case "$(basename "$file")" in
+        034_*) docker exec "$NAME" psql -U postgres -d denchclaw -v ON_ERROR_STOP=1 -q -c "insert into crm_objects (id, name, entity_table, display_field) values ('obj_people','people','crm_people','name') on conflict do nothing" >/dev/null ;;
+      esac
       docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$NAME" psql -U postgres -d denchclaw -v ON_ERROR_STOP=1 -q < "$file" >/dev/null \
         || { echo "Failed loading $(basename "$file")" >&2; exit 1; }
     done

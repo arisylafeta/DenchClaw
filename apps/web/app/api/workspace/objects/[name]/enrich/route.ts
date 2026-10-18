@@ -52,8 +52,8 @@ const POSTGRES_OBJECT_TABLES: Record<string, string> = {
 	people: "crm_people",
 	company: "crm_companies",
 	companies: "crm_companies",
-	email_thread: "crm_email_threads",
-	email_message: "crm_email_messages",
+	email_thread: "mail_thread",
+	email_message: "mail_message",
 	calendar_event: "crm_calendar_events",
 	interaction: "crm_interactions",
 };

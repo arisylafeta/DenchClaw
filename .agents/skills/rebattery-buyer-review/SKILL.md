@@ -48,9 +48,10 @@ Trade buyers added from a buy-box carry its `demand_id`, so offers and wins show
    join crm_people p on p.id = b.person_id where p.company_id = $1;
    select * from crm_bulk_trade_buyer_waiting where company_id = $1;
    -- email in the last 12 months, newest first
-   select m.sent_at, m.from_email, m.subject, left(m.body, 1500) from crm_email_messages m
-   where m.from_person_id in (select id from crm_people where company_id = $1)
-      or m.id in (select message_id from crm_email_message_recipients r join crm_people p on p.id = r.person_id where p.company_id = $1)
+   select m.sent_at, m.from_email, m.subject, left(m.body_text, 1500) from mail_message m
+   where m.crm_visible and m.sent_at >= now() - interval '12 months'
+     and (m.from_person_id in (select id from crm_people where company_id = $1)
+      or m.id in (select message_id from mail_message_recipient r join crm_people p on p.id = r.person_id where p.company_id = $1))
    order by m.sent_at desc limit 60;
    ```
    Calls: search Granola raw notes in `/root/.local/share/rebattery/granola/raw` for the company and people

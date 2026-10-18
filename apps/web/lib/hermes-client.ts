@@ -7,6 +7,10 @@ export type HermesChatStreamParams = {
   message: string;
   userId: string;
   config: HermesConfig;
+  profile?: string;
+  existingSession?: boolean;
+  signal?: AbortSignal;
+  imageAttachments?: Array<{ content: string; mimeType: string }>;
 };
 
 export function encodeSse(data: UIMessageChunk): Uint8Array {
@@ -31,6 +35,24 @@ type HermesSseEvent = {
   args?: unknown;
 };
 
+// Transport state only; Hermes owns history and execution.
+type NativeStreams = Map<string, { controller: AbortController; working: boolean | null; observedAt: number }>;
+const streamGlobal = globalThis as typeof globalThis & { __denchHermesStreams?: NativeStreams };
+const nativeStreams = streamGlobal.__denchHermesStreams ??= new Map();
+const streamKey = (profile: string, id: string) => JSON.stringify([profile, id]);
+export function nativeHermesWorking(profile: string, id: string): boolean | null {
+  const key = streamKey(profile, id);
+  const entry = nativeStreams.get(key);
+  if (entry && entry.working !== true && Date.now() - entry.observedAt > 10_000) nativeStreams.delete(key);
+  return nativeStreams.get(key)?.working ?? null;
+}
+export function stopNativeHermesStream(profile: string, id: string): boolean {
+  const entry = nativeStreams.get(streamKey(profile, id));
+  if (!entry?.working) return false;
+  entry.controller.abort();
+  return true;
+}
+
 function nextId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -43,6 +65,11 @@ export async function createHermesChatStream(
   if (!config.apiKey) {
     return errorStream("Missing Hermes API key");
   }
+
+  const nativeKey = params.existingSession && params.profile ? streamKey(params.profile, sessionKey) : null;
+  if (nativeKey && nativeStreams.get(nativeKey)?.working) return errorStream("This Hermes conversation is already working");
+  const abortController = new AbortController();
+  if (nativeKey) nativeStreams.set(nativeKey, { controller: abortController, working: true, observedAt: Date.now() });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -61,7 +88,7 @@ export async function createHermesChatStream(
       try {
         // Native session chat loads persisted history; /v1/runs with only
         // session_id does not. Both native endpoints route profiles by URL.
-        const profile = readActiveProfileName();
+        const profile = params.profile ?? readActiveProfileName();
         const baseUrl = config.baseUrl.replace(/\/+$/, "");
         const sessionUrl = `${baseUrl}${profile ? `/p/${encodeURIComponent(profile)}` : ""}/api/sessions`;
         const headers = {
@@ -69,13 +96,13 @@ export async function createHermesChatStream(
           "Content-Type": "application/json",
           "X-Hermes-Session-Key": sessionKey,
         };
-        const sessionRes = await fetch(sessionUrl, {
+        const sessionRes = params.existingSession ? null : await fetch(sessionUrl, {
           method: "POST",
           headers,
           body: JSON.stringify({ id: sessionKey, model: config.model }),
         });
 
-        if (!sessionRes.ok) {
+        if (sessionRes && !sessionRes.ok) {
           const body = await sessionRes.text();
           let alreadyExists = false;
           if (sessionRes.status === 409) {
@@ -97,7 +124,8 @@ export async function createHermesChatStream(
           {
             method: "POST",
             headers: { ...headers, Accept: "text/event-stream" },
-            body: JSON.stringify({ message, model: config.model }),
+            body: JSON.stringify({ message: params.imageAttachments?.length ? [{ type: "text", text: message }, ...params.imageAttachments.map((image) => ({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.content}` } }))] : message, model: config.model }),
+            signal: params.signal ? AbortSignal.any([params.signal, abortController.signal]) : abortController.signal,
           },
         );
 
@@ -309,6 +337,8 @@ export async function createHermesChatStream(
         const msg = err instanceof Error ? err.message : "Unknown error";
         emit({ type: "error", errorText: msg });
         controller.close();
+      } finally {
+        if (nativeKey) nativeStreams.set(nativeKey, { controller: abortController, working: finished && !abortController.signal.aborted && !params.signal?.aborted ? false : null, observedAt: Date.now() });
       }
     },
   });

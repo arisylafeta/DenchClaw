@@ -51,7 +51,7 @@ describe("campaign projections", () => {
       Array.from({ length: 113 }, (_, index) => send(`retained-${index}`, { delivered_at: AT, provider_opened_at: AT })));
 
     const detail = await getCampaignDetail("campaign-1");
-    expect(detail?.campaign.metrics).toEqual({ sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 2 });
+    expect(detail?.campaign.metrics).toEqual({ sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 2, replied: null });
     expect(detail?.campaign.metrics_basis).toBe("snapshot");
     expect(detail?.campaign.recipient_count).toBe(113);
     expect(detail?.campaign.audience).toBe("115 Supply Update contacts");
@@ -183,6 +183,18 @@ describe("campaign projections", () => {
       metrics: { sent: 1, delivered: null, opened: 1, clicked: 1, bounced: null },
       tracking_pending: 1, metrics_observed_at: null,
     });
+  });
+
+  it("never marks Gmail-sent rows as pending and reports their provider metrics as untracked", async () => {
+    detailRows(campaign({ channel: "email-gmail" }), [
+      send("gmail-a", { last_synced_at: null, provider_message_id: "gmail:1a1443" }),
+      send("gmail-b", { last_synced_at: null, provider_message_id: "gmail:1a1444" }),
+    ]);
+    const detail = await getCampaignDetail("campaign-1");
+    expect(detail?.campaign).toMatchObject({
+      metrics: { sent: 2, delivered: null, opened: null, clicked: null, bounced: null }, tracking_pending: 0,
+    });
+    expect(detail?.recipients.map((recipient) => [recipient.tracked, recipient.tracking_pending])).toEqual([[false, false], [false, false]]);
   });
 
   it("returns all five campaigns while retaining separate snapshot and ledger bases", async () => {
@@ -328,7 +340,7 @@ describe("campaign projections", () => {
     queryPgMock.mockResolvedValueOnce([campaign()])
       .mockResolvedValueOnce([{ available: false, links_available: false }]);
     const ledger = await getCampaignDetail("campaign-1");
-    expect(ledger?.campaign.metrics).toEqual({ sent: null, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 2 });
+    expect(ledger?.campaign.metrics).toEqual({ sent: null, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 2, replied: null });
     expect(ledger?.other_destinations).toEqual([]);
   });
 

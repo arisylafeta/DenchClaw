@@ -14,6 +14,7 @@ function buildCompanyResponse(
   } = {},
 ) {
   return {
+    context_notes: [{ id: "context-1", company_id: id, note: "Budget confirmed in founder review.", source_kind: "founder_review", source_ref: null, observed_on: "2026-10-16", created_at: "2026-10-16T00:00:00Z" }],
     company: {
       id,
       name,
@@ -219,6 +220,12 @@ describe("CompanyProfile tab reset on entry change", () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
+  });
+
+  it("shows sourced company context notes in Overview", async () => {
+    render(<CompanyProfile companyId="acme" />);
+    expect(await screen.findByText("Budget confirmed in founder review.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Context notes" })).toHaveTextContent("founder_review · 2026-10-16");
   });
 
   it("resets the active tab to Overview when switching from one company to another", async () => {

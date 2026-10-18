@@ -6,6 +6,7 @@ type MessageRow = {
   sent_at: string | Date | null;
   preview: string | null;
   body: string | null;
+  body_html: string | null;
   has_attachments: boolean | null;
   gmail_message_id: string | null;
   from_person_id: string | null;
@@ -44,30 +45,31 @@ export async function getPostgresInboxThread(
            m.subject,
            m.sent_at,
            m.body_preview as preview,
-           m.body,
+           m.body_text as body,
+           m.body_html,
            m.has_attachments,
            m.gmail_message_id,
            m.from_person_id,
            m.from_email,
            coalesce(to_people.person_ids, array[]::text[]) as to_person_ids,
            coalesce(cc_people.person_ids, array[]::text[]) as cc_person_ids
-      from crm_email_messages m
+      from mail_message m
       left join lateral (
         select array_agg(r.person_id order by r.position, r.person_id) as person_ids
-          from crm_email_message_recipients r
+          from mail_message_recipient r
          where r.message_id = m.id
            and r.recipient_type = 'to'
       ) to_people on true
       left join lateral (
         select array_agg(r.person_id order by r.position, r.person_id) as person_ids
-          from crm_email_message_recipients r
+          from mail_message_recipient r
          where r.message_id = m.id
            and r.recipient_type = 'cc'
       ) cc_people on true
      where m.thread_id = $1
-       and m.mailbox_owner_id = $2::uuid
+       and m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $2::uuid
        and exists (
-         select 1 from crm_email_threads t
+         select 1 from mail_thread t
           where t.id = m.thread_id and t.mailbox_owner_id = $2::uuid
        )
      order by m.sent_at asc nulls last, m.id
@@ -113,6 +115,7 @@ export async function getPostgresInboxThread(
         sent_at: iso(message.sent_at),
         preview: message.preview,
         body: message.body,
+        body_html: message.body_html,
         has_attachments: Boolean(message.has_attachments),
         gmail_message_id: message.gmail_message_id,
         from_person_id: message.from_person_id,

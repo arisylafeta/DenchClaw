@@ -24,13 +24,23 @@ const COLUMNS = `
   -- Latest email or meeting with anyone at the company, as the CRM sync keeps it on each person.
   (select to_char(max(p.last_interaction_at) at time zone 'Europe/London', 'YYYY-MM-DD')
      from crm_people p where p.company_id = d.company_id) as last_contact,
+  to_char(campaign.at at time zone 'Europe/London', 'YYYY-MM-DD') as campaign_emailed_on,
+  (select to_char(min(m.sent_at) at time zone 'Europe/London', 'YYYY-MM-DD') from mail_message m
+    where m.direction = 'inbound' and campaign.at is not null and m.sent_at > campaign.at
+      and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
+      and exists (select 1 from crm_people fp where fp.company_id = d.company_id
+                   and (fp.id = m.from_person_id or lower(fp.email) = lower(m.from_email)))) as campaign_replied_on,
   d.updated_at`;
 
 const FROM = `
   crm_dismantlers d
   join crm_companies company on company.id = d.company_id
   left join crm_users owner on owner.id = d.owner_user_id
-  left join crm_people person on person.id = d.next_step_person_id`;
+  left join crm_people person on person.id = d.next_step_person_id
+  left join lateral (
+    select max(s.accepted_at) as at from mail_message s left join crm_people sp on sp.id = s.person_id
+     where s.direction = 'outbound' and s.campaign_id is not null and s.accepted_at is not null and coalesce(s.company_id, sp.company_id) = d.company_id
+  ) campaign on true`;
 
 const select = (where: string) => `select ${COLUMNS} from ${FROM} ${where}`;
 
@@ -66,13 +76,31 @@ export type Activity =
   | { kind: "email"; at: string; subject: string | null; from: string | null; outgoing: boolean }
   | { kind: "event"; at: string; event: string; changes: Record<string, unknown>; actor: string | null };
 
-export type DismantlerDetail = { dismantler: Dismantler; people: CompanyPerson[]; activity: Activity[]; platform_error?: string | null };
+/** A campaign email to someone at the company, as frozen and sent, with what happened after it. */
+export type OutreachSend = {
+  campaign_id: string;
+  campaign: string;
+  recipient: string;
+  subject: string | null;
+  text: string | null;
+  state: string;
+  accepted_at: string | null;
+  delivered_at: string | null;
+  bounced_at: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+  replied_at: string | null;
+};
+
+export type DismantlerDetail = {
+  dismantler: Dismantler; people: CompanyPerson[]; activity: Activity[]; outreach: OutreachSend[]; platform_error?: string | null;
+};
 type DetailRow = Omit<DismantlerDetail, "dismantler"> & { dismantler: DismantlerRow };
 
 export async function getDismantlerDetail(id: string, viewerId: string): Promise<DetailRow | null> {
   const dismantler = await getDismantler(id);
   if (!dismantler) return null;
-  const [people, emails, events] = await Promise.all([
+  const [people, emails, events, outreach] = await Promise.all([
     queryPg<CompanyPerson>(
       `select id, coalesce(nullif(full_name, ''), nullif(concat_ws(' ', first_name, last_name), ''), email, id) as name,
               email, job_title
@@ -83,13 +111,13 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
     queryPg<{ at: string; subject: string | null; from: string | null; outgoing: boolean }>(
       `select m.sent_at as at, m.subject, m.from_email as from,
               not exists (select 1 from crm_people p where p.id = m.from_person_id and p.company_id = $2) as outgoing
-         from crm_email_messages m
-        where m.mailbox_owner_id = $1::uuid
+         from mail_message m
+        where m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $1::uuid
           and exists (
             select 1 from crm_people p
              where p.company_id = $2
                and (p.id = m.from_person_id
-                 or exists (select 1 from crm_email_message_recipients r where r.message_id = m.id and r.person_id = p.id)))
+                 or exists (select 1 from mail_message_recipient r where r.message_id = m.id and r.person_id = p.id)))
         order by m.sent_at desc nulls last limit 20`,
       [viewerId, dismantler.company_id],
     ),
@@ -102,13 +130,39 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
         order by e.id desc limit 40`,
       [id, viewerId],
     ),
+    // Replies count from any synced mailbox, like campaign pages; only their date is shown here.
+    queryPg<Record<keyof OutreachSend, unknown>>(
+      `select s.campaign_id, c.campaign_name as campaign, s.recipient_email as recipient, s.subject,
+              s.body_text as text, s.state, s.accepted_at, s.delivered_at, s.bounced_at,
+              s.opened_at, s.clicked_at,
+              (select min(m.sent_at) from mail_message m
+                where m.direction = 'inbound' and s.accepted_at is not null and m.sent_at > s.accepted_at
+                  and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
+                  and exists (select 1 from crm_people fp where fp.company_id = $1
+                               and (fp.id = m.from_person_id or lower(fp.email) = lower(m.from_email)))) as replied_at
+         from mail_message s
+         join campaigns c on c.id = s.campaign_id
+         left join crm_people sp on sp.id = s.person_id
+        where s.direction = 'outbound' and coalesce(s.company_id, sp.company_id) = $1
+        order by coalesce(s.accepted_at, s.created_at) desc limit 10`,
+      [dismantler.company_id],
+    ),
   ]);
   const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : String(value));
   const activity: Activity[] = [
     ...emails.map((email) => ({ kind: "email" as const, ...email, at: iso(email.at) })),
     ...events.map((event) => ({ kind: "event" as const, ...event, at: iso(event.at) })),
   ].sort((a, b) => b.at.localeCompare(a.at));
-  return { dismantler, people, activity };
+  const isoOrNull = (value: unknown) => (value == null ? null : iso(value));
+  return {
+    dismantler, people, activity,
+    outreach: outreach.map((send) => ({
+      campaign_id: String(send.campaign_id), campaign: String(send.campaign), recipient: String(send.recipient),
+      subject: (send.subject as string | null) ?? null, text: (send.text as string | null) ?? null, state: String(send.state),
+      accepted_at: isoOrNull(send.accepted_at), delivered_at: isoOrNull(send.delivered_at), bounced_at: isoOrNull(send.bounced_at),
+      opened_at: isoOrNull(send.opened_at), clicked_at: isoOrNull(send.clicked_at), replied_at: isoOrNull(send.replied_at),
+    })),
+  };
 }
 
 async function logEvent(client: Queryable, id: string, kind: string, changes: object, userId: string | null) {

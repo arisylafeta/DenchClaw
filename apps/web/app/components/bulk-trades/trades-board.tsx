@@ -13,7 +13,6 @@ import {
   type BulkTrade,
   type TradeStage,
 } from "@/lib/bulk-trades";
-import { DueChip, GROUP_TONE } from "./trade-chips";
 
 const CLOSED_STAGES: TradeStage[] = ["Done", "Lost"];
 
@@ -82,19 +81,24 @@ function Column({ stage, trades, today, onOpen, onMove }: Props & { stage: Trade
         >
           <div className="flex items-baseline gap-2">
             <span className="flex-1 text-sm font-semibold">{trade.title}</span>
-            {!!trade.new_count && (
-              <span className="shrink-0 rounded-none px-[7px] py-px text-[11px] font-semibold" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
-                {trade.new_count} new
-              </span>
+            {trade.next_step_due && trade.next_step_due < today ? (
+              <span className="text-[11px] font-semibold" style={{ color: "var(--bt-red)" }}>Overdue</span>
+            ) : !!trade.new_count && (
+              <span className="text-[11px] font-semibold" style={{ color: "var(--bt-link)" }}>{trade.new_count} new</span>
             )}
             {trade.value && <span className="bt-mono shrink-0 text-[13px] font-medium">{trade.value}</span>}
           </div>
-          {trade.fact_line && <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{trade.fact_line}</span>}
+          {trade.has_seller
+            ? <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}><span className="font-medium">{trade.seller_name}</span> → {trade.buyer_count ?? 0} {(trade.buyer_count ?? 0) === 1 ? "buyer" : "buyers"}</p>
+            : <p className="text-[13px]" style={{ color: "var(--color-warning)" }}>No seller yet</p>}
+          {!trade.has_buyer && <p className="text-[13px]" style={{ color: "var(--color-warning)" }}>No buyer yet</p>}
           <div className="flex items-center gap-2 border-t pt-1.5" style={{ borderColor: "var(--bt-divider)" }}>
-            <span className="flex-1 text-[13px] leading-[1.35]">{held ? trade.hold_reason ?? "On hold" : trade.next_step ?? "Set a next step"}</span>
-            {held
-              ? <DueChip label={holdLabel(trade, today)} tone={trade.hold_until && trade.hold_until <= today ? "red" : "grey"} />
-              : <DueChip label={dueLabel(trade, today)} tone={GROUP_TONE[tradeGroup(trade, today)]} />}
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" title={`Waiting on ${trade.waiting_on === "them" ? "them" : "us"}`}
+              style={{ background: trade.waiting_on === "them" ? "var(--bt-amber)" : "var(--bt-muted)" }} />
+            <span className="min-w-0 flex-1 truncate text-[13px]">
+              {held ? trade.hold_reason ?? "On hold" : trade.next_step ?? "No next step"}
+              <span style={{ color: "var(--bt-muted)" }}> · {held ? holdLabel(trade, today) : dueLabel(trade, today)}</span>
+            </span>
           </div>
         </button>
       ))}
@@ -129,7 +133,6 @@ export function TradesBoard(props: Props) {
         <Column stage={HOLD_STAGE} {...props} />
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs" style={{ color: "var(--bt-muted)" }}>Drop here to close</span>
         {CLOSED_STAGES.map((stage) => <ClosedZone key={stage} stage={stage} trades={props.trades} onMove={props.onMove} />)}
       </div>
     </div>

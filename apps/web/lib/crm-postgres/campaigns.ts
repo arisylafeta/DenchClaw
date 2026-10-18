@@ -26,6 +26,7 @@ type CampaignRow = {
 
 type SendRow = {
   send_id: string;
+  provider_message_id?: string | null;
   campaign_id: string;
   state: string;
   accepted_at: Timestamp;
@@ -35,6 +36,7 @@ type SendRow = {
   provider_link_clicked_at: Timestamp;
   link_clicked_at: Timestamp;
   last_synced_at: Timestamp;
+  replied_at?: Timestamp;
   person_id?: string;
   person_name?: string | null;
   company_id?: string | null;
@@ -42,6 +44,9 @@ type SendRow = {
   recipient_email?: string;
   listing_id?: string | null;
   auction_url?: string | null;
+  rendered_subject?: string | null;
+  dismantler_id?: string | null;
+  dismantler_stage?: string | null;
 };
 
 type LinkRow = {
@@ -79,8 +84,13 @@ function accepted(send: SendRow): boolean {
   return send.accepted_at != null || send.state === "accepted";
 }
 
+// Emails sent by hand from Gmail have no provider events: delivery, opens and clicks are never observed.
+function untracked(send: SendRow): boolean {
+  return !!send.provider_message_id?.startsWith("gmail:");
+}
+
 function pending(send: SendRow): boolean {
-  return accepted(send) && !send.last_synced_at;
+  return accepted(send) && !untracked(send) && !send.last_synced_at;
 }
 
 function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boolean): CampaignSummary {
@@ -92,8 +102,9 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
     // An unchecked cohort has no verified negative tracking observations. Positive
     // observations remain useful even if its provider synchronization is pending.
     const unchecked = acceptedSends.length > 0 && trackingPending === acceptedSends.length;
+    const noneTracked = acceptedSends.length > 0 && acceptedSends.every(untracked);
     const observedCount = (predicate: (send: SendRow) => boolean): number | null => {
-      if (!ledgerAvailable) { return null; }
+      if (!ledgerAvailable || noneTracked) { return null; }
       const count = acceptedSends.filter(predicate).length;
       return unchecked && count === 0 ? null : count;
     };
@@ -103,6 +114,7 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
       opened: observedCount((send) => !!send.provider_opened_at),
       clicked: observedCount((send) => !!earliest(send.provider_link_clicked_at, send.link_clicked_at)),
       bounced: observedCount((send) => !!send.bounced_at),
+      replied: ledgerAvailable ? acceptedSends.filter((send) => !!send.replied_at).length : null,
       // Suppressions are not recorded in the send ledger; retain the campaign's
       // explicit opt-out snapshot rather than inventing per-recipient evidence.
       opted_out: number(campaign.opted_out),
@@ -115,6 +127,7 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
       clicked: number(campaign.emails_clicked),
       bounced: number(campaign.emails_bounced),
       opted_out: number(campaign.opted_out),
+      replied: null,
     };
   }
   let observedAt = isLedger ? null : iso(campaign.metrics_refreshed_at);
@@ -144,27 +157,37 @@ function summarize(campaign: CampaignRow, sends: SendRow[], ledgerAvailable: boo
 
 async function ledgerAvailability(): Promise<Ledger> {
   const [ledger] = await queryPg<Ledger>(`
-    select to_regclass('crm_campaign_sends') is not null as available,
-           to_regclass('crm_campaign_send_links') is not null as links_available,
+    select to_regclass('mail_message') is not null as available,
+           to_regclass('mail_message_link') is not null as links_available,
            to_regclass('crm_bulk_trade_lots') is not null as listings_available
   `);
   return ledger ?? { available: false, links_available: false, listings_available: false };
 }
 
-async function readSends(ids: string[], ledger: Ledger, withRecipients = false): Promise<SendRow[]> {
+async function readSends(ids: string[], ledger: Ledger, withRecipients = false, messageIds?: string[]): Promise<SendRow[]> {
   if (!ledger.available || !ids.length) { return []; }
   return queryPg<SendRow>(`
-    select s.id as send_id, s.campaign_id, s.state, s.accepted_at, s.delivered_at,
-           s.bounced_at, s.provider_opened_at, s.provider_link_clicked_at, s.last_synced_at,
-           ${ledger.links_available ? `(select min(l.first_clicked_at) from crm_campaign_send_links l where l.send_id = s.id)` : "null::timestamptz"} as link_clicked_at
+    select s.id as send_id, s.campaign_id, s.provider_message_id, s.state, s.accepted_at, s.delivered_at,
+           s.bounced_at, s.opened_at as provider_opened_at, s.clicked_at as provider_link_clicked_at, s.last_synced_at,
+           ${ledger.links_available ? `(select min(l.first_clicked_at) from mail_message_link l where l.message_id = s.id)` : "null::timestamptz"} as link_clicked_at,
+           -- A reply is any inbound synced email from the recipient, or their company, after the send.
+           (select min(m.sent_at) from mail_message m
+             where m.direction = 'inbound' and s.accepted_at is not null and m.sent_at > s.accepted_at
+               and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
+               and (lower(m.from_email) = s.recipient_email or m.from_person_id = s.person_id
+                 or exists (select 1 from crm_people fp where fp.id = m.from_person_id
+                             and fp.company_id = coalesce(s.company_id, (select sp.company_id from crm_people sp where sp.id = s.person_id))))
+           ) as replied_at
            ${withRecipients ? `, s.person_id, p.full_name as person_name, coalesce(s.company_id, p.company_id) as company_id,
-             company.name as company_name, s.recipient_email, s.listing_id, s.auction_url` : ""}
-      from crm_campaign_sends s
+             company.name as company_name, s.recipient_email, s.listing_id, s.auction_url, s.subject as rendered_subject,
+             d.id as dismantler_id, d.stage as dismantler_stage` : ""}
+      from mail_message s
       ${withRecipients ? `left join crm_people p on p.id = s.person_id
-        left join crm_companies company on company.id = coalesce(s.company_id, p.company_id)` : ""}
-     where s.campaign_id = any($1::text[])
+        left join crm_companies company on company.id = coalesce(s.company_id, p.company_id)
+        left join crm_dismantlers d on d.company_id = coalesce(s.company_id, p.company_id)` : ""}
+     where s.direction = 'outbound' and s.campaign_id = any($1::text[]) ${messageIds ? 'and s.id = any($2::text[])' : ''}
      order by s.created_at, s.id
-  `, [ids]);
+  `, messageIds ? [ids,messageIds] : [ids]);
 }
 
 /** All campaigns, including historical campaigns whose saved metrics outlive the retained ledger. */
@@ -214,18 +237,18 @@ export function cachedListingMetadata(
   return { title: cached.title?.trim() || null, url };
 }
 
-export async function getCampaignDetail(id: string): Promise<CampaignDetail | null> {
+export async function getCampaignDetail(id: string, messageIds?: string[]): Promise<CampaignDetail | null> {
   const [campaign] = await queryPg<CampaignRow>("select c.* from campaigns c where c.id = $1", [id]);
   if (!campaign) { return null; }
   const ledger = await ledgerAvailability();
-  const sends = await readSends([id], ledger, true);
+  const sends = await readSends([id], ledger, true, messageIds);
   const links = ledger.available && ledger.links_available ? await queryPg<LinkRow>(`
-    select l.send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
-      from crm_campaign_send_links l
-      join crm_campaign_sends s on s.id = l.send_id
-     where s.campaign_id = $1
+    select l.message_id as send_id, l.cta_key, l.listing_id, l.destination_url, l.first_clicked_at
+      from mail_message_link l
+      join mail_message s on s.id = l.message_id
+     where s.campaign_id = $1 ${messageIds ? 'and s.id = any($2::text[])' : ''}
      order by l.cta_key, l.id
-  `, [id]) : [];
+  `, messageIds ? [id,messageIds] : [id]) : [];
   const listingIds = new Set<string>();
   for (const link of links) { if (link.listing_id) { listingIds.add(link.listing_id); } }
   for (const send of sends) { if (send.listing_id) { listingIds.add(send.listing_id); } }
@@ -326,13 +349,28 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       clicked_at: firstClick,
       last_synced_at: iso(send.last_synced_at),
       tracking_pending: pending(send),
+      tracked: !untracked(send),
+      replied_at: iso(send.replied_at),
+      subject: send.rendered_subject ?? null,
+      dismantler_id: send.dismantler_id ?? null,
+      dismantler_stage: send.dismantler_stage ?? null,
       listing_clicks: [...listingClicks.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
       other_clicks: [...otherClicks.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
     };
   });
+  const emailedDismantlers = recipients.filter((recipient) => recipient.dismantler_id && recipient.accepted_at);
+  const stages: Record<string, number> = {};
+  for (const recipient of emailedDismantlers) {
+    stages[recipient.dismantler_stage!] = (stages[recipient.dismantler_stage!] ?? 0) + 1;
+  }
   return {
     campaign: summarize(campaign, sends, ledger.available),
     recipients,
+    dismantler_funnel: campaign.type === "dismantler_outreach" ? {
+      emailed: emailedDismantlers.length,
+      replied: emailedDismantlers.filter((recipient) => recipient.replied_at).length,
+      stages,
+    } : null,
     other_destinations: [...otherDestinations.values()].toSorted((a, b) => a.label.localeCompare(b.label)),
     listings: [...listings.values()].map(({ listing, included, clicked }) => ({
       ...listing,

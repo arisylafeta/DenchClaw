@@ -157,7 +157,7 @@ export type TradeFile = {
 
 export type ProposalKind =
   | "field" | "buyer_update" | "next_step" | "new_buyer" | "file" | "needs_triage" | "link_contact" | "possible_trade"
-  | "trade_kind" | "bid" | "link_auction" | "possible_demand";
+  | "trade_kind" | "bid" | "link_auction" | "possible_demand" | "possible_supply";
 
 /**
  * Something the inbox check found in Gmail or Granola. Most findings are applied straight away
@@ -198,6 +198,7 @@ export const CHANGE_NOUN: Record<ProposalKind, [string, string]> = {
   trade_kind: ["trade kind", "trade kinds"],
   link_auction: ["auction", "auctions"],
   possible_demand: ["demand", "demand"],
+  possible_supply: ["supply batch", "supply batches"],
   needs_triage: ["thread", "threads"],
   possible_trade: ["trade", "trades"],
 };
@@ -245,6 +246,7 @@ export type TradeDetail = {
   contacts: Contact[];
   fields: TradeField[];
   files: TradeFile[];
+  events?: { id: string; kind: string; changes: Record<string, unknown>; occurred_at: string }[];
   /** True when Gmail drafts get tracked links (a public link address is configured). */
   link_tracking?: boolean;
   /** Findings from the inbox check waiting for Alex. */

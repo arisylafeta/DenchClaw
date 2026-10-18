@@ -2,6 +2,12 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
+import { parseConversationKey } from "@/lib/hermes-conversations";
+import type { HermesConversation } from "@/lib/hermes-conversations";
+import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
+import { NativeTranscript, ReadOnlyNotice } from "./chat-native";
+import { GroupAuthor } from "./workspace/group-chat";
+import { Fragment } from "react";
 import {
 	forwardRef,
 	useCallback,
@@ -38,6 +44,7 @@ import {
 } from "./chat-stream-status";
 import type { ChatModelOption } from "@/lib/chat-models";
 import { prepareFilesForChatUpload } from "@/lib/chat-image-preparation";
+import { CHAT_IMAGE_EXTENSION_TO_MIME, MAX_CHAT_IMAGE_BYTES } from "@/lib/chat-image-common";
 import { formatTableSelectionContext, type TableSelectionContext } from "@/lib/table-selection";
 import type { WorkspaceContext } from "@/lib/agent-message";
 
@@ -842,6 +849,10 @@ export function ChatPanelTerminalButton({
 }
 
 type ChatPanelProps = {
+  /** Immutable native Hermes identity; never resolved through the workspace filter. */
+  nativeConversationKey?: string;
+  nativeTransport?: "gateway" | "sse";
+  onBranched?: (conversation: HermesConversation) => void;
 	/** When set, scopes sessions to this file and prepends content as context. */
 	fileContext?: FileContext;
 	/** Compact mode for workspace sidebar (smaller UI, built-in session tabs). */
@@ -878,6 +889,8 @@ type ChatPanelProps = {
 	hideHeaderActions?: boolean;
 	/** Optional content rendered at the start of the chat header bar (e.g. layout toggles). */
 	headerLeftSlot?: React.ReactNode;
+	/** Marks the chat in the header, e.g. a "Group" tag with participant avatars. */
+	headerBadge?: React.ReactNode;
 	/** Optional content rendered at the end of the chat header bar (e.g. layout toggles). */
 	headerRightSlot?: React.ReactNode;
 	/** Called whenever the panel's runtime state changes. */
@@ -941,6 +954,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			compact,
 			sessionTitle,
 			initialSessionId,
+			nativeConversationKey,
+			nativeTransport,
+			onBranched,
 			onFileChanged,
 			onActiveSessionChange,
 			onSessionsChange,
@@ -955,6 +971,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			onBack,
 			hideHeaderActions,
 			headerLeftSlot,
+			headerBadge,
 			headerRightSlot,
 			onRuntimeStateChange,
 			onConversationActivity,
@@ -1090,6 +1107,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						if (sk) {extra.sessionKey = sk;}
 						const sid = sessionIdRef.current;
 						if (sid) {extra.sessionId = sid;}
+            if (nativeConversationKey) {
+              const identity = parseConversationKey(nativeConversationKey);
+              extra.sessionId = identity.id;
+              extra.hermesProfile = identity.profile;
+            }
 						if (pendingHtmlRef.current) {
 							extra.userHtml = pendingHtmlRef.current;
 							pendingHtmlRef.current = null;
@@ -1115,7 +1137,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					};
 				},
 			}),
-		[],
+		[nativeConversationKey],
 	);
 
 		const { messages, sendMessage, status, stop, error, setMessages } =
@@ -1136,16 +1158,58 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// produced empty session rows in the sidebar whenever the user
 		// opened a +/new chat and then navigated away without typing.
 
-		const isStreaming =
+		// ── Group chats: same panel, but history and sends go through the room log ──
+		const groupKey = useMemo(() => {
+			if (!nativeConversationKey) return undefined;
+			try { return parseConversationKey(nativeConversationKey).kind === "group" ? nativeConversationKey : undefined; } catch { return undefined; }
+		}, [nativeConversationKey]);
+		const nativeGateway = nativeTransport === "gateway" && !!nativeConversationKey && !groupKey;
+		const nativeChat = useNativeHermesChat({ conversationKey: nativeConversationKey, enabled: nativeGateway && visible !== false });
+		const groupCursorRef = useRef(0);
+		const [groupWorking, setGroupWorking] = useState(false);
+		const [groupSending, setGroupSending] = useState(false);
+		const applyGroupDetail = useCallback((data: { conversation?: { working?: boolean | null }; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string }>; cursor?: number }) => {
+			if (typeof data.cursor === "number") groupCursorRef.current = Math.max(groupCursorRef.current, data.cursor);
+			setGroupWorking(data.conversation?.working === true);
+			const incoming = data.messages ?? [];
+			if (!incoming.length) return;
+			setMessages((prev) => {
+				const have = new Set(prev.map((m) => m.id));
+				const added = incoming.filter((m) => !have.has(m.id)).map((m) => ({
+					id: m.id,
+					role: m.role,
+					parts: [{ type: "text" as const, text: m.text ?? m.content ?? "" }] as UIMessage["parts"],
+					...(m.profile ? { metadata: { profile: m.profile, name: m.name } } : {}),
+				}));
+				return added.length ? [...prev, ...added] : prev;
+			});
+		}, [setMessages]);
+		useEffect(() => {
+			if (!groupKey || loadingSession || !currentSessionId) return;
+			let alive = true;
+			const poll = async () => {
+				try {
+					const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(groupKey)}?since_seq=${groupCursorRef.current}`);
+					if (alive && res.ok) applyGroupDetail(await res.json());
+				} catch { /* The next tick retries. */ }
+			};
+			const timer = setInterval(() => void poll(), 3000);
+			return () => { alive = false; clearInterval(timer); };
+		}, [groupKey, loadingSession, currentSessionId, applyGroupDetail]);
+
+		const isStreaming = nativeGateway ? nativeChat.state.busy :
 			status === "streaming" ||
 			status === "submitted" ||
-			isReconnecting;
+			isReconnecting ||
+			groupWorking ||
+			groupSending;
+		const runtimeStatus = nativeGateway ? (nativeChat.state.busy ? "streaming" : "ready") : status;
 		useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
 
 		// Keep cloud catalog + primary model in sync (hero, session switches, and after
 		// completed turns — agent tools may change agents.defaults.model.primary).
 		useEffect(() => {
-			if (status !== "ready") {
+			if (runtimeStatus !== "ready") {
 				return;
 			}
 			let cancelled = false;
@@ -1172,7 +1236,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				cancelled = true;
 				controller.abort();
 			};
-		}, [status, messages.length, currentSessionId]);
+		}, [runtimeStatus, messages.length, currentSessionId]);
 
 		const preferServerVoiceInput = Boolean(
 			cloudState?.status === "valid" && cloudState.elevenLabsEnabled,
@@ -1186,11 +1250,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		useEffect(() => {
 			onRuntimeStateChangeRef.current?.({
-				sessionId: currentSessionId,
+				sessionId: nativeGateway ? nativeConversationKey! : currentSessionId,
 				sessionKey: subagentSessionKey ?? null,
 				isStreaming,
-				status,
-				isReconnecting,
+				awaiting: nativeGateway ? nativeChat.state.pendingRequests.length > 0 : undefined,
+				status: runtimeStatus,
+				isReconnecting: nativeGateway ? nativeChat.connection !== "connected" : isReconnecting,
 				loadingSession,
 			});
 		}, [
@@ -1200,12 +1265,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			status,
 			isReconnecting,
 			loadingSession,
+			nativeGateway,
+			nativeConversationKey,
+			nativeChat.state.pendingRequests.length,
+			runtimeStatus,
+			nativeChat.connection,
 		]);
 
 		// Stream stall detection: if we stay in "submitted" (no first
 		// token received) for too long, surface an error and reset.
 		const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 		useEffect(() => {
+			if (nativeGateway) return;
 			if (stallTimerRef.current) {
 				clearTimeout(stallTimerRef.current);
 				stallTimerRef.current = null;
@@ -1225,7 +1296,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					stallTimerRef.current = null;
 				}
 			};
-		}, [status, stop]);
+		}, [status, stop, nativeGateway]);
 
 		// ── Stick-to-bottom scroll logic ──
 		//
@@ -1358,12 +1429,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				repinRafRef.current = 0;
 				scrollToBottom("auto");
 			});
-		}, [messages, scrollToBottom]);
+		}, [messages, nativeChat.state.messages, scrollToBottom]);
 
 		// ── Session persistence helpers ──
 
 		const createSession = useCallback(
 			async (title: string): Promise<string> => {
+        if (nativeConversationKey) return nativeConversationKey;
 				// All chat sessions are workspace-level since the v3 three-column
 				// refactor. The previous behavior — binding `filePath` on the
 				// session whenever any content tab was active — caused the
@@ -1381,7 +1453,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				const data = await res.json();
 				return data.session.id;
 			},
-			[],
+			[nativeConversationKey],
 		);
 
 		// ── Stream reconnection ──
@@ -1722,13 +1794,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// Message persistence is handled server-side by ActiveRunManager,
 		// so we only refresh the file sessions list and notify the parent
 		// when the file content may have changed.
-		const prevStatusRef = useRef(status);
+		const prevStatusRef = useRef(runtimeStatus);
 		const previousStatus = prevStatusRef.current;
 		useEffect(() => {
 			const wasStreaming =
 				previousStatus === "streaming" ||
 				previousStatus === "submitted";
-			const isNowReady = status === "ready";
+			const isNowReady = runtimeStatus === "ready";
 
 			if (wasStreaming && isNowReady && currentSessionId) {
 				// Mark all current messages as saved — the server
@@ -1763,6 +1835,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			filePath,
 			onFileChanged,
 			onSessionsChange,
+			runtimeStatus,
 		]);
 
 		// ── Empty-stream error detection ──
@@ -1773,6 +1846,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// to "ready" before the final message batch is committed to state.
 		const emptyStreamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 		useEffect(() => {
+			if (nativeGateway) return;
 			if (emptyStreamTimerRef.current) {
 				clearTimeout(emptyStreamTimerRef.current);
 				emptyStreamTimerRef.current = null;
@@ -1812,11 +1886,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					emptyStreamTimerRef.current = null;
 				}
 			};
-		}, [previousStatus, status, messages, error]);
+		}, [previousStatus, status, messages, error, nativeGateway]);
 
 		useEffect(() => {
-			prevStatusRef.current = status;
-		}, [status]);
+			prevStatusRef.current = runtimeStatus;
+		}, [runtimeStatus]);
 
 		// ── Actions ──
 
@@ -1832,6 +1906,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				html: string,
 				overrideAttachments?: AttachedFile[],
 			) => {
+				if (nativeGateway && (nativeChat.readOnly || nativeChat.connection === "lost")) return;
 				const hasText = text.trim().length > 0;
 				const hasMentions = mentionedFiles.length > 0;
 				// Use override attachments (from queue) or current state
@@ -1845,7 +1920,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				// turn). Lets the user hit Enter on an empty input to push the
 				// next queued item through immediately.
 				if (!hasText && !hasMentions && !hasFiles) {
-					if (isStreaming && queuedMessagesRef.current.length > 0) {
+					if (!nativeGateway && isStreaming && queuedMessagesRef.current.length > 0) {
 						const [nextQueued, ...rest] = queuedMessagesRef.current;
 						setQueuedMessages(rest);
 						void (async () => {
@@ -1886,7 +1961,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				// Queue the message if the agent is still running. To release
 				// a queued message early (interrupt the current turn), submit
 				// an empty Enter — handled above.
-				if (isStreaming) {
+				if (isStreaming && !nativeGateway) {
 					if (!overrideAttachments) {
 						setAttachedFiles([]);
 					}
@@ -1987,7 +2062,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 				wantsToBePinnedRef.current = true;
 
-				if (gatewaySessionKey) {
+				if (nativeGateway) {
+					// Gateway owns its aggregate queue; Stop interrupts the run AND clears that queue.
+					try {
+						const images = await Promise.all(currentAttachments.filter(file => getFileCategory(file.name) === "image").map(async file => {
+							const response = await fetch(`/api/workspace/raw-file?path=${encodeURIComponent(file.path)}`);
+							if (!response.ok) throw new Error(`Couldn't attach image ${file.name}`);
+							const blob = await response.blob();
+							if (blob.size > MAX_CHAT_IMAGE_BYTES) throw new Error(`Image ${file.name} exceeds the 5 MB limit`);
+							const content = await new Promise<string>((resolve, reject) => {
+								const reader = new FileReader();
+								reader.onload = () => resolve(String(reader.result).split(",")[1]);
+								reader.onerror = () => reject(new Error(`Couldn't read image ${file.name}`));
+								reader.readAsDataURL(blob);
+							});
+							const extension = `.${file.name.split(".").pop()?.toLowerCase()}` as keyof typeof CHAT_IMAGE_EXTENSION_TO_MIME;
+							return { content, mimeType: CHAT_IMAGE_EXTENSION_TO_MIME[extension] ?? blob.type, fileName: file.name };
+						}));
+						await nativeChat.send({ text: messageText, images: images.length ? images : undefined, context: workspaceContext, html });
+					} catch (cause) { setAttachmentError(cause instanceof Error ? cause.message : String(cause)); }
+				} else if (gatewaySessionKey) {
 					// The gateway flow is a separate transport (POST /api/gateway/chat
 					// sends `{message: string}` to an upstream gateway that owns
 					// session storage). It still expects an inline-prefixed prompt
@@ -2032,6 +2126,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					} catch {
 						setStreamError("Failed to send message.");
 					}
+				} else if (groupKey) {
+					// Group chats post to the room log instead of streaming through /api/chat.
+					userHtmlMapRef.current.set(messageText, html);
+					const eventId = crypto.randomUUID();
+					setMessages((prev) => [...prev, { id: eventId, role: "user" as const, parts: [{ type: "text" as const, text: messageText }] as UIMessage["parts"] }]);
+					setGroupSending(true);
+					try {
+						const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(groupKey)}`, {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ message: messageText, eventId }),
+						});
+						if (res.ok) { setStreamError(null); applyGroupDetail(await res.json()); }
+						else setStreamError((await res.json().catch(() => ({ error: "" }))).error || "Failed to send message.");
+					} catch {
+						setStreamError("Failed to send message.");
+					} finally {
+						setGroupSending(false);
+					}
 				} else {
 					// /api/chat path: send messageText (raw text + inline
 					// attachments prefix only) + structured workspaceContext
@@ -2065,6 +2178,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				onConversationActivity,
 				isSubagentMode,
 				setMessages,
+				groupKey,
+				applyGroupDetail,
+				nativeGateway,
+				nativeChat.send,
+				nativeChat.readOnly,
+				nativeChat.connection,
 			],
 		);
 
@@ -2083,6 +2202,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// ── Queue flush: send the next queued message once the stream finishes ──
 		const prevFlushStatusRef = useRef(status);
 		useEffect(() => {
+			if (nativeGateway) return;
 			const wasStreaming =
 				prevFlushStatusRef.current === "streaming" ||
 				prevFlushStatusRef.current === "submitted";
@@ -2101,10 +2221,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					void handleEditorSubmit(next.text, next.mentionedFiles, next.html, next.attachedFiles);
 				});
 			}
-		}, [status, queuedMessages, handleEditorSubmit]);
+		}, [status, queuedMessages, handleEditorSubmit, nativeGateway]);
 
 		const handleSessionSelect = useCallback(
 			async (sessionId: string) => {
+				if (nativeGateway) {
+					setCurrentSessionId(sessionId);
+					sessionIdRef.current = sessionId;
+					setLoadingSession(false);
+					onActiveSessionChange?.(sessionId);
+					return;
+				}
 				if (sessionId === currentSessionId) {
 					return;
 				}
@@ -2124,7 +2251,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 				try {
 					const response = await fetch(
-						`/api/web-sessions/${sessionId}`,
+						nativeConversationKey ? `/api/hermes/conversations/${encodeURIComponent(nativeConversationKey)}` : `/api/web-sessions/${sessionId}`,
 					);
 					if (!response.ok) {
 						console.warn(`Session ${sessionId} not found (${response.status}), starting fresh.`);
@@ -2141,6 +2268,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						parts?: Array<Record<string, unknown>>;
 						html?: string;
 						_streaming?: boolean;
+						/** Group chats only: which agent wrote the message. */
+						profile?: string;
+						name?: string;
 					}> = data.messages || [];
 
 					const hasStreaming = sessionMessages.some(
@@ -2171,11 +2301,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 										text: msg.content,
 									},
 								]) as UIMessage["parts"],
+								...(msg.profile ? { metadata: { profile: msg.profile, name: msg.name } } : {}),
 							};
 						},
 					);
 
 					setMessages(uiMessages);
+					if (groupKey) { groupCursorRef.current = typeof data.cursor === "number" ? data.cursor : 0; setGroupWorking(data.conversation?.working === true); }
 
 					// Clear loading state *before* reconnecting — the
 					// persisted messages are now visible.  attemptReconnect
@@ -2187,7 +2319,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					// returns 404 gracefully if no active run exists,
 					// and this avoids missing runs whose _streaming
 					// flag hasn't been persisted yet.
-					await attemptReconnect(sessionId, uiMessages);
+					if (!nativeConversationKey) await attemptReconnect(sessionId, uiMessages);
 				} catch (err) {
 					console.error("Error loading session:", err);
 					setLoadingSession(false);
@@ -2199,10 +2331,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				onActiveSessionChange,
 				stop,
 				attemptReconnect,
+        nativeConversationKey,
+				groupKey,
+				nativeGateway,
 			],
 		);
 
 		const handleNewSession = useCallback(() => {
+      if (nativeConversationKey) { onNewChatSession?.(); return; }
 			reconnectAbortRef.current?.abort();
 			void stop();
 			setIsReconnecting(false);
@@ -2218,7 +2354,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			requestAnimationFrame(() => {
 				editorRef.current?.focus();
 			});
-		}, [setMessages, onActiveSessionChange, stop]);
+		}, [setMessages, onActiveSessionChange, stop, nativeConversationKey, onNewChatSession]);
 
 		// Keep the ref in sync so handleEditorSubmit can call it
 		handleNewSessionRef.current = handleNewSession;
@@ -2230,6 +2366,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			newSession: async () => { handleNewSession(); },
 				sendNewMessage: async (text: string) => {
 					onConversationActivity?.();
+					if (nativeGateway) { await handleEditorSubmitRef.current?.(text, [], `<p>${text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!)}</p>`); return; }
+          if (groupKey) { await handleEditorSubmitRef.current?.(text, [], `<p>${text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!)}</p>`); return; }
+          if (nativeConversationKey) { await sendMessage({ text }); return; }
 					handleNewSession();
 					const title =
 						text.length > 60 ? text.slice(0, 60) + "..." : text;
@@ -2245,11 +2384,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					editorRef.current?.insertFileMention(name, path);
 				},
 			}),
-			[handleSessionSelect, handleNewSession, createSession, onActiveSessionChange, onSessionsChange, onConversationActivity, sendMessage],
+			[handleSessionSelect, handleNewSession, createSession, onActiveSessionChange, onSessionsChange, onConversationActivity, sendMessage, groupKey, nativeGateway],
 		);
 
 		// ── Stop handler (aborts server-side run + client-side stream) ──
 		const handleStop = useCallback(async () => {
+			if (nativeGateway) { await nativeChat.interrupt(); return; }
 			// Abort reconnection stream if active (immediate visual feedback).
 			reconnectAbortRef.current?.abort();
 			setIsReconnecting(false);
@@ -2262,7 +2402,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			const stopKey = sk || sid;
 			if (stopKey) {
 				try {
-					await fetch("/api/chat/stop", {
+					await fetch(nativeConversationKey ? `/api/hermes/conversations/${encodeURIComponent(nativeConversationKey)}` : "/api/chat/stop", {
 						method: "POST",
 						headers: {
 							"Content-Type": "application/json",
@@ -2270,7 +2410,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						body: JSON.stringify(
 							sk
 								? { sessionKey: sk }
-								: { sessionId: sid },
+								: nativeConversationKey ? { action: "stop" } : { sessionId: sid },
 						),
 					});
 				} catch { /* ignore */ }
@@ -2278,7 +2418,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 			// Stop the useChat transport stream (transitions status → "ready").
 			void stop();
-		}, [stop]);
+		}, [stop, nativeConversationKey, nativeGateway, nativeChat.interrupt]);
 
 		// Keep the ref in sync so handleEditorSubmit can call stop without
 		// depending on handleStop (would create a dependency cycle).
@@ -2411,7 +2551,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const showStreamActivity = isStreaming && !!streamActivityLabel;
 
 		const showHeroState =
-			messages.length === 0 &&
+			(nativeGateway ? nativeChat.state.messages.length === 0 && !nativeChat.state.busy && nativeChat.state.pendingRequests.length === 0 : messages.length === 0) &&
 			!isSubagentMode &&
 			!loadingSession &&
 			optimisticUserText === null;
@@ -2420,7 +2560,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		const inputBarContent = (
 			<>
-				{queuedMessages.length > 0 && (
+				{nativeGateway && nativeChat.readOnly && <ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />}
+				{nativeGateway && nativeChat.queuedMessageIds.length > 0 && <p role="status">{nativeChat.queuedMessageIds.length} queued</p>}
+				{!nativeGateway && queuedMessages.length > 0 && (
 					<div className={compact ? "px-2 pt-2" : "px-3 pt-3"}>
 						<div
 							className="rounded-xl border overflow-hidden"
@@ -2479,7 +2621,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={loadingSession}
+					disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 					compact={compact}
 					searchFn={searchFn}
 				/>
@@ -2519,7 +2661,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
 							compact={compact}
-							disabled={loadingSession}
+							disabled={loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 							preferServerTranscription={preferServerVoiceInput}
 							onTranscript={handleVoiceTranscript}
 						/>
@@ -2541,7 +2683,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								onClick={() => editorRef.current?.submit()}
 								disabled={
 									(editorEmpty && attachedFiles.length === 0) ||
-									loadingSession
+									loadingSession || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
 								style={{
@@ -2655,15 +2797,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<>
 					<div className="min-w-0 flex-1">
 						{currentSessionId ? (
-							<h2
-								className="text-sm font-semibold truncate"
-								style={{
-									color: "var(--color-text)",
-								}}
-								title={sessionTitle || "Chat Session"}
-							>
-								{sessionTitle || "Chat Session"}
-							</h2>
+							<div className="flex min-w-0 items-center gap-2">
+								<h2
+									className="text-sm font-semibold truncate"
+									style={{
+										color: "var(--color-text)",
+									}}
+									title={sessionTitle || "Chat Session"}
+								>
+									{sessionTitle || "Chat Session"}
+								</h2>
+								{headerBadge}
+							</div>
 						) : null}
 					</div>
 					{!hideHeaderActions && (
@@ -2796,6 +2941,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								compact={!!compact}
 								onPromptClick={handlePromptClick}
 							/>						</div>
+					) : nativeGateway ? (
+						<div className={`${compact ? "" : "max-w-2xl mx-auto"} py-3`}>
+							{nativeChat.connection !== "connected" && <p role="status">{nativeChat.connection === "lost" ? "Gateway connection lost" : "Reconnecting to gateway…"}</p>}
+							{nativeChat.olderCursor && <button type="button" disabled={nativeChat.loadingEarlier} onClick={async () => {
+								const container = scrollContainerRef.current;
+								const height = container?.scrollHeight ?? 0;
+								const top = container?.scrollTop ?? 0;
+								wantsToBePinnedRef.current = false;
+								await nativeChat.loadEarlier();
+								requestAnimationFrame(() => {
+									if (container) container.scrollTop = top + container.scrollHeight - height;
+								});
+							}}>{nativeChat.loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}</button>}
+							<NativeTranscript state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} subagentTails={nativeChat.tails} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
+								onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
+								onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
+								onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
+							}} />
+						</div>
 					) : optimisticUserText !== null && messages.length === 0 ? (
 						<div className={`${compact ? "" : "max-w-2xl mx-auto"} py-3`}>
 							<div className="flex justify-end py-2">
@@ -2857,20 +3021,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									uniqueMessages.unshift(m);
 								}
 							}
-							return uniqueMessages.map((message, i) => (
-								<ChatMessage
-									key={message.id}
-									message={message}
-									isStreaming={isStreaming && i === uniqueMessages.length - 1}
-									onSubagentClick={onSubagentClick}
-									onFilePathClick={onFilePathClick}
-																		onQuestionAnswer={handleQuestionAnswer}
-									sessionId={currentSessionId}
-									voicePlaybackEnabled={voicePlaybackEnabled}
-									userHtmlMap={userHtmlMapRef.current}
-									copyable
-								/>
-							));
+							return uniqueMessages.map((message, i) => {
+								const author = message.role === "assistant" ? (message.metadata as { profile?: string; name?: string } | undefined) : undefined;
+								return (
+									<Fragment key={message.id}>
+										{author?.profile && <GroupAuthor profile={author.profile} name={author.name} />}
+										<ChatMessage
+											message={message}
+											isStreaming={isStreaming && i === uniqueMessages.length - 1}
+											onSubagentClick={onSubagentClick}
+											onFilePathClick={onFilePathClick}
+											onQuestionAnswer={handleQuestionAnswer}
+											sessionId={currentSessionId}
+											voicePlaybackEnabled={voicePlaybackEnabled}
+											userHtmlMap={userHtmlMapRef.current}
+											copyable
+										/>
+									</Fragment>
+								);
+							});
 						})()}
 						{showStreamActivity && (
 							<div className="py-3 min-w-0">

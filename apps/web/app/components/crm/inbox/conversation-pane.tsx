@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { ConversationHeader } from "./conversation-header";
-import { ThreadMessages } from "./thread-messages";
+import { ThreadMessages, type ThreadDetail } from "./thread-messages";
 import type { Thread } from "./types";
+import { pickSenderDisplay } from "./thread-list-row";
+import type { Participant } from "./participant-chips";
+import styles from "./mail.module.css";
 
 /**
  * Right pane (or full-pane on mobile) of the Inbox.
@@ -24,6 +27,7 @@ export function ConversationPane({
   onToggleStar,
   onOpenPerson,
   onClose,
+  crmOnly = true,
 }: {
   selectedThread: Thread | null;
   starred: boolean;
@@ -31,7 +35,13 @@ export function ConversationPane({
   onOpenPerson?: (id: string) => void;
   /** Single-pane drilldown back-to-list. */
   onClose?: () => void;
+  crmOnly?: boolean;
 }) {
+  const [metadata, setMetadata] = useState<{ threadId: string; count: number; first: string | null; last: string | null; people: Participant[] } | null>(null);
+  const handleLoaded = useCallback((detail: ThreadDetail) => {
+    const dates = detail.messages.map((message) => message.sent_at).filter((date): date is string => Boolean(date));
+    setMetadata({ threadId: detail.thread_id, count: detail.messages.length, first: dates[0] ?? null, last: dates.at(-1) ?? null, people: detail.people });
+  }, []);
   const handleClose = useCallback(() => {
     onClose?.();
   }, [onClose]);
@@ -63,13 +73,18 @@ export function ConversationPane({
   // Slide-in animation: bump a key on every thread change so the entire
   // pane re-mounts with the keyframe.
   const animationKey = selectedThread.id;
-  const recipientName =
-    selectedThread.primary_sender_name ?? selectedThread.primary_sender_email ?? null;
+  const sender = pickSenderDisplay(selectedThread);
+  const recipientName = sender.name ?? sender.email;
+  const currentMeta = metadata?.threadId === selectedThread.id ? metadata : null;
+  const participants = [...(currentMeta?.people ?? []), ...selectedThread.participants];
+  if (sender.email && !participants.some((person) => person.email?.toLowerCase() === sender.email?.toLowerCase())) {
+    participants.push({ id: sender.email, name: sender.name, email: sender.email, avatar_url: sender.avatar_url });
+  }
 
   return (
     <div
       key={animationKey}
-      className="flex h-full min-h-0 flex-col motion-safe:animate-[conv-slide-in_180ms_ease-out]"
+      className={`bulk-trades ${styles.thread} flex h-full min-h-0 flex-col motion-safe:animate-[conv-slide-in_180ms_ease-out]`}
       style={{ background: "var(--color-main-bg)" }}
     >
       <style>{`
@@ -80,7 +95,10 @@ export function ConversationPane({
       `}</style>
       <ConversationHeader
         subject={selectedThread.subject}
-        participants={selectedThread.participants}
+        messageCount={currentMeta?.count ?? selectedThread.message_count ?? 1}
+        firstMessageAt={currentMeta?.first}
+        lastMessageAt={currentMeta?.last ?? selectedThread.last_message_at}
+        participants={participants}
         gmailThreadId={selectedThread.gmail_thread_id}
         threadId={selectedThread.id}
         starred={starred}
@@ -88,9 +106,11 @@ export function ConversationPane({
         onOpenPerson={onOpenPerson}
         onClose={handleClose}
       />
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+      <div className={styles.threadScroller}>
         <ThreadMessages
           threadId={selectedThread.id}
+          crmOnly={crmOnly}
+          onLoaded={handleLoaded}
           seedParticipants={selectedThread.participants}
           recipientName={recipientName}
           onOpenPerson={onOpenPerson}

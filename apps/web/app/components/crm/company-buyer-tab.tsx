@@ -195,9 +195,29 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
         </section>
       )}
 
-      <section aria-label="Buy-boxes" className="rounded-2xl border p-4" style={cardStyle}>
-        <h3 className="mb-3 text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>Buy-boxes</h3>
-        {!demand.length && <p className="text-[13px]" style={muted}>No requests or buy-boxes yet. Add them on the Bulk Trades Demand page.</p>}
+      <section aria-label="Buyer profile" className="rounded-2xl border p-4" style={cardStyle}>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h3 className="text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>Buyer profile</h3>
+          {profile.buyer_profile_basis && <span className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ background: "var(--color-surface-hover)", color: "var(--color-text)" }}>
+            {profile.buyer_profile_basis === "researched" ? "Researched" : "Stated"}
+          </span>}
+          {profile.buyer_profiled_at && <span className="text-[12px]" style={muted}>Profiled {formatDayLabel(profile.buyer_profiled_at)}</span>}
+        </div>
+        {!Object.keys(profile.buyer_profile ?? {}).length
+          ? <p className="text-[13px]" style={muted}>No buyer profile on file.</p>
+          : <div className="space-y-2 text-[13px]" style={{ color: "var(--color-text)" }}>
+            {profile.buyer_profile?.wants && <p>{profile.buyer_profile.wants}</p>}
+            <ul className="space-y-1">{specLines(profile.buyer_profile ?? {}).map((line) => <li key={line}>{line}</li>)}</ul>
+            {profile.buyer_profile?.evidence_url && /^https?:\/\//i.test(profile.buyer_profile.evidence_url) && (
+              <a href={profile.buyer_profile.evidence_url} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--color-accent)" }}>Evidence</a>
+            )}
+          </div>}
+      </section>
+
+      <section aria-label="Demand" className="rounded-2xl border p-4" style={cardStyle}>
+        <h3 className="mb-3 text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>Demand</h3>
+        {!demand.length && <p className="text-[13px]" style={muted}>No demand yet. Add a buyer's specific ask on the Bulk Trades Demand page.</p>}
         <ul className="space-y-2">
           {demand.map((row) => {
             const check = checkReason(row, today());
@@ -209,6 +229,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
                   </span>
                   <span className="font-medium" style={{ color: "var(--color-text)" }}>{row.wants}</span>
                   {row.status === "closed" && <span style={muted}>closed</span>}
+                  {row.status === "qualifying" && <span style={muted}>Qualifying · {row.qualify_question ?? "Needs qualification"}</span>}
                   {check && <span className="text-[12px]" style={{ color: "var(--color-warning, #8a5300)" }}>{CHECK_LABEL[check]}</span>}
                 </div>
                 <div className="mt-1 text-[12px]" style={muted}>
@@ -223,7 +244,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
         </ul>
       </section>
 
-      <section aria-label="Buyer profile" className="rounded-2xl border p-4" style={cardStyle}>
+      <section aria-label="How we deal with them" className="rounded-2xl border p-4" style={cardStyle}>
         <div className="mb-3 flex items-center gap-2">
           <h3 className="flex-1 text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>How we deal with them</h3>
           {editing ? (

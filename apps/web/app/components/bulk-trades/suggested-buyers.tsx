@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { SuggestedBuyer } from "@/lib/bulk-demand";
 import { shortDate } from "@/lib/bulk-trade-details";
-import { DemandBadge, TierBadge } from "./demand-badge";
 import { Card, ErrorText, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request, tradeUrl } from "./trade-ui";
 
 type Props = {
@@ -53,9 +52,6 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
     <Card label="Suggested buyers">
       <header className="flex flex-wrap items-center gap-3 border-b px-5 py-3.5" style={{ borderColor: "var(--bt-divider)" }}>
         <h2 className="text-base font-semibold">Suggested buyers</h2>
-        <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-          One line per buyer · {GROUPS.map((g) => `${suggested.filter((item) => item.group === g.key).length} ${g.label.toLowerCase()}`).join(", ")}
-        </span>
         <span className="flex-1" />
         {onOpenDemand && (
           <button type="button" onClick={onOpenDemand} className="text-[13px] font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
@@ -74,7 +70,6 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
             <h3 className="flex flex-wrap items-baseline gap-2 border-b px-5 py-2 text-[13px] font-semibold"
               style={{ borderColor: "var(--bt-divider)", background: "var(--bt-divider)" }}>
               {group.label} ({all.length})
-              <span className="font-normal" style={{ color: "var(--bt-muted)" }}>{group.hint}</span>
               {group.key === "introduce" && (
                 <button type="button" aria-expanded={!folded} onClick={() => setIntroduceOpen(!introduceOpen)}
                   className="ml-auto font-medium hover:underline" style={{ color: "var(--bt-link)" }}>
@@ -89,8 +84,6 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
                   <div className="flex flex-col items-start gap-1">
                     <span className="text-sm font-semibold">{item.buyer}</span>
                     <span className="flex flex-wrap gap-1">
-                      <TierBadge tier={item.tier} />
-                      <DemandBadge kind={item.kind} basis={item.basis} />
                       <span className="rounded-none border px-1.5 py-px text-xs font-medium" style={STRENGTH[item.strength].style}>{STRENGTH[item.strength].label}</span>
                     </span>
                   </div>

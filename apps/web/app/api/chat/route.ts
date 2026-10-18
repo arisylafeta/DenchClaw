@@ -36,6 +36,8 @@ import {
 } from "@/lib/chat-image-attachments";
 import { resolveAgentBackend, resolveHermesConfig } from "@/lib/agent-backend";
 import { createHermesChatStream } from "@/lib/hermes-client";
+import { assertProfile } from "@/lib/hermes-native";
+import { hermesChatTransport } from "@/lib/hermes-gateway/transport-flag";
 import {
 	buildAgentMessage,
 	type WorkspaceContext,
@@ -104,6 +106,7 @@ export async function POST(req: Request) {
 		acknowledgeUnsafeOpenAiSwitch,
 		hasAssistantHistory: hasAssistantHistoryHint,
 		workspaceContext,
+    hermesProfile,
 	}: {
 		messages: UIMessage[];
 		sessionId?: string;
@@ -114,6 +117,7 @@ export async function POST(req: Request) {
 		acknowledgeUnsafeOpenAiSwitch?: boolean;
 		hasAssistantHistory?: boolean;
 		workspaceContext?: WorkspaceContext;
+    hermesProfile?: string;
 	} = await req.json();
 
 	const lastUserMessage = messages.filter((m) => m.role === "user").pop();
@@ -141,12 +145,18 @@ export async function POST(req: Request) {
 
 	const isSubagentSession = typeof sessionKey === "string" && sessionKey.includes(":subagent:");
 	const backend = resolveAgentBackend();
+  const nativeHermesSession = backend === "hermes" && typeof hermesProfile === "string";
+  if (nativeHermesSession) {
+    try { assertProfile(hermesProfile); } catch { return new Response("Unknown Hermes profile", { status: 400 }); }
+    if (hermesChatTransport() === "gateway") return Response.json({ error: "gateway_transport" }, { status: 409 });
+  }
 	const normalizedModelOverride =
 		typeof modelOverride === "string" && modelOverride.trim()
 			? modelOverride.trim()
 			: undefined;
 
 	if (
+		!nativeHermesSession &&
 		sessionId &&
 		normalizedModelOverride &&
 		isLikelyOpenAiModelId(normalizedModelOverride) &&
@@ -219,7 +229,7 @@ export async function POST(req: Request) {
 			});
 		}
 
-		if (sessionId && lastUserMessage) {
+		if (!nativeHermesSession && sessionId && lastUserMessage) {
 			await persistUserMessage(sessionId, {
 				id: lastUserMessage.id,
 				content: userText,
@@ -238,7 +248,10 @@ export async function POST(req: Request) {
 			message: agentMessage,
 			userId: user.id,
 			config: resolveHermesConfig(),
+      imageAttachments,
+      ...(nativeHermesSession ? { profile: hermesProfile, existingSession: true, signal: req.signal } : {}),
 		});
+    if (nativeHermesSession) return new Response(hermesStream, { headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1", "Cache-Control": "no-cache" } });
 
 		// Accumulate assistant text + parts for persistence.  The raw stream
 		// emits AI-SDK UI chunks (text-delta, reasoning-delta, etc.)

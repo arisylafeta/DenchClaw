@@ -15,7 +15,7 @@ function dismantler(o: Partial<Dismantler>): Dismantler {
     park_reason: null, revisit_on: null, next_step: "Follow up", next_step_due: today, next_step_person_id: null,
     next_step_person_name: null, owner_user_id: null, owner_name: null, goal: false, country: "UK",
     ebay_username: null, ebay_listings: null, platform_account_id: null, platform: null, source: null, notes: null,
-    last_contact: null, updated_at: "", ...o,
+    last_contact: null, campaign_emailed_on: null, campaign_replied_on: null, updated_at: "", ...o,
   };
 }
 
@@ -45,6 +45,7 @@ function mockFetch(calls: Call[]) {
         dismantler: one,
         people: [{ id: "p1", name: "Pat Example", email: "pat@example.test", job_title: "Director" }],
         activity: [{ kind: "event", at: `${today}T09:00:00Z`, event: "updated", changes: { stage: ["Found", "Talking"] }, actor: "Alex" }],
+        outreach: [],
       }));
     }
     if (url === "/api/dismantlers/outreach") {

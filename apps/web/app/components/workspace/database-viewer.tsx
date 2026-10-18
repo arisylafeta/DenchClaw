@@ -902,7 +902,7 @@ function DataTable({
   schemaColumns?: ColumnInfo[];
 }) {
   return (
-    <div className={`bulk-trades ${tableStyles.surface}`}><table
+    <div className={`bulk-trades ${tableStyles.surface} overflow-x-auto`}><table
       className={tableStyles.table}
       style={{ borderCollapse: "collapse" }}
     >

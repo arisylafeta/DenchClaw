@@ -1,13 +1,16 @@
 import { parseShape, type Parsed, type Rule } from "./bulk-trade-details";
+import type { PriceBasis, Reputation } from "./bulk-demand-score";
 // The lists live in buy-box-spec.json so the Python inbox check reads the same ones.
 import specConfig from "./buy-box-spec.json";
+import type { CompanyContextNote } from "./crm-postgres/company-context";
+import type { SupplyFeedRow } from "./bulk-supply";
 
 /** Stated and agreed buy-boxes not confirmed for this long show as "Still wanted?". */
 export const STALE_DAYS = 60;
 /** Estimated buy-boxes (our research) older than this show as "Re-research". */
 export const RESEARCH_STALE_DAYS = 180;
 
-export const CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "expired", "other"] as const;
+export const CLOSED_REASONS = ["bought_from_us", "bought_elsewhere", "no_longer_needed", "expired", "other", "duplicate", "moved_to_profile", "moved_to_lot", "recycling", "supply", "not_demand"] as const;
 export type ClosedReason = (typeof CLOSED_REASONS)[number];
 export const CLOSED_REASON_LABEL: Record<ClosedReason, string> = {
   bought_from_us: "Bought from us",
@@ -15,6 +18,12 @@ export const CLOSED_REASON_LABEL: Record<ClosedReason, string> = {
   no_longer_needed: "No longer needed",
   expired: "Past its date",
   other: "Other",
+  duplicate: "Duplicate",
+  moved_to_profile: "Moved to buyer profile",
+  moved_to_lot: "Moved to lot",
+  recycling: "Recycling",
+  supply: "Supply",
+  not_demand: "Not demand",
 };
 
 export const KINDS = ["request", "standing"] as const;
@@ -48,6 +57,10 @@ export type DemandTrade = { lot_id: string; title: string; status: string };
 /** One demand row: a request (one-off, by a date) or a standing buy-box (ongoing). Bulk only, 2+ units. */
 export type Demand = {
   id: string;
+  priority: boolean;
+  missing: string[];
+  context_notes: CompanyContextNote[];
+  inventory_matches: (SupplyFeedRow & { strength: "strong" | "partial"; reason: string })[];
   kind: DemandKind;
   basis: Basis | null;
   buyer: string;
@@ -71,7 +84,21 @@ export type Demand = {
   source_url: string | null;
   source_quote: string | null;
   observed_on: string | null;
-  status: "open" | "closed";
+  status: "open" | "qualifying" | "closed";
+  product_family: string | null;
+  fee_eur: number | null;
+  price_basis: PriceBasis | null;
+  reputation: Reputation | null;
+  qualify_question: string | null;
+  qualify_asked_on: string | null;
+  qualify_entered_on: string | null;
+  activity_count: number;
+  last_activity_at: string | null;
+  moved_to: string | null;
+  asked_on: string | null;
+  score: number | null;
+  expected_fee: number | null;
+  has_stock: boolean;
   closed_reason: ClosedReason | null;
   confirmed_on: string | null;
   updated_at: string;
@@ -109,13 +136,28 @@ export type SuggestedBuyer = {
 export type DemandInput = Partial<Pick<Demand,
   "kind" | "basis" | "buyer" | "company_id" | "person_id" | "contact" | "email" | "wants" | "quantity" | "location" | "note"
   | "confirmed_on" | "needed_by" | "volume" | "volume_unit" | "max_price" | "price_currency" | "price_unit" | "spec"
-  | "observed_on">>;
+  | "observed_on" | "status" | "product_family" | "fee_eur" | "price_basis" | "reputation" | "qualify_question" | "qualify_asked_on" | "moved_to" | "priority">>;
+
+/** Only compute a euro fee when amount, currency and compatible units are known. */
+export function demandFee(input: DemandInput): number | null {
+  if (input.price_currency !== "EUR" || !input.max_price || !input.price_unit) return null;
+  const quantity = input.quantity?.trim().match(/^(\d+(?:[.,]\d+)?)\s*(packs?|cells?|modules?|systems?|kwh|mwh)$/i);
+  const amount = input.volume ?? (quantity ? Number(quantity[1].replace(",", ".")) : null);
+  const unit = (input.volume_unit ?? quantity?.[2])?.toLowerCase().replace(/s$/, "");
+  const priced = input.price_unit.toLowerCase().replace(/s$/, "");
+  if (!amount || !unit) return null;
+  const factor = unit === priced ? 1 : unit === "mwh" && priced === "kwh" ? 1000 : null;
+  return factor === null ? null : amount * factor * input.max_price * 0.1;
+}
+
 const DEMAND_RULES: Record<string, Rule> = {
   kind: KINDS, basis: BASES, buyer: "text", company_id: "text", person_id: "text", contact: "text", email: "text", wants: "text",
   quantity: "text", location: "text", note: "text", confirmed_on: "date", needed_by: "date", observed_on: "date",
+  status: ["open", "qualifying", "closed"], product_family: "text", qualify_question: "text", qualify_asked_on: "date", moved_to: "text",
 };
-const NUMBER_KEYS = ["volume", "max_price"] as const;
-const OPTION_KEYS = { volume_unit: VOLUME_UNITS, price_currency: CURRENCIES, price_unit: PRICE_UNITS } as const;
+const NUMBER_KEYS = ["volume", "max_price", "fee_eur"] as const;
+const OPTION_KEYS = { volume_unit: VOLUME_UNITS, price_currency: CURRENCIES, price_unit: PRICE_UNITS,
+  price_basis: ["buyer", "estimate"], reputation: ["paid", "active", "email", "inbound", "anon"] } as const;
 
 /** Checks a spec: known keys only, list values from buy-box-spec.json, numbers in range. Empty values are dropped. */
 export function parseSpec(value: unknown): Parsed<Spec> {
@@ -170,20 +212,25 @@ export function parseDemandInput(body: unknown, creating: boolean): Parsed<Deman
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Body must be an object." };
   const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
   const extra: DemandInput = {};
+  if ("priority" in rest) {
+    if (typeof rest.priority !== "boolean") return { error: "priority must be true or false." };
+    extra.priority = rest.priority;
+    delete rest.priority;
+  }
   for (const key of NUMBER_KEYS) {
     if (!(key in rest)) continue;
     const value = rest[key];
     delete rest[key];
     if (value === null || value === "") extra[key] = null;
-    else if (typeof value === "number" && Number.isFinite(value) && value > 0) extra[key] = value;
-    else return { error: `${key} must be a positive number.` };
+    else if (typeof value === "number" && Number.isFinite(value) && (key === "fee_eur" ? value >= 0 : value > 0)) extra[key] = value;
+    else return { error: `${key} must be ${key === "fee_eur" ? "a non-negative" : "a positive"} number.` };
   }
-  for (const [key, allowed] of Object.entries(OPTION_KEYS) as [keyof typeof OPTION_KEYS, string[]][]) {
+  for (const [key, allowed] of Object.entries(OPTION_KEYS) as [keyof typeof OPTION_KEYS, readonly string[]][]) {
     if (!(key in rest)) continue;
     const value = rest[key];
     delete rest[key];
     if (value === null || value === "") extra[key] = null;
-    else if (typeof value === "string" && allowed.includes(value)) extra[key] = value;
+    else if (typeof value === "string" && allowed.includes(value)) Object.assign(extra, { [key]: value });
     else return { error: `${key} must be one of: ${allowed.join(", ")}.` };
   }
   if ("spec" in rest) {

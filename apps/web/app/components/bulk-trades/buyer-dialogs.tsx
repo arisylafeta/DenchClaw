@@ -119,7 +119,7 @@ export function BidDialog({ trade, buyer, onClose, onSaved }: {
       onSubmit={form.submit}
       footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Save bid</button>}
     >
-      {last && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Latest: {bidLabel(last)}. A new bid is added; earlier bids stay in the log.</p>}
+      {last && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Latest: {bidLabel(last)}</p>}
       <div className="grid grid-cols-[1fr_90px_110px] gap-3">
         <FormField label="Amount">{text("amount", { required: true, type: "number", min: "0", step: "any", inputMode: "decimal" })}</FormField>
         <FormField label="Currency">{select("currency", CURRENCIES)}</FormField>
@@ -211,15 +211,12 @@ export function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onM
         </>
       )}
     >
-      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        For {buyers.map((buyer) => buyer.name).join(", ")}. Uses only data marked Teaser, never price, location or the seller.
-        Nothing is sent from here: send it yourself, then mark the buyers.
-      </p>
+      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>For {buyers.map((buyer) => buyer.name).join(", ")} · Draft only</p>
       <textarea aria-label="Teaser text" value={text} onChange={(event) => setText(event.target.value)} rows={12}
         className="w-full rounded-none border px-3 py-2 text-sm leading-relaxed" style={inputStyle} />
       {!!without.length && (
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-          No email for {without.map((buyer) => buyer.name).join(", ")}. Link them to a CRM person to draft for them.
+          No email for {without.map((buyer) => buyer.name).join(", ")}.
         </p>
       )}
       {message && <p role="status" className="text-sm" style={{ color: "var(--bt-green)" }}>{message}</p>}

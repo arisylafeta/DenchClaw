@@ -7,18 +7,19 @@ import { TableCellContent } from "../ui/table-cell";
 import {
   BUYER_STATUSES,
   BUYER_SUBJECT,
-  auctionLabel,
+  auctionOfferLabel,
   bidLabel,
   greeting,
   shortDate,
-  trackingLabel,
   type Buyer,
   type BuyerStatus,
   type Proposal,
   type TradeField,
+  type TradeAuction,
 } from "@/lib/bulk-trade-details";
 import { BidDialog, BuyerDialog, TeaserDialog } from "./buyer-dialogs";
 import { EmailDialog } from "./email-dialog";
+import { AuctionRow, auctionStatus } from "./auction-card";
 import { ProposalRow } from "./proposal-row";
 import {
   Card,
@@ -44,11 +45,12 @@ function statusStyle(status: BuyerStatus): React.CSSProperties {
   }[tone];
 }
 
-const COLUMNS = "grid-cols-[24px_minmax(180px,1.3fr)_minmax(140px,1fr)_170px_120px_100px_130px]";
+const COLUMNS = "grid-cols-[24px_minmax(180px,1.3fr)_minmax(140px,1fr)_150px_110px_90px_130px_100px]";
 
 type Props = {
   trade: BulkTrade;
   buyers: Buyer[];
+  auction?: TradeAuction | null;
   fields: TradeField[];
   today: string;
   linkTracking: boolean;
@@ -57,7 +59,7 @@ type Props = {
   onBuyer: (buyer: Buyer) => void;
 };
 
-export function BuyersTable({ trade, buyers, fields, today, linkTracking, proposals, onProposalDecided, onBuyer }: Props) {
+export function BuyersTable({ trade, buyers, auction, fields, today, linkTracking, proposals, onProposalDecided, onBuyer }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Buyer | "new" | null>(null);
   const [bidFor, setBidFor] = useState<Buyer | null>(null);
@@ -117,7 +119,7 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
             className={`grid ${COLUMNS} gap-3.5 border-b px-3 py-2 font-medium`}
             style={{ color: "var(--bt-muted)", background: "var(--bt-table-head)", borderColor: "var(--bt-column)" }}
           >
-            <span /><span>Buyer</span><span>Wants</span><span>Status</span><span>Last touch</span><span>Chase on</span><span>Bid</span>
+            <span /><span>Buyer</span><span>Wants</span><span>Status</span><span>Last touch</span><span>Chase on</span><span>Bid</span><span>Activity</span>
           </div>
           {buyers.map((buyer) => (
             <div key={buyer.id} data-table-part="grid-row" className={`group grid ${COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-xs hover:bg-[var(--bt-row-hover)]`} style={{ borderColor: "var(--bt-divider)" }}>
@@ -133,9 +135,6 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
               <TableCellContent>
               <button type="button" className="min-w-0 text-left" onClick={() => setEditing(buyer)}>
                 <div className="truncate font-semibold hover:underline">{buyer.name}</div>
-                {buyer.contact && <div className="mt-0.5 truncate text-xs" style={{ color: "var(--bt-muted)" }}>{buyer.contact}</div>}
-                <TrackingLine buyer={buyer} />
-                <AuctionLine buyer={buyer} />
               </button>
               </TableCellContent>
               <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{buyer.wants}</span></TableCellContent>
@@ -150,11 +149,6 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 >
                   {BUYER_STATUSES.map((status) => <option key={status}>{status}</option>)}
                 </select>
-                {buyer.status === "To contact" && buyer.email_tracking?.sent_at && (
-                  <button type="button" onClick={() => changeStatus(buyer, "Teaser sent")} className="text-xs underline" style={{ color: "var(--bt-link)" }}>
-                    Mark as Teaser sent?
-                  </button>
-                )}
               </div>
               </TableCellContent>
               <TableCellContent>
@@ -182,6 +176,11 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 >
                   {bidLabel(buyer.latest_bid)}
                 </button>
+              ) : buyer.auction?.last_offer ? (
+                <button type="button" aria-label={`Add bid for ${buyer.name}`} title="Record a newer bid"
+                  onClick={() => setBidFor(buyer)} className="bt-mono h-7 text-left hover:underline">
+                  {auctionOfferLabel(buyer.auction.last_offer)}
+                </button>
               ) : (
                 <button
                   type="button"
@@ -194,10 +193,17 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
                 </button>
               )}
               </TableCellContent>
+              <span className="truncate" title={buyer.auction?.email}>
+                {buyer.auction ? auctionStatus(buyer.auction) : buyer.link_clicked_at || buyer.email_tracking?.clicked_at ? "Clicked" : buyer.email_tracking?.opened_at ? "Opened" : buyer.email_tracking?.sent_at ? "Sent" : "—"}
+              </span>
             </div>
           ))}
-          {!buyers.length && (
-            <p className="px-5 py-6 text-sm" style={{ color: "var(--bt-muted)" }}>No buyers yet. Add the first one to start tracking outreach.</p>
+          {auction?.people.filter((person) => !buyers.some((buyer) =>
+            buyer.id === person.buyer_id || buyer.auction?.email.toLowerCase() === person.email.toLowerCase()
+            || buyer.person_email?.toLowerCase() === person.email.toLowerCase() || buyer.contact?.toLowerCase() === person.email.toLowerCase()
+          )).map((person) => <AuctionRow key={person.email} tradeId={trade.id} person={person} columns={COLUMNS} onChanged={onProposalDecided} />)}
+          {!buyers.length && !auction?.people.length && (
+            <p className="px-5 py-6 text-sm" style={{ color: "var(--bt-muted)" }}>No buyers yet.</p>
           )}
         </div>
       </div>
@@ -245,37 +251,3 @@ export function BuyersTable({ trade, buyers, fields, today, linkTracking, propos
   );
 }
 
-const TRACKING_TONE = {
-  red: "var(--bt-red)",
-  green: "var(--bt-green)",
-  grey: "var(--bt-muted)",
-} as const;
-
-function AuctionLine({ buyer }: { buyer: Buyer }) {
-  const label = buyer.auction && auctionLabel(buyer.auction);
-  if (!label) return null;
-  return (
-    <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE[label.tone] }} title={buyer.auction!.email}>
-      {label.label}
-    </div>
-  );
-}
-
-function TrackingLine({ buyer }: { buyer: Buyer }) {
-  const tracking = buyer.email_tracking;
-  const label = tracking && trackingLabel(tracking);
-  const campaignAt = tracking && (tracking.bounced_at ?? tracking.clicked_at ?? tracking.opened_at ?? tracking.delivered_at ?? tracking.sent_at);
-  if (buyer.link_clicked_at && (!campaignAt || Date.parse(buyer.link_clicked_at) > Date.parse(campaignAt))) {
-    return (
-      <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE.green }}>
-        Clicked email link {shortDate(new Date(buyer.link_clicked_at).toISOString().slice(0, 10))}
-      </div>
-    );
-  }
-  if (!label) return null;
-  return (
-    <div className="mt-0.5 truncate text-xs font-medium" style={{ color: TRACKING_TONE[label.tone] }} title={tracking!.campaign ?? undefined}>
-      Teaser email: {label.label}
-    </div>
-  );
-}

@@ -31,6 +31,8 @@ def validate_manifest(manifest: dict) -> None:
     for lot in lots:
         if lot.get("lot_kind") not in LOT_KINDS:
             raise ValueError(f"invalid lot kind for {lot.get('id')}")
+        if lot.get("origin", lot["lot_kind"]) not in LOT_KINDS:
+            raise ValueError(f"invalid origin for {lot.get('id')}")
         if lot.get("stage") not in KANBAN_STAGES:
             raise ValueError(f"invalid stage for {lot.get('id')}")
         people_sent_count = lot.get("people_sent_count", 0)
@@ -85,13 +87,14 @@ def load_manifest(path: Path) -> dict[str, int]:
                     execute_values(
                         cursor,
                         """INSERT INTO crm_bulk_trade_lots
-                           (id, title, lot_kind, summary, stage, people_sent_count,
+                           (id, title, lot_kind, origin, summary, stage, people_sent_count,
                             observed_quantity, quantity_unit, observed_outcome, latest_activity_at,
                             needs_attention, confidence, reconciliation_note, source_manifest)
                            VALUES %s
                            ON CONFLICT (id) DO UPDATE SET
                              title = excluded.title,
                              lot_kind = excluded.lot_kind,
+                             origin = excluded.origin,
                              summary = excluded.summary,
                              stage = excluded.stage,
                              people_sent_count = excluded.people_sent_count,
@@ -105,7 +108,7 @@ def load_manifest(path: Path) -> dict[str, int]:
                              source_manifest = excluded.source_manifest,
                              updated_at = now()""",
                         [(
-                            lot["id"], lot["title"], lot["lot_kind"], lot["summary"],
+                            lot["id"], lot["title"], lot["lot_kind"], lot.get("origin", lot["lot_kind"]), lot["summary"],
                             lot["stage"], lot.get("people_sent_count", 0),
                             lot.get("observed_quantity"), lot.get("quantity_unit"),
                             lot["observed_outcome"], lot.get("latest_activity_at"),

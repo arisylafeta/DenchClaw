@@ -4,14 +4,54 @@ import { todayInLondon } from "../bulk-trades";
 import type { Basis, ClosedReason, Demand, DemandInput, SuggestedBuyer } from "../bulk-demand";
 import type { Buyer, Proposal } from "../bulk-trade-details";
 import { addBuyer } from "./bulk-trade-details";
+import { addDemandActivity } from "./bulk-demand-activity";
+import { companyContextSql } from "./company-context";
+
+// Both qualification gaps and visible inventory use exactly the feed's availability rules.
+const ELIGIBLE_INVENTORY = `
+  select feed.*, matched.strength, matched.reason from crm_bulk_trade_demand_matches matched
+  join crm_bulk_trade_supply_feed feed on feed.id = matched.lot_id and feed.kind in ('trade', 'auction')
+  where matched.demand_id = demand.id and not matched.hidden
+  union all
+  select feed.*, matched.strength, matched.reason from crm_bulk_trade_supply_matches matched
+  join crm_bulk_trade_supply_feed feed on feed.id = matched.supply_id and feed.kind = 'supply'
+  where matched.demand_id = demand.id and not matched.hidden`;
 
 const DEMAND_SELECT = `
   select demand.id, demand.kind, demand.basis, demand.buyer, demand.company_id, demand.person_id, demand.contact,
+    demand.priority, ${companyContextSql("demand.company_id")} as context_notes,
+    array_remove(array[
+      case when demand.max_price is null then 'no price' end,
+      case when nullif(trim(demand.quantity), '') is null and demand.volume is null then 'no quantity' end,
+      case when demand.kind = 'request' and demand.needed_by is null then 'no timeline' end,
+      case when nullif(trim(demand.qualify_question), '') is not null and demand.qualify_asked_on is null then 'question not sent' end,
+      case when not exists(${ELIGIBLE_INVENTORY}) then 'no supply match' end
+    ]::text[], null) as missing,
+    coalesce((select json_agg(row_to_json(inventory) order by inventory.strength desc, inventory.title)
+      from (${ELIGIBLE_INVENTORY}) inventory), '[]'::json) as inventory_matches,
     demand.email, demand.wants, demand.quantity, demand.location, demand.note,
     to_char(demand.needed_by, 'YYYY-MM-DD') as needed_by, demand.volume::float8 as volume, demand.volume_unit,
     demand.max_price::float8 as max_price, demand.price_currency, demand.price_unit, demand.spec, demand.source_kind,
     demand.source_label, demand.source_url, demand.source_quote, to_char(demand.observed_on, 'YYYY-MM-DD') as observed_on,
     demand.status, demand.closed_reason, to_char(demand.confirmed_on, 'YYYY-MM-DD') as confirmed_on, demand.updated_at,
+    demand.product_family, demand.fee_eur::float8 as fee_eur, demand.price_basis, demand.reputation,
+    demand.qualify_question, demand.moved_to,
+    to_char(demand.qualify_asked_on, 'YYYY-MM-DD') as qualify_asked_on,
+    to_char(demand.qualify_entered_on, 'YYYY-MM-DD') as qualify_entered_on,
+    (select count(*)::int from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as activity_count,
+    (select max(activity.occurred_at)::text from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as last_activity_at,
+    to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on,
+    bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
+      greatest(demand.observed_on, demand.confirmed_on)) as score,
+    bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
+      greatest(demand.observed_on, demand.confirmed_on))::float8 as expected_fee,
+    (demand.product_family is not null and (
+      exists(select 1 from crm_stock_items stock where stock.stock_status not in ('sold', 'unavailable')
+        and concat_ws(' ', stock.make, stock.model, stock.description) ilike '%' || demand.product_family || '%')
+      or exists(select 1 from crm_bulk_trade_lots stock where stock.origin = 'supply'
+        and stock.trade_stage in ('Needs info', 'With buyers', 'Closing')
+        and stock.title ilike '%' || demand.product_family || '%')
+    )) as has_stock,
     coalesce((
       select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'strength', m.strength, 'reason', m.reason,
         'buyer_id', m.buyer_id) order by m.strength desc, lot.title)
@@ -33,19 +73,23 @@ const RANK = `case when demand.kind = 'request' then 0 when demand.basis = 'agre
 const TIER_RANK = `case (select company.buyer_tier from crm_companies company where company.id = demand.company_id)
   when 'A' then 0 when 'B' then 1 when 'C' then 2 else 3 end`;
 
-/** Every demand row: open first, then requests by date, then buy-boxes by basis and buyer. */
+// Priority moves a row within its score band, never above a hotter qualified opportunity.
+const DEMAND_ORDER = `case status when 'open' then 0 when 'qualifying' then 1 else 2 end,
+  case when score >= 80 then 0 when score >= 60 then 1 when score >= 40 then 2
+    when score is not null then 3 else 4 end,
+  priority desc, score desc nulls last, buyer, id`;
+
+/** Open shortlist by expected-fee score, then qualification and closed history. */
 export async function listDemand(): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
-    `${DEMAND_SELECT} order by demand.status = 'closed', ${RANK}, demand.needed_by nulls last, demand.buyer,
-       demand.confirmed_on desc nulls last`,
+    `select * from (${DEMAND_SELECT}) ranked order by ${DEMAND_ORDER}`,
   ));
 }
 
 /** A company's demand rows, open first, in the same order as the Demand page. */
 export async function listDemandForCompany(companyId: string): Promise<Demand[]> {
   return withWaiting(await queryPg<Demand>(
-    `${DEMAND_SELECT} where demand.company_id = $1
-     order by demand.status = 'closed', ${RANK}, demand.needed_by nulls last, demand.observed_on desc nulls last`,
+    `select * from (${DEMAND_SELECT} where demand.company_id = $1) ranked order by ${DEMAND_ORDER}`,
     [companyId],
   ));
 }
@@ -107,6 +151,8 @@ type Source = {
 const INSERT_KEYS = [
   "kind", "basis", "buyer", "company_id", "person_id", "contact", "email", "wants", "quantity", "location", "note",
   "needed_by", "volume", "volume_unit", "max_price", "price_currency", "price_unit", "spec", "observed_on", "confirmed_on",
+  "status", "product_family", "fee_eur", "price_basis", "reputation", "qualify_question", "qualify_asked_on",
+  "priority",
 ] as const;
 
 export async function addDemand(input: DemandInput & { buyer: string; wants: string }, userId: string | null, source: Source = {}) {
@@ -121,6 +167,8 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
     observed_on: input.observed_on ?? input.confirmed_on ?? todayInLondon(),
     // Our own estimate is not a confirmation from the buyer.
     confirmed_on: input.confirmed_on ?? (input.basis === "estimated" ? null : todayInLondon()),
+    status: input.status ?? "open",
+    priority: input.priority ?? false,
   };
   const values = INSERT_KEYS.map((key) => row[key] ?? null);
   const sourceKeys = ["source_kind", "source_id", "source_label", "source_url", "source_quote"] as const;
@@ -135,13 +183,19 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
 // Column names below come only from validated DemandInput keys.
 export async function updateDemand(id: string, input: DemandInput, source: Source = {}): Promise<Demand | null> {
   const patch: Record<string, unknown> = { ...input, ...Object.fromEntries(Object.entries(source).filter(([, v]) => v)) };
+  if (input.status === "open" || input.status === "qualifying") {
+    patch.closed_reason = null;
+    patch.moved_to = null;
+  }
   if ("spec" in patch) patch.spec = JSON.stringify(patch.spec ?? {});
   const keys = Object.keys(patch);
   // Turning a request into a standing buy-box keeps any basis it has, else it becomes stated.
   const basisFix = input.kind === "standing" && !("basis" in input) ? ", basis = coalesce(basis, 'stated')" : "";
+  const matchingFix = input.status === "qualifying" ? ", match_hash = null, supply_match_hash = null"
+    : input.status === "open" ? ", match_hash = case when status <> 'open' then null else match_hash end, supply_match_hash = case when status <> 'open' then null else supply_match_hash end" : "";
   if (keys.length) {
     const rows = await queryPg(
-      `update crm_bulk_trade_demand set ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")}${basisFix}, updated_at = now()
+      `update crm_bulk_trade_demand set ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")}${basisFix}${matchingFix}, updated_at = now()
        where id = $1 returning id`,
       [id, ...keys.map((key) => patch[key])],
     );
@@ -173,11 +227,19 @@ export async function makeStanding(id: string): Promise<Demand | null> {
 
 /** "Still wanted": confirmed today, and reopened if it was closed. */
 export async function confirmDemand(id: string): Promise<Demand | null> {
+  // Status transitions are logged atomically by 045; a reconfirmation is useful even while already open.
+  const current = await getDemand(id);
   const rows = await queryPg(
-    `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now()
+    // A reopened row lost its suggestions when it closed, so the next matching passes judge it again.
+    `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now(),
+       match_hash = case when status <> 'open' then null else match_hash end,
+       supply_match_hash = case when status <> 'open' then null else supply_match_hash end
      where id = $1 returning id`,
     [id, todayInLondon()],
   );
+  if (rows.length && current?.status === "open") {
+    await addDemandActivity({ demandId: id, kind: "status", title: "Still wanted", data: { confirmed_on: todayInLondon() } });
+  }
   return rows.length ? getDemand(id) : null;
 }
 

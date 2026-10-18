@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const {txQuery} = vi.hoisted(() => ({txQuery:vi.fn(async () => ({rows:[{id:1}]}))}));
 vi.mock("@/lib/postgres", () => ({
   queryPg: vi.fn(async () => []),
+  withPgTransaction: async (fn: (client: {query: typeof txQuery}) => unknown) => fn({query:txQuery}),
 }));
 
 describe("crm-postgres sql execution", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
   });
 
   it("rejects non read-only SQL", async () => {
@@ -23,7 +25,7 @@ describe("crm-postgres sql execution", () => {
     ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
     await expect(
       postgresReadOnlyQuery(
-        "WITH x AS (SELECT * FROM crm_email_messages) SELECT * FROM x",
+        "WITH x AS (SELECT * FROM crm_interactions) SELECT * FROM x",
       ),
     ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
     await expect(
@@ -34,13 +36,30 @@ describe("crm-postgres sql execution", () => {
     ).rejects.toThrow("Raw SQL access to user-scoped CRM data is disabled");
   });
 
+  it("denies web raw mail reads and every generic mail mutation", async () => {
+    const { postgresReadOnlyQuery } = await import("./sql-execution");
+    const { queryPg } = await import("@/lib/postgres");
+    vi.mocked(queryPg).mockResolvedValue([]);
+    for (const table of ["mail_message","mail_thread","mail_event","mail_approval"]) await expect(postgresReadOnlyQuery(`select * from ${table}`)).rejects.toThrow("user-scoped");
+    for (const sql of [
+      "update mail_message set state = 'accepted'",
+      "update mail_message set delivered_at = now()",
+      "insert into mail_approval (id) values ('fake')",
+      "delete from mail_event",
+      "update mail_identity set active = true",
+      "with x as (delete from mail_approval returning *) select * from x",
+      "select 1; update mail_message set state = 'accepted'",
+    ]) await expect(postgresReadOnlyQuery(sql)).rejects.toThrow("Only read-only");
+    expect(queryPg).not.toHaveBeenCalled();
+  });
+
   it("passes read-only SQL to postgres", async () => {
     const { queryPg } = await import("@/lib/postgres");
-    vi.mocked(queryPg).mockResolvedValueOnce([{ id: 1 }]);
     const { postgresReadOnlyQuery } = await import("./sql-execution");
 
     const rows = await postgresReadOnlyQuery("SELECT 1 as id");
-    expect(queryPg).toHaveBeenCalledWith("SELECT 1 as id");
+    expect(txQuery).toHaveBeenCalledWith("set local role crm_web_sql");
+    expect(txQuery).toHaveBeenCalledWith("SELECT 1 as id");
     expect(rows).toEqual([{ id: 1 }]);
   });
 

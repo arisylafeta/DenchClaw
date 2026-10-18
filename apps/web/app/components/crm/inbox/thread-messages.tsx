@@ -6,8 +6,9 @@ import { MessageCard } from "./message-card";
 import { QuickReply } from "./quick-reply";
 import type { Participant } from "./participant-chips";
 import type { Message } from "./types";
+import styles from "./mail.module.css";
 
-type ThreadDetail = {
+export type ThreadDetail = {
   thread_id: string;
   messages: Message[];
   people: Participant[];
@@ -44,6 +45,8 @@ export function ThreadMessages({
   onOpenPerson,
   autoScrollOnLoad = true,
   showReply = true,
+  crmOnly = true,
+  onLoaded,
 }: {
   threadId: string;
   seedParticipants?: ReadonlyArray<Participant>;
@@ -51,6 +54,8 @@ export function ThreadMessages({
   onOpenPerson?: (id: string) => void;
   autoScrollOnLoad?: boolean;
   showReply?: boolean;
+  crmOnly?: boolean;
+  onLoaded?: (detail: ThreadDetail) => void;
 }) {
   const [detail, setDetail] = useState<ThreadDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,16 +71,17 @@ export function ThreadMessages({
     }
     const controller = new AbortController();
     setLoading(true);
+    setDetail(null);
     setError(null);
     void (async () => {
       try {
-        const res = await fetch(`/api/crm/inbox/${encodeURIComponent(threadId)}`, {
+        const res = await fetch(`/api/mail/threads/${encodeURIComponent(threadId)}?crmOnly=${crmOnly}`, {
           cache: "no-store",
           signal: controller.signal,
         });
         if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
         const body = (await res.json()) as ThreadDetail;
-        setDetail(body);
+        if (!controller.signal.aborted) {setDetail(body); onLoaded?.(body);}
       } catch (err) {
         if ((err as Error).name === "AbortError") {return;}
         setError(err instanceof Error ? err.message : "Failed to load this thread.");
@@ -84,7 +90,7 @@ export function ThreadMessages({
       }
     })();
     return () => controller.abort();
-  }, [threadId]);
+  }, [threadId, crmOnly, onLoaded]);
 
   // Hydrated participant map for MessageCard lookup. Seeded participants
   // (e.g. from the row's own data) are merged in case the detail fetch
@@ -132,9 +138,11 @@ export function ThreadMessages({
   if (!detail) {return null;}
 
   const lastMessageId = detail.messages.at(-1)?.id;
+  const replyMessage = detail.messages.findLast((message) => message.direction === "inbound" && !message.is_self) ?? detail.messages.at(-1);
+  const replyEmail = replyMessage?.direction === "inbound" && !replyMessage.is_self ? replyMessage.from_email ?? null : replyMessage?.to_emails?.[0] ?? null;
 
   return (
-    <div ref={containerRef} className="space-y-3">
+    <div ref={containerRef}>
       {detail.messages.map((msg) => (
         <div key={msg.id} data-thread-message={msg.id === lastMessageId ? "latest" : undefined}>
           <MessageCard
@@ -146,9 +154,9 @@ export function ThreadMessages({
         </div>
       ))}
       {showReply && (
-        <div className="pt-3">
-          <QuickReply recipientName={recipientName ?? null} />
-        </div>
+        <footer className={styles.replyFooter} aria-label="Prepare reply">
+          <QuickReply key={threadId} threadId={threadId} recipientName={recipientName ?? null} recipientEmail={replyEmail} subject={replyMessage?.subject ?? null} />
+        </footer>
       )}
     </div>
   );

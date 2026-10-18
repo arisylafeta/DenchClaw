@@ -48,7 +48,7 @@ export function EmailDialog({ trade, to, subject, body, buyerId, linkTracking, o
           </>
         )}
       >
-        <p className="text-sm">The draft is in your Gmail drafts. Check it and send it from there.</p>
+        <p className="text-sm">Draft saved. Review and send in Gmail.</p>
         {result.tracked_links > 0 && (
           <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
             {result.tracked_links === 1 ? "1 link is" : `${result.tracked_links} links are`} tracked. Clicks show on this trade.
@@ -75,7 +75,7 @@ export function EmailDialog({ trade, to, subject, body, buyerId, linkTracking, o
           Track clicks on links in this email
         </label>
       )}
-      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Saved as a draft in your Gmail. Nothing is sent from here.</p>
+      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Draft only — nothing sent.</p>
       <ErrorText error={form.error} />
     </Modal>
   );

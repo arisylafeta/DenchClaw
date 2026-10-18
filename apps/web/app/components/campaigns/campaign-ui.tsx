@@ -27,6 +27,7 @@ export function CampaignDate({ value, withTime = false }: { value: string | null
 export function followInApp(event: MouseEvent<HTMLAnchorElement>, navigate: () => void) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) { return; }
   event.preventDefault();
+  event.stopPropagation();
   navigate();
 }
 
@@ -39,13 +40,15 @@ export function StatusTag({ status }: { status: string }) {
 }
 
 export function MetricsStrip({ campaign }: { campaign: CampaignSummary }) {
-  const cells = [["Sent", campaign.metrics.sent], ["Delivered", campaign.metrics.delivered], ["Tracked opens", campaign.metrics.opened], ["Tracked clicks", campaign.metrics.clicked]] as const;
+  const cells: Array<readonly [string, number | null]> = [["Sent", campaign.metrics.sent], ["Delivered", campaign.metrics.delivered], ["Tracked opens", campaign.metrics.opened], ["Tracked clicks", campaign.metrics.clicked]];
+  // Replies are counted from synced email, so only the send ledger has them.
+  if (campaign.metrics_basis === "ledger") { cells.splice(2, 0, ["Replied", campaign.metrics.replied]); }
   return (
-    <section aria-label="Campaign metrics" className="grid grid-cols-2 rounded-none border sm:grid-cols-4" style={borderStyle}>
+    <section aria-label="Campaign metrics" className={`grid grid-cols-2 rounded-none border ${cells.length === 5 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`} style={borderStyle}>
       {cells.map(([label, value], index) => (
         <div key={label} className="flex flex-col gap-1 border-r px-3.5 py-2.5 last:border-r-0" style={{ borderColor: "var(--bt-divider)", background: index === 0 ? "var(--bt-bg)" : "var(--bt-surface)" }}>
           <span className="bt-label">{label}</span>
-          <span className="bt-mono text-[22px] font-semibold">{value == null ? "Unknown" : value.toLocaleString("en-GB")}</span>
+          <span className="bt-mono text-[22px] font-semibold">{value != null ? value.toLocaleString("en-GB") : campaign.channel === "email-gmail" ? "Not tracked" : "Unknown"}</span>
           {value == null && campaign.metrics_basis === "ledger" && campaign.tracking_pending > 0 && <span className="text-xs" style={mutedStyle}>Tracking pending</span>}
         </div>
       ))}
@@ -55,6 +58,7 @@ export function MetricsStrip({ campaign }: { campaign: CampaignSummary }) {
 
 export function Observation({ at, recipient }: { at: string | null; recipient: CampaignRecipient }) {
   if (at) { return <CampaignDate value={at} withTime />; }
+  if (!recipient.tracked) { return <span style={mutedStyle}>Not tracked</span>; }
   if (recipient.tracking_pending) { return <span style={mutedStyle}>Unknown · pending</span>; }
   return <span style={mutedStyle}>{recipient.last_synced_at ? "Not observed" : "Unknown"}</span>;
 }

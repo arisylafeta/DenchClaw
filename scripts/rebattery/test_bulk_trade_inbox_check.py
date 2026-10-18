@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+import pytest
 
 spec = importlib.util.spec_from_file_location("check", Path(__file__).with_name("bulk_trade_inbox_check.py"))
 check = importlib.util.module_from_spec(spec)
@@ -78,6 +79,141 @@ class DemandScreen(unittest.TestCase):
         self.assertTrue(check.demand_candidate(self.source(self.REPLY, "fergal@buyer.test"), set()))  # "interested in" + cells
         newsletter = self.source("Subject: News\nFrom: n@news.test\n\nOur battery newsletter. Unsubscribe here.", "n@news.test")
         self.assertFalse(check.demand_candidate(newsletter, {"n@news.test"}))
+
+    def screen(self, source, response):
+        from unittest.mock import MagicMock
+        cur = MagicMock()
+        cur.fetchall.return_value = []
+        entity = {"company_id": "co_known", "person_id": "p_known", "email": source["from"]}
+        with patch.object(check, "outreach_contacts", return_value={source["from"]}), \
+             patch.object(check, "load_trades", return_value={"bt_1": TRADE}), \
+             patch.object(check, "resolve_entity", return_value=entity), \
+             patch.object(check, "existing_demand", return_value="btd_same_family"), \
+             patch.object(check, "reputation_for", return_value="email"), \
+             patch.object(check, "call_model", return_value={"demands": [response]}) as model:
+            result = check.screen_demand(cur, [source], "mock-only", {"warnings": []})
+        return result, json.loads(model.call_args.args[1])
+
+    def test_quote_must_be_in_new_message_not_quoted_history(self):
+        source = self.source(self.REPLY, "fergal@buyer.test")
+        response = {"source_id": source["id"], "wants": "EV packs", "product_family": "EV packs",
+                    "quote": "We have EV packs."}
+        self.assertEqual(self.screen(source, response)[0], [])
+
+    def test_call_markdown_is_not_treated_as_quoted_email_history(self):
+        source = {**self.source("Meeting: Buyer\n\n> We need twenty Leaf packs.\n\nTranscript:\nBuyer: twenty Leaf packs.", "call@buyer.test"),
+                  "kind": "granola"}
+        response = {"source_id": source["id"], "wants": "Leaf packs", "product_family": "leaf",
+                    "quote": "We need twenty Leaf packs."}
+        [card], _ = self.screen(source, response)
+        self.assertEqual(card["kind"], "possible_demand")
+
+    def test_offered_stock_reply_routes_to_lot_buyer_and_bid(self):
+        source = self.source("Subject: Stock\n\nWe bid EUR 30 per kWh for your offered packs.", "sam@supplier.test")
+        response = {"source_id": source["id"], "buyer_company": "New Bidder", "wants": "Offered packs",
+                    "product_family": "ebs37", "offered_lot_id": "bt_1", "unit_price": 30,
+                    "currency": "EUR", "price_unit": "kWh", "quote": "We bid EUR 30 per kWh"}
+        out, payload = self.screen(source, response)
+        self.assertEqual([p["kind"] for p in out], ["new_buyer", "bid"])
+        self.assertTrue(all(p["lot_id"] == "bt_1" for p in out))
+        self.assertEqual(payload["SOURCES"][0]["offered_lots"][0]["title"], TRADE["title"])
+
+    def test_family_match_is_a_reconfirmation_card_never_auto_applied(self):
+        source = self.source("Subject: Packs\n\nWe need another batch of 20 Leaf packs.", "x@buyer.test")
+        response = {"source_id": source["id"], "wants": "Another Leaf batch", "product_family": " NISSAN LEAF ",
+                    "quantity": "20 packs", "quote": "We need another batch of 20 Leaf packs."}
+        [card], _ = self.screen(source, response)
+        self.assertEqual(card["proposed"]["existing_demand_id"], "btd_same_family")
+        self.assertEqual(card["proposed"]["product_family"], "nissan leaf")
+        self.assertTrue(check.is_card(card))
+
+
+class DemandAgeing(unittest.TestCase):
+    def test_expiry_boundaries_and_reconfirmation(self):
+        from demand_lifecycle import expiry_transition
+        today = dt.date(2026, 10, 16)
+        def row(days, **extra):
+            return {"kind": "standing", "status": "open", "observed_on": today - dt.timedelta(days=days),
+                    "confirmed_on": None, **extra}
+        self.assertIsNone(expiry_transition(row(59), today))
+        self.assertEqual(expiry_transition(row(60), today), "qualifying")
+        self.assertEqual(expiry_transition(row(120), today), "qualifying")
+        self.assertEqual(expiry_transition(row(121, status="qualifying"), today), "question_not_sent")
+        for kind, outcome in (("standing", "moved_to_profile"), ("request", "expired")):
+            qualifying = row(300, status="qualifying", kind=kind, qualify_entered_on=today-dt.timedelta(days=40))
+            self.assertEqual(expiry_transition(qualifying, today), "question_not_sent")
+            qualifying["qualify_asked_on"] = today-dt.timedelta(days=20)
+            self.assertIsNone(expiry_transition(qualifying, today))
+            qualifying["qualify_asked_on"] = today-dt.timedelta(days=21)
+            self.assertEqual(expiry_transition(qualifying, today), outcome)
+            # Creation/acceptance and sending on the same date is not a buyer response.
+            qualifying["observed_on"] = qualifying["qualify_asked_on"]
+            qualifying["confirmed_on"] = qualifying["qualify_asked_on"]
+            self.assertEqual(expiry_transition(qualifying, today), outcome)
+            qualifying["confirmed_on"] = today
+            self.assertIsNone(expiry_transition(qualifying, today))
+        self.assertIsNone(expiry_transition(row(121, confirmed_on=today), today))
+        self.assertIsNone(expiry_transition(row(90, kind="request"), today))
+        self.assertEqual(expiry_transition(row(91, kind="request"), today), "expired")
+        self.assertIsNone(expiry_transition(row(120, kind="request", needed_by=today), today))
+        self.assertEqual(expiry_transition(row(1, kind="request", needed_by=today-dt.timedelta(days=1)), today), "expired")
+
+
+class PossibleScreen(unittest.TestCase):
+    class Cursor:
+        def __init__(self, carded):
+            self.carded, self.rows = carded, []
+
+        def execute(self, sql, params=None):
+            self.rows = ([{"id": "bt_1", "title": "Known trade"}] if "crm_bulk_trade_lots" in sql
+                         else [{"source_thread": t} for t in self.carded])
+
+        def fetchall(self):
+            return self.rows
+
+    def source(self, i, thread, text):
+        return {**SOURCE, "id": i, "thread": thread, "from": f"{i}@seller.test", "text": text}
+
+    def test_cards_need_reuse_and_8_tonnes_or_10k_and_smaller_offers_go_to_supply(self):
+        sources = [self.source("big", "t1", "Offer: 30 packs of 60 kWh in Leeds"),
+                   self.source("priced", "t2", "Offer: 100 cells at USD 120 each"),
+                   self.source("small", "t3", "Offer: 3 hybrid packs to sell"),
+                   self.source("follow", "t4", "Follow-up: the MEB packs are new"),
+                   self.source("recy", "t5", "We recycle LMO packs at EUR 2,500 per tonne"),
+                   self.source("want", "t6", "I need two 60 kWh packs for testing")]
+        batches = [
+            {"source_id": "big", "side": "supply", "use": "reuse", "title": "30 packs", "est_tonnes": 11.7, "quote": "30 packs of 60 kWh in Leeds"},
+            {"source_id": "priced", "side": "supply", "use": "reuse", "title": "100 cells", "est_tonnes": 0.2, "est_value_usd": 12000, "quote": "100 cells at USD 120 each"},
+            {"source_id": "small", "side": "supply", "use": "reuse", "title": "3 hybrid packs", "est_tonnes": 0.12, "quote": "3 hybrid packs to sell"},
+            {"source_id": "follow", "side": "supply", "use": "reuse", "title": "MEB packs", "est_tonnes": None, "quote": "the MEB packs are new"},
+            {"source_id": "recy", "side": "supply", "use": "recycling", "title": "LMO recycling", "est_tonnes": 20, "quote": "We recycle LMO packs"},
+            {"source_id": "want", "side": "demand", "use": "reuse", "title": "Two packs", "est_tonnes": 0.8, "quote": "I need two 60 kWh packs"}]
+        report = {"model_calls": 0, "warnings": []}
+        with patch.object(check, "call_model", lambda system, user, key: {"batches": batches}):
+            out = check.screen_possible(self.Cursor(carded={"t4"}), sources, "k", report)
+        self.assertEqual([(o["kind"], o["source"]["id"]) for o in out],
+                         [("possible_trade", "big"), ("possible_trade", "priced"), ("possible_supply", "small")])
+        self.assertEqual(out[0]["proposed"]["side"], "supply")
+        self.assertTrue(out[1]["summary"].endswith("(~0.2 t · ~$12,000)"))
+        self.assertEqual(report["skipped"], {"recycling": ["LMO recycling"], "small_requests": ["Two packs"],
+                                             "carded_threads": ["follow@seller.test offers: MEB packs"]})
+
+
+class SizeNumbers(unittest.TestCase):
+    def test_numeric_strings_count_and_junk_or_infinite_values_do_not(self):
+        self.assertEqual([check.size_number(v) for v in (11.7, "11.7", "~12,000", "$900", 0)], [11.7, 11.7, 12000.0, 900.0, 0.0])
+        self.assertEqual([check.size_number(v) for v in (None, True, "n/a", -1, float("inf"), [3])], [None] * 6)
+
+    def test_an_odd_model_answer_is_skipped_not_fatal(self):
+        sources = [{**SOURCE, "id": "ok", "thread": "t1", "text": "Offer: 3 hybrid packs to sell"}]
+        batches = ["not a dict", {"source_id": "ok", "title": "x", "quote": ["a list"]},
+                   {"source_id": "ok", "title": "Packs", "existing_trade_id": ["bt_1"], "side": "supply", "use": "reuse",
+                    "est_tonnes": "0.1", "quote": "3 hybrid packs to sell"}]
+        report = {"model_calls": 0, "warnings": []}
+        with patch.object(check, "call_model", lambda system, user, key: {"batches": batches}):
+            out = check.screen_possible(PossibleScreen.Cursor(carded=set()), sources, "k", report)
+        self.assertEqual([o["kind"] for o in out], ["possible_supply"])
+        self.assertEqual(out[0]["proposed"]["est_tonnes"], 0.1)
 
 
 class Schedule(unittest.TestCase):
@@ -240,10 +376,10 @@ class History(unittest.TestCase):
         self.assertEqual(kept[0]["proposed"], {"name": "New Person", "email": "new.person@supplier.test"})
 
 
-TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
+TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL") or os.environ.get("DENCH_MAIL_DSN")
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class FullRun(unittest.TestCase):
     """End to end against a throwaway database with every migration, the model mocked."""
 
@@ -256,16 +392,25 @@ class FullRun(unittest.TestCase):
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
                 values ('bt_run', 'supply', 'Run trade', '', '', 'confirmed', 'With buyers', 'packs') on conflict do nothing;
               insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_run', 'bt_run', 'Sam', 'sam-fullrun@supplier.test') on conflict do nothing;
-              insert into crm_email_threads (id, subject, gmail_thread_id) values ('thr_run', 'Stock', 'g-thr-run') on conflict do nothing;
-              insert into crm_email_messages (id, thread_id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_run', 'thr_run', 'Stock', now(), 'Manufacturing dates: 2021 to 2025. Packs in Turin.', 'g-msg-run',
+              insert into mail_thread (id, subject, gmail_thread_id, crm_visible) values ('thr_run', 'Stock', 'g-thr-run', true) on conflict do nothing;
+              insert into mail_message (direction, transport, state, crm_visible, id, thread_id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_run', 'thr_run', 'Stock', now(), 'Manufacturing dates: 2021 to 2025. Packs in Turin.', 'g-msg-run',
                        'sam-fullrun@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_new', 'Offer: 400 Leaf packs in Leeds', now(), '400 Nissan Leaf battery packs available in Leeds, 40 kWh.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_new', 'Offer: 400 Leaf packs in Leeds', now(), '400 Nissan Leaf battery packs available in Leeds, 40 kWh.',
                        'g-msg-new', 'seller@unknown.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'msg_known', 'Batch update', now(), 'More packs for the run trade batch are ready.',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_known', 'Batch update', now(), 'More packs for the run trade batch are ready.',
                        'g-msg-known', 'new.person@supplier.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_small', 'Three hybrid packs', now(), 'We have three Toyota Prius hybrid packs to sell.',
+                       'g-msg-small', 'sophie@dismantler.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_recy', 'Recycling quote', now(), 'We can recycle the LMO packs for EUR 2,500 per tonne.',
+                       'g-msg-recy', 'quotes@recycler.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'msg_two', 'Two packs wanted', now(), 'I need two 60 kWh packs for testing.',
+                       'g-msg-two', 'massimo@lab.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
 
     def tearDown(self):
@@ -277,11 +422,19 @@ class FullRun(unittest.TestCase):
         if system is check.POSSIBLE_SYSTEM:
             existing = [t["id"] for t in json.loads(user)["EXISTING"]]
             assert "bt_run" in existing
-            return {"trades": [
-                {"source_id": "g-msg-new", "title": "Leaf packs, Leeds", "trade_kind": "packs",
-                 "summary": "400 Leaf packs offered", "quote": "400 Nissan Leaf battery packs available in Leeds"},
+            return {"batches": [
+                {"source_id": "g-msg-new", "side": "supply", "use": "reuse", "title": "Leaf packs, Leeds", "trade_kind": "packs",
+                 "est_tonnes": 104, "summary": "400 Leaf packs offered", "quote": "400 Nissan Leaf battery packs available in Leeds"},
                 {"source_id": "g-msg-known", "title": "Run trade", "existing_trade_id": "bt_run",
-                 "summary": "About the run trade", "quote": "More packs for the run trade batch"}]}
+                 "summary": "About the run trade", "quote": "More packs for the run trade batch"},
+                {"source_id": "g-msg-small", "side": "supply", "use": "reuse", "title": "3 Prius hybrid packs", "trade_kind": "packs",
+                 "company": "Dismantler Ltd", "contact_name": "Sophie", "offers": "3 Toyota Prius hybrid packs",
+                 "quantity": "three", "est_tonnes": 0.12, "est_value_usd": None, "size_note": "3 x 1.3 kWh",
+                 "quote": "three Toyota Prius hybrid packs to sell"},
+                {"source_id": "g-msg-recy", "side": "supply", "use": "recycling", "title": "LMO packs recycling",
+                 "trade_kind": "packs", "est_tonnes": 20, "quote": "We can recycle the LMO packs"},
+                {"source_id": "g-msg-two", "side": "demand", "use": "reuse", "title": "Two 60 kWh packs wanted",
+                 "trade_kind": "packs", "est_tonnes": 0.8, "quote": "I need two 60 kWh packs for testing."}]}
         return {"proposals": [
             {"kind": "field", "target": "manufacture_date", "proposed": {"value": "2021 to 2025"},
              "summary": "Manufacture date", "quote": "Manufacturing dates: 2021 to 2025", "source_id": "g-msg-run"},
@@ -313,6 +466,16 @@ class FullRun(unittest.TestCase):
             cur.execute("""select lot_id, kind, target, proposed->>'value', status from crm_bulk_trade_proposals
                            where source_id in ('g-msg-run', 'g-msg-new', 'g-msg-known') order by id""")
             rows = cur.fetchall()
+            cur.execute("""select source_id, kind, status, summary from crm_bulk_trade_proposals
+                           where source_id in ('g-msg-new', 'g-msg-small', 'g-msg-recy', 'g-msg-two') order by source_id""")
+            screened = cur.fetchall()
+            cur.execute("""select s.seller, s.offers, s.est_tonnes::float8, s.status, s.source_quote, c.purpose
+                           from crm_bulk_trade_supply s left join crm_companies c on c.id = s.company_id
+                           where s.email = 'sophie@dismantler.test'""")
+            supply = cur.fetchall()
+            cur.execute("""select c.purpose from crm_people p join crm_companies c on c.id = p.company_id
+                           where p.email = 'seller@unknown.test'""")
+            leaf_lead = cur.fetchone()
             cur.execute("select field_key, value, status, alternatives->0->>'value' from crm_bulk_trade_fields where lot_id = 'bt_run' order by field_key")
             fields = cur.fetchall()
             cur.execute("select status, to_char(chase_on, 'YYYY-MM-DD') from crm_bulk_trade_buyers where id = 'btb_run'")
@@ -329,6 +492,14 @@ class FullRun(unittest.TestCase):
         self.assertNotIn("Milan", [r[3] for r in rows])  # the unquoted claim was dropped
         self.assertIn(("bt_run", "buyer_update", "btb_run", None, "new"), rows)  # the status waits for Alex
         self.assertIn((None, "possible_trade", None, None, "new"), rows)
+        # Only the big reuse batch is a card; the small one goes on the Supply list once; recycling and a small
+        # request make nothing here (the demand screen handles requests).
+        self.assertEqual([(r[0], r[1], r[2]) for r in screened],
+                         [("g-msg-new", "possible_trade", "new"), ("g-msg-small", "possible_supply", "applied")])
+        self.assertTrue(screened[0][3].endswith("(~104 t)"))
+        self.assertEqual(supply, [("Dismantler Ltd", "3 Toyota Prius hybrid packs", 0.12, "open",
+                                   "three Toyota Prius hybrid packs to sell", ["Supplier"])])
+        self.assertEqual(leaf_lead, (["Supplier"],))
         self.assertIn(("bt_run", "link_contact", None, None, "applied"), rows)
         self.assertIn(("manufacture_date", "2021 to 2025", "unverified", None), fields)
         self.assertIn(("chemistry", "NMC", "conflict", "LFP"), fields)  # Alex's value stands; email's is a conflict
@@ -341,7 +512,7 @@ class FullRun(unittest.TestCase):
         self.assertEqual(runs[-1][2], 0)
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class HistoryRun(unittest.TestCase):
     def test_reads_all_of_a_trades_mail_oldest_first_and_keeps_the_latest_value(self):
         import psycopg2
@@ -352,17 +523,17 @@ class HistoryRun(unittest.TestCase):
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage)
                 values ('bt_hist', 'supply', 'History trade', '', '', 'confirmed', 'Needs info') on conflict do nothing;
               insert into crm_bulk_trade_contacts (id, lot_id, name, email) values ('btc_hist', 'bt_hist', 'Nic', 'nic@oem.test') on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select v.id, 'Batch', v.at::timestamptz, now(), v.body, v.gid, 'nic@oem.test', u.id
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, created_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, v.id, 'Batch', v.at::timestamptz, now(), v.body, v.gid, 'nic@oem.test', u.id
                 from crm_users u, (values
                   ('h1', '2025-05-01', 'We have 600 packs of 23.8 kWh. ' || repeat('Older context. ', 1200), 'g-h1'),
                   ('h2', '2026-09-20', 'Update: 580 packs remain available.', 'g-h2')) as v(id, at, body, gid)
                 where u.email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'h-other', 'Other', now(), now(), 'Unrelated 999 packs', 'g-other', 'someone@else.test', id
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, created_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'h-other', 'Other', now(), now(), 'Unrelated 999 packs', 'g-other', 'someone@else.test', id
                 from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, created_at, body, gmail_message_id, from_email, mailbox_owner_id)
-                select 'h-serbia', 'Serbian packs for Ecovip', '2026-03-26', now(), 'Customer is Ecovip. 300 Serbian packs.', 'g-serbia',
+              insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, created_at, body_text, gmail_message_id, from_email, mailbox_owner_id)
+                select 'inbound', 'gmail', 'received', true, 'h-serbia', 'Serbian packs for Ecovip', '2026-03-26', now(), 'Customer is Ecovip. 300 Serbian packs.', 'g-serbia',
                        'nic@oem.test', id from crm_users where email = 'alex@rebattery.io' on conflict do nothing;
             """)
         seen, placed = [], []
@@ -409,8 +580,57 @@ class HistoryRun(unittest.TestCase):
         self.assertEqual(run, ("history", "ok", 3))
 
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class DemandRun(unittest.TestCase):
+    def test_new_sender_with_matching_name_does_not_reuse_another_buyer(self):
+        from demand_lifecycle import resolve_entity
+        try:
+            with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""insert into crm_companies (id, name) values ('co_original_name', 'Original Name Co');
+                    insert into crm_people (id, full_name, first_name, email, company_id)
+                    values ('p_original_name', 'Unique Buyer Name', 'Unique', 'original@name.test', 'co_original_name')""")
+                stranger = resolve_entity(cur, 'new@other.test', 'Unique Buyer Name', 'Other Co')
+                self.assertIsNone(stranger['person_id'])
+                self.assertIsNone(stranger['company_id'])
+                known = resolve_entity(cur, None, 'Unique Buyer Name', 'Original Name Co')
+                self.assertEqual(known['person_id'], 'p_original_name')
+                person_id, company_id = check.ensure_lead(cur, 'new@other.test', 'Unique Buyer Name', 'Other Co', 'Buyer', 'Test')
+                self.assertNotEqual(person_id, 'p_original_name')
+                self.assertNotEqual(company_id, 'co_original_name')
+        finally:
+            self.conn.rollback()
+
+    def test_lifecycle_merges_old_standing_asks_and_dedupes_by_family(self):
+        from demand_lifecycle import expire_demand, existing_demand, reputation_for
+        today = dt.date(2026, 10, 16)
+        try:
+            with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""insert into crm_companies (id, name) values ('co_age', 'Ageing Buyer');
+                  insert into crm_bulk_trade_demand
+                    (id, buyer, company_id, wants, kind, product_family, observed_on, status, spec, basis)
+                  values ('btd_age_old', 'Ageing Buyer', 'co_age', 'Leaf packs', 'standing', 'leaf', '2026-06-01', 'open', '{"formats":["Packs"]}', 'stated'),
+                    ('btd_age_confirm', 'Ageing Buyer', 'co_age', 'Cells', 'standing', '21700', '2026-08-01', 'open', '{}', 'stated'),
+                    ('btd_age_request', 'Ageing Buyer', 'co_age', 'Modules', 'request', 'meb', '2026-06-01', 'qualifying', '{}', null)""")
+                self.assertEqual(existing_demand(cur, {"company_id": "co_age"}, " LEAF "), "btd_age_old")
+                cur.execute("""update crm_bulk_trade_demand set status = 'qualifying' where id = 'btd_age_old';
+                  update crm_bulk_trade_demand set qualify_asked_on = '2026-09-25' where id in ('btd_age_old', 'btd_age_request')""")
+                self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com"), "anon")
+                self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com", two_way=True), "email")
+                cur.execute("update crm_bulk_trade_demand set match_hash = 'old', supply_match_hash = 'old' where id = 'btd_age_confirm'")
+                expire_demand(cur, today)
+                cur.execute("select id, status, closed_reason, qualify_question from crm_bulk_trade_demand where company_id = 'co_age' order by id")
+                rows = {r["id"]: r for r in cur.fetchall()}
+                self.assertEqual(rows["btd_age_old"]["closed_reason"], "moved_to_profile")
+                self.assertEqual(rows["btd_age_confirm"]["status"], "qualifying")
+                self.assertEqual(rows["btd_age_confirm"]["qualify_question"], "Still buying?")
+                cur.execute("select match_hash, supply_match_hash from crm_bulk_trade_demand where id = 'btd_age_confirm'")
+                self.assertEqual(dict(cur.fetchone()), {'match_hash': None, 'supply_match_hash': None})
+                self.assertEqual(rows["btd_age_request"]["closed_reason"], "expired")
+                cur.execute("select buyer_profile from crm_companies where id = 'co_age'")
+                self.assertEqual(cur.fetchone()["buyer_profile"], {"formats": ["Packs"], "wants": "Leaf packs"})
+        finally:
+            self.conn.rollback()
+
     def setUp(self):
         import psycopg2
         self.conn = psycopg2.connect(TEST_URL)
@@ -437,9 +657,9 @@ class DemandRun(unittest.TestCase):
         seller = {**SOURCE, "id": "d3", "text": "Subject: stock\n\nWe have 400 packs available. Are you looking for batteries?"}
         reply = {"demands": [
             {"source_id": "d1", "buyer_company": "Revoxa py buyer", "contact_email": "dawid.py@revoxa.example", "wants": "LFP packs or modules",
-             "quote": "We are looking for LFP batteries from EV or BESS applications"},
+             "product_family": "lfp packs", "quote": "We are looking for LFP batteries from EV or BESS applications"},
             {"source_id": "d2", "buyer_company": "Green Voltage", "wants": "Matched packs, repeat batches",
-             "quote": "Can you supply matched packs or modules in repeat batches"},
+             "product_family": "matched packs", "quote": "Can you supply matched packs or modules in repeat batches"},
             {"source_id": "d3", "buyer_company": "Seller", "wants": "packs", "quote": "an invented line that is not there"},
         ]}
         report = {"warnings": []}
@@ -450,7 +670,7 @@ class DemandRun(unittest.TestCase):
                          [("possible_demand", "Revoxa py buyer"), ("possible_demand", "Green Voltage")])
         self.assertEqual(cards[0]["proposed"]["email"], "dawid.py@revoxa.example")
 
-    def test_email_demand_is_added_closes_estimates_and_a_no_opts_out(self):
+    def test_email_demand_waits_for_approval_and_a_no_opts_out(self):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""
               insert into crm_companies (id, name, purpose, relationship_stage) values
@@ -488,8 +708,9 @@ class DemandRun(unittest.TestCase):
             cur.execute("select tags from crm_people where id = 'p_no'")
             tags = cur.fetchone()["tags"]
         self.assertEqual([(r["status"], r["basis"], r["wants"]) for r in rows],
-                         [("closed", "estimated", "Cells and modules"), ("open", "stated", "Cells, not packs")])
-        self.assertEqual(len(report["applied"]), 1)  # the same email a second time is already recorded
+                         [("open", "estimated", "Cells and modules")])
+        self.assertEqual(len(report["applied"]), 0)
+        self.assertEqual(len(report["cards"]), 1)
         self.assertEqual(report["declines"], ["nia@nothanks.example is not interested"])
         self.assertEqual((companies["co_auto"]["relationship_stage"], companies["co_auto"]["buyer_stage"]), ("Engaged", "Responded"))
         self.assertEqual(companies["co_no"]["relationship_stage"], "Excluded")
@@ -512,11 +733,11 @@ class DemandRun(unittest.TestCase):
                            from crm_people p join crm_companies c on c.id = p.company_id
                            where p.email in ('ola@newbuyer.example', 'sales@newseller.example') order by p.email""")
             rows = cur.fetchall()
-            cur.execute("select company_id is not null as linked from crm_bulk_trade_demand where email = 'ola@newbuyer.example'")
-            linked = cur.fetchone()["linked"]
-        self.assertTrue(linked)
+            cur.execute("select count(*) as n from crm_bulk_trade_demand where email = 'ola@newbuyer.example'")
+            count = cur.fetchone()["n"]
+        self.assertEqual(count, 0)
         self.assertEqual([(r["name"], r["purpose"], r["relationship_stage"], r["source"], r["main"]) for r in rows],
-                         [("New Buyer AS", ["Buyer"], "Engaged", "Inbound", True), ("Newseller", ["Supplier"], "Engaged", "Inbound", True)])
+                         [("Newseller", ["Supplier"], "Engaged", "Inbound", True)])
         self.assertIsNotNone(seller[1])
 
     def test_auto_replies_do_not_count_as_a_reply(self):
@@ -583,6 +804,82 @@ class DemandRun(unittest.TestCase):
             cur.execute("select status from crm_bulk_trade_check_runs where kind = 'match' order by id desc limit 1")
             self.assertEqual(cur.fetchone(), ("ok",))
 
+    def test_supply_matching_uses_open_demand_only_and_judges_only_what_changed(self):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("""
+              delete from crm_bulk_trade_supply_matches;
+              update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other' where id not in ('btd_open', 'btd_hid');
+              update crm_bulk_trade_supply set status = 'closed', closed_reason = 'other' where id <> 'bts_small';
+              update crm_bulk_trade_demand set status = 'open', closed_reason = null, supply_match_hash = null,
+                wants = 'Matched packs in repeat batches' where id in ('btd_open', 'btd_hid');
+              insert into crm_bulk_trade_demand (id, buyer, wants, kind, status) values ('btd_est', 'Qualifying Co', 'Any packs', 'standing', 'qualifying')
+                on conflict (id) do update set status = 'qualifying', closed_reason = null;
+              insert into crm_bulk_trade_supply (id, seller, offers, trade_kind, quantity, est_tonnes)
+                values ('bts_small', 'Dismantler Ltd', '3 Toyota Prius hybrid packs', 'packs', 'three', 0.12)
+                on conflict (id) do update set status = 'open', closed_reason = null, match_hash = null;
+              insert into crm_bulk_trade_supply_matches (supply_id, demand_id, strength, reason, hidden)
+                values ('bts_small', 'btd_hid', 'partial', 'old', true);
+            """)
+        calls = []
+
+        def fake_model(system, user, key):
+            payload = json.loads(user)
+            calls.append(([t["title"] for t in payload["TRADES"]], [d["buyer"] for d in payload["DEMAND"]]))
+            batch = payload["TRADES"][0]["trade"]
+            label = {d["buyer"]: d["row"] for d in payload["DEMAND"]}
+            return {"matches": [{"trade": batch, "row": label.get("Green Voltage"), "buyer": "Green Voltage", "strength": "strong", "reason": "Packs"},
+                                {"trade": batch, "row": label.get("Somerset EV"), "buyer": "Somerset EV", "strength": "partial", "reason": "Modules"}]}
+
+        def matches():
+            with self.conn.cursor() as cur:
+                cur.execute("select demand_id, strength, hidden from crm_bulk_trade_supply_matches where supply_id = 'bts_small' order by 1")
+                return cur.fetchall()
+
+        with patch.object(check, "call_model", fake_model):
+            first = check.match_supply(self.conn, "k")
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], ["3 Toyota Prius hybrid packs"])
+            self.assertEqual(sorted(calls[0][1]), ["Green Voltage", "Somerset EV"])  # qualifying is never matched
+            self.assertEqual(matches(), [("btd_hid", "partial", True), ("btd_open", "strong", False)])  # not a fit stays hidden
+            self.assertEqual(first["warnings"], [])
+
+            calls.clear()
+            check.match_supply(self.conn, "k")
+            self.assertEqual(calls, [])  # nothing changed, no call
+
+            with self.conn, self.conn.cursor() as cur:  # a changed want: that row only, against the steady batch
+                cur.execute("update crm_bulk_trade_demand set wants = 'Hybrid packs for tests' where id = 'btd_open'")
+            check.match_supply(self.conn, "k")
+            self.assertEqual(calls, [(["3 Toyota Prius hybrid packs"], ["Green Voltage"])])
+
+            calls.clear()
+            with self.conn, self.conn.cursor() as cur:  # a closed batch loses its open suggestions, without a call
+                cur.execute("update crm_bulk_trade_supply set status = 'closed', closed_reason = 'sold' where id = 'bts_small'")
+            check.match_supply(self.conn, "k")
+            self.assertEqual(calls, [])
+            self.assertEqual(matches(), [("btd_hid", "partial", True)])
+        with self.conn.cursor() as cur:
+            cur.execute("select status from crm_bulk_trade_check_runs where kind = 'supply_match' order by id desc limit 1")
+            self.assertEqual(cur.fetchone(), ("ok",))
+
+    def test_a_follow_up_on_the_same_thread_refreshes_the_supply_batch(self):
+        def item(i, offers, day):
+            src = {**SOURCE, "id": i, "thread": "thr-supply-dedupe", "from": "pat@smallseller.example",
+                   "at": dt.datetime(2026, 10, day, 9, tzinfo=dt.timezone.utc), "text": f"About the packs: {offers}"}
+            return {"kind": "possible_supply", "target": None, "quote": offers, "source": src, "summary": f"Pat offers: {offers}",
+                    "proposed": {"seller": "Small Seller", "contact": "Pat", "email": "pat@smallseller.example", "offers": offers,
+                                 "trade_kind": "packs", "quantity": None, "location": None, "est_tonnes": None,
+                                 "est_value_usd": None, "size_note": None}}
+        report = {"applied": [], "cards": [], "warnings": []}
+        with self.conn, self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+            check.settle_all(cur, None, None, [item("sd1", "3 Prius hybrid packs", 7)], None, {"warnings": []}, report, False)
+            check.settle_all(cur, None, None, [item("sd2", "Photos of the 3 Prius packs attached", 9)], None, {"warnings": []}, report, False)
+            cur.execute("""select offers, to_char(observed_on, 'YYYY-MM-DD') as seen, source_thread from crm_bulk_trade_supply
+                           where email = 'pat@smallseller.example'""")
+            rows = cur.fetchall()
+        self.assertEqual([(r["offers"], r["seen"], r["source_thread"]) for r in rows],
+                         [("3 Prius hybrid packs", "2026-10-09", "thr-supply-dedupe")])
+
     def test_judge_keeps_the_first_of_a_repeated_pair(self):
         reply = {"matches": [{"row": "R1", "buyer": "Acme Energy", "strength": "strong", "reason": "first"},
                              {"row": "R1", "buyer": "Acme Energy", "strength": "partial", "reason": "again"},
@@ -625,7 +922,7 @@ class DemandRun(unittest.TestCase):
     def test_screen_keeps_a_requests_date_volume_and_valid_spec_only(self):
         source = {**SOURCE, "id": "d9", "from": "rahul.py@exigo.example",
                   "text": "Subject: cells\n\nWe need 1,000 LFP cells by 20 October, max EUR 30/kWh."}
-        reply = {"demands": [{"source_id": "d9", "buyer_company": "Exigo py", "wants": "1,000 LFP cells", "kind": "request",
+        reply = {"demands": [{"source_id": "d9", "product_family": "lfp cells", "buyer_company": "Exigo py", "wants": "1,000 LFP cells", "kind": "request",
                               "needed_by": "2026-10-20", "volume": 1000, "volume_unit": "cells", "max_price": 30,
                               "price_currency": "EUR", "price_unit": "kWh",
                               "spec": {"chemistries": ["LFP", "Graphene"], "formats": ["Cells"], "min_soh": 150},
@@ -730,14 +1027,14 @@ class DemandRun(unittest.TestCase):
                 ('btd_w', 'standing', 'agreed', 'Waiting Energy', 'p_wait', 'co_wait', 'LFP packs', null, '2026-01-05'),
                 ('btd_d', 'standing', 'stated', 'Answered Ltd', 'p_done', null, 'Modules', null, %(today)s),
                 ('btd_o', 'request', null, 'Away GmbH', 'p_ooo', null, 'CATL cells', %(soon)s, %(today)s) on conflict do nothing;
-              insert into crm_email_messages (id, subject, sent_at, from_person_id, from_email) values
-                ('m_out_w', 'Offer', now() - interval '5 days', null, 'alex@rebattery.io'),
-                ('m_in_w', 'Re: Offer, can you do 40 packs?', now() - interval '3 days', 'p_wait', 'wanda@waiting.example'),
-                ('m_in_d', 'Question', now() - interval '3 days', 'p_done', 'dan@answered.example'),
-                ('m_out_d', 'Re: Question', now() - interval '2 days', null, 'ari@rebattery.io'),
-                ('m_out_o', 'Cells', now() - interval '2 days', null, 'alex@rebattery.io'),
-                ('m_in_o', 'Automatic reply: Cells', now() - interval '1 day', 'p_ooo', 'otto@away.example') on conflict do nothing;
-              insert into crm_email_message_recipients (message_id, person_id, recipient_type) values
+              insert into mail_message (direction,transport,purpose,state,crm_visible,id,subject,sent_at,from_person_id,from_email) values
+                ('outbound','gmail','personal','accepted',true,'m_out_w', 'Offer', now() - interval '5 days', null, 'alex@rebattery.io'),
+                ('inbound','gmail','personal','received',true,'m_in_w', 'Re: Offer, can you do 40 packs?', now() - interval '3 days', 'p_wait', 'wanda@waiting.example'),
+                ('inbound','gmail','personal','received',true,'m_in_d', 'Question', now() - interval '3 days', 'p_done', 'dan@answered.example'),
+                ('outbound','gmail','personal','accepted',true,'m_out_d', 'Re: Question', now() - interval '2 days', null, 'ari@rebattery.io'),
+                ('outbound','gmail','personal','accepted',true,'m_out_o', 'Cells', now() - interval '2 days', null, 'alex@rebattery.io'),
+                ('inbound','gmail','personal','received',true,'m_in_o', 'Automatic reply: Cells', now() - interval '1 day', 'p_ooo', 'otto@away.example') on conflict do nothing;
+              insert into mail_message_recipient (message_id, person_id, recipient_type) values
                 ('m_out_w', 'p_wait', 'to'), ('m_out_d', 'p_done', 'cc'), ('m_out_o', 'p_ooo', 'to') on conflict do nothing;
               -- Added to a trade but not contacted yet: still no offer.
               insert into crm_bulk_trade_buyers (id, lot_id, name, status, demand_id) values ('b_sum', 'bt_sum', 'Away GmbH', 'To contact', 'btd_o')
@@ -754,7 +1051,7 @@ class DemandRun(unittest.TestCase):
         self.assertIn("Buy-boxes to reconfirm: Waiting Energy (agreed)", text)
         self.assertNotIn("Answered Ltd", text.split("Buy-boxes to reconfirm:")[1])
 
-@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+@pytest.mark.usefixtures("db_after_cutover")
 class HoldSummary(unittest.TestCase):
     def test_a_hold_ending_within_a_week_is_named_and_held_trades_are_still_watched(self):
         import psycopg2

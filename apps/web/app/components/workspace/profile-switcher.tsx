@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { ProfileAvatar } from "./profile-avatar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -33,6 +34,7 @@ export type ProfileSwitcherTriggerProps = {
 };
 
 type ProfileSwitcherProps = {
+  conversationFilter?: { value: string | null; profiles: string[]; onChange: (profile: string | null) => void };
   onWorkspaceSwitch?: () => void;
   onWorkspaceDelete?: (workspaceName: string) => void;
   onCreateWorkspace?: () => void;
@@ -42,22 +44,19 @@ type ProfileSwitcherProps = {
   trigger?: (props: ProfileSwitcherTriggerProps) => React.ReactNode;
 };
 
-function shortenPath(p: string): string {
-  return p
-    .replace(/^\/Users\/[^/]+/, "~")
-    .replace(/^\/home\/[^/]+/, "~")
-    .replace(/^[A-Za-z]:[/\\]Users[/\\][^/\\]+/, "~");
-}
-
 export function ProfileSwitcher({
   onWorkspaceSwitch,
   onWorkspaceDelete,
   onCreateWorkspace,
   activeWorkspaceHint,
   trigger,
+  conversationFilter,
 }: ProfileSwitcherProps) {
-  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
-  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [storedWorkspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [storedActiveWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const activeWorkspace = conversationFilter ? conversationFilter.value : storedActiveWorkspace;
+  const workspaces = conversationFilter ? conversationFilter.profiles.map((name) => ({ name, stateDir: "", workspaceDir: null, isActive: name === activeWorkspace, hasConfig: true })) : storedWorkspaces;
+  const filterMode = Boolean(conversationFilter);
   const [isOpen, setIsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [deletingWorkspace, setDeletingWorkspace] = useState<string | null>(null);
@@ -106,8 +105,8 @@ export function ProfileSwitcher({
   }, []);
 
   useEffect(() => {
-    void fetchWorkspaces();
-  }, [fetchWorkspaces, activeWorkspaceHint]);
+    if (!filterMode) void fetchWorkspaces();
+  }, [fetchWorkspaces, activeWorkspaceHint, filterMode]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -127,6 +126,11 @@ export function ProfileSwitcher({
   }, [isOpen]);
 
   const handleSwitch = async (workspaceName: string) => {
+    if (conversationFilter) {
+      conversationFilter.onChange(workspaceName || null);
+      setIsOpen(false);
+      return;
+    }
     if (workspaceName === activeWorkspace) {
       setIsOpen(false);
       return;
@@ -210,12 +214,9 @@ export function ProfileSwitcher({
           style={{ color: "var(--color-text-secondary)" }}
           title="Switch workspace"
         >
-          {/* Workspace icon */}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-          </svg>
+          {activeWorkspace && <ProfileAvatar key={activeWorkspace} name={activeWorkspace} className="h-6 w-6" />}
           <span className="truncate max-w-[120px]">
-            {activeWorkspace ?? "No workspace"}
+            {activeWorkspace ?? (filterMode ? "All chats" : "No workspace")}
           </span>
           <svg
             className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
@@ -238,10 +239,11 @@ export function ProfileSwitcher({
             className="px-2.5 py-1.5 text-[11px] font-medium"
             style={{ color: "var(--color-text-muted)" }}
           >
-            Workspaces
+            {filterMode ? "Filter conversations" : "Workspaces"}
           </div>
 
           <div className="max-h-64 overflow-y-auto">
+            {filterMode && <button type="button" className="w-full text-left px-2.5 py-2 text-sm rounded-xl hover:bg-neutral-400/15" onClick={() => void handleSwitch("")}>All chats</button>}
             {workspaces.map((workspace) => {
               const isCurrent = workspace.name === activeWorkspace;
               return (
@@ -252,29 +254,15 @@ export function ProfileSwitcher({
                   style={{ color: "var(--color-text)" }}
                 >
                   <div className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-1.5">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{
-                        background: isCurrent ? "var(--color-success)" : "transparent",
-                        border: isCurrent ? "none" : "1px solid var(--color-border-strong)",
-                      }}
-                    />
+                    <ProfileAvatar name={workspace.name} />
                     <div className="flex-1 min-w-0">
                       <span className="truncate font-medium text-[13px] block">
                         {workspace.name}
                       </span>
-                      <span
-                        className="text-[11px] truncate block mt-0.5"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        {workspace.workspaceDir
-                          ? shortenPath(workspace.workspaceDir)
-                          : "No workspace yet"}
-                      </span>
                     </div>
                     {isCurrent && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-neutral-400/15" style={{ color: "var(--color-text-muted)" }}>
-                        Active
+                        {filterMode ? "Filtered" : "Active"}
                       </span>
                     )}
                   </div>
@@ -320,7 +308,7 @@ export function ProfileSwitcher({
             </p>
           )}
 
-          <div className="border-t border-neutral-400/15 mt-0.5 pt-0.5">
+          {!filterMode && <div className="border-t border-neutral-400/15 mt-0.5 pt-0.5">
             <button
               onClick={() => {
                 setIsOpen(false);
@@ -334,7 +322,7 @@ export function ProfileSwitcher({
               </svg>
               New Workspace
             </button>
-          </div>
+          </div>}
         </div>,
         document.body,
       )}

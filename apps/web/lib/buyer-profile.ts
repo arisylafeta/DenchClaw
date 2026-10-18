@@ -1,3 +1,5 @@
+import type { Spec } from "./bulk-demand";
+
 /** Buyer profile on a company (migration 019): who the buyer is and how we deal with them. */
 
 /** How well the buyer knows us, furthest first last. Set by hand; crm_buyer_engagement suggests one. */
@@ -31,6 +33,9 @@ export type BuyerProfile = {
   workstream_status: string | null;
   evidence: string | null;
   last_reviewed_at: string | null;
+  buyer_profile?: Spec & { wants?: string; evidence_url?: string };
+  buyer_profile_basis?: "researched" | "stated" | null;
+  buyer_profiled_at?: string | null;
 };
 
 /** What the company has done with us, from crm_buyer_engagement. Email covers both mailboxes; not WhatsApp. */

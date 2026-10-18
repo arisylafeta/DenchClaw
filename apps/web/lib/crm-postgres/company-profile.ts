@@ -3,6 +3,7 @@ import type { Demand } from "../bulk-demand";
 import type { BuyerEngagement, BuyerProfile, BuyerProfileChange } from "../buyer-profile";
 import { listDemandForCompany } from "./bulk-demand";
 import { deriveDisplayDomain, deriveWebsite } from "../website-from-domain";
+import { listCompanyContextNotes, type CompanyContextNote } from "./company-context";
 
 export type CommercialProfile = {
   id: string;
@@ -85,6 +86,7 @@ export type CompanyCommercial = {
 };
 
 export type PostgresCompanyProfile = {
+  context_notes: CompanyContextNote[];
   company: {
     id: string;
     name: string | null;
@@ -387,12 +389,12 @@ export async function getPostgresCompanyProfile(
       from crm_relation_links l
       join crm_fields f on f.id = l.field_id
       join crm_objects o on o.id = f.object_id
-      join crm_email_threads t on t.id = l.source_entry_id
+      join mail_thread t on t.id = l.source_entry_id
       left join lateral (
         select m.body_preview, m.from_person_id
-          from crm_email_messages m
+          from mail_message m
          where m.thread_id = t.id
-           and m.mailbox_owner_id = $2::uuid
+           and m.crm_visible and (m.campaign_id is null or m.direction = 'inbound') and m.mailbox_owner_id = $2::uuid
          order by m.sent_at desc nulls last
          limit 1
       ) msg on true
@@ -400,7 +402,7 @@ export async function getPostgresCompanyProfile(
      where o.name = 'email_thread'
        and f.name = 'Companies'
        and l.target_entry_id = $1
-       and t.mailbox_owner_id = $2::uuid
+       and t.crm_visible and exists (select 1 from mail_message conversation where conversation.thread_id = t.id and conversation.crm_visible and (conversation.campaign_id is null or conversation.direction = 'inbound')) and t.mailbox_owner_id = $2::uuid
      order by t.last_message_at desc nulls last
      limit 50
   `, [company.id, userId]);
@@ -571,6 +573,7 @@ export async function getPostgresCompanyProfile(
 
   return {
     company,
+    context_notes: await listCompanyContextNotes(companyId),
     people,
     threads: threads.map((row) => ({
       ...row,
@@ -602,7 +605,8 @@ export async function getBuyer(companyId: string): Promise<PostgresCompanyProfil
          buyer_accepts_standard_terms as accepts_standard_terms, buyer_collection as collection, buyer_past_issues as past_issues,
          buyer_outreach_notes as outreach_notes, buyer_main_contact_id as main_contact_id, buyer_next_step as next_step,
          ${ISO("buyer_next_step_on")} as next_step_on, buyer_projects as projects, buyer_category as category, buyer_workstream_status as workstream_status,
-         buyer_evidence as evidence, ${ISO("buyer_last_reviewed_at")} as last_reviewed_at
+         buyer_evidence as evidence, ${ISO("buyer_last_reviewed_at")} as last_reviewed_at,
+         buyer_profile, buyer_profile_basis, ${ISO("buyer_profiled_at")} as buyer_profiled_at
        from crm_companies where id = $1`,
       [companyId],
     ),

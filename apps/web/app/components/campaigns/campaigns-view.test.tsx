@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import type { UserEvent } from "@testing-library/user-event";
 import type { CampaignDetail, CampaignRecipient, CampaignSummary } from "@/lib/campaigns";
 import type { CampaignActivity, CampaignActivityDestination, CampaignActivityPerson, CampaignActivityTotals } from "@/lib/campaign-activity";
+import type { MailCounts } from "@/lib/mail-types";
 import { buildEntryLink } from "@/lib/workspace-links";
 import { CampaignsView, type CampaignsViewProps } from "./campaigns-view";
 
@@ -13,14 +14,16 @@ const AT = "2026-09-29T10:30:00.000Z";
 const summary: CampaignSummary = {
   id: "historical", name: "Battery offer", status: "sent", type: "bulk_trade", channel: "email", audience: "battery_buyers",
   launched_at: AT, last_invite_at: AT, audience_size: 115,
-  metrics: { sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 0 },
+  metrics: { sent: 115, delivered: 113, opened: 24, clicked: 13, bounced: 3, opted_out: 0, replied: null },
   metrics_basis: "snapshot", metrics_observed_at: AT, recipient_count: 113, tracking_pending: 1,
 };
+const counts: MailCounts = { sent: 115, delivered: 113, bounced: 3, opened: 24, clicked: 13, unsubscribed: 2, replied: 1 };
 
 function recipient(overrides: Partial<CampaignRecipient>): CampaignRecipient {
   return { send_id: "send", person_id: "person", person_name: "Contact", company_id: null, company_name: null,
     recipient_email: "contact@example.test", state: "accepted", accepted_at: AT, delivered_at: null, bounced_at: null,
-    opened_at: null, clicked_at: null, last_synced_at: AT, tracking_pending: false, listing_clicks: [], other_clicks: [], ...overrides };
+    opened_at: null, clicked_at: null, last_synced_at: AT, tracking_pending: false, tracked: true, replied_at: null, subject: null,
+    dismantler_id: null, dismantler_stage: null, listing_clicks: [], other_clicks: [], ...overrides };
 }
 const recipients = [
   recipient({ send_id: "a", person_id: "person:a", person_name: "Ada", company_name: "North Batteries", recipient_email: "ada@example.test", delivered_at: AT, opened_at: AT,
@@ -36,6 +39,7 @@ const detail: CampaignDetail = {
     { listing_id: "internal-listing-2", label: "Renault Zoe 52 kWh", url: null, recipients: 2, clicked_recipients: 0 },
   ],
   other_destinations: [],
+  dismantler_funnel: null,
   details: { auction_slug: null, source_system: "reconciled", audience_raw: "battery_buyers", notes: "Approved historical outreach.",
     created_at: AT, updated_at: AT, objective: null, success_measure: null, message_version: "offer-v2", stock_snapshot_ref: null,
     sender_identity: null, reply_owner: null, reply_mailbox: null, approved_manifest_sha256: null, approved_by: null, approved_at: null, reviewed_at: null },
@@ -43,8 +47,8 @@ const detail: CampaignDetail = {
 const props: CampaignsViewProps = { campaignId: "historical", onOpenCampaign: vi.fn(), onBack: vi.fn(), onNavigatePerson: vi.fn() };
 const emptyTotals: CampaignActivityTotals = { redirect_events: 0, page_views: 0, sessions: 0, offer_events: 0, message_events: 0, buy_now_events: 0, redirect_recipients: 0, visited_recipients: 0, offer_recipients: 0, message_recipients: 0, buy_now_recipients: 0 };
 const unavailable: CampaignActivity = { campaign_id: "historical", status: "unavailable", unavailable_reason: "provider_unavailable", observed_at: null, period_start: null, period_end: null, totals: null, destinations: [] };
-function mockDetail(value: CampaignDetail = detail, activity: CampaignActivity = unavailable) {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/activity") ? activity : value))));
+function mockDetail(value: CampaignDetail & Partial<Record<keyof MailCounts, number | null>> = detail, activity: CampaignActivity = unavailable) {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/activity") ? activity : { ...counts, ...value }))));
 }
 
 function activityPerson(personId: string, overrides: Partial<CampaignActivityPerson>): CampaignActivityPerson {
@@ -71,6 +75,39 @@ function visiblePeople() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CampaignsView", () => {
+  it("uses the Mail header when embedded and forwards filters unchanged to list and detail", async () => {
+    const query = "view=campaigns&identity=ari&event=clicked&crmOnly=true";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/historical") ? { ...detail, ...counts } : { items: [{ ...summary, ...counts }] }))));
+    const view = render(<CampaignsView {...props} embedded campaignId={null} query={query} />);
+    await screen.findByRole("table", { name: "Campaigns" });
+    expect(screen.queryByRole("heading", { name: "Campaigns" })).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns?${query}`, expect.anything());
+    view.rerender(<CampaignsView {...props} embedded query={query} />);
+    await screen.findByRole("table", { name: "Recipients" });
+    expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns/historical?${query}`, expect.anything());
+  });
+  it("opens a campaign within the merged view without also opening a workspace tab", async () => {
+    const outerNavigation = vi.fn();
+    const openCampaign = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [{ ...summary, ...counts }] }))));
+    const user = userEvent.setup();
+    render(<div onClick={outerNavigation}><CampaignsView {...props} campaignId={null} onOpenCampaign={openCampaign} /></div>);
+    await user.click(await screen.findByRole("link", { name: "Battery offer" }));
+    expect(openCampaign).toHaveBeenCalledWith("historical");
+    expect(outerNavigation).not.toHaveBeenCalled();
+  });
+  it("renders each mail-log count separately in the list and detail", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/activity") ? unavailable : url === "/api/mail/campaigns" ? { items: [{ ...summary, ...counts }] } : { ...detail, ...counts, scanner_evidence: true, proxy_evidence: true, links: [{ id: "link", cta_key: "offer", destination_url: "https://example.test/offer", first_clicked_at: AT }] }))));
+    const view = render(<CampaignsView {...props} campaignId={null} />);
+    const table = await screen.findByRole("table", { name: "Campaigns" });
+    for (const name of ["Sent", "Delivered", "Bounced", "Opened", "Clicked", "Unsubscribed", "Replied"]) {expect(within(table).getByRole("columnheader", { name })).toBeInTheDocument();}
+    expect(within(table).getAllByRole("row")[1].textContent).toContain("1151133241321");
+    view.rerender(<CampaignsView {...props} />);
+    const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
+    for (const [key, value] of Object.entries(counts)) {expect(within(metrics).getByText(key[0].toUpperCase() + key.slice(1), { exact: true }).parentElement).toHaveTextContent(String(value));}
+    expect(screen.getByRole("note")).toHaveTextContent("Scanner evidence: recorded · Proxy evidence: recorded");
+    expect(within(screen.getByRole("region", { name: "Tracked links" })).getByRole("link", { name: "offer" })).toHaveAttribute("href", "https://example.test/offer");
+  });
   it("filters real observations including listing-only clicks and intersects search without replacing its control", async () => {
     mockDetail();
     const user = userEvent.setup();
@@ -78,19 +115,19 @@ describe("CampaignsView", () => {
     await screen.findByRole("table", { name: "Recipients" });
     expect(visiblePeople()).toEqual(["Ada", "Ben", "Cora", "Dev"]);
     const activity = screen.getByRole("group", { name: "Recipient activity" });
-    await user.click(within(activity).getByRole("button", { name: "Clicked", exact: true }));
+    await user.click(within(activity).getByRole("button", { name: "Clicked" }));
     expect(visiblePeople()).toEqual(["Ada"]);
-    await user.click(within(activity).getByRole("button", { name: "Opened", exact: true }));
+    await user.click(within(activity).getByRole("button", { name: "Opened" }));
     expect(visiblePeople()).toEqual(["Ada"]);
-    await user.click(within(activity).getByRole("button", { name: "Bounced", exact: true }));
+    await user.click(within(activity).getByRole("button", { name: "Bounced" }));
     expect(visiblePeople()).toEqual(["Ben"]);
-    await user.click(within(activity).getByRole("button", { name: "Tracking pending", exact: true }));
+    await user.click(within(activity).getByRole("button", { name: "Tracking pending" }));
     expect(visiblePeople()).toEqual(["Cora"]);
-    await user.click(within(activity).getByRole("button", { name: "All", exact: true }));
+    await user.click(within(activity).getByRole("button", { name: "All" }));
     const search = screen.getByRole("searchbox", { name: "Search recipients" });
     await user.type(search, "NORTH");
     expect(visiblePeople()).toEqual(["Ada"]);
-    await user.click(within(activity).getByRole("button", { name: "Bounced", exact: true }));
+    await user.click(within(activity).getByRole("button", { name: "Bounced" }));
     expect(visiblePeople()).toEqual([]);
     expect(screen.getByRole("searchbox", { name: "Search recipients" })).toBe(search);
     await user.clear(search);
@@ -115,18 +152,58 @@ describe("CampaignsView", () => {
     expect(within(table).getByRole("link", { name: "Ada" })).toHaveAttribute("href", buildEntryLink("people", "person:a"));
   });
 
+  it("shows replies, dismantler stages and the progress of a dismantler outreach campaign", async () => {
+    mockDetail({ ...detail,
+      campaign: { ...summary, type: "dismantler_outreach", metrics_basis: "ledger", metrics: { sent: 2, delivered: 2, opened: 1, clicked: 0, bounced: 0, opted_out: 0, replied: 1 } },
+      dismantler_funnel: { emailed: 2, replied: 1, stages: { Talking: 2 } },
+      recipients: [
+        recipient({ send_id: "x", person_id: "p-x", person_name: "Reply Yard", replied_at: AT, subject: "Your Kona packs", dismantler_id: "dm_x", dismantler_stage: "Talking" }),
+        recipient({ send_id: "y", person_id: "p-y", person_name: "Quiet Yard", subject: "Your Leaf packs", dismantler_id: "dm_y", dismantler_stage: "Talking" }),
+      ] });
+    const user = userEvent.setup();
+    render(<CampaignsView {...props} />);
+    const progress = await screen.findByRole("region", { name: "Dismantler progress" });
+    expect(progress).toHaveTextContent("Emailed 2");
+    expect(progress).toHaveTextContent("Replied 1");
+    expect(progress).toHaveTextContent("Talking 2");
+    expect(within(screen.getByRole("region", { name: "Campaign metrics" })).getByText("Replied")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Dismantler" })).toBeInTheDocument();
+    expect(screen.getByText("Your Kona packs")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Replied" }));
+    expect(screen.getByRole("link", { name: "Reply Yard" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Quiet Yard" })).not.toBeInTheDocument();
+  });
+
+  it("shows Gmail-sent outreach as sent and its delivery, opens and clicks as not tracked", async () => {
+    mockDetail({ ...detail,
+      campaign: { ...summary, type: "dismantler_outreach", channel: "email-gmail", metrics_basis: "ledger", tracking_pending: 0,
+        metrics: { sent: 1, delivered: null, opened: null, clicked: null, bounced: null, opted_out: 0, replied: 0 } },
+      dismantler_funnel: { emailed: 1, replied: 0, stages: { Talking: 1 } },
+      recipients: [recipient({ send_id: "g", person_id: "p-g", person_name: "Gmail Yard", tracked: false, last_synced_at: null,
+        dismantler_id: "dm_g", dismantler_stage: "Talking" })] });
+    render(<CampaignsView {...props} />);
+    const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
+    expect(within(metrics).getAllByText("Not tracked")).toHaveLength(3);
+    expect(within(metrics).queryByText("Unknown")).not.toBeInTheDocument();
+    const row = screen.getByText("Sent from Gmail").closest("tr")!;
+    expect(within(row).getAllByText("Not tracked")).toHaveLength(2);
+    expect(within(row).queryByText("Tracking pending")).not.toBeInTheDocument();
+    expect(within(metrics).queryByText("Tracking pending")).not.toBeInTheDocument();
+  });
+
   it("renders unknown ledger totals without losing available observations on pending recipients", async () => {
-    mockDetail({ ...detail, campaign: { ...summary, metrics_basis: "ledger", metrics: { sent: 1, delivered: null, opened: 1, clicked: 1, bounced: null, opted_out: null } },
+    mockDetail({ ...detail, sent: 1, delivered: null, opened: 1, clicked: 1, bounced: null, unsubscribed: null, replied: null, campaign: { ...summary, metrics_basis: "ledger", metrics: { sent: 1, delivered: null, opened: 1, clicked: 1, bounced: null, opted_out: null, replied: 0 } },
       recipients: [recipient({ person_name: "Observed while pending", tracking_pending: true, last_synced_at: null, opened_at: AT,
         listing_clicks: [{ listing_id: "internal-listing-1", label: "Nissan Leaf 40 kWh", first_clicked_at: AT }] })] });
     render(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
     expect(within(metrics).getAllByText("1", { exact: true })).toHaveLength(3);
-    expect(within(metrics).getByText("Unknown", { exact: true })).toBeInTheDocument();
+    expect(within(metrics).getAllByText("Unknown", { exact: true })).toHaveLength(4);
     const row = screen.getByRole("link", { name: "Observed while pending" }).closest("tr")!;
     const cells = within(row).getAllByRole("cell");
-    expect(cells[2].querySelector("time")).toHaveAttribute("datetime", AT);
+    expect(cells[2]).toHaveTextContent("No reply yet");
     expect(cells[3].querySelector("time")).toHaveAttribute("datetime", AT);
+    expect(cells[4].querySelector("time")).toHaveAttribute("datetime", AT);
     expect(within(row).queryByText("Not observed")).not.toBeInTheDocument();
     expect(within(row).getByText("Nissan Leaf 40 kWh")).toBeInTheDocument();
   });
@@ -137,7 +214,7 @@ describe("CampaignsView", () => {
     render(<CampaignsView {...props} />);
     await screen.findByRole("table", { name: "Recipients" });
     expect(visiblePeople()).toEqual(Array.from({ length: 25 }, (_, index) => `Contact ${index + 1}`));
-    await user.click(screen.getByRole("button", { name: "Next", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
     expect(visiblePeople()).toEqual(["Contact 26", "Contact 27", "Contact 28", "Contact 29", "Contact 30"]);
     const search = screen.getByRole("searchbox", { name: "Search recipients" });
     await user.type(search, "Contact 2");
@@ -173,13 +250,13 @@ describe("CampaignsView", () => {
       pending.set(url, { signal: init.signal as AbortSignal, resolve });
     })));
     const view = render(<CampaignsView {...props} campaignId="first" />);
-    await waitFor(() => expect(pending.has("/api/campaigns/first")).toBe(true));
+    await waitFor(() => expect(pending.has("/api/mail/campaigns/first")).toBe(true));
     view.rerender(<CampaignsView {...props} campaignId="second" />);
-    await waitFor(() => expect(pending.has("/api/campaigns/second")).toBe(true));
-    expect(pending.get("/api/campaigns/first")!.signal.aborted).toBe(true);
-    await act(async () => { pending.get("/api/campaigns/second")!.resolve(new Response(JSON.stringify({ ...detail, campaign: { ...summary, id: "second", name: "Second campaign" } }))); });
+    await waitFor(() => expect(pending.has("/api/mail/campaigns/second")).toBe(true));
+    expect(pending.get("/api/mail/campaigns/first")!.signal.aborted).toBe(true);
+    await act(async () => { pending.get("/api/mail/campaigns/second")!.resolve(new Response(JSON.stringify({ ...counts, ...detail, campaign: { ...summary, id: "second", name: "Second campaign" } }))); });
     expect(await screen.findByRole("heading", { name: "Second campaign" })).toBeInTheDocument();
-    await act(async () => { pending.get("/api/campaigns/first")!.resolve(new Response(JSON.stringify({ ...detail, campaign: { ...summary, id: "first", name: "First campaign" } }))); });
+    await act(async () => { pending.get("/api/mail/campaigns/first")!.resolve(new Response(JSON.stringify({ ...counts, ...detail, campaign: { ...summary, id: "first", name: "First campaign" } }))); });
     expect(screen.queryByRole("heading", { name: "First campaign" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Second campaign" })).toBeInTheDocument();
   });
@@ -187,7 +264,7 @@ describe("CampaignsView", () => {
   it("allows retry after a failed read and exposes actual campaign destinations in the resulting list", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Read unavailable" }), { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ campaigns: [summary] }))));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ ...summary, ...counts }] }))));
     const user = userEvent.setup();
     render(<CampaignsView {...props} campaignId={null} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Read unavailable");
@@ -387,15 +464,15 @@ describe("Campaign destination evidence sheets", () => {
     }));
     const user = userEvent.setup();
     const view = render(<CampaignsView {...props} campaignId="first" />);
-    await waitFor(() => expect(pending.has("/api/campaigns/first/activity")).toBe(true));
+    await waitFor(() => expect(pending.has("/api/mail/campaigns/first/activity")).toBe(true));
     view.rerender(<CampaignsView {...props} campaignId="second" />);
-    await waitFor(() => expect(pending.has("/api/campaigns/second/activity")).toBe(true));
-    expect(pending.get("/api/campaigns/first/activity")!.signal.aborted).toBe(true);
-    await act(async () => pending.get("/api/campaigns/first/activity")!.resolve(new Response(JSON.stringify({ ...availableActivity([destination({ visited_recipients: 99 })]), campaign_id: "first" }))));
+    await waitFor(() => expect(pending.has("/api/mail/campaigns/second/activity")).toBe(true));
+    expect(pending.get("/api/mail/campaigns/first/activity")!.signal.aborted).toBe(true);
+    await act(async () => pending.get("/api/mail/campaigns/first/activity")!.resolve(new Response(JSON.stringify({ ...availableActivity([destination({ visited_recipients: 99 })]), campaign_id: "first" }))));
     expect(screen.getByRole("heading", { name: "second campaign" })).toBeInTheDocument();
     await openListings(user);
     expect(screen.queryByRole("button", { name: /Browser activity, 99/ })).not.toBeInTheDocument();
-    await act(async () => pending.get("/api/campaigns/second/activity")!.resolve(new Response(JSON.stringify({ ...availableActivity([destination({ visited_recipients: 2 })]), campaign_id: "second" }))));
+    await act(async () => pending.get("/api/mail/campaigns/second/activity")!.resolve(new Response(JSON.stringify({ ...availableActivity([destination({ visited_recipients: 2 })]), campaign_id: "second" }))));
     expect(await screen.findByRole("button", { name: "Nissan Leaf 40 kWh: Browser activity, 2" })).toBeInTheDocument();
   });
 });

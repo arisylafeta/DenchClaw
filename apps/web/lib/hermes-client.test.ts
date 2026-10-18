@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DefaultChatTransport } from "ai";
 import type { HermesConfig } from "./agent-backend";
-import { createHermesChatStream, type HermesChatStreamParams } from "./hermes-client";
+import { createHermesChatStream, nativeHermesWorking, stopNativeHermesStream, type HermesChatStreamParams } from "./hermes-client";
 import { readActiveProfileName } from "./workspace";
 
 vi.mock("./workspace", () => ({ readActiveProfileName: vi.fn(() => null) }));
@@ -58,6 +58,7 @@ async function chat(overrides: Partial<HermesChatStreamParams> = {}) {
   const parsed = await transport.sendMessages({
     trigger: "submit-message",
     chatId: sessionKey,
+    messageId: undefined,
     messages: [],
     abortSignal: undefined,
   });
@@ -83,6 +84,38 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("createHermesChatStream persisted sessions", () => {
+  it("pins an existing native profile without consulting the workspace, recreating history, or dropping hydrated images", async () => {
+    vi.mocked(readActiveProfileName).mockReturnValue("wrong-global-profile");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(success("Pinned")));
+    const events = await chat({ profile: "alpha", existingSession: true, imageAttachments: [{ content: "aW1hZ2U=", mimeType: "image/png" }] });
+    expect(answer(events)).toBe("Pinned");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${config.baseUrl}/p/alpha/api/sessions/${encodeURIComponent(sessionKey)}/chat/stream`);
+    expect(readActiveProfileName).not.toHaveBeenCalled();
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)).message).toEqual([{ type: "text", text: "Hi" }, { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } }]);
+  });
+
+  it("reports actual active transport work separately for identical IDs in different profiles", async () => {
+    let upstream!: ReadableStreamDefaultController<Uint8Array>;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new ReadableStream({ start(controller) { upstream = controller; } })));
+    const stream = await createHermesChatStream({ config, sessionKey: "working-fixture", profile: "alpha", existingSession: true, message: "hello", userId: "fixture" });
+    expect(nativeHermesWorking("alpha", "working-fixture")).toBe(true);
+    expect(nativeHermesWorking("default", "working-fixture")).toBeNull();
+    upstream.enqueue(new TextEncoder().encode(success("finished"))); upstream.close();
+    await new Response(stream).text();
+    expect(nativeHermesWorking("alpha", "working-fixture")).toBe(false);
+  });
+
+  it("stops only the pinned native request and never labels uncertain cancellation idle", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }));
+    const stream = await createHermesChatStream({ config, sessionKey: "stop-fixture", profile: "alpha", existingSession: true, message: "hello", userId: "fixture" });
+    expect(stopNativeHermesStream("default", "stop-fixture")).toBe(false);
+    expect(stopNativeHermesStream("alpha", "stop-fixture")).toBe(true);
+    await new Response(stream).text();
+    expect(nativeHermesWorking("alpha", "stop-fixture")).toBeNull();
+  });
   it.each([null, "default", "sales profile"])(
     "routes create and chat to the same profile %s with auth",
     async (profile) => {

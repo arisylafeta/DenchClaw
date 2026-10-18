@@ -17,6 +17,15 @@ The application must keep every non-public page and API route behind its databas
 
 Keep the exact `/api/formbricks-buyer-sourcing-webhook` nginx route public and proxied to its dedicated loopback service. Keep Tailscale Serve as a private operational fallback to the loopback-only CRM runtime; it is not the canonical public hostname. Never restore shared nginx credentials or enable public signup.
 
+## User activity leaderboard
+
+The authenticated CRM Leaderboard requires `CRM_DB_BACKEND=postgres`. It reads `crm_user_activity_snapshots` (migration `042`), never PostHog, on request. `scripts/rebattery/leaderboard_snapshot.py` fetches PostHog once daily (05:30 UTC via `rebattery-leaderboard-snapshot.timer`, templates under `scripts/rebattery/systemd/`) using `~/.posthog/credentials.json`, retries 5xx/429, and replaces the 7/30/90-day snapshots in one transaction only on success. `/api/leaderboard/health` reports snapshot age (`stale` after 36 hours).
+
+Activity aggregates are cached in memory for 15 minutes per 7/30/90-day window. Names and emails are joined only inside the CRM, never sent to PostHog. Missing account-link tables show PostHog-only rows with “Link pending”; a failed or partial activity query shows an error rather than zero activity. The health endpoint `/api/leaderboard/health` requires a CRM session and returns connection status and latency, not credentials.
+
+Scoring version 1 weights submitted offers, buy-now and auction bids highest; sourcing requests and submitted messages next; saved searches/listings, quote starts and documentation clicks next; listing clicks lowest. Submitted and succeeded events are not double-counted. The score applies a 14-day recency half-life to window intent; engagement breaks ties. “No offer yet” means no submitted offer/buy-now/bid ever recorded. Never active means no eligible PostHog events ever; dormant means last activity at least 30 days ago; cooling means 7–29 days ago. Active accounts created within seven days are new; rising means at least three events in the latest week and over 1.5 times the preceding week. Counts honor role/search/CRM/no-offer filters but precede the segment filter and pagination.
+
+
 ## Hermes chat profiles
 
 DenchClaw selects the active Hermes profile with the `/p/<profile>/api/sessions`
@@ -111,6 +120,18 @@ filters, edits, selection, resizing and paging stay in their existing engines.
 Email HTML, code diffs, boards, timelines and non-tabular lists are outside this
 scope; badges and avatars keep their meaningful shapes.
 
+Bulk Trades Demand and Supply details open in a right-hand modal sheet, preserving
+the full-width list and its filters. The shared Radix Sheet handles focus trapping,
+Escape, overlay dismissal and return focus. Demand edits use a scrolling form with
+a fixed Save/Cancel footer, titled field groups and shared Radix Select controls.
+The fee hint and inbox proposal writer share `lib/bulk-demand.ts:demandFee`;
+the hint does not change the saved override. Qualification appears only for
+qualifying demand. Activity uses compact kind segments and a linked timeline.
+Demand History includes only Sold (`bought_from_us`), Lost (`bought_elsewhere`)
+and Dropped (`no_longer_needed`) outcomes, newest update first. Its date is the
+record's last update timestamp; there is no separate closure timestamp.
+
+
 `ui/table-cell.tsx` owns leaf-cell disclosure. Cells—including Notes, tags and
 relations—start on one line. Overflowed values expose a keyboard-operable
 chevron and expand on a plain content click; repeat click or Escape collapses
@@ -164,7 +185,7 @@ the marketplace provider. Technical fields and notes are shown only under
 Details. This page adds no schema, sending, tracking capture or scoring changes.
 
 Lot-buyer email tracking and auction synchronization attribute clicks only through
-`crm_campaign_send_links.first_clicked_at` for the matching listing. The provider's
+`mail_message_link.first_clicked_at` for the matching listing. The provider's
 message-wide click timestamp must never stand in for a listing click. A multi-lot
 send supplies invitation evidence for its primary listing and every listing CTA;
 general links supply neither listing clicks nor extra listing invitations. The
@@ -217,3 +238,150 @@ longer reorders these columns by fill rate. Company ordering is unchanged.
 Tags uses the existing editable badge renderer; JSON editor values are decoded
 into PostgreSQL arrays on create/update. Saved filters, contact values,
 subscriptions and campaign history are unchanged.
+
+## Platform account identity links
+
+Migration `041_crm_platform_accounts.sql` adds `crm_platform_accounts`, keyed by
+Supabase `auth.users.id` (UUID), without importing or changing CRM people.
+`person_id` is a nullable **text** foreign key to the existing `crm_people.id`,
+with `ON DELETE SET NULL`; platform `account_id` is a UUID. Role, account status,
+email, auth creation and last sign-in are a private CRM-side snapshot, not
+PostHog person properties. `linked_at` tracks the link decision and `updated_at`
+changes only when stored values change.
+
+Take a current `pg_dump -Fc denchclaw` backup before applying this migration in
+a transaction. The standard schema runner discovers it automatically. Run
+`python3 scripts/rebattery/platform_account_sync.py --dry-run` for aggregate
+counts, then `--apply` only when ready to update local link records. The default
+is dry-run. Supabase reads use the approved
+`/root/.hermes/workspace/secrets/dench-platform-admin.env`; production requests
+are GET-only and must verify the production project host. The script reads every
+auth-user and PostgREST page before local writes and commits atomically.
+
+Email matching trims and lowercases only; dots and plus-tags are significant.
+Duplicate CRM emails and unmatched auth users remain unlinked with
+`needs_review`; no CRM people are created. Multiple platform account memberships
+are not arbitrarily collapsed into a role: the account fields stay null and
+the row requires review. `unknown` role counts include accounts without a unique
+platform account. Match counts describe email-match candidates, not subsequent
+manual overrides. Sync preserves manual links and confirmed/rejected decisions
+while refreshing platform metadata. Identical syncs do not change timestamps.
+
+`lib/crm-postgres/platform-accounts.ts` supports authenticated callers listing,
+reading, reviewing and manually linking/unlinking identities. Unlinking records
+a protected rejection, so a later email match cannot silently restore it.
+Never expose these email-bearing records publicly or send their emails to
+PostHog. Tests use temporary tables only; run
+`PLATFORM_ACCOUNT_TEST_DSN='dbname=denchclaw' python3 -m pytest scripts/rebattery/test_platform_account_sync.py`
+and the focused Vitest file `lib/crm-postgres/platform-accounts.test.ts`.
+
+Hourly service/timer templates live in `scripts/rebattery/systemd/`. They are
+**not installed or enabled**. Review the checkout and Python interpreter paths
+(including `psycopg2` availability) before separately authorizing installation.
+The timer invokes `--apply`; its journal contains aggregate counts only.
+
+## Bulk-trade demand shortlist (16 October 2026)
+
+The Bulk Trades workspace has four tabs: **Today | Trades | Demand | Supply**.
+Today is the default work queue: overdue next steps, qualifying questions not
+sent, Inbox proposals, trades missing a seller or buyer, and demand missing
+information. Each section opens the relevant record or Inbox; longer lists
+expand beyond the first five items. Trades is the operational board; Demand
+is the buyer-ask shortlist and activity workspace; Supply is the unified
+available-inventory feed. The **Inbox** button opens a right-hand review drawer,
+not another tab. Accept or reject new demand, supply and trade candidates there,
+or apply proposed updates to existing trades. Accepted demand refreshes both
+the Demand workspace and Today's demand queues.
+
+Migrations `046`–`048` support trades from either side: `origin` records whether
+the opportunity started with supply or demand, not whether both sides are now
+present. Seller identity/name and buyer records are tracked independently;
+board cards expose missing sides. Seller references use `company:`, `supply:`
+or `stock:` namespaces, with evidence retained for seller attribution.
+
+The unified supply feed combines open supplier batches, eligible sell-side
+trades and live published auctions, plus available stock grouped by make/model
+family. Promoted batches are represented by their trades rather than duplicated.
+Sold/unavailable stock and ended auctions are excluded; stock is verified only
+when every row in its group is supplier-confirmed. Closed supplier-batch history
+remains available separately from the available feed.
+
+Demand and supplier-batch detail sheets show **Company context** notes for the
+linked company. These dated, source-attributed notes live in
+`crm_company_context_notes`, separate from mutable buyer profiles; they describe
+the company, not a new actionable ask. Demand's **Missing to move this** section
+surfaces missing price, quantity, request timeline, unsent qualification question
+or eligible supply match. These are action gaps, not automatic closures.
+
+Migration `044` separates current sourcing work from buyer discovery. **Demand**
+is a buyer's own dated, actionable request or standing ask with an identified
+buyer, product family and quantity. **Qualifying** holds a specific need that
+still needs a quantity, identity or reconfirmation; keep its next question
+explicit. **Buyer profiles** describe general buying capabilities or buy-boxes,
+with `researched` or `stated` basis, evidence and a profile date on the company.
+They suggest whom to introduce, not what to source today. **Lot interest** is a
+reply or bid to stock we offered and belongs to that lot's buyer/bid records,
+not to standalone demand. Recycling intake remains a separate pipeline.
+
+The shortlist orders open rows before qualifying rows and closed history.
+Within each status, score bands come first, then manual **Priority** within
+the band, then score. Priority never lifts a cold opportunity above a hotter
+band. Fee is quantity × unit price × 10%. Buyer-stated prices count in full;
+our estimates count at half weight:
+
+```
+asked_on = latest(observed_on, confirmed_on)
+freshness = 0.5 ^ (days_since_asked_on / 30)
+expected_fee = fee_eur × price_weight × close_chance × freshness
+score = min(100, round(25 × log10(1 + expected_fee)))
+```
+
+`price_weight` is 1 for `buyer`, otherwise 0.5. Reputation priors are `paid`
+0.60, `active` 0.35, `email` 0.20, `inbound` 0.10 and `anon` 0.03. Bands are
+Hot ≥80, Warm 60–79, Low 40–59 and Cold <40. Missing fee inputs produce no
+score ("Needs quantity"), not zero. Reconfirmation resets freshness.
+Stock availability and product-family grouping are context, not score factors.
+
+Inbox/call demand extraction is proposal-only: approval is required before a
+new ask becomes demand. Offer replies route to the existing lot rather than
+creating a new ask; evidence must come from the new message, not quoted history.
+Resolve the buyer identity and deduplicate by entity plus normalized product
+family across open and qualifying rows, not by wording.
+
+Standing asks become qualifying at 60 days ("Still buying?"). Entry into
+qualification stamps `qualify_entered_on` across UI, proposal and import writers.
+`qualify_asked_on` is the date the question was actually sent: null means not
+sent, so the row stays qualifying and the lifecycle reports `question_not_sent`.
+Only 21 days after sending, without reconfirmation, does a qualifying standing
+ask move to the company profile or a qualifying request expire. Reconfirmation
+must be dated strictly after the question was sent; same-day creation or
+acceptance is not a response. Old buyer observations never age a qualifying row.
+In the Demand detail panel, **Qualify** saves the next question without starting
+the response clock. Use **Question sent today** only after actually sending it;
+this sets `qualify_asked_on`. **Send again** resets that date and the 21-day
+response window. **Still wanted** records a new confirmation; it only counts
+as a response when dated after `qualify_asked_on`.
+
+Open requests still expire after
+`needed_by`, or after 90 days without a deadline, using their latest observation
+or confirmation. Closure is an explicit lifecycle transition, not score-based.
+
+The Demand list shows activity counts and opens a detail panel for the selected
+ask. Its activity workspace (`045_demand_activity.sql`) supports `note`,
+`research`, `outreach`, `call`, `quote`, `supply` and `status` entries, with a
+required title, optional body and timestamped history. Under **Details / link**,
+link a URL, lot, supply record or stock-item URL. Lot and supply links navigate
+to their existing CRM views; web links open in a separate tab. Suggested supply
+can be pinned as a linked `supply` activity without creating a trade.
+Status transitions are logged atomically by a database trigger, including
+script-originated changes. **Still wanted** also appears in activity. The API
+is `/api/bulk-trades/demand/[demandId]/activity`; deleting an entry is scoped to
+both its demand and activity IDs.
+
+Saved searches feed company profiles, never open demand. Sourcing requests
+enter as qualifying demand. Surveys are profile evidence unless they state
+both quantity and timing; specific incomplete needs belong in qualification.
+The scheduled importer and inbox checker use the detached
+`/root/denchclaw/scripts-live` worktree. `saved_search_import.py` defaults to a
+rollback-only dry run; `--apply` is reserved for the scheduled gate or an
+explicitly authorized import.
