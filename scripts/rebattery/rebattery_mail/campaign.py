@@ -22,8 +22,19 @@ def validate_links(row, links, auction_url=None):
             raise Refused('unapproved_destination_host')
         urls.add(url)
         keys.add(key)
-    html_urls = set(re.findall(r'''href=["'](https://[^"']+)''',row['body_html']))
-    text_urls = set(re.findall(r'https://[^\s<>]+',row['body_text']))
+    # Folder-backed templates bind all copy into the approval digest, but only
+    # body CTAs are campaign-tracked, not the shared brand shell or signature.
+    scope = row.get('personalization', {}).get('template_link_scope')
+    html_body = scope['html'] if scope else row['body_html']
+    text_body = scope['text'] if scope else row['body_text']
+    if scope:
+        from .catalogue import links as template_links
+        html_urls, text_urls = template_links({'html': html_body, 'text': text_body})
+        html_urls = {url for url in html_urls if url.startswith('https://')}
+        text_urls = {url for url in text_urls if url.startswith('https://')}
+    else:
+        html_urls = set(re.findall(r'''href=["'](https://[^"']+)''',html_body))
+        text_urls = set(re.findall(r'https://[^\s<>]+',text_body))
     if html_urls != urls or text_urls != urls:
         raise Refused('tracked_link_parity')
     if auction_url:

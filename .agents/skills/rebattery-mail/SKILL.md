@@ -13,7 +13,7 @@ Run `python3 scripts/rebattery/rebattery-mail.py` from this repository. The pack
 
 The production-stack port follows migrations through 049 with `050_mail_log.sql`,
 the separately approved `legacy import`, `051_mail_cutover.sql`, then
-`052_mail_agent_role.sql`. Synthetic harness checks are not a production-data
+`052_mail_agent_role.sql`, followed by additive `053_mail_template_meta.sql`. Synthetic harness checks are not a production-data
 rehearsal; the real cutover still requires a fresh verified, restore-tested backup
 and its own approval.
 
@@ -64,6 +64,35 @@ status message-id
 ```
 
 Search also accepts `--identity`, `--campaign` and events `opened|clicked|replied|bounced`. `--limit` is 1 to 1000. `thread`, `message` and `person` expose associated log history. `status` returns distinct sent, delivered, bounced, opened, clicked, unsubscribed and replied counts, with scanner/proxy evidence separately. Gmail acceptance is not delivery. Opens/clicks are observations, not verified people or site visits.
+
+## Folder-backed templates
+
+The mailvin profile's `workspace/email-templates/` is the copy source of truth
+(deployed at `/root/.hermes/profiles/mailvin/workspace/email-templates/`).
+Use `template validate --dir <folder>` before `template preview --dir <folder>
+--out <preview-folder> --identity alex`; both are entirely local. Preview writes
+one HTML file per template and `sheet.html`, including platform-owned snapshots.
+For an explicitly selected database, review `template sync --dir <folder>` first.
+Only with the separate mutation authority add `--apply`. Sync stores composed
+shell/body copy and metadata, and updates only Alex/Ari signature fields.
+It does not send or approve anything. Changed content under an existing
+`(name, version)` refuses with `template_version_conflict`; bump the version.
+
+Add the metadata JSON, body HTML and text to `presets/<category>/` (or `custom/`)
+and catalogue entry to `index.json`. Declare every body/subject variable in
+required or optional variables and supply synthetic `sample_vars`. Validation
+checks declarations, sample rendering, HTML/text link parity, unsubscribe paths,
+unknown raw tokens and em dashes. Optional variables default empty. `{{name}}`
+escapes HTML; raw insertion is restricted to `content`, `signature_html`,
+`unsubscribe_html`, `body_html`. Provider Postmark tokens stay untouched.
+
+`sendable: false` snapshots are references only; draft/freeze refuse them with
+`template_not_sendable`. Identity/purpose restrictions produce
+`template_identity_not_allowed` / `template_purpose_not_allowed`. Signatures
+come from the selected identity, never supplied variables, inside digest-bound
+copy. Marketing footers are automatically inserted: the Postmark Broadcast
+token in both formats, or Gmail's `Unsubscribe: mailto:<sender>?subject=unsubscribe`
+and matching HTML link. Shared shell/signature links are not campaign CTAs.
 
 ## Prepare and freeze
 
