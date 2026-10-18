@@ -39,7 +39,9 @@ function useLiveDisclosure(live: boolean) {
   useEffect(() => { if (!manual) setOpen(live); }, [live, manual]);
   return { open, onToggle: (event: { currentTarget: { open: boolean } }) => { if (event.currentTarget.open !== open) { setManual(true); setOpen(event.currentTarget.open); } } };
 }
-const clip = (text: string, max = 140) => { const line = text.replace(/\s+/g, " ").trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
+/** Hermes decorates status and narration with emoji; the transcript shows plain text. */
+export const stripEmoji = (text: string) => text.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3\u{1F3FB}-\u{1F3FF}]/gu, "").replace(/[ \t]{2,}/g, " ").trim();
+const clip = (text: string, max = 140) => { const line = stripEmoji(text).replace(/\s+/g, " ").trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
 export function formatDuration(seconds: number): string {
   const whole = Math.max(0, Math.round(seconds));
   return whole < 60 ? `${whole}s` : `${Math.floor(whole / 60)}m ${whole % 60}s`;
