@@ -152,6 +152,21 @@ describe("native transcript", () => {
     expect(screen.getByText("Tail content")).toBeInTheDocument();
   });
 
+  it("opens a finished tool's result preview as an accordion, and offers none while running", () => {
+    const running = events([["tool.start", { tool_id: "r", name: "read_file", args: { path: "/a/plan.md" } }]]);
+    const { container, rerender } = render(<NativeTranscript state={running} callbacks={callbacks()} />);
+    expect(container.querySelector("[data-tool-id] details")).toBeNull();
+    const done = events([["tool.complete", { tool_id: "r", name: "read_file", result: { content: "1|first line\n2|second line" } }]], running);
+    rerender(<NativeTranscript state={done} callbacks={callbacks()} />);
+    const details = container.querySelector("[data-tool-id] details") as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(within(details).getByText("Read plan.md")).toBeInTheDocument();
+    expect(within(details).getByText("2|second line")).toBeInTheDocument();
+    expect(within(details).getByText("2 lines")).toBeInTheDocument();
+    expect(container.querySelector('[data-preview="code"]')).not.toBeNull();
+  });
+
   it("nests todos and renders usage fields", () => {
     const state = events([["todo.updated", { todos: [{ id: "p", content: "Ship", status: "in_progress" }, { id: "c", parent: "p", content: "Review", status: "completed" }] }], ["session.usage", { usage: { input: 10, output: 20, context_used: 50, context_max: 100, cost_usd: 0.02 } }]]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
