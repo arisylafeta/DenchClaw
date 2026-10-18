@@ -1,0 +1,23 @@
+# Read-only capture of the ReBattery WhatsApp business number (REB-355).
+# Pair first, interactively: node capture.mjs --state /root/.rebattery/whatsapp-capture --pair
+# Set WorkingDirectory to the reviewed checkout before installation.
+[Unit]
+Description=ReBattery WhatsApp read-only capture
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/denchclaw/scripts-live/scripts/rebattery/whatsapp_capture
+ExecStart=/usr/bin/node capture.mjs --state /root/.rebattery/whatsapp-capture
+Restart=on-failure
+RestartSec=15
+# 2 = usage/already paired, 3 = unpaired or logged out: needs a human, not a restart loop.
+RestartPreventExitStatus=2 3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
