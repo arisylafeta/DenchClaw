@@ -1,5 +1,7 @@
 "use client";
 
+import { useDocumentDirty } from "./document-dirty-context";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -209,9 +211,11 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 	const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
 	const [theme, setTheme] = useState<string>(isDarkMode() ? "denchclaw-dark" : "denchclaw-light");
 	const [saveState, setSaveState] = useState<SaveState>("clean");
+  useDocumentDirty(saveState === "dirty" || saveState === "saving" || saveState === "error");
 	const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const currentContentRef = useRef(content);
+	const saveInFlightRef = useRef(false);
 
 	const language = monacoLangFromFilename(filename);
 	const canSave = !!filePath;
@@ -230,7 +234,8 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 	}, []);
 
 	const saveFile = useCallback(async () => {
-		if (!filePath || !editorRef.current) {return;}
+		if (!filePath || !editorRef.current || saveInFlightRef.current) {return;}
+		saveInFlightRef.current = true;
 		const value = editorRef.current.getValue();
 		setSaveState("saving");
 		try {
@@ -241,13 +246,15 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 			});
 			if (!res.ok) {throw new Error("Save failed");}
 			currentContentRef.current = value;
-			setSaveState("saved");
+			setSaveState(editorRef.current?.getValue() === value ? "saved" : "dirty");
 			if (saveTimeoutRef.current) {clearTimeout(saveTimeoutRef.current);}
-			saveTimeoutRef.current = setTimeout(() => setSaveState("clean"), 2000);
+			saveTimeoutRef.current = setTimeout(() => setSaveState(state => state === "saved" ? "clean" : state), 2000);
 		} catch {
 			setSaveState("error");
 			if (saveTimeoutRef.current) {clearTimeout(saveTimeoutRef.current);}
 			saveTimeoutRef.current = setTimeout(() => setSaveState("dirty"), 3000);
+		} finally {
+			saveInFlightRef.current = false;
 		}
 	}, [filePath]);
 
@@ -269,6 +276,13 @@ function EditorInner({ content, filename, filePath, className, onDirty }: CodeEd
 
 		// Track dirty state
 		ed.onDidChangeModelContent(() => {
+			// Even undoing to the old disk baseline is an unsaved reversal while
+			// another version is being written. Do not expose a clean interval.
+			if (saveInFlightRef.current) {
+				setSaveState("saving");
+				onDirty?.();
+				return;
+			}
 			const current = ed.getValue();
 			if (current !== currentContentRef.current) {
 				setSaveState("dirty");

@@ -22,7 +22,15 @@ export type TreeNode = {
  * Supports a browse mode: when `browseDir` is set, the tree is fetched from
  * the browse API instead of the workspace tree API.
  */
+export type WorkspaceFileChange = { type: string; path: string; root: string };
+export type SubscribeWorkspaceChanges = (listener: (event: WorkspaceFileChange) => void) => () => void;
+
 export function useWorkspaceWatcher() {
+  const changeListeners = useRef(new Set<(event: WorkspaceFileChange) => void>());
+  const subscribeChanges: SubscribeWorkspaceChanges = useCallback(listener => {
+    changeListeners.current.add(listener);
+    return () => { changeListeners.current.delete(listener); };
+  }, []);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [exists, setExists] = useState(false);
@@ -166,9 +174,8 @@ export function useWorkspaceWatcher() {
     };
   }, [fetchTree]);
 
-  // SSE subscription -- only active in workspace mode (not browse mode)
+  // Keep workspace content updates flowing even while browsing another folder.
   useEffect(() => {
-    if (browseDirRaw) {return;}
 
     let eventSource: EventSource | null = null;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -180,7 +187,7 @@ export function useWorkspaceWatcher() {
     function debouncedRefetch() {
       if (debounceTimer) {clearTimeout(debounceTimer);}
       debounceTimer = setTimeout(() => {
-        if (alive) {void fetchWorkspaceTree();}
+        if (alive) {void fetchTree();}
       }, 300);
     }
 
@@ -200,7 +207,13 @@ export function useWorkspaceWatcher() {
           }
         });
 
-        eventSource.addEventListener("change", () => {
+        eventSource.addEventListener("change", message => {
+          try {
+            const event = JSON.parse((message as MessageEvent).data) as WorkspaceFileChange;
+            if (typeof event.path === "string" && typeof event.root === "string" && typeof event.type === "string") {
+              for (const listener of changeListeners.current) listener(event);
+            }
+          } catch { /* malformed event: tree fallback still runs */ }
           debouncedRefetch();
         });
 
@@ -234,7 +247,7 @@ export function useWorkspaceWatcher() {
     function startPolling() {
       if (pollInterval || !alive) {return;}
       pollInterval = setInterval(() => {
-        if (alive) {void fetchWorkspaceTree();}
+        if (alive) {void fetchTree();}
       }, 5000);
     }
 
@@ -247,7 +260,7 @@ export function useWorkspaceWatcher() {
       if (reconnectTimeout) {clearTimeout(reconnectTimeout);}
       if (debounceTimer) {clearTimeout(debounceTimer);}
     };
-  }, [browseDirRaw, fetchWorkspaceTree, sseReconnectKey]);
+  }, [fetchTree, sseReconnectKey]);
 
-  return { tree, loading, exists, refresh, reconnect, browseDir, setBrowseDir, parentDir, workspaceRoot, openclawDir, activeWorkspace, showHidden, setShowHidden };
+  return { tree, loading, exists, refresh, reconnect, subscribeChanges, browseDir, setBrowseDir, parentDir, workspaceRoot, openclawDir, activeWorkspace, showHidden, setShowHidden };
 }

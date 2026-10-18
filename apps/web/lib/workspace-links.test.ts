@@ -113,6 +113,10 @@ describe("buildBrowseLink", () => {
 // ─── parseWorkspaceLink ───────────────────────────────────────────
 
 describe("parseWorkspaceLink", () => {
+  it.each(["https://foreign.test/?path=readme.md", "//foreign.test/?path=readme.md", "https://crm.rebattery.io@foreign.test/?path=readme.md"])("rejects foreign origins: %s", href => {
+    expect(parseWorkspaceLink(href)).toBeNull();
+    expect(isWorkspaceLink(href)).toBe(false);
+  });
   it("parses file link from root route path param", () => {
     const result = parseWorkspaceLink("/?path=knowledge/doc.md");
     expect(result).toEqual({ kind: "file", path: "knowledge/doc.md" });
@@ -124,12 +128,12 @@ describe("parseWorkspaceLink", () => {
   });
 
   it("parses entry link from full URL", () => {
-    const result = parseWorkspaceLink("http://localhost:3100/?entry=deals:xyz");
+    const result = parseWorkspaceLink("https://crm.rebattery.io/?entry=deals:xyz");
     expect(result).toEqual({ kind: "entry", objectName: "deals", entryId: "xyz" });
   });
 
   it("parses file link from full URL", () => {
-    const result = parseWorkspaceLink("http://localhost:3100/?path=readme.md");
+    const result = parseWorkspaceLink("https://crm.rebattery.io/?path=readme.md");
     expect(result).toEqual({ kind: "file", path: "readme.md" });
   });
 

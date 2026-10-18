@@ -92,20 +92,19 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
     : view.groupBy === "day" ? dayBucket(row.updatedAt, now) : scheduledJob(row);
   const sections = new Map<string, ChatSection>();
   const pins = new Set(view.pins ?? []);
-  const sorted = [...shown].sort((a, b) => {
-    if (view.sortBy === "project") {
-      // Unknown projects stay last. Titles and message text never supply projects.
-      const projectOrder = Number(!a.project) - Number(!b.project) || (a.project ?? "").localeCompare(b.project ?? "", undefined, { sensitivity: "base" });
-      if (projectOrder) return projectOrder;
-    }
-    return b.updatedAt - a.updatedAt || a.key.localeCompare(b.key);
-  });
+  const recentFirst = (a: HermesConversation, b: HermesConversation) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key);
+  // Discover sections in recency order regardless of the row sort preference.
+  const sorted = [...shown].sort(recentFirst);
   for (const row of sorted) {
     const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
       : automation(row) ? sourceSection(row)
       : view.groupBy === "source" || view.groupBy === "none" ? sourceSection(row) : { key: `view:${keyOf(row)}`, label: keyOf(row) };
     const section = sections.get(bucket.key) ?? { ...bucket, rows: [] };
     section.rows.push(row); sections.set(bucket.key, section);
+  }
+  if (view.sortBy === "project") for (const section of sections.values()) {
+    section.rows.sort((a, b) => Number(!a.project) - Number(!b.project)
+      || (a.project ?? "").localeCompare(b.project ?? "", undefined, { sensitivity: "base" }) || recentFirst(a, b));
   }
   const order = ["pinned", "chats", "group", "discord", "whatsapp"];
   const rank = (key: string) => key === "automation" ? 1000 : order.includes(key) ? order.indexOf(key) : 10;
