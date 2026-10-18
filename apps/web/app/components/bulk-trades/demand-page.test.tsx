@@ -30,6 +30,7 @@ function row(overrides: Partial<Demand>): Demand {
     price_currency: null,
     price_unit: null,
     spec: {},
+    context: {},
     source_kind: "email",
     source_label: "Gmail · adam@gv.example",
     source_url: null,
@@ -76,6 +77,27 @@ function setup(rows: Demand[]) {
   return fetchMock;
 }
 describe("Demand visualization", () => {
+  it("renders context conflicts and unknown design without changing quantity", async () => {
+    setup([row({ quantity: "12 packs", context: {
+      application: "Synthetic storage pilot", min_usable_energy_kwh_per_pack: 42,
+      homogeneous_within_container: true, repeat_supply_required: false,
+      container_design_finalized: null, pilot_quantity_conflict: true,
+      pilot_quantities_observed: [{ packs: 12, date: "2026-08-01", source: "Synthetic email" },
+        { packs: 18, date: "2026-08-02", source: "Synthetic call" }],
+      missing_documents: ["Pack test report"], alternatives_to_confirm: ["Different pack family"],
+      next_action: "Confirm pack count and design status",
+      sources: [{ kind: "email", id: "test-email-1", url: "https://example.test/thread", label: "Synthetic source" }],
+    } })]);
+    await userEvent.click(await screen.findByRole("button", { name: /Green Voltage/ }));
+    const context = within(screen.getByRole("region", { name: "Buyer context" }));
+    for (const text of ["Unknown / to confirm", "42 kWh per pack", "Not required", "Pack test report", "Different pack family", "Confirm pack count and design status"]) {
+      expect(context.getByText(text)).toBeVisible();
+    }
+    expect(context.getByText(/Pilot quantity conflict:/)).toBeVisible();
+    expect(context.getByText(/18 packs · 2026-08-02 · Synthetic call/)).toBeVisible();
+    expect(context.getByRole("link", { name: "Synthetic source" })).toHaveAttribute("href", "https://example.test/thread");
+    expect(screen.getByText("12 packs")).toBeVisible();
+  });
   it("filters History categories without swamping All with research and patches only the category", async () => {
     const fetchMock = setup([
       row({ id: "live", buyer: "Live buyer" }),

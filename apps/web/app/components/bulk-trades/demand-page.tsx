@@ -11,6 +11,7 @@ import styles from "./bulk-detail.module.css";
 import { DemandActions } from "./demand-actions";
 import { DemandDialog } from "./demand-editor";
 import { CompanyContext } from "./company-context";
+import { BuyerContext } from "./buyer-context";
 
 const MISSING_ORDER = [
   "no supply match",
@@ -483,6 +484,7 @@ function DemandPanel({
           )}
         </>
       )}
+      {tab === "Overview" && <BuyerContext context={demand.context} />}
       {tab === "Overview" && <CompanyContext notes={demand.context_notes} />}
       {tab === "Suitable supply" && (
         <>

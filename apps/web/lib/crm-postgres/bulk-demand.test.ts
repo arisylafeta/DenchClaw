@@ -43,6 +43,27 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(rows.filter((row) => row.status === "qualifying")).toHaveLength(8);
   });
 
+  it("round trips context and preserves it on legacy edits without changing demand facts", async () => {
+    const context = { container_design_finalized: null, pilot_quantity_conflict: true,
+      pilot_quantities_observed: [{ packs: 12, date: "2026-08-01", source: "Synthetic email" },
+        { packs: 18, date: "2026-08-02", source: "Synthetic call" }],
+      sources: [{ kind: "url", label: "Synthetic source", url: "https://example.test/context" }] };
+    const row = await demand.addDemand({ buyer: "Synthetic Context Buyer", wants: "Storage packs",
+      context, volume: 12, volume_unit: "packs", confirmed_on: "2026-08-01", status: "qualifying" }, user.id);
+    expect(row.context).toEqual(context);
+    expect((await demand.listDemand()).find((item) => item.id === row.id)?.context).toEqual(context);
+    expect(await demand.updateDemand(row.id, { note: "Narrative only" })).toMatchObject({ context,
+      volume: 12, confirmed_on: "2026-08-01", status: "qualifying" });
+    expect(await demand.updateDemand(row.id, { context: { ...context, next_action: "Confirm count" } })).toMatchObject({
+      context: { ...context, next_action: "Confirm count" }, volume: 12, confirmed_on: "2026-08-01", status: "qualifying" });
+    expect((await demand.updateDemand(row.id, { context: {} }))?.context).toEqual({});
+    const legacy = await demand.addDemand({ buyer: "Legacy Synthetic Buyer", wants: "Packs" }, user.id);
+    expect(legacy.context).toEqual({});
+    for (const invalid of ["[]", "null", "42"]) {
+      await expect(pg.queryPg("update crm_bulk_trade_demand set context = $2::jsonb where id = $1", [row.id, invalid])).rejects.toThrow();
+    }
+  });
+
   it("adds, edits, confirms and closes demand", async () => {
     const row = await demand.addDemand({ buyer: "Green Voltage", wants: "Matched packs in repeat batches", confirmed_on: "2026-05-01" }, user.id);
     expect(row).toMatchObject({ status: "open", confirmed_on: "2026-05-01", fits: [] });
