@@ -28,7 +28,8 @@ def load_catalogue(directory):
     entries = index if isinstance(index, list) else index.get('templates', [])
     if not isinstance(entries, list) or not entries:
         raise Refused('invalid_template_index')
-    files = list(root.glob('presets/**/*.json')) + list(root.glob('custom/*.json')) + list(root.glob('snapshots/*.json'))
+    oneoffs = sorted(root.glob('custom/oneoff/*.json'))
+    files = list(root.glob('presets/**/*.json')) + list(root.glob('custom/*.json')) + list(root.glob('snapshots/*.json')) + oneoffs
     by_name = {}
     for path in files:
         meta = read_json(path)
@@ -67,6 +68,8 @@ def load_catalogue(directory):
             row['text_body'] = text_layout.replace('{{{content}}}', text)
         by_name[name] = row
     names = [entry if isinstance(entry, str) else entry.get('name') for entry in entries]
+    # Saved one-offs are opt-in files, not edits to the curated catalogue index.
+    names += [read_json(path)['name'] for path in oneoffs if read_json(path)['name'] not in names]
     if len(names) != len(set(names)) or set(names) != set(by_name):
         raise Refused('template_index_mismatch')
     signatures = {}

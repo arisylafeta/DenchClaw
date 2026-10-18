@@ -1,0 +1,1 @@
+{{cta_label}}: {{cta_url}}

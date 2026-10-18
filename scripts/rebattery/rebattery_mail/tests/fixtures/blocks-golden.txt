@@ -1,0 +1,25 @@
+Hi {{first_name}},
+
+An update
+
+Plain & useful <copy>.
+
+Details
+
+- First
+- Second
+
+1. Check
+2. Reply
+
+Status: Confirmed
+
+Next: Review
+
+Review details: https://example.test/review?a=1&b=2
+
+For reference.
+
+
+
+Best,

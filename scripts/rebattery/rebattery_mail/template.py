@@ -55,6 +55,39 @@ def sync_catalogue(db, rows, signatures, apply=False):
 
 
 def handle(args):
+    if args.action in ('compose', 'save-oneoff'):
+        from .blocks import compose_blocks, read_blocks, CATALOGUE
+        from pathlib import Path
+        import re
+        result = compose_blocks(read_blocks(args.blocks), args.identity, args.allow_multiple_cta)
+        if args.action == 'compose':
+            if args.out_dir:
+                out = Path(args.out_dir)
+                out.mkdir(parents=True, exist_ok=True)
+                (out / 'body.html').write_text(result['body_html'])
+                (out / 'body.txt').write_text(result['body_text'])
+            return result
+        if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]*', args.name):
+            raise Refused('invalid_template_name')
+        from .templating import VARIABLE, RESERVED
+        variables = sorted(set(result['variables_used']) | (set(VARIABLE.findall(args.subject)) - RESERVED))
+        metadata = {'name': args.name, 'version': 1, 'category': 'oneoff', 'purpose': args.purpose,
+                    'description': 'Reusable semantic one-off', 'subject': args.subject,
+                    'required_variables': variables, 'optional_variables': [],
+                    'allowed_identities': [args.identity], 'allowed_purposes': [args.purpose],
+                    'sendable': True, 'sample_vars': {key: 'Example' for key in variables}}
+        directory = CATALOGUE / 'custom' / 'oneoff'
+        files = {str(directory / (args.name + '.json')): json.dumps(metadata, indent=2) + '\n',
+                 str(directory / (args.name + '.html')): result['body_html'],
+                 str(directory / (args.name + '.txt')): result['body_text']}
+        if any(Path(path).exists() for path in files):
+            raise Refused('oneoff_template_exists', template=args.name)
+        if args.apply:
+            directory.mkdir(parents=True, exist_ok=True)
+            for path, content in files.items():
+                with Path(path).open('x') as target:
+                    target.write(content)
+        return {'dry_run': not args.apply, 'files': files, 'warnings': result['warnings']}
     if args.action in ('sync', 'validate', 'preview'):
         rows, signatures = load_catalogue(args.dir)
         result = validate_catalogue(rows, signatures)
@@ -87,6 +120,19 @@ def handle(args):
 def register(subparsers):
     actions = subparsers.add_parser('template').add_subparsers(dest='action', required=True)
     actions.add_parser('list').set_defaults(handler=handle)
+    for action in ('compose', 'save-oneoff'):
+        parser = actions.add_parser(action)
+        parser.add_argument('--blocks', required=True, help='Semantic JSON list or {greeting, blocks, allowed_identities}; @file accepted')
+        parser.add_argument('--identity', default='alex')
+        parser.add_argument('--allow-multiple-cta', action='store_true')
+        if action == 'compose':
+            parser.add_argument('--out-dir')
+        else:
+            parser.add_argument('--name', required=True)
+            parser.add_argument('--subject', default='{{subject}}')
+            parser.add_argument('--purpose', choices=('personal', 'marketing', 'transactional'), default='personal')
+            parser.add_argument('--apply', action='store_true')
+        parser.set_defaults(handler=handle)
     for action in ('show', 'render'):
         parser = actions.add_parser(action)
         parser.add_argument('name')

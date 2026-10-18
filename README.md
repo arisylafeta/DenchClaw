@@ -241,6 +241,34 @@ Gmail's `Unsubscribe: mailto:<sender>?subject=unsubscribe` line and HTML link.
 Only template body CTAs are campaign-tracked; shared shell/signature links are
 still part of the exact approved copy.
 
+Dynamic one-offs use semantic blocks and the same shell, signature, unsubscribe,
+digest and approval path, without model-written HTML:
+
+```bash
+template compose --blocks '{"greeting":"Hi {{first_name}},","blocks":[{"type":"paragraph","text":"Could you confirm a suitable time?"},{"type":"signoff","text":"Best,"}]}' --identity alex --out-dir /tmp/oneoff
+draft --oneoff-blocks @oneoff.json --subject 'A quick question' --identity alex --to buyer@example.test --vars '{"first_name":"Reader"}'
+template save-oneoff --name reusable-question --blocks @oneoff.json --subject 'A quick question' --identity alex
+```
+
+Compose returns `{body_html, body_text, variables_used, warnings}` and optionally
+writes `body.html`/`body.txt`. Blocks are paragraph, heading, section_label,
+bullets, numbered, fact_box, key_values, cta, note, divider and signoff; see
+`.agents/skills/rebattery-mail/SKILL.md` for exact schemas. Text is escaped,
+malformed/raw/reserved merge tokens are neutralised, and URLs must be concrete
+HTTPS, mailto or tel links. Multiple buttons refuse with `multiple_ctas`
+unless `--allow-multiple-cta`; this is not a semantic one-ask check.
+Warnings flag em dashes, paragraphs over 120 words, absent greeting/sign-off,
+bare URL labels and exclamation marks.
+
+Draft requires a subject and cannot combine blocks with template/body/HTML.
+Its normal `--apply`, preview and human approval steps remain unchanged.
+Save dry-runs print three files; `--apply` writes only a new
+`workspace/email-templates/custom/oneoff/<name>.json/.html/.txt` triplet,
+category `oneoff`. It refuses existing files and never syncs or sends.
+`template sync --dir <catalogue>` discovers saved one-offs without changing
+the curated index. Omit save's `--subject` to require a `subject` variable later.
+
+
 Use `campaign create --id <id> --name <name> --identity <key> --template <name>
 --person-ids <comma-separated-ids> --verification <json> --apply`, or
 `--cohort-sql <read-only-select-file>` for the audience. The SELECT must return

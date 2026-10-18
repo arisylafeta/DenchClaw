@@ -94,6 +94,56 @@ copy. Marketing footers are automatically inserted: the Postmark Broadcast
 token in both formats, or Gmail's `Unsubscribe: mailto:<sender>?subject=unsubscribe`
 and matching HTML link. Shared shell/signature links are not campaign CTAs.
 
+### Dynamic one-offs without HTML
+
+Prefer a catalogue template when it fits. Otherwise use semantic blocks, not
+model-written HTML or raw `body_html` variables. `draft --oneoff-blocks` is a
+distinct input mode so generated copy cannot accidentally bypass the catalogue
+shell, identity-owned signature, unsubscribe policy, preview, digest or approval.
+It cannot be combined with `--template`, `--body` or `--html`; subject is required.
+
+```bash
+template compose --blocks @oneoff.json --identity alex --out-dir /tmp/oneoff-preview
+draft --id synthetic-oneoff --oneoff-blocks @oneoff.json --subject 'An update' --identity alex --to buyer@example.test --vars '{"first_name":"Reader"}'
+# After reviewing and with authority to persist the draft, repeat with --apply.
+preview synthetic-oneoff
+template save-oneoff --name reusable-update --blocks @oneoff.json --subject 'An update' --identity alex
+# --apply writes three local files only; it never syncs or sends.
+```
+
+`oneoff.json` is a list or an object with `blocks`, optional `greeting`
+(for example `Hi {{first_name}},`) and optional `allowed_identities`.
+The latter defaults to `alex`, `ari`, `hello`; explicitly declare other approved
+identities when needed. Actual draft identity availability/purpose/transport
+checks still apply. Fields are strict, with no extra keys:
+
+- `paragraph`, `heading`, `section_label`, `note`, `signoff`: `text` string.
+- `bullets`, `numbered`: non-empty `items` string list.
+- `fact_box`, `key_values`: non-empty `rows` of `{label, value}` strings.
+- `cta`: `label` and concrete `url`; only HTTPS, mailto and tel are accepted.
+- `divider`: no other fields.
+
+Text is escaped; only ordinary `{{name}}` variables survive for `--vars`.
+Malformed, triple-brace and reserved tokens become literal full-width braces.
+URLs cannot contain variables. No model HTML is interpreted.
+At most one CTA is allowed (`multiple_ctas`); only use
+`--allow-multiple-cta` with explicit editorial authority. This guard counts
+buttons, not semantic requests: still review the whole email for one ask.
+
+Compose returns `body_html`, `body_text`, `variables_used` and structured
+`warnings` (em dash, paragraph over 120 words, no greeting, missing sign-off,
+bare URL label, exclamation mark). Fix warnings editorially; they are not
+automatic rewrites. A sign-off is a closing such as `Best,`, not a duplicate
+sender signature. Neither compose nor save adds signatures or unsubscribe.
+These come from the shared composition path when rendering a draft/template.
+
+Save dry-runs print JSON/HTML/text file contents. `--apply` creates a new
+`custom/oneoff/<name>.json/.html/.txt` triplet, category `oneoff`, refusing
+existing files. No `index.json` edit is needed: `template sync --dir <folder>`
+discovers these files alongside the indexed catalogue. Save does not sync.
+Without `--subject`, reusable templates require a `subject` variable.
+
+
 ## Prepare and freeze
 
 Every mutating command defaults to dry-run unless `--apply` is present. A dry-run performs no durable database writes. Provider reads may still be needed for preflight. Never turn a dry run into a live send merely to verify output.

@@ -18,10 +18,21 @@ def render_message(row, variables):
 
 
 def prepare(db, identity_key, recipients, purpose='personal', template=None, variables=None,
-            subject=None, body=None, html=None, thread=None, campaign=None, verification=None, transport=None, message_id=None):
+            subject=None, body=None, html=None, thread=None, campaign=None, verification=None, transport=None, message_id=None,
+            oneoff_blocks=None, allow_multiple_cta=False):
     author, transport = policy.identity(db,identity_key,purpose,transport)
     variables = variables or {}
-    if template:
+    generated = None
+    if oneoff_blocks is not None:
+        from .blocks import compose_blocks, oneoff_template
+        if template or body is not None or html is not None:
+            raise Refused('conflicting_oneoff_content')
+        if not subject:
+            raise Refused('missing_oneoff_subject')
+        generated = compose_blocks(oneoff_blocks, identity_key, allow_multiple_cta)
+        tpl = oneoff_template(generated, subject, identity_key, purpose)
+        rendered = compose(tpl, variables, author, purpose, transport)
+    elif template:
         with dict_cursor(db) as cur:
             cur.execute('select * from mail_template where name=%s order by version desc limit 1',(template,))
             tpl = cur.fetchone()
@@ -40,10 +51,12 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
     row = {'id':message_id or uuid4().hex,'direction':'outbound','state':'draft','identity_key':identity_key,
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
            'cc_emails':[],'bcc_emails':[],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
-           'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and author.get('signature_text') else ''),
-           'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template else ''),'thread_id':thread,'campaign_id':campaign,
+           'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and generated is None and author.get('signature_text') else ''),
+           'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template and generated is None else ''),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
                               'identity_snapshot':{key:author.get(key) for key in ('address','display_name','reply_to','gmail_account','postmark_stream')}},'links':[]}
+    if generated is not None:
+        row['personalization']['oneoff'] = {'warnings': generated['warnings'], 'variables_used': generated['variables_used']}
     if template and 'source_body_html' in (tpl.get('meta') or {}):
         row['personalization']['template_link_scope'] = campaign_body
     if not row['to_emails']:
@@ -74,7 +87,10 @@ def insert(db,row):
 
 def create(args):
     with connection(read_only=not args.apply) as db:
-        row, author = prepare(db,args.identity,args.to.split(','),args.purpose,args.template,json.loads(args.vars),args.subject,args.body,args.html,args.thread,args.campaign,json.loads(args.verification),args.transport,args.id)
+        from .blocks import read_blocks
+        blocks = read_blocks(args.oneoff_blocks) if getattr(args, 'oneoff_blocks', None) is not None else None
+        row, author = prepare(db,args.identity,args.to.split(','),args.purpose,args.template,json.loads(args.vars),args.subject,args.body,args.html,args.thread,args.campaign,json.loads(args.verification),args.transport,args.id,
+                              oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False))
         exclusions = []
         for email in row['to_emails']:
             try:
@@ -116,6 +132,8 @@ def content_flags(parser):
 def register(subparsers):
     parser = subparsers.add_parser('draft')
     content_flags(parser)
+    parser.add_argument('--oneoff-blocks', help='Semantic block JSON or @file; uses the catalogue shell and policy-owned signature')
+    parser.add_argument('--allow-multiple-cta', action='store_true')
     parser.add_argument('--to',required=True)
     parser.add_argument('--id')
     parser.add_argument('--thread')
