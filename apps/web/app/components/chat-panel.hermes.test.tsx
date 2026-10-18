@@ -162,7 +162,7 @@ describe("gateway ChatPanel solo transport", () => {
     expect(screen.getByText("Sources checked")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === `${endpoint}/prompt`)).toBe(true));
-    expect(screen.getByText("1 queued")).toBeInTheDocument();
+    expect(screen.queryByText(/queued/)).toBeNull(); // the queued message itself shows in the transcript with its Queued tag
     fireEvent.click(screen.getByTitle("Stop generating"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/interrupt`, expect.objectContaining({ method: "POST", body: "{}" })));
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/chat")).toBe(false);

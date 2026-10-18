@@ -2563,7 +2563,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
 		) : (
 			<>
-				{nativeGateway && nativeChat.queuedMessageIds.length > 0 && <p role="status">{nativeChat.queuedMessageIds.length} queued</p>}
 				{!nativeGateway && queuedMessages.length > 0 && (
 					<div className={compact ? "px-2 pt-2" : "px-3 pt-3"}>
 						<div
