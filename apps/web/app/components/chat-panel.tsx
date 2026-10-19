@@ -7,6 +7,8 @@ import type { HermesConversation } from "@/lib/hermes-conversations";
 import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
 import { NativeTranscript, PromptDock, ReadOnlyNotice } from "./chat-native";
 import { NativeModelControls } from "./chat-native/model-controls";
+import { NativeSlashComposer } from "./chat-native/slash-commands";
+import { routeSlashResult, slashVisible } from "@/lib/hermes-chat/slash-commands";
 import { GroupAuthor } from "./workspace/group-chat";
 import { Fragment } from "react";
 import {
@@ -1197,6 +1199,42 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const nativeChat = useNativeHermesChat({ conversationKey: nativeConversationKey, enabled: nativeGateway && visible !== false });
 		const pendingNativeRequest = nativeGateway && nativeChat.state.pendingRequests.length > 0;
 		const clarificationOpen = nativeGateway && nativeChat.state.pendingRequests.some(request => request.kind === "clarify");
+		const [composerText, setComposerText] = useState("");
+		const [slashOutput, setSlashOutput] = useState<string | null>(null);
+		const [slashBusy, setSlashBusy] = useState(false);
+		const latestNativeSubmission = nativeChat.state.optimistic.at(-1)?.clientId;
+		useEffect(() => { if (latestNativeSubmission) { setSlashOutput(null); } }, [latestNativeSubmission]);
+		const slashKey = useRef(nativeConversationKey);
+		slashKey.current = nativeConversationKey;
+		useEffect(() => {
+			setSlashOutput(null);
+			setSlashBusy(false);
+			setComposerText("");
+		}, [nativeConversationKey]);
+		const runSlash = useCallback(async (command: string) => {
+			if (!nativeGateway || slashBusy || pendingNativeRequest || nativeChat.readOnly || nativeChat.connection === "lost") { return; }
+			const key = nativeConversationKey;
+			setSlashBusy(true);
+			setSlashOutput(null);
+			editorRef.current?.clear();
+			try {
+				if (!slashVisible(command)) { throw new Error("This command is only available in the terminal interface."); }
+				const action = routeSlashResult(await nativeChat.executeSlash(command));
+				if (slashKey.current !== key) { return; }
+				if (action.type === "conversation") { onBranched?.(action.conversation); }
+				else if (action.type === "prefill") {
+					editorRef.current?.setText(action.text);
+					setSlashOutput(action.notice ?? null);
+				} else if (action.type === "send") {
+					onConversationActivity?.();
+					await nativeChat.send({ text: action.text });
+				} else { setSlashOutput(action.text); }
+			} catch (cause) {
+				if (slashKey.current === key) { setSlashOutput(cause instanceof Error ? cause.message : String(cause)); }
+			} finally {
+				if (slashKey.current === key) { setSlashBusy(false); }
+			}
+		}, [nativeGateway, nativeConversationKey, nativeChat.executeSlash, nativeChat.send, nativeChat.readOnly, nativeChat.connection, slashBusy, pendingNativeRequest, onBranched, onConversationActivity]);
 		const [clarifyComposerTarget, setClarifyComposerTarget] = useState<HTMLDivElement | null>(null);
 		const pendingRequestRef = useRef(pendingNativeRequest);
 		pendingRequestRef.current = pendingNativeRequest;
@@ -1943,6 +1981,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				overrideAttachments?: AttachedFile[],
 			) => {
 				if (nativeGateway && (pendingRequestRef.current || nativeChat.readOnly || nativeChat.connection === "lost")) return;
+				if (nativeGateway && text.startsWith("/") && !mentionedFiles.length) { await runSlash(text); return; }
+				setSlashOutput(null);
 				const hasText = text.trim().length > 0;
 				const hasMentions = mentionedFiles.length > 0;
 				// Use override attachments (from queue) or current state
@@ -2228,6 +2268,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				nativeChat.send,
 				nativeChat.readOnly,
 				nativeChat.connection,
+				runSlash,
 			],
 		);
 
@@ -2683,10 +2724,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					/>
 				)}
 
+				{nativeGateway && slashOutput !== null && <div role="status" className="mx-3 mb-2 rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs text-[var(--color-text)]">
+					<div className="mb-1 flex items-center justify-between gap-2"><span className="font-medium">Command output</span><button type="button" aria-label="Dismiss command output" onClick={() => setSlashOutput(null)} className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]">Dismiss</button></div>
+					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">{slashOutput}</pre>
+				</div>}
+				{nativeGateway && slashBusy && <p role="status" className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">Running command…</p>}
+				<NativeSlashComposer key={nativeConversationKey ?? "legacy"} chat={nativeChat} text={composerText} enabled={nativeGateway && !pendingNativeRequest && !transcriptLoading && nativeChat.connection !== "lost"} busy={slashBusy} setText={text => editorRef.current?.setText(text)} run={command => { void runSlash(command); }}>
 				<ChatEditor
 					ref={editorRef}
 					onSubmit={handleEditorSubmit}
 					onChange={(isEmpty) => setEditorEmpty(isEmpty)}
+					onTextChange={setComposerText}
 					onNativeFileDrop={isSubagentMode ? undefined : uploadAndAttachNativeFiles}
 					placeholder={
 						showHeroState
@@ -2701,10 +2749,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={pendingNativeRequest || transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+					disabled={slashBusy || pendingNativeRequest || transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
 					compact={compact}
 					searchFn={searchFn}
 				/>
+				</NativeSlashComposer>
 
 				<div className={`flex items-center justify-between ${compact ? "px-2 pb-1.5" : "px-3 pb-2.5"}`}>
 					<div className="flex min-w-0 items-center gap-1">
@@ -2764,7 +2813,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								type="button"
 								onClick={() => editorRef.current?.submit()}
 								disabled={
-									pendingNativeRequest || (editorEmpty && attachedFiles.length === 0) ||
+									slashBusy || pendingNativeRequest || (editorEmpty && attachedFiles.length === 0) ||
 									transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
 								}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}

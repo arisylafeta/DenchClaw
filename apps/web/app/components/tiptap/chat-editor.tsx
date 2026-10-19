@@ -42,6 +42,7 @@ type ChatEditorProps = {
 	onSubmit: (text: string, mentionedFiles: Array<{ name: string; path: string }>, html: string) => void;
 	/** Called on every content change. */
 	onChange?: (isEmpty: boolean) => void;
+	onTextChange?: (text: string) => void;
 	/** Called when native files (e.g. from Finder/Desktop) are dropped onto the editor. */
 	onNativeFileDrop?: (files: FileList) => void;
 	placeholder?: string;
@@ -165,9 +166,11 @@ function createChatFileMentionSuggestion(searchFnRef?: React.RefObject<((query: 
 // ── Main component ──
 
 export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
-	function ChatEditor({ onSubmit, onChange, onNativeFileDrop, placeholder, disabled, compact, searchFn }, ref) {
+	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, compact, searchFn }, ref) {
 		const submitRef = useRef(onSubmit);
 		submitRef.current = onSubmit;
+		const textChangeRef = useRef(onTextChange);
+		textChangeRef.current = onTextChange;
 
 		const nativeFileDropRef = useRef(onNativeFileDrop);
 		nativeFileDropRef.current = onNativeFileDrop;
@@ -316,6 +319,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 			},
 			onUpdate: ({ editor: ed }) => {
 				onChange?.(ed.isEmpty);
+				textChangeRef.current?.(ed.getText({ blockSeparator: "\n" }));
 			},
 		});
 
@@ -393,7 +397,10 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 				}
 			},
 			setText: (text: string) => {
-				editor?.commands.setContent(text);
+				editor?.commands.setContent({
+					type: "doc",
+					content: text.split("\n").map(line => ({ type: "paragraph", content: line ? [{ type: "text", text: line }] : [] })),
+				}, { emitUpdate: true });
 				editor?.commands.focus("end");
 			},
 			appendText: (text: string) => {

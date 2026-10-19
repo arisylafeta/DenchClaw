@@ -7,6 +7,7 @@ import { applyLive, applySnapshot, beginHydration, initialReconcileState, submit
 import { messageText, reduce, type PendingRequest } from './reducer'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
+import type { SlashCompletion } from './slash-commands'
 
 export interface NativePrompt { text: string; images?: { content: string; mimeType: string; fileName?: string }[]; context?: WorkspaceContext; html?: string }
 export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
@@ -26,6 +27,8 @@ export interface NativeHermesChat {
   setModel(model: string, provider?: string, confirm?: boolean): Promise<Record<string, unknown>>
   setReasoning(effort: string): Promise<Record<string, unknown>>
   setFast(enabled: boolean): Promise<Record<string, unknown>>
+  completeSlash(text: string, signal?: AbortSignal): Promise<SlashCompletion>
+  executeSlash(command: string): Promise<Record<string, unknown>>
   send(prompt: NativePrompt): Promise<void>
   interrupt(): Promise<void>
   steer(text: string): Promise<void>
@@ -202,6 +205,26 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   }
   return {
     state, subagents: state.subagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
+    completeSlash: async (text, signal) => {
+      if (!conversationKey || !enabled) { throw new Error('No active gateway conversation') }
+      const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(conversationKey)}/slash-complete`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal,
+      })
+      const result = await response.json()
+      if (!response.ok) { throw new Error(result.error || 'Command completion unavailable') }
+      return result as SlashCompletion
+    },
+    executeSlash: async (command) => {
+      const key = conversationKey
+      const result = await post('slash-execute', { command })
+      if (activeKey.current === key && /^\/(?:compress|compact|undo|retry)(?:\s|$)/i.test(command)) {
+        earlierRows.current = []
+        lastSnapshot.current = null
+        setOlderCursor(null)
+        resync()
+      }
+      return result
+    },
     setModel: async (model, provider, confirm) => {
       const key = conversationKey
       const result = await post('model', { model, provider, confirm })

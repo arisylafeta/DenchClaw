@@ -26,6 +26,7 @@ class FakeSocket implements GatewaySocket {
   steerUnsupported = false;
   configResults: Record<string, unknown>[] = [];
   failConfig = false;
+  slashErrorCode?: number;
   addEventListener(type: string, handler: (event: unknown) => void) { (this.listeners[type] ??= []).push(handler); }
   deferConsumption = false;
   activeRows: { id: string; session_key: string; status: string }[] = [];
@@ -41,6 +42,7 @@ class FakeSocket implements GatewaySocket {
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     if (frame.method === "session.steer" && this.steerUnsupported) { this.receive({ id: frame.id, error: { code: 4010, message: "agent does not support steer" } }); return; }
     if (frame.method === "config.set" && this.failConfig) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
+    if (frame.method === "slash.exec" && this.slashErrorCode) { this.receive({ id: frame.id, error: { code: this.slashErrorCode, message: "slash refused" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
       : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { profile_name: "ari", lazy: false, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
@@ -52,6 +54,7 @@ class FakeSocket implements GatewaySocket {
       : frame.method === "model.options" ? { model: "test", provider: "openai", providers: [{ slug: "openai", name: "OpenAI", models: ["test", "expensive"], capabilities: { test: { fast: false, reasoning: true } } }] }
       : frame.method === "config.get" ? { value: "high", display: "hide" }
       : frame.method === "config.set" ? this.configResults.shift() ?? { key: frame.params?.key, value: frame.params?.value }
+      : frame.method === "command.dispatch" ? { type: "skill", message: frame.params?.arg, display: "Skill loaded" }
       : frame.method === "session.events.since" ? { events: this.replayEvents, latest_seq: 100, epoch: "e" } : {};
     this.receive({ id: frame.id, result });
     if (frame.method === "prompt.submit" && !this.busy && !this.deferConsumption) this.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: this.frames.length, payload: {} } });
@@ -73,6 +76,26 @@ beforeEach(async () => {
 });
 afterEach(() => { manager.shutdown(); vi.useRealTimers(); });
 describe("gateway chat service", () => {
+  it("keeps slash completion read-only and session-scoped, then resumes execution with only the 4018 dispatch fallback", async () => {
+    expect(await service.slashComplete(key, { text: "/exa" })).toEqual({ items: [], replace_from: 1, catalog: {} });
+    expect(socket.frames.filter(frame => ["complete.slash", "commands.catalog"].includes(frame.method ?? "")).map(frame => frame.params)).toEqual([
+      { text: "/exa", profile: "ari" }, { profile: "ari" },
+    ]);
+    expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
+    await expect(service.slashExecute(key, { command: "/usr/local" })).rejects.toThrow("invalid_slash_command");
+    await expect(service.slashComplete(key, { text: `/${"x".repeat(65_536)}` })).rejects.toThrow("invalid_slash_text");
+    socket.slashErrorCode = 4018;
+    const arg = "first line\n  indented second line";
+    expect(await service.slashExecute(key, { command: `/Exa ${arg}` })).toEqual({ type: "skill", message: arg, display: "Skill loaded" });
+    expect(socket.frames.find(frame => frame.method === "slash.exec")?.params).toEqual({ session_id: "runtime-one", profile: "ari", command: `/Exa ${arg}` });
+    expect(socket.frames.find(frame => frame.method === "command.dispatch")?.params).toEqual({ session_id: "runtime-one", profile: "ari", name: "exa", arg });
+    expect(socket.frames.filter(frame => frame.method === "session.resume")).toHaveLength(1);
+    await service.slashComplete(key, { text: "/exa" });
+    expect(socket.frames.filter(frame => frame.method === "complete.slash").at(-1)?.params).toEqual({ text: "/exa", profile: "ari", session_id: "runtime-one" });
+    socket.slashErrorCode = 4010;
+    await expect(service.slashExecute(key, { command: "/exa" })).rejects.toThrow("slash refused");
+    expect(socket.frames.filter(frame => frame.method === "command.dispatch")).toHaveLength(1);
+  });
   it("returns native model inventory and live reasoning from only the conversation runtime", async () => {
     manager.retainSession("ari", "one", "runtime-one");
     manager.retainSession("ari", "two", "runtime-two");
@@ -81,6 +104,7 @@ describe("gateway chat service", () => {
     expect(socket.frames.filter(frame => ["model.options", "config.get"].includes(frame.method ?? "")).map(frame => frame.params)).toEqual([
       { session_id: "runtime-one", profile: "ari" },
       { session_id: "runtime-one", profile: "ari", key: "reasoning" },
+      { session_id: "runtime-one", profile: "ari", key: "fast" },
     ]);
     expect(socket.frames.some(frame => frame.method === "session.resume")).toBe(false);
   });

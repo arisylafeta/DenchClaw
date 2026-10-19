@@ -28,3 +28,11 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 - From 768px through 1023px, content opens full-screen instead of squeezing beside chat. Back to chat, Escape or the content close control returns to chat; the chat header can reopen content.
 - Below 768px, show only one of sidebar, chat or content. Opening sidebar or content replaces the other; closing either returns to chat. Keep content tabs and chat/file deep links independent of pane visibility.
 - Reuse the `useIsMobile` matchMedia hook for both breakpoints. Full-screen pane switches do not animate, use labelled keyboard-focusable buttons, and hide underlying panes from keyboard and assistive technology.
+
+## Native Hermes command composer
+
+- Match the native model picker: borderless `@base-ui/react` popover above the composer, rounded neutral surface, compact system type, muted descriptions and a quiet hover/keyboard selection fill.
+- The composer itself is the slash search field; do not add a second search input. Show Session, Model, Tools, Skills and Plugins sections from Hermes metadata, with collapsible headings and one-line descriptions. Keep skills separate and hide terminal-only commands.
+- Keep focus in the composer while Arrow keys select, Tab completes, Enter runs and Escape dismisses. Argument completions replace only Hermes' indicated suffix.
+- Command output is a dismissible, bounded-height monospace surface above the composer, never a transcript bubble. Clear it on the next send or conversation switch.
+- Fit a 390px viewport without horizontal overflow; preserve visible focus, readable descriptions and approximately 44px command-row targets.

@@ -77,6 +77,17 @@ const reasoningSelectionSchema = z.object({
   effort: z.enum(["none", "false", "disabled", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
 }).strict();
 
+// Match Hermes' slash-token boundary: paths such as /usr/local are not commands.
+// Arguments may span lines; preserve their interior whitespace for skills and prompts.
+const slashText = z.string().max(65_536).refine(value => Buffer.byteLength(value) <= 65_536)
+  .refine(value => !/(?![\t\n\r])\p{Cc}/u.test(value));
+const slashCompletionSchema = z.object({
+  text: slashText.refine(value => /^\/[^\s/]*(?:\s[\s\S]*)?$/u.test(value)),
+}).strict();
+const slashExecutionSchema = z.object({
+  command: slashText.refine(value => /^\/[^\s/]+(?:\s[\s\S]*)?$/u.test(value)),
+}).strict();
+
 export class HermesChatService {
   // session.create mints a runtime before Hermes persists the first user row.
   private readonly newConversations = new Map<string, HermesConversation>();
@@ -303,6 +314,48 @@ export class HermesChatService {
     const model = typeof stored?.session?.model === "string" && stored.session.model ? stored.session.model : options.model;
     const provider = model === options.model ? options.provider : options.providers.find(row => row.models?.includes(model))?.slug ?? options.provider;
     return { ...options, model, provider, reasoning, fast: fast.value === "fast" || fast.value === "ultrafast" };
+  }
+  async slashComplete(key: string, body: unknown) {
+    const parsed = slashCompletionSchema.safeParse(body);
+    if (!parsed.success) { throw new ChatServiceError(400, "invalid_slash_text"); }
+    const identity = authorizeConversation(key);
+    await this.source(key);
+    try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
+    const retained = this.retainedKey(key);
+    // Completion is a read: only use an already retained runtime, never resume an idle chat.
+    const [completion, catalog] = this.manager.session(retained)?.runtimeId
+      ? await Promise.all([
+        this.manager.callSession(retained, "complete.slash", { text: parsed.data.text }),
+        this.manager.callSession(retained, "commands.catalog", {}),
+      ])
+      : await Promise.all([
+        this.manager.call("complete.slash", { text: parsed.data.text, profile: identity.profile }),
+        this.manager.call("commands.catalog", { profile: identity.profile }),
+      ]);
+    return { ...completion, items: completion.items ?? [], replace_from: completion.replace_from ?? 1, catalog };
+  }
+  async slashExecute(key: string, body: unknown) {
+    const parsed = slashExecutionSchema.safeParse(body);
+    if (!parsed.success) { throw new ChatServiceError(400, "invalid_slash_command"); }
+    const identity = authorizeConversation(key);
+    const retained = await this.liveControls(key);
+    const command = parsed.data.command;
+    const parts = /^\/(\S+)([\s\S]*)$/u.exec(command)!;
+    const name = parts[1].toLowerCase();
+    const arg = parts[2].trim();
+    return this.manager.serialize(retained, async () => {
+      await this.writable(key);
+      // These create openable CRM conversations rather than mutating a slash worker's session.
+      if (name === "new") { return { conversation: await this.createGatewayConversation([identity.profile]) }; }
+      if (name === "branch") { return { conversation: await this.branchConversation(key) }; }
+      if (!this.manager.session(retained)?.runtimeId) { await this.manager.resumeSession(retained); }
+      try {
+        return await this.manager.callSession(retained, "slash.exec", { session_id: "", command });
+      } catch (error) {
+        if (!(error instanceof JsonRpcGatewayError) || error.code !== 4018) { throw error; }
+        return this.manager.callSession(retained, "command.dispatch", { name, arg });
+      }
+    });
   }
   async command(key: string, action: string, body: Record<string, unknown>) {
     const retained = await this.liveControls(key);
