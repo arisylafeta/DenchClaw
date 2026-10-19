@@ -74,9 +74,11 @@ describe("native transcript", () => {
   });
 
   it("updates a running tool to done and collapses completed reasoning", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(5000);
     const live = events([["message.start", {}], ["reasoning.delta", { text: "Plan" }]]);
     const cb = callbacks();
     const { container, rerender } = render(<NativeTranscript state={live} callbacks={cb} />);
+    clock.mockRestore();
     expect(container.querySelector('[data-segment="work"]')).toHaveAttribute("open");
     expect(screen.getByText(/^Thinking/)).toHaveTextContent(/^Thinking \d+s$/);
     const running = events([["tool.start", { tool_id: "t", name: "terminal", args: { command: "pwd" } }]], live);
@@ -241,7 +243,7 @@ describe("durable history shape", () => {
     expect(container.querySelectorAll("article")).toHaveLength(2);
     expect(container.querySelectorAll('[data-segment="work"]')).toHaveLength(1);
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
-    expect(screen.getByText("Thought for 1m 30s")).toBeInTheDocument(); // prompt sent at 1000s, answer row at 1090s
+    expect(screen.getByText("Thought for 90s")).toBeInTheDocument(); // prompt sent at 1000s, answer row at 1090s
     expect(screen.getByText("Because of X.")).toBeInTheDocument();
   });
 });

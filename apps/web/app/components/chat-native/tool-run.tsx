@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatElapsedDuration } from "@/lib/elapsed-duration";
 import { Brain, ChevronRight, CircleAlert, type LucideIcon } from "lucide-react";
 import { PixelGrid } from "./thinking";
 import type { ToolSegment } from "@/lib/hermes-chat/reducer";
@@ -18,7 +19,7 @@ export function Elapsed({ startedAt, completedAt, seconds }: ElapsedProps) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [completedAt, seconds]);
-  return <span>{Math.max(0, Math.floor(seconds ?? ((completedAt ?? now) - startedAt) / 1000))}s</span>;
+  return <span>{formatElapsedDuration(seconds ?? ((completedAt ?? now) - startedAt) / 1000)}</span>;
 }
 export type StepState = "running" | "done" | "error";
 export const chipClass = "min-w-0 rounded-md bg-[var(--color-surface-hover)] px-2 py-1 font-mono text-[10px] text-[var(--color-text-muted)]";

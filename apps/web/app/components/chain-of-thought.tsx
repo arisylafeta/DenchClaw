@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatElapsedDuration } from "@/lib/elapsed-duration";
 import { motion, AnimatePresence } from "framer-motion";
 import { DiffCard } from "./diff-viewer";
 
@@ -612,13 +613,6 @@ export function ChainOfThought({ parts, isStreaming }: { parts: ChainPart[]; isS
 		return () => clearInterval(id);
 	}, [isActive]);
 
-	const formatDuration = useCallback((s: number) => {
-		if (s < 60) {return `${s}s`;}
-		const m = Math.floor(s / 60);
-		const rem = s % 60;
-		return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
-	}, []);
-
 	// Collapse only when the parent stream truly ends — not on intermediate
 	// isActive flickers (e.g. gap between reasoning end and tool start).
 	const wasStreamingRef = useRef(false);
@@ -649,10 +643,10 @@ export function ChainOfThought({ parts, isStreaming }: { parts: ChainPart[]; isS
 
 	const headerLabel = isActive
 		? elapsed > 0
-			? `Thinking for ${formatDuration(elapsed)}`
+			? `Thinking for ${formatElapsedDuration(elapsed)}`
 			: "Thinking..."
 		: elapsed > 0
-			? `Thought for ${formatDuration(elapsed)}`
+			? `Thought for ${formatElapsedDuration(elapsed)}`
 			: "Thought";
 
 	return (
