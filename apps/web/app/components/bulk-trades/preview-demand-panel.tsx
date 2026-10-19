@@ -9,7 +9,7 @@ import type { BuyerProfile, BuyerEngagement } from "@/lib/buyer-profile";
 import type { DemandSupply, MarketLead, SupplyUnitView } from "@/lib/demand-supply-types";
 import { buildEntryLink } from "@/lib/workspace-links";
 import { ErrorText, request } from "./trade-ui";
-import { ChatHint, SheetTabs, rowFocus } from "./demand-page";
+import { SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
 import { DemandDialog } from "./demand-editor";
 import { CompanyContext } from "./company-context";
@@ -17,6 +17,7 @@ import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
 import { DemandHeader } from "./demand-header";
 import css from "./demand-panel.module.css";
+import headerCss from "./demand-header.module.css";
 
 type BuyerMail = { id: string; direction: "inbound" | "outbound"; subject: string | null; preview: string | null; from_email: string | null; at: string };
 type BuyerContext = {
@@ -208,20 +209,20 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       onEdit={() => setEditing(true)} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
   );
   return (
-    <div ref={top} role="region" aria-label="Demand detail" className="mx-auto flex w-full max-w-[1100px] flex-col gap-5">
+    <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} mx-auto flex w-full min-w-0 max-w-[640px] flex-col gap-3`}>
       <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
         <button type="button" onClick={onClose} className={`${rowFocus} hover:underline`}>← Trades Preview</button>
       </nav>
       <DemandHeader demand={demand} supply={supply} actions={actions("Overview")} />
       <SheetTabs
         tabs={TABS}
-        labels={{ "Supply matching": supply ? `Supply matching · ${supply.totalGroups}` : "Supply matching" }}
+        labels={{ "Supply matching": supply ? `Matches · ${supply.totalGroups}` : "Matches" }}
         value={tab}
         onChange={setTab}
       />
       <ErrorText error={error} />
       {tab === "Details" && (
-        <div className={css.details}>
+        <div data-preview-details className={css.details}>
           <div className="flex flex-col gap-6">
             <TheAsk demand={demand} supply={supply} />
             <BuyerContext context={demand.context} />
@@ -246,7 +247,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           )}
         </div>
       )}
-      <ChatHint id={demand.id} />
+
       {editing && (
         <DemandDialog demand={demand} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />
       )}

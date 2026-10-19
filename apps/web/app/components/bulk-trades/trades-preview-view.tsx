@@ -109,7 +109,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   }
   if (route.demand) {
     return (
-      <div className="bulk-trades bt-preview h-full overflow-auto px-4 pb-8 pt-5 sm:px-8">
+      <div className="bulk-trades bt-preview h-full overflow-auto px-3 pb-5 pt-3">
         <DemandDetail key={route.demand} id={route.demand} today={today} onClose={closeDetail}
           onOpenTrade={openTrade} onOpenSupply={openSupply} onOpenDemand={openDemand} />
       </div>

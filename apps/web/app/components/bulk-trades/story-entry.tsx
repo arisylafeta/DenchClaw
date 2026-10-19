@@ -39,20 +39,20 @@ export function StoryEntry({ entry, busy, onDelete, onOpenTrade, onOpenSupply }:
   const refId = entry.ref_id;
   const openable = refId && (entry.ref_kind === "lot" || entry.ref_kind === "supply" || /^https?:\/\//i.test(refId));
   return (
-    <li className="group relative flex gap-3 py-3 first:pt-0" style={{ opacity: quiet ? 0.7 : 1 }}>
-      <div className="w-20 shrink-0 pt-0.5 sm:w-24">
+    <li className="group relative flex min-w-0 flex-col gap-1 py-3" style={{ opacity: quiet ? 0.7 : 1 }}>
+      <div className="flex items-center gap-2 pr-9">
         <span className="block text-[12px] font-semibold" style={{ color: "var(--bt-text-2)" }}>{storyLabel(entry)}</span>
         <time className="block text-[12px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
           {shortDate(entry.occurred_at.slice(0, 10))}
         </time>
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-[14px] leading-snug" style={{ fontWeight: quiet ? 400 : 500 }}>
+        <p className="pr-9 text-[13px] leading-snug" style={{ fontWeight: quiet ? 400 : 500 }}>
           {entry.title}
           {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
         </p>
         {body && (
-          <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed" style={{ color: "var(--bt-text-2)" }}>
+          <p className="mt-1 whitespace-pre-wrap text-[13px] leading-snug" style={{ color: "var(--bt-text-2)" }}>
             {long && !expanded ? `${body.slice(0, LONG).trimEnd()}…` : body}
             {long && (
               <button type="button" className="ml-1 underline" onClick={() => setExpanded((value) => !value)}>
@@ -72,7 +72,7 @@ export function StoryEntry({ entry, busy, onDelete, onOpenTrade, onOpenSupply }:
         )}
       </div>
       <button type="button" disabled={busy} aria-label={`Delete ${entry.title}`} onClick={onDelete}
-        className="h-8 w-8 shrink-0 self-start rounded-md opacity-0 hover:bg-[var(--bt-row-hover)] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60"
+        className="absolute right-0 top-2 h-11 w-9 rounded-md opacity-0 hover:bg-[var(--bt-row-hover)] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60"
         style={{ color: "var(--bt-muted)" }}>
         <Trash2 size={13} className="mx-auto" />
       </button>

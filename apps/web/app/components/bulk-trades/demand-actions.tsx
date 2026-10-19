@@ -116,7 +116,7 @@ function StatusMenu({ demand, busy, onConfirm, onNeedsInfo, onAnswered, onAsked,
         {label}
         <ChevronDown size={14} aria-hidden />
       </button>
-      {sub && <span className="mt-1 text-[11px]" style={{ color: "var(--bt-muted)" }}>{sub}</span>}
+      {sub && <span data-status-caption className="mt-1 text-[11px]" style={{ color: "var(--bt-muted)" }}>{sub}</span>}
       {open && (
         <div role="menu" aria-label="Change status" className={styles.menu}>
           {status === "open" && item("Buyer confirmed it today", "Keeps it fresh in the ranking", onConfirm)}
@@ -257,7 +257,7 @@ export function DemandActions({
   return (
     <>
       {(!story || section === "Overview") && <div className={section === "Overview" ? "space-y-3" : "hidden"}>
-        <div className="flex items-start justify-end gap-2">
+        <div data-preview-toolbar={story || undefined} className="flex items-start justify-end gap-2">
           <StatusMenu
             demand={demand}
             busy={busy}
@@ -337,7 +337,7 @@ export function DemandActions({
       </div>}
       <ErrorText error={error} />
       {showsActivity && (<section aria-label={story ? "Story" : "Activity"}>
-        <h3 className="mb-3 text-sm font-semibold">
+        <h3 className={story ? "sr-only" : "mb-3 text-sm font-semibold"}>
           {story ? "Story" : "Activity"}{" "}
           <span
             className="ml-1 font-normal"

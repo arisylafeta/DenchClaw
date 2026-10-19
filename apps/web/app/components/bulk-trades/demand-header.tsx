@@ -25,13 +25,14 @@ export function ScoreRing({ score }: { score: number | null }) {
   );
 }
 
-const agoDays = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+
 
 /** Score, headline, buyer, three facts and a short brief. A fact we don't have says so quietly. */
 export function DemandHeader({ demand, supply, actions }: { demand: Demand; supply: DemandSupply | null; actions: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const description = demandDescription(demand);
-  const long = description.split(/\s+/).length > 55;
+  const words = description.split(/\s+/);
+  const long = words.length > 42;
   const value = demandValue(demand);
   const started = demandStarted(demand);
   const sellers = [...new Set((supply?.shortlisted ?? []).map((unit) => unit.seller).filter(Boolean))] as string[];
@@ -47,7 +48,6 @@ export function DemandHeader({ demand, supply, actions }: { demand: Demand; supp
           {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
         </div>
       </div>
-      <div className={css.actions}>{actions}</div>
       <dl className={css.facts}>
         <div className={css.fact}>
           <dt>Supplier</dt>
@@ -67,11 +67,11 @@ export function DemandHeader({ demand, supply, actions }: { demand: Demand; supp
       </dl>
       {description && (
         <div className={css.brief} data-open={open}>
-          <p>{description}</p>
-          {long && <button type="button" className={css.more} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
+          <p>{long && !open ? `${words.slice(0, 42).join(" ")}…` : description}</p>
+          {long && <button type="button" aria-expanded={open} className={css.more} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
         </div>
       )}
-      {demand.waiting && <p className={css.waiting}>{demand.waiting.who ?? "The buyer"} wrote {agoDays(demand.waiting.since) <= 0 ? "today" : `${agoDays(demand.waiting.since)}d ago`} and is waiting for our reply.</p>}
+      <div className={css.actions}>{actions}</div>
     </header>
   );
 }
