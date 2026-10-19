@@ -410,7 +410,7 @@ function collectCrmObjectNodes(
  * type so a synthetic `{path:"~cron", type:"folder"}` opens as the cron
  * dashboard, not as a directory listing.
  */
-function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
+export function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   if (path === "campaign") {return "campaigns";}
   if (path === "~cron") return "cron-dashboard";
   if (path.startsWith("~cron/")) return "cron-job";
@@ -420,6 +420,7 @@ function nodeToContentTabKind(nodeType: string, path: string): ContentTabKind {
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
+  if (path === TRADES_PREVIEW_PATH) return "trades-preview";
   switch (nodeType) {
     case "object": return "object";
     case "document": return "document";
