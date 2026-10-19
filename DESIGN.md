@@ -40,6 +40,7 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 ## Native Hermes command composer
 
 - Show provider-exposed reasoning as streaming 12px muted plain text in the existing work trace. Preserve line breaks and wrap long tokens without clipping; keep tools distinct. Auto-collapse completed work to its duration summary unless manually toggled, and retain non-empty reasoning after reload regardless of duration. Never substitute status text or fabricate reasoning when none is supplied.
+- Keep public assistant prose fully visible in chronological order when tools continue. Group only contiguous tools and explicit reasoning into work disclosures, never demote an already-visible response to a clipped trace label.
 
 - Limit model-picker choices to Anthropic, OpenAI (including its Codex route) and OpenCode. Keep route identifiers intact and never silently change the active session or configured credentials when filtering choices.
 - Match the native model picker: borderless `@base-ui/react` popover above the composer, rounded neutral surface, compact system type, muted descriptions and a quiet hover/keyboard selection fill.

@@ -7,8 +7,8 @@ import { NativeTranscript, ApprovalCard, ClarifyCard, PromptDock, ReadOnlyNotice
 import type { NativeTranscriptCallbacks } from "./types";
 import { stateFromSnapshot, type GatewayChatSnapshot } from "@/lib/hermes-chat/snapshot";
 
+let id = 0;
 function events(frames: Array<[string, GatewayEvent["payload"], (string | number)?]>, base = initialState("chat")): ChatState {
-  let id = 0;
   return frames.reduce((state, [type, payload, requestId], index) => reduce(state, { type, payload, requestId }, { now: () => 1000 + index * 1000, id: () => `m-${++id}` }), base);
 }
 function callbacks(): NativeTranscriptCallbacks {
@@ -91,7 +91,7 @@ describe("native transcript", () => {
       ["message.interim", { text: "Last narration" }],
     ]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} queuedMessageIds={["user"]} userHtml={() => '<span class="mention" onclick="bad()">CRM</span><script>unsafe()</script>'} />);
-    expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["work", "interim", "reasoning", "interim"]);
+    expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["interim", "work", "reasoning", "interim"]);
     expect(screen.getByText("Read README")).toBeInTheDocument();
     expect(screen.getByText("Ran a quick command")).toBeInTheDocument();
     expect(screen.queryByText(/pwd/)).not.toBeInTheDocument();
@@ -101,7 +101,7 @@ describe("native transcript", () => {
     expect(container.querySelector("script")).toBeNull();
   });
 
-  it("folds a finished turn's reasoning, tool calls and narration into one 'Thought' accordion above the answer", () => {
+  it("keeps finished prose visible between folded chronological tool blocks", () => {
     const state = events([
       ["client.submit", { text: "Why?", id: "u" }],
       ["message.start", {}],
@@ -116,17 +116,19 @@ describe("native transcript", () => {
     ]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
     const work = container.querySelectorAll('[data-segment="work"]');
-    expect(work).toHaveLength(1);
+    expect(work).toHaveLength(2);
     expect(work[0]).not.toHaveAttribute("open");
     expect(within(work[0] as HTMLElement).getByText(/^Thought/)).toBeInTheDocument();
     expect(within(work[0] as HTMLElement).queryByText(/steps?$/)).toBeNull();
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
-    expect(within(work[0] as HTMLElement).getByText("Let me check the schema.")).toBeInTheDocument();
+    expect(screen.getByText("Let me check the schema.")).toBeVisible();
+    expect(screen.getByText("Now the callers.")).toBeVisible();
+    expect(work[0]).not.toContainElement(screen.getByText("Let me check the schema."));
     expect(within(work[0] as HTMLElement).queryByText("Final answer text.")).toBeNull();
     expect(screen.getByText("Final answer text.")).toBeInTheDocument();
     // The answer is rendered after the folded work, with no stray empty blocks between tool calls.
-    const answer = container.querySelector('[data-segment="text"]')!;
-    expect(work[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const answer = screen.getByText("Final answer text.");
+    expect(work[1].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("updates a running tool to done and collapses completed reasoning", () => {
