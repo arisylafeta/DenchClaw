@@ -52,7 +52,11 @@ export function ToolRow({ tool, connectPrevious, connectNext }: ToolRowProps) {
   const seconds = tool.duration_s != null ? tool.duration_s : tool.completedAt !== undefined ? (tool.completedAt - tool.startedAt) / 1000 : 0;
   const detail = state === "error" ? "Failed" : state === "done" && seconds >= 1 ? <Elapsed startedAt={tool.startedAt} completedAt={tool.completedAt} seconds={tool.duration_s} /> : undefined;
   const preview = state === "running" ? null : buildPreview(tool);
-  return <TraceStep data-tool-id={tool.id} state={state} icon={icon} label={label} detail={detail} body={preview ? <ResultPreviewView preview={preview} tool={tool} /> : undefined} connectPrevious={connectPrevious} connectNext={connectNext}>
-    {tool.error && <p role="alert" className="mt-1 text-[11px] text-[var(--color-error)]">{typeof tool.error === "string" ? tool.error : tool.message || "Tool failed"}</p>}
-  </TraceStep>;
+  // Errors are for the agent. The row shows a red failure marker; the text stays folded away.
+  const failure = tool.error ? (typeof tool.error === "string" ? tool.error : tool.message || "Tool failed") : undefined;
+  const body = preview || failure ? <>
+    {preview && <ResultPreviewView preview={preview} tool={tool} />}
+    {failure && <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--color-error)]">{failure.length > 4000 ? `${failure.slice(0, 3999)}…` : failure}</pre>}
+  </> : undefined;
+  return <TraceStep data-tool-id={tool.id} state={state} icon={icon} label={label} detail={detail} body={body} connectPrevious={connectPrevious} connectNext={connectNext} />;
 }

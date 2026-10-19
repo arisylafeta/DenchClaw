@@ -152,11 +152,17 @@ describe("native transcript", () => {
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(1);
   });
 
-  it("shows tool errors inline as a flat trace step", () => {
+  it("keeps tool errors folded away and only marks the step and the header as failed", () => {
     const state = events([["tool.complete", { tool_id: "edit", name: "edit_file", inline_diff: "--- a/file.ts\n+++ b/file.ts\n@@ -1,1 +1,2 @@\n-old\n+new\n+extra", result: { error: "Permission denied" } }]]);
-    render(<NativeTranscript state={state} callbacks={callbacks()} />);
-    expect(screen.getByText("Permission denied", { selector: "p" })).toBeInTheDocument();
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
     expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    const step = container.querySelector("[data-tool-id] details") as HTMLDetailsElement;
+    expect(step.open).toBe(false);
+    expect(step.textContent).toContain("Permission denied");
+    const work = container.querySelector('[data-segment="work"]') as HTMLDetailsElement;
+    expect(work.dataset.failed).toBe("true");
+    expect(work.querySelector("summary")?.className).toContain("text-[var(--color-error)]");
   });
 
   it.each(["Run once", "Allow for session", "Deny"])("submits %s with the wire choice", label => {

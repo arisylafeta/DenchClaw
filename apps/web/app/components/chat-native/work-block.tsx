@@ -63,12 +63,14 @@ export function WorkBlock({ work, live, answerStartedAt }: WorkBlockProps) {
   const started = work[0]?.startedAt ?? 0;
   const ended = Math.max(...work.map(segment => segment.completedAt ?? segment.startedAt), answerStartedAt ?? 0);
   const seconds = (ended - started) / 1000;
-  return <details className="group/work w-full min-w-0" data-segment="work" open={disclosure.open} onToggle={disclosure.onToggle}>
-    <summary className="flex min-h-6 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
+  // A failed tool turns the header red; it never opens the block.
+  const failed = work.some(segment => segment.type === "tool" && (segment.status === "error" || Boolean(segment.error)));
+  return <details className="group/work w-full min-w-0" data-segment="work" data-failed={failed || undefined} open={disclosure.open} onToggle={disclosure.onToggle}>
+    <summary className={`flex min-h-6 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden${failed ? " text-[var(--color-error)]" : ""}`}>
       <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/work:rotate-90" />
       {live
         ? <ThinkingIndicator>Thinking <Elapsed startedAt={started} /></ThinkingIndicator>
-        : <><Brain aria-hidden="true" className="size-3.5 text-[var(--color-text-muted)]" /><span className="font-medium">{seconds >= 1 ? `Thought for ${formatElapsedDuration(seconds)}` : "Thought"}</span></>}
+        : <><Brain aria-hidden="true" className={`size-3.5 ${failed ? "text-[var(--color-error)]" : "text-[var(--color-text-muted)]"}`} /><span className="font-medium">{seconds >= 1 ? `Thought for ${formatElapsedDuration(seconds)}` : "Thought"}</span></>}
     </summary>
     <div className="mt-1 ml-1.5">
       {items.map((segment, index) => {
