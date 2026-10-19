@@ -35,6 +35,8 @@
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
     pointer-events: auto;
+    /* The section the input sits on must be the chat's own background, not whatever is behind the panel. */
+    background: var(--color-main-bg);
   }
   .position[data-hero] > div { padding-inline: 0; }
   .position button[title="Send message"],
