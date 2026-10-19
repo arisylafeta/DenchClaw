@@ -16,13 +16,23 @@ function Harness() {
 let messages: { id: string; role: string; text: string }[];
 let created: HermesConversation;
 let fetchMock: ReturnType<typeof vi.fn>;
+let serverPins: string[];
 let sessions: HermesConversation[];
 beforeEach(() => {
   localStorage.clear();
   sessions = [group, solo];
   messages = [{ id: "first", role: "user", text: "Existing room history" }];
   created = solo;
+  serverPins = [];
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/hermes/pins") {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(init.body as string);
+        serverPins = body.pinned ? [...new Set([...serverPins, body.key])] : serverPins.filter((key) => key !== body.key);
+        return Response.json({ ...body, pins: serverPins });
+      }
+      return Response.json({ pins: serverPins });
+    }
     if (url === "/api/hermes/conversations") {
       if (init?.method === "POST") return Response.json({ conversation: created });
       return Response.json({ backend: "hermes", profiles: ["default", "alpha", "other"], sessions, warnings: [], groupsAvailable: true });
@@ -62,7 +72,7 @@ describe("Hermes unified chat UI", () => {
     const requestCount = fetchMock.mock.calls.length;
     await user.click(pin);
     expect(screen.getByRole("button", { name: "Unpin Alpha solo" })).toHaveAttribute("aria-pressed", "true");
-    expect(fetchMock.mock.calls.length).toBe(requestCount);
+    expect(fetchMock.mock.calls.slice(requestCount).every(([url, init]) => url === "/api/hermes/pins" && init?.method === "PUT")).toBe(true);
     expect(screen.getByRole("button", { name: "Open Alpha solo" })).toHaveAttribute("aria-current", "true");
   });
   it("defaults to all chats, separates presence from working and keeps a selected group routed while the workspace picker filters", async () => {
@@ -141,7 +151,7 @@ describe("Hermes unified chat UI", () => {
     await user.click(screen.getByRole("button", { name: "Automation 1" }));
     expect(screen.getByRole("button", { name: "Open Daily digest" })).toHaveTextContent("read-only");
     await user.click(screen.getByRole("button", { name: "Open Daily digest" }));
-    expect(fetchMock.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+    expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
   it("pins via keyboard and touch without selecting, persists collapse and unpins to source", async () => {
     const user = userEvent.setup(); const first = render(<Harness />);
@@ -157,7 +167,7 @@ describe("Hermes unified chat UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Unpin Alpha solo" }));
     expect(within(screen.getByRole("region", { name: "Chats" })).getByText("Alpha solo")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+    expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
   it("persists project sorting without rerouting and keeps hidden sources in the filter without notice copy", async () => {
     localStorage.setItem("hermes-chats-view", JSON.stringify({ ...DEFAULT_VIEW, hidden: ["webhook", "cron"] }));
@@ -233,7 +243,7 @@ describe("Hermes unified chat UI", () => {
     expect(screen.getByRole("button", { name: "Open Harbour contact" })).toHaveAttribute("aria-current", "true");
     await user.type(screen.getByRole("searchbox"), "harbour"); expect(screen.getByText("Harbour contact")).toBeInTheDocument();
     first.unmount(); render(<Harness />); await screen.findByText("Harbour contact");
-    expect(fetchMock.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+    expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
   it("recovers from initial loading and failure without showing a false empty state", async () => {
     let reject!: (error: Error) => void;
@@ -304,3 +314,30 @@ describe("useHermesConversations loading and deep links", () => {
     expect(result.current.selected?.title).toBe("Older chat");
   });
 });
+
+describe("server-backed pins", () => {
+  it("shows pins stored on the server for this user and writes pin changes through the API", async () => {
+    serverPins = [solo.key];
+    render(<Harness2 />);
+    expect(within(await screen.findByRole("region", { name: "Pinned" })).getByText("Alpha solo")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pin Shared room" }));
+    await waitFor(() => expect(serverPins).toEqual([solo.key, group.key]));
+    fireEvent.click(screen.getByRole("button", { name: "Unpin Alpha solo" }));
+    await waitFor(() => expect(serverPins).toEqual([group.key]));
+  });
+  it("migrates browser-local pins to the server once and clears them locally", async () => {
+    localStorage.setItem("hermes-chats-view", JSON.stringify({ ...DEFAULT_VIEW, pins: [solo.key] }));
+    render(<Harness2 />);
+    await waitFor(() => expect(serverPins).toEqual([solo.key]));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("hermes-chats-view")!).pins).toEqual([]));
+  });
+  it("rolls back and reports a failed pin", async () => {
+    const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url === "/api/hermes/pins" && init?.method === "PUT" ? Response.json({ error: "chat_not_found" }, { status: 404 }) : base(url, init));
+    render(<Harness2 />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pin Alpha solo" }));
+    await screen.findByText("That chat no longer exists").catch(() => undefined);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Pin Alpha solo" })).toBeInTheDocument());
+  });
+});
+function Harness2() { const chats = useHermesConversations(); return <HermesConversationList chats={chats} />; }
