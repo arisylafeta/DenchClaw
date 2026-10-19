@@ -18,6 +18,7 @@
  * SOFTWARE.
  */
 import type { Notice } from './notice'
+import { eventNotice } from './event-notices'
 import { asRecord, stringValue, type ErrorSurface, type EventPayload, type GatewayEvent, type PersistedTurn, type Usage } from './events'
 import { initialSubagents, pruneFinishedSubagents, reduceSubagents, type SubagentState } from './subagents'
 import { applyTodos, expireTodos, initialTodos, isTodoToolName, settleTodos, type TodoState } from './todos'
@@ -35,6 +36,8 @@ export type Segment = TextSegment | ToolSegment
 export interface ChatMessage {
   /** A system event stored as a user row; shown as a notice line, not a bubble. */
   notice?: Notice
+  /** Local transcript event, independent of turn/source ownership. */
+  localNotice?: boolean
   source?: 'durable' | 'live' | 'optimistic' | 'queued'
   /** Work before an accepted mid-turn steer remains patchable, but is no longer live. */
   steerBoundary?: boolean
@@ -46,6 +49,7 @@ export interface ChatMessage {
 }
 export interface PendingRequest { id: string | number; requestId?: string; kind: 'approval' | 'clarify'; payload: EventPayload }
 export interface ChatState {
+  sessionNoticeInfo?: Record<string, unknown>
   sessionId: string | null; storedSessionId: string | null; messages: ChatMessage[]
   model: string | null; provider: string | null; reasoningEffort: string | null; reasoningEffortWire: string | null
   /** Priority service tier (`/fast`) for this session; null until Hermes reports it. */
@@ -171,6 +175,15 @@ function upsertTool(s: ChatState, p: EventPayload, complete: boolean, ctx: Reduc
   if (!owner || message.id === s.streamId) { s.sawAssistantPayload = true; s.awaitingResponse = false; s.status = null }
   if (isTodoToolName(name)) s.todos = applyTodos(s.todos, p, now, true)
 }
+/** Insert or update a local event without claiming the assistant stream or a user boundary. */
+export function withNotice<T extends ChatState>(state: T, notice: Notice, ctx: ReducerContext): T {
+  if (state.messages.some(row => row.notice && row.source === 'durable' &&
+    ((notice.details && normalize(row.notice.details ?? messageText(row)) === normalize(notice.details)) || row.notice.text === notice.text))) return state
+  const old = notice.key ? state.messages.findLast(row => row.localNotice && row.notice?.key === notice.key) : undefined
+  if (!old && state.messages.at(-1)?.notice?.text === notice.text) return state
+  const row: ChatMessage = { id: old?.id ?? ctx.id(), role: 'assistant', segments: [], startedAt: old?.startedAt ?? ctx.now(), pending: false, localNotice: true, notice }
+  return { ...state, messages: old ? state.messages.map(item => item.id === old.id ? row : item) : [...state.messages, row] }
+}
 /** Pure transition. Local actions use the same envelope with type client.submit / client.interrupt / client.tick. */
 export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContext): ChatState {
   const now = ctx.now()
@@ -183,7 +196,12 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
   if (key && state.duplicates[key] !== undefined && now - state.duplicates[key] < 30000) return state
   const duplicates = Object.fromEntries(Object.entries(state.duplicates).filter(([, at]) => now - at < 30000))
   if (key) duplicates[key] = now
-  const s: ChatState = { ...state, generation, watermark: Math.max(watermark, event.seq ?? -1), duplicates, todos: expireTodos(state.todos, now) }
+  let s: ChatState = { ...state, generation, watermark: Math.max(watermark, event.seq ?? -1), duplicates, todos: expireTodos(state.todos, now) }
+  const projected = eventNotice(event, state.sessionNoticeInfo)
+  if (event.type === 'session.info') s.sessionNoticeInfo = { ...state.sessionNoticeInfo, ...asRecord(event.payload) }
+  if (projected && !projected.key && event.seq !== undefined) projected.key = `event:${generation}:${event.seq}`
+  if (projected && (event.type !== 'error' || !state.busy)) s = withNotice(s, projected, ctx)
+  if (event.type === 'error' && !state.busy) return s
   const p = event.payload ?? {}
   const text = stringValue(p.text)
   if (event.type === 'client.error') {
@@ -208,7 +226,7 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
   }
   if (event.type === 'message.complete') {
     let message = s.messages.find(m => m.id === (s.streamId ?? s.heartbeatSettledStreamId))
-    const previous = s.messages.findLast((m, i) => i > lastUser(s) && m.role === 'assistant')
+    const previous = s.messages.findLast((m, i) => i > lastUser(s) && m.role === 'assistant' && !m.notice)
     if (s.interrupted) {
       if (p.status === 'interrupted' && previous && text.startsWith(messageText(previous))) updateMessage(s, replaceResponse(previous, text, ctx, now, true))
       settle(s, now); return s

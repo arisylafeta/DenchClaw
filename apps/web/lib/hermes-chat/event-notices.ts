@@ -12,7 +12,13 @@ const labels: Record<string, string> = {
   'review.summary': 'Review finished',
 }
 /** Pure projection. No raw auth/connection payloads are copied into transcript details. */
-export function eventNotice(event: GatewayEvent): Notice | null {
+export function eventNotice(event: GatewayEvent, previousInfo?: Record<string, unknown>): Notice | null {
+  if (event.type === 'session.info') {
+    if (!previousInfo) return null
+    const p = asRecord(event.payload)
+    const changes = ['model', 'branch', 'cwd'].filter(key => typeof p[key] === 'string' && previousInfo[key] !== undefined && p[key] !== previousInfo[key])
+    return changes.length ? { kind: changes.includes('model') ? 'model' : 'notification', text: clip(changes.map(key => `${key}: ${p[key]}`).join(', ')) } : null
+  }
   const p = asRecord(event.payload)
   const type = event.type
   if (type === 'status.update' || type === 'notice' || type === 'error') {

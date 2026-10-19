@@ -295,6 +295,19 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
     return id && merged.messages.some(message => message.id === id && message.source === 'durable')
       ? { ...item, resolvedMessageId: id } : item
   })
+  // Event-only rows are not replaced by history. Preserve their nearest surviving
+  // predecessor, and yield one-for-one to an equivalent durable system row.
+  const claimedNotices = new Set<string>()
+  for (const [index, row] of state.messages.entries()) {
+    if (!row.localNotice || !row.notice || merged.messages.some(item => item.id === row.id)) continue
+    const equivalent = merged.messages.find(item => item.source === 'durable' && item.notice && !claimedNotices.has(item.id) &&
+      ((row.notice?.details && normalizeMessageText(item.notice.details ?? messageText(item)) === normalizeMessageText(row.notice.details)) ||
+        (item.notice.kind === row.notice?.kind && item.notice.text === row.notice.text)))
+    if (equivalent) { claimedNotices.add(equivalent.id); continue }
+    const preceding = state.messages.slice(0, index).reverse().find(item => merged.messages.some(target => target.id === item.id))
+    const after = preceding ? merged.messages.findIndex(item => item.id === preceding.id) + 1 : merged.messages.findIndex(item => item.startedAt > row.startedAt)
+    merged.messages.splice(after < 0 ? merged.messages.length : after, 0, row)
+  }
   const replayed = applyLive(merged, [
     ...state.overlay.filter(event => event.seq !== undefined && event.seq > base.watermark && (event.generation === undefined || event.generation === snapshot.generation)),
     ...state.buffered.map(event => event.type === 'request.cancel' || event.type === 'approval.request' || event.type === 'clarify.request' ? { ...event, seq: undefined } : event),
