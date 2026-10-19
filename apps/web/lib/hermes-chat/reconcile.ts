@@ -219,9 +219,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   }
   base.usage = state.usage
   base.subagents = state.subagents
-  // Child lists seed a newly mounted view. Merge through the lifecycle reducer:
-  // snapshots must not resurrect retired children or demote completed ones.
-  for (const child of snapshot.subagents ?? []) base.subagents = reduceSubagents(base.subagents, 'subagent.start', child, ctx.now())
+
   base.interrupted = !snapshot.running && state.interrupted
   if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
@@ -231,8 +229,13 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
     return id && merged.messages.some(message => message.id === id && message.source === 'durable')
       ? { ...item, resolvedMessageId: id } : item
   })
-  return applyLive(merged, [
+  const replayed = applyLive(merged, [
     ...state.overlay.filter(event => event.seq !== undefined && event.seq > base.watermark && (event.generation === undefined || event.generation === snapshot.generation)),
     ...state.buffered.map(event => event.type === 'request.cancel' || event.type === 'approval.request' || event.type === 'clarify.request' ? { ...event, seq: undefined } : event),
   ], ctx)
+  // The child list is read after the replay boundary. Apply it last so an
+  // earlier message.start cannot retire a child that finished during the read.
+  // Lifecycle reduction still preserves terminal states and retired IDs.
+  for (const child of snapshot.subagents ?? []) replayed.subagents = reduceSubagents(replayed.subagents, 'subagent.start', child, ctx.now())
+  return replayed
 }

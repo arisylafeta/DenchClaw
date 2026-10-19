@@ -61,6 +61,15 @@ it('orders buffered replay before deciding whether a finished worker is retired'
   expect(screen.getByText('1 subagent finished')).toBeInTheDocument()
 })
 
+it('keeps a completed current-turn worker when the child list races ahead of replay', () => {
+  render(<Dock />)
+  Source.instance.emit('gw', { key, generation: 1, seq: 1, type: 'message.start', payload: {} })
+  start(2)
+  Source.instance.emit('gw', { key, generation: 1, seq: 3, type: 'subagent.complete', payload: { subagent_id: 'child', status: 'completed' } })
+  Source.instance.emit('snapshot', snapshot({ seq: 0, subagents: [{ subagent_id: 'child', goal: 'Research', status: 'completed' }] }))
+  expect(screen.getByText('1 subagent finished')).toBeInTheDocument()
+})
+
 it('keeps completion terminal through replay and stale snapshots, and never resurrects retired workers', () => {
   render(<Dock />)
   start()
