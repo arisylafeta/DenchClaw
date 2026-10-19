@@ -16,6 +16,8 @@ vi.mock("./tiptap/chat-editor", async () => {
 vi.mock("./chat-message", () => ({ ChatMessage: ({ message }: { message: unknown }) => <pre data-testid="rich-message">{JSON.stringify(message)}</pre> }));
 vi.mock("./hero-suggestions", () => ({ HeroSuggestions: () => null }));
 vi.mock("./chat-voice-input-button", () => ({ ChatVoiceInputButton: () => null }));
+// Model options have their own integration suite; these transport fixtures do not serve them.
+vi.mock("./chat-native/model-controls", () => ({ NativeModelControls: () => null }));
 vi.mock("@/lib/chat-image-preparation", () => ({ prepareFilesForChatUpload: async (files: FileList) => ({ files: Array.from(files), errors: [] }) }));
 const key = conversationKey("solo", "native-existing", "alpha");
 const endpoint = `/api/hermes/conversations/${encodeURIComponent(key)}`;
@@ -32,7 +34,7 @@ class FakeEventSource {
   close() { this.readyState = 2; }
   emit(type: string, data: unknown) { act(() => { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) } as MessageEvent); }); }
 }
-const gatewaySnapshot = (overrides: Record<string, unknown> = {}) => ({ key, conversation: { id: "native-existing", profile: "alpha", title: "Native", working: false, source: "crm" }, messages: [{ id: "history", role: "assistant", parts: [{ type: "tool-invocation", toolCallId: "saved", toolName: "terminal", args: { command: "old command" }, result: "saved gateway result" }] }], running: false, generation: 1, seq: 0, pendingRequests: [], ...overrides });
+const gatewaySnapshot = (overrides: Record<string, unknown> = {}) => ({ key, gateway: "connected", conversation: { id: "native-existing", profile: "alpha", title: "Native", working: false, source: "crm" }, messages: [{ id: "history", role: "assistant", parts: [{ type: "tool-invocation", toolCallId: "saved", toolName: "terminal", args: { command: "old command" }, result: "saved gateway result" }] }], running: false, generation: 1, seq: 0, pendingRequests: [], ...overrides });
 function openGateway(overrides: Record<string, unknown> = {}) {
   FakeEventSource.instance.emit("connection", { connectionId: "tab-connection" });
   FakeEventSource.instance.emit("snapshot", gatewaySnapshot(overrides));

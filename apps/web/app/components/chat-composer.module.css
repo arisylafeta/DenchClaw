@@ -1,0 +1,35 @@
+/* Only the phone composer enters flex flow. Desktop retains the floating pill. */
+.position[data-hero] {
+  top: 40px;
+  bottom: auto;
+  min-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.position[data-hero][data-compact] { min-height: 60vh; }
+.position[data-hero] > div { width: 100%; padding-inline: 16px; }
+
+@media (max-width: 767px) {
+  .transcript { padding-bottom: 16px !important; }
+  .position,
+  .position[data-hero],
+  .position[data-hero][data-compact] {
+    position: relative;
+    inset: auto;
+    flex: 0 0 auto;
+    min-height: 0;
+    max-height: min(65%, calc(var(--chat-visible-height, 100dvh) - 100px));
+    overflow-y: auto;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    pointer-events: auto;
+  }
+  .position[data-hero] > div { padding-inline: 0; }
+  .position button[title="Send message"],
+  .position button[title="Stop generating"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

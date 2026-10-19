@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
+// Keep PNG tests scoped to attachment ingestion, not model-options network fixtures.
+vi.mock("./chat-native/model-controls", () => ({ NativeModelControls: () => null }));
 const transport = vi.hoisted(() => ({ error: null as Error | null }));
 vi.mock("@ai-sdk/react", async importOriginal => {
   const actual = await importOriginal<typeof import("@ai-sdk/react")>();
@@ -24,7 +26,7 @@ function pick(container: HTMLElement) {
 }
 function snapshot(k = key) {
   FakeEventSource.instance.emit("connection", { connectionId: "fixture" });
-  FakeEventSource.instance.emit("snapshot", { key: k, conversation: { id: "png-fixture", profile: k === key ? "alpha" : "beta", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
+  FakeEventSource.instance.emit("snapshot", { key: k, gateway: "connected", conversation: { id: "png-fixture", profile: k === key ? "alpha" : "beta", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -180,7 +182,7 @@ describe("PNG file-picker ingestion", () => {
     const ref = React.createRef<ChatPanelHandle>();
     const { container } = render(<ChatPanel ref={ref} nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
     FakeEventSource.instance.emit("connection", { connectionId: "fixture" });
-    FakeEventSource.instance.emit("snapshot", { key, conversation: { id: "png-fixture", profile: "alpha", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
+    FakeEventSource.instance.emit("snapshot", { key, gateway: "connected", conversation: { id: "png-fixture", profile: "alpha", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
     fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File([png], "synthetic.png", { type: "image/png" })] } });
     await waitFor(() => expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" }));
     await act(() => ref.current!.sendNewMessage("Inspect this"));
@@ -205,7 +207,7 @@ describe("PNG file-picker ingestion", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { container } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
     FakeEventSource.instance.emit("connection", { connectionId: "fixture" });
-    FakeEventSource.instance.emit("snapshot", { key, conversation: { id: "png-fixture", profile: "alpha", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
+    FakeEventSource.instance.emit("snapshot", { key, gateway: "connected", conversation: { id: "png-fixture", profile: "alpha", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
     const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="), c => c.charCodeAt(0));
     fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File([png], "synthetic.png", { type: "image/png" })] } });
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(`synthetic.png: ${detail}`));

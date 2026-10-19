@@ -39,6 +39,7 @@ import type {
 import { ChatTranscriptSkeleton } from "./chat-loading-skeleton";
 import { ProfileAvatar } from "./workspace/profile-avatar";
 import { UnicodeSpinner } from "./unicode-spinner";
+import composerStyles from "./chat-composer.module.css";
 import { Dialog, DialogContent } from "./ui/dialog";
 import type { ChatPanelRuntimeState } from "@/lib/chat-session-registry";
 import {
@@ -854,6 +855,8 @@ export function ChatPanelTerminalButton({
 }
 
 type ChatPanelProps = {
+  /** Backend discovery is pending. Keep the draft editable, but never submit. */
+  initializing?: boolean;
   /** Immutable native Hermes identity; never resolved through the workspace filter. */
   nativeConversationKey?: string;
   nativeTransport?: "gateway" | "sse";
@@ -956,6 +959,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 	function ChatPanelInner(
 		{
 			fileContext,
+			initializing = false,
 			compact,
 			sessionTitle,
 			initialSessionId,
@@ -1202,6 +1206,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const [composerText, setComposerText] = useState("");
 		const [slashOutput, setSlashOutput] = useState<string | null>(null);
 		const [slashBusy, setSlashBusy] = useState(false);
+		// Cover the render before identity/hydration effects and all imperative callers.
+		const submissionUnavailable = initializing || loadingSession || slashBusy || pendingNativeRequest ||
+			attachedFiles.some(file => file.uploading) ||
+			(nativeGateway && (nativeChat.state.hydrating || nativeChat.state.key !== nativeConversationKey ||
+				nativeChat.connection !== "connected" || !!nativeChat.readOnly)) ||
+			(!!initialSessionId && !nativeGateway && currentSessionId !== initialSessionId);
+		const submissionUnavailableRef = useRef(submissionUnavailable);
+		submissionUnavailableRef.current = submissionUnavailable;
+		const panelRef = useRef<HTMLDivElement>(null);
+		useEffect(() => {
+			const viewport = window.visualViewport;
+			if (!viewport) return;
+			const resize = () => {
+				// Do not treat pinch zoom as keyboard resizing.
+				if (viewport.scale === 1) panelRef.current?.style.setProperty("--chat-visible-height", `${viewport.height}px`);
+			};
+			resize();
+			viewport.addEventListener("resize", resize);
+			return () => viewport.removeEventListener("resize", resize);
+		}, []);
 		const latestNativeSubmission = nativeChat.state.optimistic.at(-1)?.clientId;
 		useEffect(() => { if (latestNativeSubmission) { setSlashOutput(null); } }, [latestNativeSubmission]);
 		const slashKey = useRef(nativeConversationKey);
@@ -1209,10 +1233,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		useEffect(() => {
 			setSlashOutput(null);
 			setSlashBusy(false);
-			setComposerText("");
 		}, [nativeConversationKey]);
 		const runSlash = useCallback(async (command: string) => {
-			if (!nativeGateway || slashBusy || pendingNativeRequest || nativeChat.readOnly || nativeChat.connection === "lost") { return; }
+			if (submissionUnavailableRef.current || !nativeGateway) { return; }
 			const key = nativeConversationKey;
 			setSlashBusy(true);
 			setSlashOutput(null);
@@ -1680,7 +1703,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const initialSessionHandled = useRef(false);
 		const lastInitialSessionRef = useRef<string | null>(null);
 		useEffect(() => {
-			if (isSubagentMode || isGatewayMode || !initialSessionId) {
+			if (initializing || isSubagentMode || isGatewayMode || !initialSessionId) {
 				return;
 			}
 			if (initialSessionHandled.current && initialSessionId === lastInitialSessionRef.current) {
@@ -1690,7 +1713,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			lastInitialSessionRef.current = initialSessionId;
 			void handleSessionSelect(initialSessionId);
 			// eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-run when initialSessionId changes
-		}, [initialSessionId]);
+		}, [initialSessionId, initializing]);
 
 		// ── Subagent mode: load persisted messages + reconnect to active stream ──
 		useEffect(() => {
@@ -1980,7 +2003,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				html: string,
 				overrideAttachments?: AttachedFile[],
 			) => {
-				if (nativeGateway && (pendingRequestRef.current || nativeChat.readOnly || nativeChat.connection === "lost")) return;
+				if (submissionUnavailableRef.current || (nativeGateway && pendingRequestRef.current)) return;
 				if (nativeGateway && text.startsWith("/") && !mentionedFiles.length) { await runSlash(text); return; }
 				setSlashOutput(null);
 				const hasText = text.trim().length > 0;
@@ -2064,7 +2087,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				}
 
 				let sessionId = currentSessionId;
-				if (!sessionId && !isSubagentMode && !isGatewayMode) {
+				if (!sessionId && !nativeConversationKey && !isSubagentMode && !isGatewayMode) {
 					const titleSource =
 						userText || "File attachment";
 					const title =
@@ -2158,7 +2181,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							const extension = `.${file.name.split(".").pop()?.toLowerCase()}` as keyof typeof CHAT_IMAGE_EXTENSION_TO_MIME;
 							return { content, mimeType: CHAT_IMAGE_EXTENSION_TO_MIME[extension] ?? blob.type, fileName: file.name };
 						}));
-						if (scope !== attachmentScopeRef.current) return;
+						if (scope !== attachmentScopeRef.current || submissionUnavailableRef.current) return;
 						await nativeChat.send({ text: messageText, images: images.length ? images : undefined, context: workspaceContext, html });
 					} catch (cause) {
 						if (scope === attachmentScopeRef.current && attempt === attachmentAttemptRef.current) {
@@ -2262,6 +2285,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				onConversationActivity,
 				isSubagentMode,
 				setMessages,
+				nativeConversationKey,
 				groupKey,
 				applyGroupDetail,
 				nativeGateway,
@@ -2450,6 +2474,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			loadSession: handleSessionSelect,
 			newSession: async () => { handleNewSession(); },
 				sendNewMessage: async (text: string) => {
+					if (submissionUnavailableRef.current) return;
 					onConversationActivity?.();
 					if (nativeGateway) { await handleEditorSubmitRef.current?.(text, [], `<p>${text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!)}</p>`); return; }
           if (groupKey) { await handleEditorSubmitRef.current?.(text, [], `<p>${text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!)}</p>`); return; }
@@ -2469,7 +2494,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					editorRef.current?.insertFileMention(name, path);
 				},
 			}),
-			[handleSessionSelect, handleNewSession, createSession, onActiveSessionChange, onSessionsChange, onConversationActivity, sendMessage, groupKey, nativeGateway],
+			[handleSessionSelect, handleNewSession, createSession, onActiveSessionChange, onSessionsChange, onConversationActivity, sendMessage, groupKey, nativeGateway, nativeConversationKey],
 		);
 
 		// ── Stop handler (aborts server-side run + client-side stream) ──
@@ -2656,7 +2681,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			nativeChat.state.messages.length === 0 &&
 			!nativeChat.state.busy &&
 			nativeChat.connection !== "lost";
-		const transcriptLoading = loadingSession || nativeHydrating;
+		const transcriptLoading = initializing || loadingSession || nativeHydrating;
 
 		const showHeroState =
 			(nativeGateway ? nativeChat.state.messages.length === 0 && !nativeChat.state.busy && nativeChat.state.pendingRequests.length === 0 : messages.length === 0) &&
@@ -2729,7 +2754,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">{slashOutput}</pre>
 				</div>}
 				{nativeGateway && slashBusy && <p role="status" className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">Running command…</p>}
-				<NativeSlashComposer key={nativeConversationKey ?? "legacy"} chat={nativeChat} text={composerText} enabled={nativeGateway && !pendingNativeRequest && !transcriptLoading && nativeChat.connection !== "lost"} busy={slashBusy} setText={text => editorRef.current?.setText(text)} run={command => { void runSlash(command); }}>
+				<NativeSlashComposer chat={nativeChat} text={composerText} enabled={nativeGateway && !submissionUnavailable} busy={slashBusy} setText={text => editorRef.current?.setText(text)} run={command => { void runSlash(command); }}>
 				<ChatEditor
 					ref={editorRef}
 					onSubmit={handleEditorSubmit}
@@ -2749,7 +2774,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											? "Add a message or send files..."
 											: "Type @ to mention files..."
 					}
-					disabled={slashBusy || pendingNativeRequest || transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))}
+					submitDisabled={submissionUnavailable}
 					compact={compact}
 					searchFn={searchFn}
 				/>
@@ -2775,7 +2800,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									type="button"
 									disabled={pendingNativeRequest}
 									onClick={() => fileInputRef.current?.click()}
-									className="p-1.5 rounded-lg hover:opacity-80 transition-opacity"
+									className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 p-1.5 rounded-lg hover:opacity-80 transition-opacity"
 									style={{
 										color: attachedFiles.length > 0 ? "var(--color-accent)" : "var(--color-text-muted)",
 									}}
@@ -2787,7 +2812,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								</button>
 							</>
 						)}
-						{nativeGateway && nativeConversationKey && <NativeModelControls key={nativeConversationKey} conversationKey={nativeConversationKey} chat={nativeChat} disabled={transcriptLoading || nativeChat.state.hydrating} />}
+						{nativeGateway && nativeConversationKey && <NativeModelControls key={nativeConversationKey} conversationKey={nativeConversationKey} chat={nativeChat} disabled={submissionUnavailable} />}
 					</div>
 					<div className="flex items-center gap-1.5">
 						<ChatVoiceInputButton
@@ -2812,10 +2837,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							<button
 								type="button"
 								onClick={() => editorRef.current?.submit()}
-								disabled={
-									slashBusy || pendingNativeRequest || (editorEmpty && attachedFiles.length === 0) ||
-									transcriptLoading || (nativeGateway && (!!nativeChat.readOnly || nativeChat.connection === "lost"))
-								}
+								disabled={submissionUnavailable || (editorEmpty && attachedFiles.length === 0)}
 								className={`${compact ? "w-6 h-6" : "w-7 h-7"} rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}
 								style={{
 									background: !editorEmpty || attachedFiles.length > 0 ? "var(--color-accent-fill)" : "var(--color-text-muted)",
@@ -2898,6 +2920,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		return (
 			<div
+				ref={panelRef}
 				className="@container relative h-full min-h-0 flex flex-col overflow-hidden"
 				style={{ background: "var(--color-main-bg)" }}
 			>
@@ -3019,7 +3042,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 				<div
 					ref={scrollContainerRef}
-					className="min-h-0 min-w-0 flex-1 overflow-y-auto"
+					className={`${composerStyles.transcript} min-h-0 min-w-0 flex-1 overflow-y-auto`}
 					style={{
 						scrollbarGutter: "stable",
 						// Reserve space at the bottom so the last message can scroll
@@ -3037,31 +3060,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					) : (showHeroState && !mounted) ? (
 						<div className={`flex items-center justify-center h-full ${compact ? "min-h-[40vh]" : "min-h-[60vh]"}`} />
 					) : showHeroState ? (
-						<div className={`relative flex flex-col items-center justify-center py-8 md:py-12 ${compact ? "min-h-[60vh]" : "min-h-[75vh]"}`}>
-							{/* Hero greeting */}
-							{greeting && (
-								<h1
-									className="font-bookerly font-medium mb-2 md:mb-3 text-center px-4"
-									style={{
-										color: "var(--color-text)",
-										fontSize: "clamp(1.5rem, 3.5cqw + 0.85rem, 3rem)",
-										letterSpacing: "-0.03em",
-									}}
-								>
-									{greeting}
-								</h1>
-							)}
-
-							{/* Centered input bar */}
-							<div className="w-full max-w-[720px] mx-auto px-3 md:px-4">
-								{inputBarContainer(handleInputDragOver, handleInputDragLeave, handleInputDrop)}
-							</div>
-
-							{/* Prompt suggestion pills */}
-							<HeroSuggestions
-								compact={!!compact}
-								onPromptClick={handlePromptClick}
-							/>						</div>
+						<div aria-hidden="true" />
 					) : nativeGateway ? (
 						<div className={`${compact ? "" : "max-w-2xl mx-auto"} py-3`}>
 							{nativeChat.connection !== "connected" && <p role="status">{nativeChat.connection === "lost" ? "Gateway connection lost" : "Reconnecting to gateway…"}</p>}
@@ -3247,14 +3246,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					/>
 				)}
 
-				{/* Input bar — floats over the scroll area so messages can scroll
-				    underneath. The blur lives on the input pill itself, not on
-				    this wrapper, so the chat background shows through cleanly. */}
-				{!showHeroState && (
+				{/* One stable composer: floating on desktop, in flex flow above the phone safe area. */}
+				{(
 					<div
-						className={`${compact ? "px-3 py-2" : "px-3 pb-3 pt-3 @md:px-6 @md:pb-5"} absolute inset-x-0 bottom-0 z-20 pointer-events-none`}
+						data-chat-composer-position=""
+						data-hero={showHeroState || undefined}
+						data-compact={compact || undefined}
+						className={`${composerStyles.position} ${compact ? "px-3 py-2" : "px-3 pb-3 pt-3 @md:px-6 @md:pb-5"} absolute inset-x-0 bottom-0 z-20 pointer-events-none`}
 					>
 						<div className={`${compact ? "" : "max-w-[720px] mx-auto"} pointer-events-auto relative`}>
+							{showHeroState && mounted && <h1 className="font-bookerly font-medium mb-2 md:mb-3 text-center px-4" style={{ color: "var(--color-text)", fontSize: "clamp(1.5rem, 3.5cqw + 0.85rem, 3rem)", letterSpacing: "-0.03em" }}>{greeting}</h1>}
 							{/* Scroll to bottom button — anchored above this pill so it
 							    moves up with the queue when the pill grows. */}
 							{showScrollButton && (
@@ -3277,7 +3278,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									</button>
 								</div>
 							)}
-							{inputBarContainer(handleInputDragOver, handleInputDragLeave, handleInputDrop)}
+							<div key="ordinary-composer">{inputBarContainer(handleInputDragOver, handleInputDragLeave, handleInputDrop)}</div>
+							{showHeroState && mounted && <HeroSuggestions compact={!!compact} onPromptClick={handlePromptClick} />}
 						</div>
 					</div>
 				)}

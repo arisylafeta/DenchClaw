@@ -47,6 +47,8 @@ type ChatEditorProps = {
 	onNativeFileDrop?: (files: FileList) => void;
 	placeholder?: string;
 	disabled?: boolean;
+	/** Block submission without making the draft read-only or clearing it. */
+	submitDisabled?: boolean;
 	compact?: boolean;
 	/** Client-side search function for instant @ mention results. */
 	searchFn?: (query: string, limit?: number) => import("@/lib/search-index").SearchIndexItem[];
@@ -166,7 +168,9 @@ function createChatFileMentionSuggestion(searchFnRef?: React.RefObject<((query: 
 // ── Main component ──
 
 export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
-	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, compact, searchFn }, ref) {
+	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, submitDisabled, compact, searchFn }, ref) {
+		const submitDisabledRef = useRef(false);
+		submitDisabledRef.current = !!disabled || !!submitDisabled;
 		const submitRef = useRef(onSubmit);
 		submitRef.current = onSubmit;
 		const textChangeRef = useRef(onTextChange);
@@ -201,6 +205,9 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 			],
 			editorProps: {
 				attributes: {
+					role: "textbox",
+					"aria-label": "Message",
+					"aria-multiline": "true",
 					class: `chat-editor-content ${compact ? "chat-editor-compact" : ""}`,
 					style: `color: var(--color-text);`,
 				},
@@ -338,6 +345,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 					if (suggestState?.active) {return;}
 
 					event.preventDefault();
+					if (submitDisabledRef.current) { return; }
 					const { text, mentionedFiles } = serializeContent(editor);
 					// Always forward Enter to the submit handler — even when the
 					// input is blank — so the panel can react (e.g. release the
@@ -387,7 +395,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 				return editor?.isEmpty ?? true;
 			},
 			submit: () => {
-				if (!editor) {return;}
+				if (!editor || submitDisabledRef.current) {return;}
 				const { text, mentionedFiles } = serializeContent(editor);
 				if (text.trim() || mentionedFiles.length > 0) {
 					const html = editor.getHTML();
@@ -469,6 +477,19 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 					}
 					.chat-editor-content.chat-editor-compact {
 						min-height: 16px;
+					}
+					@media (max-width: 767px) {
+						.chat-editor-content,
+						.chat-editor-content.chat-editor-compact {
+							box-sizing: border-box;
+							min-height: 96px;
+							max-height: min(200px, max(96px, calc(var(--chat-visible-height, 100dvh) * 0.3)));
+							padding: 12px 16px;
+							font-size: 16px;
+							line-height: 24px;
+							overflow-wrap: anywhere;
+							overscroll-behavior-y: contain;
+						}
 					}
 				`}</style>
 			</>
