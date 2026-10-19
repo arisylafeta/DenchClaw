@@ -212,17 +212,21 @@ function kwhCount(demand: Demand): number | null {
   return unit === "kwh" ? demand.volume : unit === "mwh" ? demand.volume * 1000 : null;
 }
 
-const COUNTRY_WORDS: [RegExp, string][] = [
-  [/\b(uk|united kingdom|england|scotland|wales|gb)\b/i, "GB"], [/\b(germany|deutschland|de)\b/i, "DE"],
-  [/\b(france|fr)\b/i, "FR"], [/\b(italy|italia|it)\b/i, "IT"], [/\b(poland|polska|pl)\b/i, "PL"],
-  [/\b(netherlands|holland|nl)\b/i, "NL"], [/\b(belgium|be)\b/i, "BE"], [/\b(spain|es)\b/i, "ES"],
-  [/\b(norway|no)\b/i, "NO"], [/\b(sweden|se)\b/i, "SE"], [/\b(greece|gr)\b/i, "GR"], [/\b(ukraine|ua)\b/i, "UA"],
-  [/\b(lithuania|lt)\b/i, "LT"], [/\b(india|in)\b/i, "IN"], [/\b(uganda)\b/i, "UG"], [/\b(usa|united states|us)\b/i, "US"],
-  [/\b(finland|fi)\b/i, "FI"], [/\b(slovenia|si)\b/i, "SI"], [/\b(macedonia)\b/i, "MK"], [/\b(china)\b/i, "CN"],
+// Country names match anywhere, case-insensitively; two-letter codes only as standalone capitals, so "Grålum",
+// "Jochem de Wildstraat" and "stores also in Vilnius" are not Greece, Germany and India.
+const COUNTRY_NAMES: [string, string][] = [
+  ["united kingdom|england|scotland|wales", "GB"], ["germany|deutschland", "DE"], ["france|occitanie|bretagne|normandie", "FR"], ["italy|italia", "IT"],
+  ["poland|polska", "PL"], ["netherlands|holland|noord-brabant|gelderland|overijssel|drenthe|groningen|limburg|zuid-holland|noord-holland|rotterdam|amsterdam", "NL"],
+  ["belgium|belgie|belgië", "BE"], ["spain|españa", "ES"], ["norway|norge|østfold|trøndelag|innlandet|romsdal|viken", "NO"],
+  ["sweden|sverige", "SE"], ["greece", "GR"], ["ukraine", "UA"], ["lithuania|vilnius|kaunas", "LT"], ["india", "IN"],
+  ["uganda", "UG"], ["united states|usa", "US"], ["finland", "FI"], ["slovenia", "SI"], ["macedonia", "MK"], ["china|shenzhen", "CN"],
+  ["denmark|danmark", "DK"], ["austria|österreich", "AT"], ["czech", "CZ"], ["portugal", "PT"], ["ireland", "IE"],
 ];
+const COUNTRY_CODES = ["GB", "UK", "DE", "FR", "IT", "PL", "NL", "BE", "ES", "NO", "SE", "GR", "UA", "LT", "IN", "UG", "US", "FI", "SI", "MK", "CN", "DK", "AT", "CZ", "PT", "IE"];
 export function countryFromText(text: string | null | undefined): string | null {
   if (!text) return null;
-  for (const [re, code] of COUNTRY_WORDS) if (re.test(text)) return code;
+  for (const [names, code] of COUNTRY_NAMES) if (new RegExp(`(?<!\\p{L})(${names})(?!\\p{L})`, "iu").test(text)) return code;
+  for (const code of COUNTRY_CODES) if (new RegExp(`(?<![\\p{L}\\p{N}])${code}(?![\\p{L}\\p{N}])`, "u").test(text)) return code === "UK" ? "GB" : code;
   return null;
 }
 

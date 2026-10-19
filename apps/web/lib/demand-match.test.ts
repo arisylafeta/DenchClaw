@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, fewestSellers, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
+import { bestLine, bySeller, countryFromText, fewestSellers, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -38,6 +38,18 @@ describe("kwhFromText", () => {
     expect(kwhFromText("MEB packs, 55, 62 and 82 kWh")).toEqual({ options: [55, 62, 82] });
     expect(kwhFromText("Reusable EV packs 50kWh+ usable")).toEqual({ min: 50, max: 10_000 });
     expect(kwhFromText("no capacity here")).toBeNull();
+  });
+});
+
+describe("countryFromText", () => {
+  it("reads country names and standalone codes, not letters inside words", () => {
+    expect(countryFromText("Grålum (Sarpsborg), Østfold")).toBe("NO");
+    expect(countryFromText("Volkel (Jochem de Wildstraat 7) and Uden (Kruisweg 1), Noord-Brabant")).toBe("NL");
+    expect(countryFromText("Kaunas district (Narėpai); stores also in Vilnius")).toBe("LT");
+    expect(countryFromText("PL")).toBe("PL");
+    expect(countryFromText("Kampala, Uganda (via Mombasa port)")).toBe("UG");
+    expect(countryFromText("Region, United Kingdom")).toBe("GB");
+    expect(countryFromText("ASM Auto Recycling Ltd")).toBeNull();
   });
 });
 

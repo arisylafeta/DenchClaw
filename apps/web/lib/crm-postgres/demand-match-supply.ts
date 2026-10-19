@@ -153,7 +153,9 @@ export async function stockCandidates(): Promise<Candidate[]> {
     return {
       key: `stock:${row.id}`,
       source: (web ? "web" : "stock") as SourceKind,
-      title: [row.make, row.model, row.model_detail].filter(Boolean).join(" ") || row.description || row.part_number || "Stock row",
+      // Stock lists often repeat the make in the model ("Citroen" + "Citroen Berlingo").
+      title: [row.make, row.make && row.model?.toLowerCase().startsWith(row.make.toLowerCase()) ? row.model.slice(row.make.length).trim() : row.model,
+        row.model_detail].filter(Boolean).join(" ") || row.description || row.part_number || "Stock row",
       seller: row.supplier,
       make: row.make,
       model: row.model,
