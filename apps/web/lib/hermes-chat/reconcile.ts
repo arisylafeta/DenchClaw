@@ -93,15 +93,16 @@ export function submitOptimistic(state: ReconcileState, submission: OptimisticSu
  */
 export function placeSteer(state: ReconcileState, clientId: string): ReconcileState {
   const index = state.messages.findIndex(message => message.id === clientId)
+  const user = state.messages.findLastIndex((message, i) => i < index && message.role === 'user' && message.source !== 'queued')
   const stream = state.streamId ? state.messages.findIndex(message => message.id === state.streamId)
-    : state.messages.findLastIndex((message, i) => i < index && message.role === 'assistant')
+    : state.messages.findLastIndex((message, i) => i > user && i < index && message.role === 'assistant')
   if (index < 0 || !state.busy || !state.messages[index].pending) return state
   const steer = { ...state.messages[index], source: 'optimistic' as const, pending: false }
   const live = state.messages.filter((_, i) => i !== index).map(message =>
     message.id === state.messages[stream]?.id ? { ...message, steerBoundary: true } : message)
   // There may be no stream between model calls, or after another accepted steer.
   // Do not put the next steer before an already accepted instruction.
-  const boundary = Math.max(live.findIndex(message => message.id === state.messages[stream]?.id),
+  const boundary = Math.max(user, live.findIndex(message => message.id === state.messages[stream]?.id),
     live.findLastIndex(message => message.role === 'user' && message.source === 'optimistic' && !message.pending))
   const waiting = live.findIndex(message => message.source === 'queued')
   live.splice(boundary < 0 ? (waiting < 0 ? live.length : waiting) : boundary + 1, 0, steer)
@@ -252,23 +253,40 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
     hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion }
-  // Inflight snapshots contain only one aggregate assistant string, not the
-  // injection boundaries. Keep the event timeline until history contains the
-  // accepted instructions. Otherwise a resync hoists them below ongoing work.
-  const boundaryIndex = state.messages.findIndex(message => message.steerBoundary)
-  const unresolvedSteer = state.messages.some(message => message.source === 'optimistic' && !message.pending
-    && !merged.clientToMessage[message.id])
-  if (snapshot.running && snapshot.generation === state.generation && boundaryIndex >= 0 && unresolvedSteer) {
+  // User history alone does not resolve assistant prose ownership. Preserve the
+  // split timeline until assistant rows own its boundaries, including prose-only
+  // blocks. The snapshot aggregate can also be newer than the local continuation.
+  const boundaryIndex = state.messages.findIndex(message => message.steerBoundary &&
+    !base.messages.some(item => item.source === 'durable' && item.role === 'assistant' &&
+      (item.id === message.id || (messageText(message) !== '' && messageText(item) === messageText(message)))))
+  if (snapshot.running && snapshot.generation === state.generation && boundaryIndex >= 0) {
     const tail = state.messages.slice(boundaryIndex).filter(message => message.source !== 'queued').map(message => {
       const durableId = merged.clientToMessage[message.id]
-      return durableId ? merged.messages.find(item => item.id === durableId) ?? message : message
+      return durableId ? merged.messages.find(item => item.id === durableId) ?? message : { ...message, segments: [...message.segments] }
     })
+    const aggregate = base.messages.find(message => message.id === base.streamId)
+    if (aggregate) {
+      let remainder = messageText(aggregate)
+      // Remove prose already represented by closed blocks in timeline order.
+      for (const message of tail) {
+        if (message.role !== 'assistant' || message.id === state.streamId) continue
+        const text = messageText(message)
+        if (text && remainder.startsWith(text)) remainder = remainder.slice(text.length)
+      }
+      const continuation = tail.find(message => message.id === state.streamId)
+      if (continuation && remainder.startsWith(messageText(continuation))) {
+        const extra = remainder.slice(messageText(continuation).length)
+        if (extra) continuation.segments = [...continuation.segments, { id: ctx.id(), type: 'text', text: extra, startedAt: ctx.now() }]
+      } else if (!continuation && remainder) {
+        tail.push({ ...aggregate, segments: aggregate.segments.map(segment => segment.type === 'text' ? { ...segment, text: remainder } : segment) })
+      }
+    }
     const tailIds = new Set(tail.map(message => message.id))
     const first = merged.messages.findIndex(message => tailIds.has(message.id) || message.id === base.streamId)
     if (first >= 0) {
       const waiting = merged.messages.filter(message => message.source === 'queued')
       merged.messages = [...merged.messages.slice(0, first), ...tail, ...waiting]
-      merged.streamId = state.streamId
+      merged.streamId = state.streamId ?? (aggregate && tail.some(message => message.id === aggregate.id) ? aggregate.id : null)
       merged.watermark = Math.max(merged.watermark, state.watermark)
     }
   }
