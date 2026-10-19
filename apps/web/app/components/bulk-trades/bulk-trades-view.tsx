@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
@@ -50,7 +50,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const loadInbox = useCallback(async () => {
     try {
       const [data, inbox] = await Promise.all([
-        sharedGet<{ owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades"),
+        sharedGet<{ owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades?inbox=1"),
         sharedGet<{ possible?: Proposal[]; accepted?: Proposal[] }>("/api/bulk-trades/demand"),
       ]);
       setOwners(data.owners);
@@ -64,14 +64,23 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const load = useCallback(() => { void loadSheet(); void loadInbox(); }, [loadSheet, loadInbox]);
   useEffect(() => { load(); }, [load]);
 
+  // Coming back to the list, by Back or by the breadcrumb, shows what was just saved.
+  const detailOpen = !!(route.trade || route.demand || route.supply);
+  const wasDetailOpen = useRef(false);
+  useEffect(() => {
+    if (wasDetailOpen.current && !detailOpen) load();
+    wasDetailOpen.current = detailOpen;
+  }, [detailOpen, load]);
+
   const filters = useMemo(() => filtersFromRoute(route), [route]);
   const shown = useMemo(() => filterSheet(rows, filters), [rows, filters]);
-  const filterFields = { query: route.query, side: route.side, progress: route.progress, company: route.company, category: route.category };
+  // Normalised from what the sheet shows, so an older ?tab=demand link keeps its filter through open and back.
+  const filterFields = routeFromFilters(filters);
 
   /** Filters refine the current page (replace); opening a record is a new page (push). */
   const setFilters = (next: SheetFilters) => navigate(routeFromFilters(next), "replace");
   const open = (row: SheetRow) => navigate({ ...filterFields, [row.kind]: row.id });
-  const closeDetail = () => { navigate(filterFields); load(); };
+  const closeDetail = () => navigate(filterFields);
   const openTrade = (id: string) => navigate({ ...filterFields, trade: id });
   const openDemand = (id: string) => navigate({ ...filterFields, demand: id });
   const openSupply = (id: string) => navigate({ ...filterFields, supply: id });

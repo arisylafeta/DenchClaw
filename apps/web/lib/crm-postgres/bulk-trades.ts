@@ -53,6 +53,10 @@ const TRADE_COLUMNS = `
 
 const TRADE_FROM = `crm_bulk_trade_lots lot left join crm_users owner on owner.id = lot.owner_user_id`;
 
+export function listTradeOwners(): Promise<TradeOwner[]> {
+  return queryPg<TradeOwner>("select id, display_name as name from crm_users where is_active order by display_name");
+}
+
 export async function listBulkTrades(): Promise<{ trades: BulkTrade[]; owners: TradeOwner[] }> {
   const [trades, owners] = await Promise.all([
     queryPg<BulkTrade>(`select ${TRADE_COLUMNS} from ${TRADE_FROM} order by lot.title`),

@@ -1,6 +1,6 @@
 import { currentUser } from "@/lib/auth";
 import { parseTradePatch } from "@/lib/bulk-trades";
-import { createBulkTrade, listBulkTrades } from "@/lib/crm-postgres/bulk-trades";
+import { createBulkTrade, listBulkTrades, listTradeOwners } from "@/lib/crm-postgres/bulk-trades";
 import { checkStatus, possibleTrades } from "@/lib/crm-postgres/bulk-trade-proposals";
 
 export const dynamic = "force-dynamic";
@@ -12,11 +12,14 @@ function postgresOnly(): Response | null {
     : Response.json({ error: "Bulk Trades requires the Postgres backend" }, { status: 503 });
 }
 
-export async function GET() {
+/** `?inbox=1` returns only what the sheet header needs (owners, check status, possible trades), not every trade. */
+export async function GET(req?: Request) {
   const unavailable = postgresOnly();
   if (unavailable) return unavailable;
   if (!(await currentUser())) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const [list, check, possible] = await Promise.all([listBulkTrades(), checkStatus(), possibleTrades()]);
+  const inboxOnly = !!req && new URL(req.url).searchParams.has("inbox");
+  const [list, check, possible] = await Promise.all([
+    inboxOnly ? listTradeOwners().then((owners) => ({ owners })) : listBulkTrades(), checkStatus(), possibleTrades()]);
   return Response.json({ ...list, check, possible });
 }
 

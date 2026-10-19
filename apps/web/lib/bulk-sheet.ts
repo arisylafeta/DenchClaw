@@ -158,7 +158,8 @@ export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" |
 /** The URL fields for a set of filters; defaults are left out so shared links stay short. */
 export function routeFromFilters(filters: SheetFilters): Partial<BulkTradesRoute> {
   return {
-    query: filters.query.trim() || null,
+    // Kept as typed: trimming here would eat the space between words while they are being typed.
+    query: filters.query.trim() ? filters.query : null,
     side: filters.side === "all" ? null : filters.side,
     progress: filters.progress === "all" ? null : filters.progress,
     company: filters.company === "all" ? null : filters.company,

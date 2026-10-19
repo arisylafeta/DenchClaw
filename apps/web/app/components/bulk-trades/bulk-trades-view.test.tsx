@@ -56,9 +56,9 @@ type Api = { inbox?: unknown; sheet?: SheetRow[]; hangInbox?: boolean };
 function mockApi({ inbox, sheet = ROWS, hangInbox }: Api = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: sheet }));
-    if ((url === "/api/bulk-trades" || url === "/api/bulk-trades/demand") && hangInbox) return new Promise<Response>(() => {});
+    if ((url.startsWith("/api/bulk-trades?") || url === "/api/bulk-trades" || url === "/api/bulk-trades/demand") && hangInbox) return new Promise<Response>(() => {});
     if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [], accepted: [] }));
-    if (url === "/api/bulk-trades") return new Response(JSON.stringify(inbox ?? { trades: [], owners: [] }));
+    if (url === "/api/bulk-trades?inbox=1") return new Response(JSON.stringify(inbox ?? { trades: [], owners: [] }));
     if (url === "/api/bulk-trades/bt_1" && init?.method === "PATCH") return new Response(JSON.stringify({ trade: { ...TRADE, ...JSON.parse(String(init.body)) } }));
     if (url === "/api/bulk-trades/bt_1") return new Response(JSON.stringify({ trade: TRADE, buyers: [], contacts: [], fields: [], files: [] }));
     return new Response("{}");
@@ -122,6 +122,31 @@ describe("Bulk Trades sheet", () => {
     render(<BulkTradesView />);
     expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Buyer-led" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps the spaces while a multiword search is typed", async () => {
+    vi.stubGlobal("fetch", mockApi());
+    render(<BulkTradesView />);
+    await screen.findByRole("button", { name: /12 Ioniq packs/ });
+    await userEvent.type(screen.getByRole("searchbox"), "Seller Ltd");
+    expect(screen.getByRole("searchbox")).toHaveValue("Seller Ltd");
+    expect(screen.getByText("2 of 3 open")).toBeInTheDocument();
+  });
+
+  it("an older tab=demand link keeps its filter through open and back, and Back refreshes the list", async () => {
+    nativeReplace(null, "", "/?path=bulk_trade&tab=demand");
+    const fetchMock = mockApi();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<BulkTradesView />);
+    await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
+    expect(new URLSearchParams(window.location.search).get("side")).toBe("buyer");
+    const loads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/bulk-trades/sheet").length;
+    const before = loads();
+
+    nativeReplace(null, "", "/?path=bulk_trade&side=buyer"); // browser Back, not the breadcrumb
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(await screen.findByRole("button", { name: "Buyer-led" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(loads()).toBeGreaterThan(before));
   });
 
   it("opens a trade by link or by click, and Back returns to the same filtered sheet", async () => {

@@ -34,7 +34,7 @@ function stubApi(calls: string[], hold: string[] = []) {
     if (hold.includes(url)) return new Promise<Response>(() => {});
     const body = url === "/api/bulk-trades/sheet" ? { rows: [sheetRow] }
       : url === "/api/bulk-trades/demand" ? { demand: [demandRow], possible: [], accepted: [] }
-        : url === "/api/bulk-trades" ? { trades: [], owners: [] }
+        : url.startsWith("/api/bulk-trades?") ? { owners: [] }
           : url.endsWith("/activity") ? { activity: [] }
             : {};
     return new Response(JSON.stringify(body));
@@ -52,7 +52,7 @@ describe("Bulk Trades loading", () => {
 
   it("opening the sheet loads each list once, and the rows do not wait for the inbox", async () => {
     const calls: string[] = [];
-    stubApi(calls, ["/api/bulk-trades", "/api/bulk-trades/demand"]);
+    stubApi(calls, ["/api/bulk-trades?inbox=1", "/api/bulk-trades/demand"]);
     window.history.replaceState(null, "", "/?path=bulk_trade");
     const BulkTradesView = await freshView();
     render(<BulkTradesView />);
