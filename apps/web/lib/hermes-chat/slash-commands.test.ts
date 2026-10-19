@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { routeSlashResult, slashSection, slashVisible } from './slash-commands'
+import { isBusyRefusal, routeSlashResult, slashNeedsIdleSession, slashSection, slashVisible } from './slash-commands'
 
 it('routes command directives without putting command output into the transcript', () => {
   for (const type of ['send', 'skill']) {expect(routeSlashResult({ type, message: 'expanded prompt' })).toEqual({ type: 'send', text: 'expanded prompt', notice: undefined })}
@@ -13,4 +13,11 @@ it('routes command directives without putting command output into the transcript
   expect(slashVisible('/model')).toBe(true)
   expect(slashSection({ text: '/docx', display: '/docx', meta: '', kind: 'skill' }, {})).toBe('Skills')
   expect(slashSection({ text: '/custom', display: '/custom', meta: '' }, { categories: [{ name: 'Plugins', pairs: [['/custom', 'custom command']] }] })).toBe('Plugins')
+})
+
+it('recognises commands that must wait for the reply to finish, and Hermes busy refusals', () => {
+  for (const command of ['/compress', '/Compact now', ' /undo', '/retry']) {expect(slashNeedsIdleSession(command)).toBe(true)}
+  for (const command of ['/model', '/invite matcha', '/new']) {expect(slashNeedsIdleSession(command)).toBe(false)}
+  expect(isBusyRefusal('session busy — Hermes is still replying. Stop the current reply first')).toBe(true)
+  expect(isBusyRefusal('Compressed 12 messages')).toBe(false)
 })

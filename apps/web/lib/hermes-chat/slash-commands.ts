@@ -40,3 +40,8 @@ export function routeSlashResult(result: Record<string, unknown>): SlashAction {
   if (typeof result.output === 'string') {return { type: 'output', text: [result.output, result.warning].filter(value => typeof value === 'string' && value).join('\n\n') }}
   throw new Error('Command returned an unsupported result')
 }
+
+/** Commands that rewrite the transcript; Hermes refuses them while a reply is streaming. */
+export function slashNeedsIdleSession(command: string): boolean { return ['compress', 'compact', 'undo', 'retry'].includes(slashName(command)) }
+/** Hermes' own refusal text for a command sent mid-reply. */
+export function isBusyRefusal(output: string): boolean { return /^\s*session busy\b/i.test(output) }

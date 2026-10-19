@@ -8,7 +8,7 @@ import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
 import { NativeTranscript, PromptDock, ReadOnlyNotice } from "./chat-native";
 import { NativeModelControls } from "./chat-native/model-controls";
 import { NativeSlashComposer } from "./chat-native/slash-commands";
-import { routeSlashResult, slashVisible } from "@/lib/hermes-chat/slash-commands";
+import { isBusyRefusal, routeSlashResult, slashNeedsIdleSession, slashVisible } from "@/lib/hermes-chat/slash-commands";
 import { GroupAuthor } from "./workspace/group-chat";
 import { Fragment } from "react";
 import {
@@ -1212,6 +1212,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const [composerText, setComposerText] = useState("");
 		const [slashOutput, setSlashOutput] = useState<string | null>(null);
 		const [slashBusy, setSlashBusy] = useState(false);
+		// A rewrite command typed mid-reply waits here and runs when the reply finishes.
+		const [deferredSlash, setDeferredSlash] = useState<string | null>(null);
 		// Cover the render before identity/hydration effects and all imperative callers.
 		const submissionUnavailable = initializing || conversationUnselected || loadingSession || slashBusy || pendingNativeRequest ||
 			attachedFiles.some(file => file.uploading) ||
@@ -1233,11 +1235,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			return () => viewport.removeEventListener("resize", resize);
 		}, []);
 		const latestNativeSubmission = nativeChat.state.optimistic.at(-1)?.clientId;
-		useEffect(() => { if (latestNativeSubmission) { setSlashOutput(null); } }, [latestNativeSubmission]);
+		useEffect(() => { if (latestNativeSubmission) { setSlashOutput(null); setDeferredSlash(null); } }, [latestNativeSubmission]);
 		const slashKey = useRef(nativeConversationKey);
 		slashKey.current = nativeConversationKey;
 		useEffect(() => {
 			setSlashOutput(null);
+			setDeferredSlash(null);
 			setSlashBusy(false);
 		}, [nativeConversationKey]);
 		const runSlash = useCallback(async (command: string) => {
@@ -1248,8 +1251,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			editorRef.current?.clear();
 			try {
 				if (!slashVisible(command)) { throw new Error("This command is only available in the terminal interface."); }
+				if (slashNeedsIdleSession(command) && nativeChat.state.busy) {
+					setDeferredSlash(command.trim());
+					setSlashOutput(`Hermes is still replying. ${command.trim()} will run when the reply finishes.`);
+					return;
+				}
 				const action = routeSlashResult(await nativeChat.executeSlash(command));
 				if (slashKey.current !== key) { return; }
+				if (action.type === "output" && isBusyRefusal(action.text) && slashNeedsIdleSession(command)) {
+					setDeferredSlash(command.trim());
+					setSlashOutput(`Hermes is still replying. ${command.trim()} will run when the reply finishes.`);
+					return;
+				}
 				if (action.type === "conversation") { onBranched?.(action.conversation); }
 				else if (action.type === "prefill") {
 					editorRef.current?.setText(action.text);
@@ -1263,7 +1276,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			} finally {
 				if (slashKey.current === key) { setSlashBusy(false); }
 			}
-		}, [nativeGateway, nativeConversationKey, nativeChat.executeSlash, nativeChat.send, nativeChat.readOnly, nativeChat.connection, slashBusy, pendingNativeRequest, onBranched, onConversationActivity]);
+		}, [nativeGateway, nativeConversationKey, nativeChat.executeSlash, nativeChat.send, nativeChat.readOnly, nativeChat.state.busy, nativeChat.connection, slashBusy, pendingNativeRequest, onBranched, onConversationActivity]);
+		useEffect(() => {
+			if (deferredSlash && !nativeChat.state.busy && !submissionUnavailable) {
+				const command = deferredSlash;
+				setDeferredSlash(null);
+				void runSlash(command);
+			}
+		}, [deferredSlash, nativeChat.state.busy, submissionUnavailable, runSlash]);
 		const [clarifyComposerTarget, setClarifyComposerTarget] = useState<HTMLDivElement | null>(null);
 		const pendingRequestRef = useRef(pendingNativeRequest);
 		pendingRequestRef.current = pendingNativeRequest;
@@ -2748,7 +2768,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				)}
 
 				{nativeGateway && slashOutput !== null && <div role="status" className="mx-3 mb-2 rounded-xl bg-[var(--color-surface-hover)] p-3 text-xs text-[var(--color-text)]">
-					<div className="mb-1 flex items-center justify-between gap-2"><span className="font-medium">Command output</span><button type="button" aria-label="Dismiss command output" onClick={() => setSlashOutput(null)} className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]">Dismiss</button></div>
+					<div className="mb-1 flex items-center justify-between gap-2"><span className="font-medium">Command output</span><button type="button" aria-label={deferredSlash ? "Cancel queued command" : "Dismiss command output"} onClick={() => { setSlashOutput(null); setDeferredSlash(null); }} className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]">{deferredSlash ? "Cancel" : "Dismiss"}</button></div>
 					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">{slashOutput}</pre>
 				</div>}
 				{nativeGateway && slashBusy && <p role="status" className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">Running command…</p>}
