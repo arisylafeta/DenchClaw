@@ -19,6 +19,21 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); getHermesEventsClient().close(); vi.unstubAllGlobals() })
 describe('native controller', () => {
+  it.each(['steered', 'redirected', 'queued'])('handles the unwrapped prompt JSON status %s', async status => {
+    vi.mocked(fetch).mockImplementation(async url => Response.json(String(url).endsWith('/prompt') ? { status } : {}))
+    const { result } = renderHook(() => useNativeHermesChat({ conversationKey: 'first', enabled: true }))
+    const running = { ...snapshot('first', 'history'), running: true, inflight: { user: 'Start', assistant: '', streaming: true } }
+    FakeSource.instance.emit('snapshot', running)
+    await act(() => result.current.send({ text: 'Change direction' }))
+    const user = result.current.state.messages.find(message => message.segments.some(segment => segment.type === 'text' && segment.text === 'Change direction'))!
+    expect(result.current.queuedMessageIds).toEqual(status === 'queued' ? [user.id] : [])
+    expect(user.pending).toBe(status === 'queued')
+    if (status === 'queued') {
+      FakeSource.instance.emit('snapshot', { ...running, seq: 1, inflight: { user: 'Change direction', assistant: '', streaming: true } })
+      expect(result.current.queuedMessageIds).toEqual([])
+    } else expect(result.current.state.streamId).toBeNull()
+  })
+
   it('discards old-session snapshots and never interrupts when switching or hiding', async () => {
     const { result, rerender } = renderHook(({ key, enabled }) => useNativeHermesChat({ conversationKey: key, enabled }), { initialProps: { key: 'first', enabled: true } })
     const source = FakeSource.instance

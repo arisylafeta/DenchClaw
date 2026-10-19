@@ -220,12 +220,12 @@ describe("gateway ChatPanel solo transport", () => {
     FakeEventSource.instance.emit("request", { key, id: "retry", method: "clarify", params: { questions: [{ qid: "why", question: "Why?" }] } });
     expect(screen.getByText(/Attachments are saved/)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Keep this answer" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
     await screen.findByRole("textbox", { name: "Your answer" });
     expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Keep this answer");
     expect(screen.getAllByRole("alert").some(node => node.textContent?.includes("Try again"))).toBe(true);
     fail = false;
-    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/clarify"))).toHaveLength(2));
     for (const [, init] of fetchMock.mock.calls.filter(([url]) => url.endsWith("/clarify"))) expect(JSON.parse(init.body)).toEqual({ request_id: "retry", answers: { why: "Keep this answer" } });
     await waitFor(() => expect(screen.getByAltText("pic.png")).toBeVisible());

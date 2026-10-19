@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Clock3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { NativeTranscriptProps } from "./types";
@@ -31,13 +32,24 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 export function NativeTranscript({ state, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [] }: NativeTranscriptProps) {
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
-      {message.role === "user" ? (() => { const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join("")); return <div className="flex flex-col items-end gap-1.5 py-2"><AttachmentChips attachments={attachments} />{(body || !attachments.length) && <div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}><UserContent html={attachments.length ? undefined : userHtml?.(message.id)} text={body} /></div>}{queuedMessageIds.includes(message.id) && <span className="text-xs text-[var(--color-text-muted)]">Queued</span>}</div>; })() : (() => {
+      {message.role === "user" ? (() => {
+        const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join(""));
+        const queued = queuedMessageIds.includes(message.id);
+        return <div className="flex flex-col items-end gap-1.5 py-2">
+          <AttachmentChips attachments={attachments} />
+          {(body || !attachments.length || queued) && <div data-queued={queued || undefined} className={`max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font ${queued ? "border border-dashed border-[var(--color-border)] bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]" : ""}`} style={queued ? undefined : { background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}>
+            {queued && <span className="mb-1 flex w-fit items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs font-medium"><Clock3 aria-hidden="true" className="size-3" />Queued</span>}
+            <UserContent html={attachments.length ? undefined : userHtml?.(message.id)} text={body} />
+          </div>}
+          {queued && <span className="text-xs text-[var(--color-text-muted)]">Waiting for the current turn to finish</span>}
+        </div>;
+      })() : (() => {
         const blocks = transcriptBlocks(message.segments);
         return <Fragment key={message.id}>
           {blocks.map((block, index) => {
             const next = blocks[index + 1];
             return block.type === "work"
-              ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && index === blocks.length - 1} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
+              ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && !message.steerBoundary && index === blocks.length - 1} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
               : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words">{renderMarkdown ? renderMarkdown(block.segment.text) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.segment.text}</ReactMarkdown>}</div>;
           })}
         </Fragment>;

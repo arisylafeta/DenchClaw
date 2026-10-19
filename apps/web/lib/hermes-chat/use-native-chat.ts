@@ -157,7 +157,16 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     try {
       const result = await post('prompt', { ...prompt, clientMessageId })
       if (activeKey.current !== key) return
-      if (wasBusy && (result.status === 'steered' || result.status === 'redirected')) update(previous => placeSteer(previous, clientMessageId))
+      if (result.status === 'queued') {
+        queued.current.add(clientMessageId)
+        update(previous => {
+          const waiting = previous.messages.find(message => message.id === clientMessageId)
+          return waiting ? { ...previous, messages: [...previous.messages.filter(message => message.id !== clientMessageId), { ...waiting, source: 'queued' as const }] } : previous
+        })
+      } else if (result.status === 'steered' || result.status === 'redirected') {
+        queued.current.delete(clientMessageId)
+        update(previous => placeSteer(previous, clientMessageId))
+      }
       if (result.autoContinue) update(previous => ({ ...previous, status: 'Hermes is continuing an interrupted turn; your message is queued' }))
     } catch {
       // Failed/ambiguous submissions remain visible, but are never submitted automatically again.
@@ -273,7 +282,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (lastUser) await send({ text: messageText(lastUser), html: html.get(lastUser.id) })
       else resync()
     },
-    queuedMessageIds: state.messages.filter(message => queued.current.has(message.id) || message.source === 'queued').map(message => message.id),
+    queuedMessageIds: state.messages.filter(message => queued.current.has(message.id) && message.source === 'optimistic' && message.pending || message.source === 'queued').map(message => message.id),
     interrupt: async () => {
       const key = conversationKey
       try {

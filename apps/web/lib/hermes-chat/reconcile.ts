@@ -93,12 +93,18 @@ export function submitOptimistic(state: ReconcileState, submission: OptimisticSu
  */
 export function placeSteer(state: ReconcileState, clientId: string): ReconcileState {
   const index = state.messages.findIndex(message => message.id === clientId)
-  const stream = state.streamId ? state.messages.findIndex(message => message.id === state.streamId) : -1
-  if (index < 0 || stream < 0 || index < stream || !state.busy) return state
-  const steer = { ...state.messages[index], pending: false }
-  const rest = state.messages.filter((_, i) => i !== index)
-  const live = rest.slice()
-  live.splice(stream + 1, 0, steer)
+  const stream = state.streamId ? state.messages.findIndex(message => message.id === state.streamId)
+    : state.messages.findLastIndex((message, i) => i < index && message.role === 'assistant')
+  if (index < 0 || !state.busy || !state.messages[index].pending) return state
+  const steer = { ...state.messages[index], source: 'optimistic' as const, pending: false }
+  const live = state.messages.filter((_, i) => i !== index).map(message =>
+    message.id === state.messages[stream]?.id ? { ...message, steerBoundary: true } : message)
+  // There may be no stream between model calls, or after another accepted steer.
+  // Do not put the next steer before an already accepted instruction.
+  const boundary = Math.max(live.findIndex(message => message.id === state.messages[stream]?.id),
+    live.findLastIndex(message => message.role === 'user' && message.source === 'optimistic' && !message.pending))
+  const waiting = live.findIndex(message => message.source === 'queued')
+  live.splice(boundary < 0 ? (waiting < 0 ? live.length : waiting) : boundary + 1, 0, steer)
   return { ...state, messages: live, streamId: null, awaitingResponse: true, sawAssistantPayload: false }
 }
 /** Consume consecutive submissions in order, including the gateway's aggregate queue MERGE. */
@@ -166,6 +172,13 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
     base.messages.unshift(...state.messages.filter(message => message.source === 'durable' && message.rowId !== undefined
       && overlappingWindow && Number.isFinite(firstRow) && message.rowId < firstRow && !ids.has(message.id)))
   }
+  // The snapshot reuses a fixed inflight ID even after a local steer split it.
+  // That ID must not alias the closed pre-steer block.
+  if (base.streamId && state.messages.some(message => message.id === base.streamId && message.steerBoundary)) {
+    const aggregate = base.messages.find(message => message.id === base.streamId)!
+    aggregate.id = ctx.id()
+    base.streamId = aggregate.id
+  }
   // Resolve ownership across the whole snapshot before retaining event-only detail.
   // A completion receipt may move a tool from the final live message to an earlier row.
   const claimed = new Set<object>()
@@ -179,7 +192,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
       (item.id === old.id || (old.rowId !== undefined && item.rowId === old.rowId)))
     const oldUser = state.messages.findLast((item, index) => index < state.messages.indexOf(old) && item.role === 'user' && item.source !== 'queued')
     const userIndex = oldUser ? base.messages.findLastIndex(item => item.role === 'user' &&
-      (item.id === oldUser.id || (oldUser.source !== 'durable' && normalizeMessageText(messageText(item)) === normalizeMessageText(messageText(oldUser))))) : -1
+      (item.id === oldUser.id || (oldUser.source !== 'durable' && normalizeMessageText(steerOwnText(messageText(item))) === normalizeMessageText(steerOwnText(messageText(oldUser)))))) : -1
     const nextUserIndex = base.messages.findIndex((item, index) => index > userIndex && item.role === 'user')
     const sameTurn = !oldUser || userIndex >= 0
     const active = !state.interrupted && sameTurn && snapshot.generation === state.generation && snapshot.running && old.id === state.streamId
@@ -189,7 +202,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
         (nextUserIndex < 0 || index < nextUserIndex) && normalizeMessageText(messageText(item)) === normalizeMessageText(messageText(old)))
       : undefined
     let target = identity ?? active ?? completed
-    if (!target && old.source !== 'durable' && !old.pending && old.role === 'assistant' && old.segments.some(segment => segment.type === 'tool' || segment.type === 'reasoning')) {
+    if (!target && old.source !== 'durable' && (!old.pending || old.steerBoundary) && old.role === 'assistant' && old.segments.some(segment => segment.type === 'tool' || segment.type === 'reasoning')) {
       target = { ...old, segments: [...old.segments] }
       base.messages.splice(nextUserIndex < 0 ? base.messages.length : nextUserIndex, 0, target)
     }
@@ -239,6 +252,26 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
     hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion }
+  // Inflight snapshots contain only one aggregate assistant string, not the
+  // injection boundaries. Keep the event timeline until history contains the
+  // accepted instructions. Otherwise a resync hoists them below ongoing work.
+  const boundaryIndex = state.messages.findIndex(message => message.steerBoundary)
+  const unresolvedSteer = state.messages.some(message => message.source === 'optimistic' && !message.pending
+    && !merged.clientToMessage[message.id])
+  if (snapshot.running && snapshot.generation === state.generation && boundaryIndex >= 0 && unresolvedSteer) {
+    const tail = state.messages.slice(boundaryIndex).filter(message => message.source !== 'queued').map(message => {
+      const durableId = merged.clientToMessage[message.id]
+      return durableId ? merged.messages.find(item => item.id === durableId) ?? message : message
+    })
+    const tailIds = new Set(tail.map(message => message.id))
+    const first = merged.messages.findIndex(message => tailIds.has(message.id) || message.id === base.streamId)
+    if (first >= 0) {
+      const waiting = merged.messages.filter(message => message.source === 'queued')
+      merged.messages = [...merged.messages.slice(0, first), ...tail, ...waiting]
+      merged.streamId = state.streamId
+      merged.watermark = Math.max(merged.watermark, state.watermark)
+    }
+  }
   merged.optimistic = state.optimistic.map(item => {
     const id = merged.clientToMessage[item.clientId]
     return id && merged.messages.some(message => message.id === id && message.source === 'durable')

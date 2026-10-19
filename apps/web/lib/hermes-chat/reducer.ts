@@ -35,6 +35,9 @@ export type Segment = TextSegment | ToolSegment
 export interface ChatMessage {
   /** A system event stored as a user row; shown as a notice line, not a bubble. */
   notice?: Notice
+  source?: 'durable' | 'live' | 'optimistic' | 'queued'
+  /** Work before an accepted mid-turn steer remains patchable, but is no longer live. */
+  steerBoundary?: boolean
   id: string; role: 'user' | 'assistant'; segments: Segment[]; startedAt: number
   completedAt?: number; pending: boolean; interim?: boolean; interrupted?: boolean
   error?: string; error_surface?: ErrorSurface | null; status?: 'complete' | 'error' | 'interrupted'
@@ -78,7 +81,7 @@ export function toolError(payload: { result?: unknown; error?: unknown; is_error
   return payload.is_error === true || result.is_error === true || result.success === false || result.ok === false
     || (typeof result.exit_code === 'number' && result.exit_code !== 0) ? true : undefined
 }
-const lastUser = (s: ChatState): number => s.messages.findLastIndex(m => m.role === 'user')
+const lastUser = (s: ChatState): number => s.messages.findLastIndex(m => m.role === 'user' && m.source !== 'queued')
 const sealSegments = (segments: Segment[], now: number, tools = false): Segment[] => segments.map(segment => {
   if (segment.completedAt !== undefined || (segment.type === 'tool' && !tools)) return segment
   return segment.type === 'tool' ? { ...segment, completedAt: now, status: segment.error ? 'error' : 'done' } : { ...segment, completedAt: now }
@@ -87,7 +90,9 @@ function ensureMessage(s: ChatState, ctx: ReducerContext, now: number): ChatMess
   let message = selectCurrentMessage(s)
   if (!message) {
     message = { id: ctx.id(), role: 'assistant', segments: [], pending: true, startedAt: now }
-    s.messages = [...s.messages, message]
+    const waiting = s.messages.findIndex(item => item.source === 'queued')
+    s.messages = [...s.messages]
+    s.messages.splice(waiting < 0 ? s.messages.length : waiting, 0, message)
     s.streamId = message.id
   }
   return message
