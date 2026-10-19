@@ -8,7 +8,7 @@ import { rowFocus } from "./demand-page";
 import { buttonClass, buttonStyle } from "./trade-ui";
 import css from "./demand-panel.module.css";
 
-export const SOURCE_LABEL: Record<SourceKind, string> = { marketplace: "Marketplace", stock: "Stock list", trade: "Trade", supply: "Supply" };
+export const SOURCE_LABEL: Record<SourceKind, string> = { marketplace: "Marketplace", stock: "Stock list", trade: "Trade", supply: "Supply", web: "Web listing" };
 
 export const eur = (n: number | null | undefined, digits = 0) =>
   n == null ? "—" : `€${n >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : n.toLocaleString("en-GB", { maximumFractionDigits: digits })}`;
@@ -313,6 +313,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
         {" "}· {checked.toLocaleString("en-GB")} units checked
       </p>
       {supply.errors.map((e) => <p key={e} role="alert" className="text-[12px]" style={{ color: "var(--bt-red)" }}>{e}</p>)}
+      <h3 className={css.label}>In our inventory</h3>
       {supply.blocked ? <p className={css.empty}>{supply.blocked}</p> : (
         <>
           <div className={css.toolbar}>
@@ -346,7 +347,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
           {supply.smallGroups > 0 && (
             <button type="button" className={`${rowFocus} self-start text-[12px] underline`} style={{ color: "var(--bt-muted)" }}
               onClick={() => setShowSmall(!showSmall)}>
-              {showSmall ? "Hide small lots" : `Show ${supply.smallGroups} small lot${supply.smallGroups === 1 ? "" : "s"} (under 1% of the ask)`}
+              {showSmall ? "Hide small lots" : `Show ${supply.smallGroups} lot${supply.smallGroups === 1 ? "" : "s"} under 30% of the ask`}
             </button>
           )}
           {groups.length > shown && (
@@ -356,15 +357,19 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
           )}
         </>
       )}
-      <MarketSection supply={supply} leads={leads} />
+      <MarketSection supply={supply} leads={leads} onVerdict={onVerdict} busy={busy} />
       <p className={css.note}>Prices in €/kWh use {supply.fxNote.replace(/^Approximate FX/, "approximate exchange rates")}.</p>
     </div>
   );
 }
 
 /** Sellers outside our inventory. Ari's finder fills `leads`; this only shows them and the price to ask at. */
-function MarketSection({ supply, leads }: { supply: DemandSupply; leads: MarketLead[] }) {
+function MarketSection({ supply, leads, onVerdict, busy }: { supply: DemandSupply; leads: MarketLead[]; onVerdict: Verdict; busy: boolean }) {
   const target = supply.targetBuyEurPerKwh;
+  const [open, setOpen] = useState<string | null>(null);
+  const [showSmall, setShowSmall] = useState(false);
+  const [shown, setShown] = useState(5);
+  const groups = supply.market.groups.filter((g) => showSmall || !g.small);
   return (
     <section className="mt-4 flex flex-col gap-2">
       <h3 className={css.label}>In the market</h3>
@@ -373,7 +378,14 @@ function MarketSection({ supply, leads }: { supply: DemandSupply; leads: MarketL
           ? <>Buy at <strong>{perKwh(target)}</strong> or less to keep our 10% fee on the buyer&apos;s {perKwh(supply.requirement.buyerEurPerKwh)}.</>
           : <>No buyer price yet, so there is no target buy price. Ask the buyer for one first.</>}
       </p>
+      {groups.length > 0 && (
+        <p className={css.note}>Public adverts on breakers&apos; websites, found by web research. Not our stock: ask the seller before offering.</p>
+      )}
       <div className={css.groups}>
+        {groups.slice(0, shown).map((group) => (
+          <GroupRow key={group.key} group={group} open={open === group.key} busy={busy} onVerdict={onVerdict}
+            onToggle={() => setOpen(open === group.key ? null : group.key)} />
+        ))}
         {leads.map((lead) => (
           <div key={lead.id} className={css.groupRow} style={{ gridTemplateColumns: "minmax(0,1fr) 90px 110px" }}>
             <div className="min-w-0">
@@ -384,8 +396,18 @@ function MarketSection({ supply, leads }: { supply: DemandSupply; leads: MarketL
             <span className={css.num}>{lead.status === "new" ? "Ask to buy" : lead.status}</span>
           </div>
         ))}
-        {!leads.length && <p className={css.empty}>Sellers outside our inventory will appear here once Ari&apos;s market finder is connected.</p>}
+        {!groups.length && !leads.length && <p className={css.empty}>Nothing in the market yet. Ari&apos;s market finder will add sellers here.</p>}
       </div>
+      {supply.market.smallGroups > 0 && (
+        <button type="button" className={`${rowFocus} self-start text-[12px] underline`} style={{ color: "var(--bt-muted)" }} onClick={() => setShowSmall(!showSmall)}>
+          {showSmall ? "Hide small lots" : `Show ${supply.market.smallGroups} lot${supply.market.smallGroups === 1 ? "" : "s"} under 30% of the ask`}
+        </button>
+      )}
+      {groups.length > shown && (
+        <button type="button" className={`${buttonClass} self-start`} style={buttonStyle} onClick={() => setShown(shown + 10)}>
+          Show {Math.min(10, groups.length - shown)} more of {groups.length - shown}
+        </button>
+      )}
     </section>
   );
 }

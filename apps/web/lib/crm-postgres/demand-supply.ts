@@ -2,7 +2,7 @@ import "server-only";
 
 // The Suitable supply view for one demand row, and the best-match line for every open row on the Demand list.
 import type { Demand } from "../bulk-demand";
-import { matchDemand, bestLine, bySeller, fewestSellers, type Match, type MatchGroup } from "../demand-match";
+import { matchDemand, bestLine, bySeller, fewestSellers, vocabulary, type Match, type MatchGroup } from "../demand-match";
 import type { DemandSupply, SupplyGroupView, SupplyUnitView, BestMatchLine } from "../demand-supply-types";
 import { feedCandidates, inventoryFor, marketplaceCandidates, mergeSources, stockCandidates, matchVerdicts, type MatchVerdict } from "./demand-match-supply";
 import { addDemandActivity } from "./bulk-demand-activity";
@@ -42,8 +42,15 @@ function groupView(g: MatchGroup, verdicts: Map<string, MatchVerdict>): SupplyGr
 
 export async function demandSupply(demand: Demand): Promise<DemandSupply> {
   const { candidates, hidden, verdicts, errors } = await inventoryFor(demand.id);
-  const result = matchDemand(demand, candidates, hidden);
-  const all = result.groups.flatMap((g) => g.matches);
+  // Web-research adverts are market supply: matched the same way, shown under In the market, never as our inventory.
+  const vocab = vocabulary(candidates);
+  const ours = candidates.filter((c) => c.source !== "web");
+  const web = candidates.filter((c) => c.source === "web");
+  const result = matchDemand(demand, ours, hidden, vocab);
+  const market = matchDemand(demand, web, hidden, vocab);
+  const shown = (groups: MatchGroup[]) => [...groups.filter((g) => !g.small).slice(0, GROUPS_SHOWN), ...groups.filter((g) => g.small).slice(0, 20)]
+    .map((g) => groupView(g, verdicts));
+  const all = [...result.groups, ...market.groups].flatMap((g) => g.matches);
   const shortlisted = all.filter((m) => verdicts.get(m.candidate.key)?.verdict === "shortlist").map((m) => unitView(m, verdicts));
   const missingShortlist = [...verdicts].filter(([key, v]) => v.verdict === "shortlist" && !shortlisted.some((u) => u.key === key)).map(([key]) => key);
   const r = result.requirement;
@@ -52,8 +59,7 @@ export async function demandSupply(demand: Demand): Promise<DemandSupply> {
       pinned: r.pinned, unitsNeeded: r.unitsNeeded, kwhNeeded: r.kwhNeeded, buyerEurPerKwh: r.buyerEurPerKwh,
       buyerEurPerUnit: r.buyerEurPerUnit, country: r.country,
     },
-    groups: [...result.groups.filter((g) => !g.small).slice(0, GROUPS_SHOWN), ...result.groups.filter((g) => g.small).slice(0, 20)]
-      .map((g) => groupView(g, verdicts)),
+    groups: shown(result.groups),
     totalGroups: result.groups.filter((g) => !g.small).length,
     smallGroups: result.groups.filter((g) => g.small).length,
     totalUnits: result.groups.filter((g) => !g.small).reduce((s, g) => s + g.units, 0),
@@ -61,6 +67,12 @@ export async function demandSupply(demand: Demand): Promise<DemandSupply> {
       marketplace: candidates.filter((c) => c.source === "marketplace").length,
       stock: candidates.filter((c) => c.source === "stock").length,
       trades: candidates.filter((c) => c.source === "trade" || c.source === "supply").length,
+      web: web.length,
+    },
+    market: {
+      groups: shown(market.groups),
+      totalGroups: market.groups.filter((g) => !g.small).length,
+      smallGroups: market.groups.filter((g) => g.small).length,
     },
     hiddenCount: hidden.size,
     shortlisted,
@@ -91,16 +103,19 @@ export function bestMatchLines(fresh = false): Promise<Record<string, BestMatchL
   if (fresh || !bestCache || Date.now() - bestCache.at > 120_000) {
     const lines = (async () => {
       const [demand, listings, stock] = await Promise.all([listDemand(), marketplaceCandidates().catch(() => []), stockCandidates()]);
-      const base = mergeSources(listings.map((l) => ({ ...l, alsoIn: [] })), stock.map((s) => ({ ...s })));
+      const merged = mergeSources(listings.map((l) => ({ ...l, alsoIn: [] })), stock.map((s) => ({ ...s })));
+      const vocab = vocabulary(merged);
+      const base = merged.filter((c) => c.source !== "web");
       const out: Record<string, BestMatchLine> = {};
       for (const row of demand.filter((d) => d.status !== "closed")) {
         const [feed, verdicts] = await Promise.all([feedCandidates(row.id), matchVerdicts(row.id)]);
         const hidden = new Set([...verdicts].filter(([, v]) => v.verdict === "not_a_fit").map(([k]) => k));
-        const result = matchDemand(row, [...feed, ...base], hidden);
+        const result = matchDemand(row, [...feed, ...base], hidden, vocab);
         const line = bestLine(result);
         out[row.id] = line
           ? { ...line, groups: result.groups.filter((g) => !g.small).length, shortlisted: [...verdicts.values()].filter((v) => v.verdict === "shortlist").length }
-          : { verdict: null, text: result.blocked ? "Too vague to match" : "No match in our inventory", groups: 0,
+          : { verdict: null, groups: 0,
+            text: result.blocked ? "Too vague to match" : result.groups.length ? `${result.groups.length} small lot${result.groups.length === 1 ? "" : "s"}, none covers 30%` : "No match in our inventory",
             shortlisted: [...verdicts.values()].filter((v) => v.verdict === "shortlist").length };
       }
       return out;

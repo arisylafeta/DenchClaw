@@ -3,7 +3,8 @@
 // Pure and deterministic: no model calls. The inbox check's AI matches for trades and supply feed in as evidence.
 import type { Demand } from "./bulk-demand";
 
-export type SourceKind = "marketplace" | "stock" | "trade" | "supply";
+/** "web": a public advert found by web research. It is market supply, not our inventory. */
+export type SourceKind = "marketplace" | "stock" | "trade" | "supply" | "web";
 export type Format = "Packs" | "Modules" | "Cells" | "Systems";
 
 /** One unit of supply in a shape every source can fill. Price is per unit, in `currency`. */
@@ -81,7 +82,7 @@ export type MatchGroup = {
   bestMarginPct: number | null;
   /** Units the group can cover against the ask, when the ask has a unit count. */
   covers: { have: number; need: number } | null;
-  /** Under 1% of a bulk ask (50+ units): too small to matter, hidden unless asked for. */
+  /** All sellers together cover under 30% of the stated quantity: hidden unless asked for. */
   small: boolean;
   matches: Match[];
 };
@@ -200,7 +201,8 @@ function unitCount(demand: Demand): number | null {
   // "1 test pack, then 10 packs": the larger number is the deal.
   const all = [...(demand.quantity ?? "").matchAll(/(\d+)\s*(?:packs?|units?)/gi)].map((x) => Number(x[1]));
   if (all.length) return Math.max(...all);
-  const lead = demand.wants.match(/^(?:approximately\s+|about\s+)?(\d+)\s+(?!kwh)/i);
+  // "12 Renault Zoe packs" is a count; "5 MWh of batteries" is energy, read by kwhCount instead.
+  const lead = demand.wants.match(/^(?:approximately\s+|about\s+)?(\d+)\s+(?!(?:k|m)?wh\b|(?:k|m)w\b)/i);
   return lead ? Number(lead[1]) : null;
 }
 
@@ -461,8 +463,8 @@ const groupLabel = (m: Match) => {
 };
 
 const FIT_RANK: Record<Match["verdict"], number> = { exact: 0, check: 1 };
-/** A lot under this share of a bulk ask is noise next to the ask (one cell against 500,000). */
-export const SMALL_SHARE = 0.01;
+/** A batch that, with every seller together, covers less than this share of the ask is hidden until asked for. */
+export const SMALL_SHARE = 0.3;
 const priceOf = (m: Match) => m.economics.sellerEurPerKwh ?? 1e9;
 
 /** One rule: Exact before Check, then cheapest €/kWh (priced before unpriced), then the group that covers more of the ask. */
@@ -472,8 +474,8 @@ export function compareGroups(a: MatchGroup, b: MatchGroup): number {
 }
 
 /** Filters our inventory to what fits, groups the same product across sellers, and sorts Exact then cheapest. */
-export function matchDemand(demand: Demand, candidates: Candidate[], hidden: Set<string> = new Set()): MatchResult {
-  const requirement = requirementFor(demand, vocabulary(candidates));
+export function matchDemand(demand: Demand, candidates: Candidate[], hidden: Set<string> = new Set(), vocab?: Set<string>): MatchResult {
+  const requirement = requirementFor(demand, vocab ?? vocabulary(candidates));
   const pinned = requirement.products.length || requirement.makeWords.length || requirement.kwh
     || requirement.chemistries.length || requirement.cellTokens.length;
   if (!pinned && !candidates.some((c) => c.ai)) {
@@ -501,7 +503,7 @@ export function matchDemand(demand: Demand, candidates: Candidate[], hidden: Set
       eurPerKwh: priced.length ? { min: priced[0].economics.sellerEurPerKwh!, max: priced[priced.length - 1].economics.sellerEurPerKwh! } : null,
       bestMarginPct: margins.length ? Math.max(...margins) : null,
       covers: need ? { have: units, need } : null,
-      small: !!need && need >= 50 && units < need * SMALL_SHARE,
+      small: !!need && units < need * SMALL_SHARE,
       matches: list,
     });
   }

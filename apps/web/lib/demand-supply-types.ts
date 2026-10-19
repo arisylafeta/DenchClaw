@@ -59,7 +59,9 @@ export type DemandSupply = {
   /** Groups under 1% of a bulk ask, sent after the rest and hidden until asked for. */
   smallGroups: number;
   totalUnits: number;
-  considered: { marketplace: number; stock: number; trades: number };
+  considered: { marketplace: number; stock: number; trades: number; web: number };
+  /** Matches among public adverts found by web research: market supply, shown under In the market. */
+  market: { groups: SupplyGroupView[]; totalGroups: number; smallGroups: number };
   hiddenCount: number;
   shortlisted: SupplyUnitView[];
   /** Shortlisted units that no longer appear in our inventory (sold, withdrawn or edited). */

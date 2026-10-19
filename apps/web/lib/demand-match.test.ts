@@ -57,6 +57,12 @@ describe("requirementFor", () => {
     expect(req.buyerEurPerKwh).toBeCloseTo(34.8);
     expect(req.country).toBe("PL");
   });
+
+  it("reads energy, not a unit count, from an ask that starts with MWh", () => {
+    const req = requirementFor(demand({ wants: "Approximately 5 MWh of retired batteries this year", volume: 5, volume_unit: "MWh" }));
+    expect(req.unitsNeeded).toBeNull();
+    expect(req.kwhNeeded).toBe(5000);
+  });
 });
 
 describe("scoreCandidate", () => {
@@ -191,7 +197,7 @@ describe("matchDemand", () => {
     expect(result.groups.flatMap((g) => g.matches.map((m) => m.candidate.title))).toEqual(["Samsung INR21700-50E"]);
   });
 
-  it("hides lots under 1% of a bulk ask and keeps them out of the best line", () => {
+  it("hides batches that cover under 30% of the ask and keeps them out of the best line", () => {
     const ask = demand({ wants: "21700 cells", quantity: "500,000 cells", spec: { formats: ["Cells"] } });
     const result = matchDemand(ask, [
       unit({ format: "Cells", title: "LISHEN LR21700LH", units: 1, kwh: 0.011 }),
@@ -199,5 +205,14 @@ describe("matchDemand", () => {
     ]);
     expect(result.groups.map((g) => g.small)).toEqual([false, true]);
     expect(bestLine(result)?.text).toContain("Panasonic");
+  });
+
+  it("applies the 30% rule to the whole batch across sellers, not to each seller", () => {
+    const ask = demand({ wants: "Hyundai Kona 64 kWh", quantity: "10 packs" });
+    const result = matchDemand(ask, [
+      kona({ seller: "A" }), kona({ seller: "B" }), kona({ seller: "C" }), // 3 of 10 together: shown
+      unit({ make: "Hyundai", model: "Kona", title: "Hyundai Kona 64", kwh: 66, seller: "D", units: 2 }), // separate batch, 2 of 10: hidden
+    ]);
+    expect(result.groups.map((g) => [g.units, g.small])).toEqual([[3, false], [2, true]]);
   });
 });

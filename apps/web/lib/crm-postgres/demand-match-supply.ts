@@ -121,7 +121,11 @@ type StockRow = {
   part_number: string | null; description: string | null; quantity: number; price: number | null; location: string | null;
   chemistry: string | null; capacity_kwh: number | null; scope: string | null; soh_percent: number | null; tested: boolean | null;
   photo_urls: string[]; supplier_confirmed: boolean; updated_at: string; stock_status: string; attributes: Record<string, unknown>;
+  evidence: Record<string, unknown>;
 };
+
+/** Rows found on a breaker's public website (web research) are market supply, not our inventory. */
+const isWebListing = (evidence: Record<string, unknown>) => typeof evidence?.source === "string" && /^web research/i.test(evidence.source);
 
 const SKIP_SCOPES = new Set(["obvious_nonpack", "spares", "inverter"]);
 
@@ -129,14 +133,16 @@ export async function stockCandidates(): Promise<Candidate[]> {
   const rows = await queryPg<StockRow>(
     `select id, supplier, make, model, model_detail, year, part_number, description, quantity::float8 as quantity,
        price::float8 as price, location, chemistry, capacity_kwh::float8 as capacity_kwh, scope, soh_percent::float8 as soh_percent,
-       tested, photo_urls, supplier_confirmed, updated_at::text, stock_status, attributes
+       tested, photo_urls, supplier_confirmed, updated_at::text, stock_status, attributes, evidence
      from crm_stock_items where stock_status not in ('sold', 'unavailable')`,
   );
   return rows.filter((row) => !SKIP_SCOPES.has(row.scope ?? "")).map((row) => {
     const a = row.attributes ?? {};
     const str = (key: string) => (typeof a[key] === "string" && a[key] ? String(a[key]) : null);
     const country = supplierCountry(row.supplier, row.location, str("supplier_country"));
-    const statedCurrency = str("price_currency") ?? str("currency");
+    const web = isWebListing(row.evidence ?? {});
+    const ev = (key: string) => (typeof row.evidence?.[key] === "string" && row.evidence[key] ? String(row.evidence[key]) : null);
+    const statedCurrency = str("price_currency") ?? str("currency") ?? ev("currency");
     const kwhText = kwhFromText(`${row.model_detail ?? ""} ${row.description ?? ""}`);
     const kwh = row.capacity_kwh ?? (typeof a.energy_kwh === "number" ? a.energy_kwh : null)
       ?? (kwhText && "options" in kwhText && kwhText.options.length === 1 ? kwhText.options[0] : null);
@@ -146,7 +152,7 @@ export async function stockCandidates(): Promise<Candidate[]> {
       : /bess|container/.test(scope) ? "Systems" : "Packs";
     return {
       key: `stock:${row.id}`,
-      source: "stock" as SourceKind,
+      source: (web ? "web" : "stock") as SourceKind,
       title: [row.make, row.model, row.model_detail].filter(Boolean).join(" ") || row.description || row.part_number || "Stock row",
       seller: row.supplier,
       make: row.make,
@@ -168,8 +174,8 @@ export async function stockCandidates(): Promise<Candidate[]> {
       photos: row.photo_urls?.length ?? 0,
       tested: !!row.tested,
       verified: row.supplier_confirmed,
-      seen: row.updated_at,
-      href: "/?path=stock",
+      seen: (web ? ev("checked_at") : null) ?? row.updated_at,
+      href: (web ? ev("url") : null) ?? "/?path=stock",
       ai: null,
       alsoIn: [],
     };

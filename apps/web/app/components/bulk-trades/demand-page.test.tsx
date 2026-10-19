@@ -83,7 +83,7 @@ const sampleSupply: DemandSupply = {
       units: 3, kwh: { min: 58, max: 58 }, eurPerKwh: { min: 48, max: 52 }, totalEur: 8350, pricedUnits: 3, verdict: "exact", withPhotos: 1,
       items: [unit], more: 0 }],
     fill: { sellers: [{ name: "Example Breakers", units: 3 }], units: 3, need: 10, eurPerKwh: 48 } }],
-  totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, stock: 2000, trades: 20 }, hiddenCount: 0,
+  totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, stock: 2000, trades: 20, web: 0 }, market: { groups: [], totalGroups: 0, smallGroups: 0 }, hiddenCount: 0,
   shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, blocked: null, errors: [], fxNote: "Approximate FX",
 };
 
@@ -259,7 +259,7 @@ describe("Demand visualization", () => {
     await userEvent.click(await within(sheet).findByRole("button", { name: "Supply matching · 1" }));
     expect(within(sheet).getAllByText("Volkswagen ID.3 · 58 kWh").length).toBeGreaterThan(0);
     expect(within(sheet).getByText("3 / 10")).toBeInTheDocument();
-    expect(within(sheet).getByText(/once Ari's market finder is connected/)).toBeInTheDocument();
+    expect(within(sheet).getByText(/Ari's market finder will add sellers here/)).toBeInTheDocument();
     expect(
       within(sheet).getByRole("button", { name: "Copy ID" }),
     ).toBeInTheDocument();

@@ -39,6 +39,7 @@
 .units td.r, .units th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tag { display: inline-block; padding: 1px 5px; font-size: 10px; letter-spacing: 0.03em; border: 1px solid var(--bt-border); color: var(--bt-muted); white-space: nowrap; }
 .tag[data-source="marketplace"] { color: var(--bt-blue); border-color: var(--bt-blue-border); background: var(--bt-blue-bg); }
+.tag[data-source="web"] { color: var(--bt-amber); border-color: var(--bt-amber-border); background: var(--bt-amber-tint); }
 .tag[data-source="trade"], .tag[data-source="supply"] { color: var(--bt-purple); border-color: var(--bt-purple-border); background: var(--bt-purple-bg); }
 .iconButton { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; color: var(--bt-muted); border: 1px solid transparent; }
 .iconButton:hover { color: var(--bt-text); border-color: var(--bt-border); }
