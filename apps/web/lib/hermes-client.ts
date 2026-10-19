@@ -1,57 +1,12 @@
 import type { HermesConfig } from "./agent-backend";
 import { readActiveProfileName } from "./workspace";
-import type { ImageAttachment } from "./agent-runner";
 
 export type HermesChatStreamParams = {
   sessionKey: string;
   message: string;
   userId: string;
   config: HermesConfig;
-  /** Images attached to this turn (base64 content), forwarded as inline
-   *  `image_url` content parts so Hermes's multimodal normalizer picks
-   *  them up — same as `/v1/chat/completions` and `/v1/responses`. */
-  images?: ImageAttachment[];
 };
-
-/** Build the `message` field for the chat/stream request body. Plain
- *  string when there are no images (unchanged legacy shape); otherwise
- *  a content-parts array so the Hermes multimodal normalizer attaches
- *  the images to this turn instead of silently dropping them. */
-function buildHermesMessagePayload(
-  message: string,
-  images?: ImageAttachment[],
-): string | Array<Record<string, unknown>> {
-  if (!images || images.length === 0) {
-    return message;
-  }
-  const parts: Array<Record<string, unknown>> = [{ type: "text", text: message }];
-  for (const image of images) {
-    parts.push({
-      type: "image_url",
-      image_url: { url: `data:${image.mimeType};base64,${image.content}` },
-    });
-  }
-  return parts;
-}
-
-/** Hermes gateway error bodies are sometimes an HTML page (proxy/500
- *  overlay) rather than the documented JSON error shape. Surfacing that
- *  raw markup verbatim in the chat looks like a broken page and leaves
- *  the turn stuck, so collapse anything HTML-shaped to a short message
- *  instead of forwarding it to the client as-is. */
-function sanitizeUpstreamErrorBody(body: string, status: number): string {
-  const trimmed = body.trim();
-  const looksLikeHtml = /^<(!doctype|html)/i.test(trimmed) || /<\/html>\s*$/i.test(trimmed);
-  if (!trimmed || looksLikeHtml) {
-    return `Hermes backend returned an unexpected error (HTTP ${status}). Please try again.`;
-  }
-  try {
-    const parsed = JSON.parse(trimmed) as { error?: { message?: string }; message?: string };
-    return parsed.error?.message ?? parsed.message ?? trimmed;
-  } catch {
-    return trimmed;
-  }
-}
 
 export function encodeSse(data: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -82,7 +37,7 @@ function nextId(prefix: string): string {
 export async function createHermesChatStream(
   params: HermesChatStreamParams,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { sessionKey, message, config, images } = params;
+  const { sessionKey, message, config } = params;
 
   if (!config.apiKey) {
     return errorStream("Missing Hermes API key");
@@ -130,11 +85,7 @@ export async function createHermesChatStream(
             }
           }
           if (!alreadyExists) {
-            emit({
-              type: "error",
-              errorText: sanitizeUpstreamErrorBody(body, sessionRes.status),
-              status: sessionRes.status,
-            });
+            emit({ type: "error", errorText: body, status: sessionRes.status });
             controller.close();
             return;
           }
@@ -145,10 +96,7 @@ export async function createHermesChatStream(
           {
             method: "POST",
             headers: { ...headers, Accept: "text/event-stream" },
-            body: JSON.stringify({
-              message: buildHermesMessagePayload(message, images),
-              model: config.model,
-            }),
+            body: JSON.stringify({ message, model: config.model }),
           },
         );
 
@@ -156,7 +104,7 @@ export async function createHermesChatStream(
           const body = await eventsRes.text();
           emit({
             type: "error",
-            errorText: `Events stream failed: ${sanitizeUpstreamErrorBody(body, eventsRes.status)}`,
+            errorText: `Events stream failed: ${body}`,
             status: eventsRes.status,
           });
           controller.close();

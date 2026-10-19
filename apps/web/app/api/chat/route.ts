@@ -238,7 +238,6 @@ export async function POST(req: Request) {
 			message: agentMessage,
 			userId: user.id,
 			config: resolveHermesConfig(),
-			images: imageAttachments,
 		});
 
 		// Accumulate assistant text + parts for persistence.  The raw stream
