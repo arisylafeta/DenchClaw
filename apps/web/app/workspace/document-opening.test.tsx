@@ -147,7 +147,7 @@ describe.each([1440, 1024, 1023, 768, 767, 390])('document opening (width=%s)', 
       expect(panel.className).toContain('fixed inset-0')
       expect(panel.style.width).toBe('100%')
       expect(chat.getAttribute('aria-hidden')).toBe('true')
-      expect(screen.getByRole('button', { name: 'Back to chat' })).toBe(document.activeElement)
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Back to chat' })).toBe(document.activeElement))
     } else {
       expect(chat.getAttribute('aria-hidden')).toBe('false')
       expect(screen.queryByRole('button', { name: 'Back to chat' })).toBeNull()
