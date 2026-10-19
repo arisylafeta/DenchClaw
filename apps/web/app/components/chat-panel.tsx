@@ -1031,6 +1031,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// ── Stream-level error (empty response detection) ──
 		const [streamError, setStreamError] = useState<string | null>(null);
 		const [attachmentError, setAttachmentError] = useState<string | null>(null);
+		const attachmentScope = nativeConversationKey ?? subagentSessionKey ?? gatewaySessionKey ?? currentSessionId ?? initialSessionId ?? "new";
+		const attachmentScopeRef = useRef(0);
+		const attachmentAttemptRef = useRef(0);
+		useLayoutEffect(() => {
+			setAttachmentError(null);
+			// Leave completed attachments and the text draft alone. Pending uploads
+			// belong to the old conversation and must not land in the new one.
+			setAttachedFiles(prev => prev.filter(file => {
+				if (!file.uploading) return true;
+				if (file.localUrl) URL.revokeObjectURL(file.localUrl);
+				return false;
+			}));
+			return () => { attachmentScopeRef.current++; attachmentAttemptRef.current++; };
+		}, [attachmentScope]);
+		const dismissAttachmentError = useCallback(() => {
+			attachmentAttemptRef.current++;
+			setAttachmentError(null);
+		}, []);
 
 		// Track persisted messages to avoid double-saves
 		const savedMessageIdsRef = useRef<Set<string>>(new Set());
@@ -2082,6 +2100,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 				if (nativeGateway) {
 					// Gateway owns its aggregate queue; Stop interrupts the run AND clears that queue.
+					const scope = attachmentScopeRef.current;
+					const attempt = ++attachmentAttemptRef.current;
+					setAttachmentError(null);
 					try {
 						const images = await Promise.all(currentAttachments.filter(file => getFileCategory(file.name) === "image").map(async file => {
 							const response = await fetch(`/api/workspace/raw-file?path=${encodeURIComponent(file.path)}`);
@@ -2097,8 +2118,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							const extension = `.${file.name.split(".").pop()?.toLowerCase()}` as keyof typeof CHAT_IMAGE_EXTENSION_TO_MIME;
 							return { content, mimeType: CHAT_IMAGE_EXTENSION_TO_MIME[extension] ?? blob.type, fileName: file.name };
 						}));
+						if (scope !== attachmentScopeRef.current) return;
 						await nativeChat.send({ text: messageText, images: images.length ? images : undefined, context: workspaceContext, html });
-					} catch (cause) { setAttachmentError(cause instanceof Error ? cause.message : String(cause)); }
+					} catch (cause) {
+						if (scope === attachmentScopeRef.current && attempt === attachmentAttemptRef.current) {
+							setAttachmentError(cause instanceof Error ? cause.message : String(cause));
+						}
+					}
 				} else if (gatewaySessionKey) {
 					// The gateway flow is a separate transport (POST /api/gateway/chat
 					// sends `{message: string}` to an upstream gateway that owns
@@ -2493,12 +2519,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const uploadAndAttachNativeFiles = useCallback(
 			async (files: FileList) => {
 				if (pendingRequestRef.current) return;
+				const scope = attachmentScopeRef.current;
+				const attempt = ++attachmentAttemptRef.current;
+				const isCurrentScope = () => scope === attachmentScopeRef.current;
+				const canShowError = () => isCurrentScope() && attempt === attachmentAttemptRef.current;
 				setAttachmentError(null);
 				const {
 					files: preparedFiles,
 					errors: preparationErrors,
 				} = await prepareFilesForChatUpload(files);
-				if (preparationErrors.length > 0) {
+				if (!isCurrentScope()) return;
+				if (preparationErrors.length > 0 && canShowError()) {
 					const summary = preparationErrors.length === 1
 						? preparationErrors[0]
 						: `${preparationErrors.length} images couldn't be prepared for vision. ${preparationErrors[0]}`;
@@ -2542,6 +2573,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							return json.path;
 						})
 						.then((path) => {
+							if (!isCurrentScope()) return;
 							// Replace placeholder with the real uploaded file
 							setAttachedFiles((prev) =>
 								prev.map((f) =>
@@ -2552,8 +2584,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							);
 						})
 						.catch((cause: unknown) => {
+							if (!isCurrentScope()) return;
 							const detail = cause instanceof Error ? cause.message : "Upload failed. Please try again.";
-							setAttachmentError(`${file.name}: ${detail}`);
+							if (canShowError()) setAttachmentError(`${file.name}: ${detail}`);
 							setAttachedFiles((prev) => prev.filter((f) => f.id !== placeholderId));
 							if (localUrl) {URL.revokeObjectURL(localUrl);}
 						});
@@ -3134,7 +3167,20 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								y2="16"
 							/>
 						</svg>
-						<p className="text-xs">{error?.message ?? streamError ?? attachmentError}</p>
+						<div className="min-w-0 flex-1 text-xs break-words">
+							{(error || streamError) && <p>{error?.message ?? streamError}</p>}
+							{attachmentError && <p>{attachmentError}</p>}
+						</div>
+						{attachmentError && (
+							<button
+								type="button"
+								aria-label="Dismiss attachment error"
+								onClick={dismissAttachmentError}
+								className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] md:h-7 md:w-7"
+							>
+								<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+							</button>
+						)}
 					</div>
 				)}
 				</div>
