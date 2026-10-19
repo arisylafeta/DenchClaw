@@ -18,12 +18,12 @@ it('hides absent or invalid occupancy, never substitutes cumulative billed token
 })
 it('shows occupancy, a percentage tooltip and an estimated label', () => {
   render(<ContextUsage usage={{ context_used: 42100, context_max: 200000, context_estimated: true }} />)
-  expect(screen.getByText('42.1k / 200k')).toBeInTheDocument()
+  expect(screen.getByText('21%')).toBeInTheDocument()
   expect(screen.getByTitle('Estimated context: 42,100 / 200,000 tokens (21.1%)')).toHaveAttribute('tabindex', '0')
 })
 it('keeps zero visible and caps the bar without hiding overflow usage', () => {
   const { rerender, container } = render(<ContextUsage usage={{ context_used: 0, context_max: 200000 }} />)
-  expect(screen.getByText('0 / 200k')).toBeInTheDocument()
+  expect(screen.getByText('0%')).toBeInTheDocument()
   rerender(<ContextUsage usage={{ context_used: 220000, context_max: 200000 }} />)
   expect(screen.getByTitle('Context: 220,000 / 200,000 tokens (110.0%)')).toBeInTheDocument()
   expect(container.querySelector('[style]')).toHaveStyle({ width: '100%' })
