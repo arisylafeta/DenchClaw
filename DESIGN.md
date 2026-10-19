@@ -21,3 +21,10 @@ The sidebar helps Ari and Alex find the right conversation without mixing direct
 - Verify default, pinned, collapsed, filtered, loading, empty, error and recovery states using synthetic data only. Never browser-test production CRM data or send provider messages.
 
 Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes Desktop's source/platform sections and independent profile filter. DenchClaw currently has one configured backend, so do not invent additional remote gateway connections.
+
+## Responsive workspace panes
+
+- At 1024px and wider, preserve the resizable sidebar, chat and content columns and their saved desktop preferences.
+- From 768px through 1023px, content opens full-screen instead of squeezing beside chat. Back to chat, Escape or the content close control returns to chat; the chat header can reopen content.
+- Below 768px, show only one of sidebar, chat or content. Opening sidebar or content replaces the other; closing either returns to chat. Keep content tabs and chat/file deep links independent of pane visibility.
+- Reuse the `useIsMobile` matchMedia hook for both breakpoints. Full-screen pane switches do not animate, use labelled keyboard-focusable buttons, and hide underlying panes from keyboard and assistive technology.
