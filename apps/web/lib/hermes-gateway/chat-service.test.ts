@@ -48,6 +48,7 @@ class FakeSocket implements GatewaySocket {
     if (frame.method === "config.set" && this.failConfig) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     if (frame.method === "slash.exec" && this.slashErrorCode) { this.receive({ id: frame.id, error: { code: this.slashErrorCode, message: "slash refused" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
+      : frame.method === "session.usage" ? { context_used: 42100, context_max: 200000 }
       : frame.method === "subagent.list" ? { subagents: this.children }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
       : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { profile_name: "ari", lazy: false, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
@@ -86,6 +87,17 @@ beforeEach(async () => {
 });
 afterEach(() => { manager.shutdown(); vi.useRealTimers(); });
 describe("gateway chat service", () => {
+  it("reads context occupancy from the attached runtime without resuming idle history", async () => {
+    const idle = await service.openForView("ari", "one");
+    expect(idle.usage).toBeNull();
+    expect(socket.frames.some(frame => frame.method === "session.resume" || frame.method === "session.usage")).toBe(false);
+    socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
+    const live = await service.openForView("ari", "one");
+    expect(live.usage).toEqual({ context_used: 42100, context_max: 200000 });
+    expect(socket.frames.find(frame => frame.method === "session.usage")?.params).toEqual({ session_id: "runtime-one", profile: "ari" });
+    vi.spyOn(manager, "callSession").mockRejectedValueOnce(new Error("usage unsupported"));
+    expect((await service.openForView("ari", "one")).usage).toBeNull();
+  });
   it("includes already-running children from the verified runtime in the view snapshot", async () => {
     socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
     socket.snapshot = { running: true };

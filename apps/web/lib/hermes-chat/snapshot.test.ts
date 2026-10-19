@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
+import { applyLive, applySnapshot, initialReconcileState } from './reconcile'
 import { messageText, reduce, selectTools } from './reducer'
 const ctx = { now: () => 1000, id: () => 'live' }
 const snapshot = (extra: Partial<GatewayChatSnapshot> = {}): GatewayChatSnapshot => ({ key: 'k', conversation: { id: 's', profile: 'p', title: 'Chat', working: false }, messages: [], running: false, pendingRequests: [], generation: 2, seq: 10, ...extra })
 
 describe('snapshot hydration', () => {
+  it('hydrates, refreshes and clears context usage while retaining live usage events', () => {
+    const initial = initialReconcileState('s', 'k')
+    const usage = { context_used: 42100, context_max: 200000 }
+    let state = applySnapshot(initial, snapshot({ usage }), initial.loadToken, ctx)
+    expect(state.usage).toEqual(usage)
+    state = applyLive(state, [{ type: 'session.usage', generation: 2, seq: 11, payload: { usage: { ...usage, context_used: 50000 } } }], ctx)
+    expect(state.usage?.context_used).toBe(50000)
+    state = applySnapshot(state, snapshot({ seq: 12, usage: { ...usage, context_used: 60000 } }), state.loadToken, ctx)
+    expect(state.usage?.context_used).toBe(60000)
+    state = applySnapshot(state, snapshot({ seq: 13, usage: null }), state.loadToken, ctx)
+    expect(state.usage).toBeNull()
+  })
   it('hydrates ordered narration, reasoning, args and string results without flattening', () => {
     const state = stateFromSnapshot(snapshot({ messages: [{ id: '1', role: 'assistant', parts: [
       { type: 'text', text: 'Before' }, { type: 'reasoning', text: 'Why' },

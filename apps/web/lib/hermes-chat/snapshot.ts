@@ -20,6 +20,7 @@ export interface SnapshotInflight {
 }
 /** Wire contract shared by the endpoint and the native ChatPanel hook. */
 export interface GatewayChatSnapshot {
+  usage?: ChatState['usage']
   gateway?: 'connected' | 'unavailable'
   key: string
   subscriptionId?: string
@@ -76,6 +77,7 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
   const state: SnapshotChatState = { ...initialState(snapshot.conversation.id), storedSessionId: snapshot.conversation.id,
     generation: snapshot.generation, watermark: snapshot.seq ?? -1,
     messages: snapshot.messages.flatMap(row => { const message = rowMessage(row); return message ? [message] : [] }),
+    usage: snapshot.usage ?? null,
     busy: snapshot.running, live: snapshot.running, adoptedRunningTurn: snapshot.running }
   const inflight = snapshot.inflight
   if (inflight) {

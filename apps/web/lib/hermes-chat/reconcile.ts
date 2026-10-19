@@ -232,7 +232,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
       if (old.status === 'interrupted' || old.status === 'error') identity.status = old.status
     }
   }
-  base.usage = state.usage
+  base.usage = snapshot.usage === undefined ? state.usage : snapshot.usage
   base.subagents = state.subagents
 
   base.interrupted = !snapshot.running && state.interrupted

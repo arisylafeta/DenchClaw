@@ -248,6 +248,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
         update(previous => ({
           ...previous, model: typeof result.value === 'string' ? result.value : model, provider: provider ?? previous.provider,
         }))
+        resync()
       }
       return result
     },

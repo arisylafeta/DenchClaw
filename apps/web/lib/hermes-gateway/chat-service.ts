@@ -7,7 +7,7 @@ import { conversationKey, parseConversationKey, type HermesConversation, type He
 import { assertProfile, nativeFetch, readConversation, soloConversation } from "../hermes-native";
 import { getHermesGatewayManager, type HermesGatewayManager, type LiveSessionSnapshot, type PendingServerRequest } from "./manager";
 import { lookupMessageHtml, saveMessageHtml, type MessageHtmlRecord } from "./message-html-store";
-import type { SessionResumeResult } from "../../vendor/hermes-gateway/gateway-events";
+import type { SessionResumeResult, SessionUsageResult } from "../../vendor/hermes-gateway/gateway-events";
 import { JsonRpcGatewayError } from "../../vendor/hermes-gateway/json-rpc-channel";
 import { resolveAgentWorkspacePrefix } from "../workspace";
 
@@ -25,6 +25,7 @@ export interface GatewayChatSnapshot {
   pendingRequests: PendingServerRequest[];
   todo_state: SessionResumeResult["todo_state"];
   subagents?: LiveSessionSnapshot["subagents"];
+  usage?: SessionUsageResult | null;
   html: MessageHtmlRecord[];
   gateway: "connected" | "unavailable";
   /** Opaque cursor for GET conversations/[key]/history?before=...&limit=200. */
@@ -162,7 +163,12 @@ export class HermesChatService {
     const inflightRow = inflight?.user && [...messages].reverse().find(row => row.role === "user" && !row.pending && row.text === inflight.user);
     if (inflightRow) inflightRow.pending = "inflight";
     const page = this.pageMessages(messages, pageOptions ? Math.min(pageOptions.before, messages.length) : messages.length, pageOptions?.limit);
-    return { ...history, ...page, gateway, generation: replay.generation, seq: replay.seq,
+    // Usage is a read of an existing runtime, never a reason to resume an idle chat.
+    // Older gateways may not implement it; history must remain available.
+    const usage = gateway === "connected" && this.manager.session(retained)?.runtimeId
+      ? await this.manager.callSession(retained, "session.usage", { session_id: "" }).catch(() => null)
+      : null;
+    return { ...history, ...page, usage, gateway, generation: replay.generation, seq: replay.seq,
       running: Boolean(resume?.running), inflight, queued, subagents: resume?.subagents,
       pendingRequests: gateway === "connected" ? this.manager.pendingRequests(retained) : [], todo_state: resume?.todo_state,
       html: await lookupMessageHtml(profile, storedId) };

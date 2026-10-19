@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from
 import { Popover } from '@base-ui/react/popover'
 import { Brain, Check, ChevronDown, ChevronRight, Loader2, Search, Zap } from 'lucide-react'
 import type { NativeHermesChat } from '@/lib/hermes-chat/use-native-chat'
+import { ContextUsage } from './context-usage'
 import { ProviderIcon } from '../chat-model-selector'
 
 type Provider = { slug: string; name?: string; models: string[]; capabilities?: Record<string, { reasoning?: boolean; can_disable_reasoning?: boolean }> }
@@ -193,7 +194,8 @@ export function NativeModelControls({ conversationKey, chat, disabled = false }:
       <button type="button" className={QUIET_BUTTON} disabled={saving} onClick={() => setConfirmation(null)}>Cancel</button>
     </div>
   }
-  return <div className="flex min-w-0 items-center gap-0.5" aria-label="Session model settings">
+  return <div className="flex min-w-0 flex-wrap items-center gap-0.5" aria-label="Session model settings">
+    <ContextUsage usage={chat.connection === 'connected' ? chat.state.usage : null} />
     <ModelPicker options={options} model={model} provider={provider} busy={chat.state.busy} disabled={locked} saving={saving} error={error}
       onPick={(nextModel, nextProvider) => void changeModel(nextModel, nextProvider)} />
     <ThinkingPicker effort={effort} wire={chat.state.reasoningEffortWire} busy={chat.state.busy}
