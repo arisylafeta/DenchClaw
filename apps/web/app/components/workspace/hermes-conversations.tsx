@@ -74,11 +74,17 @@ export function useHermesConversations() {
   const newChat = useCallback((mode: NewChatMode = "solo") => setDialog(mode), []);
   const closeDialog = useCallback(() => setDialog(null), []);
   const clear = useCallback(() => setSelected(null), []);
+  const [pins, setPins] = useState<string[]>([]);
   const reload = useCallback(async () => {
     try {
       const data = await jsonResponse(await fetch("/api/hermes/conversations"));
       if (data.backend === "hermes") setListing(data);
       setError(null);
+      // Pins are per signed-in user on the server; a failed read keeps the last known set.
+      try {
+        const saved = await (await fetch("/api/hermes/pins")).json();
+        if (Array.isArray(saved?.pins)) setPins(saved.pins.filter((id: unknown) => typeof id === "string"));
+      } catch { /* Keep the previous pins. */ }
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load chats"); }
     finally { setReady(true); }
   }, []);
@@ -131,12 +137,42 @@ export function useHermesConversations() {
       return true;
     } catch (e) { setError(e instanceof Error ? e.message : "Could not rename chat"); return false; }
   };
+  const setPinned = useCallback(async (key: string, pinned: boolean) => {
+    const previous = pins;
+    setPins(pinned ? [...new Set([...previous, key])] : previous.filter((id) => id !== key));
+    try {
+      const response = await fetch("/api/hermes/pins", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, pinned }) });
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.pins)) throw new Error(data?.error === "chat_not_found" ? "That chat no longer exists" : "Could not update pin");
+      setPins(data.pins);
+    } catch (e) { setPins(previous); setError(e instanceof Error ? e.message : "Could not update pin"); }
+  }, [pins]);
+  // One-time move of browser-local pins (pre-server) into this user's server pins. Stale keys are skipped by the server.
+  const migrated = useRef(false);
+  useEffect(() => {
+    if (!ready || !listing || migrated.current) return;
+    migrated.current = true;
+    let local: string[] = [];
+    try { local = loadView().pins ?? []; } catch { /* Nothing to migrate. */ }
+    if (!local.length) return;
+    void (async () => {
+      for (const key of local) {
+        try { await fetch("/api/hermes/pins", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, pinned: true }) }); } catch { /* Skip; the next load retries. */ }
+      }
+      try {
+        const saved = await (await fetch("/api/hermes/pins")).json();
+        if (Array.isArray(saved?.pins)) setPins(saved.pins);
+        const view = loadView();
+        localStorage.setItem(VIEW_KEY, JSON.stringify({ ...view, pins: [] }));
+      } catch { /* Local pins stay until a later load succeeds. */ }
+    })();
+  }, [ready, listing]);
   const display = useCallback((row: HermesConversation) => messagingConversation(row) && Object.hasOwn(aliases, row.key) ? { ...row, title: aliases[row.key] } : row, [aliases]);
   const displayListing = useMemo(() => listing ? { ...listing, sessions: listing.sessions.map(display) } : null, [listing, display]);
   const displaySelected = useMemo(() => selected ? display(selected) : null, [selected, display]);
   return { enabled: listing?.backend === "hermes", ready, listing: displayListing, filter, setFilter: updateFilter, selected: displaySelected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    seen, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
+    seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; done means unseen output. */
@@ -184,10 +220,11 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
     setView(next);
     try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
   };
-  const result = applyChatView(rows, view, query);
-  const reorderMotion = useConversationReorderMotion(result.sections, JSON.stringify([view, query, chats.filter, chats.ready]));
+  const result = applyChatView(rows, { ...view, pins: chats.pins ?? [] }, query);
+  const reorderMotion = useConversationReorderMotion(result.sections, JSON.stringify([view, chats.pins, query, chats.filter, chats.ready]));
 
-  const togglePin = (key: string) => updateView({ ...view, pins: view.pins?.includes(key) ? view.pins.filter((id) => id !== key) : [...(view.pins ?? []), key] });
+  const serverPins = chats.pins ?? [];
+  const togglePin = (key: string) => void chats.setPinned(key, !serverPins.includes(key));
   const toggleSection = (key: string) => updateView({ ...view, collapsed: view.collapsed?.includes(key) ? view.collapsed.filter((id) => id !== key) : [...(view.collapsed ?? []), key] });
   return <motion.div layoutScroll className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-2 text-[var(--color-text)]" aria-label="Hermes conversations">
     <div className="flex items-center gap-1 pb-2">
@@ -233,7 +270,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
       </button></h3>
       {!view.collapsed?.includes(section.key) && section.rows.map((row) => {
         const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
-        const pinned = view.pins?.includes(row.key) ?? false;
+        const pinned = serverPins.includes(row.key);
         const PinIcon = pinned ? PinOff : Pin;
         return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
           <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
