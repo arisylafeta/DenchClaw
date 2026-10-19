@@ -179,7 +179,8 @@ function upsertTool(s: ChatState, p: EventPayload, complete: boolean, ctx: Reduc
 export function withNotice<T extends ChatState>(state: T, notice: Notice, ctx: ReducerContext): T {
   if (state.messages.some(row => row.notice && row.source === 'durable' &&
     ((notice.details && normalize(row.notice.details ?? messageText(row)) === normalize(notice.details)) || row.notice.text === notice.text))) return state
-  const old = notice.key ? state.messages.findLast(row => row.localNotice && row.notice?.key === notice.key) : undefined
+  const old = notice.key ? state.messages.findLast((row, index) => row.localNotice && row.notice?.key === notice.key &&
+    (!notice.key?.startsWith('status:') || index > lastUser(state)) && (!notice.key?.startsWith('slash:') || row.notice?.pending)) : undefined
   if (!old && state.messages.at(-1)?.notice?.text === notice.text) return state
   const row: ChatMessage = { id: old?.id ?? ctx.id(), role: 'assistant', segments: [], startedAt: old?.startedAt ?? ctx.now(), pending: false, localNotice: true, notice }
   return { ...state, messages: old ? state.messages.map(item => item.id === old.id ? row : item) : [...state.messages, row] }
@@ -267,7 +268,12 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     s.interrupted = p.status === 'interrupted'
     return s
   }
-  if (event.type === 'request.cancel') {
+  if (event.type === 'approval.cancelled') {
+    const ids = asRecord(p).request_ids
+    s.pendingRequests = s.pendingRequests.filter(r => r.kind !== 'approval' || (Array.isArray(ids) && !ids.includes(r.requestId ?? String(r.id)) && !ids.includes(String(r.id))))
+    s.needsInput = s.pendingRequests.length > 0; return s
+  }
+  if (event.type === 'request.cancel' || event.type === 'client.request.resolve') {
     s.pendingRequests = s.pendingRequests.filter(r => String(r.id) !== String(p.id ?? p.request_id) && r.requestId !== (p.id ?? p.request_id))
     s.needsInput = s.pendingRequests.length > 0; return s
   }

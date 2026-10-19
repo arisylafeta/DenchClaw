@@ -16,8 +16,8 @@ export function eventNotice(event: GatewayEvent, previousInfo?: Record<string, u
   if (event.type === 'session.info') {
     if (!previousInfo) return null
     const p = asRecord(event.payload)
-    const changes = ['model', 'branch', 'cwd'].filter(key => typeof p[key] === 'string' && previousInfo[key] !== undefined && p[key] !== previousInfo[key])
-    return changes.length ? { kind: changes.includes('model') ? 'model' : 'notification', text: clip(changes.map(key => `${key}: ${p[key]}`).join(', ')) } : null
+    const changes = ['model', 'branch', 'cwd'].filter(key => (typeof p[key] === 'string' || p[key] === null) && previousInfo[key] !== undefined && p[key] !== previousInfo[key])
+    return changes.length ? { kind: changes.includes('model') ? 'model' : 'notification', text: clip(changes.map(key => `${key}: ${p[key] ?? 'none'}`).join(', ')) } : null
   }
   const p = asRecord(event.payload)
   const type = event.type
@@ -29,7 +29,15 @@ export function eventNotice(event: GatewayEvent, previousInfo?: Record<string, u
   }
   const label = labels[type]
   if (!label) return null
-  const body = ['text', 'message', 'title', 'reason', 'detail', 'phase'].map(key => stringValue(p[key])).find(Boolean)
+  const formatters: Record<string, () => string> = {
+    'session.resume_progress': () => [p.phase, p.status, p.message].filter(value => typeof value === 'string' && value).join(': '),
+    'tool.output_risk': () => [p.name, p.risk, ...(Array.isArray(p.findings) ? p.findings : [])].filter(value => typeof value === 'string' && value).join('\n'),
+    'session.control.update': () => {
+      const control = asRecord(p.control)
+      return ['goal', 'loop', 'heartbeat'].map(key => `${key}: ${control[key] == null ? 'off' : typeof control[key] === 'string' ? control[key] : 'updated'}`).join(', ')
+    },
+  }
+  const body = formatters[type]?.() || ['text', 'message', 'title', 'reason', 'detail', 'phase'].map(key => stringValue(p[key])).find(Boolean)
   return { kind: type === 'background.complete' || type === 'btw.complete' ? 'delegation' : 'notification',
     text: clip(body ? `${label}: ${body}` : label),
     ...(body ? { details: body } : {}),

@@ -194,7 +194,9 @@ describe("process gateway manager", () => {
     const h = harness(); await start(h);
     const key = h.manager.retainSession("ari", "one", "runtime-one");
     const notices = vi.fn(); h.manager.subscribeNotices(notices);
+    const received = vi.fn(); h.manager.subscribe(key, received);
     h.sockets[0].receive({ method: "event", params: { type: "session.reclaimed", payload: { session_id: "runtime-one", stored_session_id: "one", reason: "ttl" } } });
+    expect(received).toHaveBeenCalledWith(expect.objectContaining({ type: 'session.reclaimed', session_id: 'runtime-one', payload: expect.objectContaining({ reason: 'ttl' }) }));
     expect(h.manager.session(key)?.runtimeId).toBeUndefined();
     expect(notices).toHaveBeenCalledWith({ type: "resync", key, reason: "session_reclaimed" });
     expect(h.sockets[0].frames.some(frame => frame.method === "session.resume")).toBe(false);

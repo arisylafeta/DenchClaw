@@ -47,7 +47,7 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 - Match the native model picker: borderless `@base-ui/react` popover above the composer, rounded neutral surface, compact system type, muted descriptions and a quiet hover/keyboard selection fill.
 - The composer itself is the slash search field; do not add a second search input. Show Session, Model, Tools, Skills and Plugins sections from Hermes metadata, with collapsible headings and one-line descriptions. Keep skills separate and hide terminal-only commands.
 - Keep focus in the composer while Arrow keys select, Tab completes, Enter runs and Escape dismisses. Argument completions replace only Hermes' indicated suffix.
-- Command output is a dismissible, bounded-height monospace surface above the composer, never a transcript bubble. Clear it on the next send or conversation switch.
+- Command results use the transcript's existing muted, icon-led notice line, not a box above the composer or a chat bubble. Show the command and a clipped summary; reveal full multiline output on demand. Errors use the error tone. Queued rewrite commands use the same row with Cancel, then update to the result or cancelled state. Preserve completed notices through history resync for the mounted conversation.
 - Fit a 390px viewport without horizontal overflow; preserve visible focus, readable descriptions and approximately 44px command-row targets.
 
 ## Narrow artifact and sidebar navigation

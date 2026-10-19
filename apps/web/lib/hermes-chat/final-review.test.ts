@@ -70,9 +70,11 @@ describe('payloadless Hermes contract frames', () => {
     if (type === 'message.complete' || type === 'error') expect(state.busy).toBe(false)
     if (type === 'approval.request' || type === 'clarify.request') expect(state.pendingRequests).toEqual([])
   })
-  it.each(ignoredContractEvents)('ignores unsupported real wire example: %s', type => {
+  it.each(ignoredContractEvents)('routes supplemental real wire example: %s', type => {
     const state = applySnapshot(applyLive(initial(), [{ type, seq: 1, payload: ignoredExamples[type] as EventPayload }], ctx), snapshot(), 0, ctx)
-    expect(state.messages).toEqual([])
+    const visible = ['notice', 'session.title', 'review.summary', 'tool.output_risk', 'session.resume_progress', 'session.reclaimed', 'approval.cancelled', 'session.control.update', 'billing.step_up.verification', 'background.complete', 'btw.complete'].includes(type)
+    if (visible) { expect(state.messages).toHaveLength(1); expect(state.messages[0].notice?.text).toBeTruthy() }
+    else expect(state.messages).toEqual([])
     expect(state.busy).toBe(false)
   })
   it.each(examples)('accepts real wire example: %s', (type, payload) => {

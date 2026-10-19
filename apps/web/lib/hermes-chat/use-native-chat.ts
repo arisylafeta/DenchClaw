@@ -4,7 +4,8 @@ import type { WorkspaceContext } from '../agent-message'
 import type { HermesConversation } from '../hermes-conversations'
 import { getHermesEventsClient, type ConnectionState } from './events-client'
 import { applyLive, applySnapshot, beginHydration, initialReconcileState, placeSteer, submitOptimistic, type ReconcileState } from './reconcile'
-import { messageText, reduce, type PendingRequest } from './reducer'
+import { messageText, reduce, withNotice, type PendingRequest } from './reducer'
+import type { Notice } from './notice'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 import type { SlashCompletion } from './slash-commands'
@@ -30,6 +31,7 @@ export interface NativeHermesChat {
   setReasoning(effort: string): Promise<Record<string, unknown>>
   setFast(enabled: boolean): Promise<Record<string, unknown>>
   completeSlash(text: string, signal?: AbortSignal): Promise<SlashCompletion>
+  addNotice(notice: Notice): void
   executeSlash(command: string): Promise<Record<string, unknown>>
   send(prompt: NativePrompt): Promise<void>
   interrupt(): Promise<void>
@@ -140,7 +142,8 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       }
       return result
     } catch (error) {
-      if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
+      // Slash errors have their own command-labelled transcript notice.
+      if (activeKey.current === key && action !== 'slash-execute') surface(error instanceof Error ? error.message : String(error))
       throw error
     }
   }, [conversationKey, enabled, surface, connection])
@@ -185,7 +188,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     const key = conversationKey
     await post(action, body)
     if (activeKey.current !== key) return
-    update(previous => ({ ...previous, ...reduce(previous, { type: 'request.cancel', payload: { id: String(request.id) } }, context) }))
+    update(previous => ({ ...previous, ...reduce(previous, { type: 'client.request.resolve', payload: { id: String(request.id) } }, context) }))
   }, [post, update, conversationKey])
   const html = mapMessageHtml(state.messages, htmlRows)
   for (const message of state.messages) {
@@ -216,6 +219,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
     } finally { historyLoading.current = false; setLoadingEarlier(false) }
   }
+  const addNotice = useCallback((notice: Notice) => update(previous => withNotice(previous, notice, context)), [update])
   // The transcript waits for history ordering, but the dock need not. Preview
   // buffered lifecycle frames with the real reducer without advancing the live
   // watermark or consuming the buffer before the snapshot arrives.
@@ -239,6 +243,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (!response.ok) { throw new Error(result.error || 'Command completion unavailable') }
       return result as SlashCompletion
     },
+    addNotice,
     executeSlash: async (command) => {
       const key = conversationKey
       const result = await post('slash-execute', { command })

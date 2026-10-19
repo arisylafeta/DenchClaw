@@ -395,6 +395,8 @@ export class HermesGatewayManager {
     if (event.type === "session.reclaimed") {
       const runtime = (event.payload as { session_id?: string } | undefined)?.session_id;
       for (const session of this.sessions.values()) if (runtime && session.runtimeId === runtime) {
+        const frame: GatewaySessionEvent = { ...event, session_id: runtime, seq: ++session.seq, generation: session.generation };
+        for (const handler of session.subscribers) { try { handler(frame); } catch { /* Isolate consumers. */ } }
         session.runtimeId = undefined; session.active = false; session.requests.clear(); session.children.clear();
         this.resync(session, "session_reclaimed");
       }

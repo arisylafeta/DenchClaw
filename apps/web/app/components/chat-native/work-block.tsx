@@ -32,8 +32,8 @@ export function displayTurns(messages: readonly ChatMessage[]): ChatMessage[] {
   const turns: ChatMessage[] = [];
   for (const message of messages) {
     const previous = turns.at(-1);
-    if (message.role !== "assistant") { turns.push(message); continue; }
-    if (previous?.role === "assistant") {
+    if (message.notice || message.role !== "assistant") { turns.push(message); continue; }
+    if (previous?.role === "assistant" && !previous.notice) {
       turns[turns.length - 1] = { ...previous, segments: [...previous.segments, ...message.segments], pending: message.pending, steerBoundary: message.steerBoundary, completedAt: message.completedAt,
         error: message.error ?? previous.error, error_surface: message.error_surface ?? previous.error_surface, partial: message.partial ?? previous.partial, status: message.status ?? previous.status };
       continue;

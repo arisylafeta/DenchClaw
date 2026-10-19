@@ -208,6 +208,56 @@ describe("phone composer readiness with the real TipTap editor", () => {
     expect(promptCalls()[0][0]).toBe(`${endpoint}/slash-execute`);
   });
 
+  it("keeps slash output in the transcript across resync and surfaces command errors", async () => {
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/slash-execute') ? Response.json({ output: 'Synthetic output\nFull second line' }) : Response.json({}));
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    const editor = await typeDraft('/help');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    const result = await screen.findByRole('button', { name: /Ran \/help/ });
+    expect(screen.queryByText('Command output')).toBeNull();
+    fireEvent.click(result);
+    expect(screen.getByText(/Full second line/, { selector: 'pre' })).toBeTruthy();
+    snapshot();
+    expect(screen.getByRole('button', { name: /Ran \/help/ })).toBeTruthy();
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/slash-execute') ? Response.json({ error: 'Synthetic command failure' }, { status: 400 }) : Response.json({}));
+    await typeDraft('/help');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByText(/Failed \/help/)).toBeTruthy());
+  });
+
+  it("queues rewrite commands in the transcript and cancels before idle", async () => {
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    FakeEventSource.instance.emit('gw', { key, type: 'message.start', session_id: 'phone-fixture', generation: 1, seq: 1 });
+    const editor = await typeDraft('/compress');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await screen.findByText(/Queued \/compress/);
+    expect(promptCalls()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel queued command' }));
+    expect(screen.getByText('Cancelled /compress')).toBeTruthy();
+    FakeEventSource.instance.emit('gw', { key, type: 'message.complete', session_id: 'phone-fixture', generation: 1, seq: 2, payload: { text: 'Finished' } });
+    await act(async () => {});
+    expect(promptCalls()).toHaveLength(0);
+  });
+
+  it("runs a queued rewrite once after idle and retains its result through hydration", async () => {
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/slash-execute') ? Response.json({ output: 'Compressed synthetic history' }) : Response.json({}));
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    FakeEventSource.instance.emit('gw', { key, type: 'message.start', session_id: 'phone-fixture', generation: 1, seq: 1 });
+    const editor = await typeDraft('/compress');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await screen.findByText(/Queued \/compress/);
+    FakeEventSource.instance.emit('gw', { key, type: 'message.complete', session_id: 'phone-fixture', generation: 1, seq: 2, payload: { text: 'Finished' } });
+    snapshot();
+    await screen.findByText(/Ran \/compress: Compressed synthetic history/);
+    snapshot();
+    expect(screen.getByText(/Ran \/compress: Compressed synthetic history/)).toBeTruthy();
+    expect(screen.queryByText(/Queued \/compress/)).toBeNull();
+    expect(promptCalls()).toHaveLength(1);
+  });
+
   it("tracks visible keyboard height and removes the listener on unmount", async () => {
     const viewport = new EventTarget() as EventTarget & { height: number; scale: number };
     viewport.height = 780; viewport.scale = 1;

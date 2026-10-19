@@ -10,6 +10,7 @@ export interface NativeTranscriptCallbacks {
   onSubagentTail(id: string): void | Promise<void>;
   onSubagentSteer(id: string, text: string): void | Promise<void>;
   onSubagentInterrupt(id: string): void | Promise<void>;
+  onCancelNotice?(): void;
   onRetry(): void | Promise<void>;
 }
 export interface NativeTranscriptProps {

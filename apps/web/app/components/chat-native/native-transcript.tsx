@@ -31,7 +31,7 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 }
 export function NativeTranscript({ state, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [] }: NativeTranscriptProps) {
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
-    {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
+    {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => {
         const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join(""));
         const queued = queuedMessageIds.includes(message.id);
