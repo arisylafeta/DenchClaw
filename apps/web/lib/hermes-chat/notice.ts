@@ -2,14 +2,14 @@
  * Hermes writes system events (finished background subagents, watcher pings, resumes, steers, model switches)
  * as `user` rows. They are not the user's words and must not render as the user's bubble.
  */
-export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model'
+export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model' | 'process'
 export interface Notice { kind: NoticeKind; text: string; details?: string }
 
 const KINDS: Record<string, NoticeKind> = {
-  async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model',
+  async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model', background_process: 'process',
 }
 const FALLBACK: Record<NoticeKind, string> = {
-  delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed',
+  delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update',
 }
 const clip = (text: string, max = 140) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line }
 const readMetadata = (value: unknown): Record<string, unknown> => {
@@ -22,13 +22,19 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   const text = row.text ?? ''
   const typed = row.displayKind ? KINDS[row.displayKind] : undefined
   const legacy = !typed && /^\[ASYNC DELEGATION BATCH COMPLETE/.test(text) ? 'delegation' : undefined
-  const kind = typed ?? legacy
+  const process = !typed && !legacy && /^\[IMPORTANT: Background process \S+/.test(text) ? 'process' as const : undefined
+  const kind = typed ?? legacy ?? process
   if (!kind) return null
   const display = typeof readMetadata(row.displayMetadata).display_text === 'string' ? String(readMetadata(row.displayMetadata).display_text) : ''
   let summary = display
   if (!summary && kind === 'delegation') {
     const task = /--- [^\n]*TASK \d+\/\d+: ([^\n]*?) \(status=(\w+)/.exec(text)
     if (task) summary = `Subagent task ${task[2] === 'completed' ? 'completed' : task[2]}: ${task[1]}`
+  }
+  if (!summary && kind === 'process') {
+    const head = /^\[IMPORTANT: Background process (\S+) ([^\n(]*?)(?: \(exit code (-?\d+)\))?\.?\n/.exec(text)
+    const command = /^Command: ([^\n]*)/m.exec(text)?.[1]
+    if (head) summary = `Background process ${head[2].trim()}${head[3] && head[3] !== '0' ? ` (exit ${head[3]})` : ''}${command ? `: ${command}` : ''}`
   }
   // A steer row's text is the user's own instruction: show it, not a generic label.
   if (kind === 'steer' && text.trim()) summary = `Steered: ${text}`

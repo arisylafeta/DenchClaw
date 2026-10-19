@@ -22,4 +22,9 @@ describe("noticeForRow", () => {
     expect(noticeForRow({ role: "assistant", displayKind: "steer", text: "x" })).toBeNull();
     expect(noticeForRow({ role: "user", displayKind: null, text: "hello" })).toBeNull();
   });
+  it("renders injected background-process completions as a notice, not a user bubble", () => {
+    const text = "[IMPORTANT: Background process proc_fc98601bfacf completed normally (exit code 0).\nCommand: cd /tmp/x && pnpm build\nOutput:\n\nDone]";
+    expect(noticeForRow({ role: "user", text })).toMatchObject({ kind: "process", text: "Background process completed normally: cd /tmp/x && pnpm build", details: text });
+    expect(noticeForRow({ role: "user", text: "see [IMPORTANT: Background process x" })).toBeNull();
+  });
 });
