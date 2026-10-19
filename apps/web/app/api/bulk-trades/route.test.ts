@@ -31,11 +31,11 @@ describe("bulk trades routes", () => {
   it("requires the Postgres backend and a signed-in user", async () => {
     delete process.env.CRM_DB_BACKEND;
     const { GET } = await import("./route");
-    expect((await GET()).status).toBe(503);
+    expect((await GET(new Request("http://localhost/api/bulk-trades"))).status).toBe(503);
 
     process.env.CRM_DB_BACKEND = "postgres";
     currentUser.mockResolvedValueOnce(null);
-    expect((await GET()).status).toBe(401);
+    expect((await GET(new Request("http://localhost/api/bulk-trades"))).status).toBe(401);
   });
 
   it("creates a trade as the signed-in user and rejects a missing title", async () => {

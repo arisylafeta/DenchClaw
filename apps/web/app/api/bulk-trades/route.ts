@@ -13,11 +13,11 @@ function postgresOnly(): Response | null {
 }
 
 /** `?inbox=1` returns only what the sheet header needs (owners, check status, possible trades), not every trade. */
-export async function GET(req?: Request) {
+export async function GET(req: Request) {
   const unavailable = postgresOnly();
   if (unavailable) return unavailable;
   if (!(await currentUser())) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const inboxOnly = !!req && new URL(req.url).searchParams.has("inbox");
+  const inboxOnly = new URL(req.url).searchParams.has("inbox");
   const [list, check, possible] = await Promise.all([
     inboxOnly ? listTradeOwners().then((owners) => ({ owners })) : listBulkTrades(), checkStatus(), possibleTrades()]);
   return Response.json({ ...list, check, possible });
