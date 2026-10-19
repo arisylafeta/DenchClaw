@@ -1,3 +1,20 @@
+/* Touch defaults: avatars stay visible; independent actions never intercept opening. */
+.conversationRow[data-selected="true"] { background: var(--color-surface-hover); }
+.conversationRow:has(:focus-visible) { outline: 1px solid var(--color-text-muted); outline-offset: -1px; }
+.rowAvatar { opacity: 1; }
+.rowPin, .rowRename { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .conversationRow:hover { background: var(--color-surface-hover); }
+  .rowPin { position: absolute; left: 0; opacity: 0; pointer-events: none; }
+  .rowRename { width: 28px; opacity: 0; }
+  .conversationRow:hover .rowPin,
+  .rowPin:focus-visible { opacity: 1; pointer-events: auto; }
+  .conversationRow:hover .rowAvatar,
+  .conversationRow:has(.rowPin:focus-visible) .rowAvatar { opacity: 0; }
+  .conversationRow:hover .rowRename,
+  .conversationRow:has(:focus-visible) .rowRename { opacity: 1; }
+}
+
 /* Sidebar-only overrides: do not alter the shared menu primitives. */
 .filterMenu.filterMenu {
   width: 216px;

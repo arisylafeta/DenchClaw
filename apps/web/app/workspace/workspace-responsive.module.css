@@ -1,0 +1,16 @@
+/* CSS protects the first server/client paint before matchMedia effects run. */
+@media (max-width: 767px) {
+  .desktopSidebar { display: none; }
+}
+@media (min-width: 1024px) {
+  .narrowNavigation { display: none; }
+}
+@media (max-width: 1023px) {
+  .contentPane[data-open="false"] { display: none; }
+  .contentPane {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+}

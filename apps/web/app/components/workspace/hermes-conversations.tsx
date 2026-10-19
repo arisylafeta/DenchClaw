@@ -232,11 +232,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
         const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
         const pinned = view.pins?.includes(row.key) ?? false;
         const PinIcon = pinned ? PinOff : Pin;
-        return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} className={`group relative flex min-w-0 items-center rounded-lg hover:bg-[var(--color-surface-hover)] focus-within:bg-[var(--color-surface-hover)] ${status === "running" ? styles.running : ""} ${chats.selected?.key === row.key ? "bg-[var(--color-surface-hover)]" : ""}`}>
-          <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2">
-            <span className="group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0">{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
-            <PinIcon size={15} aria-hidden="true" className="absolute opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100" />
-          </button>
+        return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
+          <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
           <div className="min-w-0 flex-1">
             {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
             <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
@@ -245,7 +242,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
             </button>}
           </div>
           <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
-          {renaming !== row.key && <button type="button" aria-label={`Rename ${row.title}`} title={messagingConversation(row) ? "Rename in this browser" : "Rename"} onClick={() => setRenaming(row.key)} className="flex h-11 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:w-11 [@media(hover:none)]:opacity-100 focus-visible:outline focus-visible:outline-2"><Pencil size={12} aria-hidden="true" /></button>}
+          <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className={`${styles.rowPin} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><PinIcon size={15} aria-hidden="true" /></button>
+          {renaming !== row.key && <button type="button" aria-label={`Rename ${row.title}`} title={messagingConversation(row) ? "Rename in this browser" : "Rename"} onClick={() => setRenaming(row.key)} className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><Pencil size={12} aria-hidden="true" /></button>}
         </motion.div>;
       })}
     </section>)}

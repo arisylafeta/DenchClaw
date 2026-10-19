@@ -43,6 +43,28 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("Hermes unified chat UI", () => {
+  it("opens once on touch and keeps selection separate from pinning, focus and hover", async () => {
+    const user = userEvent.setup(); render(<Harness />);
+    const open = await screen.findByRole("button", { name: "Open Alpha solo" });
+    const row = open.closest("[data-conversation-key]")!;
+    const avatar = within(row as HTMLElement).getByLabelText("Participants: Alpha");
+    const pin = screen.getByRole("button", { name: "Pin Alpha solo" });
+    expect(avatar.closest("button")).toBeNull();
+    expect(row.className).not.toMatch(/hover:bg|focus-within:bg/);
+    expect(avatar.parentElement!.className).not.toMatch(/opacity-0|hover/);
+    expect(pin.className).toContain("h-11 w-11");
+    fireEvent.mouseEnter(row);
+    pin.focus();
+    expect(row).toHaveAttribute("data-selected", "false");
+    await user.pointer([{ keys: '[TouchA>]', target: open }, { keys: '[/TouchA]' }]);
+    expect(open).toHaveAttribute("aria-current", "true");
+    expect(row).toHaveAttribute("data-selected", "true");
+    const requestCount = fetchMock.mock.calls.length;
+    await user.click(pin);
+    expect(screen.getByRole("button", { name: "Unpin Alpha solo" })).toHaveAttribute("aria-pressed", "true");
+    expect(fetchMock.mock.calls.length).toBe(requestCount);
+    expect(screen.getByRole("button", { name: "Open Alpha solo" })).toHaveAttribute("aria-current", "true");
+  });
   it("defaults to all chats, separates presence from working and keeps a selected group routed while the workspace picker filters", async () => {
     const user = userEvent.setup(); render(<Harness />);
     const list = await screen.findByLabelText("Hermes conversations");
