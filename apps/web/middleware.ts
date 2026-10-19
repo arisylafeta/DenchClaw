@@ -46,6 +46,16 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Next 15's Node middleware runner starts clone finalization without awaiting
+  // it. If an authenticated upload is still arriving, the route adapter sees
+  // the already-disturbed original Node stream and throws before POST runs.
+  // Drain only this authenticated upload's clone so finalization can replace
+  // the original body before the runner hands it to the route. The framework
+  // clone limit and the route's 25 MB file limit remain unchanged.
+  if (pathname === "/api/workspace/upload" && req.method === "POST") {
+    await req.arrayBuffer();
+  }
+
   const response = NextResponse.next();
   response.cookies.set(sessionCookie(token));
   response.headers.set("Cache-Control", "private, no-store");

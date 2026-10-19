@@ -5,10 +5,33 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
+const transport = vi.hoisted(() => ({ error: null as Error | null }));
+vi.mock("@ai-sdk/react", async importOriginal => {
+  const actual = await importOriginal<typeof import("@ai-sdk/react")>();
+  return { ...actual, useChat: (...args: Parameters<typeof actual.useChat>) => {
+    const chat = actual.useChat(...args);
+    return { ...chat, error: transport.error ?? chat.error };
+  } };
+});
 vi.mock("./tiptap/chat-editor", () => ({ ChatEditor: () => null }));
 vi.mock("./hero-suggestions", () => ({ HeroSuggestions: () => null }));
 vi.mock("./chat-voice-input-button", () => ({ ChatVoiceInputButton: () => null }));
 const key = conversationKey("solo", "png-fixture", "alpha");
+const otherKey = conversationKey("solo", "png-fixture", "beta");
+const fixturePng = () => new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="), c => c.charCodeAt(0))], "synthetic.png", { type: "image/png" });
+function pick(container: HTMLElement) {
+  fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [fixturePng()] } });
+}
+function snapshot(k = key) {
+  FakeEventSource.instance.emit("connection", { connectionId: "fixture" });
+  FakeEventSource.instance.emit("snapshot", { key: k, conversation: { id: "png-fixture", profile: k === key ? "alpha" : "beta", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (cause: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
 class FakeEventSource {
   static instance: FakeEventSource;
   listeners: Record<string, Array<(event: MessageEvent) => void>> = {};
@@ -19,6 +42,7 @@ class FakeEventSource {
   emit(type: string, data: unknown) { act(() => { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) } as MessageEvent); }); }
 }
 beforeEach(() => {
+  transport.error = null;
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   URL.createObjectURL = vi.fn(() => "blob:synthetic-png");
@@ -27,6 +51,123 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); getHermesEventsClient().close(); vi.unstubAllGlobals(); });
 describe("PNG file-picker ingestion", () => {
+  it("dismisses attachment errors without clearing an unrelated transport error", async () => {
+    transport.error = new Error("transport offline");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/workspace/upload" ? Response.json({ error: "upload refused" }, { status: 500 }) : Response.json({})));
+    const { container } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    pick(container);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("upload refused"));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss attachment error" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("transport offline");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("upload refused");
+    expect(screen.queryByRole("button", { name: "Dismiss attachment error" })).not.toBeInTheDocument();
+  });
+
+  it("does not resurrect a dismissed error when another file from the batch fails late", async () => {
+    const late = deferred<Response>();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/workspace/upload"
+      ? ++calls === 1 ? Response.json({ error: "first failure" }, { status: 500 }) : late.promise
+      : Response.json({})));
+    const { container } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [fixturePng(), fixturePng()] } });
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss attachment error" }));
+    await act(async () => late.reject(new Error("late failure")));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores image-read errors after moving to a different conversation", async () => {
+    const raw = deferred<Response>();
+    let reading = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/workspace/upload") return Response.json({ ok: true, path: "assets/synthetic.png" });
+      if (url.startsWith("/api/workspace/raw-file")) { reading = true; return raw.promise; }
+      return Response.json({});
+    }));
+    const ref = React.createRef<ChatPanelHandle>();
+    const { container, rerender } = render(<ChatPanel ref={ref} nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    pick(container);
+    await waitFor(() => expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" }));
+    let sending!: Promise<void>;
+    act(() => { sending = ref.current!.sendNewMessage("Inspect this"); });
+    await waitFor(() => expect(reading).toBe(true));
+    rerender(<ChatPanel ref={ref} nativeConversationKey={otherKey} initialSessionId={otherKey} nativeTransport="gateway" />);
+    snapshot(otherKey);
+    await act(async () => { raw.reject(new Error("old image read failed")); await sending; });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("dismisses an attachment failure without removing a successfully attached file", async () => {
+    let attempt = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/workspace/upload"
+      ? ++attempt === 1 ? Response.json({ ok: true, path: "assets/synthetic.png" }) : Response.json({ error: "disk full" }, { status: 500 })
+      : Response.json({})));
+    const { container } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    pick(container);
+    await waitFor(() => expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" }));
+    pick(container);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss attachment error" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" });
+  });
+
+  it("clears the old error at retry and ignores an older attempt's late failure", async () => {
+    const old = deferred<Response>();
+    const retry = deferred<Response>();
+    let attempt = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/workspace/upload"
+      ? ++attempt === 1 ? Response.json({ error: "first failure" }, { status: 500 }) : attempt === 2 ? old.promise : retry.promise
+      : Response.json({})));
+    const { container } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    pick(container);
+    await screen.findByRole("alert");
+    pick(container);
+    await waitFor(() => expect(attempt).toBe(2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    pick(container);
+    await waitFor(() => expect(attempt).toBe(3));
+    await act(async () => retry.resolve(Response.json({ ok: true, path: "assets/synthetic.png" })));
+    await act(async () => old.reject(new Error("late old failure")));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" });
+  });
+
+  it.each(["failure", "success"])("does not apply an old chat's pending upload %s in a different profile", async (result) => {
+    const upload = deferred<Response>();
+    let started = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/workspace/upload") { started = true; return upload.promise; }
+      return Response.json({});
+    }));
+    const { container, rerender } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    pick(container);
+    await waitFor(() => expect(started).toBe(true));
+    rerender(<ChatPanel nativeConversationKey={otherKey} initialSessionId={otherKey} nativeTransport="gateway" />);
+    snapshot(otherKey);
+    await act(async () => result === "failure" ? upload.reject(new Error("old profile failure")) : upload.resolve(Response.json({ ok: true, path: "assets/old.png" })));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByAltText("synthetic.png")).not.toBeInTheDocument();
+  });
+
+  it("clears an existing attachment error when changing conversations", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/workspace/upload" ? Response.json({ error: "old failure" }, { status: 500 }) : Response.json({})));
+    const { container, rerender } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    pick(container);
+    await screen.findByRole("alert");
+    rerender(<ChatPanel nativeConversationKey={otherKey} initialSessionId={otherKey} nativeTransport="gateway" />);
+    snapshot(otherKey);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("preserves valid PNG bytes and the exact profile in the send payload", async () => {
     const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     const png = Uint8Array.from(atob(base64), c => c.charCodeAt(0));

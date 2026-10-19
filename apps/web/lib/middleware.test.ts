@@ -162,6 +162,18 @@ describe("CRM auth middleware", () => {
     expect(refreshSessionTokenMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["https://evil.example", "synthetic", 403],
+    ["https://crm.rebattery.io", undefined, 401],
+    ["https://crm.rebattery.io", "expired", 401],
+  ])("rejects uploads before reading their body (%s, %s)", async (origin, token, status) => {
+    refreshSessionTokenMock.mockResolvedValue(null);
+    const req = request("/api/workspace/upload", { method: "POST", origin, token });
+    const read = vi.spyOn(req, "arrayBuffer");
+    expect((await middleware(req)).status).toBe(status);
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("allows same-origin protected mutations and protects logout", async () => {
     refreshSessionTokenMock.mockResolvedValue({ id: "user-1" });
     const mutation = await middleware(
