@@ -42,6 +42,27 @@ it("does not re-enter loading on SSE browse refresh and retains the listing on H
   unmount();
 });
 
+it("never shows the previous directory's files after a failed directory switch", async () => {
+  vi.stubGlobal("EventSource", FakeEventSource);
+  const entries = [{ name: "private-a.md", path: "/synthetic/a/private-a.md", type: "document" }];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.includes("%2Fb")) return Response.json({ error: "denied" }, { status: 403 });
+    if (url.includes("/browse")) return Response.json({ entries, parentDir: "/synthetic" });
+    return Response.json({ tree: [], exists: true, workspaceRoot: "/synthetic" });
+  }));
+  const { result, unmount } = renderHook(() => useWorkspaceWatcher());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  act(() => result.current.setBrowseDir("/synthetic/a"));
+  await waitFor(() => expect(result.current.tree).toEqual(entries));
+  act(() => result.current.setBrowseDir("/synthetic/b"));
+  expect(result.current.tree).toEqual([]);
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.browseDir).toBe("/synthetic/b");
+  expect(result.current.tree).toEqual([]);
+  expect(result.current.parentDir).toBeNull();
+  unmount();
+});
+
 it("forwards every exact path/root event and keeps workspace updates alive in browse mode", async () => {
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ tree: [], exists: true, workspaceRoot: "/synthetic/workspace", entries: [] })));

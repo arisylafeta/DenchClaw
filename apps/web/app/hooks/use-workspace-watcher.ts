@@ -138,7 +138,10 @@ export function useWorkspaceWatcher() {
     // Mark loading synchronously when entering a new browse directory so the
     // very first render after navigation already shows the loading state
     // (prevents a flash of stale tree data).
-    if (nextDir != null && nextDir !== browseDirRef.current) {
+    if (nextDir !== browseDirRef.current) {
+      ++fetchVersionRef.current;
+      setTree([]);
+      setParentDir(null);
       setLoading(true);
     }
     browseDirRef.current = nextDir;

@@ -541,7 +541,7 @@ function WorkspacePageInner() {
     activeWorkspace: workspaceName,
     showHidden, setShowHidden, subscribeChanges,
   } = useWorkspaceWatcher();
-  const { tree: crmNavigationTree, loading: crmNavigationLoading, refresh: refreshCrmNavigation } = useCrmNavigationTree();
+  const { tree: crmNavigationTree, loading: crmNavigationLoading, refresh: refreshCrmNavigation } = useCrmNavigationTree(workspaceName, subscribeChanges);
 
   // The multi-megabyte search index loads only when search is first used.
   // Filesystem events must not refetch it on every workspace-tree change.
@@ -1267,7 +1267,7 @@ function WorkspacePageInner() {
   }, [fetchGatewaySessions]);
 
   const handleWorkspaceChanged = useCallback(() => {
-    void refreshCrmNavigation();
+    void refreshCrmNavigation(true);
     resetWorkspaceStateOnSwitch({
       setBrowseDir,
       clearActiveContent: () => dispatch({ type: "activateContent", id: null }),

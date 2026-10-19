@@ -172,7 +172,7 @@ describe.each([1440, 1024, 1023, 768, 767, 390])('document opening (width=%s)', 
 })
 
 describe('independent CRM navigation', () => {
-  it.each([1440, 820, 390])('keeps canonical objects while browsing report folders and refreshing files or chats at %spx', async width => {
+  it.each([1440, 820, 390])('keeps canonical objects mounted when file-browser and chat readiness state changes at %spx', async width => {
     fixture.width = width
     const canonicalTree = [
       { name: 'bulk_trades', path: 'bulk_trades', type: 'object', icon: 'truck' },
