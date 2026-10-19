@@ -8,13 +8,14 @@ import { messageText, reduce, type PendingRequest } from './reducer'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 import type { SlashCompletion } from './slash-commands'
-import { initialSubagents } from './subagents'
+import { initialSubagents, isTerminalSubagent } from './subagents'
 
 export interface NativePrompt { text: string; context?: WorkspaceContext; html?: string }
 export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
 const context = { now: () => Date.now(), id: () => crypto.randomUUID() }
 export interface NativeHermesChat {
   state: ReconcileState
+  active: boolean
   subagents: ReconcileState['subagents']
   todos: ReconcileState['todos']
   tails: Record<string, string>
@@ -218,6 +219,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     return applyLive({ ...state, hydrating: false, generation }, events, context).subagents
   }, [state, conversationKey])
   return {
+    active: state.busy || visibleSubagents.items.some(child => !isTerminalSubagent(child.status)),
     state, subagents: visibleSubagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
     completeSlash: async (text, signal) => {
       if (!conversationKey || !enabled) { throw new Error('No active gateway conversation') }

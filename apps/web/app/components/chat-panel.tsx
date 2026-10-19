@@ -1300,13 +1300,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			return () => { alive = false; clearInterval(timer); };
 		}, [groupKey, loadingSession, currentSessionId, applyGroupDetail]);
 
-		const isStreaming = nativeGateway ? nativeChat.state.busy :
+		const isStreaming = nativeGateway ? nativeChat.active :
 			status === "streaming" ||
 			status === "submitted" ||
 			isReconnecting ||
 			groupWorking ||
 			groupSending;
-		const runtimeStatus = nativeGateway ? (nativeChat.state.busy ? "streaming" : "ready") : status;
+		const runtimeStatus = nativeGateway ? (nativeChat.active ? "streaming" : "ready") : status;
 		useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
 
 		// Keep cloud catalog + primary model in sync (hero, session switches, and after

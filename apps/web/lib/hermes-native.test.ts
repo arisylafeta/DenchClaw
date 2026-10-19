@@ -55,6 +55,20 @@ it("enriches only requested messaging IDs and uses the same name on deep-link re
     expect(detail.conversation.title).toBe("Harbour / #stock");
   } finally { lookup.mockImplementation(async () => ({})); }
 });
+it.each(['queued', 'running', 'completed', 'failed', 'interrupted'])("counts %s children in hidden solo chat working status", async status => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2020, 0, 1, 0, 0, ['queued', 'running', 'completed', 'failed', 'interrupted'].indexOf(status) * 10));
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "parent", title: "Solo" }] })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [{ id: "runtime", session_key: "parent", status: "idle" }] } as never);
+  const attach = vi.spyOn(manager, "attachLive").mockResolvedValue({ running: false, subagents: [{ subagent_id: "child", status }] } as never);
+  const requests = vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
+  try {
+    const result = await listConversations();
+    expect(result.sessions.find(row => row.profile === "alpha")?.working).toBe(['queued', 'running'].includes(status));
+  } finally { call.mockRestore(); attach.mockRestore(); requests.mockRestore(); }
+});
 it("uses gateway status for hidden solo chats with profile-colliding stored ids", async () => {
   vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
   vi.useFakeTimers({ toFake: ["Date"] });

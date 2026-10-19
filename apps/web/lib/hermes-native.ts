@@ -153,7 +153,7 @@ function gatewayListStatus(rows: HermesConversation[]) {
         const { row, live } = selected[next++];
         const retained = manager.retainSession(row.participants[0].profile, row.id);
         const snapshot = await manager.attachLive(retained, live.id);
-        if (snapshot) result[row.key] = { working: Boolean(snapshot.running || live.status !== "idle"), blocked: Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval) };
+        if (snapshot) result[row.key] = { working: Boolean(snapshot.running || live.status !== "idle" || snapshot.subagents?.some(child => !child.status || ["queued", "running"].includes(child.status))), blocked: Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval) };
         else if (result[row.key].working === null) result[row.key] = { working: false, blocked: false };
       }
     }));
