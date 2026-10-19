@@ -3,7 +3,7 @@
  * as `user` rows. They are not the user's words and must not render as the user's bubble.
  */
 export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model' | 'process'
-export interface Notice { kind: NoticeKind; text: string; details?: string }
+export interface Notice { kind: NoticeKind; text: string; details?: string; tone?: 'error'; key?: string; pending?: boolean }
 
 const KINDS: Record<string, NoticeKind> = {
   async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model', background_process: 'process',
