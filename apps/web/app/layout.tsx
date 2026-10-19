@@ -7,19 +7,33 @@ import { Toaster } from "./components/platform-admin/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CRM",
-  description:
-    "AI Workspace with an agent that connects to your apps and does the work for you",
+  title: "ReBattery CRM",
+  applicationName: "ReBattery CRM",
+  description: "ReBattery's private CRM and DenchClaw AI workspace.",
+  appleWebApp: {
+    capable: true,
+    title: "ReBattery CRM",
+    statusBarStyle: "default",
+  },
   icons: {
     icon: "/rebattery-favicon.svg",
-    apple: "/rebattery-workspace-icon.svg",
+    apple: {
+      url: "/apple-touch-icon.png",
+      sizes: "180x180",
+      type: "image/png",
+    },
   },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#222222" },
+  ],
 };
 
 export const dynamic = "force-dynamic";

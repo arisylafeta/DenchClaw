@@ -6,6 +6,12 @@ const PUBLIC_ASSETS = new Set([
   "/rebattery-favicon.svg",
   "/rebattery-logo-all-black.svg",
   "/rebattery-workspace-icon.svg",
+  // Public installation resources contain branding only, never workspace data.
+  "/manifest.webmanifest",
+  "/rebattery-app-192.png",
+  "/rebattery-app-512.png",
+  "/rebattery-app-maskable-512.png",
+  "/apple-touch-icon.png",
 ]);
 const PUBLIC_ROUTES = new Set([
   "/login",
