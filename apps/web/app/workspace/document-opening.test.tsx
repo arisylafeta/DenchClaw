@@ -242,11 +242,14 @@ describe('responsive pane navigation', () => {
   it.each([390, 820])('uses one chat header with navigation controls at %spx', width => {
     fixture.width = width
     const { container } = render(<WorkspaceShell />)
-    expect(container.querySelector('main')!.querySelectorAll('[data-chat-chrome]')).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: /^(Open|Close) sidebar$/ })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: 'Open files & content' })).toHaveLength(1)
+    const toggle = screen.getByRole('button', { name: /^(Open|Close) sidebar$/ })
+    const header = toggle.closest('header')
+    expect(header).not.toBeNull()
+    expect(container.querySelector('main')!.querySelectorAll('header')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Open files & content' }).closest('header')).toBe(header)
     expect(screen.getAllByTitle('New chat')).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: 'Open terminal' })).toHaveLength(1)
+    expect(screen.getByTitle('New chat').closest('header')).toBe(header)
+    expect(screen.getByRole('button', { name: 'Open terminal' }).closest('header')).toBe(header)
   })
   it.each([390, 768, 820, 1024])('preserves unsaved editor and draft nodes across return/reopen at %spx', async width => {
     fixture.width = width
