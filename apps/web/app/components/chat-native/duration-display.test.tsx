@@ -49,7 +49,7 @@ describe("thinking and subagent duration displays", () => {
   it.each(boundaries)("formats finished thinking and supplied subagent duration at %s seconds", (seconds, expected) => {
     const { container } = render(<><WorkBlock work={[reasoning(seconds + 0.9)]} live={false} /><Dock worker={agent({ status: "completed", durationSeconds: seconds + 0.9, updatedAt: start + 999_000 })} /></>);
     expect(screen.getByText(`Thought for ${expected}`)).toBeInTheDocument();
-    expect(container.querySelector('[data-segment="reasoning"]')).toHaveTextContent(`Thought${expected}`);
+    expect(container.querySelector('[data-segment="reasoning"]')).toHaveTextContent(`Plan${expected}`);
     const subagent = screen.getByRole("region", { name: "Subagent: Inspect timers" });
     expect(subagent.querySelector("summary")).toHaveTextContent(`Done · ${expected}`);
     act(() => { vi.advanceTimersByTime(5000); });

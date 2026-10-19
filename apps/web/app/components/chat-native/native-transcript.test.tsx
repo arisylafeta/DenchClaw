@@ -22,6 +22,62 @@ function clarify(questions: NonNullable<NonNullable<GatewayEvent["payload"]>["qu
 }
 
 describe("native transcript", () => {
+  it("streams exposed reasoning as muted plain text, separate from tools and the final answer", async () => {
+    const cb = callbacks();
+    let state = events([["message.start", {}], ["thinking.delta", { text: "Status only" }]]);
+    const { container, rerender } = render(<NativeTranscript state={state} callbacks={cb} />);
+    expect(screen.queryByText("Status only")).toBeNull();
+    state = events([["reasoning.delta", { text: "Check the schema.\n" }]], state);
+    rerender(<NativeTranscript state={state} callbacks={cb} />);
+    const text = screen.getByText("Check the schema.");
+    expect(text.parentElement).toHaveClass("text-[12px]", "text-[var(--color-text-muted)]");
+    expect(text).toHaveClass("whitespace-pre-wrap", "[overflow-wrap:anywhere]");
+    state = events([["reasoning.delta", { text: "Then compare callers. <script>not executable</script>" }]], state);
+    rerender(<NativeTranscript state={state} callbacks={cb} />);
+    expect(text.textContent).toBe("Check the schema.\nThen compare callers. <script>not executable</script>");
+    expect(container.querySelector("script")).toBeNull();
+    state = events([
+      ["tool.start", { tool_id: "read", name: "read_file", args: { path: "schema.sql" } }],
+      ["tool.complete", { tool_id: "read", name: "read_file", result: "ok" }],
+      ["message.delta", { text: "The final answer." }],
+      ["message.complete", { text: "The final answer.", status: "complete" }],
+    ], state);
+    rerender(<NativeTranscript state={state} callbacks={cb} />);
+    const work = container.querySelector<HTMLDetailsElement>('[data-segment="work"]')!;
+    expect(work).not.toHaveAttribute("open");
+    expect(within(work).getByText("Read schema.sql")).toBeInTheDocument();
+    expect(work.querySelectorAll('[data-segment="reasoning"]')).toHaveLength(1);
+    expect(work).not.toContainElement(screen.getByText("The final answer."));
+    fireEvent.click(work.querySelector("summary")!);
+    await waitFor(() => expect(work).toHaveAttribute("open"));
+    expect(text).toBeVisible();
+  });
+
+  it("retains non-empty reasoning from history with zero-duration timestamps", async () => {
+    const snapshot: GatewayChatSnapshot = {
+      key: "test", conversation: { id: "test", profile: "test", title: "Test", working: false },
+      messages: [{ id: "1", role: "assistant", timestamp: 1000, parts: [
+        { type: "reasoning", text: "A stored reasoning summary." },
+        { type: "text", text: "Stored answer." },
+      ] }], running: false, pendingRequests: [], generation: 1, seq: 1,
+    };
+    const state = stateFromSnapshot(snapshot, { now: () => 2000, id: () => "id" });
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    const work = container.querySelector<HTMLDetailsElement>('[data-segment="work"]')!;
+    expect(work).not.toHaveAttribute("open");
+    fireEvent.click(work.querySelector("summary")!);
+    await waitFor(() => expect(screen.getByText("A stored reasoning summary.")).toBeVisible());
+    expect(work).not.toContainElement(screen.getByText("Stored answer."));
+  });
+
+  it("does not invent reasoning when the provider supplies only an answer", () => {
+    const state = events([["message.start", {}], ["thinking.delta", { text: "Status only" }],
+      ["message.delta", { text: "Just an answer." }], ["message.complete", { text: "Just an answer." }]]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    expect(screen.getByText("Just an answer.")).toBeInTheDocument();
+    expect(container.querySelector('[data-segment="reasoning"]')).toBeNull();
+    expect(screen.queryByText("Status only")).toBeNull();
+  });
   it("preserves prose, reasoning, grouped tools, and interim ordering", () => {
     const state = events([
       ["client.submit", { text: "Research CRM", id: "user" }],

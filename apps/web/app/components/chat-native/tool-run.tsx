@@ -25,7 +25,7 @@ export type StepState = "running" | "done" | "error";
 export const chipClass = "min-w-0 rounded-md bg-[var(--color-surface-hover)] px-2 py-1 font-mono text-[10px] text-[var(--color-text-muted)]";
 /** One trace step in the rebattery-platform style: status node on a connector line, label, detail chip. No disclosure. */
 export function TraceStep({ state, icon, label, detail, body, muted, connectPrevious, connectNext, children, ...rest }: {
-  state: StepState; icon?: LucideIcon; label: string; detail?: React.ReactNode; body?: React.ReactNode; muted?: boolean; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
+  state: StepState; icon?: LucideIcon; label: React.ReactNode; detail?: React.ReactNode; body?: React.ReactNode; muted?: boolean; connectPrevious?: boolean; connectNext?: boolean; children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const Icon = state === "error" ? CircleAlert : state === "done" ? (icon ?? Brain) : null;
   const row = <>

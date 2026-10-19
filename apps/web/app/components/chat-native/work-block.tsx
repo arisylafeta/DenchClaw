@@ -58,7 +58,8 @@ export interface WorkBlockProps { work: readonly Segment[]; live: boolean; answe
 /** One continuous trace for the whole turn. Open while the agent works, folded into "Thought for Xs" afterwards. */
 export function WorkBlock({ work, live, answerStartedAt }: WorkBlockProps) {
   const disclosure = useLiveDisclosure(live);
-  const items = work.filter(segment => segment.type !== "reasoning" || live || (segment.completedAt ?? segment.startedAt) - segment.startedAt >= 1000);
+  // History has no per-part durations; text must remain readable after reload.
+  const items = work.filter(segment => segment.type !== "reasoning" || segment.text.trim() || live || (segment.completedAt ?? segment.startedAt) - segment.startedAt >= 1000);
   const started = work[0]?.startedAt ?? 0;
   const ended = Math.max(...work.map(segment => segment.completedAt ?? segment.startedAt), answerStartedAt ?? 0);
   const seconds = (ended - started) / 1000;
@@ -73,7 +74,7 @@ export function WorkBlock({ work, live, answerStartedAt }: WorkBlockProps) {
       {items.map((segment, index) => {
         const connect = { connectPrevious: index > 0, connectNext: index < items.length - 1 };
         if (segment.type === "tool") return <ToolRow key={segment.id} tool={segment} {...connect} />;
-        if (segment.type === "reasoning") return <TraceStep key={segment.id} data-segment="reasoning" state={live && segment.completedAt === undefined ? "running" : "done"} label="Thought" detail={segment.completedAt === undefined ? undefined : <Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} />} {...connect} />;
+        if (segment.type === "reasoning") return <TraceStep key={segment.id} data-segment="reasoning" state={live && segment.completedAt === undefined ? "running" : "done"} label={segment.text.trim() ? <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{segment.text}</span> : "Thought"} muted={Boolean(segment.text.trim())} detail={segment.completedAt === undefined ? undefined : <Elapsed startedAt={segment.startedAt} completedAt={segment.completedAt} />} {...connect} />;
         return <TraceStep key={segment.id} data-segment={segment.type} state="done" icon={MessageSquareText} label={clip(segment.text)} muted {...connect} />;
       })}
     </div>
