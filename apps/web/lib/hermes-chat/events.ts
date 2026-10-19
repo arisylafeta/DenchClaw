@@ -85,6 +85,7 @@ export interface EventPayload {
   provider?: string | null
   reasoning_effort?: string | null
   reasoning_effort_wire?: string | null
+  fast?: boolean | null
   request_id?: string
   questions?: ClarifyQuestion[]
   question?: string

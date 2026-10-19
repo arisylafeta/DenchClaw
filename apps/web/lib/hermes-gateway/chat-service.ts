@@ -286,25 +286,27 @@ export class HermesChatService {
     const identity = authorizeConversation(key);
     const retained = await this.liveControls(key);
     if (this.manager.session(retained)?.runtimeId) {
-      const [options, reasoning] = await Promise.all([
+      const [options, reasoning, fast] = await Promise.all([
         this.manager.callSession(retained, "model.options", { session_id: "" }),
         this.manager.callSession(retained, "config.get", { session_id: "", key: "reasoning" }),
+        this.manager.callSession(retained, "config.get", { session_id: "", key: "fast" }),
       ]);
-      return { ...options, reasoning };
+      return { ...options, reasoning, fast: fast.value === "fast" || fast.value === "ultrafast" };
     }
     // Idle chat: read the profile's catalogue without resuming it; the stored row names its model.
-    const [options, reasoning, stored] = await Promise.all([
+    const [options, reasoning, fast, stored] = await Promise.all([
       this.manager.call("model.options", { profile: identity.profile }),
       this.manager.call("config.get", { profile: identity.profile, key: "reasoning" }),
+      this.manager.call("config.get", { profile: identity.profile, key: "fast" }),
       nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, {}, [404]).then(response => response.ok ? response.json() : null),
     ]);
     const model = typeof stored?.session?.model === "string" && stored.session.model ? stored.session.model : options.model;
     const provider = model === options.model ? options.provider : options.providers.find(row => row.models?.includes(model))?.slug ?? options.provider;
-    return { ...options, model, provider, reasoning };
+    return { ...options, model, provider, reasoning, fast: fast.value === "fast" || fast.value === "ultrafast" };
   }
   async command(key: string, action: string, body: Record<string, unknown>) {
     const retained = await this.liveControls(key);
-    if (action === "model" || action === "reasoning") {
+    if (action === "model" || action === "reasoning" || action === "fast") {
       // A pick is an explicit intent to use this chat, so an idle chat resumes like a send would.
       await this.manager.serialize(retained, async () => {
         if (!this.manager.session(retained)?.runtimeId) {await this.manager.resumeSession(retained);}
@@ -319,6 +321,10 @@ export class HermesChatService {
       // Model persistence is controlled by CLI flags, not the RPC scope field. Pin both.
       const value = `${model}${provider ? ` --provider ${provider}` : ""} --session`;
       return this.manager.callSession(retained, "config.set", { session_id: "", key: "model", value, scope: "session", confirm_expensive_model: confirm ?? false });
+    }
+    if (action === "fast") {
+      if (typeof body.enabled !== "boolean") { throw new ChatServiceError(400, "invalid_fast"); }
+      return this.manager.callSession(retained, "config.set", { session_id: "", key: "fast", value: body.enabled ? "fast" : "normal", scope: "session" });
     }
     if (action === "reasoning") {
       const parsed = reasoningSelectionSchema.safeParse(body);

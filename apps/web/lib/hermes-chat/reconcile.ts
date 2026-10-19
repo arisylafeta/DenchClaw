@@ -139,6 +139,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   base.provider = state.provider
   base.reasoningEffort = state.reasoningEffort
   base.reasoningEffortWire = state.reasoningEffortWire
+  base.fast = state.fast
   // Keep durable rows which slid off the front of the server's newest window. A snapshot
   // without olderCursor is the whole transcript: nothing slid off, and an in-place compaction
   // re-IDs its head rows, so an old row id below the window's minimum is a superseded copy.

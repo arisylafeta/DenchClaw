@@ -25,6 +25,7 @@ export interface NativeHermesChat {
   loadEarlier(): Promise<void>
   setModel(model: string, provider?: string, confirm?: boolean): Promise<Record<string, unknown>>
   setReasoning(effort: string): Promise<Record<string, unknown>>
+  setFast(enabled: boolean): Promise<Record<string, unknown>>
   send(prompt: NativePrompt): Promise<void>
   interrupt(): Promise<void>
   steer(text: string): Promise<void>
@@ -219,6 +220,12 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
           ...previous, reasoningEffort: typeof result.value === 'string' ? result.value : effort, reasoningEffortWire: null,
         }))
       }
+      return result
+    },
+    setFast: async (enabled) => {
+      const key = conversationKey
+      const result = await post('fast', { enabled })
+      if (activeKey.current === key) { update(previous => ({ ...previous, fast: result.value === 'fast' || result.value === 'ultrafast' })) }
       return result
     },
     retry: async () => {
