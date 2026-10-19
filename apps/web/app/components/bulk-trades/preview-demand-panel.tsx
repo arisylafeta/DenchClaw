@@ -9,13 +9,13 @@ import type { BuyerProfile, BuyerEngagement } from "@/lib/buyer-profile";
 import type { DemandSupply, MarketLead, SupplyUnitView } from "@/lib/demand-supply-types";
 import { buildEntryLink } from "@/lib/workspace-links";
 import { ErrorText, request } from "./trade-ui";
-import { ChatHint, ScorePill, SheetTabs, rowFocus } from "./demand-page";
+import { ChatHint, SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
 import { DemandDialog } from "./demand-editor";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
-import styles from "./bulk-detail.module.css";
+import { DemandHeader } from "./demand-header";
 import css from "./demand-panel.module.css";
 
 type BuyerMail = { id: string; direction: "inbound" | "outbound"; subject: string | null; preview: string | null; from_email: string | null; at: string };
@@ -144,31 +144,6 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
   );
 }
 
-/** Where this demand stands, in four short facts. A gap says so; nothing is guessed. */
-function DemandSummary({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
-  const needs = [volumeLabel(demand) ?? demand.quantity, demand.product_family ?? supply?.requirement.pinned?.[0], demand.needed_by ? `by ${shortDate(demand.needed_by)}` : null].filter(Boolean).join(" · ");
-  const standing = demand.trades.length
-    ? `On ${demand.trades.length === 1 ? "a trade" : `${demand.trades.length} trades`}`
-    : demand.last_activity_at ? `Last activity ${ago(demand.last_activity_at)}` : "No activity recorded";
-  const waiting = demand.waiting ? `${demand.waiting.who ?? "The buyer"} wrote ${ago(demand.waiting.since)}; waiting for our reply` : "Nothing recorded";
-  const facts: [string, string, boolean][] = [
-    ["Needs", needs || "Not recorded", !needs],
-    ["Where it stands", standing, false],
-    ["Waiting for", waiting, !demand.waiting],
-    ["Next action", "None set", true],
-  ];
-  return (
-    <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
-      {facts.map(([label, value, quiet]) => (
-        <div key={label} className="min-w-0">
-          <dt className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{label}</dt>
-          <dd className="text-[13px] leading-snug" style={{ color: quiet ? "var(--bt-muted)" : demand.waiting && label === "Waiting for" ? "var(--bt-amber)" : undefined }}>{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 const TABS = ["Story", "Details", "Supply matching"];
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
@@ -237,22 +212,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
         <button type="button" onClick={onClose} className={`${rowFocus} hover:underline`}>← Trades Preview</button>
       </nav>
-      <header className={css.head}>
-        <div className="flex min-w-0 items-start gap-3">
-          <ScorePill score={demand.score} />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[22px] font-semibold leading-tight">{demand.buyer}</h2>
-              {demand.tier && <span className={styles.status}>{demand.tier}-tier</span>}
-              {demand.status !== "open" && <span className={styles.status}>{demand.status}</span>}
-              {demand.priority && <span className={styles.status} style={{ color: "var(--bt-green)" }}>Priority</span>}
-            </div>
-            <p className="mt-1 line-clamp-3 max-w-[80ch] text-[14px] leading-snug" title={demand.wants}>{demand.wants}</p>
-            <DemandSummary demand={demand} supply={supply} />
-          </div>
-        </div>
-        <div className={css.headActions}>{actions("Overview")}</div>
-      </header>
+      <DemandHeader demand={demand} supply={supply} actions={actions("Overview")} />
       <SheetTabs
         tabs={TABS}
         labels={{ "Supply matching": supply ? `Supply matching · ${supply.totalGroups}` : "Supply matching" }}

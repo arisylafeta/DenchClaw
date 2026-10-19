@@ -1,0 +1,77 @@
+"use client";
+
+import { useState } from "react";
+import type { Demand } from "@/lib/bulk-demand";
+import { demandDescription, demandStarted, demandTitle, demandValue } from "@/lib/bulk-demand-header";
+import type { DemandSupply } from "@/lib/demand-supply-types";
+import css from "./demand-header.module.css";
+
+/** A circular score: the ring fills with the score out of 100. */
+export function ScoreRing({ score }: { score: number | null }) {
+  const color = score == null ? "var(--bt-border-strong)" : score >= 80 ? "var(--bt-green)" : score >= 60 ? "var(--bt-amber)" : "var(--bt-muted)";
+  const radius = 29;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <div className={css.ring} role="img" aria-label={score == null ? "Not scored" : `Score ${score} out of 100`}>
+      <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+        <circle cx="32" cy="32" r={radius} fill="none" stroke="var(--bt-segment)" strokeWidth="5" />
+        {score != null && (
+          <circle cx="32" cy="32" r={radius} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={circumference * (1 - Math.min(Math.max(score, 0), 100) / 100)} />
+        )}
+      </svg>
+      <span className={css.ringNum} style={{ color: score == null ? "var(--bt-muted)" : undefined }}>{score ?? "–"}</span>
+    </div>
+  );
+}
+
+const agoDays = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+
+/** Score, headline, buyer, three facts and a short brief. A fact we don't have says so quietly. */
+export function DemandHeader({ demand, supply, actions }: { demand: Demand; supply: DemandSupply | null; actions: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const description = demandDescription(demand);
+  const long = description.split(/\s+/).length > 55;
+  const value = demandValue(demand);
+  const started = demandStarted(demand);
+  const sellers = [...new Set((supply?.shortlisted ?? []).map((unit) => unit.seller).filter(Boolean))] as string[];
+  return (
+    <header className={css.root}>
+      <ScoreRing score={demand.score} />
+      <div className="min-w-0">
+        <h2 className={css.title}>{demandTitle(demand)}</h2>
+        <div className={css.sub}>
+          <span>{demand.buyer}</span>
+          {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}
+          {demand.priority && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
+          {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
+        </div>
+      </div>
+      <div className={css.actions}>{actions}</div>
+      <dl className={css.facts}>
+        <div className={css.fact}>
+          <dt>Supplier</dt>
+          <dd className={sellers.length ? undefined : css.quiet}>
+            {sellers.length ? sellers.slice(0, 2).join(", ") : supply ? "Not chosen yet" : "…"}
+            {sellers.length > 2 && <small>+{sellers.length - 2} more</small>}
+          </dd>
+        </div>
+        <div className={css.fact}>
+          <dt>Started</dt>
+          <dd className={started ? undefined : css.quiet}>{started ?? "Not recorded"}</dd>
+        </div>
+        <div className={css.fact}>
+          <dt>Approx. value</dt>
+          <dd className={value ? undefined : css.quiet}>{value?.text ?? "Not priced"}{value?.note && <small>{value.note}</small>}</dd>
+        </div>
+      </dl>
+      {description && (
+        <div className={css.brief} data-open={open}>
+          <p>{description}</p>
+          {long && <button type="button" className={css.more} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
+        </div>
+      )}
+      {demand.waiting && <p className={css.waiting}>{demand.waiting.who ?? "The buyer"} wrote {agoDays(demand.waiting.since) <= 0 ? "today" : `${agoDays(demand.waiting.since)}d ago`} and is waiting for our reply.</p>}
+    </header>
+  );
+}

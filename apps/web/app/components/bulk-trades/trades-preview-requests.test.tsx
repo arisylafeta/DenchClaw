@@ -67,7 +67,10 @@ describe("Trades Preview loading", () => {
     window.history.replaceState(null, "", "/?path=%7Etrades-preview&demand=d1");
     const TradesPreviewView = await freshView();
     render(<TradesPreviewView />);
-    expect(await screen.findByRole("heading", { name: "Green Voltage" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "12 × Ioniq packs" })).toBeInTheDocument();
+    expect(screen.getByText("Green Voltage")).toBeInTheDocument();
+    expect(screen.getByText("Supplier")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Not scored" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Story" })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByRole("region", { name: "Story" })).toBeInTheDocument();
     expect(calls.filter((url) => url === "/api/bulk-trades/demand")).toHaveLength(1);
