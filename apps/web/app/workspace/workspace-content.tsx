@@ -97,8 +97,8 @@ import {
 import { UnicodeSpinner } from "../components/unicode-spinner";
 import { ToastProvider } from "../components/workspace/toast";
 import { ChatSessionsSidebar, type SidebarGatewaySession } from "../components/workspace/chat-sessions-sidebar";
-import { useHermesConversations, HermesConversationList, HermesConversationPanel, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
-import { ChatListSkeleton, ChatPaneSkeleton } from "../components/chat-loading-skeleton";
+import { useHermesConversations, HermesConversationList, HermesNewChatDialog, type HermesChatsController } from "../components/workspace/hermes-conversations";
+import { ChatListSkeleton } from "../components/chat-loading-skeleton";
 import { GroupBadge } from "../components/workspace/group-chat";
 import { automation, parseConversationKey } from "@/lib/hermes-conversations";
 import { RightPanel } from "../components/workspace/right-panel";
@@ -120,6 +120,7 @@ import { mergeNewlySeenColumns } from "./object-view-column-discovery";
 import { resetWorkspaceStateOnSwitch } from "./workspace-switch";
 import { contentUsesFullView, type WorkspacePanelLayout } from "./content-layout";
 import { useContentFullView } from "./use-content-full-view";
+import responsiveStyles from "./workspace-responsive.module.css";
 // Note: TabBar (the chrome-tabs strip used by the legacy single-strip layout)
 // is no longer used here — the v3 layout has separate inline strips for
 // chats and content. Keep the file for components that may still mount it.
@@ -642,7 +643,15 @@ function WorkspacePageInner() {
   // Tabs state — single source of truth for content + chat tabs.
   // Replaces the older tabState/activePath/content/activeContentTabId quartet
   // which raced each other across effects. See `apps/web/lib/workspace-tabs.ts`.
-  const [tabsState, dispatch] = useReducer(workspaceTabsReducer, EMPTY_TABS_STATE);
+  const [tabsState, dispatch] = useReducer(workspaceTabsReducer, EMPTY_TABS_STATE, (empty) => {
+    const url = parseUrlState(searchParams);
+    if (!url.chat) return ensureChatPresent(empty);
+    const tab = url.subagent
+      ? createSubagentChatTab({ sessionKey: url.subagent, parentSessionId: url.chat, title: "Subagent" })
+      : createSessionChatTab({ sessionId: url.chat });
+    return workspaceTabsReducer(empty, { type: "openChat", tab });
+  });
+  const bootstrapChatId = useRef(tabsState.activeChatId);
   const tabsStateRef = useRef<WorkspaceTabsState>(EMPTY_TABS_STATE);
   useEffect(() => {
     tabsStateRef.current = tabsState;
@@ -651,6 +660,7 @@ function WorkspacePageInner() {
   // Track which workspace we loaded tabs for, so we reload if the workspace switches
   // and don't save until we've loaded first.
   const tabLoadedForWorkspace = useRef<string | null>(null);
+  const firstTabRestore = useRef(true);
 
   // Load tabs from localStorage once workspace name is known
   useEffect(() => {
@@ -660,7 +670,13 @@ function WorkspacePageInner() {
     const loaded = loadTabsState(key);
     // v3 invariant: at least one chat tab must exist so the center never goes
     // blank — even when localStorage only stored file/CRM tabs.
-    dispatch({ type: "replace", state: ensureChatPresent(loaded) });
+    // Keep the first editable scaffold mounted while workspace/backend identity loads.
+    const scaffold = firstTabRestore.current ? tabsStateRef.current.chatTabs.find((tab) => tab.id === bootstrapChatId.current) : undefined;
+    firstTabRestore.current = false;
+    const restored = scaffold && !loaded.chatTabs.some((tab) => tab.id === scaffold.id)
+      ? { ...loaded, chatTabs: [...loaded.chatTabs, scaffold], activeChatId: parseUrlState(searchParams).chat ? scaffold.id : loaded.activeChatId ?? scaffold.id }
+      : loaded;
+    dispatch({ type: "replace", state: ensureChatPresent(restored) });
     setChatRuntimeSnapshots({});
   }, [workspaceName]);
 
@@ -2603,7 +2619,7 @@ function WorkspacePageInner() {
         <div
           aria-hidden={isNarrow && narrowContentOpen}
           inert={isNarrow && narrowContentOpen ? true : undefined}
-          className="sidebar-animate flex shrink-0 flex-col relative z-10 overflow-hidden"
+          className={`${responsiveStyles.desktopSidebar} sidebar-animate flex shrink-0 flex-col relative z-10 overflow-hidden`}
           style={{
             width: leftSidebarCollapsed ? 0 : leftSidebarWidth,
             minWidth: leftSidebarCollapsed ? 0 : leftSidebarWidth,
@@ -2656,21 +2672,23 @@ function WorkspacePageInner() {
         inert={chatHidden ? true : undefined}
       >
         {/* Narrow-screen navigation also stays available on the empty chat screen. */}
-        {isNarrow && (
+        {(
           <div
-            className="px-2 py-1.5 border-b flex-shrink-0 flex items-center gap-1.5"
+            className={`${responsiveStyles.narrowNavigation} px-2 py-1.5 border-b flex-shrink-0 flex items-center gap-1.5`}
             style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
           >
             <button
               type="button"
               onClick={() => isMobile ? setNarrowPane("sidebar") : setLeftSidebarCollapsed((collapsed) => !collapsed)}
-              aria-label="Open sidebar"
+              aria-label={isMobile || leftSidebarCollapsed ? "Open sidebar" : "Close sidebar"}
+              aria-expanded={isMobile ? sidebarOpen : !leftSidebarCollapsed}
+              aria-controls="workspace-sidebar"
               className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0 focus-visible:outline focus-visible:outline-2"
               style={{ color: "var(--color-text-muted)" }}
               title="Open sidebar"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="4" x2="20" y1="12" y2="12" /><line x1="4" x2="20" y1="6" y2="6" /><line x1="4" x2="20" y1="18" y2="18" />
+                <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />
               </svg>
             </button>
             <div className="flex-1 min-w-0 text-sm font-medium truncate" style={{ color: "var(--color-text)" }}>
@@ -2692,7 +2710,7 @@ function WorkspacePageInner() {
               <button
                 type="button"
                 onClick={() => setTerminalOpen((v) => !v)}
-                className="p-1.5 rounded-lg flex-shrink-0"
+                className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0"
                 style={{ color: terminalOpen ? "var(--color-text)" : "var(--color-text-muted)", background: terminalOpen ? "var(--color-surface-hover)" : "transparent" }}
                 title="Terminal"
               >
@@ -2703,7 +2721,7 @@ function WorkspacePageInner() {
               <button
                 type="button"
                 onClick={() => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab()}
-                className="p-1.5 rounded-lg flex-shrink-0"
+                className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0"
                 style={{ color: "var(--color-text-muted)" }}
                 title="New chat"
               >
@@ -2717,22 +2735,21 @@ function WorkspacePageInner() {
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
-          {chatPaneLoading && <ChatPaneSkeleton />}
-          {!chatPaneLoading && hermesChats.enabled && !hermesChats.selected && <HermesConversationPanel chats={hermesChats} />}
+          {/* The real composer stays mounted while only its transcript loads. */}
           {hermesChats.enabled && <HermesNewChatDialog chats={hermesChats} />}
           {mainChatTabs.map((tab) => {
             let nativeKey: string | undefined;
             if (hermesChats.enabled) {
               try { if (tab.sessionId) { parseConversationKey(tab.sessionId); nativeKey = tab.sessionId; } } catch { /* Legacy tabs are not native Hermes sessions. */ }
-              if (!nativeKey) return null;
+              // Preserve the draft editor while native identity is unresolved.
             }
             const groupRow = nativeKey ? hermesChats.listing?.sessions.find((row) => row.key === nativeKey && row.kind === "group") : undefined;
             const isGateway = tab.variant === "gateway";
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
               : null;
-            // Before the backend is known the draft tab would flash the home screen; keep it mounted but hidden.
-            const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || hermesChats.selected?.key === nativeKey) && !(chatPaneLoading && !hermesChats.enabled);
+            // Backend identification must not replace or hide the editable draft.
+            const isVisible = tab.id === visibleMainChatTabId;
             const showLeftToggle = !isNarrow && leftSidebarCollapsed;
             const showRightToggle = !isNarrow && rightPanelCollapsed;
             const headerLeftSlot = showLeftToggle ? (
@@ -2797,6 +2814,7 @@ function WorkspacePageInner() {
                 className={isVisible ? "flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" : "hidden"}
               >
                 <ChatPanel
+                  initializing={chatPaneLoading || (!hermesChats.listing && !!hermesChats.error) || (hermesChats.enabled && !nativeKey)}
                   nativeConversationKey={nativeKey}
                   headerBadge={groupRow ? <GroupBadge row={groupRow} /> : undefined}
                   ref={(handle) => setMainChatPanelRef(tab.id, handle)}
@@ -2844,12 +2862,13 @@ function WorkspacePageInner() {
       </main>
 
       {/* ── Right panel ── */}
-      {(!isNarrow || narrowContentOpen) && (
+      {(
         <aside
           aria-label="Files and content"
-          aria-hidden={!isNarrow && rightPanelCollapsed}
-          inert={!isNarrow && rightPanelCollapsed ? true : undefined}
-          className={isNarrow ? "fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden" : `sidebar-animate flex-shrink-0 min-h-0 flex flex-col relative ${rightPanelCollapsed ? "overflow-hidden" : "border-l overflow-hidden"}`}
+          data-open={narrowContentOpen}
+          aria-hidden={isNarrow ? !narrowContentOpen : rightPanelCollapsed}
+          inert={(isNarrow ? !narrowContentOpen : rightPanelCollapsed) ? true : undefined}
+          className={`${responsiveStyles.contentPane} ${isNarrow ? `${narrowContentOpen ? "flex" : "hidden"} fixed inset-0 z-50 min-h-0 flex-col overflow-hidden` : `sidebar-animate flex-shrink-0 min-h-0 flex flex-col relative ${rightPanelCollapsed ? "overflow-hidden" : "border-l overflow-hidden"}`}`}
           style={{
             width: isNarrow ? "100%" : effectiveRightPanelWidth,
             minWidth: isNarrow ? 0 : effectiveRightPanelWidth,
@@ -2859,13 +2878,14 @@ function WorkspacePageInner() {
           }}
         >
           {isNarrow && (
-            <div className="flex shrink-0 items-center border-b px-2" style={{ borderColor: "var(--color-border)" }}>
+            <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2" style={{ borderColor: "var(--color-border)" }}>
               <button type="button" onClick={showChat} aria-label="Back to chat" className="min-h-11 rounded-md px-3 text-sm focus-visible:outline focus-visible:outline-2" style={{ color: "var(--color-text)" }}>
                 Back to chat
               </button>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium" title={activeContentTab?.title}>{activeContentTab?.title || "Files & content"}</span>
             </div>
           )}
-          <div className="flex h-full min-h-0 flex-col relative overflow-hidden" style={{ width: isNarrow ? "100%" : renderedRightPanelWidth, minWidth: isNarrow ? 0 : renderedRightPanelWidth }}>
+          <div className="flex flex-1 min-h-0 flex-col relative overflow-hidden" style={{ width: isNarrow ? "100%" : renderedRightPanelWidth, minWidth: isNarrow ? 0 : renderedRightPanelWidth }}>
             {!isNarrow && <ResizeHandle
               mode="right"
               containerRef={layoutRef}
@@ -2879,6 +2899,7 @@ function WorkspacePageInner() {
                 subscribeChanges={subscribeChanges}
                 tabsState={tabsState}
                 activeContentTab={activeContentTab}
+                narrow={isNarrow}
                 chatPanelCollapsed={!isNarrow && chatPanelCollapsed}
                 fileTreeCollapsed={fileTreeCollapsed}
                 enhancedTree={enhancedTree}

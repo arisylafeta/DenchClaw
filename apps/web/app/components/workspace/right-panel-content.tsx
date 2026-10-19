@@ -17,7 +17,7 @@
  * the active tab.
  */
 
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -51,6 +51,8 @@ export type EntryModalState = {
 };
 
 export type RightPanelContentProps = {
+  /** Narrow panes show files or content, never cramped side-by-side columns. */
+  narrow?: boolean;
   /** Source-of-truth tabs state. */
   tabsState: WorkspaceTabsState;
   subscribeChanges?: SubscribeWorkspaceChanges;
@@ -126,6 +128,7 @@ export type RightPanelContentProps = {
 export function RightPanelContent(props: RightPanelContentProps) {
   const {
     tabsState,
+    narrow = false,
     activeContentTab,
     chatPanelCollapsed,
     fileTreeCollapsed,
@@ -177,35 +180,52 @@ export function RightPanelContent(props: RightPanelContentProps) {
   }, [refreshActive, onRefreshActiveChange]);
 
   const activePath = activeContentTab?.path ?? null;
+  const [narrowFilesOpen, setNarrowFilesOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const filesFocusPending = useRef(false);
+  const showFiles = narrow ? !activeContentTab || narrowFilesOpen : !fileTreeCollapsed;
+  useEffect(() => {
+    if (!narrow || !filesFocusPending.current) return;
+    filesFocusPending.current = false;
+    panelRef.current?.querySelector<HTMLButtonElement>(showFiles ? '[title="Hide files (⌘E)"]' : '[title="Show files (⌘E)"]')?.focus();
+  }, [narrow, showFiles]);
+  const hideFiles = () => {
+    filesFocusPending.current = narrow && !!activeContentTab;
+    if (!narrow) onSetFileTreeCollapsed(true);
+    else if (!activeContentTab) onShowChat();
+    else setNarrowFilesOpen(false);
+  };
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
-      {!fileTreeCollapsed && (
+    <div ref={panelRef} className="flex h-full min-h-0 min-w-0 overflow-hidden">
+      {showFiles && (
         <FileTreeColumn
+          narrow={narrow}
           enhancedTree={enhancedTree}
           activePath={activePath}
           effectiveParentDir={effectiveParentDir}
           browseDir={browseDir}
           workspaceRoot={workspaceRoot}
           fileSearchFn={fileSearchFn}
-          onTreeNodeSelect={onTreeNodeSelect}
+          onTreeNodeSelect={(node) => { onTreeNodeSelect(node); if (node.type !== "folder") { filesFocusPending.current = narrow; setNarrowFilesOpen(false); } }}
           onTreeRefresh={onTreeRefresh}
           onTreeNavigateUp={onTreeNavigateUp}
           onTreeExternalDrop={onTreeExternalDrop}
-          onTreeFileSearchSelect={onTreeFileSearchSelect}
+          onTreeFileSearchSelect={onTreeFileSearchSelect ? (item) => { onTreeFileSearchSelect(item); filesFocusPending.current = narrow; setNarrowFilesOpen(false); } : undefined}
           onTreeGoHome={onTreeGoHome}
-          onCollapse={() => onSetFileTreeCollapsed(true)}
+          onCollapse={hideFiles}
         />
       )}
 
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+      <div aria-hidden={narrow && showFiles} inert={narrow && showFiles ? true : undefined} className={`${narrow && showFiles ? "hidden" : "flex"} flex-1 flex-col min-h-0 min-w-0 overflow-hidden`}>
         <ContentTabStrip
+          narrow={narrow}
           tabs={tabsState.contentTabs}
           activeContentId={tabsState.activeContentId}
           chatPanelCollapsed={chatPanelCollapsed}
-          fileTreeCollapsed={fileTreeCollapsed}
+          fileTreeCollapsed={!showFiles}
           onShowChat={onShowChat}
-          onShowFileTree={() => onSetFileTreeCollapsed(false)}
+          onShowFileTree={() => { if (narrow) { filesFocusPending.current = true; setNarrowFilesOpen(true); } else onSetFileTreeCollapsed(false); }}
           onCollapseRightPanel={() => onSetRightPanelCollapsed(true)}
           onActivate={onActivateContent}
           onClose={onCloseContent}
@@ -278,6 +298,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
 // ---------------------------------------------------------------------------
 
 type FileTreeColumnProps = {
+  narrow?: boolean;
   enhancedTree: TreeNode[];
   activePath: string | null;
   effectiveParentDir: string | null;
@@ -296,6 +317,7 @@ type FileTreeColumnProps = {
 const FILE_TREE_WIDTH = 240;
 
 function FileTreeColumn({
+  narrow = false,
   enhancedTree,
   activePath,
   effectiveParentDir,
@@ -312,10 +334,10 @@ function FileTreeColumn({
 }: FileTreeColumnProps) {
   return (
     <div
-      className="flex flex-col min-h-0 shrink-0 border-r overflow-hidden"
+      className={`flex flex-col min-h-0 shrink-0 border-r overflow-hidden ${narrow ? "flex-1" : ""}`}
       style={{
-        width: FILE_TREE_WIDTH,
-        minWidth: FILE_TREE_WIDTH,
+        width: narrow ? "100%" : FILE_TREE_WIDTH,
+        minWidth: narrow ? 0 : FILE_TREE_WIDTH,
         borderColor: "var(--color-border)",
       }}
     >
@@ -327,7 +349,7 @@ function FileTreeColumn({
           <button
             type="button"
             onClick={onCollapse}
-            className="p-1 rounded-md cursor-pointer shrink-0"
+            className={`${narrow ? "min-h-11 min-w-11" : ""} p-1 rounded-md cursor-pointer shrink-0 focus-visible:outline focus-visible:outline-2`}
             style={{ color: "var(--color-text-muted)" }}
             title="Hide files (⌘E)"
             onMouseEnter={(e) => {
@@ -427,6 +449,7 @@ function FileTreeColumn({
 // ---------------------------------------------------------------------------
 
 type ContentTabStripProps = {
+  narrow?: boolean;
   tabs: ContentTab[];
   activeContentId: string | null;
   chatPanelCollapsed: boolean;
@@ -442,6 +465,7 @@ type ContentTabStripProps = {
 };
 
 function ContentTabStrip({
+  narrow = false,
   tabs,
   activeContentId,
   chatPanelCollapsed,
@@ -465,10 +489,10 @@ function ContentTabStrip({
 
   return (
     <div
-      className="flex items-center h-10 shrink-0 border-b min-w-0"
+      className={`flex items-center ${narrow ? "min-h-11" : "h-10"} shrink-0 border-b min-w-0`}
       style={{ borderColor: "var(--color-border)" }}
     >
-      <button
+      {!narrow && <button
         type="button"
         onClick={onCollapseRightPanel}
         className="p-1.5 ml-2 rounded-md cursor-pointer shrink-0"
@@ -496,14 +520,14 @@ function ContentTabStrip({
           <rect width="18" height="18" x="3" y="3" rx="2" />
           <path d="M15 3v18" />
         </svg>
-      </button>
+      </button>}
       <div className="no-scrollbar flex-1 flex items-center gap-1 px-2 min-w-0 h-full overflow-x-auto">
         {chatPanelCollapsed && (
           <button
             id="workspace-show-chat"
             type="button"
             onClick={onShowChat}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer shrink-0 text-[12px] font-medium"
+            className={`${narrow ? "min-h-11 min-w-11" : ""} flex items-center justify-center gap-1.5 px-2 py-1 rounded-md cursor-pointer shrink-0 text-[12px] font-medium focus-visible:outline focus-visible:outline-2`}
             style={{ color: "var(--color-text-muted)" }}
             title="Show chat"
             onMouseEnter={(e) => {
@@ -533,7 +557,7 @@ function ContentTabStrip({
           <button
             type="button"
             onClick={onShowFileTree}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer shrink-0 text-[12px] font-medium"
+            className={`${narrow ? "min-h-11 min-w-11" : ""} flex items-center justify-center gap-1.5 px-2 py-1 rounded-md cursor-pointer shrink-0 text-[12px] font-medium focus-visible:outline focus-visible:outline-2`}
             style={{ color: "var(--color-text-muted)" }}
             title="Show files (⌘E)"
             onMouseEnter={(e) => {
@@ -556,7 +580,7 @@ function ContentTabStrip({
             >
               <path d="M4 4h5l2 2h9a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
             </svg>
-            <span className="sr-only">Files</span>
+            <span className={narrow ? "" : "sr-only"}>Files</span>
           </button>
         )}
         {tabs.map((tab, tabIdx) => {
@@ -574,7 +598,9 @@ function ContentTabStrip({
                   <button
                     type="button"
                     onClick={() => onActivate(tab.id)}
-                    className="flex items-center gap-1.5 pl-2 pr-1 py-1 text-[12px] font-medium transition-colors cursor-pointer"
+                    aria-current={isActive ? "page" : undefined}
+                    aria-label={`Open ${tab.title}`}
+                    className={`${narrow ? "min-h-11" : ""} flex items-center gap-1.5 pl-2 pr-1 py-1 text-[12px] font-medium transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2`}
                     style={{
                       color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
                       fontStyle: tab.preview ? "italic" : "normal",
@@ -589,7 +615,8 @@ function ContentTabStrip({
                   <button
                     type="button"
                     onClick={(e) => handleClose(e, tab.id)}
-                    className="p-0.5 rounded-md mr-0.5 cursor-pointer"
+                    aria-label={`Close ${tab.title}`}
+                    className={`${narrow ? "min-h-11 min-w-11 flex items-center justify-center" : ""} p-0.5 rounded-md mr-0.5 cursor-pointer focus-visible:outline focus-visible:outline-2`}
                     style={{ color: "var(--color-text-muted)" }}
                     title="Close tab"
                     onMouseEnter={(e) => {

@@ -36,3 +36,12 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 - Keep focus in the composer while Arrow keys select, Tab completes, Enter runs and Escape dismisses. Argument completions replace only Hermes' indicated suffix.
 - Command output is a dismissible, bounded-height monospace surface above the composer, never a transcript bubble. Clear it on the next send or conversation switch.
 - Fit a 390px viewport without horizontal overflow; preserve visible focus, readable descriptions and approximately 44px command-row targets.
+
+## Narrow artifact and sidebar navigation
+
+- Before matchMedia hydration, CSS must hide desktop sidebar chrome below 768px. The initial chat uses the actual editable composer, not an input-shaped skeleton.
+- Keep artifact editor/cache owners mounted when returning to chat. Hide and inert inactive panes; navigation visibility must not discard drafts or dirty editor state.
+- Below 1024px, Files and the artifact use the full content width separately. Keep Back to chat and the current artifact title in a normal-flow header with safe-area padding; do not float controls over documents.
+- The sidebar uses the existing outlined panel toggle icon with an expanded state, never Back. Back to chat is reserved for artifact return.
+- Touch conversation rows retain avatars and separate visible 44px pin/rename actions. Only selection receives the selected fill. Avatar-to-pin overlays and row hover fill require both hover capability and a fine pointer; keyboard feedback uses focus-visible.
+- Content tabs scroll horizontally inside their bounded strip, expose full accessible titles and labelled close controls, and use 44px targets in narrow panes. Preserve desktop sizing and saved layout preferences.

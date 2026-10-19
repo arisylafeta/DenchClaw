@@ -83,6 +83,46 @@ function SyntheticEditor({ body }: { body: string }) {
   return <><input aria-label="document" value={text} onChange={event => { setText(event.target.value); setDirty(true); }} /><button onClick={() => setDirty(false)}>Saved clean</button></>;
 }
 
+it("keeps the narrow artifact editor mounted while Files occupies the full pane", async () => {
+  const tab: ContentTab = { ...activeTab, id: "report.md", path: "report.md", title: "A very long synthetic artifact title for tablet and phone", kind: "document" };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: "original", type: "markdown" })));
+  const view = render(cloneElement(rightPanelElement(null), {
+    narrow: true,
+    activeContentTab: tab,
+    tabsState: { ...tabsState, contentTabs: [tab], activeContentId: tab.id },
+    workspaceRoot: "/synthetic/workspace",
+    onTreeFileSearchSelect: vi.fn(),
+    renderContent: (content: import("../../workspace/content-state").ContentState) => content.kind === "document" ? <SyntheticEditor body={content.data.content} /> : <div>Loading</div>,
+  }));
+  const editor = await screen.findByRole("textbox", { name: "document" });
+  fireEvent.change(editor, { target: { value: "unsaved narrow document" } });
+  const active = screen.getByRole("button", { name: `Open ${tab.title}` });
+  expect(active).toHaveAttribute("aria-current", "page");
+  expect(active.className).toContain("min-h-11");
+  const close = screen.getByRole("button", { name: `Close ${tab.title}` });
+  expect(close.className).toContain("min-h-11 min-w-11");
+  expect(active.closest(".overflow-x-auto")).toBeTruthy();
+  fireEvent.click(screen.getByTitle("Show files (⌘E)"));
+  expect(editor.closest(".hidden")).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: "document", hidden: true })).toBe(editor);
+  const hideFiles = screen.getByTitle("Hide files (⌘E)");
+  expect(hideFiles).toBe(document.activeElement);
+  expect(hideFiles.closest('[style*="width: 100%"]')).toBeTruthy();
+  fireEvent.click(hideFiles);
+  expect(screen.getByTitle("Show files (⌘E)")).toBe(document.activeElement);
+  expect(screen.getByRole("textbox", { name: "document" })).toBe(editor);
+  expect(editor).toHaveValue("unsaved narrow document");
+  // Switching responsive chrome never changes identity or the editor/cache owner.
+  view.rerender(cloneElement(rightPanelElement(null), {
+    narrow: false, activeContentTab: tab,
+    tabsState: { ...tabsState, contentTabs: [tab], activeContentId: tab.id },
+    workspaceRoot: "/synthetic/workspace",
+    renderContent: (content: import("../../workspace/content-state").ContentState) => content.kind === "document" ? <SyntheticEditor body={content.data.content} /> : <div>Loading</div>,
+  }));
+  expect(screen.getByRole("textbox", { name: "document" })).toBe(editor);
+  expect(editor).toHaveValue("unsaved narrow document");
+});
+
 it("routes SSE into clean editor reload, preserves dirty input, and clears the pending notice after save", async () => {
   const tab: ContentTab = { ...activeTab, id: "report.md", path: "report.md", title: "report.md", kind: "document" };
   let listener: ((event: WorkspaceFileChange) => void) | undefined;

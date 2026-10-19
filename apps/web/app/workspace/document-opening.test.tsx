@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ComponentProps } from 'react'
+import { useState, type ComponentProps } from 'react'
 import type { RightPanelContent } from '../components/workspace/right-panel-content'
 
 const fixture = vi.hoisted(() => ({
   width: 1440,
   params: new URLSearchParams(),
+  ready: true, enabled: false,
   router: { push: vi.fn(), replace: vi.fn() },
   tree: [{ path: 'reports/sample.docx', name: 'sample.docx', type: 'file' }],
 }))
@@ -21,7 +22,7 @@ function resizeViewport(width: number) {
 }
 const watcher = {
   tree: fixture.tree, loading: false, exists: true, workspaceRoot: '/synthetic',
-  activeWorkspace: 'synthetic', browseDir: null, parentDir: null,
+  activeWorkspace: 'synthetic' as string | null, browseDir: null, parentDir: null,
   refresh: noop, reconnect: noop, setBrowseDir: noop, setShowHidden: noop,
   subscribeChanges: () => noop,
 }
@@ -32,23 +33,30 @@ vi.mock('next/dynamic', () => ({ default: () => () => null }))
 vi.mock('../hooks/use-workspace-watcher', () => ({ useWorkspaceWatcher: () => watcher }))
 vi.mock('@/lib/search-index', () => ({ useSearchIndex: () => ({ search: noop }) }))
 vi.mock('../components/workspace/hermes-conversations', () => ({
-  useHermesConversations: () => ({ enabled: false, ready: true }),
+  useHermesConversations: () => ({ enabled: fixture.enabled, ready: fixture.ready, listing: fixture.enabled ? { sessions: [] } : null, newChat: () => {}, clear: () => {}, selectKey: async () => false }),
   HermesConversationList: () => null, HermesConversationPanel: () => null,
   HermesNewChatDialog: () => null,
 }))
 vi.mock('../components/workspace/toast', () => ({ ToastProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../components/chat-panel', () => ({
-  ChatPanel: ({ headerLeftSlot, headerRightSlot }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode }) => <>{headerLeftSlot}{headerRightSlot}<a href="/?path=reports%2Fsample.docx">Open generated document</a></>,
+  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean }) => {
+    const [draft, setDraft] = useState('')
+    return <>{headerLeftSlot}{headerRightSlot}<textarea aria-label="Draft" value={draft} onChange={e => setDraft(e.target.value)} /><button disabled={initializing}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
+  },
 }))
 // Keep the real shell, URL/link handlers, resolver, reducer and panel containers.
 // Editors/data views are unrelated to visibility; expose their received tab identity
 // and close control so assertions observe the actual desktop width/mobile drawer.
 vi.mock('../components/workspace/right-panel-content', () => ({
-  RightPanelContent: (props: ComponentProps<typeof RightPanelContent>) => <section data-testid="panel-content">
+  RightPanelContent: (props: ComponentProps<typeof RightPanelContent>) => {
+    const [text, setText] = useState('')
+    return <section data-testid="panel-content">
+    <textarea aria-label="Unsaved artifact" value={text} onChange={e => setText(e.target.value)} />
     <span data-testid="active-path">{props.activeContentTab?.path}</span>
     <span data-testid="tab-count">{props.tabsState.contentTabs.length}</span>
     <button onClick={() => props.onSetRightPanelCollapsed(true)}>Close document panel</button>
-  </section>,
+  </section>
+  },
 }))
 vi.mock('../components/workspace/workspace-sidebar', () => ({
   WorkspaceSidebar: ({ mobile, onClose, onSelect }: { mobile?: boolean; onClose?: () => void; onSelect: (node: typeof fixture.tree[number]) => void }) => <nav aria-label={mobile ? 'Mobile sidebar' : 'Desktop sidebar'}>
@@ -94,6 +102,8 @@ const { WorkspaceShell } = await import('./workspace-content')
 
 beforeEach(() => {
   fixture.width = 1440
+  watcher.activeWorkspace = 'synthetic'
+  fixture.ready = true; fixture.enabled = false
   mediaListeners.clear()
   fixture.params = new URLSearchParams()
   fixture.router.push.mockClear()
@@ -112,7 +122,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function panelIsOpen(container: HTMLElement) {
-  if (fixture.width < 1024) return container.querySelector('aside[aria-label="Files and content"]') !== null
+  if (fixture.width < 1024) return container.querySelector('aside[aria-label="Files and content"]')?.getAttribute('aria-hidden') === 'false'
   const panel = screen.getByTestId('panel-content').closest('aside')!
   return parseFloat(panel.style.width) > 0
 }
@@ -154,7 +164,70 @@ describe.each([1440, 1024, 1023, 768, 767, 390])('document opening (width=%s)', 
   })
 })
 
+describe('initial composer shell', () => {
+  it('preserves text typed before the workspace identity arrives', async () => {
+    fixture.width = 390; fixture.ready = false
+    watcher.activeWorkspace = null
+    const view = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Typed before workspace identity' } })
+    watcher.activeWorkspace = 'synthetic'
+    view.rerender(<WorkspaceShell />)
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
+    expect(draft).toHaveValue('Typed before workspace identity')
+  })
+  it('keeps the exact deep-link editor node while native key lookup settles', async () => {
+    fixture.width = 390; fixture.ready = false
+    fixture.params = new URLSearchParams('chat=solo%3Aalpha%3Anative-session')
+    window.history.replaceState(null, '', `/?${fixture.params}`)
+    const view = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Typed during exact native lookup' } })
+    fixture.ready = true; fixture.enabled = true
+    view.rerender(<WorkspaceShell />)
+    await act(async () => {})
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
+    expect(draft).toHaveValue('Typed during exact native lookup')
+  })
+  it.each([390, 768, 820, 1024])('keeps the same editable draft through backend identification at %spx', async width => {
+    fixture.width = width; fixture.ready = false
+    const view = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    expect(draft.closest('[class="hidden"]')).toBeNull()
+    expect(screen.queryByLabelText('Loading chat')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Synthetic send' })).toBeDisabled()
+    fireEvent.change(draft, { target: { value: 'Draft before backend discovery' } })
+    fixture.ready = true; fixture.enabled = true
+    view.rerender(<WorkspaceShell />)
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
+    expect(draft).toHaveValue('Draft before backend discovery')
+    // Native chat has not been chosen: no legacy send and no implicit route.
+    expect(screen.getByRole('button', { name: 'Synthetic send' })).toBeDisabled()
+    expect(fixture.router.push.mock.calls.some(([url]) => String(url).includes('chat='))).toBe(false)
+  })
+})
+
 describe('responsive pane navigation', () => {
+  it.each([390, 768, 820, 1024])('preserves unsaved editor and draft nodes across return/reopen at %spx', async width => {
+    fixture.width = width
+    const { container } = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Unsent chat draft' } })
+    await clickDocument()
+    await waitFor(() => expect(panelIsOpen(container)).toBe(true))
+    const editor = screen.getByRole('textbox', { name: 'Unsaved artifact' })
+    fireEvent.change(editor, { target: { value: 'Unsaved document changes' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Close document panel' }))
+    const aside = editor.closest('aside')!
+    expect(aside).toHaveAttribute('aria-hidden', 'true')
+    expect(aside).toHaveAttribute('inert')
+    expect(draft).toHaveValue('Unsent chat draft')
+    await clickDocument()
+    await waitFor(() => expect(panelIsOpen(container)).toBe(true))
+    expect(screen.getByRole('textbox', { name: 'Unsaved artifact' })).toBe(editor)
+    expect(editor).toHaveValue('Unsaved document changes')
+    expect(screen.getByRole('textbox', { name: 'Draft', hidden: true })).toBe(draft)
+  })
   it('keeps mobile sidebar, artifact and chat mutually exclusive, including keyboard switches', async () => {
     fixture.width = 390
     const { container } = render(<WorkspaceShell />)

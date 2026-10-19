@@ -24,6 +24,20 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
 
 describe("workspace sidebar navigation", () => {
+  it("uses the desktop panel-toggle idiom, not Back, for the mobile drawer", () => {
+    const close = vi.fn();
+    render(<WorkspaceSidebar mobile onClose={close} onToggleCompact={vi.fn()} />);
+    const toggle = screen.getByRole("button", { name: "Close sidebar" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-sidebar");
+    expect(toggle.querySelector('path')).toHaveAttribute("d", "M9 3v18");
+    expect(toggle.className).toContain("min-h-11");
+    expect(toggle.className).toContain("min-w-11");
+    expect(screen.queryByText("Back")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Collapse sidebar" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
   it("makes Chats the first and default sidebar view without navigating content", () => {
     const navigate = vi.fn();
     render(<WorkspaceSidebar chatsPanel={<p>Conversation fixture</p>} onNavigate={navigate} />);
