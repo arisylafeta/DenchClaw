@@ -15,6 +15,9 @@ import { HermesGatewayManager, type GatewaySocket } from "./manager";
 import { HermesChatService } from "./chat-service";
 import { conversationKey } from "../hermes-conversations";
 import { buildAgentMessage } from "../agent-message";
+import { EventConnection } from "../../app/api/hermes/events/registry";
+import { applyLive, applySnapshot, initialReconcileState } from "../hermes-chat/reconcile";
+import type { GatewayChatSnapshot as ClientSnapshot } from "../hermes-chat/snapshot";
 
 type Frame = { id?: string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { code: number; message: string } };
 class FakeSocket implements GatewaySocket {
@@ -31,6 +34,7 @@ class FakeSocket implements GatewaySocket {
   deferConsumption = false;
   activeRows: { id: string; session_key: string; status: string }[] = [];
   snapshot: Record<string, unknown> = {};
+  children: Record<string, unknown>[] = [];
   replayEvents: unknown[] = [];
   onChildren?: () => void;
   emit(type: string, event: unknown = {}) { for (const handler of this.listeners[type] ?? []) handler(event); }
@@ -44,6 +48,7 @@ class FakeSocket implements GatewaySocket {
     if (frame.method === "config.set" && this.failConfig) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     if (frame.method === "slash.exec" && this.slashErrorCode) { this.receive({ id: frame.id, error: { code: this.slashErrorCode, message: "slash refused" } }); return; }
     const result = frame.method === "session.resume" ? { session_id: `runtime-${frame.params?.session_id}`, running: this.busy, auto_continue: this.autoContinue ? { attempt: 1 } : undefined }
+      : frame.method === "subagent.list" ? { subagents: this.children }
       : frame.method === "session.active_list" ? { sessions: this.activeRows }
       : frame.method === "session.activate" ? { session_id: frame.params?.session_id, session_key: "one", info: { profile_name: "ari", lazy: false, cwd: "/workspace", branch: "", project: {}, model: "test", skills: {}, tools: {} }, ...this.snapshot }
       : frame.method === "image.attach_bytes" ? { attached: true, path: "/image" }
@@ -76,6 +81,43 @@ beforeEach(async () => {
 });
 afterEach(() => { manager.shutdown(); vi.useRealTimers(); });
 describe("gateway chat service", () => {
+  it("includes already-running children from the verified runtime in the view snapshot", async () => {
+    socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
+    socket.snapshot = { running: true };
+    socket.children = [{ subagent_id: "child", goal: "Research", status: "running", model: "test" }];
+    const view = await service.openForView("ari", "one");
+    expect(view).toMatchObject({ subagents: socket.children });
+    expect(socket.frames.filter(frame => frame.method === "subagent.list").map(frame => frame.params)).toEqual([{ session_id: "runtime-one", profile: "ari" }]);
+  });
+  it("admits workers arriving during the history read and applies list-racing completion after the snapshot", async () => {
+    socket.activeRows = [{ id: "runtime-one", session_key: "one", status: "working" }];
+    socket.snapshot = { running: true };
+    socket.children = [{ subagent_id: "listed", goal: "Already running", status: "running" }];
+    socket.onChildren = () => socket.receive({ method: "event", params: { type: "subagent.complete", session_id: "runtime-one", seq: 41, payload: { subagent_id: "listed", status: "completed", summary: "Finished during list" } } });
+    let release!: () => void;
+    let reading = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const read = vi.mocked(readConversation).getMockImplementation()!;
+    vi.mocked(readConversation).mockImplementationOnce(async (...args) => { reading = true; await gate; return read(...args); });
+    const ctx = { now: () => 1000, id: () => "synthetic" };
+    let state = initialReconcileState("one", key);
+    const emitted: string[] = [];
+    const connection = new EventConnection("synthetic-user", (type, payload) => {
+      emitted.push(type);
+      if (type === "snapshot") state = applySnapshot(state, payload as ClientSnapshot, state.loadToken, ctx);
+      if (type === "gw") state = applyLive(state, [payload as Parameters<typeof applyLive>[1][number]], ctx);
+    }, service);
+    try {
+      const pending = connection.update([key], []);
+      await flush(); await flush();
+      expect(reading).toBe(true);
+      socket.receive({ method: "event", params: { type: "subagent.start", session_id: "runtime-one", seq: 42, payload: { subagent_id: "during-history", goal: "New work" } } });
+      expect(emitted).toEqual([]); // Admission deliberately holds live frames until history establishes its boundary.
+      release(); await pending;
+      expect(emitted).toEqual(["snapshot", "gw", "gw"]);
+      expect(state.subagents.items.map(child => [child.id, child.status])).toEqual([["listed", "completed"], ["during-history", "running"]]);
+    } finally { release(); connection.close(); }
+  });
   it("keeps slash completion read-only and session-scoped, then resumes execution with only the 4018 dispatch fallback", async () => {
     expect(await service.slashComplete(key, { text: "/exa" })).toEqual({ items: [], replace_from: 1, catalog: {} });
     expect(socket.frames.filter(frame => ["complete.slash", "commands.catalog"].includes(frame.method ?? "")).map(frame => frame.params)).toEqual([

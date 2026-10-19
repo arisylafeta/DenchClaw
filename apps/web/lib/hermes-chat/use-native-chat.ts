@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceContext } from '../agent-message'
 import type { HermesConversation } from '../hermes-conversations'
 import { getHermesEventsClient, type ConnectionState } from './events-client'
@@ -8,6 +8,7 @@ import { messageText, reduce, type PendingRequest } from './reducer'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 import type { SlashCompletion } from './slash-commands'
+import { initialSubagents } from './subagents'
 
 export interface NativePrompt { text: string; images?: { content: string; mimeType: string; fileName?: string }[]; context?: WorkspaceContext; html?: string }
 export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
@@ -203,8 +204,19 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
     } finally { historyLoading.current = false; setLoadingEarlier(false) }
   }
+  // The transcript waits for history ordering, but the dock need not. Preview
+  // buffered lifecycle frames with the real reducer without advancing the live
+  // watermark or consuming the buffer before the snapshot arrives.
+  const visibleSubagents = useMemo(() => {
+    // Effects reset the store after rendering; never paint the prior key's dock.
+    if (state.key !== (conversationKey ?? null)) return initialSubagents()
+    if (!state.hydrating) return state.subagents
+    const events = state.buffered.filter(event => event.type.startsWith('subagent.') || event.type === 'message.start')
+    const generation = state.generation === 0 ? events.find(event => event.generation !== undefined)?.generation ?? 0 : state.generation
+    return applyLive({ ...state, hydrating: false, generation }, events, context).subagents
+  }, [state, conversationKey])
   return {
-    state, subagents: state.subagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
+    state, subagents: visibleSubagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
     completeSlash: async (text, signal) => {
       if (!conversationKey || !enabled) { throw new Error('No active gateway conversation') }
       const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(conversationKey)}/slash-complete`, {

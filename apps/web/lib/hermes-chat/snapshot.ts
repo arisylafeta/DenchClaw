@@ -3,6 +3,8 @@ import { asRecord, stringValue, type ErrorSurface, type EventPayload } from './e
 import { initialState, toolError, type ChatMessage, type ChatState, type ReducerContext, type Segment } from './reducer'
 import { applyTodos } from './todos'
 import type { MessageHtmlRow } from './html-map'
+import type { RpcMethods } from '../../vendor/hermes-gateway/gateway-events'
+import { reduceSubagents } from './subagents'
 
 export interface SnapshotRow {
   /** Row time in milliseconds when the history source provides it. */
@@ -28,6 +30,7 @@ export interface GatewayChatSnapshot {
   pendingRequests: { id: string | number; requestId?: string; method: string; params: Record<string, unknown> }[]
   todo_state?: { todos: unknown; revision: number } | null
   generation: number; seq: number | null; html?: MessageHtmlRow[]
+  subagents?: RpcMethods['subagent.list']['result']['subagents']
 }
 export interface SourcedMessage extends ChatMessage {
   source?: 'durable' | 'live' | 'optimistic' | 'queued'
@@ -104,5 +107,6 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
   state.needsInput = state.pendingRequests.length > 0
   state.awaitingResponse = snapshot.running && !state.sawAssistantPayload
   if (snapshot.todo_state) state.todos = applyTodos(state.todos, snapshot.todo_state, ctx.now())
+  for (const child of snapshot.subagents ?? []) state.subagents = reduceSubagents(state.subagents, 'subagent.start', child, ctx.now())
   return state
 }

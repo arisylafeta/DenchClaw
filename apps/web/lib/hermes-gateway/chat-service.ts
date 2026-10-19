@@ -26,6 +26,7 @@ export interface GatewayChatSnapshot {
   queued: SessionResumeResult["queued"];
   pendingRequests: PendingServerRequest[];
   todo_state: SessionResumeResult["todo_state"];
+  subagents?: LiveSessionSnapshot["subagents"];
   html: MessageHtmlRecord[];
   gateway: "connected" | "unavailable";
   /** Opaque cursor for GET conversations/[key]/history?before=...&limit=200. */
@@ -166,7 +167,7 @@ export class HermesChatService {
     if (inflightRow) inflightRow.pending = "inflight";
     const page = this.pageMessages(messages, pageOptions ? Math.min(pageOptions.before, messages.length) : messages.length, pageOptions?.limit);
     return { ...history, ...page, gateway, generation: replay.generation, seq: replay.seq,
-      running: Boolean(resume?.running), inflight, queued,
+      running: Boolean(resume?.running), inflight, queued, subagents: resume?.subagents,
       pendingRequests: gateway === "connected" ? this.manager.pendingRequests(retained) : [], todo_state: resume?.todo_state,
       html: await lookupMessageHtml(profile, storedId) };
   }

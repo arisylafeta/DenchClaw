@@ -20,7 +20,7 @@ export interface PendingServerRequest {
   replayed?: boolean;
 }
 export interface ReplayResult { generation: number; latestSeq: number; events: GatewaySessionEvent[]; truncated: boolean }
-export type LiveSessionSnapshot = SessionResumeResult & { replayBoundary: { generation: number; seq: number } };
+export type LiveSessionSnapshot = SessionResumeResult & { replayBoundary: { generation: number; seq: number }; subagents: NonNullable<RpcMethods["subagent.list"]["result"]["subagents"]> };
 export interface GatewayClock {
   now(): number;
   setTimeout(callback: () => void, delay: number): unknown;
@@ -296,8 +296,8 @@ export class HermesGatewayManager {
       this.adoptRuntime(session, runtimeId);
       session.active = Boolean(result.running);
       const replayBoundary = { generation: session.generation, seq: session.seq };
-      await this.refreshChildren(session);
-      return { ...result, replayBoundary };
+      const subagents = await this.refreshChildren(session);
+      return { ...result, replayBoundary, subagents };
     } catch (error) {
       if (error instanceof JsonRpcGatewayError && [4001, 4007, 4009].includes(error.code ?? 0)) return undefined;
       throw error;
@@ -328,7 +328,7 @@ export class HermesGatewayManager {
       }
     }
   }
-  private async refreshChildren(session: SessionState): Promise<void> {
+  private async refreshChildren(session: SessionState): Promise<LiveSessionSnapshot["subagents"]> {
     const changes: GatewaySessionEvent[] = [];
     const stop = this.subscribe(session.key, event => {
       if (event.type === "subagent.start" || event.type === "subagent.complete") changes.push(event);
@@ -337,6 +337,9 @@ export class HermesGatewayManager {
       const result = await this.callSession(session.key, "subagent.list", { session_id: "" });
       session.children = new Set((result.subagents ?? []).filter(child => !child.status || ["queued", "running"].includes(child.status)).map(child => child.subagent_id));
       for (const event of changes) this.trackChild(session, event);
+      // The view replays changes after its pre-list boundary, so return the list
+      // unchanged rather than consuming a concurrent completion here.
+      return result.subagents ?? [];
     } finally { stop(); }
   }
   private trackChild(session: SessionState, event: GatewayEvent): void {

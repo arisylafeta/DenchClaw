@@ -1,6 +1,7 @@
 import { asRecord, type GatewayEvent } from './events'
 import { initialState, messageText, reduce, type ChatState, type ReducerContext } from './reducer'
 import { normalizeMessageText, stateFromSnapshot, type GatewayChatSnapshot, type SnapshotChatState, type SourcedMessage } from './snapshot'
+import { reduceSubagents } from './subagents'
 
 export interface OptimisticSubmission { clientId: string; text: string }
 export interface PendingSubmission extends OptimisticSubmission { knownUserIds: string[]; resolvedMessageId?: string }
@@ -218,6 +219,9 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   }
   base.usage = state.usage
   base.subagents = state.subagents
+  // Child lists seed a newly mounted view. Merge through the lifecycle reducer:
+  // snapshots must not resurrect retired children or demote completed ones.
+  for (const child of snapshot.subagents ?? []) base.subagents = reduceSubagents(base.subagents, 'subagent.start', child, ctx.now())
   base.interrupted = !snapshot.running && state.interrupted
   if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
