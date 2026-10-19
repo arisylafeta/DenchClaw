@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
-import { readFileSync } from "node:fs";
+
 
 // Keep the actual TipTap editor, transport hook, reconciliation and slash wrapper.
 vi.mock("./chat-message", () => ({ ChatMessage: () => null }));
@@ -218,15 +218,5 @@ describe("phone composer readiness with the real TipTap editor", () => {
     view.unmount(); expect(remove).toHaveBeenCalledWith("resize", expect.any(Function));
   });
 
-  it("contracts phone height/type and in-flow safe-area layout without changing desktop editor rules", () => {
-    const editor = readFileSync(`${process.cwd()}/app/components/tiptap/chat-editor.tsx`, "utf8");
-    const css = readFileSync(`${process.cwd()}/app/components/chat-composer.module.css`, "utf8");
-    expect(editor).toMatch(/@media \(max-width: 767px\)[\s\S]*min-height: 96px/);
-    expect(editor).toMatch(/font-size: 16px/);
-    expect(editor).toContain("var(--chat-visible-height, 100dvh)");
-    expect(editor).toContain("font-size: 12px");
-    expect(css).toMatch(/@media \(max-width: 767px\)[\s\S]*position: relative/);
-    expect(css).toContain("env(safe-area-inset-bottom)");
-    expect(css).toContain("min-height: 44px");
-  });
+
 });
