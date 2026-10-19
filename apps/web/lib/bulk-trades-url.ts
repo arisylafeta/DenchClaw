@@ -26,6 +26,7 @@ export type BulkTradesRoute = {
   category: string | null;
 };
 
+const SHELL_PARAMS = ["terminal", "browse", "hidden"] as const;
 const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply"];
 export const BULK_TRADES_PARAMS = ["tab", "trade", "demand", "supply", "status", "q", "category"] as const;
 
@@ -67,8 +68,10 @@ export function bulkTradesParams(patch: Partial<BulkTradesRoute>): URLSearchPara
 }
 
 /** Shareable link to a Bulk Trades page or record. */
-export function buildBulkTradesUrl(patch: Partial<BulkTradesRoute> = {}): string {
+export function buildBulkTradesUrl(patch: Partial<BulkTradesRoute> = {}, current?: URLSearchParams): string {
   const params = new URLSearchParams({ path: BULK_TRADES_PATH });
+  // Shell state (terminal, browse folder, hidden files) is not part of the destination; keep it.
+  if (current) for (const key of SHELL_PARAMS) if (current.has(key)) params.set(key, current.get(key)!);
   for (const [key, value] of bulkTradesParams(patch)) params.set(key, value);
   return `/?${params.toString()}`;
 }

@@ -17,7 +17,7 @@ export function useBulkTradesRoute() {
   const route = useMemo(() => parseBulkTradesRoute(search), [search]);
 
   const navigate = useCallback((next: Partial<BulkTradesRoute>, mode: "push" | "replace" = "push") => {
-    const url = buildBulkTradesUrl(next);
+    const url = buildBulkTradesUrl(next, new URLSearchParams(window.location.search));
     if (url === `${window.location.pathname}${window.location.search}`) return;
     if (mode === "replace") window.history.replaceState(window.history.state, "", url);
     else window.history.pushState(window.history.state, "", url);

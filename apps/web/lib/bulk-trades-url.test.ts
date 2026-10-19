@@ -14,6 +14,12 @@ describe("bulk trades URLs", () => {
     expect(buildBulkTradesUrl()).toBe("/?path=bulk_trade");
   });
 
+  it("keeps shell state when the page writes its own params", () => {
+    const current = new URLSearchParams("path=bulk_trade&tab=demand&terminal=1&browse=%2Ftmp&hidden=1&chat=x");
+    expect(buildBulkTradesUrl({ tab: "demand", query: "a" }, current))
+      .toBe("/?path=bulk_trade&terminal=1&browse=%2Ftmp&hidden=1&tab=demand&q=a");
+  });
+
   it("a selected record implies its tab, an unknown tab is ignored", () => {
     const fallback = "trades";
     expect(activeBulkTradesTab(parseBulkTradesRoute("demand=1"), fallback)).toBe("demand");

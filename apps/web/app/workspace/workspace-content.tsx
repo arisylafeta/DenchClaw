@@ -1878,6 +1878,8 @@ function WorkspacePageInner() {
       // Generated document links carry exact absolute identity, never aliases.
       const node = isAbsolutePath(path) ? findNode(tree, path) : resolveNode(tree, path);
       if (node) return nodeToContentTabKind(node.type, node.path);
+      // Bulk Trades is a CRM object page, whatever folder the file browser is showing.
+      if (path === BULK_TRADES_PATH) return "object";
       // CRM legacy paths route through the canonical object names.
       if (path.startsWith("~crm/")) {
         const view = path.slice("~crm/".length).split("/")[0];
@@ -1925,7 +1927,9 @@ function WorkspacePageInner() {
     // Bulk Trades owns its record and filter params; keep them while the page is unchanged.
     const nextQs = carryBulkTradesParams(serializeUrlState(merged), current);
     const currentQs = current.toString();
-    if (nextQs !== currentQs) {
+    // Same params in a different order is the same URL; do not add a history entry for it.
+    const sorted = (qs: string) => { const p = new URLSearchParams(qs); p.sort(); return p.toString(); };
+    if (sorted(nextQs) !== sorted(currentQs)) {
       const url = nextQs ? `/?${nextQs}` : "/";
       router.push(url, { scroll: false });
     }
@@ -2175,7 +2179,7 @@ function WorkspacePageInner() {
    */
   const openBulkTrades = useCallback((href?: string) => {
     const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
-    window.history.pushState(window.history.state, "", buildBulkTradesUrl(route));
+    window.history.pushState(window.history.state, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search)));
     handleNavigateToObject(BULK_TRADES_PATH);
   }, [handleNavigateToObject]);
 
