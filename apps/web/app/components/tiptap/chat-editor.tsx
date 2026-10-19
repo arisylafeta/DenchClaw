@@ -199,7 +199,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 					listItem: false,
 				}),
 				Placeholder.configure({
-					placeholder: placeholder ?? "Ask anything...",
+					placeholder: placeholder ?? "What are we cooking?",
 					showOnlyWhenEditable: false,
 				}),
 				FileMentionNode,

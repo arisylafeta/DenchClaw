@@ -48,6 +48,11 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); getHermesEventsClient().close(); vi.unstubAllGlobals(); });
 describe("phone composer readiness with the real TipTap editor", () => {
+  it("uses the requested placeholder before the user starts typing", async () => {
+    render(<ChatPanel initializing />);
+    const editor = await screen.findByRole("textbox", { name: "Message" });
+    expect(editor.querySelector("[data-placeholder]")).toHaveAttribute("data-placeholder", "What are we cooking?");
+  });
   it("offers an agent choice rather than an endless loading skeleton for an unbound draft", async () => {
     const choose = vi.fn();
     const view = render(<ChatPanel conversationUnselected onChooseConversation={choose} />);

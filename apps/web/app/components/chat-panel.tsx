@@ -2749,19 +2749,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					onChange={(isEmpty) => { setEditorEmpty(isEmpty); onDraftChange?.(!isEmpty); }}
 					onTextChange={setComposerText}
 					onNativeFileDrop={isSubagentMode ? undefined : uploadAndAttachNativeFiles}
-					placeholder={
-						showHeroState
-							? "Build a workflow to automate your tasks"
-							: isSubagentMode
-								? (isStreaming ? "Type to queue a message..." : "Type @ to mention files...")
-								: fileContext
-									? `Ask about ${fileContext.isDirectory ? "this folder" : fileContext.filename}...`
-									: isStreaming
-										? "Type to queue a message..."
-										: attachedFiles.length > 0
-											? "Add a message or send files..."
-											: "Type @ to mention files..."
-					}
+					placeholder="What are we cooking?"
 					submitDisabled={submissionUnavailable}
 					compact={compact}
 					searchFn={searchFn}
