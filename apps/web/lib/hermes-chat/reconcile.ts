@@ -86,6 +86,20 @@ export function submitOptimistic(state: ReconcileState, submission: OptimisticSu
   return { ...state, messages: [...state.messages, message], busy: true, awaitingResponse: true,
     optimistic: [...state.optimistic, { ...submission, knownUserIds: state.messages.filter(item => item.role === 'user' && item.source === 'durable').map(item => item.id) }] }
 }
+/**
+ * A steer is injected into the running turn, so it belongs where the agent is now, not under the turn.
+ * Move it after the live assistant message and open a fresh one for what follows.
+ */
+export function placeSteer(state: ReconcileState, clientId: string): ReconcileState {
+  const index = state.messages.findIndex(message => message.id === clientId)
+  const stream = state.streamId ? state.messages.findIndex(message => message.id === state.streamId) : -1
+  if (index < 0 || stream < 0 || index < stream || !state.busy) return state
+  const steer = { ...state.messages[index], pending: false }
+  const rest = state.messages.filter((_, i) => i !== index)
+  const live = rest.map(message => message.id === state.streamId ? { ...message, pending: false } : message)
+  live.splice(stream + 1, 0, steer)
+  return { ...state, messages: live, streamId: null, awaitingResponse: true, sawAssistantPayload: false }
+}
 /** Consume consecutive submissions in order, including the gateway's aggregate queue MERGE. */
 function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pick<ReconcileState, 'messages' | 'clientToMessage'> {
   const messages = base.messages.slice()

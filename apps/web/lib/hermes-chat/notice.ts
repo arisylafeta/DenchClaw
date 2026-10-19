@@ -15,6 +15,8 @@ const FALLBACK: Record<NoticeKind, string> = {
 const OOB_OPEN = /^\s*\[OUT-OF-BAND USER MESSAGE[^\]\n]*\]\s*/
 const OOB_CLOSE = /\s*\[\/OUT-OF-BAND USER MESSAGE\]\s*$/
 export const stripSteerEnvelope = (text: string): string => text.replace(OOB_OPEN, '').replace(OOB_CLOSE, '').trim()
+/** A steer can arrive carrying finished background-process results; those are not the user's words. */
+const PROCESS_TAIL = /\n*\[?IMPORTANT: (\d+) background processes? completed|\n*\[IMPORTANT: Background process \S+/
 const clip = (text: string, max = 140) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line }
 const readMetadata = (value: unknown): Record<string, unknown> => {
   if (typeof value === 'string') { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {} } catch { return {} } }
@@ -26,7 +28,7 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   const text = row.text ?? ''
   const typed = row.displayKind ? KINDS[row.displayKind] : undefined
   const legacy = !typed && /^\[ASYNC DELEGATION BATCH COMPLETE/.test(text) ? 'delegation' : undefined
-  const process = !typed && !legacy && /^\[IMPORTANT: Background process \S+/.test(text) ? 'process' as const : undefined
+  const process = !typed && !legacy && /^\[IMPORTANT: (?:Background process \S+|\d+ background processes? completed)/.test(text) ? 'process' as const : undefined
   const wrapped = !typed && !legacy && !process && OOB_OPEN.test(text) ? 'steer' as const : undefined
   const kind = typed ?? legacy ?? process ?? wrapped
   if (!kind) return null
@@ -37,13 +39,18 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
     if (task) summary = `Subagent task ${task[2] === 'completed' ? 'completed' : task[2]}: ${task[1]}`
   }
   if (!summary && kind === 'process') {
+    const batch = /^\[IMPORTANT: (\d+) background processes? completed/.exec(text)
+    if (batch) summary = `${batch[1]} background processes completed`
     const head = /^\[IMPORTANT: Background process (\S+) ([^\n(]*?)(?: \(exit code (-?\d+)\))?\.?\n/.exec(text)
     const command = /^Command: ([^\n]*)/m.exec(text)?.[1]
-    if (head) summary = `Background process ${head[2].trim()}${head[3] && head[3] !== '0' ? ` (exit ${head[3]})` : ''}${command ? `: ${command}` : ''}`
+    if (!batch && head) summary = `Background process ${head[2].trim()}${head[3] && head[3] !== '0' ? ` (exit ${head[3]})` : ''}${command ? `: ${command}` : ''}`
   }
   // A steer row's text is the user's own instruction: show it, not a generic label.
-  const steerText = kind === 'steer' ? stripSteerEnvelope(text) : ''
+  const steerFull = kind === 'steer' ? stripSteerEnvelope(text) : ''
+  const tail = PROCESS_TAIL.exec(steerFull)
+  const steerText = tail ? steerFull.slice(0, tail.index).trim() : steerFull
   if (steerText) summary = `Steered: ${steerText}`
-  const details = kind === 'steer' ? (steerText.length > 140 || steerText.includes('\n') ? steerText : '') : text.trim() ? text : ''
-  return { kind, text: clip(summary || FALLBACK[kind]), ...(details ? { details } : {}) }
+  else if (tail) { const count = tail[1] ? Number(tail[1]) : 1; summary = `${count} background process${count === 1 ? '' : 'es'} completed` }
+  const details = kind === 'steer' ? (steerFull.length > 140 || steerFull.includes('\n') ? steerFull : '') : text.trim() ? text : ''
+  return { kind: kind === 'steer' && !steerText && tail ? 'process' : kind, text: clip(summary || FALLBACK[kind]), ...(details ? { details } : {}) }
 }

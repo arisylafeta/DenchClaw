@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyLive, applySnapshot, beginHydration, initialReconcileState, needsResync, submitOptimistic } from './reconcile'
+import { applyLive, applySnapshot, beginHydration, initialReconcileState, needsResync, placeSteer, submitOptimistic } from './reconcile'
 import { messageText } from './reducer'
 import type { GatewayChatSnapshot } from './snapshot'
 const ctx = { now: () => 1000, id: (() => { let id = 0; return () => `live-${++id}` })() }
@@ -82,3 +82,14 @@ describe('history/live reconciliation', () => {
     expect(state.messages[1].segments.map(segment => segment.type)).toEqual(['text', 'tool', 'reasoning', 'text'])
   })
 })
+
+describe("placeSteer", () => {
+  it("moves an accepted steer under the live assistant message and opens a new one after it", () => {
+    let state = submitOptimistic({ ...initial(), busy: true, streamId: "a1", messages: [{ id: "a1", role: "assistant", segments: [], pending: true, startedAt: 0 }] } as never, { clientId: "s", text: "change course" });
+    state = placeSteer(state, "s");
+    expect(state.messages.map(message => message.id)).toEqual(["a1", "s"]);
+    expect(state.streamId).toBeNull();
+    expect(state.messages[1].pending).toBe(false);
+    expect(placeSteer({ ...state, busy: false }, "s")).toEqual({ ...state, busy: false });
+  });
+});

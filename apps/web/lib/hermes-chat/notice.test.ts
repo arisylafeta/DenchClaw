@@ -34,4 +34,15 @@ describe("noticeForRow", () => {
     const long = "x ".repeat(100).trim();
     expect(noticeForRow({ role: "user", text: wrap(long) })?.details).toBe(long);
   });
+  it("treats the batched background-process wrapper as a process notice", () => {
+    const text = "[IMPORTANT: 2 background processes completed. Treat these results as one batch]\n\n[IMPORTANT: Background process proc_a completed normally (exit code 0).\nCommand: x]";
+    expect(noticeForRow({ role: "user", text })).toMatchObject({ kind: "process", text: "2 background processes completed", details: text });
+  });
+  it("shows a steer's own words and not the background-process results appended to it", () => {
+    const body = "no they're fine\n\nIMPORTANT: 2 background processes completed. Treat as one batch.\n\n[IMPORTANT: Background process p completed normally (exit code 0).\nCommand: x]";
+    const text = `[OUT-OF-BAND USER MESSAGE — a direct message from the user]\n${body}\n[/OUT-OF-BAND USER MESSAGE]`;
+    expect(noticeForRow({ role: "user", text })).toMatchObject({ kind: "steer", text: "Steered: no they're fine", details: body });
+    const onlyProcess = `[OUT-OF-BAND USER MESSAGE — x]\nIMPORTANT: 2 background processes completed.\n[/OUT-OF-BAND USER MESSAGE]`;
+    expect(noticeForRow({ role: "user", text: onlyProcess })).toMatchObject({ kind: "process", text: "2 background processes completed" });
+  });
 });

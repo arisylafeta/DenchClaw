@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceContext } from '../agent-message'
 import type { HermesConversation } from '../hermes-conversations'
 import { getHermesEventsClient, type ConnectionState } from './events-client'
-import { applyLive, applySnapshot, beginHydration, initialReconcileState, submitOptimistic, type ReconcileState } from './reconcile'
+import { applyLive, applySnapshot, beginHydration, initialReconcileState, placeSteer, submitOptimistic, type ReconcileState } from './reconcile'
 import { messageText, reduce, type PendingRequest } from './reducer'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
@@ -156,6 +156,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     try {
       const result = await post('prompt', { ...prompt, clientMessageId })
       if (activeKey.current !== key) return
+      if (wasBusy && (result.status === 'steered' || result.status === 'redirected')) update(previous => placeSteer(previous, clientMessageId))
       if (result.autoContinue) update(previous => ({ ...previous, status: 'Hermes is continuing an interrupted turn; your message is queued' }))
     } catch {
       // Failed/ambiguous submissions remain visible, but are never submitted automatically again.
