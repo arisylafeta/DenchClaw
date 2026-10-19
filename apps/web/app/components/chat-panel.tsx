@@ -1242,7 +1242,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			setDeferredSlash(null);
 			setSlashBusy(false);
 		}, [nativeConversationKey]);
-		const runSlash = useCallback(async (command: string) => {
+		const runSlash = useCallback(async (command: string, auto = false) => {
 			if (submissionUnavailableRef.current || !nativeGateway) { return; }
 			const key = nativeConversationKey;
 			setSlashBusy(true);
@@ -1258,6 +1258,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				const action = routeSlashResult(await nativeChat.executeSlash(command));
 				if (slashKey.current !== key) { return; }
 				if (action.type === "output" && isBusyRefusal(action.text) && slashNeedsIdleSession(command)) {
+					// One automatic retry only: a refusal after it means Hermes disagrees about being idle.
+					if (auto) { nativeChat.addNotice(slashNotice(command, "Hermes still reports the session as busy. Run it again when the reply has finished.", "error")); return; }
 					if (deferredSlash && deferredSlash !== command.trim()) nativeChat.addNotice(slashNotice(deferredSlash, "Replaced by another command", "cancelled"));
 					setDeferredSlash(command.trim());
 					nativeChat.addNotice(slashNotice(command, "Waiting for the current reply to finish", "pending"));
@@ -1281,7 +1283,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			if (deferredSlash && !nativeChat.state.busy && !submissionUnavailable) {
 				const command = deferredSlash;
 				setDeferredSlash(null);
-				void runSlash(command);
+				void runSlash(command, true);
 			}
 		}, [deferredSlash, nativeChat.state.busy, submissionUnavailable, runSlash]);
 		const [clarifyComposerTarget, setClarifyComposerTarget] = useState<HTMLDivElement | null>(null);

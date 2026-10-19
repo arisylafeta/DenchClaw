@@ -177,13 +177,26 @@ function upsertTool(s: ChatState, p: EventPayload, complete: boolean, ctx: Reduc
 }
 /** Insert or update a local event without claiming the assistant stream or a user boundary. */
 export function withNotice<T extends ChatState>(state: T, notice: Notice, ctx: ReducerContext): T {
-  if (state.messages.some(row => row.notice && row.source === 'durable' &&
-    ((notice.details && normalize(row.notice.details ?? messageText(row)) === normalize(notice.details)) || row.notice.text === notice.text))) return state
+  // Slash results are never persisted as system rows, and unrelated actions may print identical text.
+  // Anything else yields only to a same-kind durable row that no earlier local notice already accounts for.
+  if (!notice.key?.startsWith('slash:')) {
+    const same = (row: ChatMessage) => row.notice?.kind === notice.kind &&
+      ((notice.details && normalize(row.notice.details ?? messageText(row)) === normalize(notice.details)) || row.notice.text === notice.text)
+    if (state.messages.filter(row => row.notice && row.source === 'durable' && same(row)).length >
+      state.messages.filter(row => row.localNotice && same(row)).length) return state
+  }
   const old = notice.key ? state.messages.findLast((row, index) => row.localNotice && row.notice?.key === notice.key &&
     (!notice.key?.startsWith('status:') || index > lastUser(state)) && (!notice.key?.startsWith('slash:') || row.notice?.pending)) : undefined
   if (!old && state.messages.at(-1)?.notice?.text === notice.text) return state
   const row: ChatMessage = { id: old?.id ?? ctx.id(), role: 'assistant', segments: [], startedAt: old?.startedAt ?? ctx.now(), pending: false, localNotice: true, notice }
-  return { ...state, messages: old ? state.messages.map(item => item.id === old.id ? row : item) : [...state.messages, row] }
+  return { ...state, messages: pruneLocalNotices(old ? state.messages.map(item => item.id === old.id ? row : item) : [...state.messages, row]) }
+}
+/** A long-lived chat must not accumulate local event rows forever; pending commands are always kept. */
+export const MAX_LOCAL_NOTICES = 100
+export function pruneLocalNotices<T extends ChatMessage>(messages: T[]): T[] {
+  let excess = messages.filter(row => row.localNotice && !row.notice?.pending).length - MAX_LOCAL_NOTICES
+  if (excess <= 0) return messages
+  return messages.filter(row => !(excess > 0 && row.localNotice && !row.notice?.pending && excess--))
 }
 /** Pure transition. Local actions use the same envelope with type client.submit / client.interrupt / client.tick. */
 export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContext): ChatState {

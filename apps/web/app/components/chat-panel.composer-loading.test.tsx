@@ -258,6 +258,19 @@ describe("phone composer readiness with the real TipTap editor", () => {
     expect(promptCalls()).toHaveLength(1);
   });
 
+  it("retries a refused rewrite command only once instead of looping", async () => {
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/slash-execute') ? Response.json({ output: 'session busy — Hermes is still replying. Stop the current reply first' }) : Response.json({}));
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    const editor = await typeDraft('/compress');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await screen.findByText(/Queued \/compress/);
+    snapshot();
+    await screen.findByText(/Hermes still reports the session as busy/);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(promptCalls()).toHaveLength(2);
+  });
+
   it("tracks visible keyboard height and removes the listener on unmount", async () => {
     const viewport = new EventTarget() as EventTarget & { height: number; scale: number };
     viewport.height = 780; viewport.scale = 1;

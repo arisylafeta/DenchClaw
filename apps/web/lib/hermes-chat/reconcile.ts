@@ -300,9 +300,10 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   const claimedNotices = new Set<string>()
   for (const [index, row] of state.messages.entries()) {
     if (!row.localNotice || !row.notice || merged.messages.some(item => item.id === row.id)) continue
-    const equivalent = merged.messages.find(item => item.source === 'durable' && item.notice && !claimedNotices.has(item.id) &&
+    const equivalent = row.notice.key?.startsWith('slash:') ? undefined : merged.messages.find(item => item.source === 'durable' && item.notice && !claimedNotices.has(item.id) &&
+      item.notice.kind === row.notice?.kind &&
       ((row.notice?.details && normalizeMessageText(item.notice.details ?? messageText(item)) === normalizeMessageText(row.notice.details)) ||
-        (item.notice.kind === row.notice?.kind && item.notice.text === row.notice.text)))
+        item.notice.text === row.notice.text))
     if (equivalent) { claimedNotices.add(equivalent.id); continue }
     const preceding = state.messages.slice(0, index).reverse().find(item => merged.messages.some(target => target.id === item.id))
     const after = preceding ? merged.messages.findIndex(item => item.id === preceding.id) + 1 : merged.messages.findIndex(item => item.startedAt > row.startedAt)
