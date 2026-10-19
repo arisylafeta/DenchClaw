@@ -5,7 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { NativeTranscriptProps } from "./types";
 import { ErrorCard, TodoPanel } from "./panels";
-import { displayTurns, splitTurn, WorkBlock } from "./work-block";
+import { displayTurns, WorkBlock } from "./work-block";
+import { transcriptBlocks } from "./transcript-blocks";
 import { NoticeLine } from "./notice-line";
 import { AttachmentChips } from "./attachment-chips";
 import { parseUserAttachments } from "./attachments";
@@ -31,10 +32,14 @@ export function NativeTranscript({ state, todos = state.todos, callbacks, render
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => { const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join("")); return <div className="flex flex-col items-end gap-1.5 py-2"><AttachmentChips attachments={attachments} />{(body || !attachments.length) && <div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}><UserContent html={attachments.length ? undefined : userHtml?.(message.id)} text={body} /></div>}{queuedMessageIds.includes(message.id) && <span className="text-xs text-[var(--color-text-muted)]">Queued</span>}</div>; })() : (() => {
-        const { work, answer } = splitTurn(message.segments);
+        const blocks = transcriptBlocks(message.segments);
         return <Fragment key={message.id}>
-          {work.length > 0 && <WorkBlock work={work} live={state.live && message.pending} answerStartedAt={answer[0]?.startedAt} />}
-          {answer.map(segment => <div key={segment.id} data-segment={segment.type} className="chat-prose chat-message-font text-sm break-words">{renderMarkdown ? renderMarkdown(segment.text) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment.text}</ReactMarkdown>}</div>)}
+          {blocks.map((block, index) => {
+            const next = blocks[index + 1];
+            return block.type === "work"
+              ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && index === blocks.length - 1} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
+              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words">{renderMarkdown ? renderMarkdown(block.segment.text) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.segment.text}</ReactMarkdown>}</div>;
+          })}
         </Fragment>;
       })()}
       {message.error_surface ? <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={callbacks.onRetry} /> : message.error ? <p role="alert">{message.error}</p> : null}

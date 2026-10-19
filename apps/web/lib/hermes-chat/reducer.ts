@@ -210,8 +210,12 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     }
     if (!message && previous) {
       const oldText = messageText(previous)
+      // A repeated terminal frame contains only the final response, not the
+      // already-visible prose from earlier tool rounds in this message.
+      const lastTool = previous.segments.findLastIndex(segment => segment.type === 'tool')
+      const oldResponse = previous.segments.slice(lastTool + 1).filter((segment): segment is TextSegment => segment.type === 'text' || segment.type === 'interim').map(segment => segment.text).join('')
       const receipt = p.persisted_turn?.final_assistant_row_id
-      if (previous.pending || (previous.interim && (text.startsWith(oldText) || oldText.startsWith(text) || (s.interimBoundaryPending && (p.response_previewed || p.response_transformed)) || (receipt && !previous.rowId))) || (!s.live && normalize(oldText) === normalize(text))) message = previous
+      if (previous.pending || (previous.interim && (text.startsWith(oldText) || oldText.startsWith(text) || (s.interimBoundaryPending && (p.response_previewed || p.response_transformed)) || (receipt && !previous.rowId))) || (!s.live && (normalize(oldText) === normalize(text) || normalize(oldResponse) === normalize(text)))) message = previous
     }
     if (!message && (text || p.error || p.status === 'error')) message = ensureMessage(s, ctx, now)
     if (message) {
