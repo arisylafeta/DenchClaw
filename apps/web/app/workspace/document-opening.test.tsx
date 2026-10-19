@@ -3,11 +3,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState, type ComponentProps } from 'react'
 import type { RightPanelContent } from '../components/workspace/right-panel-content'
+import { createSessionChatTab, EMPTY_TABS_STATE, saveTabsState, workspaceTabsReducer } from '@/lib/workspace-tabs'
+import { conversationKey } from '@/lib/hermes-conversations'
 
 const fixture = vi.hoisted(() => ({
   width: 1440,
   params: new URLSearchParams(),
   ready: true, enabled: false,
+  selected: null as { key: string; title: string } | null,
+  lastCreatedKey: null as string | null,
   router: { push: vi.fn(), replace: vi.fn() },
   tree: [{ path: 'reports/sample.docx', name: 'sample.docx', type: 'file' }],
 }))
@@ -33,15 +37,15 @@ vi.mock('next/dynamic', () => ({ default: () => () => null }))
 vi.mock('../hooks/use-workspace-watcher', () => ({ useWorkspaceWatcher: () => watcher }))
 vi.mock('@/lib/search-index', () => ({ useSearchIndex: () => ({ search: noop }) }))
 vi.mock('../components/workspace/hermes-conversations', () => ({
-  useHermesConversations: () => ({ enabled: fixture.enabled, ready: fixture.ready, listing: fixture.enabled ? { sessions: [] } : null, newChat: () => {}, clear: () => {}, selectKey: async () => false }),
+  useHermesConversations: () => ({ enabled: fixture.enabled, ready: fixture.ready, selected: fixture.selected, lastCreatedKey: fixture.lastCreatedKey, listing: fixture.enabled ? { sessions: [] } : null, newChat: () => {}, clear: () => {}, selectKey: async () => false }),
   HermesConversationList: () => null, HermesConversationPanel: () => null,
   HermesNewChatDialog: () => null,
 }))
 vi.mock('../components/workspace/toast', () => ({ ToastProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../components/chat-panel', () => ({
-  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean }) => {
+  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing, conversationUnselected, onDraftChange }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean; conversationUnselected?: boolean; onDraftChange?: (dirty: boolean) => void }) => {
     const [draft, setDraft] = useState('')
-    return <>{headerLeftSlot}{headerRightSlot}<textarea aria-label="Draft" value={draft} onChange={e => setDraft(e.target.value)} /><button disabled={initializing}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
+    return <>{headerLeftSlot}{headerRightSlot}<textarea aria-label="Draft" value={draft} onChange={e => { setDraft(e.target.value); onDraftChange?.(!!e.target.value) }} /><button disabled={initializing || conversationUnselected}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
   },
 }))
 // Keep the real shell, URL/link handlers, resolver, reducer and panel containers.
@@ -104,6 +108,7 @@ beforeEach(() => {
   fixture.width = 1440
   watcher.activeWorkspace = 'synthetic'
   fixture.ready = true; fixture.enabled = false
+  fixture.selected = null; fixture.lastCreatedKey = null
   mediaListeners.clear()
   fixture.params = new URLSearchParams()
   fixture.router.push.mockClear()
@@ -165,6 +170,32 @@ describe.each([1440, 1024, 1023, 768, 767, 390])('document opening (width=%s)', 
 })
 
 describe('initial composer shell', () => {
+  it('does not hide an early typed draft when a different saved chat restores', async () => {
+    fixture.width = 390; fixture.ready = false; watcher.activeWorkspace = null
+    const saved = workspaceTabsReducer(EMPTY_TABS_STATE, { type: 'openChat', tab: createSessionChatTab({ sessionId: 'saved-session', title: 'Saved chat' }) })
+    saveTabsState(saved, 'synthetic')
+    const view = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Do not hide this draft' } })
+    watcher.activeWorkspace = 'synthetic'
+    view.rerender(<WorkspaceShell />)
+    await act(async () => {})
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
+    expect(draft).toHaveValue('Do not hide this draft')
+  })
+  it('binds a newly chosen agent chat without remounting the editable draft', async () => {
+    fixture.width = 390; fixture.ready = true; fixture.enabled = true
+    const view = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Draft for my chosen agent' } })
+    fixture.selected = { key: conversationKey('solo', 'created', 'alpha'), title: 'Created chat' }
+    fixture.lastCreatedKey = fixture.selected.key
+    view.rerender(<WorkspaceShell />)
+    await act(async () => {})
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
+    expect(draft).toHaveValue('Draft for my chosen agent')
+    expect(screen.getByRole('button', { name: 'Synthetic send' })).toBeEnabled()
+  })
   it('preserves text typed before the workspace identity arrives', async () => {
     fixture.width = 390; fixture.ready = false
     watcher.activeWorkspace = null

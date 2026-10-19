@@ -29,6 +29,14 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 - Below 768px, show only one of sidebar, chat or content. Opening sidebar or content replaces the other; closing either returns to chat. Keep content tabs and chat/file deep links independent of pane visibility.
 - Reuse the `useIsMobile` matchMedia hook for both breakpoints. Full-screen pane switches do not animate, use labelled keyboard-focusable buttons, and hide underlying panes from keyboard and assistive technology.
 
+## Mobile composer and PWA foundation
+
+- Keep a single real, editable composer mounted during discovery and history loading. Gate sends and commands, not typing; retain the draft through saved-tab restoration and explicit agent selection.
+- Phone input has a 96px minimum editable area and 16px text. Keep it in normal flex flow, above the keyboard and bottom safe area; preserve desktop floating-composer density.
+- Size narrow workspace shells to the visual viewport without interpreting pinch zoom as a keyboard resize. Retain browser zoom.
+- Native drafts without a chosen agent show an explicit agent-choice action, not an endless loading skeleton or an implicit send to an arbitrary profile.
+- PWA metadata and public icons support standalone installation. Do not cache private chats, documents, API responses or authenticated HTML; this phase adds no service worker, offline queue or push prompt.
+
 ## Native Hermes command composer
 
 - Match the native model picker: borderless `@base-ui/react` popover above the composer, rounded neutral surface, compact system type, muted descriptions and a quiet hover/keyboard selection fill.

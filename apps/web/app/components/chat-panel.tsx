@@ -857,6 +857,10 @@ export function ChatPanelTerminalButton({
 type ChatPanelProps = {
   /** Backend discovery is pending. Keep the draft editable, but never submit. */
   initializing?: boolean;
+  /** Native backend is ready but the user has not chosen an agent/chat yet. */
+  conversationUnselected?: boolean;
+  onChooseConversation?: () => void;
+  onDraftChange?: (hasContent: boolean) => void;
   /** Immutable native Hermes identity; never resolved through the workspace filter. */
   nativeConversationKey?: string;
   nativeTransport?: "gateway" | "sse";
@@ -960,6 +964,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		{
 			fileContext,
 			initializing = false,
+			conversationUnselected = false,
+			onChooseConversation,
+			onDraftChange,
 			compact,
 			sessionTitle,
 			initialSessionId,
@@ -1207,7 +1214,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const [slashOutput, setSlashOutput] = useState<string | null>(null);
 		const [slashBusy, setSlashBusy] = useState(false);
 		// Cover the render before identity/hydration effects and all imperative callers.
-		const submissionUnavailable = initializing || loadingSession || slashBusy || pendingNativeRequest ||
+		const submissionUnavailable = initializing || conversationUnselected || loadingSession || slashBusy || pendingNativeRequest ||
 			attachedFiles.some(file => file.uploading) ||
 			(nativeGateway && (nativeChat.state.hydrating || nativeChat.state.key !== nativeConversationKey ||
 				nativeChat.connection !== "connected" || !!nativeChat.readOnly)) ||
@@ -2758,7 +2765,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				<ChatEditor
 					ref={editorRef}
 					onSubmit={handleEditorSubmit}
-					onChange={(isEmpty) => setEditorEmpty(isEmpty)}
+					onChange={(isEmpty) => { setEditorEmpty(isEmpty); onDraftChange?.(!isEmpty); }}
 					onTextChange={setComposerText}
 					onNativeFileDrop={isSubagentMode ? undefined : uploadAndAttachNativeFiles}
 					placeholder={
@@ -2779,6 +2786,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					searchFn={searchFn}
 				/>
 				</NativeSlashComposer>
+				{conversationUnselected && onChooseConversation && <button type="button" onClick={() => onChooseConversation()} className="mx-3 mb-2 min-h-11 rounded-md px-2 text-left text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2">Choose an agent to send this draft</button>}
 
 				<div className={`flex items-center justify-between ${compact ? "px-2 pb-1.5" : "px-3 pb-2.5"}`}>
 					<div className="flex min-w-0 items-center gap-1">

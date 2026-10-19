@@ -48,6 +48,24 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); getHermesEventsClient().close(); vi.unstubAllGlobals(); });
 describe("phone composer readiness with the real TipTap editor", () => {
+  it("offers an agent choice rather than an endless loading skeleton for an unbound draft", async () => {
+    const choose = vi.fn();
+    const view = render(<ChatPanel conversationUnselected onChooseConversation={choose} />);
+    const editor = await typeDraft("Draft before choosing an agent");
+    expect(screen.getByTitle("Send message")).toBeDisabled();
+    expect(screen.queryByLabelText("Loading chat history")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Choose an agent to send this draft" }));
+    expect(choose).toHaveBeenCalledWith();
+    view.rerender(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBe(editor);
+    await waitFor(() => expect(screen.getByTitle("Send message")).toBeEnabled());
+    expect(promptCalls()).toHaveLength(0);
+    fireEvent.click(screen.getByTitle("Send message"));
+    await waitFor(() => expect(promptCalls()).toHaveLength(1));
+    expect(JSON.parse(promptCalls()[0][1].body).text).toBe("Draft before choosing an agent");
+  });
+
   it("types immediately, blocks Enter/button/imperative sends and submits the exact draft to the resolved profile", async () => {
     const ref = React.createRef<ChatPanelHandle>();
     const view = render(<ChatPanel ref={ref} initializing />);

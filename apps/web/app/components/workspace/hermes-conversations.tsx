@@ -59,6 +59,7 @@ export function useHermesConversations() {
   const [selected, setSelected] = useState<HermesConversation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [lastCreatedKey, setLastCreatedKey] = useState<string | null>(null);
   const [dialog, setDialog] = useState<NewChatMode | null>(null);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [aliases, setAliases] = useState<Record<string, string>>({});
@@ -109,6 +110,7 @@ export function useHermesConversations() {
     setCreating(true); setError(null);
     try {
       const data = await jsonResponse(await fetch("/api/hermes/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profiles }) }));
+      setLastCreatedKey(data.conversation.key);
       select(data.conversation); await reload();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create chat"); }
     finally { setCreating(false); }
@@ -134,7 +136,7 @@ export function useHermesConversations() {
   const displaySelected = useMemo(() => selected ? display(selected) : null, [selected, display]);
   return { enabled: listing?.backend === "hermes", ready, listing: displayListing, filter, setFilter: updateFilter, selected: displaySelected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    seen, error, creating, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
+    seen, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; done means unseen output. */

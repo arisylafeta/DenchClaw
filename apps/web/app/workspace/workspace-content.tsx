@@ -121,6 +121,7 @@ import { resetWorkspaceStateOnSwitch } from "./workspace-switch";
 import { contentUsesFullView, type WorkspacePanelLayout } from "./content-layout";
 import { useContentFullView } from "./use-content-full-view";
 import responsiveStyles from "./workspace-responsive.module.css";
+import { useWorkspaceVisualViewport } from "./use-workspace-visual-viewport";
 // Note: TabBar (the chrome-tabs strip used by the legacy single-strip layout)
 // is no longer used here — the v3 layout has separate inline strips for
 // chats and content. Keep the file for components that may still mount it.
@@ -528,6 +529,7 @@ function WorkspacePageInner() {
   const skillTemplatePromptSentRef = useRef(false);
   // Root layout ref for resize handle position (handle follows cursor)
   const layoutRef = useRef<HTMLDivElement>(null);
+  useWorkspaceVisualViewport(layoutRef);
   const [layoutWidth, setLayoutWidth] = useState(0);
 
   // Live-reactive tree via SSE watcher (with browse-mode support)
@@ -652,6 +654,7 @@ function WorkspacePageInner() {
     return workspaceTabsReducer(empty, { type: "openChat", tab });
   });
   const bootstrapChatId = useRef(tabsState.activeChatId);
+  const dirtyChatDrafts = useRef(new Set<string>());
   const tabsStateRef = useRef<WorkspaceTabsState>(EMPTY_TABS_STATE);
   useEffect(() => {
     tabsStateRef.current = tabsState;
@@ -674,7 +677,7 @@ function WorkspacePageInner() {
     const scaffold = firstTabRestore.current ? tabsStateRef.current.chatTabs.find((tab) => tab.id === bootstrapChatId.current) : undefined;
     firstTabRestore.current = false;
     const restored = scaffold && !loaded.chatTabs.some((tab) => tab.id === scaffold.id)
-      ? { ...loaded, chatTabs: [...loaded.chatTabs, scaffold], activeChatId: parseUrlState(searchParams).chat ? scaffold.id : loaded.activeChatId ?? scaffold.id }
+      ? { ...loaded, chatTabs: [...loaded.chatTabs, scaffold], activeChatId: parseUrlState(searchParams).chat || dirtyChatDrafts.current.has(scaffold.id) ? scaffold.id : loaded.activeChatId ?? scaffold.id }
       : loaded;
     dispatch({ type: "replace", state: ensureChatPresent(restored) });
     setChatRuntimeSnapshots({});
@@ -789,7 +792,15 @@ function WorkspacePageInner() {
   }, []);
 
   useEffect(() => {
-    if (hermesChats.selected) openSessionChatTab(hermesChats.selected.key, hermesChats.selected.title);
+    if (!hermesChats.selected) return;
+    const draft = tabsStateRef.current.chatTabs.find(tab => tab.id === tabsStateRef.current.activeChatId && !tab.sessionId && tab.variant === "draft");
+    if (draft && hermesChats.lastCreatedKey === hermesChats.selected.key) {
+      // Agent selection for an already-typed draft binds its identity in place.
+      dispatch({ type: "bindChatSession", tabId: draft.id, sessionId: hermesChats.selected.key });
+      dispatch({ type: "renameChat", id: draft.id, title: hermesChats.selected.title });
+      setActiveSessionId(hermesChats.selected.key);
+      setActiveSubagentKey(null);
+    } else openSessionChatTab(hermesChats.selected.key, hermesChats.selected.title);
   }, [hermesChats.selected, openSessionChatTab]);
 
   const lastHermesTab = useRef<string | null>(null);
@@ -2591,7 +2602,7 @@ function WorkspacePageInner() {
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       ref={layoutRef}
-      className="relative flex h-screen"
+      className={`${responsiveStyles.shell} relative flex h-screen`}
       style={{ background: "var(--color-main-bg)" }}
       onClick={handleContainerClick}
     >
@@ -2812,9 +2823,14 @@ function WorkspacePageInner() {
               <div
                 key={tab.id}
                 className={isVisible ? "flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" : "hidden"}
+                aria-hidden={!isVisible}
+                inert={!isVisible ? true : undefined}
               >
                 <ChatPanel
-                  initializing={chatPaneLoading || (!hermesChats.listing && !!hermesChats.error) || (hermesChats.enabled && !nativeKey)}
+                  initializing={chatPaneLoading || (!hermesChats.listing && !!hermesChats.error)}
+                  conversationUnselected={hermesChats.enabled && !nativeKey}
+                  onChooseConversation={hermesChats.newChat}
+                  onDraftChange={hasContent => { if (hasContent) dirtyChatDrafts.current.add(tab.id); else dirtyChatDrafts.current.delete(tab.id); }}
                   nativeConversationKey={nativeKey}
                   headerBadge={groupRow ? <GroupBadge row={groupRow} /> : undefined}
                   ref={(handle) => setMainChatPanelRef(tab.id, handle)}
