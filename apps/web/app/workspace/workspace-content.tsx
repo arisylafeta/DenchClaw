@@ -2456,10 +2456,6 @@ function WorkspacePageInner() {
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
     onNavigateToCrmObject: handleNavigateToObject,
     onNewChatSession: () => { showChat(); return hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(); },
-    newChatOptions: hermesChats.enabled ? [
-      { label: "Solo chat…", onSelect: () => { showChat(); hermesChats.newChat("solo"); } },
-      { label: "Group chat…", onSelect: () => { showChat(); hermesChats.newChat("group"); } },
-    ] : undefined,
     chatsLoading: !hermesChats.ready,
     chatsPanel: (
       !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={showChat} /> : <ChatSessionsSidebar
