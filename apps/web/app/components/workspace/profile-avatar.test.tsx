@@ -6,7 +6,7 @@ import { ProfileAvatar } from "./profile-avatar";
 import { bundledProfileAvatar } from "@/lib/profile-avatars";
 
 describe("bundled profile avatars", () => {
-  it.each(["default", "investigator", "mailvin", "enricho"])("uses a bundled WebP rather than the profile API for %s", (name) => {
+  it.each(["default", "investigator", "mailvin", "enricho", "devon", "matcha"])("uses a bundled WebP rather than the profile API for %s", (name) => {
     const { container } = render(<ProfileAvatar name={name} />);
     const image = container.querySelector("img")!;
     expect(image.getAttribute("src")).toBe(bundledProfileAvatar(name));

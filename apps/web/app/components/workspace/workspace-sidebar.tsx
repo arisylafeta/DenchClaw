@@ -8,7 +8,6 @@ import {
 	ComboboxList,
 	ComboboxItem,
 } from "../ui/combobox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import {
 	IconFolderFilled,
 	IconFileFilled,
@@ -154,8 +153,6 @@ type WorkspaceSidebarProps = {
   chatsPanel?: React.ReactNode;
   /** Invoked when the user hits the "+" next to the Chats tab. */
   onNewChatSession?: () => void;
-  /** When set, the "+" opens this menu instead of calling onNewChatSession. */
-  newChatOptions?: { label: string; onSelect: () => void }[];
   /** True until the conversation backend has answered, so the header does not flash a stale name. */
   chatsLoading?: boolean;
 };
@@ -329,7 +326,6 @@ export function WorkspaceSidebar({
   onNavigateToCrmObject,
   chatsPanel,
   onNewChatSession,
-  newChatOptions,
   chatsLoading = false,
 }: WorkspaceSidebarProps) {
 	const width = mobile ? "280px" : (widthProp ?? 260);
@@ -753,26 +749,13 @@ export function WorkspaceSidebar({
 						</button>
 					);
 				})}
-				{sidebarTab === "chats" && (newChatOptions?.length || onNewChatSession) && (() => {
-					const plus = (
+				{sidebarTab === "chats" && onNewChatSession && (
+					<button type="button" onClick={onNewChatSession} className="p-1 rounded-md transition-colors cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }} title="New chat" aria-label="New chat">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
 							<path d="M5 12h14" /><path d="M12 5v14" />
 						</svg>
-					);
-					const buttonClass = "p-1 rounded-md transition-colors cursor-pointer shrink-0 hover:bg-[var(--color-surface-hover)]";
-					return newChatOptions?.length ? (
-						<DropdownMenu>
-							<DropdownMenuTrigger className={buttonClass} style={{ color: "var(--color-text-muted)" }} title="New chat" aria-label="New chat">{plus}</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								{newChatOptions.map((option) => (
-									<DropdownMenuItem key={option.label} onClick={option.onSelect}>{option.label}</DropdownMenuItem>
-								))}
-							</DropdownMenuContent>
-						</DropdownMenu>
-					) : (
-						<button type="button" onClick={onNewChatSession} className={buttonClass} style={{ color: "var(--color-text-muted)" }} title="New chat" aria-label="New chat">{plus}</button>
-					);
-				})()}
+					</button>
+				)}
 			</div>
 		)}
 

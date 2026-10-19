@@ -247,7 +247,7 @@ function NativeRow({
 							e.stopPropagation();
 							onStartRename(session.id, session.title);
 						}}
-						className="flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-lg cursor-pointer"
+						className="flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-lg cursor-pointer touch-manipulation"
 						title={session.title || "Untitled chat"}
 					>
 						<div className="flex items-center gap-1.5">
@@ -297,7 +297,7 @@ function NativeRow({
 								<StopIcon />
 							</button>
 						)}
-						{(onStartRename || onDelete) && (
+						{(
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									onClick={(e) => e.stopPropagation()}
@@ -317,6 +317,10 @@ function NativeRow({
 											Rename
 										</DropdownMenuItem>
 									)}
+									<DropdownMenuItem onSelect={() => { void navigator.clipboard?.writeText(session.id); }}>
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>
+										Copy ID
+									</DropdownMenuItem>
 									{onDelete && (
 										<DropdownMenuItem
 											variant="destructive"
@@ -393,8 +397,7 @@ function NativeRow({
 		</div>
 	);
 
-	if (!onStartRename && !onDelete) return rowContent;
-
+	
 	return (
 		<ContextMenu onOpenChange={(open) => { setCtxOpen(open); if (!open) onLeave(); }}>
 			<ContextMenuTrigger asChild>{rowContent}</ContextMenuTrigger>
@@ -405,6 +408,10 @@ function NativeRow({
 						Rename
 					</ContextMenuItem>
 				)}
+				<ContextMenuItem onSelect={() => { void navigator.clipboard?.writeText(session.id); }}>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>
+					Copy ID
+				</ContextMenuItem>
 				{onDelete && (
 					<ContextMenuItem variant="destructive" onSelect={() => onDelete(session.id)}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
