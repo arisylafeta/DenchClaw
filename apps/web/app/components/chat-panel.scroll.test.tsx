@@ -7,17 +7,19 @@ import { ChatPanel } from "./chat-panel";
 describe("ChatPanel bottom pinning", () => {
 	let resizeCallbacks: ResizeObserverCallback[];
 	let rafCallbacks: FrameRequestCallback[];
+	let observedElements: Element[];
 
 	beforeEach(() => {
 		vi.useFakeTimers();
 		resizeCallbacks = [];
 		rafCallbacks = [];
+		observedElements = [];
 
 		class FakeResizeObserver {
 			constructor(callback: ResizeObserverCallback) {
 				resizeCallbacks.push(callback);
 			}
-			observe() {}
+			observe(element: Element) { observedElements.push(element); }
 			unobserve() {}
 			disconnect() {}
 		}
@@ -39,6 +41,46 @@ describe("ChatPanel bottom pinning", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
+	});
+
+	it.each([true, false])("tracks dock growth and collapse while pinned=%s", async (pinned) => {
+		const { container } = render(
+			<ChatPanel sessionKey="agent:main:subagent:test" subagentTask="Test dock" />,
+		);
+		const composer = container.querySelector<HTMLDivElement>("[data-chat-composer-position]")!;
+		const scroller = container.querySelector<HTMLDivElement>(".overflow-y-auto")!;
+		expect(observedElements).toContain(composer);
+		let height = 140;
+		vi.spyOn(composer, "getBoundingClientRect").mockImplementation(() => ({ height }) as DOMRect);
+		const scrollTo = vi.fn();
+		Object.defineProperties(scroller, {
+			clientHeight: { configurable: true, value: 600 },
+			scrollHeight: { configurable: true, get: () => 1000 + height },
+			scrollTop: { configurable: true, value: 0, writable: true },
+			scrollTo: { configurable: true, value: scrollTo },
+		});
+		await act(async () => {
+			while (rafCallbacks.length) rafCallbacks.shift()?.(performance.now());
+		});
+		if (!pinned) {
+			await act(async () => {
+				scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+				scroller.dispatchEvent(new Event("scroll"));
+				vi.advanceTimersByTime(201);
+			});
+		}
+		for (const nextHeight of [360, 140]) {
+			scrollTo.mockClear();
+			await act(async () => {
+				height = nextHeight;
+				for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+				while (rafCallbacks.length) rafCallbacks.shift()?.(performance.now());
+			});
+			expect(scroller.style.paddingBottom).toBe("var(--chat-composer-height, 140px)");
+			expect(scroller.style.getPropertyValue("--chat-composer-height")).toBe(`${height}px`);
+			if (pinned) expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + height, behavior: "auto" });
+			else expect(scrollTo).not.toHaveBeenCalled();
+		}
 	});
 
 	it("stays pinned when content grows during a downward wheel gesture", async () => {

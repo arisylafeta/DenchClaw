@@ -1421,6 +1421,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		//   3. The legacy messages-changed effect is preserved so token-by-
 		//      token streaming feels smooth even before ResizeObserver fires.
 		const scrollContainerRef = useRef<HTMLDivElement>(null);
+		const composerPositionRef = useRef<HTMLDivElement>(null);
 		const wantsToBePinnedRef = useRef(true);
 		const isUserScrollingRef = useRef(false);
 		const userScrollResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1495,6 +1496,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			if (!el) {return;}
 
 			const repinIfNeeded = () => {
+				// Measure the entire floating stack, including dock panels and outer
+				// padding. Phone layouts override this inset because it is in flex flow.
+				const composer = composerPositionRef.current;
+				if (composer) {
+					el.style.setProperty("--chat-composer-height", `${composer.getBoundingClientRect().height}px`);
+				}
 				if (repinRafRef.current) {return;}
 				repinRafRef.current = requestAnimationFrame(() => {
 					repinRafRef.current = 0;
@@ -1511,6 +1518,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 			const ro = new ResizeObserver(repinIfNeeded);
 			ro.observe(el);
+			if (composerPositionRef.current) {
+				ro.observe(composerPositionRef.current, { box: "border-box" });
+			}
+			repinIfNeeded();
 			const content = el.firstElementChild;
 			if (content instanceof HTMLElement) {ro.observe(content);}
 
@@ -3026,7 +3037,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						// Reserve space at the bottom so the last message can scroll
 						// up above the floating input bar (which sits absolutely on
 						// top of this scroll area).
-						paddingBottom: showHeroState ? 0 : 140,
+						paddingBottom: showHeroState ? 0 : "var(--chat-composer-height, 140px)",
 					}}
 				>
 				{/* Messages */}
@@ -3227,6 +3238,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				{/* One stable composer: floating on desktop, in flex flow above the phone safe area. */}
 				{(
 					<div
+						ref={composerPositionRef}
 						data-chat-composer-position=""
 						data-hero={showHeroState || undefined}
 						data-compact={compact || undefined}
