@@ -117,6 +117,35 @@ describe("existing ChatPanel with a native Hermes group", () => {
   }, 10000);
 });
 
+describe("native Hermes group sends", () => {
+  const groupKey = conversationKey("group", "room-dup");
+  const groupEndpoint = `/api/hermes/conversations/${encodeURIComponent(groupKey)}`;
+  it("shows one copy of my message when the room log returns it under its server-owned id", async () => {
+    // Hermes maps the client event id into its own `user:<hash>` namespace, so ids never match the optimistic row.
+    let serverRow: { id: string; role: string; text: string; content: string } | null = null;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
+      if (url.startsWith(groupEndpoint) && init?.method === "POST") {
+        const { message } = JSON.parse(init.body as string);
+        serverRow = { id: "user:6f1c0d", role: "user", text: message, content: message };
+        return Response.json({ conversation: { working: true }, cursor: 1, messages: [serverRow] });
+      }
+      if (url.startsWith(groupEndpoint)) {
+        const history = [{ id: "e1", role: "assistant", text: "Earlier reply", content: "Earlier reply", profile: "investigator", name: "InvestiGator" }];
+        return Response.json({ conversation: { working: Boolean(serverRow) }, cursor: serverRow ? 3 : 2, messages: url.includes("since_seq") ? (serverRow ? [serverRow] : []) : history });
+      }
+      return new Response(null, { status: 404 });
+    });
+    render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} />);
+    await waitFor(() => expect(screen.getAllByTestId("rich-message").some((m) => m.textContent?.includes("Earlier reply"))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    await waitFor(() => expect(serverRow).not.toBeNull());
+    // Both the POST response and the next poll deliver the same server row.
+    await new Promise((resolve) => setTimeout(resolve, 3400));
+    expect(screen.getAllByTestId("rich-message").filter((m) => m.textContent?.includes("Continue native"))).toHaveLength(1);
+  }, 10000);
+});
+
 describe("gateway ChatPanel solo transport", () => {
   it("sends uploaded images as attachment paths with context, never as inline bytes", async () => {
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {

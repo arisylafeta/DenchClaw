@@ -1299,6 +1299,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		pendingRequestRef.current = pendingNativeRequest;
 
 		const groupCursorRef = useRef(0);
+		// Client ids of group messages shown before the room log confirmed them.
+		const optimisticGroupIds = useRef(new Set<string>());
 		const [groupWorking, setGroupWorking] = useState(false);
 		const [groupSending, setGroupSending] = useState(false);
 		const applyGroupDetail = useCallback((data: { conversation?: { working?: boolean | null }; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string }>; cursor?: number }) => {
@@ -1308,13 +1310,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			if (!incoming.length) return;
 			setMessages((prev) => {
 				const have = new Set(prev.map((m) => m.id));
-				const added = incoming.filter((m) => !have.has(m.id)).map((m) => ({
+				// Hermes re-keys my message into its own `user:<hash>` id, so the optimistic row never matches by id.
+				// Swap the first still-optimistic row with the same text for the server row instead of appending a twin.
+				const rows = [...prev];
+				const fresh = incoming.filter((m) => {
+					if (have.has(m.id)) return false;
+					if (m.role !== "user") return true;
+					const text = m.text ?? m.content ?? "";
+					const index = rows.findIndex((row) => optimisticGroupIds.current.has(row.id) && row.role === "user" && row.parts.some((part) => part.type === "text" && part.text === text));
+					if (index < 0) return true;
+					optimisticGroupIds.current.delete(rows[index].id);
+					rows[index] = { ...rows[index], id: m.id };
+					return false;
+				});
+				const added = fresh.map((m) => ({
 					id: m.id,
 					role: m.role,
 					parts: [{ type: "text" as const, text: m.text ?? m.content ?? "" }] as UIMessage["parts"],
 					...(m.profile ? { metadata: { profile: m.profile, name: m.name } } : {}),
 				}));
-				return added.length ? [...prev, ...added] : prev;
+				return added.length ? [...rows, ...added] : rows.some((row, i) => row !== prev[i]) ? rows : prev;
 			});
 		}, [setMessages]);
 		useEffect(() => {
@@ -2264,6 +2279,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					// Group chats post to the room log instead of streaming through /api/chat.
 					userHtmlMapRef.current.set(messageText, html);
 					const eventId = crypto.randomUUID();
+					optimisticGroupIds.current.add(eventId);
 					setMessages((prev) => [...prev, { id: eventId, role: "user" as const, parts: [{ type: "text" as const, text: messageText }] as UIMessage["parts"] }]);
 					setGroupSending(true);
 					try {
