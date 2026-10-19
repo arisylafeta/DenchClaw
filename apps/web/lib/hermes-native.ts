@@ -12,10 +12,11 @@ import { hermesChatTransport } from "./hermes-gateway/transport-flag";
 import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
 type NativeSession = { id: string; source?: string; title?: string; last_active?: number; started_at?: number; hidden?: boolean; is_internal_child?: boolean };
-type Member = { profile: string; member_id: string; display_name?: string; handle?: string };
-type Room = { room_id: string; name: string; updated_at: number; members: Member[] };
-type RoomState = { room: Room; driver_status?: { working?: boolean; blocked?: boolean } };
-type RoomEvent = { event_id: string; kind: string; actor: { id: string; profile?: string; display_name?: string }; payload: { text?: string; task_id?: string; member_id?: string } };
+export type Member = { profile: string; member_id: string; display_name?: string; handle?: string };
+export type Room = { room_id: string; name: string; updated_at: number; members: Member[] };
+export type RoomDriver = { working?: boolean; blocked?: boolean; pending_actions?: Array<Record<string, unknown>>; counts?: Record<string, unknown> };
+export type RoomState = { room: Room; driver_status?: RoomDriver };
+export type RoomEvent = { event_id: string; kind: string; created_at?: number; actor: { id: string; profile?: string; display_name?: string }; payload: { text?: string; task_id?: string; member_id?: string; turn_id?: string; passed?: boolean; message_event_id?: string; discussion_event_id?: string } };
 export function hermesProfiles() { return discoverWorkspaces().map((p) => p.name); }
 export function assertProfile(profile: string) {
   const found = discoverWorkspaces().find((workspace) => workspace.name === profile);
@@ -274,11 +275,15 @@ export async function readConversation(key: string, sinceSeq = 0) {
       if (page.has_more === false || (page.has_more === undefined && page.events.length < 100)) break;
     }
     const messages: HermesMessage[] = events.filter((e) => ["message.user", "message.member"].includes(e.kind)).map((e) => {
-      const member = state.room.members.find((m) => m.member_id === e.actor.id);
-      return { id: e.event_id, role: e.kind === "message.user" ? "user" : "assistant", text: e.payload.text || "", content: e.payload.text || "", profile: member?.profile, name: member?.display_name || e.actor.display_name };
+      const member = state.room.members.find((m) => m.member_id === (e.payload.member_id ?? e.actor.id));
+      return { id: e.event_id, role: e.kind === "message.user" ? "user" : "assistant", text: e.payload.text || "", content: e.payload.text || "", profile: member?.profile, name: member?.display_name || e.actor.display_name,
+        memberId: e.payload.member_id ?? member?.member_id, turnId: e.payload.turn_id, taskId: e.payload.task_id, createdAt: e.created_at ? e.created_at * 1000 : undefined };
     });
     const conversation = roomConversation(state.room, state.driver_status?.working ?? null);
-    return { conversation, messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false };
+    return { conversation, messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false,
+      members: state.room.members, driver: state.driver_status ?? {},
+      settled: events.filter(e => e.kind === "turn.settled").map(e => ({ memberId: e.payload.member_id, turnId: e.payload.turn_id, taskId: e.payload.task_id, passed: e.payload.passed, createdAt: e.created_at ? e.created_at * 1000 : undefined })),
+      events };
   }
   const root = `/api/sessions/${encodeURIComponent(identity.id)}`;
   // Display history, not the model's working set: after Hermes compacts in place, only

@@ -238,7 +238,7 @@ describe("native Hermes conversations", () => {
       calls.push({ method, params });
       if (method === "groups.create") return { room };
       if (method === "groups.state") return { room, driver_status: { working: true } };
-      return { events: [{ event_id: "user:1", seq: 1, kind: "message.user", actor: { id: "user" }, payload: { text: "hello" } }, { event_id: "answer:1", seq: 2, kind: "message.member", actor: { id: "m2" }, payload: { text: "Alpha reply" } }] };
+      return { events: [{ event_id: "user:1", seq: 1, kind: "message.user", actor: { id: "user" }, payload: { text: "hello" } }, { event_id: "answer:1", seq: 2, kind: "message.member", created_at: 42, actor: { id: "m2" }, payload: { text: "Alpha reply", member_id: "m2", task_id: "task1", turn_id: "turn1" } }, { event_id: "settle:1", seq: 3, kind: "turn.settled", created_at: 43, actor: { id: "gateway" }, payload: { member_id: "m2", task_id: "task1", turn_id: "turn1", passed: false } }] };
     };
     await startGateway();
     const created = await createConversation(["default", "alpha"]);
@@ -246,7 +246,9 @@ describe("native Hermes conversations", () => {
     expect(calls[0]).toMatchObject({ method: "groups.create", params: { members: [{ profile: "default", member_id: "default", handle: "default", target: { kind: "local", profile: "default" } }, { profile: "alpha", member_id: "alpha", handle: "alpha", target: { kind: "local", profile: "alpha" } }] } });
     expect(calls[1].method).toBe("groups.state");
     const detail = await readConversation(conversationKey("group", room.room_id));
-    expect(detail.messages).toEqual([{ id: "user:1", role: "user", text: "hello", content: "hello", profile: undefined, name: undefined }, { id: "answer:1", role: "assistant", text: "Alpha reply", content: "Alpha reply", profile: "alpha", name: "Alpha" }]);
+    expect(detail.messages).toMatchObject([{ id: "user:1", role: "user", text: "hello", content: "hello", profile: undefined, name: undefined }, { id: "answer:1", role: "assistant", text: "Alpha reply", content: "Alpha reply", profile: "alpha", name: "Alpha", memberId: "m2" }]);
+    expect(detail).toMatchObject({ members: room.members, driver: { working: true }, settled: [{ memberId: "m2", taskId: "task1", turnId: "turn1", passed: false, createdAt: 43000 }], cursor: 3, sinceSeq: 0 });
+    expect(detail.messages[1]).toMatchObject({ memberId: "m2", taskId: "task1", turnId: "turn1", createdAt: 42000 });
     expect(detail.conversation.working).toBe(true);
   });
   it("reads all pages of native solo history without copying or rewriting it", async () => {
