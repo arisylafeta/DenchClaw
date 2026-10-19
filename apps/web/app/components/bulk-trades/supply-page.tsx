@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Supply, SupplyFeedRow } from "@/lib/bulk-supply";
 import type { BulkTradesRoute } from "@/lib/bulk-trades-url";
 import type { Demand } from "@/lib/bulk-demand";
@@ -13,7 +13,7 @@ import {
   SUPPLY_CLOSED_LABEL,
   type SupplyClosedReason,
 } from "@/lib/bulk-supply";
-import { Card, DetailSheet, ErrorText, request } from "./trade-ui";
+import { Card, DetailSheet, ErrorText, peekShared, request, sharedGet } from "./trade-ui";
 import { ChatHint, SheetTabs, rowFocus } from "./demand-page";
 import styles from "./bulk-detail.module.css";
 import { CompanyContext } from "./company-context";
@@ -24,6 +24,9 @@ const KIND = {
   auction: "Auction",
   stock: "Stock",
 } as const;
+const SUPPLY_URL = "/api/bulk-trades/supply";
+const DEMAND_URL = "/api/bulk-trades/demand";
+
 export function SupplyPage({
   onOpenDemand,
   initialSupplyId,
@@ -37,9 +40,10 @@ export function SupplyPage({
   onRouteChange?: (patch: Partial<BulkTradesRoute>, mode: "push" | "replace") => void;
 }) {
   initialSupplyId = route ? route.supply : initialSupplyId;
-  const [supply, setSupply] = useState<Supply[]>([]);
-  const [feed, setFeed] = useState<SupplyFeedRow[]>([]);
-  const [demand, setDemand] = useState<Demand[]>([]);
+  const cached = peekShared<{ supply: Supply[]; feed: SupplyFeedRow[] }>(SUPPLY_URL);
+  const [supply, setSupply] = useState<Supply[]>(cached?.supply ?? []);
+  const [feed, setFeed] = useState<SupplyFeedRow[]>(cached?.feed ?? []);
+  const [demand, setDemand] = useState<Demand[]>(() => peekShared<{ demand: Demand[] }>(DEMAND_URL)?.demand ?? []);
   const [selectedId, setSelectedState] = useState(initialSupplyId ?? null);
   const [query, setQueryState] = useState(route?.query ?? "");
   const [filter, setFilterState] = useState(route?.status ?? "open");
@@ -47,18 +51,20 @@ export function SupplyPage({
   const setQuery = (value: string) => { setQueryState(value); onRouteChange?.({ query: value || null }, "replace"); };
   const setFilter = (value: string) => { setFilterState(value); onRouteChange?.({ status: value === "open" ? null : value }, "replace"); };
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
+  const latest = useRef({ supply: 0, demand: 0 });
+  // Supply and demand load side by side; the supply rows never wait for demand.
   const load = useCallback(async () => {
+    const seq = ++latest.current.supply;
+    const demandSeq = ++latest.current.demand;
+    void sharedGet<{ demand: Demand[] }>(DEMAND_URL)
+      .then((data) => { if (demandSeq === latest.current.demand) setDemand(data.demand); })
+      .catch(() => { /* demand only adds context here */ });
     try {
-      const data = await request<{ supply: Supply[]; feed: SupplyFeedRow[] }>(
-        "/api/bulk-trades/supply",
-      );
+      const data = await sharedGet<{ supply: Supply[]; feed: SupplyFeedRow[] }>(SUPPLY_URL);
+      if (seq !== latest.current.supply) return;
       setSupply(data.supply);
       setFeed(data.feed);
-      const matches = await request<{ demand: Demand[] }>(
-        "/api/bulk-trades/demand",
-      );
-      setDemand(matches.demand);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load supply.");
     } finally {

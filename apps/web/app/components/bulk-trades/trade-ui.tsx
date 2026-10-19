@@ -28,12 +28,55 @@ export function DetailSheet({ title, onClose, children, onSubmit, footer }: {
   </Sheet>;
 }
 
+/**
+ * Shared reads for the Bulk Trades tabs: one request per URL at a time, and the last result is
+ * kept so a tab shows what is already loaded while it refreshes. Any write clears all of it, so
+ * a saved change is never replaced by an older copy.
+ */
+const sharedResults = new Map<string, unknown>();
+const sharedInflight = new Map<string, Promise<unknown>>();
+let writeGeneration = 0;
+
+export function forgetShared() {
+  writeGeneration += 1;
+  sharedResults.clear();
+  sharedInflight.clear();
+}
+
+/** The last loaded result for a URL, if any. */
+export function peekShared<T>(url: string): T | undefined {
+  return sharedResults.get(url) as T | undefined;
+}
+
+/** GET a URL once at a time; concurrent callers share the request. */
+export function sharedGet<T>(url: string): Promise<T> {
+  const running = sharedInflight.get(url);
+  if (running) return running as Promise<T>;
+  const generation = writeGeneration;
+  const promise: Promise<T> = request<T>(url)
+    .then((value) => {
+      if (generation === writeGeneration) sharedResults.set(url, value);
+      return value;
+    })
+    .finally(() => {
+      if (sharedInflight.get(url) === promise) sharedInflight.delete(url);
+    });
+  sharedInflight.set(url, promise);
+  return promise;
+}
+
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const write = !!init?.method && init.method !== "GET";
+  if (write) forgetShared();
   const headers = init?.body instanceof FormData ? undefined : { "content-type": "application/json" };
-  const response = await fetch(url, { ...init, headers });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
-  return body as T;
+  try {
+    const response = await fetch(url, { ...init, headers });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+    return body as T;
+  } finally {
+    if (write) forgetShared();
+  }
 }
 
 export const tradeUrl = (id: string, path = "") => `/api/bulk-trades/${encodeURIComponent(id)}${path}`;

@@ -19,7 +19,7 @@ import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { TradePage } from "./trade-page";
 import { ProposalRow } from "./proposal-row";
-import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
+import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
 import { TodayDashboard } from "./today-dashboard";
 
@@ -74,8 +74,8 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const load = useCallback(async () => {
     try {
       const [data, inbox] = await Promise.all([
-        request<{ trades: BulkTrade[]; owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades"),
-        request<{ possible?: Proposal[]; accepted?: Proposal[] }>("/api/bulk-trades/demand"),
+        sharedGet<{ trades: BulkTrade[]; owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades"),
+        sharedGet<{ possible?: Proposal[]; accepted?: Proposal[] }>("/api/bulk-trades/demand"),
       ]);
       setTrades(data.trades);
       setOwners(data.owners);

@@ -5,7 +5,7 @@ import type { BulkTrade } from "@/lib/bulk-trades";
 import { LIVE_STAGES } from "@/lib/bulk-trades";
 import type { Demand } from "@/lib/bulk-demand";
 import { shortDate } from "@/lib/bulk-trade-details";
-import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
+import { ErrorText, buttonClass, buttonStyle, peekShared, sharedGet } from "./trade-ui";
 import { rowFocus } from "./demand-page";
 
 type WorkItem = {
@@ -33,13 +33,12 @@ export function TodayDashboard({
   onOpenInbox: () => void;
   demandRevision?: number;
 }) {
-  const [demand, setDemand] = useState<Demand[]>([]);
+  const [demand, setDemand] = useState<Demand[]>(() => peekShared<{ demand: Demand[] }>("/api/bulk-trades/demand")?.demand ?? []);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !peekShared("/api/bulk-trades/demand"));
   const [expanded, setExpanded] = useState<string[]>([]);
   useEffect(() => {
-    setLoading(true);
-    void request<{ demand: Demand[] }>("/api/bulk-trades/demand")
+    void sharedGet<{ demand: Demand[] }>("/api/bulk-trades/demand")
       .then((data) => {
         setDemand(data.demand);
         setError(null);

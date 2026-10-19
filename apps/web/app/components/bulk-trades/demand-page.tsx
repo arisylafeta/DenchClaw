@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import type { BulkTradesRoute } from "@/lib/bulk-trades-url";
 import { CLOSED_REASON_LABEL, HISTORY_CATEGORIES } from "@/lib/bulk-demand";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
 import type { BestMatchLine } from "@/lib/demand-supply-types";
-import { Card, ErrorText, request } from "./trade-ui";
+import { Card, ErrorText, peekShared, request, sharedGet } from "./trade-ui";
 import styles from "./bulk-detail.module.css";
 import { DemandDialog } from "./demand-editor";
 import { DemandPanel } from "./demand-panel";
@@ -137,6 +137,9 @@ export function ChatHint({ id }: { id: string }) {
     </footer>
   );
 }
+const DEMAND_URL = "/api/bulk-trades/demand";
+const MATCHES_URL = "/api/bulk-trades/demand/matches";
+
 export function DemandPage({
   today,
   onOpenTrade,
@@ -154,7 +157,8 @@ export function DemandPage({
   onRouteChange?: (patch: Partial<BulkTradesRoute>, mode: "push" | "replace") => void;
 }) {
   initialDemandId = route ? route.demand : initialDemandId;
-  const [demand, setDemand] = useState<Demand[]>([]);
+  // Rows already loaded by another tab show at once; the fetch below refreshes them.
+  const [demand, setDemand] = useState<Demand[]>(() => peekShared<{ demand: Demand[] }>(DEMAND_URL)?.demand ?? []);
   const [filter, setFilterState] = useState(route?.status ?? "open");
   const [query, setQueryState] = useState(route?.query ?? "");
   const [category, setCategoryState] = useState(route?.category ?? "all");
@@ -166,24 +170,27 @@ export function DemandPage({
   const setSelectedId = (id: string | null) => { setSelectedState(id); onRouteChange?.({ demand: id }, "push"); };
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [best, setBest] = useState<Record<string, BestMatchLine>>({});
+  const [loading, setLoading] = useState(() => !peekShared(DEMAND_URL));
+  const [best, setBest] = useState<Record<string, BestMatchLine>>(() => peekShared<{ matches?: Record<string, BestMatchLine> }>(MATCHES_URL)?.matches ?? {});
+  const latest = useRef({ demand: 0, best: 0 });
+  // Match lines are slow and optional: they never hold up the rows.
   const loadBest = useCallback(async () => {
+    const seq = ++latest.current.best;
     try {
-      setBest((await request<{ matches?: Record<string, BestMatchLine> }>("/api/bulk-trades/demand/matches")).matches ?? {});
+      const data = await sharedGet<{ matches?: Record<string, BestMatchLine> }>(MATCHES_URL);
+      if (seq === latest.current.best) setBest(data.matches ?? {});
     } catch {
-      setBest({});
+      if (seq === latest.current.best) setBest({});
     }
   }, []);
   useEffect(() => {
     void loadBest();
   }, [loadBest]);
   const load = useCallback(async () => {
+    const seq = ++latest.current.demand;
     try {
-      const data = await request<{ demand: Demand[] }>(
-        "/api/bulk-trades/demand",
-      );
-      setDemand(data.demand);
+      const data = await sharedGet<{ demand: Demand[] }>(DEMAND_URL);
+      if (seq === latest.current.demand) setDemand(data.demand);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load demand.");
     } finally {

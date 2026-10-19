@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { todayInLondon, type BulkTrade } from "@/lib/bulk-trades";
 import { BulkTradesView } from "./bulk-trades-view";
+import { forgetShared } from "./trade-ui";
 
 // `useSearchParams` follows the History API the way Next's router does.
 const urlListeners = new Set<() => void>();
@@ -60,7 +61,7 @@ function dataTransfer() {
 }
 
 describe("BulkTradesView", () => {
-  beforeEach(() => { window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); nativeReplace(null, "", "/?path=bulk_trade"); });
+  beforeEach(() => { forgetShared(); window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); nativeReplace(null, "", "/?path=bulk_trade"); });
   afterEach(() => vi.unstubAllGlobals());
 
   it("defaults to Today and never shows empty work lists before trades have loaded", async () => {

@@ -7,6 +7,7 @@ import type { Demand } from "@/lib/bulk-demand";
 import type { Check } from "@/lib/demand-match";
 import type { BestMatchLine, DemandSupply, SupplyUnitView } from "@/lib/demand-supply-types";
 import { DemandPage } from "./demand-page";
+import { forgetShared } from "./trade-ui";
 function row(overrides: Partial<Demand>): Demand {
   return {
     priority: false,
@@ -96,6 +97,7 @@ function respond(url: string, rows: Demand[], matches: Record<string, BestMatchL
   return { demand: rows };
 }
 function setup(rows: Demand[], matches: Record<string, BestMatchLine> = {}, pageProps: Partial<React.ComponentProps<typeof DemandPage>> = {}) {
+  forgetShared();
   const fetchMock = vi.fn(
     async (url: string, _init?: RequestInit) => new Response(JSON.stringify(respond(url, rows, matches))),
   );
