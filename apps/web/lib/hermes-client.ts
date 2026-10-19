@@ -26,6 +26,25 @@ export function errorStream(message: string): ReadableStream<Uint8Array> {
   });
 }
 
+/** Hermes gateway error bodies are sometimes an HTML page (proxy/500
+ *  overlay) rather than the documented JSON error shape. Surfacing that
+ *  raw markup verbatim in the chat looks like a broken page and leaves
+ *  the turn stuck, so collapse anything HTML-shaped to a short message
+ *  instead of forwarding it to the client as-is. */
+function sanitizeUpstreamErrorBody(body: string, status: number): string {
+  const trimmed = body.trim();
+  const looksLikeHtml = /^<(!doctype|html)/i.test(trimmed) || /<\/html>\s*$/i.test(trimmed);
+  if (!trimmed || looksLikeHtml) {
+    return `Hermes backend returned an unexpected error (HTTP ${status}). Please try again.`;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: { message?: string }; message?: string };
+    return parsed.error?.message ?? parsed.message ?? trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
 type HermesSseEvent = {
   delta?: string;
   content?: string;
@@ -113,7 +132,7 @@ export async function createHermesChatStream(
             }
           }
           if (!alreadyExists) {
-            emit({ type: "error", errorText: body });
+            emit({ type: "error", errorText: sanitizeUpstreamErrorBody(body, sessionRes.status) });
             controller.close();
             return;
           }
@@ -133,7 +152,7 @@ export async function createHermesChatStream(
           const body = await eventsRes.text();
           emit({
             type: "error",
-            errorText: `Events stream failed: ${body}`,
+            errorText: `Events stream failed: ${sanitizeUpstreamErrorBody(body, eventsRes.status)}`,
           });
           controller.close();
           return;
