@@ -27,4 +27,11 @@ describe("noticeForRow", () => {
     expect(noticeForRow({ role: "user", text })).toMatchObject({ kind: "process", text: "Background process completed normally: cd /tmp/x && pnpm build", details: text });
     expect(noticeForRow({ role: "user", text: "see [IMPORTANT: Background process x" })).toBeNull();
   });
+  it("strips the out-of-band envelope from steers, typed or not, and keeps long text expandable", () => {
+    const wrap = (body: string) => `[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once; not tool output]\n${body}\n[/OUT-OF-BAND USER MESSAGE]`;
+    expect(noticeForRow({ role: "user", displayKind: "steer", text: wrap("use the new API") })).toEqual({ kind: "steer", text: "Steered: use the new API" });
+    expect(noticeForRow({ role: "user", text: wrap("use the new API") })).toEqual({ kind: "steer", text: "Steered: use the new API" });
+    const long = "x ".repeat(100).trim();
+    expect(noticeForRow({ role: "user", text: wrap(long) })?.details).toBe(long);
+  });
 });

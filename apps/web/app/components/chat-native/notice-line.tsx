@@ -9,7 +9,7 @@ const ICON = { delegation: CircleCheck, notification: Bell, resume: Repeat, stee
 export function NoticeLine({ notice }: { notice: Notice }) {
   const [open, setOpen] = useState(false);
   const Icon = ICON[notice.kind];
-  const hasDetails = Boolean(notice.details) && notice.kind !== "steer" && notice.kind !== "model";
+  const hasDetails = Boolean(notice.details) && notice.kind !== "model";
   return <div data-notice={notice.kind} className="py-1 text-[12px] text-[var(--color-text-muted)]">
     <button type="button" disabled={!hasDetails} aria-expanded={hasDetails ? open : undefined} onClick={() => setOpen(!open)} className="flex min-w-0 max-w-full items-center gap-2 text-left disabled:cursor-default">
       <Icon aria-hidden="true" className="size-3.5 shrink-0" />

@@ -11,6 +11,10 @@ const KINDS: Record<string, NoticeKind> = {
 const FALLBACK: Record<NoticeKind, string> = {
   delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update',
 }
+/** Hermes wraps a mid-turn steer in an out-of-band marker; only the user's words matter. */
+const OOB_OPEN = /^\s*\[OUT-OF-BAND USER MESSAGE[^\]\n]*\]\s*/
+const OOB_CLOSE = /\s*\[\/OUT-OF-BAND USER MESSAGE\]\s*$/
+export const stripSteerEnvelope = (text: string): string => text.replace(OOB_OPEN, '').replace(OOB_CLOSE, '').trim()
 const clip = (text: string, max = 140) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line }
 const readMetadata = (value: unknown): Record<string, unknown> => {
   if (typeof value === 'string') { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {} } catch { return {} } }
@@ -23,7 +27,8 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   const typed = row.displayKind ? KINDS[row.displayKind] : undefined
   const legacy = !typed && /^\[ASYNC DELEGATION BATCH COMPLETE/.test(text) ? 'delegation' : undefined
   const process = !typed && !legacy && /^\[IMPORTANT: Background process \S+/.test(text) ? 'process' as const : undefined
-  const kind = typed ?? legacy ?? process
+  const wrapped = !typed && !legacy && !process && OOB_OPEN.test(text) ? 'steer' as const : undefined
+  const kind = typed ?? legacy ?? process ?? wrapped
   if (!kind) return null
   const display = typeof readMetadata(row.displayMetadata).display_text === 'string' ? String(readMetadata(row.displayMetadata).display_text) : ''
   let summary = display
@@ -37,6 +42,8 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
     if (head) summary = `Background process ${head[2].trim()}${head[3] && head[3] !== '0' ? ` (exit ${head[3]})` : ''}${command ? `: ${command}` : ''}`
   }
   // A steer row's text is the user's own instruction: show it, not a generic label.
-  if (kind === 'steer' && text.trim()) summary = `Steered: ${text}`
-  return { kind, text: clip(summary || FALLBACK[kind]), ...(text.trim() ? { details: text } : {}) }
+  const steerText = kind === 'steer' ? stripSteerEnvelope(text) : ''
+  if (steerText) summary = `Steered: ${steerText}`
+  const details = kind === 'steer' ? (steerText.length > 140 || steerText.includes('\n') ? steerText : '') : text.trim() ? text : ''
+  return { kind, text: clip(summary || FALLBACK[kind]), ...(details ? { details } : {}) }
 }
