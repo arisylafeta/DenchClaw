@@ -90,7 +90,7 @@ function SpecChips({
                     : [...selected, value],
                 )
               }
-              className="h-7 rounded-lg border px-2 text-xs"
+              className="h-7 rounded-none border px-2 text-xs"
               style={
                 on
                   ? {
@@ -357,7 +357,7 @@ export function DemandDialog({
             onChange={(event) => setPaste(event.target.value)}
             rows={3}
             placeholder="We are looking for 100+ NMC packs, 30–70 kWh, for storage builds in India…"
-            className="w-full rounded-lg border px-2.5 py-2 text-sm"
+            className="w-full rounded-none border px-2.5 py-2 text-sm"
             style={{
               background: "var(--bt-surface)",
               borderColor: "var(--bt-border)",

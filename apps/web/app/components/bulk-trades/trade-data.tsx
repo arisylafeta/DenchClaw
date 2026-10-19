@@ -162,7 +162,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
                   {claims.length ? claims.map((claim, index) => <Source key={index} source={claim} />) : <Source source={{ value: "", source_label: null, source_url: null, source_date: null }} />}
                 </span>
                 </TableCellContent>
-                <TableCellContent><span><span className="rounded-lg px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span></TableCellContent>
+                <TableCellContent><span><span className="rounded-none px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span></TableCellContent>
                 <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span></TableCellContent>
               </div>
               {proposals.filter((proposal) => proposal.target === template.key).map((proposal) => (
@@ -177,7 +177,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
       </div>
       {conflicts.map(({ template, row }) => (
         <div key={template.key} className="flex flex-wrap items-center gap-2.5 border-t px-5 py-3" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
-          <span className="rounded-lg px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={STATUS_STYLE.conflict}>Conflict</span>
+          <span className="rounded-none px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={STATUS_STYLE.conflict}>Conflict</span>
           <span className="min-w-[240px] flex-1 text-sm">
             {template.label}: {[row!, ...row!.alternatives].map((claim) => `${claim.value}${sourceText(claim) ? ` (${sourceText(claim)})` : ""}`).join(" or ")}?
           </span>
@@ -311,7 +311,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
                 aria-label={`Who sees ${file.file_name}`}
                 value={file.visibility}
                 onChange={(event) => changeVisibility(file, event.target.value as Visibility)}
-                className="h-8 rounded-lg border px-1.5 text-xs"
+                className="h-8 rounded-none border px-1.5 text-xs"
                 style={inputStyle}
               >
                 {VISIBILITIES.map((visibility) => <option key={visibility} value={visibility}>{VISIBILITY_LABEL[visibility]}</option>)}

@@ -26,7 +26,7 @@ export type SheetRow = {
   progress: string;
   tone: SheetTone;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
-  latest: { label: string; at: string | null } | null;
+  latest: { label: string; at: string | null; kind?: string } | null;
   next_action: string | null;
   next_due: string | null;
   owner: string | null;
@@ -67,7 +67,7 @@ export function demandRow(input: DemandInput): SheetRow {
     progress: input.linked_trades > 0 ? "On a trade" : worked ? "Being worked" : "New",
     tone: input.linked_trades > 0 ? "closing" : worked ? "active" : "new",
     latest: input.latest_title
-      ? { label: `${ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity"}: ${input.latest_title}`, at: input.latest_at }
+      ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" }
       : null,
     next_action: null, next_due: null, owner: null,
     touched: input.latest_at ?? input.asked_on ?? input.updated_at,

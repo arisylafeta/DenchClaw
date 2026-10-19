@@ -42,7 +42,7 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     expect(rows.map((row) => row.key).sort()).toEqual(
       ["demand:btd_sheet_new", "demand:btd_sheet_worked", "supply:bts_sheet_open", "trade:btl_sheet_live"].sort());
     const worked = rows.find((row) => row.id === "btd_sheet_worked")!;
-    expect(worked).toMatchObject({ progress: "Being worked", latest: { label: "Outreach: Asked supplier A" }, next_action: null, owner: null });
+    expect(worked).toMatchObject({ progress: "Being worked", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
     expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "New", latest: null });
   });
 });

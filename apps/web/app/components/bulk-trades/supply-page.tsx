@@ -520,7 +520,7 @@ export function SupplyDetail({ id, onClose, onOpenDemand }: { id: string; onClos
   if (!row && !detail) {
     return (
       <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
-        <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>
+        <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Trades Preview</button>
         <ErrorText error={error} />
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{supply && !error ? "This offer no longer exists." : error ? "" : "Loading…"}</p>
       </div>

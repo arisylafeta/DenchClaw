@@ -18,7 +18,7 @@ describe("sheet rows", () => {
 
   it("a demand is 'Being worked' on recorded activity and 'On a trade' only on a real buyer link, never on a suggestion", () => {
     expect(demand({ activity_count: 2, latest_kind: "outreach", latest_title: "Asked A", latest_at: "2026-10-05" }))
-      .toMatchObject({ progress: "Being worked", latest: { label: "Outreach: Asked A", at: "2026-10-05" } });
+      .toMatchObject({ progress: "Being worked", latest: { label: "Asked A", kind: "Outreach", at: "2026-10-05" } });
     expect(demand({ linked_trades: 1 })).toMatchObject({ progress: "On a trade" });
   });
 

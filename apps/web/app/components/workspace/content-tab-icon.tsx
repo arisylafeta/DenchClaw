@@ -39,6 +39,7 @@ function resolveIconKind(tab: ContentTab): IconKind {
   if (tab.kind === "campaigns") {return "object";}
   if (tab.kind === "crm-inbox") {return "inbox";}
   if (tab.kind === "crm-calendar") {return "calendar";}
+  if (tab.kind === "trades-preview") {return "object";}
   if (tab.kind === "cloud") {return "cloud";}
   if (tab.kind === "skills") {return "skills";}
   if (tab.kind === "cron-dashboard" || tab.kind === "cron-job") {return "cron";}

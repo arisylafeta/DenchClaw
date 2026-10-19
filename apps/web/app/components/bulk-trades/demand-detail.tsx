@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
-import { DemandPanel } from "./demand-panel";
+import { PreviewDemandPanel } from "./preview-demand-panel";
 import { ErrorText, peekShared, sharedGet } from "./trade-ui";
 
 const DEMAND_URL = "/api/bulk-trades/demand";
@@ -32,12 +32,12 @@ export function DemandDetail({ id, today, onClose, onOpenTrade, onOpenSupply, on
 
   const selected = demand?.find((row) => row.id === id);
   if (selected) {
-    return <DemandPanel key={selected.id} demand={selected} today={today} onChanged={load} onClose={onClose}
+    return <PreviewDemandPanel key={selected.id} demand={selected} today={today} onChanged={load} onClose={onClose}
       onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} onOpenDemand={onOpenDemand} />;
   }
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
-      <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>
+      <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Trades Preview</button>
       <ErrorText error={error} />
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
         {demand && !error ? "This demand no longer exists." : error ? "" : "Loading…"}

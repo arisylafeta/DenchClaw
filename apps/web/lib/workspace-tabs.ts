@@ -70,6 +70,7 @@ export type ContentTabKind =
   | "crm-inbox"
   | "crm-leaderboard"
   | "crm-calendar"
+  | "trades-preview"
   | "crm-person"
   | "crm-company";
 
@@ -352,6 +353,7 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
+  if (path === "~trades-preview") return "trades-preview";
   // Direct/generated links must open the same editor before tree hydration.
   if (/\.(md|mdx)$/i.test(path)) return "document";
   return "file";
@@ -378,6 +380,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~crm/inbox") return "Mail";
   if (path === "~crm/leaderboard") return "Leaderboard";
   if (path === "~crm/calendar") return "Calendar";
+  if (path === "~trades-preview") return "Trades Preview";
   return path.split("/").pop() || path;
 }
 

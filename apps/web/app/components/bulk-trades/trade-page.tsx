@@ -119,9 +119,9 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         <ErrorText error={holdError} />
         <ErrorText error={loadError} />
         {trade.trade_stage === HOLD_STAGE && (
-          <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-2.5"
+          <div role="status" className="flex flex-wrap items-center gap-3 rounded-none border px-4 py-2.5"
             style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-border)" }}>
-            <span className="rounded-lg border px-2 py-0.5 text-xs font-medium"
+            <span className="rounded-none border px-2 py-0.5 text-xs font-medium"
               style={trade.hold_until && trade.hold_until <= today
                 ? { background: "var(--bt-red-bg)", color: "var(--bt-red)", borderColor: "var(--bt-red-border)" }
                 : { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" }}>

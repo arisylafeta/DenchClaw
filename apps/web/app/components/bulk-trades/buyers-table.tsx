@@ -144,7 +144,7 @@ export function BuyersTable({ trade, buyers, auction, fields, today, linkTrackin
                   aria-label={`Status for ${buyer.name}`}
                   value={buyer.status}
                   onChange={(event) => changeStatus(buyer, event.target.value as BuyerStatus)}
-                  className="max-w-full cursor-pointer appearance-none rounded-lg border px-2 py-0.5 text-xs font-medium"
+                  className="max-w-full cursor-pointer appearance-none rounded-none border px-2 py-0.5 text-xs font-medium"
                   style={statusStyle(buyer.status)}
                 >
                   {BUYER_STATUSES.map((status) => <option key={status}>{status}</option>)}

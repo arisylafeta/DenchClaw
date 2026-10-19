@@ -3,8 +3,7 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { todayInLondon } from "@/lib/bulk-trades";
-import type { SheetRow } from "@/lib/bulk-sheet";
+import { todayInLondon, type BulkTrade } from "@/lib/bulk-trades";
 import { BulkTradesView } from "./bulk-trades-view";
 import { forgetShared } from "./trade-ui";
 
@@ -28,231 +27,247 @@ window.addEventListener("popstate", () => urlListeners.forEach((l) => l()));
 
 const today = todayInLondon();
 
-function row(overrides: Partial<SheetRow>): SheetRow {
+function trade(overrides: Partial<BulkTrade>): BulkTrade {
   return {
-    key: "demand:d1", kind: "demand", id: "d1", side: "buyer", title: "12 Ioniq packs", company: "H. Nolden", company_id: null,
-    category: "Ioniq", progress: "New", tone: "new", latest: null, next_action: null, next_due: null, owner: null, touched: "2026-10-01",
+    origin: "supply", seller_ref: null, seller_name: null, has_seller: false, has_buyer: false,
+    id: "t", title: "Trade", trade_stage: "With buyers", trade_kind: null, fact_line: null,
+    next_step: "Follow up", next_step_due: today, waiting_on: "us", waiting_since: null,
+    next_step_contact_id: null, next_step_buyer_id: null,
+    owner_user_id: null, owner_name: null, value: null, last_touched: null, clear_by: null,
+    ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: null, auction_slug: null, auction_status: null, auction_closes_at: null, hold_until: null, hold_reason: null, hold_from_stage: null, updated_at: "2026-09-28T09:00:00Z",
     ...overrides,
   };
 }
 
-const ROWS: SheetRow[] = [
-  row({}),
-  row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Offered",
-    latest: { label: "Offer by email", at: "2026-10-07" } }),
-  row({ key: "trade:bt_1", kind: "trade", id: "bt_1", side: "both", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "With buyers",
-    tone: "active", next_action: "Call the buyer", owner: "Alex", next_due: today }),
+const TRADES = [
+  trade({ id: "bt_1", title: "Synthetic eBS37", fact_line: "161 packs", value: "€119–149k", new_count: 2 }),
+  trade({ id: "bt_2", title: "Synthetic cells", trade_stage: "Needs info", next_step: null, next_step_due: null }),
+  trade({ id: "bt_3", title: "Old lot", trade_stage: "Done" }),
 ];
 
-const TRADE = {
-  origin: "supply", seller_ref: null, seller_name: null, has_seller: false, has_buyer: false, id: "bt_1", title: "Synthetic eBS37",
-  trade_stage: "With buyers", trade_kind: null, fact_line: "161 packs", next_step: "Follow up", next_step_due: today, waiting_on: "us",
-  waiting_since: null, next_step_contact_id: null, next_step_buyer_id: null, owner_user_id: null, owner_name: null, value: null,
-  last_touched: null, clear_by: null, ship_by: null, transport_class: null, tfs_needed: "unknown", listing_id: null, auction_slug: null,
-  auction_status: null, auction_closes_at: null, hold_until: null, hold_reason: null, hold_from_stage: null, updated_at: "2026-09-28T09:00:00Z",
-};
-
-type Api = { inbox?: unknown; sheet?: SheetRow[]; hangInbox?: boolean };
-function mockApi({ inbox, sheet = ROWS, hangInbox }: Api = {}) {
+function mockFetch(patchResponse: (body: Record<string, unknown>) => Response) {
   return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: sheet }));
-    if ((url.startsWith("/api/bulk-trades?") || url === "/api/bulk-trades" || url === "/api/bulk-trades/demand") && hangInbox) return new Promise<Response>(() => {});
-    if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [], accepted: [] }));
-    if (url === "/api/bulk-trades?inbox=1") return new Response(JSON.stringify(inbox ?? { trades: [], owners: [] }));
-    if (url === "/api/bulk-trades/bt_1" && init?.method === "PATCH") return new Response(JSON.stringify({ trade: { ...TRADE, ...JSON.parse(String(init.body)) } }));
-    if (url === "/api/bulk-trades/bt_1") return new Response(JSON.stringify({ trade: TRADE, buyers: [], contacts: [], fields: [], files: [] }));
-    return new Response("{}");
+    if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [] }));
+    if (init?.method === "PATCH") return patchResponse(JSON.parse(String(init.body)));
+    const one = TRADES.find((candidate) => url === `/api/bulk-trades/${candidate.id}`);
+    if (one) return new Response(JSON.stringify({ trade: one, buyers: [], contacts: [], fields: [], files: [] }));
+    return new Response(JSON.stringify({ trades: TRADES, owners: [] }));
   });
 }
 
-describe("Bulk Trades sheet", () => {
-  beforeEach(() => { forgetShared(); window.localStorage.clear(); nativeReplace(null, "", "/?path=bulk_trade"); });
+function dataTransfer() {
+  const data: Record<string, string> = {};
+  return { setData: (k: string, v: string) => { data[k] = v; }, getData: (k: string) => data[k] ?? "" };
+}
+
+describe("BulkTradesView", () => {
+  beforeEach(() => { forgetShared(); window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); nativeReplace(null, "", "/?path=bulk_trade"); });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows one row per source record with its company, progress, latest development and next action, and no tabs", async () => {
-    vi.stubGlobal("fetch", mockApi());
+  it("defaults to Today and never shows empty work lists before trades have loaded", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
     render(<BulkTradesView />);
-    expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
-    const trade = screen.getByRole("button", { name: /Synthetic eBS37/ });
-    expect(within(trade).getByText("With buyers")).toBeInTheDocument();
-    expect(within(trade).getByText("Call the buyer")).toBeInTheDocument();
-    expect(within(trade).getByText(/Alex/)).toBeInTheDocument();
-    expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
-    for (const gone of ["Today", "Trades", "Demand", "Supply"]) expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Loading today's work…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing needs attention.")).not.toBeInTheDocument();
   });
 
-  it("says plainly when a value is not recorded instead of guessing", async () => {
-    vi.stubGlobal("fetch", mockApi({ sheet: [row({ company: null })] }));
+  it("remembers Trades and keeps closed trades off the board", async () => {
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
-    const demand = await screen.findByRole("button", { name: /12 Ioniq packs/ });
-    expect(within(demand).getByText("No company recorded")).toBeInTheDocument();
-    expect(within(demand).getByText("No next action set")).toBeInTheDocument();
-    expect(within(demand).getByText("Nothing recorded")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Trades" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("Synthetic eBS37")).toBeInTheDocument();
+    expect(screen.queryByText("Old lot")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "List" })).not.toBeInTheDocument();
   });
 
-  it("filters by search and starting point, and keeps the filters in the URL", async () => {
-    vi.stubGlobal("fetch", mockApi());
-    render(<BulkTradesView />);
-    await screen.findByRole("button", { name: /12 Ioniq packs/ });
-    await userEvent.click(screen.getByRole("button", { name: "Seller-led" }));
-    expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("side")).toBe("seller");
-
-    await userEvent.click(screen.getByRole("button", { name: "All" }));
-    await userEvent.type(screen.getByRole("searchbox"), "nolden");
-    expect(screen.getByText("1 of 3 open")).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("q")).toBe("nolden");
-
-    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
-    expect(window.location.search).toBe("?path=bulk_trade");
-  });
-
-  it("opens a filtered view from a link, and an older tab=demand link as buyer-led", async () => {
-    nativeReplace(null, "", "/?path=bulk_trade&progress=Offered");
-    vi.stubGlobal("fetch", mockApi());
-    const first = render(<BulkTradesView />);
-    expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
-    expect(screen.getByLabelText("Progress")).toHaveValue("Offered");
-    first.unmount();
-
-    nativeReplace(null, "", "/?path=bulk_trade&tab=demand");
-    render(<BulkTradesView />);
-    expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Buyer-led" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("keeps the spaces while a multiword search is typed", async () => {
-    vi.stubGlobal("fetch", mockApi());
-    render(<BulkTradesView />);
-    await screen.findByRole("button", { name: /12 Ioniq packs/ });
-    await userEvent.type(screen.getByRole("searchbox"), "Seller Ltd");
-    expect(screen.getByRole("searchbox")).toHaveValue("Seller Ltd");
-    expect(screen.getByText("2 of 3 open")).toBeInTheDocument();
-  });
-
-  it("an older tab=demand link keeps its filter through open and back, and Back refreshes the list", async () => {
-    nativeReplace(null, "", "/?path=bulk_trade&tab=demand");
-    const fetchMock = mockApi();
+  it("moves a card to the dropped stage and saves it", async () => {
+    const fetchMock = mockFetch((body) =>
+      new Response(JSON.stringify({ trade: { ...TRADES[0], ...body } })));
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
-    await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
-    expect(new URLSearchParams(window.location.search).get("side")).toBe("buyer");
-    const loads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/bulk-trades/sheet").length;
-    const before = loads();
+    await screen.findByText("Synthetic eBS37");
 
-    nativeReplace(null, "", "/?path=bulk_trade&side=buyer"); // browser Back, not the breadcrumb
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(await screen.findByRole("button", { name: "Buyer-led" })).toHaveAttribute("aria-pressed", "true");
-    await waitFor(() => expect(loads()).toBeGreaterThan(before));
+    const transfer = dataTransfer();
+    fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic eBS37/ }), { dataTransfer: transfer });
+    fireEvent.drop(screen.getByRole("region", { name: "Closing" }), { dataTransfer: transfer });
+
+    await waitFor(() =>
+      expect(within(screen.getByRole("region", { name: "Closing" })).getByText("Synthetic eBS37")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ trade_stage: "Closing" }),
+    }));
   });
 
-  it("opens a trade by link or by click, and Back returns to the same filtered sheet", async () => {
-    nativeReplace(null, "", "/?path=bulk_trade&side=both");
-    vi.stubGlobal("fetch", mockApi());
+  it("puts the card back and says so when the save fails", async () => {
+    vi.stubGlobal("fetch", mockFetch(() => new Response(JSON.stringify({ error: "Unknown stage." }), { status: 400 })));
     render(<BulkTradesView />);
+    await screen.findByText("Synthetic eBS37");
+
+    const transfer = dataTransfer();
+    fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic eBS37/ }), { dataTransfer: transfer });
+    fireEvent.drop(screen.getByRole("region", { name: "Closing" }), { dataTransfer: transfer });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not move Synthetic eBS37: Unknown stage.");
+    expect(within(screen.getByRole("region", { name: "With buyers" })).getByText("Synthetic eBS37")).toBeInTheDocument();
+  });
+
+  it("opens a trade page and goes back to the list", async () => {
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("trade")).toBe("bt_1");
 
     await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
-    expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
-    expect(window.location.search).toBe("?path=bulk_trade&side=both");
+    expect(await screen.findByRole("region", { name: "With buyers" })).toBeInTheDocument();
   });
 
-  it("clicking a demand row opens that demand by id", async () => {
-    vi.stubGlobal("fetch", mockApi());
+  it("sends only the changed fields when a trade is edited", async () => {
+    const fetchMock = mockFetch((body) => new Response(JSON.stringify({ trade: { ...TRADES[0], ...body } })));
+    vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
-    await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
-    expect(new URLSearchParams(window.location.search).get("demand")).toBe("d1");
+
+    await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit trade" }));
+    await userEvent.selectOptions(screen.getByLabelText("Waiting on"), "them");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1", expect.objectContaining({
+      body: JSON.stringify({ waiting_on: "them" }),
+    })));
   });
 
-  it("shows the rows while the inbox is still loading", async () => {
-    vi.stubGlobal("fetch", mockApi({ hangInbox: true }));
-    render(<BulkTradesView />);
-    expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Inbox · 0/ })).toBeInTheDocument();
-  });
-
-  it("distinguishes loading, an empty sheet and a filter that matches nothing", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
-    const loading = render(<BulkTradesView />);
-    expect(screen.getByText("Loading…")).toBeInTheDocument();
-    loading.unmount();
-
-    forgetShared();
-    vi.stubGlobal("fetch", mockApi({ sheet: [] }));
-    render(<BulkTradesView />);
-    expect(await screen.findByText("Nothing open right now.")).toBeInTheDocument();
-  });
-
-  it("shows the sheet's error and keeps the page usable", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/bulk-trades/sheet"
-      ? new Response(JSON.stringify({ error: "Database unavailable" }), { status: 500 }) : new Response(JSON.stringify({ trades: [], owners: [] }))));
-    render(<BulkTradesView />);
-    expect(await screen.findByText("Database unavailable")).toBeInTheDocument();
-    expect(screen.getByText("The sheet could not load.")).toBeInTheDocument();
-  });
-
-  it("shows the inbox check status and possible new trades", async () => {
+  it("shows new-item counts, the inbox check status and possible new trades", async () => {
     const possible = {
       id: "7", lot_id: null, kind: "possible_trade", target: null, proposed: { title: "Leaf packs, Leeds" },
       summary: "400 Leaf packs offered", quote: "400 Nissan Leaf battery packs available", source_kind: "gmail",
       source_url: null, source_label: "Gmail · seller@unknown.test", source_at: null, created_at: "2026-09-29T12:00:00Z",
     };
-    vi.stubGlobal("fetch", mockApi({ inbox: { trades: [], owners: [], check: { last_run_at: "2026-09-29T12:00:00Z", status: "failed", error: "boom" }, possible: [possible] } }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url === "/api/bulk-trades"
+      ? { trades: TRADES, owners: [], check: { last_run_at: "2026-09-29T12:00:00Z", status: "failed", error: "boom" }, possible: [possible] }
+      : { trade: TRADES[0], buyers: [], contacts: [], fields: [], files: [] }))));
     render(<BulkTradesView />);
+
     expect(await screen.findByRole("img", { name: /Check failed/ })).toHaveAttribute("title", expect.stringContaining("boom"));
     await userEvent.click(screen.getByRole("button", { name: /Inbox · 1/ }));
     expect(screen.getByText("400 Leaf packs offered")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create trade" })).toBeInTheDocument();
   });
 
-  it("keeps accepted no-trade demand source-linked and shows conflict-checked undo", async () => {
-    const proposal = { id: "accepted-demand", kind: "possible_demand", summary: "Synthetic accepted demand",
-      source_url: "/whatsapp/threads/synthetic#message-synthetic", source_kind: "whatsapp" };
-    let undone = false, conflict = true;
+  it("refreshes mounted demand after accepting an inbox proposal", async () => {
+    let accepted = false;
+    const proposal = {
+      id: "demand-proposal", kind: "possible_demand", lot_id: null, target: null,
+      proposed: { buyer: "New buyer" }, summary: "New buyer wants packs", quote: "We need packs",
+      source_kind: "gmail", source_label: "Gmail", source_url: null, source_at: null, created_at: "2026-10-16T09:00:00Z",
+    };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/bulk-trades/proposals/accepted-demand" && init?.method === "POST") {
-        if (conflict) return new Response(JSON.stringify({ error: "That demand has changed since." }), { status: 409 });
-        undone = true;
+      if (url === "/api/bulk-trades/proposals/demand-proposal" && init?.method === "POST") {
+        accepted = true;
         return new Response(JSON.stringify({ lot_id: null }));
       }
-      if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: ROWS }));
-      if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [], accepted: undone ? [] : [proposal] }));
-      return new Response(JSON.stringify({ trades: [], owners: [], possible: [] }));
+      if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({
+        demand: accepted ? [{ id: "new-demand", buyer: "New buyer", wants: "Tested packs", status: "open", spec: {},
+          fee_eur: null, price_basis: null, reputation: null, observed_on: today, confirmed_on: null,
+          activity_count: 0, last_activity_at: null, fits: [], inventory_matches: [], context_notes: [], missing: [], score: null }] : [],
+        possible: accepted ? [] : [proposal],
+      }));
+      return new Response(JSON.stringify({ trades: TRADES, owners: [], possible: [] }));
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
-    await screen.findByRole("button", { name: /Synthetic eBS37/ });
-    await userEvent.click(await screen.findByRole("button", { name: /Inbox/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Demand" }));
+    expect(await screen.findByText("No demand here.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Inbox · 1/ }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Add demand" }));
+    await waitFor(() => expect(screen.getByText("Inbox clear.")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("button", { name: /New buyer/ })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/demand-proposal", expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "accept" }) }));
+  });
+
+  it("keeps accepted no-trade demand source-linked and shows conflict-checked undo", async () => {
+    const proposal = {id:"accepted-demand",kind:"possible_demand",summary:"Synthetic accepted demand",
+      source_url:"/whatsapp/threads/synthetic#message-synthetic",source_kind:"whatsapp"};
+    let undone = false, conflict = true;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/bulk-trades/proposals/accepted-demand" && init?.method === "POST") {
+        if (conflict) return new Response(JSON.stringify({error:"That demand has changed since."}),{status:409});
+        undone = true;
+        return new Response(JSON.stringify({lot_id:null}));
+      }
+      if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({demand:[],possible:[],accepted:undone ? [] : [proposal]}));
+      return new Response(JSON.stringify({trades:TRADES,owners:[],possible:[]}));
+    });
+    vi.stubGlobal("fetch",fetchMock);
+    render(<BulkTradesView />);
+    await screen.findByText("Synthetic eBS37");
+    await userEvent.click(screen.getByRole("button",{name:/Inbox/}));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("link", { name: "Source" })).toHaveAttribute("href", proposal.source_url);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Undo" }));
+    expect(within(dialog).getByRole("link",{name:"Source"})).toHaveAttribute("href",proposal.source_url);
+    await userEvent.click(within(dialog).getByRole("button",{name:"Undo"}));
     expect(await within(dialog).findByText("That demand has changed since.")).toBeInTheDocument();
     conflict = false;
-    await userEvent.click(within(dialog).getByRole("button", { name: "Undo" }));
+    await userEvent.click(within(dialog).getByRole("button",{name:"Undo"}));
     await waitFor(() => expect(within(dialog).queryByText(proposal.summary)).not.toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/proposals/accepted-demand",expect.objectContaining({body:JSON.stringify({action:"undo"})}));
   });
 
-  it("sends only the changed fields when a trade is edited", async () => {
-    nativeReplace(null, "", "/?path=bulk_trade&trade=bt_1");
-    const fetchMock = mockApi();
+  it("folds on-hold trades at the bottom of the list, and asks for a date and reason when a card is dropped on hold", async () => {
+    const held = trade({ id: "bt_h", title: "Synthetic BESS portfolio", trade_stage: "On hold", hold_until: "2099-03-01",
+      hold_reason: "Batteries stay on site until removal", hold_from_stage: "With buyers" });
+    const live = trade({ id: "bt_l", title: "Synthetic packs" });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PATCH"
+      ? new Response(JSON.stringify({ trade: { ...live, ...JSON.parse(String(init.body)) } }))
+      : new Response(JSON.stringify({ trades: [held, live], owners: [] })));
     vi.stubGlobal("fetch", fetchMock);
     render(<BulkTradesView />);
-    await userEvent.click(await screen.findByRole("button", { name: "Edit trade" }));
-    await userEvent.selectOptions(screen.getByLabelText("Waiting on"), "them");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1", expect.objectContaining({ body: JSON.stringify({ waiting_on: "them" }) })));
+
+    const column = await screen.findByRole("region", { name: "On hold" });
+    const transfer = dataTransfer();
+    fireEvent.dragStart(screen.getByRole("button", { name: /Synthetic packs/ }), { dataTransfer: transfer });
+    fireEvent.drop(column, { dataTransfer: transfer });
+    const dialog = await screen.findByRole("dialog", { name: /Put on hold/ });
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("bt_l"), expect.anything());
+    await userEvent.click(within(dialog).getByRole("button", { name: "3 months" }));
+    await userEvent.type(within(dialog).getByLabelText("Why it waits"), "Seller relocating stock");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Put on hold" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_l", expect.objectContaining({ method: "PATCH" })));
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")![1]!.body));
+    expect(body).toMatchObject({ trade_stage: "On hold", hold_reason: "Seller relocating stock" });
+    expect(body.hold_until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("the Add menu starts a new trade", async () => {
-    vi.stubGlobal("fetch", mockApi());
+  it("opens the trade named in the URL and keeps it in the URL", async () => {
+    nativeReplace(null, "", "/?path=bulk_trade&trade=bt_1");
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
-    await userEvent.click(await screen.findByRole("button", { name: "Add" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "New trade" }));
-    expect(await screen.findByRole("button", { name: "Create trade" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
+    expect(await screen.findByRole("region", { name: "With buyers" })).toBeInTheDocument();
+    expect(window.location.search).not.toContain("trade=");
+  });
+
+  it("keeps the tab in the URL, and back/forward move between tabs", async () => {
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+    await userEvent.click(await screen.findByRole("button", { name: "Demand" }));
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("demand");
+    expect(screen.getByRole("button", { name: "Demand" })).toHaveAttribute("aria-pressed", "true");
+
+    nativeReplace(null, "", "/?path=bulk_trade&tab=today");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("opens a demand link on the Demand tab even when Trades was the last tab", async () => {
+    nativeReplace(null, "", "/?path=bulk_trade&demand=dm_1");
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+    expect(await screen.findByRole("button", { name: "Demand" })).toHaveAttribute("aria-pressed", "true");
   });
 });

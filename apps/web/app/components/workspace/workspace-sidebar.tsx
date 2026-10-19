@@ -127,6 +127,7 @@ type WorkspaceSidebarProps = {
       | "crm-leaderboard"
       | "crm-inbox"
       | "crm-calendar"
+      | "trades-preview"
       | "platform-proposals"
       | "platform-listings"
       | "platform-stock"
@@ -137,7 +138,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | null;
+  activeCrmTarget?: "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | "trades-preview" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "stock" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -422,6 +423,12 @@ export function WorkspaceSidebar({
 					<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z" />
 				</svg>
 			),
+		},
+		{
+			id: "trades-preview" as const,
+			label: "Trades Preview",
+			target: "trades-preview" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>,
 		},
 	];
 

@@ -119,5 +119,6 @@ export type ContentState =
   | { kind: "crm-inbox" }
   | { kind: "crm-leaderboard" }
   | { kind: "crm-calendar" }
+  | { kind: "trades-preview" }
   | { kind: "crm-person"; entryId: string; profileTab?: string }
   | { kind: "crm-company"; entryId: string; profileTab?: string };

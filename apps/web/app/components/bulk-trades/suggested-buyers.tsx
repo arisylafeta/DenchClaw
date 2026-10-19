@@ -84,7 +84,7 @@ export function SuggestedBuyers({ tradeId, suggested, onChanged, onOpenDemand }:
                   <div className="flex flex-col items-start gap-1">
                     <span className="text-sm font-semibold">{item.buyer}</span>
                     <span className="flex flex-wrap gap-1">
-                      <span className="rounded-lg border px-1.5 py-px text-xs font-medium" style={STRENGTH[item.strength].style}>{STRENGTH[item.strength].label}</span>
+                      <span className="rounded-none border px-1.5 py-px text-xs font-medium" style={STRENGTH[item.strength].style}>{STRENGTH[item.strength].label}</span>
                     </span>
                   </div>
                   <span className="text-[13px]" style={{ color: "var(--bt-text-2)" }}>

@@ -42,7 +42,8 @@ import { CompanyProfile } from "../components/crm/company-profile";
 import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../components/chat-panel";
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
-import { BULK_TRADES_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, parseBulkTradesRoute } from "@/lib/bulk-trades-url";
+import { TradesPreviewView } from "../components/bulk-trades/trades-preview-view";
+import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute } from "@/lib/bulk-trades-url";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
@@ -1439,6 +1440,7 @@ function WorkspacePageInner() {
         | "crm-leaderboard"
         | "crm-inbox"
         | "crm-calendar"
+        | "trades-preview"
         | "platform-proposals"
         | "platform-listings"
         | "platform-stock"
@@ -1475,6 +1477,7 @@ function WorkspacePageInner() {
         "crm-inbox": { path: "~crm/inbox", name: "Mail" },
         "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
+        "trades-preview": { path: TRADES_PREVIEW_PATH, name: "Trades Preview" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-listings": { path: "~platform-admin/listings", name: "Listings" },
         "platform-stock": { path: "~platform-admin/stock", name: "Stock" },
@@ -2183,6 +2186,13 @@ function WorkspacePageInner() {
     handleNavigateToObject(BULK_TRADES_PATH);
   }, [handleNavigateToObject]);
 
+  /** Opens Trades Preview the same way: the named record or filter, or its home when no href is given. */
+  const openTradesPreview = useCallback((href?: string) => {
+    const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
+    window.history.pushState(window.history.state, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search), TRADES_PREVIEW_PATH));
+    handleNavigate("trades-preview");
+  }, [handleNavigate]);
+
   /**
    * Unified navigate handler for links in the editor and read mode.
    * Handles /workspace?entry=..., /workspace?path=..., and legacy relative paths.
@@ -2204,6 +2214,10 @@ function WorkspacePageInner() {
           openBulkTrades(href);
           return;
         }
+        if (isTradesPreviewHref(href)) {
+          openTradesPreview(href);
+          return;
+        }
         // File/object link -- resolve using the path from the URL
         void handleFilePathClickFromChat(parsed.path);
         return;
@@ -2217,7 +2231,7 @@ function WorkspacePageInner() {
         handleNodeSelect(node);
       }
     },
-    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject, openBulkTrades, handleFilePathClickFromChat],
+    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject, openBulkTrades, openTradesPreview, handleFilePathClickFromChat],
   );
 
   // Refresh callback for the currently displayed object — exposed via the
@@ -2471,7 +2485,9 @@ function WorkspacePageInner() {
             ? "inbox" as const
             : activeContentTab?.kind === "crm-calendar"
               ? "calendar" as const
-              : null
+              : activeContentTab?.kind === "trades-preview"
+                ? "trades-preview" as const
+                : null
     ),
     activePlatformTarget: activeContentTab?.kind === "platform-admin"
       ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "listings" | "stock" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews"
@@ -2640,7 +2656,7 @@ function WorkspacePageInner() {
             onExternalDrop={handleSidebarExternalDrop}
             showHidden={showHidden}
             onToggleHidden={() => setShowHidden((v) => !v)}
-            onNavigate={(target) => { handleNavigate(target); }}
+            onNavigate={(target) => { if (target === "trades-preview") openTradesPreview(); else handleNavigate(target); }}
             mobile
             onClose={showChat}
           />
@@ -2679,7 +2695,7 @@ function WorkspacePageInner() {
               compact={isLeftSidebarCompact}
               onToggleCompact={toggleLeftSidebarCompact}
               onCollapse={() => setLeftSidebarCollapsed(true)}
-              onNavigate={handleNavigate}
+              onNavigate={(target) => { if (target === "trades-preview") openTradesPreview(); else handleNavigate(target); }}
             />
           </div>
         </div>
@@ -3243,6 +3259,9 @@ function ContentRenderer({
 
     case "crm-inbox":
       return <InboxView key="mail-conversations" onOpenPerson={(id) => onOpenEntry("people", id)} />;
+
+    case "trades-preview":
+      return <TradesPreviewView onOpenEntry={onOpenEntry} />;
 
     case "crm-calendar":
       return (

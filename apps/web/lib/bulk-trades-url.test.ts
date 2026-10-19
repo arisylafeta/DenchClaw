@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, parseBulkTradesRoute,
+  activeBulkTradesTab, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute,
 } from "./bulk-trades-url";
 
 describe("bulk trades URLs", () => {
   it("round-trips records and filters through one builder and parser", () => {
-    const url = buildBulkTradesUrl({ side: "buyer", progress: "Closing", company: "R3 Robotics", category: "packs", query: "r3 robotics" });
-    expect(url).toBe("/?path=bulk_trade&q=r3+robotics&side=buyer&progress=Closing&company=R3+Robotics&category=packs");
+    const url = buildBulkTradesUrl({ tab: "demand", status: "closed", category: "offer_reply", query: "r3 robotics" });
+    expect(url).toBe("/?path=bulk_trade&tab=demand&status=closed&q=r3+robotics&category=offer_reply");
     expect(parseBulkTradesRoute(new URL(url, "https://x.test").searchParams)).toMatchObject({
-      side: "buyer", progress: "Closing", company: "R3 Robotics", category: "packs", query: "r3 robotics", demand: null,
+      tab: "demand", status: "closed", category: "offer_reply", query: "r3 robotics", demand: null,
     });
     expect(buildBulkTradesUrl({ demand: "dm 1" })).toBe("/?path=bulk_trade&demand=dm+1");
     expect(buildBulkTradesUrl()).toBe("/?path=bulk_trade");
@@ -18,6 +18,13 @@ describe("bulk trades URLs", () => {
     const current = new URLSearchParams("path=bulk_trade&tab=demand&terminal=1&browse=%2Ftmp&hidden=1&chat=x");
     expect(buildBulkTradesUrl({ tab: "demand", query: "a" }, current))
       .toBe("/?path=bulk_trade&terminal=1&browse=%2Ftmp&hidden=1&tab=demand&q=a");
+  });
+
+  it("a selected record implies its tab, an unknown tab is ignored", () => {
+    const fallback = "trades";
+    expect(activeBulkTradesTab(parseBulkTradesRoute("demand=1"), fallback)).toBe("demand");
+    expect(activeBulkTradesTab(parseBulkTradesRoute("supply=1&tab=demand"), fallback)).toBe("supply");
+    expect(activeBulkTradesTab(parseBulkTradesRoute("tab=bogus"), fallback)).toBe("trades");
   });
 
   it("recognises Bulk Trades links only", () => {
@@ -31,5 +38,14 @@ describe("bulk trades URLs", () => {
     expect(carryBulkTradesParams("path=bulk_trade&terminal=1", current)).toBe("path=bulk_trade&terminal=1&demand=dm_1&status=closed");
     expect(carryBulkTradesParams("path=people", current)).toBe("path=people");
     expect(carryBulkTradesParams("path=bulk_trade", "path=people&demand=1")).toBe("path=bulk_trade");
+  });
+
+  it("preview links stay on their own page and never mix with Bulk Trades links", () => {
+    expect(buildBulkTradesUrl({ demand: "d1", side: "buyer" }, undefined, "~trades-preview")).toBe("/?path=%7Etrades-preview&demand=d1&side=buyer");
+    expect(isTradesPreviewHref("/?path=%7Etrades-preview&demand=d1")).toBe(true);
+    expect(isTradesPreviewHref("/?path=bulk_trade&demand=d1")).toBe(false);
+    expect(isBulkTradesHref("/?path=%7Etrades-preview&demand=d1")).toBe(false);
+    expect(carryBulkTradesParams("path=%7Etrades-preview", "path=%7Etrades-preview&demand=d1")).toBe("path=%7Etrades-preview&demand=d1");
+    expect(carryBulkTradesParams("path=bulk_trade", "path=%7Etrades-preview&demand=d1")).toBe("path=bulk_trade");
   });
 });

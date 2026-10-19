@@ -13,8 +13,7 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   hold: { dot: "var(--bt-purple)", bg: "var(--bt-purple-bg)" },
 };
 
-const KIND_LABEL = { demand: "Demand", supply: "Offer", trade: "Trade" } as const;
-const GRID = "md:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_9rem_minmax(0,1.5fr)] lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_9rem_minmax(0,1.6fr)_minmax(0,1.5fr)]";
+const GRID = "md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,1fr)_8.5rem_minmax(0,1.3fr)] lg:grid-cols-[minmax(0,1.8fr)_minmax(8rem,1fr)_8.5rem_minmax(0,1.5fr)_minmax(0,1.2fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -48,29 +47,26 @@ function SheetRowItem({ row, today, onOpen }: { row: SheetRow; today: string; on
       <button type="button" onClick={() => onOpen(row)}
         className={`grid w-full grid-cols-1 items-start gap-x-4 gap-y-2 px-4 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-visible:bg-[var(--bt-row-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--bt-text-2)] ${GRID}`}>
         <span className="min-w-0">
-          <span className="line-clamp-2 text-[14px] font-medium leading-snug">{row.title}</span>
-          <span className="mt-0.5 block text-[12px]" style={{ color: "var(--bt-muted)" }}>
-            {KIND_LABEL[row.kind]} · {SIDE_LABEL[row.side]}
-            {row.company && <span className="md:hidden"> · {row.company}</span>}
-          </span>
+          <span className="line-clamp-2 text-[14px] font-medium leading-snug" title={row.title}>{row.title}</span>
+          {row.company && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
         </span>
-        <span className="hidden min-w-0 truncate text-[13px] md:block" style={{ color: row.company ? undefined : "var(--bt-muted)" }}>{row.company ?? "No company recorded"}</span>
+        <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}>{row.company ?? "—"}</span>
         <span><ProgressChip row={row} /></span>
         <span className="hidden min-w-0 text-[13px] lg:block">
           {row.latest ? (
             <>
-              <span className="line-clamp-2">{row.latest.label}</span>
-              {row.latest.at && <span className="block text-[12px]" style={{ color: "var(--bt-muted)" }}>{shortDate(row.latest.at.slice(0, 10))}</span>}
+              <span className="block truncate" title={row.latest.label}>{row.latest.label}</span>
+              <span className="block text-[12px]" style={{ color: "var(--bt-muted)" }}>{[row.latest.kind, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")}</span>
             </>
-          ) : <span style={{ color: "var(--bt-muted)" }}>Nothing recorded</span>}
+          ) : <span style={{ color: "var(--bt-muted)" }}>—</span>}
         </span>
         <span className="min-w-0 text-[13px]">
           {row.next_action ? (
             <>
-              <span className="line-clamp-2">{row.next_action}</span>
+              <span className="line-clamp-2" title={row.next_action}>{row.next_action}</span>
               {meta && <span className="block text-[12px]" style={{ color: overdue ? "var(--bt-red)" : "var(--bt-muted)" }}>{meta}</span>}
             </>
-          ) : <span style={{ color: "var(--bt-muted)" }}>No next action set</span>}
+          ) : <span title="No next action recorded" style={{ color: "var(--bt-muted)" }}>—</span>}
         </span>
       </button>
     </li>
@@ -132,11 +128,11 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
           <span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest development</span><span>Next action</span>
         </div>
         {shown.length > 0 ? (
-          <ul className="divide-y" style={{ borderColor: "var(--bt-divider)" }}>
+          <ul className="divide-y divide-[var(--bt-divider)]">
             {shown.map((row) => <SheetRowItem key={row.key} row={row} today={today} onOpen={onOpen} />)}
           </ul>
         ) : loading && !rows.length ? (
-          <ul aria-hidden="true" className="divide-y" style={{ borderColor: "var(--bt-divider)" }}>
+          <ul aria-hidden="true" className="divide-y divide-[var(--bt-divider)]">
             {[0, 1, 2, 3].map((n) => (
               <li key={n} className="flex animate-pulse flex-col gap-2 px-4 py-4 motion-reduce:animate-none">
                 <span className="h-3.5 w-2/5 rounded" style={{ background: "var(--bt-segment)" }} />
