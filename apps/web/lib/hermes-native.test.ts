@@ -9,7 +9,7 @@ vi.mock("./hermes-session-projects", () => ({ sessionProjectLabels: vi.fn(async 
 import { sessionProjectLabels } from "./hermes-session-projects";
 vi.mock("./hermes-session-activity", () => ({ recentlyActiveSessionIds: vi.fn(async () => new Set<string>()) }));
 import { recentlyActiveSessionIds } from "./hermes-session-activity";
-import { createConversation, groupRpc, listConversations, nativeFetch, readConversation } from "./hermes-native";
+import { createConversation, groupRpc, inviteHandoff, inviteToConversation, listConversations, nativeFetch, readConversation, roomMembers } from "./hermes-native";
 import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
 let server: WebSocketServer | undefined;
@@ -26,8 +26,8 @@ async function startGateway() {
     socket.send(JSON.stringify({ jsonrpc: "2.0", method: "gateway.ready", params: {} }) + "\n");
     socket.on("message", (raw) => {
       const request = JSON.parse(raw.toString());
-      const result = handler(request.method, request.params);
-      socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n");
+      const result = handler(request.method, request.params) as { __rpcError?: number } | undefined;
+      socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, ...(result?.__rpcError ? { error: { code: result.__rpcError, message: "refused" } } : { result }) }) + "\n");
     });
   });
 }
@@ -243,7 +243,7 @@ describe("native Hermes conversations", () => {
     await startGateway();
     const created = await createConversation(["default", "alpha"]);
     expect(created.kind).toBe("group"); expect(created.participants.map((p) => p.profile)).toEqual(["default", "alpha"]);
-    expect(calls[0]).toMatchObject({ method: "groups.create", params: { members: [{ profile: "default", member_id: "bot-1", handle: "bot1", target: { kind: "local", profile: "default" } }, { profile: "alpha", member_id: "bot-2", handle: "bot2", target: { kind: "local", profile: "alpha" } }] } });
+    expect(calls[0]).toMatchObject({ method: "groups.create", params: { members: [{ profile: "default", member_id: "default", handle: "default", target: { kind: "local", profile: "default" } }, { profile: "alpha", member_id: "alpha", handle: "alpha", target: { kind: "local", profile: "alpha" } }] } });
     expect(calls[1].method).toBe("groups.state");
     const detail = await readConversation(conversationKey("group", room.room_id));
     expect(detail.messages).toEqual([{ id: "user:1", role: "user", text: "hello", content: "hello", profile: undefined, name: undefined }, { id: "answer:1", role: "assistant", text: "Alpha reply", content: "Alpha reply", profile: "alpha", name: "Alpha" }]);
@@ -276,5 +276,47 @@ describe("native Hermes conversations", () => {
     await expect(nativeFetch("../default", "/api/sessions")).rejects.toThrow("Unknown"); expect(fetchMock).not.toHaveBeenCalled();
     vi.stubEnv("HERMES_GATEWAY_WS_URL", "ws://unsafe.example/api/ws"); vi.stubEnv("HERMES_GATEWAY_TOKEN", "never-print-me");
     await expect(groupRpc("groups.list")).rejects.toThrow("TLS");
+  });
+});
+
+describe("inviting an agent into a chat", () => {
+  it("addresses members by profile name and falls back for names that cannot be mentions", () => {
+    expect(roomMembers(["default", "matcha"]).map(m => m.handle)).toEqual(["default", "matcha"]);
+    expect(roomMembers(["all", "my profile", "bot2"]).map(m => m.handle)).toEqual(["bot1", "bot2", "bot3"]);
+  });
+  it("hands the invitee a bounded transcript with no live mentions of other members", () => {
+    const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? "assistant" : "user", text: `line ${i} @default @all ${"x".repeat(2000)}`, content: "" }));
+    const prompt = inviteHandoff("default", "matcha", [...messages, { id: "tool", role: "tool", text: "ignored", content: "" }, { id: "blank", role: "user", text: "  ", content: "" }], "price the lot");
+    expect(prompt.startsWith("@matcha ")).toBe(true);
+    expect(prompt.match(/@[A-Za-z0-9]/g)).toEqual(["@m"]);
+    expect(prompt).toContain("The user asks you: price the lot");
+    expect(prompt).toContain("line 29"); expect(prompt).not.toContain("line 17 "); expect(prompt).not.toContain("ignored");
+    expect(prompt.length).toBeLessThan(14_500);
+    expect(inviteHandoff("default", "matcha", [], "")).toContain("The earlier chat had no messages.");
+  });
+  it("creates a room for host and invitee, sends the handoff to the invitee, and removes the room if the send fails", async () => {
+    const created = { room_id: "ignored", name: "x", updated_at: 1, members: [] };
+    const calls: { method: string; params: Record<string, unknown> }[] = [];
+    let failSend = false;
+    handler = (method, params) => {
+      calls.push({ method, params });
+      if (method === "groups.send" && failSend) return { __rpcError: 5112 };
+      if (method === "groups.create") return { room: created };
+      if (method === "groups.state") return { room: { ...created, room_id: params.room_id, name: "x", members: [{ member_id: "alpha", profile: "alpha" }, { member_id: "default", profile: "default" }] }, driver_status: { working: false } };
+      return {};
+    };
+    await startGateway();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/messages") ? Response.json({ data: [{ id: 1, role: "user", content: "Is the Panasonic lot priced?" }, { id: 2, role: "assistant", content: "Not yet." }], has_more: false }) : Response.json({ session: { id: "s1", title: "Pricing" } })));
+    const room = await inviteToConversation(conversationKey("solo", "s1", "alpha"), "default", "take over pricing");
+    expect(room.kind).toBe("group");
+    expect(calls.find(c => c.method === "groups.create")?.params).toMatchObject({ name: "Pricing · default", members: [{ handle: "alpha", profile: "alpha" }, { handle: "default", profile: "default" }] });
+    const send = calls.find(c => c.method === "groups.send")!;
+    expect(send.params).toMatchObject({ room_id: room.id, payload: { thread_id: room.id } });
+    expect(String((send.params.payload as { text: string }).text)).toMatch(/^@default .*Is the Panasonic lot priced\?.*alpha: Not yet\..*take over pricing/s);
+    await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "alpha")).rejects.toThrow("different agent");
+    await expect(inviteToConversation(conversationKey("group", "room-1"), "default")).rejects.toThrow("one-to-one");
+    failSend = true; calls.length = 0;
+    await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "default")).rejects.toThrow();
+    expect(calls.map(c => c.method)).toContain("groups.disband");
   });
 });

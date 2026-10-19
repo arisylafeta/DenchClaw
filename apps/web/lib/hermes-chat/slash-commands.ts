@@ -25,7 +25,7 @@ export function slashSection(item: SlashItem, catalog: SlashCatalog): string {
   if (/skill/i.test(category)) {return 'Skills'}
   if (/plugin|quick|custom/i.test(category)) {return 'Plugins'}
   if (/model|config|provider/i.test(category) || ['model', 'fast', 'reasoning'].includes(name)) {return 'Model'}
-  if (/session|conversation/i.test(category) || ['new', 'branch', 'title', 'goal', 'compress', 'compact', 'undo', 'retry'].includes(name)) {return 'Session'}
+  if (/session|conversation/i.test(category) || ['new', 'branch', 'invite', 'title', 'goal', 'compress', 'compact', 'undo', 'retry'].includes(name)) {return 'Session'}
   return 'Tools'
 }
 export type SlashAction = { type: 'send' | 'prefill'; text: string; notice?: string } | { type: 'output'; text: string } | { type: 'conversation'; conversation: HermesConversation }

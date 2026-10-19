@@ -230,6 +230,17 @@ export async function listConversations() {
   return { backend: "hermes", profiles, groupsAvailable: groupsConfigured(), warnings,
     sessions: [...soloLists.flat(), ...rooms.values()].sort((a, b) => b.updatedAt - a.updatedAt) };
 }
+const MENTION_HANDLE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+/** Members are addressed as @<profile>; a profile that cannot be a mention handle falls back to a positional one. */
+export function roomMembers(profiles: string[]) {
+  const taken = new Set(["all", "everyone"]);
+  return profiles.map((profile, index) => {
+    let handle = MENTION_HANDLE.test(profile) && !taken.has(profile.toLowerCase()) ? profile : `bot${index + 1}`;
+    for (let n = index + 2; taken.has(handle.toLowerCase()); n++) handle = `bot${n}`;
+    taken.add(handle.toLowerCase());
+    return { member_id: handle, profile, handle, display_name: profile, target: { kind: "local", profile } };
+  });
+}
 export async function createConversation(profiles: string[], title?: string) {
   if (!Array.isArray(profiles) || profiles.length < 1 || profiles.length > 6 || new Set(profiles).size !== profiles.length) throw new Error("Choose one to six distinct bots");
   profiles.forEach(assertProfile);
@@ -239,7 +250,7 @@ export async function createConversation(profiles: string[], title?: string) {
     const result = await (await nativeFetch(profiles[0], `/api/sessions/${encodeURIComponent(id)}`)).json();
     return soloConversation(profiles[0], result.session ?? result);
   }
-  const room = { room_id: id, name: title || profiles.join(", "), members: profiles.map((profile, index) => ({ member_id: `bot-${index + 1}`, profile, handle: `bot${index + 1}`, display_name: profile, target: { kind: "local", profile } })) };
+  const room = { room_id: id, name: title || profiles.join(", "), members: roomMembers(profiles) };
   await groupRpc("groups.create", room);
   const verified = await groupRpc<RoomState>("groups.state", { room_id: id });
   return roomConversation(verified.room, verified.driver_status?.working ?? null);
@@ -312,4 +323,40 @@ export async function readConversation(key: string, sinceSeq = 0) {
     if (Object.hasOwn(names, identity.id)) conversation.title = names[identity.id];
   }
   return { conversation, messages };
+}
+
+const HANDOFF_MESSAGES = 12, HANDOFF_MESSAGE_CHARS = 1200, HANDOFF_TOTAL_CHARS = 12_000;
+/** The invitee's first prompt. Transcript text must not contain live @mentions, which would pull extra members into round 0. */
+export function inviteHandoff(host: string, invitee: string, messages: HermesMessage[], task: string): string {
+  const quiet = (text: string) => text.replace(/@(?=[A-Za-z0-9])/g, "@\u200b");
+  const lines: string[] = [];
+  let used = 0;
+  for (const message of messages.filter((m) => (m.role === "user" || m.role === "assistant") && (m.text ?? "").trim()).slice(-HANDOFF_MESSAGES).reverse()) {
+    const text = quiet(message.text.trim().slice(0, HANDOFF_MESSAGE_CHARS));
+    const line = `${message.role === "user" ? "user" : host}: ${text}`;
+    if (used + line.length > HANDOFF_TOTAL_CHARS) break;
+    used += line.length; lines.unshift(line);
+  }
+  return [
+    `@${invitee} The user invited you into this chat. It was a one-to-one chat with ${host}, so ${host} is now your teammate here.`,
+    lines.length ? `\nRecent conversation, oldest first:\n${lines.join("\n\n")}` : "\nThe earlier chat had no messages.",
+    task.trim() ? `\nThe user asks you: ${task.trim()}` : "\nCatch up, then add what is useful or ask the user what they need.",
+  ].join("\n");
+}
+/** Turn a one-to-one chat into a group: new room with the host and the invitee, seeded with the recent transcript. */
+export async function inviteToConversation(key: string, invitee: string, task = "") {
+  const identity = parseConversationKey(key);
+  if (identity.kind !== "solo") throw new Error("Only a one-to-one chat can invite another agent");
+  assertProfile(identity.profile); assertProfile(invitee);
+  if (invitee === identity.profile) throw new Error("Pick a different agent than the one in this chat");
+  const source = await readConversation(key);
+  const title = source.conversation.title;
+  const room = await createConversation([identity.profile, invitee], title && title !== "Untitled chat" && title !== "New chat" ? `${title} · ${invitee}`.slice(0, 80) : undefined);
+  try {
+    await groupRpc("groups.send", { room_id: room.id, event_id: `invite-${randomUUID()}`, payload: { text: inviteHandoff(identity.profile, invitee, source.messages, task), thread_id: room.id } });
+  } catch (error) {
+    await groupRpc("groups.disband", { room_id: room.id }).catch(() => undefined);
+    throw error;
+  }
+  return room;
 }

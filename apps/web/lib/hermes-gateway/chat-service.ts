@@ -4,7 +4,7 @@ import { z } from "zod";
 import { buildAgentMessage, stripAgentMessageContext, type WorkspaceContext } from "../agent-message";
 import { hydrateMessageImageAttachments, buildChatImageHydrationErrorMessage } from "../chat-image-attachments";
 import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "../hermes-conversations";
-import { assertProfile, nativeFetch, readConversation, soloConversation } from "../hermes-native";
+import { assertProfile, hermesProfiles, inviteToConversation, nativeFetch, readConversation, soloConversation } from "../hermes-native";
 import { getHermesGatewayManager, type HermesGatewayManager, type LiveSessionSnapshot, type PendingServerRequest } from "./manager";
 import { lookupMessageHtml, saveMessageHtml, type MessageHtmlRecord } from "./message-html-store";
 import type { SessionResumeResult, SessionUsageResult } from "../../vendor/hermes-gateway/gateway-events";
@@ -58,6 +58,19 @@ export function parseGatewayPrompt(value: unknown): GatewayPrompt {
   const parsed = promptSchema.safeParse(value);
   if (!parsed.success) throw new ChatServiceError(400, "invalid_prompt");
   return parsed.data;
+}
+/** Offer /invite and its agent argument; Hermes does not know this command. */
+export function inviteCompletion<T extends { items: { text: string; display?: string; meta?: string }[]; replace_from: number }>(text: string, self: string, completion: T): T {
+  const argument = /^\/invite\s+(\S*)$/i.exec(text);
+  if (argument) {
+    const items = hermesProfiles().filter((profile) => profile !== self && profile.toLowerCase().startsWith(argument[1].toLowerCase())).map((profile) => ({ text: profile, display: profile, meta: `Invite ${profile} into this chat` })) as T["items"];
+    return { ...completion, items, replace_from: text.length - argument[1].length };
+  }
+  const command = /^\/(\S*)$/.exec(text);
+  if (command && "invite".startsWith(command[1].toLowerCase())) {
+    return { ...completion, items: [{ text: "/invite", display: "/invite", meta: "Invite another agent into this chat (makes it a group)" }, ...completion.items.filter((item) => item.text !== "/invite")] as T["items"] };
+  }
+  return completion;
 }
 export function authorizeConversation(key: string) {
   let identity;
@@ -332,17 +345,26 @@ export class HermesChatService {
         this.manager.call("complete.slash", { text: parsed.data.text, profile: identity.profile }),
         this.manager.call("commands.catalog", { profile: identity.profile }),
       ]);
-    return { ...completion, items: completion.items ?? [], replace_from: completion.replace_from ?? 1, catalog };
+    return inviteCompletion(parsed.data.text, identity.profile, { ...completion, items: completion.items ?? [], replace_from: completion.replace_from ?? 1, catalog });
   }
   async slashExecute(key: string, body: unknown) {
     const parsed = slashExecutionSchema.safeParse(body);
     if (!parsed.success) { throw new ChatServiceError(400, "invalid_slash_command"); }
     const identity = authorizeConversation(key);
-    const retained = await this.liveControls(key);
     const command = parsed.data.command;
     const parts = /^\/(\S+)([\s\S]*)$/u.exec(command)!;
     const name = parts[1].toLowerCase();
     const arg = parts[2].trim();
+    // Not a Hermes command: it replaces this chat with a group that includes the invited agent.
+    if (name === "invite") {
+      const [invitee, ...task] = arg.split(/\s+/);
+      if (!invitee) { throw new ChatServiceError(400, "invite_needs_agent"); }
+      if (!hermesProfiles().includes(invitee)) { throw new ChatServiceError(404, "unknown_profile"); }
+      if (invitee === identity.profile) { throw new ChatServiceError(400, "invite_same_agent"); }
+      await this.writable(key);
+      return { conversation: await inviteToConversation(key, invitee, task.join(" ")) };
+    }
+    const retained = await this.liveControls(key);
     return this.manager.serialize(retained, async () => {
       await this.writable(key);
       // These create openable CRM conversations rather than mutating a slash worker's session.

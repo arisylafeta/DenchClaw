@@ -3,13 +3,15 @@ vi.mock("../hermes-native", () => ({
   dashboardToken: vi.fn(), invalidateDashboardToken: vi.fn(),
   assertProfile: vi.fn((profile: string) => { if (profile !== "ari") throw new Error("unknown"); return { workspaceDir: "/workspace" }; }),
   nativeFetch: vi.fn(async () => Response.json({ source: "crm" })),
+  hermesProfiles: vi.fn(() => ["ari", "matcha"]),
+  inviteToConversation: vi.fn(async () => ({ key: "group-key", kind: "group" })),
   readConversation: vi.fn(async () => ({ conversation: { key: "one", source: "crm" }, messages: [] })),
   soloConversation: vi.fn((profile: string, row: { id: string }) => ({ key: encodeURIComponent(JSON.stringify(["solo", profile, row.id])), profile, ...row })),
 }));
 vi.mock("./message-html-store", () => ({ lookupMessageHtml: vi.fn(async () => []), saveMessageHtml: vi.fn() }));
 vi.mock("../chat-image-attachments", () => ({ hydrateMessageImageAttachments: vi.fn(() => ({ attachments: [], skipped: [] })), buildChatImageHydrationErrorMessage: vi.fn(() => null) }));
 vi.mock("../workspace", () => ({ resolveAgentWorkspacePrefix: () => "/source-workspace" }));
-import { nativeFetch, readConversation } from "../hermes-native";
+import { inviteToConversation, nativeFetch, readConversation } from "../hermes-native";
 import { hydrateMessageImageAttachments } from "../chat-image-attachments";
 import { HermesGatewayManager, type GatewaySocket } from "./manager";
 import { HermesChatService } from "./chat-service";
@@ -134,6 +136,21 @@ describe("gateway chat service", () => {
       expect(emitted).toEqual(["snapshot", "gw", "gw"]);
       expect(state.subagents.items.map(child => [child.id, child.status])).toEqual([["listed", "completed"], ["during-history", "running"]]);
     } finally { release(); connection.close(); }
+  });
+  it("offers /invite and turns it into a group conversation without touching the Hermes slash worker", async () => {
+    const commands = await service.slashComplete(key, { text: "/inv" });
+    expect(commands.items[0]).toMatchObject({ text: "/invite" });
+    const agents = await service.slashComplete(key, { text: "/invite " });
+    expect(agents.items.map(item => item.text)).toEqual(["matcha"]);
+    expect(agents.replace_from).toBe("/invite ".length);
+    expect((await service.slashComplete(key, { text: "/invite ma" })).items.map(item => item.text)).toEqual(["matcha"]);
+    socket.frames.length = 0;
+    expect(await service.slashExecute(key, { command: "/invite matcha look at pricing" })).toEqual({ conversation: { key: "group-key", kind: "group" } });
+    expect(inviteToConversation).toHaveBeenCalledWith(key, "matcha", "look at pricing");
+    expect(socket.frames.some(frame => ["slash.exec", "session.resume"].includes(frame.method ?? ""))).toBe(false);
+    await expect(service.slashExecute(key, { command: "/invite" })).rejects.toThrow("invite_needs_agent");
+    await expect(service.slashExecute(key, { command: "/invite nobody" })).rejects.toThrow("unknown_profile");
+    await expect(service.slashExecute(key, { command: "/invite ari" })).rejects.toThrow("invite_same_agent");
   });
   it("keeps slash completion read-only and session-scoped, then resumes execution with only the 4018 dispatch fallback", async () => {
     expect(await service.slashComplete(key, { text: "/exa" })).toEqual({ items: [], replace_from: 1, catalog: {} });
