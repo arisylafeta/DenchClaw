@@ -83,6 +83,20 @@ function SyntheticEditor({ body }: { body: string }) {
   return <><input aria-label="document" value={text} onChange={event => { setText(event.target.value); setDirty(true); }} /><button onClick={() => setDirty(false)}>Saved clean</button></>;
 }
 
+it("keeps chat return in the existing artifact/files toolbar without an extra header", () => {
+  const showChat = vi.fn();
+  render(cloneElement(rightPanelElement(null), { narrow: true, onShowChat: showChat }));
+  const back = screen.getByRole("button", { name: "Back to chat" });
+  expect(back.parentElement).toContainElement(screen.getByRole("button", { name: `Open ${activeTab.title}` }));
+  fireEvent.click(back);
+  expect(showChat).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByTitle("Show files (⌘E)"));
+  const filesBack = screen.getByRole("button", { name: "Back to chat" });
+  expect(filesBack.parentElement).toContainElement(screen.getByTitle("Hide files (⌘E)"));
+  fireEvent.click(filesBack);
+  expect(showChat).toHaveBeenCalledTimes(2);
+});
+
 it("keeps the narrow artifact editor mounted while Files occupies the full pane", async () => {
   const tab: ContentTab = { ...activeTab, id: "report.md", path: "report.md", title: "A very long synthetic artifact title for tablet and phone", kind: "document" };
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ content: "original", type: "markdown" })));

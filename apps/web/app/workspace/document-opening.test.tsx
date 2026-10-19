@@ -55,6 +55,7 @@ vi.mock('../components/workspace/right-panel-content', () => ({
   RightPanelContent: (props: ComponentProps<typeof RightPanelContent>) => {
     const [text, setText] = useState('')
     return <section data-testid="panel-content">
+    {props.narrow && <button aria-label="Back to chat" onClick={props.onShowChat}>Chat</button>}
     <textarea aria-label="Unsaved artifact" value={text} onChange={e => setText(e.target.value)} />
     <span data-testid="active-path">{props.activeContentTab?.path}</span>
     <span data-testid="tab-count">{props.tabsState.contentTabs.length}</span>
@@ -239,6 +240,16 @@ describe('initial composer shell', () => {
 })
 
 describe('responsive pane navigation', () => {
+  it.each([390, 820])('does not add a second workspace header above the artifact at %spx', async width => {
+    fixture.width = width
+    const { container } = render(<WorkspaceShell />)
+    await clickDocument()
+    await waitFor(() => expect(panelIsOpen(container)).toBe(true))
+    const aside = screen.getByRole('complementary', { name: 'Files and content' })
+    expect(aside.children).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Back to chat' })).toHaveLength(1)
+  })
+
   it.each([390, 820])('uses one chat header with navigation controls at %spx', width => {
     fixture.width = width
     const { container } = render(<WorkspaceShell />)

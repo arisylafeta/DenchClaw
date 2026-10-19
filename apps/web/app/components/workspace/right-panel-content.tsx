@@ -214,6 +214,7 @@ export function RightPanelContent(props: RightPanelContentProps) {
           onTreeFileSearchSelect={onTreeFileSearchSelect ? (item) => { onTreeFileSearchSelect(item); filesFocusPending.current = narrow; setNarrowFilesOpen(false); } : undefined}
           onTreeGoHome={onTreeGoHome}
           onCollapse={hideFiles}
+          onShowChat={onShowChat}
         />
       )}
 
@@ -312,9 +313,18 @@ type FileTreeColumnProps = {
   onTreeFileSearchSelect?: (item: SuggestItem) => void;
   onTreeGoHome?: () => void;
   onCollapse: () => void;
+  onShowChat: () => void;
 };
 
 const FILE_TREE_WIDTH = 240;
+
+function ArtifactChatToggle({ onClick }: { onClick: () => void }) {
+  return <button type="button" onClick={onClick} aria-label="Back to chat" title="Back to chat"
+    className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-2"
+    style={{ color: "var(--color-text-muted)" }}>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /></svg>
+  </button>;
+}
 
 function FileTreeColumn({
   narrow = false,
@@ -331,6 +341,7 @@ function FileTreeColumn({
   onTreeFileSearchSelect,
   onTreeGoHome,
   onCollapse,
+  onShowChat,
 }: FileTreeColumnProps) {
   return (
     <div
@@ -341,10 +352,11 @@ function FileTreeColumn({
         borderColor: "var(--color-border)",
       }}
     >
-      {onTreeFileSearchSelect && (
+      {(onTreeFileSearchSelect || narrow) && (
         <div className="px-2 pt-2 pb-1 shrink-0 flex items-center gap-1">
+          {narrow && <ArtifactChatToggle onClick={onShowChat} />}
           <div className="flex-1 min-w-0">
-            <FileSearch onSelect={onTreeFileSearchSelect} searchFn={fileSearchFn} />
+            {onTreeFileSearchSelect ? <FileSearch onSelect={onTreeFileSearchSelect} searchFn={fileSearchFn} /> : <span className="text-sm font-medium">Files</span>}
           </div>
           <button
             type="button"
@@ -492,6 +504,7 @@ function ContentTabStrip({
       className={`flex items-center ${narrow ? "min-h-11" : "h-10"} shrink-0 border-b min-w-0`}
       style={{ borderColor: "var(--color-border)" }}
     >
+      {narrow && <ArtifactChatToggle onClick={onShowChat} />}
       {!narrow && <button
         type="button"
         onClick={onCollapseRightPanel}
@@ -522,7 +535,7 @@ function ContentTabStrip({
         </svg>
       </button>}
       <div className="no-scrollbar flex-1 flex items-center gap-1 px-2 min-w-0 h-full overflow-x-auto">
-        {chatPanelCollapsed && (
+        {!narrow && chatPanelCollapsed && (
           <button
             id="workspace-show-chat"
             type="button"

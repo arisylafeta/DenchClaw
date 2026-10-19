@@ -39,6 +39,7 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 
 ## Native Hermes command composer
 
+- Limit model-picker choices to Anthropic, OpenAI (including its Codex route) and OpenCode. Keep route identifiers intact and never silently change the active session or configured credentials when filtering choices.
 - Match the native model picker: borderless `@base-ui/react` popover above the composer, rounded neutral surface, compact system type, muted descriptions and a quiet hover/keyboard selection fill.
 - The composer itself is the slash search field; do not add a second search input. Show Session, Model, Tools, Skills and Plugins sections from Hermes metadata, with collapsible headings and one-line descriptions. Keep skills separate and hide terminal-only commands.
 - Keep focus in the composer while Arrow keys select, Tab completes, Enter runs and Escape dismisses. Argument completions replace only Hermes' indicated suffix.
@@ -50,7 +51,7 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 - Render one chat header at every width. Put narrow sidebar, Files, terminal and new-chat controls in the existing ChatPanel header slots, never a second workspace bar above it; retain subagent return and conversation actions.
 - Before matchMedia hydration, CSS must hide desktop sidebar chrome below 768px. The initial chat uses the actual editable composer, not an input-shaped skeleton.
 - Keep artifact editor/cache owners mounted when returning to chat. Hide and inert inactive panes; navigation visibility must not discard drafts or dirty editor state.
-- Below 1024px, Files and the artifact use the full content width separately. Keep Back to chat and the current artifact title in a normal-flow header with safe-area padding; do not float controls over documents.
+- Below 1024px, Files and the artifact use the full content width separately. Keep the chat-return toggle inside the existing file-search or artifact-tab toolbar, never a second workspace header. Keep safe-area padding and do not float controls over documents.
 - The sidebar uses the existing outlined panel toggle icon with an expanded state, never Back. Back to chat is reserved for artifact return.
 - Touch conversation rows retain avatars and separate visible 44px pin/rename actions. Only selection receives the selected fill. Avatar-to-pin overlays and row hover fill require both hover capability and a fine pointer; keyboard feedback uses focus-visible.
 - Content tabs scroll horizontally inside their bounded strip, expose full accessible titles and labelled close controls, and use 44px targets in narrow panes. Preserve desktop sizing and saved layout preferences.

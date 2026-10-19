@@ -2854,14 +2854,7 @@ function WorkspacePageInner() {
             transition: isNarrow ? undefined : "width 200ms ease, min-width 200ms ease",
           }}
         >
-          {isNarrow && (
-            <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2" style={{ borderColor: "var(--color-border)" }}>
-              <button type="button" onClick={showChat} aria-label="Back to chat" className="min-h-11 rounded-md px-3 text-sm focus-visible:outline focus-visible:outline-2" style={{ color: "var(--color-text)" }}>
-                Back to chat
-              </button>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium" title={activeContentTab?.title}>{activeContentTab?.title || "Files & content"}</span>
-            </div>
-          )}
+
           <div className="flex flex-1 min-h-0 flex-col relative overflow-hidden" style={{ width: isNarrow ? "100%" : renderedRightPanelWidth, minWidth: isNarrow ? 0 : renderedRightPanelWidth }}>
             {!isNarrow && <ResizeHandle
               mode="right"

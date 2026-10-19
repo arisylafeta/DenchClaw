@@ -9,6 +9,9 @@ import { ProviderIcon } from '../chat-model-selector'
 type Provider = { slug: string; name?: string; models: string[]; capabilities?: Record<string, { reasoning?: boolean; can_disable_reasoning?: boolean }> }
 type ModelOptions = { model: string; provider: string; providers: Provider[]; reasoning?: { value?: string }; fast?: boolean }
 
+// Limit picker choices without changing configured credentials or a running session.
+const PICKER_PROVIDERS = new Set(['anthropic', 'openai', 'openai-codex', 'opencode', 'opencode-zen', 'opencode-go'])
+
 const LEVELS = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
@@ -51,7 +54,7 @@ function ModelPicker({ options, model, provider, busy, disabled, saving, error, 
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const needle = query.trim().toLowerCase()
-  const groups = useMemo(() => (options?.providers ?? []).map(row => ({
+  const groups = useMemo(() => (options?.providers ?? []).filter(row => PICKER_PROVIDERS.has(row.slug)).map(row => ({
     ...row, matches: needle ? row.models.filter(name => `${name} ${row.name ?? ''} ${row.slug}`.toLowerCase().includes(needle)) : row.models,
   })).filter(row => row.matches.length), [options, needle])
   return <Popover.Root open={open} onOpenChange={next => { setOpen(next); if (!next) { setQuery('') } }}>
