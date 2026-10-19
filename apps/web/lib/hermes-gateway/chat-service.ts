@@ -59,6 +59,14 @@ export function parseGatewayPrompt(value: unknown): GatewayPrompt {
   if (!parsed.success) throw new ChatServiceError(400, "invalid_prompt");
   return parsed.data;
 }
+const SKILL_COLLISION = /slash command \/\S+ unavailable[^\n]*name taken by built-in; use \/skill (\S+)/i;
+/** A skill whose slash name is a built-in cannot be typed as /name. Hermes says so; run the skill as a prompt instead. */
+export function skillCollisionDirective<T extends object>(result: T, arg: string): T | { type: "send"; message: string; notice: string } {
+  const output = (result as { output?: unknown }).output;
+  const skill = typeof output === "string" ? SKILL_COLLISION.exec(output)?.[1] : undefined;
+  if (!skill) { return result; }
+  return { type: "send", message: `Use the "${skill}" skill${arg ? `: ${arg}` : "."}`, notice: `/${skill} is also a built-in command name, so I ran the ${skill} skill instead.` };
+}
 /** Offer /invite and its agent argument; Hermes does not know this command. */
 export function inviteCompletion<T extends { items: { text: string; display?: string; meta?: string }[]; replace_from: number }>(text: string, self: string, completion: T): T {
   const argument = /^\/invite\s+(\S*)$/i.exec(text);
@@ -372,10 +380,12 @@ export class HermesChatService {
       if (name === "branch") { return { conversation: await this.branchConversation(key) }; }
       if (!this.manager.session(retained)?.runtimeId) { await this.manager.resumeSession(retained); }
       try {
-        return await this.manager.callSession(retained, "slash.exec", { session_id: "", command });
+        return skillCollisionDirective(await this.manager.callSession(retained, "slash.exec", { session_id: "", command }), arg);
       } catch (error) {
+        const collided = skillCollisionDirective({ output: error instanceof Error ? error.message : "" }, arg);
+        if ("type" in collided) { return collided; }
         if (!(error instanceof JsonRpcGatewayError) || error.code !== 4018) { throw error; }
-        return this.manager.callSession(retained, "command.dispatch", { name, arg });
+        return skillCollisionDirective(await this.manager.callSession(retained, "command.dispatch", { name, arg }), arg);
       }
     });
   }

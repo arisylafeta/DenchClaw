@@ -223,7 +223,9 @@ describe("phone composer readiness with the real TipTap editor", () => {
     fetchMock.mockImplementation(async (url: string) => url.endsWith('/slash-execute') ? Response.json({ error: 'Synthetic command failure' }, { status: 400 }) : Response.json({}));
     await typeDraft('/help');
     fireEvent.keyDown(editor, { key: 'Enter' });
-    await waitFor(() => expect(screen.getByText(/Failed \/help/)).toBeTruthy());
+    const status = await screen.findByRole('alert');
+    expect(status.textContent).toContain('/help: Synthetic command failure');
+    expect(screen.queryByRole('button', { name: /Failed \/help/ })).toBeNull();
   });
 
   it("queues rewrite commands in the transcript and cancels before idle", async () => {
@@ -232,10 +234,10 @@ describe("phone composer readiness with the real TipTap editor", () => {
     FakeEventSource.instance.emit('gw', { key, type: 'message.start', session_id: 'phone-fixture', generation: 1, seq: 1 });
     const editor = await typeDraft('/compress');
     fireEvent.keyDown(editor, { key: 'Enter' });
-    await screen.findByText(/Queued \/compress/);
+    await screen.findByText(/\/compress queued until the reply finishes/);
     expect(promptCalls()).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel queued command' }));
-    expect(screen.getByText('Cancelled /compress')).toBeTruthy();
+    expect(screen.queryByText(/queued until the reply finishes/)).toBeNull();
     FakeEventSource.instance.emit('gw', { key, type: 'message.complete', session_id: 'phone-fixture', generation: 1, seq: 2, payload: { text: 'Finished' } });
     await act(async () => {});
     expect(promptCalls()).toHaveLength(0);
@@ -248,14 +250,25 @@ describe("phone composer readiness with the real TipTap editor", () => {
     FakeEventSource.instance.emit('gw', { key, type: 'message.start', session_id: 'phone-fixture', generation: 1, seq: 1 });
     const editor = await typeDraft('/compress');
     fireEvent.keyDown(editor, { key: 'Enter' });
-    await screen.findByText(/Queued \/compress/);
+    await screen.findByText(/\/compress queued until the reply finishes/);
     FakeEventSource.instance.emit('gw', { key, type: 'message.complete', session_id: 'phone-fixture', generation: 1, seq: 2, payload: { text: 'Finished' } });
     snapshot();
     await screen.findByText(/Ran \/compress: Compressed synthetic history/);
     snapshot();
     expect(screen.getByText(/Ran \/compress: Compressed synthetic history/)).toBeTruthy();
-    expect(screen.queryByText(/Queued \/compress/)).toBeNull();
+    expect(screen.queryByText(/queued until the reply finishes/)).toBeNull();
     expect(promptCalls()).toHaveLength(1);
+  });
+
+  it("docks the command list on top of the input instead of floating over the page", async () => {
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/slash-complete') ? Response.json({ items: [{ text: '/compress', display: '/compress', meta: 'Compress the conversation' }], replace_from: 1, catalog: {} }) : Response.json({}));
+    const view = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    await typeDraft('/comp');
+    const dock = await waitFor(() => { const node = view.container.querySelector('[data-slash-dock]'); if (!node) throw new Error('no dock'); return node; });
+    expect(await screen.findByRole('option', { name: /\/compress/ })).toBeTruthy();
+    expect(dock.closest('[role="dialog"]')).toBeNull();
+    expect(dock.parentElement?.querySelector('.ProseMirror, [contenteditable]')).toBeTruthy();
   });
 
   it("retries a refused rewrite command only once instead of looping", async () => {
@@ -264,9 +277,9 @@ describe("phone composer readiness with the real TipTap editor", () => {
     snapshot();
     const editor = await typeDraft('/compress');
     fireEvent.keyDown(editor, { key: 'Enter' });
-    await screen.findByText(/Queued \/compress/);
+    await screen.findByText(/\/compress queued until the reply finishes/);
     snapshot();
-    await screen.findByText(/Hermes still reports the session as busy/);
+    expect((await screen.findByRole('alert')).textContent).toContain('Hermes still reports the session as busy');
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
     expect(promptCalls()).toHaveLength(2);
   });

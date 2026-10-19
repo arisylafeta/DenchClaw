@@ -14,7 +14,7 @@ vi.mock("../workspace", () => ({ resolveAgentWorkspacePrefix: () => "/source-wor
 import { inviteToConversation, nativeFetch, readConversation } from "../hermes-native";
 import { hydrateMessageImageAttachments } from "../chat-image-attachments";
 import { HermesGatewayManager, type GatewaySocket } from "./manager";
-import { HermesChatService } from "./chat-service";
+import { skillCollisionDirective, HermesChatService } from "./chat-service";
 import { conversationKey } from "../hermes-conversations";
 import { buildAgentMessage } from "../agent-message";
 import { EventConnection } from "../../app/api/hermes/events/registry";
@@ -151,6 +151,13 @@ describe("gateway chat service", () => {
     await expect(service.slashExecute(key, { command: "/invite" })).rejects.toThrow("invite_needs_agent");
     await expect(service.slashExecute(key, { command: "/invite nobody" })).rejects.toThrow("unknown_profile");
     await expect(service.slashExecute(key, { command: "/invite ari" })).rejects.toThrow("invite_same_agent");
+  });
+  it("runs a skill whose name collides with a built-in as a prompt instead of showing Hermes' refusal", async () => {
+    const note = "slash command /handoff unavailable — name taken by built-in; use /skill handoff";
+    expect(skillCollisionDirective({ output: note }, "to matcha")).toEqual({ type: "send", message: 'Use the "handoff" skill: to matcha', notice: expect.stringContaining("ran the handoff skill") });
+    expect(skillCollisionDirective({ output: note }, "")).toMatchObject({ message: 'Use the "handoff" skill.' });
+    const ordinary = { output: "Compressed 12 messages" };
+    expect(skillCollisionDirective(ordinary, "")).toBe(ordinary);
   });
   it("keeps slash completion read-only and session-scoped, then resumes execution with only the 4018 dispatch fallback", async () => {
     expect(await service.slashComplete(key, { text: "/exa" })).toEqual({ items: [], replace_from: 1, catalog: {} });
