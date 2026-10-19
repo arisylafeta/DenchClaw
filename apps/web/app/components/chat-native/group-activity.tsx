@@ -69,10 +69,11 @@ export function GroupWorkingBubbles({ working, activity, roster, driver, settled
     {approvals.map((action, i) => <p key={String(action.member_id ?? i)} className="py-2 text-xs text-[var(--color-text-muted)]">Waiting for approval: {roster.find(m => m.memberId === action.member_id)?.name || String(action.member_id || 'agent')}</p>)}
     {activity.members.filter(m => m.approval && !approvals.some(a => a.member_id === m.memberId)).map(m => <p key={m.memberId} className="py-2 text-xs text-[var(--color-text-muted)]">Waiting for approval or clarification: {roster.find(r => r.memberId === m.memberId)?.name || 'agent'}</p>)}
     {running.map(row => <div key={row.memberId} className="min-w-0 py-2" data-member-working={row.memberId}>
-      <GroupAuthor profile={row.profile} name={row.name} />
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <ThinkingIndicator>Working</ThinkingIndicator><span title="since you opened this chat or since it started, whichever is later"><Elapsed startedAt={row.started} /></span>
-      </div>
+      {/* Status sits on the avatar's line, not under it. */}
+      <GroupAuthor profile={row.profile} name={row.name}>
+        <span aria-hidden="true" className="px-0.5 font-normal">·</span>
+        <span className="flex items-center gap-2 font-normal"><ThinkingIndicator>Working</ThinkingIndicator><span title="since you opened this chat or since it started, whichever is later"><Elapsed startedAt={row.started} /></span></span>
+      </GroupAuthor>
     </div>)}
     {working && (activity.degraded || !running.length) && !waiting.size && <div className="py-3 text-xs text-[var(--color-text-muted)]"><ThinkingIndicator>Agents are working</ThinkingIndicator></div>}
   </div>;

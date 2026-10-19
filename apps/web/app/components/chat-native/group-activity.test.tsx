@@ -95,3 +95,11 @@ it('polls activity only while working and visible, never writes on unmount', asy
   expect(fetch).toHaveBeenCalledTimes(2);
   unmount(); expect(fetch.mock.calls.every(c => c.length === 1 && c[0].endsWith('/activity'))).toBe(true);
 });
+it('shows Working on the same line as the agent avatar and name', () => {
+  const { container } = render(<GroupWorkingBubbles working roster={roster} activity={{ members: [{ memberId: 'alpha', running: true }], degraded: false }} />);
+  const bubble = container.querySelector('[data-member-working="alpha"]')!;
+  const line = bubble.firstElementChild!;
+  expect(line.textContent).toContain('Working');
+  expect(line.querySelector('[data-testid="avatar"], img, svg, span')).not.toBeNull();
+  expect(bubble.children).toHaveLength(1);
+});

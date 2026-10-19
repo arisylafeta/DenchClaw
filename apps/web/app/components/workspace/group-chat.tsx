@@ -3,9 +3,9 @@ import type { HermesConversation } from "@/lib/hermes-conversations";
 import { ProfileAvatar } from "./profile-avatar";
 
 /** Who said it, shown above an agent's message inside a group chat. */
-export function GroupAuthor({ profile, name }: { profile: string; name?: string }) {
+export function GroupAuthor({ profile, name, children }: { profile: string; name?: string; children?: React.ReactNode }) {
   return <div className="flex items-center gap-1.5 pt-2 text-xs font-medium" style={{ color: "var(--color-text-muted)" }}>
-    <ProfileAvatar name={profile} className="h-5 w-5" />{name || profile}
+    <ProfileAvatar name={profile} className="h-5 w-5" />{name || profile}{children}
   </div>;
 }
 
