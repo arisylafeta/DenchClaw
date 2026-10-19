@@ -22,7 +22,7 @@
 /* Supply groups. */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .segment { display: inline-flex; gap: 2px; padding: 3px; background: var(--bt-segment); }
-.segment button { padding: 5px 10px; font-size: 12px; color: var(--bt-muted); border-radius: 0 !important; }
+.segment button { padding: 5px 10px; font-size: 12px; color: var(--bt-muted); border-radius: 8px !important; }
 .segment button[aria-pressed="true"] { background: var(--bt-badge); color: var(--bt-on-badge); }
 .groups { border: 1px solid var(--bt-border); }
 .group + .group { border-top: 1px solid var(--bt-divider); }

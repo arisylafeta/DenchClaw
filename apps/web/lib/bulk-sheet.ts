@@ -5,6 +5,7 @@
 // Missing values stay null: nothing here is guessed, and progress is only what the record states.
 
 import type { TradeStage } from "./bulk-trades";
+import type { BulkTradesRoute } from "./bulk-trades-url";
 
 export type SheetKind = "demand" | "supply" | "trade";
 export type SheetSide = "buyer" | "seller" | "both";
@@ -137,4 +138,30 @@ export function sheetOptions(rows: SheetRow[]) {
   const distinct = (pick: (row: SheetRow) => string | null) =>
     [...new Set(rows.map(pick).filter((value): value is string => !!value))].sort((a, b) => a.localeCompare(b));
   return { progress: distinct((row) => row.progress), company: distinct((row) => row.company), category: distinct((row) => row.category) };
+}
+
+const SIDES: readonly string[] = ["buyer", "seller", "both"];
+
+/** The sheet filters a URL asks for. Older tab=demand / tab=supply links mean buyer-led / seller-led. */
+export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" | "progress" | "company" | "category" | "tab">): SheetFilters {
+  const legacySide = route.tab === "demand" ? "buyer" : route.tab === "supply" ? "seller" : null;
+  const side = route.side ?? legacySide;
+  return {
+    query: route.query ?? "",
+    side: side && SIDES.includes(side) ? (side as SheetSide) : "all",
+    progress: route.progress ?? "all",
+    company: route.company ?? "all",
+    category: route.category ?? "all",
+  };
+}
+
+/** The URL fields for a set of filters; defaults are left out so shared links stay short. */
+export function routeFromFilters(filters: SheetFilters): Partial<BulkTradesRoute> {
+  return {
+    query: filters.query.trim() || null,
+    side: filters.side === "all" ? null : filters.side,
+    progress: filters.progress === "all" ? null : filters.progress,
+    company: filters.company === "all" ? null : filters.company,
+    category: filters.category === "all" ? null : filters.category,
+  };
 }

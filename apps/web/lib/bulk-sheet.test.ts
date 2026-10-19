@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { demandRow, filterSheet, NO_FILTERS, sheetOptions, sortSheet, supplyRow, tradeRow } from "./bulk-sheet";
+import { demandRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, supplyRow, tradeRow } from "./bulk-sheet";
 
 const demand = (over = {}) => demandRow({
   id: "d1", buyer: "H. Nolden", company_id: "c1", wants: "Complete packs", product_family: "Ioniq", activity_count: 0, linked_trades: 0,
@@ -53,5 +53,23 @@ describe("sheet filters", () => {
   it("offers only values that exist, and sorts newest development first", () => {
     expect(sheetOptions(rows).category).toEqual(["cells", "Ioniq", "packs"]);
     expect(sortSheet(rows).map((row) => row.id)).toEqual(["t1", "t2", "d1"]);
+  });
+});
+
+describe("sheet filters in the URL", () => {
+  const route = { query: null, side: null, progress: null, company: null, category: null, tab: null };
+
+  it("round-trips, keeping defaults out of the URL", () => {
+    const filters = { ...NO_FILTERS, query: "nolden", side: "buyer" as const, progress: "New" };
+    expect(routeFromFilters(filters)).toEqual({ query: "nolden", side: "buyer", progress: "New", company: null, category: null });
+    expect(filtersFromRoute({ ...route, ...routeFromFilters(filters) })).toEqual(filters);
+    expect(routeFromFilters(NO_FILTERS)).toEqual({ query: null, side: null, progress: null, company: null, category: null });
+  });
+
+  it("maps older demand and supply tab links to the matching side, and ignores an unknown side", () => {
+    expect(filtersFromRoute({ ...route, tab: "demand" }).side).toBe("buyer");
+    expect(filtersFromRoute({ ...route, tab: "supply" }).side).toBe("seller");
+    expect(filtersFromRoute({ ...route, tab: "today" }).side).toBe("all");
+    expect(filtersFromRoute({ ...route, side: "bogus" }).side).toBe("all");
   });
 });

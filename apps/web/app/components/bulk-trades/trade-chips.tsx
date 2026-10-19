@@ -25,7 +25,7 @@ export const GROUP_TONE: Record<TradeGroupName, ChipTone> = {
 
 export function DueChip({ label, tone }: { label: string; tone: ChipTone }) {
   return (
-    <span className="whitespace-nowrap rounded-none px-2 py-0.5 text-xs font-medium" style={TONES[tone]}>
+    <span className="whitespace-nowrap rounded-lg px-2 py-0.5 text-xs font-medium" style={TONES[tone]}>
       {label}
     </span>
   );

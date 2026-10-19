@@ -131,7 +131,7 @@ export function NextStepStrip({ detail, today, linkTracking, onTradePatch }: {
   }
 
   const emailName = who ? firstName(who.name) : null;
-  const small = "inline-flex h-8 items-center whitespace-nowrap rounded-none border px-3 text-[13px] font-medium";
+  const small = "inline-flex h-8 items-center whitespace-nowrap rounded-lg border px-3 text-[13px] font-medium";
   return (
     <section
       aria-label="Next step"

@@ -2499,30 +2499,30 @@ td:has(> div > :empty) {
 }
 
 /* ============================================================
-   Bulk Trades: ReBattery platform palette and type (rebattery-platform app/globals.css:
-   --rb-gray-*, --status-*, --brand-accent). Square corners like the platform's app surfaces.
+   Bulk Trades: neutrals come from the app's own tokens so the page matches the chat and sidebar
+   in light and dark; only the status colours below are local. Rounded corners like the rest of the app.
    ============================================================ */
 
 .bulk-trades {
-  --bt-bg: #fafafa;
-  --bt-surface: #ffffff;
-  --bt-row-hover: #fafafa;
-  --bt-border: #e0e0e0;
-  --bt-border-strong: #b0b0b0;
-  --bt-divider: #f0f0f0;
-  --bt-segment: #f0f0f0;
-  --bt-column: #f2f2f2;
-  --bt-column-over: #e0e0e0;
-  --bt-table-head: #fafafa;
-  --bt-dashed: #d4d4d4;
-  --bt-text: #1a1a1a;
-  --bt-text-2: #525252;
-  --bt-muted: #5c5c5c;
+  --bt-bg: var(--color-bg);
+  --bt-surface: var(--color-surface);
+  --bt-row-hover: var(--color-surface-hover);
+  --bt-border: var(--color-border);
+  --bt-border-strong: color-mix(in srgb, var(--color-text) 30%, transparent);
+  --bt-divider: var(--color-border);
+  --bt-segment: color-mix(in srgb, var(--color-text) 7%, transparent);
+  --bt-column: var(--color-surface-hover);
+  --bt-column-over: var(--color-surface-hover);
+  --bt-table-head: color-mix(in srgb, var(--color-text) 3%, transparent);
+  --bt-dashed: color-mix(in srgb, var(--color-text) 20%, transparent);
+  --bt-text: var(--color-text);
+  --bt-text-2: color-mix(in srgb, var(--color-text) 78%, var(--color-bg));
+  --bt-muted: color-mix(in srgb, var(--color-text) 62%, var(--color-bg));
   --bt-accent: #e7f346;
   --bt-accent-hover: #d4e030;
   --bt-on-accent: #0a0a0a;
-  --bt-badge: #0a0a0a;
-  --bt-on-badge: #ffffff;
+  --bt-badge: var(--color-text);
+  --bt-on-badge: var(--color-bg);
   --bt-ok: #22c55e;
   --bt-link: #1e40af;
   --bt-red: #b91c1c;
@@ -2548,26 +2548,10 @@ td:has(> div > :empty) {
   --bt-bar-muted: #b0b0b0;
   background: var(--bt-bg);
   color: var(--bt-text);
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: inherit;
 }
 
 .dark .bulk-trades {
-  --bt-bg: #0b0c10;
-  --bt-surface: #1a1a1a;
-  --bt-row-hover: #222222;
-  --bt-border: #3d3d3d;
-  --bt-border-strong: #5c5c5c;
-  --bt-divider: #2e2e2e;
-  --bt-segment: #2e2e2e;
-  --bt-column: #141414;
-  --bt-column-over: #2e2e2e;
-  --bt-table-head: #141414;
-  --bt-dashed: #525252;
-  --bt-text: #f4f4f2;
-  --bt-text-2: #d4d4d4;
-  --bt-muted: #a3a3a3;
-  --bt-badge: #f4f4f2;
-  --bt-on-badge: #0a0a0a;
   --bt-link: #a4b8ff;
   --bt-red: #f87171;
   --bt-red-bg: rgba(239, 68, 68, 0.14);

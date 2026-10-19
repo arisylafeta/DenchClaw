@@ -17,19 +17,26 @@ vi.mock("next/navigation", async () => {
 const push = window.history.pushState.bind(window.history);
 window.history.pushState = (...args) => { push(...args); window.dispatchEvent(new Event("bt-url")); };
 
-const row = (overrides: Record<string, unknown>) => ({
-  priority: false, missing: [], context_notes: [], inventory_matches: [], id: "d1", kind: "standing", basis: "stated",
-  buyer: "Green Voltage", company_id: null, status: "open", wants: "12 packs", closed_reason: null, source_kind: "manual", ...overrides,
-});
+const demandRow = {
+  priority: false, missing: [], context_notes: [], inventory_matches: [], id: "d1", kind: "standing", basis: "stated", buyer: "Green Voltage",
+  company_id: null, person_id: null, contact: null, email: null, wants: "12 Ioniq packs", quantity: null, location: null, note: null,
+  needed_by: null, volume: null, volume_unit: null, max_price: null, price_currency: null, price_unit: null, spec: {}, context: {},
+  status: "open", activity_count: 0, last_activity_at: null, fits: [], trades: [], waiting: null, tier: null, score: null,
+};
+const sheetRow = {
+  key: "demand:d1", kind: "demand", id: "d1", side: "buyer", title: "12 Ioniq packs", company: "Green Voltage", company_id: null, category: null,
+  progress: "New", tone: "new", latest: null, next_action: null, next_due: null, owner: null, touched: "2026-10-01",
+};
 
-function stubApi(calls: string[], hold: { demand: boolean }) {
+function stubApi(calls: string[], hold: string[] = []) {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     calls.push(url);
-    if (hold.demand && url === "/api/bulk-trades/demand") await new Promise(() => {});
-    const body = url === "/api/bulk-trades/demand" ? { demand: [row({})], possible: [], accepted: [] }
-      : url === "/api/bulk-trades/supply" ? { supply: [], feed: [], matched: null }
-        : url === "/api/bulk-trades/demand/matches" ? { matches: {} }
-          : { trades: [], owners: [] };
+    if (hold.includes(url)) return new Promise<Response>(() => {});
+    const body = url === "/api/bulk-trades/sheet" ? { rows: [sheetRow] }
+      : url === "/api/bulk-trades/demand" ? { demand: [demandRow], possible: [], accepted: [] }
+        : url === "/api/bulk-trades" ? { trades: [], owners: [] }
+          : url.endsWith("/activity") ? { activity: [] }
+            : {};
     return new Response(JSON.stringify(body));
   }));
 }
@@ -43,36 +50,33 @@ async function freshView() {
 describe("Bulk Trades loading", () => {
   afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
 
-  it("opening Demand loads the demand list once, not once per component", async () => {
+  it("opening the sheet loads each list once, and the rows do not wait for the inbox", async () => {
     const calls: string[] = [];
-    stubApi(calls, { demand: false });
-    window.history.replaceState(null, "", "/?path=bulk_trade&tab=demand");
+    stubApi(calls, ["/api/bulk-trades", "/api/bulk-trades/demand"]);
+    window.history.replaceState(null, "", "/?path=bulk_trade");
     const BulkTradesView = await freshView();
     render(<BulkTradesView />);
-    await screen.findByRole("button", { name: /Green Voltage/ });
-    // eslint-disable-next-line no-console
-    console.log("COLD_OPEN_DEMAND_REQUESTS", calls.filter((url) => url === "/api/bulk-trades/demand").length);
+    await screen.findByRole("button", { name: /12 Ioniq packs/ });
+    expect(calls.filter((url) => url === "/api/bulk-trades/sheet")).toHaveLength(1);
     expect(calls.filter((url) => url === "/api/bulk-trades/demand")).toHaveLength(1);
   });
 
-  it("a revisited tab keeps showing its rows while the refresh is still pending", async () => {
+  it("a demand opened by link shows its requirement and story without waiting for match calculations", async () => {
     const calls: string[] = [];
-    const hold = { demand: false };
-    stubApi(calls, hold);
-    window.history.replaceState(null, "", "/?path=bulk_trade&tab=demand");
+    stubApi(calls, ["/api/bulk-trades/demand/d1/supply", "/api/bulk-trades/demand/d1/context"]);
+    window.history.replaceState(null, "", "/?path=bulk_trade&demand=d1");
     const BulkTradesView = await freshView();
     render(<BulkTradesView />);
-    await screen.findByRole("button", { name: /Green Voltage/ });
-    await userEvent.click(screen.getByRole("button", { name: "Supply" }));
-    hold.demand = true;
-    await userEvent.click(screen.getByRole("button", { name: "Demand" }));
-    expect(screen.getByRole("button", { name: /Green Voltage/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Green Voltage" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Story" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("region", { name: "Story" })).toBeInTheDocument();
+    expect(calls.filter((url) => url === "/api/bulk-trades/demand")).toHaveLength(1);
   });
 
   it("a read that started before a save never delivers its older copy", async () => {
     let status = "old";
     const releases: Array<() => void> = [];
-    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
       if (init?.method === "PATCH") { status = "saved"; return Promise.resolve(new Response("{}")); }
       const snapshot = status; // what the server holds when this read is served
       return new Promise<Response>((resolve) => releases.push(() => resolve(new Response(JSON.stringify({ status: snapshot })))));

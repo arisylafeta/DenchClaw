@@ -4,10 +4,13 @@
  * A Bulk Trades page is `/?path=bulk_trade` plus the params below. The shell owns `path`;
  * this module owns everything else, so shell navigation, chat links and the page agree.
  *
- *   Tab:        /?path=bulk_trade&tab=today|trades|demand|supply
+ *   Sheet:      /?path=bulk_trade            (filters: &q=…&side=buyer|seller|both&progress=…&company=…&category=…)
  *   Trade:      /?path=bulk_trade&trade=<id>
- *   Demand:     /?path=bulk_trade&demand=<id>      (list: &tab=demand&status=open|qualifying|closed&q=…&category=…)
- *   Supply:     /?path=bulk_trade&supply=<id>      (list: &tab=supply&status=open|closed&q=…)
+ *   Demand:     /?path=bulk_trade&demand=<id>
+ *   Supply:     /?path=bulk_trade&supply=<id>
+ *
+ * Older links with tab=today|trades|demand|supply or status=… still open the sheet; tab=demand and
+ * tab=supply map to the buyer-led and seller-led filters. Selected records open as before.
  */
 
 export const BULK_TRADES_PATH = "bulk_trade";
@@ -20,17 +23,21 @@ export type BulkTradesRoute = {
   trade: string | null;
   demand: string | null;
   supply: string | null;
-  /** List filters (demand and supply lists only). */
-  status: string | null;
+  /** Sheet filters. */
   query: string | null;
+  side: string | null;
+  progress: string | null;
+  company: string | null;
   category: string | null;
+  /** Legacy list filter, kept so old links parse; the sheet ignores it. */
+  status: string | null;
 };
 
 const SHELL_PARAMS = ["terminal", "browse", "hidden"] as const;
 const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply"];
-export const BULK_TRADES_PARAMS = ["tab", "trade", "demand", "supply", "status", "q", "category"] as const;
+export const BULK_TRADES_PARAMS = ["tab", "trade", "demand", "supply", "status", "q", "side", "progress", "company", "category"] as const;
 
-const EMPTY: BulkTradesRoute = { tab: null, trade: null, demand: null, supply: null, status: null, query: null, category: null };
+const EMPTY: BulkTradesRoute = { tab: null, trade: null, demand: null, supply: null, status: null, query: null, side: null, progress: null, company: null, category: null };
 
 export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTradesRoute {
   const params = typeof search === "string" ? new URLSearchParams(search) : search;
@@ -42,15 +49,11 @@ export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTrad
     supply: params.get("supply") || null,
     status: params.get("status") || null,
     query: params.get("q") || null,
+    side: params.get("side") || null,
+    progress: params.get("progress") || null,
+    company: params.get("company") || null,
     category: params.get("category") || null,
   };
-}
-
-/** The tab a route shows. A selected supply or demand record implies its tab. */
-export function activeBulkTradesTab(route: BulkTradesRoute, fallback: BulkTradesTab): BulkTradesTab {
-  if (route.supply) return "supply";
-  if (route.demand) return "demand";
-  return route.tab ?? fallback;
 }
 
 /** Build the params for a route (without `path`), omitting empty values. */
@@ -63,6 +66,9 @@ export function bulkTradesParams(patch: Partial<BulkTradesRoute>): URLSearchPara
   if (route.supply) params.set("supply", route.supply);
   if (route.status) params.set("status", route.status);
   if (route.query) params.set("q", route.query);
+  if (route.side) params.set("side", route.side);
+  if (route.progress) params.set("progress", route.progress);
+  if (route.company) params.set("company", route.company);
   if (route.category) params.set("category", route.category);
   return params;
 }

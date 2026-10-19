@@ -15,6 +15,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { StoryEntry } from "./story-entry";
 import styles from "./bulk-detail.module.css";
 import {
   CLOSED_REASON_LABEL,
@@ -252,7 +253,7 @@ export function DemandActions({
     });
   return (
     <>
-      <div className={section === "Overview" ? "space-y-3" : "hidden"}>
+      {section === "Overview" && <div className="space-y-3">
         <div className="flex items-start justify-end gap-2">
           <StatusMenu
             demand={demand}
@@ -330,11 +331,11 @@ export function DemandActions({
             </button>
           </form>
         )}
-      </div>
+      </div>}
       <ErrorText error={error} />
-      {showsActivity && (<section aria-label="Activity">
+      {showsActivity && (<section aria-label="Story">
         <h3 className="mb-3 text-sm font-semibold">
-          Activity{" "}
+          Story{" "}
           <span
             className="ml-1 font-normal"
             style={{ color: "var(--bt-muted)" }}
@@ -479,88 +480,11 @@ export function DemandActions({
             No activity yet
           </p>
         )}
-        <ol className={styles.timeline}>
-          {activity.map((entry) => {
-            const Icon =
-              ACTIVITY_ICONS[entry.kind as keyof typeof ACTIVITY_ICONS] ??
-              MessageSquare;
-            const linked =
-              entry.ref_id &&
-              (entry.ref_kind === "lot" ||
-                entry.ref_kind === "supply" ||
-                /^https?:\/\//i.test(entry.ref_id));
-            return (
-              <li key={entry.id} className={styles.entry}>
-                <span className={styles.entryIcon}>
-                  <Icon size={14} />
-                </span>
-                <div className="min-w-0 flex-1 pt-1">
-                  <div className="flex items-start gap-2">
-                    <p className="flex-1 text-[13px] font-medium">
-                      {entry.title}
-                    </p>
-                    <button
-                      type="button"
-                      className={styles.delete}
-                      disabled={busy}
-                      aria-label={`Delete ${entry.title}`}
-                      onClick={() =>
-                        run(() =>
-                          request(`${endpoint}/activity/${entry.id}`, {
-                            method: "DELETE",
-                          }),
-                        )
-                      }
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                  <time
-                    className="mt-1 block text-[11px]"
-                    style={{ color: "var(--bt-muted)" }}
-                    dateTime={entry.occurred_at}
-                    title={shortDate(entry.occurred_at.slice(0, 10))}
-                  >
-                    {formatDistanceToNow(new Date(entry.occurred_at), {
-                      addSuffix: true,
-                    })}
-                  </time>
-                  {entry.body && (
-                    <p
-                      className="mt-2 whitespace-pre-wrap text-xs leading-relaxed"
-                      style={{ color: "var(--bt-muted)" }}
-                    >
-                      {entry.body}
-                    </p>
-                  )}
-                  {linked &&
-                    (entry.ref_kind === "lot" || entry.ref_kind === "supply" ? (
-                      <button
-                        className={styles.chip}
-                        onClick={() =>
-                          entry.ref_kind === "lot"
-                            ? onOpenTrade(entry.ref_id!)
-                            : onOpenSupply?.(entry.ref_id!)
-                        }
-                      >
-                        <Link2 size={11} />
-                        View {entry.ref_kind}
-                      </button>
-                    ) : (
-                      <a
-                        className={styles.chip}
-                        href={entry.ref_id!}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <Link2 size={11} />
-                        Open link
-                      </a>
-                    ))}
-                </div>
-              </li>
-            );
-          })}
+        <ol className="divide-y" style={{ borderColor: "var(--bt-divider)" }}>
+          {activity.map((entry) => (
+            <StoryEntry key={entry.id} entry={entry} busy={busy} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply}
+              onDelete={() => run(() => request(`${endpoint}/activity/${entry.id}`, { method: "DELETE" }))} />
+          ))}
         </ol>
       </section>)}
     </>

@@ -180,9 +180,7 @@ describe("Demand visualization", () => {
         body: JSON.stringify({ action: "confirm" }),
       }),
     );
-    await userEvent.click(
-      within(sheet).getByRole("button", { name: "Activity" }),
-    );
+    expect(within(sheet).getByRole("button", { name: "Story" })).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(within(sheet).getByRole("button", { name: "Log activity" }));
     await userEvent.type(
       within(sheet).getByRole("textbox", { name: "Activity title" }),
@@ -279,14 +277,10 @@ describe("Demand visualization", () => {
     expect(
       within(sheet).getByRole("button", { name: "Copy ID" }),
     ).toBeInTheDocument();
-    await userEvent.click(within(sheet).getByRole("button", { name: "← Demand" }));
+    await userEvent.click(within(sheet).getByRole("button", { name: "← Bulk Trades" }));
     expect(await screen.findByRole("button", { name: /Green Voltage/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Green Voltage/ }));
     sheet = screen.getByRole("region", { name: "Demand detail" });
-    await userEvent.click(
-      within(sheet).getByRole("button", { name: "Activity" }),
-    );
-    expect(within(sheet).getByText("Email with the buyer")).toBeInTheDocument();
     await userEvent.click(within(sheet).getByRole("button", { name: "Log activity" }));
     expect(
       within(sheet).getByRole("textbox", { name: "Activity title" }),
@@ -297,6 +291,7 @@ describe("Demand visualization", () => {
     expect(await screen.findByText("Volkswagen ID.3 · 58 kWh · 3/10")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Green Voltage/ }));
     const sheet = screen.getByRole("region", { name: "Demand detail" });
+    await userEvent.click(within(sheet).getByRole("button", { name: /^Supply matching/ }));
     expect(await within(sheet).findAllByLabelText("Exact")).not.toHaveLength(0);
     await userEvent.click(await within(sheet).findByRole("button", { name: "Shortlist" }));
     expect(fetchMock).toHaveBeenCalledWith(
@@ -327,7 +322,7 @@ describe("Demand visualization", () => {
     await userEvent.click(screen.getByRole("button", { name: "Status: Demand" }));
     await userEvent.click(screen.getByRole("menuitem", { name: /Buyer confirmed it today/ }));
     expect(await screen.findByText("Could not confirm demand.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "← Demand" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "← Bulk Trades" })).toBeInTheDocument();
   });
   it("moves a row to Qualifying with a question built from its gaps, and back to Demand", async () => {
     const fetchMock = setup([row({ max_price: null, needed_by: null, kind: "request", basis: null })]);

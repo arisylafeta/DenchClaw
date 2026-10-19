@@ -35,7 +35,7 @@ type Props = {
   onOpenEvidence?: () => void;
 };
 
-const inputClass = "h-9 w-full rounded-none border px-2.5 text-sm outline-none focus:border-[var(--color-accent)]";
+const inputClass = "h-9 w-full rounded-lg border px-2.5 text-sm outline-none focus:border-[var(--color-accent)]";
 const inputStyle = { background: "var(--color-bg)", borderColor: "var(--color-border)", color: "var(--color-text)" };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -127,7 +127,7 @@ export function TradeEditor({ trade, owners, today, onClose, onSave, onOpenEvide
           <section className="flex flex-col gap-3">
             <h3 className="text-[13px] font-semibold" style={{ color: "var(--color-text)" }}>Next step</h3>
             <textarea value={draft.next_step} onChange={set("next_step")} rows={2}
-              className="w-full rounded-none border px-2.5 py-2 text-sm outline-none focus:border-[var(--color-accent)]" style={inputStyle} />
+              className="w-full rounded-lg border px-2.5 py-2 text-sm outline-none focus:border-[var(--color-accent)]" style={inputStyle} />
             <div className="grid grid-cols-2 gap-3">
               <Field label="Due">{input("next_step_due", "date")}</Field>
               <Field label="Waiting on">{select("waiting_on", ["us", "them"], { us: "Us", them: "Them" })}</Field>
@@ -135,7 +135,7 @@ export function TradeEditor({ trade, owners, today, onClose, onSave, onOpenEvide
                 <div className="flex gap-2">
                   {input("last_touched", "date")}
                   <button type="button" onClick={() => setDraft((current) => ({ ...current, last_touched: today }))}
-                    className="shrink-0 rounded-none border px-2 text-xs" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}>
+                    className="shrink-0 rounded-lg border px-2 text-xs" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}>
                     Today
                   </button>
                 </div>
@@ -158,7 +158,7 @@ export function TradeEditor({ trade, owners, today, onClose, onSave, onOpenEvide
 
         <div className="mt-auto flex items-center gap-3 border-t px-5 py-4" style={{ borderColor: "var(--color-border)" }}>
           <button type="submit" disabled={saving}
-            className="h-9 rounded-none px-4 text-sm font-semibold disabled:opacity-60"
+            className="h-9 rounded-lg px-4 text-sm font-semibold disabled:opacity-60"
             style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
             {saving ? "Saving" : trade ? "Save" : "Create trade"}
           </button>

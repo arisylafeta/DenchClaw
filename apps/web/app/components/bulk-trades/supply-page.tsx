@@ -488,3 +488,48 @@ function SupplyPanel({
     </DetailSheet>
   );
 }
+
+/** One supply record, opened by id from the sheet or a shared link. */
+export function SupplyDetail({ id, onClose, onOpenDemand }: { id: string; onClose: () => void; onOpenDemand?: (id: string) => void }) {
+  const cached = peekShared<{ supply: Supply[]; feed: SupplyFeedRow[] }>(SUPPLY_URL);
+  const [supply, setSupply] = useState<Supply[] | null>(cached?.supply ?? null);
+  const [feed, setFeed] = useState<SupplyFeedRow[]>(cached?.feed ?? []);
+  const [demand, setDemand] = useState<Demand[]>(() => peekShared<{ demand: Demand[] }>(DEMAND_URL)?.demand ?? []);
+  const [error, setError] = useState<string | null>(null);
+  const latest = useRef(0);
+  const load = useCallback(async () => {
+    const seq = ++latest.current;
+    void sharedGet<{ demand: Demand[] }>(DEMAND_URL)
+      .then((data) => { if (seq === latest.current) setDemand(data.demand); })
+      .catch(() => { /* demand only adds the buyer fits */ });
+    try {
+      const data = await sharedGet<{ supply: Supply[]; feed: SupplyFeedRow[] }>(SUPPLY_URL);
+      if (seq !== latest.current) return;
+      setSupply(data.supply);
+      setFeed(data.feed);
+      setError(null);
+    } catch (err) {
+      if (seq === latest.current) setError(err instanceof Error ? err.message : "Could not load this offer.");
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const today = todayInLondon();
+  const row = feed.find((candidate) => candidate.id === id || candidate.id === `supply:${id}`);
+  const detail = supply?.find((candidate) => candidate.id === id || `supply:${candidate.id}` === id);
+  if (!row && !detail) {
+    return (
+      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
+        <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>
+        <ErrorText error={error} />
+        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{supply && !error ? "This offer no longer exists." : error ? "" : "Loading…"}</p>
+      </div>
+    );
+  }
+  const matches = demand.flatMap((buyer) => {
+    if (buyer.status !== "open" || checkReason(buyer, today) === "past_needed_by") return [];
+    const fit = buyer.inventory_matches?.find((match) => match.id === row?.id);
+    return fit ? [{ demand_id: buyer.id, buyer: buyer.buyer, reason: fit.reason }] : [];
+  });
+  return <SupplyPanel key={id} row={row} supply={detail} matches={matches} onClose={onClose} onChanged={load} onOpenDemand={onOpenDemand} />;
+}

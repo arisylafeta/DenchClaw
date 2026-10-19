@@ -144,7 +144,32 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
   );
 }
 
-const TABS = ["Details", "Supply matching", "Activity"];
+/** Where this demand stands, in four short facts. A gap says so; nothing is guessed. */
+function DemandSummary({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
+  const needs = [volumeLabel(demand) ?? demand.quantity, demand.product_family ?? supply?.requirement.pinned?.[0], demand.needed_by ? `by ${shortDate(demand.needed_by)}` : null].filter(Boolean).join(" · ");
+  const standing = demand.trades.length
+    ? `On ${demand.trades.length === 1 ? "a trade" : `${demand.trades.length} trades`}`
+    : demand.last_activity_at ? `Last activity ${ago(demand.last_activity_at)}` : "No activity recorded";
+  const waiting = demand.waiting ? `${demand.waiting.who ?? "The buyer"} wrote ${ago(demand.waiting.since)}; waiting for our reply` : "Nothing recorded";
+  const facts: [string, string, boolean][] = [
+    ["Needs", needs || "Not recorded", !needs],
+    ["Where it stands", standing, false],
+    ["Waiting for", waiting, !demand.waiting],
+    ["Next action", "None set", true],
+  ];
+  return (
+    <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+      {facts.map(([label, value, quiet]) => (
+        <div key={label} className="min-w-0">
+          <dt className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{label}</dt>
+          <dd className="text-[13px] leading-snug" style={{ color: quiet ? "var(--bt-muted)" : demand.waiting && label === "Waiting for" ? "var(--bt-amber)" : undefined }}>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+const TABS = ["Story", "Details", "Supply matching"];
 
 export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
   demand: Demand;
@@ -155,8 +180,8 @@ export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, on
   onOpenSupply?: (id: string) => void;
   onOpenDemand?: (id: string) => void;
 }) {
-  // Opens on the matches: that is why you click into a demand. Details is reference.
-  const [tab, setTab] = useState("Supply matching");
+  // Opens on the story: what was asked, said and done. Details and matching are reference.
+  const [tab, setTab] = useState("Story");
   const [editing, setEditing] = useState(false);
   const [supply, setSupply] = useState<DemandSupply | null>(null);
   const [supplyError, setSupplyError] = useState<string | null>(null);
@@ -210,7 +235,7 @@ export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, on
   return (
     <div ref={top} role="region" aria-label="Demand detail" className="mx-auto flex w-full max-w-[1100px] flex-col gap-5">
       <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        <button type="button" onClick={onClose} className={`${rowFocus} hover:underline`}>← Demand</button>
+        <button type="button" onClick={onClose} className={`${rowFocus} hover:underline`}>← Bulk Trades</button>
       </nav>
       <header className={css.head}>
         <div className="flex min-w-0 items-start gap-3">
@@ -222,26 +247,15 @@ export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, on
               {demand.status !== "open" && <span className={styles.status}>{demand.status}</span>}
               {demand.priority && <span className={styles.status} style={{ color: "var(--bt-green)" }}>Priority</span>}
             </div>
-            <p className="mt-1 max-w-[80ch] text-[14px] leading-snug">{demand.wants}</p>
-            <p className={`${css.meta} mt-1`}>
-              <span>{KIND_LABEL[demand.kind]}{demand.basis ? ` · ${BASIS_LABEL[demand.basis]}` : ""}</span>
-              {demand.asked_on && <span>Asked {shortDate(demand.asked_on)}</span>}
-              {demand.contact && <span>{demand.contact}</span>}
-              {demand.fee_eur != null && <span>Fee {formatFee(demand.fee_eur)}</span>}
-            </p>
-            {demand.waiting && (
-              <p className="mt-2 text-[13px]" style={{ color: "var(--bt-amber)" }}>
-                {demand.waiting.who ?? "The buyer"} wrote {ago(demand.waiting.since)} and is waiting for our reply.
-              </p>
-            )}
+            <p className="mt-1 line-clamp-3 max-w-[80ch] text-[14px] leading-snug" title={demand.wants}>{demand.wants}</p>
+            <DemandSummary demand={demand} supply={supply} />
           </div>
         </div>
         <div className={css.headActions}>{actions("Overview")}</div>
       </header>
       <SheetTabs
         tabs={TABS}
-        labels={{ "Supply matching": supply ? `Supply matching · ${supply.totalGroups}` : "Supply matching",
-          Activity: demand.activity_count ? `Activity · ${demand.activity_count}` : "Activity" }}
+        labels={{ "Supply matching": supply ? `Supply matching · ${supply.totalGroups}` : "Supply matching" }}
         value={tab}
         onChange={setTab}
       />
@@ -259,10 +273,17 @@ export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, on
         <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy}
           onEdit={() => setEditing(true)} leads={leads} />
       )}
-      {tab === "Activity" && (
+      {tab === "Story" && (
         <div className="flex max-w-[760px] flex-col gap-6">
-          <MailList mail={context?.mail ?? []} />
           {actions("Activity")}
+          {(context?.mail ?? []).length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-[13px]" style={{ color: "var(--bt-muted)" }}>
+                Recent email with this buyer ({context!.mail.length}). Not matched to this request.
+              </summary>
+              <div className="mt-3"><MailList mail={context!.mail} /></div>
+            </details>
+          )}
         </div>
       )}
       <ChatHint id={demand.id} />
