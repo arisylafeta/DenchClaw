@@ -200,10 +200,10 @@ describe("native transcript", () => {
     const onClarify = vi.fn();
     render(<ClarifyCard request={request} onClarify={onClarify} />);
     fireEvent.click(screen.getByRole("checkbox", { name: /Red/ })); fireEvent.click(screen.getByRole("checkbox", { name: /Blue/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByText("2 of 3")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Readable" } });
-    fireEvent.click(screen.getByRole("button", { name: "Next" })); fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" })); fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     expect(onClarify).toHaveBeenCalledWith(request, { colors: "Red, Blue", note: "Readable", optional: null });
   });
 

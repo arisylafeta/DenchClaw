@@ -2743,6 +2743,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				{nativeGateway && slashBusy && <p role="status" className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">Running command…</p>}
 				<NativeSlashComposer chat={nativeChat} text={composerText} enabled={nativeGateway && !submissionUnavailable} busy={slashBusy} setText={text => editorRef.current?.setText(text)} run={command => { void runSlash(command); }}>
 				<ChatEditor
+					multiline
 					ref={editorRef}
 					onSubmit={handleEditorSubmit}
 					onChange={(isEmpty) => { setEditorEmpty(isEmpty); onDraftChange?.(!isEmpty); }}

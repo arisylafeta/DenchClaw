@@ -50,6 +50,8 @@ type ChatEditorProps = {
 	/** Block submission without making the draft read-only or clearing it. */
 	submitDisabled?: boolean;
 	compact?: boolean;
+	/** Normal chat reserves three editable lines even with compact surrounding chrome. */
+	multiline?: boolean;
 	/** Client-side search function for instant @ mention results. */
 	searchFn?: (query: string, limit?: number) => import("@/lib/search-index").SearchIndexItem[];
 };
@@ -168,7 +170,7 @@ function createChatFileMentionSuggestion(searchFnRef?: React.RefObject<((query: 
 // ── Main component ──
 
 export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
-	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, submitDisabled, compact, searchFn }, ref) {
+	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, submitDisabled, compact, multiline = !compact, searchFn }, ref) {
 		const submitDisabledRef = useRef(false);
 		submitDisabledRef.current = !!disabled || !!submitDisabled;
 		const submitRef = useRef(onSubmit);
@@ -208,7 +210,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 					role: "textbox",
 					"aria-label": "Message",
 					"aria-multiline": "true",
-					class: `chat-editor-content ${compact ? "chat-editor-compact" : ""}`,
+					class: `chat-editor-content ${compact ? "chat-editor-compact" : ""} ${multiline ? "chat-editor-multiline" : ""}`,
 					style: `color: var(--color-text);`,
 				},
 				handleKeyDown: (view, event) => {
@@ -431,11 +433,12 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 				<style>{`
 					.chat-editor-content {
 						outline: none;
-						min-height: ${compact ? "16px" : "28px"};
+						box-sizing: border-box;
+						min-height: 28px;
 						max-height: 200px;
 						overflow-y: auto;
-						padding: ${compact ? "10px 12px" : "14px 16px"};
-						font-size: ${compact ? "12px" : "14px"};
+						padding: 14px 16px;
+						font-size: 14px;
 						line-height: 1.5;
 						transition: opacity 0.15s ease;
 					}
@@ -476,11 +479,20 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 						opacity: 0.85;
 					}
 					.chat-editor-content.chat-editor-compact {
-						min-height: 16px;
+						min-height: 36px;
+						padding: 10px 12px;
+						font-size: 12px;
+					}
+					/* Include padding: the editable content, not just its box, fits three lines. */
+					.chat-editor-content.chat-editor-multiline {
+						min-height: calc(3lh + 28px);
+					}
+					.chat-editor-content.chat-editor-compact.chat-editor-multiline {
+						min-height: calc(3lh + 20px);
 					}
 					@media (max-width: 767px) {
-						.chat-editor-content,
-						.chat-editor-content.chat-editor-compact {
+						.chat-editor-content.chat-editor-multiline,
+						.chat-editor-content.chat-editor-compact.chat-editor-multiline {
 							box-sizing: border-box;
 							min-height: 96px;
 							max-height: min(200px, max(96px, calc(var(--chat-visible-height, 100dvh) * 0.3)));

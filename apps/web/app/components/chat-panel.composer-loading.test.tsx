@@ -145,6 +145,27 @@ describe("phone composer readiness with the real TipTap editor", () => {
     expect(editor.textContent).toBe("Draft during approval");
   });
 
+  it("routes the compact answer to its exact request and restores the hidden normal draft", async () => {
+    render(<ChatPanel compact nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    snapshot();
+    const editor = await typeDraft("Keep my normal draft");
+    expect(editor).toHaveClass("chat-editor-multiline");
+    FakeEventSource.instance.emit("request", { key, id: "clarify-exact", method: "clarify", params: { questions: [{ qid: "location-exact", question: "Where?", choices: ["Here", "Other"] }] } });
+    const answer = await screen.findByRole("textbox", { name: "Other" });
+    expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
+    expect(editor.isConnected).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: /Other/ }));
+    expect(answer).toHaveFocus();
+    fireEvent.change(answer, { target: { value: "Berlin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === `${endpoint}/clarify`)).toBe(true));
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === `${endpoint}/clarify`)!;
+    expect(JSON.parse(init.body)).toMatchObject({ request_id: "clarify-exact", answers: { "location-exact": "Berlin" } });
+    expect(promptCalls()).toHaveLength(0);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toBe(editor));
+    expect(editor.textContent).toBe("Keep my normal draft");
+  });
+
   it("keeps typing during a lost connection and never submits or queues the draft on reconnect", async () => {
     render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
     snapshot();
@@ -203,7 +224,7 @@ describe("phone composer readiness with the real TipTap editor", () => {
     expect(editor).toMatch(/@media \(max-width: 767px\)[\s\S]*min-height: 96px/);
     expect(editor).toMatch(/font-size: 16px/);
     expect(editor).toContain("var(--chat-visible-height, 100dvh)");
-    expect(editor).toContain('compact ? "12px" : "14px"');
+    expect(editor).toContain("font-size: 12px");
     expect(css).toMatch(/@media \(max-width: 767px\)[\s\S]*position: relative/);
     expect(css).toContain("env(safe-area-inset-bottom)");
     expect(css).toContain("min-height: 44px");

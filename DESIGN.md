@@ -32,7 +32,8 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 ## Mobile composer and PWA foundation
 
 - Keep a single real, editable composer mounted during discovery and history loading. Gate sends and commands, not typing; retain the draft through saved-tab restoration and explicit agent selection.
-- Phone input has a 96px minimum editable area and 16px text. Keep it in normal flex flow, above the keyboard and bottom safe area; preserve desktop floating-composer density.
+- Normal chat reserves at least three visible text lines inside the editable content at every width, including compact chat chrome. Include vertical padding in the minimum; phone input retains its stronger 96px floor and 16px text. Compact popover editors stay compact. Keep chat in normal flex flow above the keyboard and bottom safe area.
+- Clarification matches ReBattery Jules' `joules-prompt-stack.tsx` and `joules-composer.tsx`: questions and numbered choices above a compact, borderless answer row with an adjacent send arrow, all inside the existing single composer surface. No visible Other heading, large answer textarea or separate Submit answer row. Single choices advance immediately; multi-select uses checkboxes and Continue. Preserve Hermes request/qid identity, locked answers and Skip, rather than sending ordinary prompts. Keep the normal draft and attachments mounted but hidden while answering.
 - Size narrow workspace shells to the visual viewport without interpreting pinch zoom as a keyboard resize. Retain browser zoom.
 - Native drafts without a chosen agent show an explicit agent-choice action, not an endless loading skeleton or an implicit send to an arbitrary profile.
 - PWA metadata and public icons support standalone installation. Do not cache private chats, documents, API responses or authenticated HTML; this phase adds no service worker, offline queue or push prompt.
