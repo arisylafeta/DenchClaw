@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { HermesParticipant } from '@/lib/hermes-conversations';
 import type { RoomActivity } from '@/lib/hermes-gateway/room-activity';
 import type { RoomDriver } from '@/lib/hermes-native';
@@ -8,15 +8,14 @@ import { GroupAuthor } from '../workspace/group-chat';
 import { ThinkingIndicator } from './thinking';
 import { Elapsed } from './tool-run';
 import { WorkBlock } from './work-block';
-import { describeTool } from './describe';
 import { formatElapsedDuration } from '@/lib/elapsed-duration';
 export type GroupSettlement = { memberId?: string; createdAt?: number; passed?: boolean };
 export interface GroupActivityProps {
   conversationKey: string; working: boolean; visible?: boolean;
-  roster: HermesParticipant[]; driver?: RoomDriver; settled?: GroupSettlement[];
+  roster: HermesParticipant[]; driver?: RoomDriver; settled?: GroupSettlement[]; lastUser?: string;
 }
 /** Ephemeral work never enters transcript state. The room log wins over a stale activity poll. */
-export function GroupActivity({ conversationKey, working, visible = true, roster, driver, settled = [] }: GroupActivityProps) {
+export function GroupActivity({ conversationKey, working, visible = true, roster, driver, settled = [], lastUser }: GroupActivityProps) {
   const [activity, setActivity] = useState<RoomActivity>({ members: [], degraded: true });
   useEffect(() => {
     let alive = true; let pending = false;
@@ -29,6 +28,7 @@ export function GroupActivity({ conversationKey, working, visible = true, roster
         const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(conversationKey)}/activity`);
         if (!response.ok) throw Error('unavailable');
         const data = await response.json();
+        if (!Array.isArray(data?.members) || typeof data.degraded !== 'boolean') throw Error('Invalid activity');
         if (alive) setActivity(data);
       } catch { if (alive) setActivity({ members: [], degraded: true }); }
       finally { pending = false; }
@@ -38,26 +38,43 @@ export function GroupActivity({ conversationKey, working, visible = true, roster
     document.addEventListener('visibilitychange', poll);
     return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', poll); };
   }, [conversationKey, working, visible]);
-  return <GroupWorkingBubbles working={working} activity={activity} roster={roster} driver={driver} settled={settled} />;
+  return <GroupWorkingBubbles working={working} activity={activity} roster={roster} driver={driver} settled={settled} lastUser={lastUser} />;
 }
-export function GroupWorkingBubbles({ working, activity, roster, driver, settled = [] }: Pick<GroupActivityProps, 'working' | 'roster' | 'driver' | 'settled'> & { activity: RoomActivity }) {
+export function GroupWorkingBubbles({ working, activity, roster, driver, settled = [], lastUser }: Pick<GroupActivityProps, 'working' | 'roster' | 'driver' | 'settled' | 'lastUser'> & { activity: RoomActivity }) {
+  const observations = useRef(new Map<string, { poll: RoomActivity; settlement: string; user?: string; hidden: boolean; running: boolean; started: number }>());
   const approvals = (driver?.pending_actions ?? []).filter(action => action.kind === 'approval');
-  const waiting = new Set(approvals.map(action => action.member_id));
-  const running = working ? roster.flatMap(member => {
-    const row = activity.members.find(row => row.memberId === member.memberId && row.running);
-    const finished = settled.filter(s => s.memberId === member.memberId);
-    if (!row || waiting.has(member.memberId) || finished.some(s => !row.startedAt || !s.createdAt || row.startedAt <= s.createdAt)) return [];
-    return [{ ...row, profile: member.profile, name: member.name }];
-  }) : [];
+  const waiting = new Set([...approvals.map(action => action.member_id), ...activity.members.filter(m => m.approval).map(m => m.memberId)]);
+  const running = roster.flatMap(member => {
+    if (!member.memberId) return [];
+    const row = activity.members.find(row => row.memberId === member.memberId);
+    const stamp = JSON.stringify(settled.filter(s => s.memberId === member.memberId));
+    const old = observations.current.get(member.memberId);
+    const isRunning = working && row?.running === true;
+    // Ordering is client observation order, not session timestamps. Historical settlements
+    // are the baseline. A newly observed settlement hides until a not-running -> running
+    // transition, or a NEW poll after a new room user-message id. A stale poll cannot
+    // revive a settled bubble. Later turns are never suppressed by historical replies.
+    const newPoll = old?.poll !== activity;
+    let hidden = old?.hidden ?? false;
+    if (old && stamp !== old.settlement) hidden = true;
+    else if (newPoll && isRunning && (!old?.running || old.user !== lastUser)) hidden = false;
+    // Elapsed means since you opened this chat or since it started, whichever is later.
+    // active_list exposes no turn start. Never use started_at or last_active.
+    const started = !old || !old.running || (old.hidden && !hidden) ? Date.now() : old.started;
+    observations.current.set(member.memberId, { poll: activity, settlement: stamp, user: newPoll && (!old || stamp === old.settlement) ? lastUser : old?.user, hidden, running: isRunning, started });
+    if (!isRunning || hidden || waiting.has(member.memberId)) return [];
+    return [{ memberId: member.memberId, profile: member.profile, name: member.name, started }];
+  });
   return <div className="min-w-0" aria-live="polite">
     {approvals.map((action, i) => <p key={String(action.member_id ?? i)} className="py-2 text-xs text-[var(--color-text-muted)]">Waiting for approval: {roster.find(m => m.memberId === action.member_id)?.name || String(action.member_id || 'agent')}</p>)}
+    {activity.members.filter(m => m.approval && !approvals.some(a => a.member_id === m.memberId)).map(m => <p key={m.memberId} className="py-2 text-xs text-[var(--color-text-muted)]">Waiting for approval or clarification: {roster.find(r => r.memberId === m.memberId)?.name || 'agent'}</p>)}
     {running.map(row => <div key={row.memberId} className="min-w-0 py-2" data-member-working={row.memberId}>
       <GroupAuthor profile={row.profile} name={row.name} />
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <ThinkingIndicator>Working</ThinkingIndicator><span>{row.tool ? describeTool(row.tool).label : row.status}</span>{row.startedAt && <Elapsed startedAt={row.startedAt} />}
+        <ThinkingIndicator>Working</ThinkingIndicator><span title="since you opened this chat or since it started, whichever is later"><Elapsed startedAt={row.started} /></span>
       </div>
     </div>)}
-    {working && !running.length && !approvals.length && <div className="py-3 text-xs text-[var(--color-text-muted)]"><ThinkingIndicator>Agents are working</ThinkingIndicator></div>}
+    {working && (activity.degraded || !running.length) && !waiting.size && <div className="py-3 text-xs text-[var(--color-text-muted)]"><ThinkingIndicator>Agents are working</ThinkingIndicator></div>}
   </div>;
 }
 type TraceSummary = Pick<RoomTrace, 'startedAt' | 'completedAt' | 'steps'>;

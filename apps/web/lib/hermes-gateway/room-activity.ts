@@ -1,72 +1,45 @@
-import type { ToolSegment } from '../hermes-chat/reducer';
 import { nativeFetch, type Room } from '../hermes-native';
-import { getHermesGatewayManager, type HermesGatewayManager } from './manager';
-export interface RoomMemberActivity { memberId: string; profile: string; name: string; running: boolean; startedAt?: number; status: string; tool?: ToolSegment }
-const tools = new WeakMap<HermesGatewayManager, Map<string, { started: number; generation: number; seq: number; tool?: ToolSegment }>>();
-/** Only use events observed after ownership verification and within the same timed turn.
- * Mid-tool attachment has no trustworthy start frame, so it stays Thinking until the next tool. */
-export function observedRoomTool(manager: HermesGatewayManager, key: string, started: number): ToolSegment | undefined {
-  let sessions = tools.get(manager);
-  if (!sessions) { sessions = new Map(); tools.set(manager, sessions); }
-  const old = sessions.get(key);
-  const replay = manager.eventsSince(key, old?.generation, old?.seq);
-  const current = { started, generation: replay.generation, seq: replay.latestSeq, tool: old?.tool };
-  if (!started || !old || old.started !== started || replay.truncated || old.generation !== replay.generation) current.tool = undefined;
-  else for (const event of replay.events) {
-    const payload = event.payload as Record<string, unknown> | undefined;
-    if (event.type === 'message.complete' || event.type === 'message.start') current.tool = undefined;
-    if (event.type === 'tool.complete' && payload?.tool_id === current.tool?.toolId) current.tool = undefined;
-    if (event.type === 'tool.start' && typeof payload?.name === 'string' && typeof payload.tool_id === 'string') {
-      current.tool = { type: 'tool', id: payload.tool_id, toolId: payload.tool_id, name: payload.name,
-        args: payload.args && typeof payload.args === 'object' ? payload.args as Record<string, unknown> : {}, status: 'running', startedAt: Date.now() };
-    }
-  }
-  if (sessions.size >= 128 && !sessions.has(key)) sessions.delete(sessions.keys().next().value!);
-  sessions.set(key, current);
-  return current.tool;
-}
+import { HermesGatewayManager } from './manager';
+import { BoundedReads, limitConcurrency } from './room-read-cache';
+export interface RoomMemberActivity { memberId: string; running: boolean; approval?: boolean }
 export interface RoomActivity { members: RoomMemberActivity[]; degraded: boolean }
 export interface RoomSession { id: string; title?: string; source?: string }
 export async function roomSessions(profile: string, roomId: string): Promise<RoomSession[]> {
   const page = await (await nativeFetch(profile, `/api/sessions?title=${encodeURIComponent(`Group: ${roomId}`)}&include_hidden=true&limit=100`)).json();
+  if ((page.data?.length ?? 0) >= 100 || page.has_more) throw Error('Ambiguous room session discovery');
   return (page.data ?? []).filter((row: RoomSession) => row.title === `Group: ${roomId}` && row.source === 'bot_room');
 }
-/** No resume/create/submit calls: attaching is additive and preserves the driver's close_on_disconnect=false. */
-export async function discoverRoomActivity(room: Room, manager: HermesGatewayManager, lookup = roomSessions): Promise<RoomActivity> {
-  const result: RoomActivity = { members: [], degraded: room.members.length > 6 };
-  try {
-    const live = await manager.call('session.active_list', {});
-    await Promise.all(room.members.slice(0, 6).map(async member => {
-      try {
-        const stored = await lookup(member.profile, room.room_id);
-        const candidates = live.sessions.filter(row => stored.some(s => s.id === row.session_key));
-        // Avoid guessing if a profile has several matching live sessions.
-        if (candidates.length > 1) { result.degraded = true; return; }
-        for (const candidate of candidates) {
-          const key = manager.retainSession(member.profile, candidate.session_key);
-          const snapshot = await manager.attachLive(key, candidate.id);
-          if (!snapshot) { result.degraded = true; continue; }
-          if (!snapshot.running) continue;
-          const started = snapshot.turn_started_at ?? snapshot.info?.turn_started_at;
-          const tool = observedRoomTool(manager, key, started ?? 0);
-          result.members.push({ memberId: member.member_id, profile: member.profile, name: member.display_name || member.handle || member.profile,
-            running: true, status: 'Thinking', ...(tool ? { tool } : {}), ...(started && started > 0 ? { startedAt: started * 1000 } : {}) });
-        }
-      } catch { result.degraded = true; }
-    }));
-  } catch { result.degraded = true; }
-  result.members.sort((a, b) => room.members.findIndex(m => m.member_id === a.memberId) - room.members.findIndex(m => m.member_id === b.memberId));
-  return result;
+const discovery = limitConcurrency(2);
+/** active_list is the only viewer RPC. Never activate a transport, subscribe, or read previews. */
+export function discoverRoomActivity(room: Room, manager: HermesGatewayManager, lookup = roomSessions): Promise<RoomActivity> {
+  return discovery(async () => {
+    const result: RoomActivity = { members: [], degraded: room.members.length > 6 };
+    try {
+      const live = await manager.call('session.active_list', {});
+      const members = room.members.slice(0, 6);
+      let lookupFailed = false;
+      const stored = await Promise.all(members.map(async member => {
+        try { return await lookup(member.profile, room.room_id); }
+        catch { lookupFailed = true; result.degraded = true; return []; }
+      }));
+      for (const [i, member] of members.entries()) {
+        const ids = stored[i].map(s => s.id);
+        const collision = ids.some(id => stored.some((rows, j) => members[j].profile !== member.profile && rows.some(s => s.id === id)));
+        const candidates = live.sessions.filter(row => ids.includes(row.session_key) && row.title === `Group: ${room.room_id}`);
+        if (lookupFailed || room.members.length > 6 || collision || candidates.length > 1) { result.degraded = true; result.members.push({ memberId: member.member_id, running: false }); continue; }
+        const status = String(candidates[0]?.status ?? '');
+        // Hermes exposes only "waiting", not whether the pending request is approval or clarify.
+        result.members.push({ memberId: member.member_id, running: status === 'working' || status === 'running', ...(status === 'waiting' ? { approval: true } : {}) });
+      }
+    } catch { result.degraded = true; }
+    return result;
+  });
 }
-const cache = new WeakMap<HermesGatewayManager, Map<string, { until: number; pending: Promise<RoomActivity> }>>();
-export function readRoomActivity(room: Room): Promise<RoomActivity> {
-  const manager = getHermesGatewayManager();
-  let rooms = cache.get(manager);
-  if (!rooms) { rooms = new Map(); cache.set(manager, rooms); }
-  const old = rooms.get(room.room_id);
-  if (old && old.until > Date.now()) return old.pending;
-  const pending = discoverRoomActivity(room, manager);
-  if (rooms.size >= 64) rooms.delete(rooms.keys().next().value!);
-  rooms.set(room.room_id, { until: Date.now() + 5000, pending });
-  return pending;
+const caches = new WeakMap<HermesGatewayManager, BoundedReads<RoomActivity>>();
+const viewer = globalThis as typeof globalThis & { __hermesRoomViewer?: HermesGatewayManager };
+function roomViewer() { return viewer.__hermesRoomViewer ??= new HermesGatewayManager({ discoveryOnly: true }); }
+export function readRoomActivity(room: Room, manager = roomViewer()): Promise<RoomActivity> {
+  let cache = caches.get(manager);
+  if (!cache) { cache = new BoundedReads(64, 5000); caches.set(manager, cache); }
+  return cache.read(JSON.stringify([room.room_id, room.members.map(m => [m.member_id, m.profile])]), () => discoverRoomActivity(room, manager));
 }

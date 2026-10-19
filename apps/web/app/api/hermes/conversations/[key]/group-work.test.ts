@@ -11,13 +11,13 @@ const key = conversationKey('group', 'synthetic');
 const context = { params: Promise.resolve({ key }) };
 afterEach(() => vi.resetAllMocks());
 describe('read-only group routes', () => {
-  it('returns degraded activity with driver approval state and no cache', async () => {
+  it('returns only a dedicated minimal DTO and no cache', async () => {
     mocks.backend.mockReturnValue('hermes');
     mocks.state.mockResolvedValue({ room: { room_id: 'synthetic' }, driver_status: { working: true, pending_actions: [{ kind: 'approval', member_id: 'a' }] } });
-    mocks.activity.mockResolvedValue({ members: [], degraded: true });
+    mocks.activity.mockResolvedValue({ members: [{ memberId: 'a', running: true, approval: false, tool: { args: { secret: 'synthetic' } }, preview: 'synthetic', profile: 'private' }], degraded: true, driver: {} });
     const response = await activity(new Request('http://test/activity'), context);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(await response.json()).toMatchObject({ members: [], degraded: true, driver: { pending_actions: [{ member_id: 'a' }] } });
+    expect(await response.json()).toEqual({ members: [{ memberId: 'a', running: true, approval: false }], degraded: true });
     expect(mocks.state).toHaveBeenCalledExactlyOnceWith('groups.state', { room_id: 'synthetic' });
   });
   it('does not expose reasoning or tools in summary probes', async () => {

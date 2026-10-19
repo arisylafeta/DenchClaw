@@ -3,12 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-libra
 import { afterEach, it, expect, vi } from 'vitest';
 import { GroupWorkingBubbles, GroupWorkTrace, GroupActivity } from './group-activity';
 const roster = ['alpha', 'beta'].map(profile => ({ profile, memberId: profile, name: profile }));
-const activity = { degraded: false, members: roster.map(m => ({ memberId: m.memberId, profile: m.profile, name: m.name, running: true, startedAt: 1000, status: 'Thinking' })) };
+const activity = { degraded: false, members: roster.map(m => ({ memberId: m.memberId, running: true })) };
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('stacks current members in roster order, replacing their bubbles as messages settle', () => {
   const { container, rerender } = render(<GroupWorkingBubbles working activity={{ ...activity, members: [...activity.members].reverse() }} roster={roster} />);
   expect([...container.querySelectorAll('[data-member-working]')].map(n => n.getAttribute('data-member-working'))).toEqual(['alpha', 'beta']);
-  rerender(<><p>Alpha reply</p><GroupWorkingBubbles working activity={activity} roster={roster} settled={[{ memberId: 'alpha', createdAt: 2000 }]} /></>);
+  rerender(<GroupWorkingBubbles working activity={activity} roster={roster} settled={[{ memberId: 'alpha', createdAt: 2000 }]} />);
   expect(container.querySelector('[data-member-working="alpha"]')).toBeNull();
   expect(container.querySelector('[data-member-working="beta"]')).not.toBeNull();
   rerender(<GroupWorkingBubbles working={false} activity={activity} roster={roster} />);
@@ -27,9 +27,34 @@ it('replaces an approval member bubble with a neutral non-action line', () => {
   expect(container.querySelector('[data-member-working="beta"]')).not.toBeNull();
   expect(screen.queryByRole('button')).toBeNull();
 });
-it('uses the solo tool label for observed tool activity', () => {
-  render(<GroupWorkingBubbles working activity={{ degraded: false, members: [{ ...activity.members[0], tool: { type: 'tool', id: 'tool', toolId: 'tool', name: 'read_file', args: { path: 'fixture.txt' }, status: 'running', startedAt: 1000 } }] }} roster={roster} />);
-  expect(screen.getByText('Reading fixture.txt')).toBeInTheDocument();
+it('shows only generic working status, with client-observed elapsed', () => {
+  render(<GroupWorkingBubbles working activity={activity} roster={roster} />);
+  expect(screen.getAllByText('Working')).toHaveLength(2);
+  expect(screen.getAllByTitle('since you opened this chat or since it started, whichever is later')).toHaveLength(2);
+});
+it('shows a second turn after a user message and a fresh running poll', () => {
+  const { container, rerender } = render(<GroupWorkingBubbles working activity={activity} roster={roster} lastUser="user1" />);
+  const settled = [{ memberId: 'alpha', createdAt: 2000 }];
+  rerender(<GroupWorkingBubbles working activity={activity} roster={roster} settled={settled} lastUser="user1" />);
+  expect(container.querySelector('[data-member-working="alpha"]')).toBeNull();
+  const lastPoll = { ...activity };
+  rerender(<GroupWorkingBubbles working activity={lastPoll} roster={roster} settled={settled} lastUser="user1" />);
+  expect(container.querySelector('[data-member-working="alpha"]')).toBeNull();
+  rerender(<GroupWorkingBubbles working activity={lastPoll} roster={roster} settled={settled} lastUser="user2" />);
+  expect(container.querySelector('[data-member-working="alpha"]')).toBeNull();
+  rerender(<GroupWorkingBubbles working activity={{ ...activity }} roster={roster} settled={settled} lastUser="user2" />);
+  expect(container.querySelector('[data-member-working="alpha"]')).not.toBeNull();
+});
+it('ignores old settlements on opening and revives after an observed idle transition', () => {
+  const settled = [{ memberId: 'alpha', createdAt: 2000 }];
+  const { container, rerender } = render(<GroupWorkingBubbles working activity={activity} roster={roster} settled={settled} />);
+  expect(container.querySelector('[data-member-working="alpha"]')).not.toBeNull();
+  const next = [{ memberId: 'alpha', createdAt: 3000 }];
+  rerender(<GroupWorkingBubbles working activity={activity} roster={roster} settled={next} />);
+  expect(container.querySelector('[data-member-working="alpha"]')).toBeNull();
+  rerender(<GroupWorkingBubbles working activity={{ degraded: false, members: [{ memberId: 'alpha', running: false }] }} roster={roster} settled={next} />);
+  rerender(<GroupWorkingBubbles working activity={{ ...activity }} roster={roster} settled={next} />);
+  expect(container.querySelector('[data-member-working="alpha"]')).not.toBeNull();
 });
 it('keeps trace collapsed, loads full work only on click, and uses the solo work and folded tool UI', async () => {
   const summary = { startedAt: 1000, completedAt: 43000, steps: 1 };

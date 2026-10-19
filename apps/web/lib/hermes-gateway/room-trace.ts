@@ -1,3 +1,4 @@
+import { BoundedReads } from './room-read-cache';
 import { conversationKey, parseConversationKey, type HermesMessage } from '../hermes-conversations';
 import { readConversation, type RoomEvent } from '../hermes-native';
 import { roomSessions } from './room-activity';
@@ -31,30 +32,34 @@ export function sliceRoomTrace(events: RoomEvent[], rows: HermesMessage[], membe
   if (work.some(s => s.type === 'tool' && s.status === 'running')) return null;
   return { work, startedAt: window[0].timestamp!, completedAt: end, steps: work.filter(s => s.type === 'tool').length };
 }
-const cache = new Map<string, RoomTrace>();
-// Mounted replies probe only summaries. Coalesce their shared room/session history reads,
-// keeping full reasoning/tool payloads server-side until the user expands a chip.
-const histories = new Map<string, { until: number; pending: ReturnType<typeof readConversation> }>();
+const traces = new BoundedReads<RoomTrace | null>(128, 60_000, 4 * 1024 * 1024);
+const histories = new BoundedReads<Awaited<ReturnType<typeof readConversation>>>(64, 5000, 8 * 1024 * 1024);
+const probes = new BoundedReads<RoomTrace | null>(128, 5000, 4 * 1024 * 1024);
+const roomLimits = new Map<string, { active: number }>();
 function sharedHistory(key: string) {
-  const old = histories.get(key); if (old && old.until > Date.now()) return old.pending;
-  const pending = readConversation(key);
-  if (histories.size >= 64) histories.delete(histories.keys().next().value!);
-  histories.set(key, { until: Date.now() + 5000, pending });
-  void pending.catch(() => { if (histories.get(key)?.pending === pending) histories.delete(key); });
-  return pending;
+  return histories.read(key, () => readConversation(key, 0, 200));
 }
-export async function readRoomTrace(key: string, memberId: string, turnId: string): Promise<RoomTrace | null> {
+export function readRoomTrace(key: string, memberId: string, turnId: string): Promise<RoomTrace | null> {
   const identity = parseConversationKey(key);
   if (identity.kind !== 'group') throw Error('Group required');
   const cacheKey = JSON.stringify([key, memberId, turnId]);
-  const old = cache.get(cacheKey); if (old) return old;
-  const detail = await sharedHistory(key);
-  const member = detail.conversation.participants.find(m => m.memberId === memberId);
-  if (!member || !('events' in detail)) return null;
-  const sessions = await roomSessions(member.profile, identity.id);
-  if (sessions.length !== 1) return null;
-  const history = await sharedHistory(conversationKey('solo', sessions[0].id, member.profile));
-  const trace = sliceRoomTrace(detail.events ?? [], history.messages, memberId, turnId);
-  if (trace) { if (cache.size >= 128) cache.delete(cache.keys().next().value!); cache.set(cacheKey, trace); }
-  return trace;
+  return probes.read(cacheKey, async () => {
+    // At most two probes per room. Excess mounted replies omit their chip, not queue
+    // unbounded history reads. Both room log and member history have a 200-row cap.
+    const slot = roomLimits.get(key) ?? { active: 0 };
+    if (slot.active >= 2) return null;
+    slot.active++; roomLimits.set(key, slot);
+    try {
+      return await traces.read(cacheKey, async () => {
+        const detail = await sharedHistory(key);
+        const member = detail.conversation.participants.find(m => m.memberId === memberId);
+        if (!member || !('events' in detail)) return null;
+        const sessions = await roomSessions(member.profile, identity.id);
+        if (sessions.length !== 1) return null;
+        const history = await sharedHistory(conversationKey('solo', sessions[0].id, member.profile));
+        return sliceRoomTrace(detail.events ?? [], history.messages, memberId, turnId);
+      });
+    } catch { return null; }
+    finally { if (--slot.active === 0) roomLimits.delete(key); }
+  });
 }

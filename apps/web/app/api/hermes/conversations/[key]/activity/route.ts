@@ -12,6 +12,7 @@ export async function GET(req: Request, context: { params: Promise<{ key: string
     const identity = parseConversationKey(key);
     if (identity.kind !== 'group') return Response.json({ error: 'Group required' }, { status: 400 });
     const state = await groupRpc<RoomState>('groups.state', { room_id: identity.id });
-    return Response.json({ ...await readRoomActivity(state.room), driver: state.driver_status ?? {} }, { headers: { 'Cache-Control': 'no-store' } });
+    const activity = await readRoomActivity(state.room);
+    return Response.json({ members: activity.members.map(({ memberId, running, approval }) => ({ memberId, running, ...(approval === undefined ? {} : { approval }) })), degraded: activity.degraded }, { headers: { 'Cache-Control': 'no-store' } });
   } catch { return Response.json({ error: 'Could not load group activity' }, { status: 502 }); }
 }

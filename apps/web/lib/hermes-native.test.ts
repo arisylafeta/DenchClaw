@@ -41,6 +41,14 @@ afterEach(async () => {
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
   vi.useRealTimers(); vi.restoreAllMocks();
 });
+it('bounds trace member history to one newest page and rejects cap overflow', async () => {
+  const fetch = vi.fn(async (url: string) => url.includes('/messages') ? Response.json({ data: Array.from({ length: 201 }, (_, id) => ({ id, role: 'user', content: 'synthetic', timestamp: 1 })) }) : Response.json({ id: 'synthetic', title: 'Test' }));
+  vi.stubGlobal('fetch', fetch);
+  await expect(readConversation(conversationKey('solo', 'synthetic', 'alpha'), 0, 200)).rejects.toThrow('Trace probe cap exceeded');
+  const pages = fetch.mock.calls.filter(([url]) => url.includes('/messages'));
+  expect(pages).toHaveLength(1);
+  expect(pages[0][0]).toContain('order=latest&limit=201&offset=0');
+});
 it("enriches only requested messaging IDs and uses the same name on deep-link readback", async () => {
   const lookup = vi.mocked(sessionDisplayNames);
   lookup.mockImplementation(async (profile, ids): Promise<Record<string, string>> => ids.includes("room") && profile === "alpha" ? { room: "Harbour / #stock" } : {});

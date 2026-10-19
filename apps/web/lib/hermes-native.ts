@@ -256,7 +256,7 @@ export async function createConversation(profiles: string[], title?: string) {
   const verified = await groupRpc<RoomState>("groups.state", { room_id: id });
   return roomConversation(verified.room, verified.driver_status?.working ?? null);
 }
-export async function readConversation(key: string, sinceSeq = 0) {
+export async function readConversation(key: string, sinceSeq = 0, probeCap?: number) {
   const identity = parseConversationKey(key);
   if (identity.kind === "group") {
     const state = await groupRpc<RoomState>("groups.state", { room_id: identity.id });
@@ -265,6 +265,7 @@ export async function readConversation(key: string, sinceSeq = 0) {
     for (;;) {
       const page = await groupRpc<{ events: (RoomEvent & { seq: number })[]; has_more?: boolean }>("groups.log", { room_id: identity.id, since_seq: since, limit: 100 });
       events.push(...page.events);
+      if (probeCap && (events.length > probeCap || (events.length >= probeCap && page.has_more !== false))) throw Error('Trace probe cap exceeded');
       if (!page.events.length) {
         if (page.has_more) throw new Error("Hermes room replay made no progress");
         break;
@@ -288,12 +289,16 @@ export async function readConversation(key: string, sinceSeq = 0) {
   const root = `/api/sessions/${encodeURIComponent(identity.id)}`;
   // Display history, not the model's working set: after Hermes compacts in place, only
   // include_compacted returns the summarized turns (and re-ID'd copies once, in display order).
-  const historyPage = (offset: number) => `${root}/messages?order=oldest&limit=500&offset=${offset}&include_compacted=true`;
+  const historyPage = (offset: number) => `${root}/messages?order=${probeCap ? 'latest' : 'oldest'}&limit=${probeCap ? probeCap + 1 : 500}&offset=${offset}&include_compacted=true`;
   const [sessionResponse, messagesResponse] = await Promise.all([nativeFetch(identity.profile, root), nativeFetch(identity.profile, historyPage(0))]);
   const session = await sessionResponse.json();
   const messages: HermesMessage[] = [];
   const tools = new Map<string, Record<string, unknown>>();
   let page = await messagesResponse.json();
+  if (probeCap) {
+    // Hermes order=latest already returns chronological rows.
+    if (page.data.length > probeCap) throw Error('Trace probe cap exceeded');
+  }
   let offset = 0;
   for (;;) {
     for (const m of page.data) {

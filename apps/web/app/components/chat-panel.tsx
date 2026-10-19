@@ -1307,9 +1307,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const optimisticGroupIds = useRef(new Set<string>());
 		const [groupWorking, setGroupWorking] = useState(false);
 		const [groupSending, setGroupSending] = useState(false);
-        const [groupWork, setGroupWork] = useState<{ roster: HermesParticipant[]; driver?: RoomDriver; settled: GroupSettlement[] }>({ roster: [], settled: [] });
+        const [groupWork, setGroupWork] = useState<{ roster: HermesParticipant[]; driver?: RoomDriver; settled: GroupSettlement[]; lastUser?: string }>({ roster: [], settled: [] });
         const updateGroupWork = useCallback((data: GroupDetail) => {
-            setGroupWork(previous => ({ roster: data.conversation?.participants ?? previous.roster, driver: data.driver,
+            setGroupWork(previous => ({ roster: data.conversation?.participants ?? previous.roster, driver: data.driver, lastUser: data.messages?.filter(m => m.role === 'user').at(-1)?.id ?? previous.lastUser,
                 settled: [...new Map([...previous.settled, ...(data.settled ?? []), ...(data.messages ?? []).filter(m => m.role === "assistant" && m.memberId).map(m => ({ memberId: m.memberId, createdAt: m.createdAt }))].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)).map(s => [s.memberId, s])).values()] }));
         }, []);
         useEffect(() => { setGroupWork({ roster: [], settled: [] }); setGroupWorking(false); }, [groupKey]);
@@ -3206,7 +3206,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								);
 							});
 						})()}
-						{groupKey && <GroupActivity key={groupKey} conversationKey={groupKey} working={groupWorking} visible={visible !== false} roster={groupWork.roster} driver={groupWork.driver} settled={groupWork.settled} />}
+						{groupKey && <GroupActivity key={groupKey} conversationKey={groupKey} working={groupWorking} visible={visible !== false} roster={groupWork.roster} driver={groupWork.driver} settled={groupWork.settled} lastUser={groupWork.lastUser} />}
                         {showStreamActivity && (
 							<div className="py-3 min-w-0">
 								<div

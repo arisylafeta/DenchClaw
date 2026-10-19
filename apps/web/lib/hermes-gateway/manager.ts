@@ -33,6 +33,8 @@ export interface GatewaySocket {
   on?(type: "unexpected-response", listener: (request: unknown, response: { statusCode?: number; resume(): void }) => void): void;
 }
 export interface GatewayManagerOptions {
+  /** Discovery-only connection: no capabilities, heartbeat RPCs, or session bindings. */
+  discoveryOnly?: boolean;
   url?: string;
   socketFactory?: (url: string) => GatewaySocket;
   tokenProvider?: (url: URL) => Promise<string>;
@@ -101,6 +103,7 @@ export class HermesGatewayManager {
   constructor(private readonly options: GatewayManagerOptions = {}) {
     this.clock = options.clock ?? defaultClock;
     this.channel = new JsonRpcRequestChannel({
+      advertiseCapabilities: !options.discoveryOnly,
       requestTimeoutMs: 0, // Manager clock owns deadlines, including deterministic tests.
       onEvent: event => this.onEvent(event),
     });
@@ -144,7 +147,7 @@ export class HermesGatewayManager {
           this.connected = true;
           this.lastInbound = this.clock.now();
           this.channel.attach({ send: text => socket.send(text) });
-          this.heartbeat(socket);
+          if (!this.options.discoveryOnly) this.heartbeat(socket);
         });
         socket.addEventListener("message", event => {
           if (this.socket !== socket || !this.connected) return;
@@ -215,6 +218,7 @@ export class HermesGatewayManager {
   private cancel(handle: unknown): void { this.clock.clearTimeout(handle); this.timers.delete(handle); }
 
   private request<T>(method: string, params: object): Promise<T> {
+    if (this.options.discoveryOnly && method !== 'session.active_list') return Promise.reject(new Error('Discovery allows only session.active_list'));
     const controller = new AbortController();
     const timer = this.later(() => controller.abort(), 120_000);
     return this.channel.request<T>(method, params as Record<string, unknown>, 0, controller.signal).finally(() => this.cancel(timer));
@@ -385,6 +389,7 @@ export class HermesGatewayManager {
       this.reconnectAttempt = 0;
       this.authFailures = 0;
       this.connection("connected");
+      if (this.options.discoveryOnly) return;
       void this.request("client.capabilities", { server_requests: true }).then(() => {
         // History-only subscriptions must never cold-resume interrupted work.
         for (const session of this.sessions.values()) {
@@ -462,6 +467,7 @@ export class HermesGatewayManager {
   }
 
   private onRequest(request: ServerRequest): boolean {
+    if (this.options.discoveryOnly) return true;
     if (request.method !== "approval" && request.method !== "clarify") {
       // Returning false sends -32601, which settles the shared request before Desktop.
       request.decline?.("This client does not own a Desktop window");

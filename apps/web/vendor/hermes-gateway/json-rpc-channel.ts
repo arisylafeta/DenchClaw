@@ -103,6 +103,8 @@ export interface JsonRpcTransport {
 }
 
 export interface JsonRpcRequestChannelOptions {
+  /** Read-only discovery transports must not advertise server-request ownership. */
+  advertiseCapabilities?: boolean
   createRequestId?: (nextId: number) => GatewayRequestId
   heartbeatDeadlineMs?: number
   heartbeatIntervalMs?: number
@@ -203,6 +205,7 @@ export class JsonRpcRequestChannel {
 
   constructor(options: JsonRpcRequestChannelOptions = {}) {
     this.options = {
+      advertiseCapabilities: options.advertiseCapabilities ?? true,
       createRequestId: options.createRequestId ?? ((nextId: number) => `${options.requestIdPrefix ?? 'r'}${nextId}`),
       heartbeatDeadlineMs: options.heartbeatDeadlineMs ?? DEFAULT_HEARTBEAT_DEADLINE_MS,
       heartbeatIntervalMs: options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
@@ -487,7 +490,7 @@ export class JsonRpcRequestChannel {
     }
 
     if (frame.method === 'event' && frame.params && typeof (frame.params as GatewayEvent).type === 'string') {
-      if ((frame.params as GatewayEvent).type === 'gateway.ready') {
+      if ((frame.params as GatewayEvent).type === 'gateway.ready' && this.options.advertiseCapabilities) {
         this.advertiseCapabilities()
       }
 
