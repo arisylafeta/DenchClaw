@@ -1,6 +1,7 @@
 import { asRecord, type GatewayEvent } from './events'
 import { initialState, messageText, reduce, type ChatState, type ReducerContext } from './reducer'
 import { normalizeMessageText, stateFromSnapshot, type GatewayChatSnapshot, type SnapshotChatState, type SourcedMessage } from './snapshot'
+import { steerOwnText } from './notice'
 import { reduceSubagents } from './subagents'
 
 export interface OptimisticSubmission { clientId: string; text: string }
@@ -96,7 +97,7 @@ export function placeSteer(state: ReconcileState, clientId: string): ReconcileSt
   if (index < 0 || stream < 0 || index < stream || !state.busy) return state
   const steer = { ...state.messages[index], pending: false }
   const rest = state.messages.filter((_, i) => i !== index)
-  const live = rest.map(message => message.id === state.streamId ? { ...message, pending: false } : message)
+  const live = rest.slice()
   live.splice(stream + 1, 0, steer)
   return { ...state, messages: live, streamId: null, awaitingResponse: true, sawAssistantPayload: false }
 }
@@ -119,7 +120,7 @@ function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pi
       const message = messages[row]
       if (message.role !== 'user' || first.knownUserIds.includes(message.id)) continue
       if (message.clientIds?.includes(first.clientId)) { match = row; consumed = 1; break }
-      const target = normalizeMessageText(messageText(message))
+      const target = normalizeMessageText(steerOwnText(messageText(message)))
       let combined = ''
       for (let end = i; end < state.optimistic.length; end++) {
         if (state.optimistic[end].knownUserIds.includes(message.id)) break

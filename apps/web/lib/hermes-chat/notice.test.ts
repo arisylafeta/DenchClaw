@@ -39,10 +39,14 @@ describe("noticeForRow", () => {
     expect(noticeForRow({ role: "user", text })).toMatchObject({ kind: "process", text: "2 background processes completed", details: text });
   });
   it("shows a steer's own words and not the background-process results appended to it", () => {
-    const body = "no they're fine\n\nIMPORTANT: 2 background processes completed. Treat as one batch.\n\n[IMPORTANT: Background process p completed normally (exit code 0).\nCommand: x]";
+    const body = "no they're fine\n\nIMPORTANT: 2 background processes completed. Treat these results as one batch.\n\n[IMPORTANT: Background process p completed normally (exit code 0).\nCommand: x]";
     const text = `[OUT-OF-BAND USER MESSAGE — a direct message from the user]\n${body}\n[/OUT-OF-BAND USER MESSAGE]`;
     expect(noticeForRow({ role: "user", text })).toMatchObject({ kind: "steer", text: "Steered: no they're fine", details: body });
-    const onlyProcess = `[OUT-OF-BAND USER MESSAGE — x]\nIMPORTANT: 2 background processes completed.\n[/OUT-OF-BAND USER MESSAGE]`;
+    const onlyProcess = `[OUT-OF-BAND USER MESSAGE — x]\nIMPORTANT: 2 background processes completed. Treat these results as one batch.\n[/OUT-OF-BAND USER MESSAGE]`;
     expect(noticeForRow({ role: "user", text: onlyProcess })).toMatchObject({ kind: "process", text: "2 background processes completed" });
+  });
+  it("keeps a steer that merely mentions background processes as the user's words", () => {
+    const text = "IMPORTANT: 2 background processes completed, but please check their output";
+    expect(noticeForRow({ role: "user", displayKind: "steer", text })).toMatchObject({ kind: "steer", text: `Steered: ${text}` });
   });
 });

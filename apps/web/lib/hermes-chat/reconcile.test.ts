@@ -92,4 +92,15 @@ describe("placeSteer", () => {
     expect(state.messages[1].pending).toBe(false);
     expect(placeSteer({ ...state, busy: false }, "s")).toEqual({ ...state, busy: false });
   });
+  it("matches an accepted steer to its envelope-wrapped durable row instead of duplicating it", () => {
+    let state = submitOptimistic(initial(), { clientId: 's', text: 'change course' })
+    const wrapped = '[OUT-OF-BAND USER MESSAGE — a direct message from the user]\nchange course\n[/OUT-OF-BAND USER MESSAGE]'
+    state = applySnapshot(state, snapshot({ messages: [{ id: '10', role: 'user', text: wrapped }] }), 0, ctx)
+    expect(state.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(state.clientToMessage).toEqual({ s: '10' })
+  })
+  it("keeps the live assistant message pending so id-less tool completions still find their tool", () => {
+    const state = placeSteer(submitOptimistic({ ...initial(), busy: true, streamId: 'a1', messages: [{ id: 'a1', role: 'assistant', segments: [], pending: true, startedAt: 0 }] } as never, { clientId: 's', text: 'x' }), 's')
+    expect(state.messages[0].pending).toBe(true)
+  })
 });

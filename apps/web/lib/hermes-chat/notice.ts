@@ -15,8 +15,10 @@ const FALLBACK: Record<NoticeKind, string> = {
 const OOB_OPEN = /^\s*\[OUT-OF-BAND USER MESSAGE[^\]\n]*\]\s*/
 const OOB_CLOSE = /\s*\[\/OUT-OF-BAND USER MESSAGE\]\s*$/
 export const stripSteerEnvelope = (text: string): string => text.replace(OOB_OPEN, '').replace(OOB_CLOSE, '').trim()
+/** The user's own words in a steer row: envelope and appended process results removed. */
+export const steerOwnText = (text: string): string => { if (!OOB_OPEN.test(text)) return text; const body = stripSteerEnvelope(text); const tail = PROCESS_TAIL.exec(`\n${body}`); return tail ? body.slice(0, Math.max(0, tail.index - 1)).trim() : body }
 /** A steer can arrive carrying finished background-process results; those are not the user's words. */
-const PROCESS_TAIL = /\n*\[?IMPORTANT: (\d+) background processes? completed|\n*\[IMPORTANT: Background process \S+/
+export const PROCESS_TAIL = /\n+(?:\[?IMPORTANT: (\d+) background processes? completed\.[^\n]*Treat these results as one batch|\[IMPORTANT: Background process \S+ )/
 const clip = (text: string, max = 140) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line }
 const readMetadata = (value: unknown): Record<string, unknown> => {
   if (typeof value === 'string') { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {} } catch { return {} } }
@@ -47,8 +49,8 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   }
   // A steer row's text is the user's own instruction: show it, not a generic label.
   const steerFull = kind === 'steer' ? stripSteerEnvelope(text) : ''
-  const tail = PROCESS_TAIL.exec(steerFull)
-  const steerText = tail ? steerFull.slice(0, tail.index).trim() : steerFull
+  const tail = PROCESS_TAIL.exec(`\n${steerFull}`)
+  const steerText = tail ? steerFull.slice(0, Math.max(0, tail.index - 1)).trim() : steerFull
   if (steerText) summary = `Steered: ${steerText}`
   else if (tail) { const count = tail[1] ? Number(tail[1]) : 1; summary = `${count} background process${count === 1 ? '' : 'es'} completed` }
   const details = kind === 'steer' ? (steerFull.length > 140 || steerFull.includes('\n') ? steerFull : '') : text.trim() ? text : ''
