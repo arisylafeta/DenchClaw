@@ -97,10 +97,18 @@ describe("Hermes unified chat UI", () => {
     const request = fetchMock.mock.calls.find(([url, init]) => url === "/api/hermes/conversations" && init?.method === "POST");
     expect(JSON.parse(request![1].body)).toEqual({ profiles });
   });
+  it("copies the session id from the row menu", async () => {
+    const user = userEvent.setup(); render(<Harness />);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Copy ID" }));
+    expect(writeText).toHaveBeenCalledWith(solo.id);
+  });
   it("renames a chat in place and sends the new title", async () => {
     const user = userEvent.setup(); render(<Harness />);
-    await user.click(await screen.findByRole("button", { name: "Rename Alpha solo" }));
-    const input = screen.getByLabelText("Chat title");
+    await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" })); await user.click(await screen.findByRole("menuitem", { name: /^Rename/ }));
+    const input = await screen.findByLabelText("Chat title");
     await user.clear(input); await user.type(input, "Renamed chat{Enter}");
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
     const request = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
@@ -219,8 +227,8 @@ describe("Hermes unified chat UI", () => {
   it("uses local messaging aliases consistently in search, selection and reload", async () => {
     sessions = [{ ...solo, source: "whatsapp" }];
     const user = userEvent.setup(); const first = render(<Harness />);
-    await user.click(await screen.findByRole("button", { name: "Rename Alpha solo" }));
-    await user.clear(screen.getByLabelText("Chat title")); await user.type(screen.getByLabelText("Chat title"), "Harbour contact{Enter}");
+    await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" })); await user.click(await screen.findByRole("menuitem", { name: /^Rename/ }));
+    const titleInput = await screen.findByLabelText("Chat title"); await user.clear(titleInput); await user.type(titleInput, "Harbour contact{Enter}");
     await user.click(await screen.findByRole("button", { name: "Open Harbour contact" }));
     expect(screen.getByRole("button", { name: "Open Harbour contact" })).toHaveAttribute("aria-current", "true");
     await user.type(screen.getByRole("searchbox"), "harbour"); expect(screen.getByText("Harbour contact")).toBeInTheDocument();

@@ -1,9 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
-import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil } from "lucide-react";
+import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreHorizontal } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
 import { ProfileAvatar } from "./profile-avatar";
 import { useConversationReorderMotion } from "./use-conversation-reorder-motion";
@@ -176,6 +176,7 @@ function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmi
 export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpen }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string>; onOpen?: () => void }) {
   const rows = filterConversations(chats.listing?.sessions ?? [], chats.filter);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const renamingNext = useRef(false);
   const [view, setView] = useState<ChatView>(DEFAULT_VIEW);
   const [query, setQuery] = useState("");
   useEffect(() => { setView(loadView()); }, []);
@@ -238,14 +239,20 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
           <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
           <div className="min-w-0 flex-1">
             {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
-            <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
+            <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
               <span className="block truncate text-[12px] font-medium">{row.title}</span>
               <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", section.key === "pinned" ? conversationChannel(row).label : "", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
             </button>}
           </div>
           <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
           <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className={`${styles.rowPin} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><PinIcon size={15} aria-hidden="true" /></button>
-          {renaming !== row.key && <button type="button" aria-label={`Rename ${row.title}`} title={messagingConversation(row) ? "Rename in this browser" : "Rename"} onClick={() => setRenaming(row.key)} className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><Pencil size={12} aria-hidden="true" /></button>}
+          {renaming !== row.key && <DropdownMenu>
+            <DropdownMenuTrigger aria-label={`More options for ${row.title}`} title="More options" className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><MoreHorizontal size={14} aria-hidden="true" /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="bottom" finalFocus={() => { if (!renamingNext.current) return true; renamingNext.current = false; return false; }}>
+              <DropdownMenuItem onSelect={() => { renamingNext.current = true; setRenaming(row.key); }}><Pencil size={14} aria-hidden="true" />{messagingConversation(row) ? "Rename in this browser" : "Rename"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => { void navigator.clipboard?.writeText(row.id); }}><Copy size={14} aria-hidden="true" />Copy ID</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>}
         </motion.div>;
       })}
     </section>)}
