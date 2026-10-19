@@ -90,6 +90,29 @@ describe("existing ChatPanel with native Hermes identity", () => {
   });
 });
 describe("existing ChatPanel with a native Hermes group", () => {
+  it("replaces a member working bubble on room settlement and preserves lazy trace coordinates", async () => {
+    const groupKey = conversationKey("group", "synthetic-work");
+    const endpoint = `/api/hermes/conversations/${encodeURIComponent(groupKey)}`;
+    let settled = false;
+    const participants = [{ profile: "alpha", memberId: "a", name: "Alpha" }];
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
+      if (url.startsWith(`${endpoint}/activity`)) return Response.json({ degraded: false, members: [{ memberId: "a", profile: "alpha", name: "Alpha", running: true, status: "Thinking", startedAt: 1000 }] });
+      if (url.startsWith(`${endpoint}/trace`)) return Response.json({ trace: { startedAt: 1000, completedAt: 43000, steps: 12 } });
+      if (url.startsWith(endpoint)) return Response.json({ conversation: { working: !settled, participants }, cursor: settled ? 2 : 1,
+        messages: settled ? [{ id: "reply", role: "assistant", text: "Synthetic room reply", content: "Synthetic room reply", profile: "alpha", name: "Alpha", memberId: "a", turnId: "turn1", createdAt: 43000 }] : [{ id: "user", role: "user", text: "Synthetic question", content: "Synthetic question" }],
+        settled: settled ? [{ memberId: "a", createdAt: 43000, passed: false }] : [] });
+      return new Response(null, { status: 404 });
+    });
+    const { container } = render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} />);
+    await screen.findByText("Thinking");
+    expect(container.querySelector('[data-member-working="a"]')).not.toBeNull();
+    settled = true;
+    await waitFor(() => expect(screen.getByRole("button", { name: "Worked 42s · 12 steps" })).toHaveAttribute("aria-expanded", "false"), { timeout: 5000 });
+    expect(container.querySelector('[data-member-working="a"]')).toBeNull();
+    expect(screen.getAllByTestId("rich-message").filter(m => m.textContent?.includes("Synthetic room reply"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("/trace?member=a&turn=turn1&summary=1"))).toBe(true);
+  }, 10000);
   const groupKey = conversationKey("group", "room-1");
   const groupEndpoint = `/api/hermes/conversations/${encodeURIComponent(groupKey)}`;
   it("renders room history with who said it, posts sends to the room log instead of /api/chat, and picks up new replies", async () => {

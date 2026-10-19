@@ -44,9 +44,9 @@ export function displayTurns(messages: readonly ChatMessage[]): ChatMessage[] {
   }
   return turns;
 }
-function useLiveDisclosure(live: boolean) {
-  const [open, setOpen] = useState(live);
-  const [manual, setManual] = useState(false);
+function useLiveDisclosure(live: boolean, initiallyOpen = false) {
+  const [open, setOpen] = useState(live || initiallyOpen);
+  const [manual, setManual] = useState(initiallyOpen);
   useEffect(() => { if (!manual) setOpen(live); }, [live, manual]);
   return { open, onToggle: (event: { currentTarget: { open: boolean } }) => { if (event.currentTarget.open !== open) { setManual(true); setOpen(event.currentTarget.open); } } };
 }
@@ -54,10 +54,10 @@ function useLiveDisclosure(live: boolean) {
 export const stripEmoji = (text: string) => text.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3\u{1F3FB}-\u{1F3FF}]/gu, "").replace(/[ \t]{2,}/g, " ").trim();
 const clip = (text: string, max = 140) => { const line = stripEmoji(text).replace(/\s+/g, " ").trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
 
-export interface WorkBlockProps { work: readonly Segment[]; live: boolean; answerStartedAt?: number }
+export interface WorkBlockProps { work: readonly Segment[]; live: boolean; answerStartedAt?: number; initiallyOpen?: boolean }
 /** One continuous trace for the whole turn. Open while the agent works, folded into "Thought for Xs" afterwards. */
-export function WorkBlock({ work, live, answerStartedAt }: WorkBlockProps) {
-  const disclosure = useLiveDisclosure(live);
+export function WorkBlock({ work, live, answerStartedAt, initiallyOpen }: WorkBlockProps) {
+  const disclosure = useLiveDisclosure(live, initiallyOpen);
   // History has no per-part durations; text must remain readable after reload.
   const items = work.filter(segment => segment.type !== "reasoning" || segment.text.trim() || live || (segment.completedAt ?? segment.startedAt) - segment.startedAt >= 1000);
   const started = work[0]?.startedAt ?? 0;

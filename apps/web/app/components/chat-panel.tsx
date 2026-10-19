@@ -11,6 +11,10 @@ import { NativeModelControls } from "./chat-native/model-controls";
 import { NativeSlashComposer } from "./chat-native/slash-commands";
 import { isBusyRefusal, routeSlashResult, slashNeedsIdleSession, slashVisible } from "@/lib/hermes-chat/slash-commands";
 import { GroupAuthor } from "./workspace/group-chat";
+import { GroupActivity, GroupWorkTrace, type GroupSettlement } from "./chat-native/group-activity";
+import type { RoomDriver } from "@/lib/hermes-native";
+import type { HermesParticipant } from "@/lib/hermes-conversations";
+type GroupDetail = { conversation?: { working?: boolean | null; participants?: HermesParticipant[] }; driver?: RoomDriver; settled?: GroupSettlement[]; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string; memberId?: string; turnId?: string; createdAt?: number }>; cursor?: number };
 import { Fragment } from "react";
 import {
 	forwardRef,
@@ -1303,7 +1307,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const optimisticGroupIds = useRef(new Set<string>());
 		const [groupWorking, setGroupWorking] = useState(false);
 		const [groupSending, setGroupSending] = useState(false);
-		const applyGroupDetail = useCallback((data: { conversation?: { working?: boolean | null }; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string }>; cursor?: number }) => {
+        const [groupWork, setGroupWork] = useState<{ roster: HermesParticipant[]; driver?: RoomDriver; settled: GroupSettlement[] }>({ roster: [], settled: [] });
+        const updateGroupWork = useCallback((data: GroupDetail) => {
+            setGroupWork(previous => ({ roster: data.conversation?.participants ?? previous.roster, driver: data.driver,
+                settled: [...new Map([...previous.settled, ...(data.settled ?? []), ...(data.messages ?? []).filter(m => m.role === "assistant" && m.memberId).map(m => ({ memberId: m.memberId, createdAt: m.createdAt }))].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)).map(s => [s.memberId, s])).values()] }));
+        }, []);
+        useEffect(() => { setGroupWork({ roster: [], settled: [] }); setGroupWorking(false); }, [groupKey]);
+		const applyGroupDetail = useCallback((data: GroupDetail) => {
+            updateGroupWork(data);
 			if (typeof data.cursor === "number") groupCursorRef.current = Math.max(groupCursorRef.current, data.cursor);
 			setGroupWorking(data.conversation?.working === true);
 			const incoming = data.messages ?? [];
@@ -1327,11 +1338,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					id: m.id,
 					role: m.role,
 					parts: [{ type: "text" as const, text: m.text ?? m.content ?? "" }] as UIMessage["parts"],
-					...(m.profile ? { metadata: { profile: m.profile, name: m.name } } : {}),
+					...(m.profile ? { metadata: { profile: m.profile, name: m.name, memberId: m.memberId, turnId: m.turnId } } : {}),
 				}));
 				return added.length ? [...rows, ...added] : rows.some((row, i) => row !== prev[i]) ? rows : prev;
 			});
-		}, [setMessages]);
+		}, [setMessages, updateGroupWork]);
 		useEffect(() => {
 			if (!groupKey || loadingSession || !currentSessionId) return;
 			let alive = true;
@@ -2420,6 +2431,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 						parts?: Array<Record<string, unknown>>;
 						html?: string;
 						_streaming?: boolean;
+						memberId?: string; turnId?: string;
 						/** Group chats only: which agent wrote the message. */
 						profile?: string;
 						name?: string;
@@ -2453,13 +2465,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 										text: msg.content,
 									},
 								]) as UIMessage["parts"],
-								...(msg.profile ? { metadata: { profile: msg.profile, name: msg.name } } : {}),
+								...(msg.profile ? { metadata: { profile: msg.profile, name: msg.name, memberId: msg.memberId, turnId: msg.turnId } } : {}),
 							};
 						},
 					);
 
 					setMessages(uiMessages);
-					if (groupKey) { groupCursorRef.current = typeof data.cursor === "number" ? data.cursor : 0; setGroupWorking(data.conversation?.working === true); }
+					if (groupKey) { groupCursorRef.current = typeof data.cursor === "number" ? data.cursor : 0; setGroupWorking(data.conversation?.working === true); updateGroupWork(data); }
 
 					// Clear loading state *before* reconnecting — the
 					// persisted messages are now visible.  attemptReconnect
@@ -2714,7 +2726,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			hasRunningSubagents,
 			lastMessage: lastMsg,
 		});
-		const showStreamActivity = isStreaming && !!streamActivityLabel;
+		const showStreamActivity = !groupKey && isStreaming && !!streamActivityLabel;
 
 		// Gateway chats get their transcript from a snapshot after mount; until it lands the
 		// message list is empty, which must not be mistaken for a new conversation.
@@ -3174,13 +3186,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								}
 							}
 							return uniqueMessages.map((message, i) => {
-								const author = message.role === "assistant" ? (message.metadata as { profile?: string; name?: string } | undefined) : undefined;
+								const author = message.role === "assistant" ? (message.metadata as { profile?: string; name?: string; memberId?: string; turnId?: string } | undefined) : undefined;
 								return (
 									<Fragment key={message.id}>
 										{author?.profile && <GroupAuthor profile={author.profile} name={author.name} />}
 										<ChatMessage
 											message={message}
-											isStreaming={isStreaming && i === uniqueMessages.length - 1}
+											isStreaming={!groupKey && isStreaming && i === uniqueMessages.length - 1}
 											onSubagentClick={onSubagentClick}
 											onFilePathClick={onFilePathClick}
 											onQuestionAnswer={handleQuestionAnswer}
@@ -3189,11 +3201,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											userHtmlMap={userHtmlMapRef.current}
 											copyable
 										/>
+										{groupKey && author?.memberId && author.turnId && <GroupWorkTrace conversationKey={groupKey} memberId={author.memberId} turnId={author.turnId} />}
 									</Fragment>
 								);
 							});
 						})()}
-						{showStreamActivity && (
+						{groupKey && <GroupActivity key={groupKey} conversationKey={groupKey} working={groupWorking} visible={visible !== false} roster={groupWork.roster} driver={groupWork.driver} settled={groupWork.settled} />}
+                        {showStreamActivity && (
 							<div className="py-3 min-w-0">
 								<div
 									className="inline-flex max-w-full items-center gap-1.5 px-1 py-1.5 dench-shimmer"
