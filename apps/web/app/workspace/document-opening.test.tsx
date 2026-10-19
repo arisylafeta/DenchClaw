@@ -26,7 +26,7 @@ function resizeViewport(width: number) {
 }
 const watcher = {
   tree: fixture.tree, loading: false, exists: true, workspaceRoot: '/synthetic',
-  activeWorkspace: 'synthetic' as string | null, browseDir: null, parentDir: null,
+  activeWorkspace: 'synthetic' as string | null, browseDir: null as string | null, parentDir: null,
   refresh: noop, reconnect: noop, setBrowseDir: noop, setShowHidden: noop,
   subscribeChanges: () => noop,
 }
@@ -64,7 +64,8 @@ vi.mock('../components/workspace/right-panel-content', () => ({
   },
 }))
 vi.mock('../components/workspace/workspace-sidebar', () => ({
-  WorkspaceSidebar: ({ mobile, onClose, onSelect }: { mobile?: boolean; onClose?: () => void; onSelect: (node: typeof fixture.tree[number]) => void }) => <nav aria-label={mobile ? 'Mobile sidebar' : 'Desktop sidebar'}>
+  WorkspaceSidebar: ({ mobile, onClose, onSelect, customCrmObjects = [], loading }: { mobile?: boolean; onClose?: () => void; onSelect: (node: typeof fixture.tree[number]) => void; customCrmObjects?: { name: string }[]; loading?: boolean }) => <nav aria-label={mobile ? 'Mobile sidebar' : 'Desktop sidebar'}>
+    {loading ? <span>Loading navigation</span> : customCrmObjects.map(object => <button key={object.name}>{object.name}</button>)}
     {mobile && <button aria-label="Close sidebar" onClick={onClose}>Back</button>}
     <button onClick={() => onSelect(fixture.tree[0])}>Select document</button>
   </nav>,
@@ -167,6 +168,44 @@ describe.each([1440, 1024, 1023, 768, 767, 390])('document opening (width=%s)', 
     await clickDocument()
     await waitFor(() => expect(panelIsOpen(container)).toBe(true))
     expect(screen.getByTestId('tab-count').textContent).toBe('1')
+  })
+})
+
+describe('independent CRM navigation', () => {
+  it.each([1440, 820, 390])('keeps canonical objects while browsing report folders and refreshing files or chats at %spx', async width => {
+    fixture.width = width
+    const canonicalTree = [
+      { name: 'bulk_trades', path: 'bulk_trades', type: 'object', icon: 'truck' },
+      { name: 'supplier', path: 'supplier', type: 'object', defaultView: 'kanban' },
+    ]
+    const fetcher = vi.fn(async (_url: string) => Response.json({ tree: canonicalTree, exists: true, sessions: [], jobs: [] }))
+    vi.stubGlobal('fetch', fetcher)
+    watcher.tree = canonicalTree
+    const view = render(<WorkspaceShell />)
+    if (width < 768) fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }))
+    const bulkTrades = await screen.findByRole('button', { name: 'bulk_trades' })
+    expect(screen.getByRole('button', { name: 'supplier' })).toBeTruthy()
+    const metadataRequests = () => fetcher.mock.calls.filter(([url]) => url.startsWith('/api/workspace/tree')).length
+    const initialRequests = metadataRequests()
+    try {
+      watcher.tree = []
+      watcher.browseDir = '/synthetic/reports'
+      watcher.loading = true
+      fixture.ready = false
+      view.rerender(<WorkspaceShell />)
+      expect(screen.getByRole('button', { name: 'bulk_trades' })).toBe(bulkTrades)
+      expect(screen.queryByText('Loading navigation')).toBeNull()
+      watcher.loading = false
+      fixture.ready = true
+      view.rerender(<WorkspaceShell />)
+      await act(async () => {})
+      expect(screen.getByRole('button', { name: 'bulk_trades' })).toBe(bulkTrades)
+      expect(metadataRequests()).toBe(initialRequests)
+    } finally {
+      watcher.tree = fixture.tree
+      watcher.browseDir = null
+      watcher.loading = false
+    }
   })
 })
 

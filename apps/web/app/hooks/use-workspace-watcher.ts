@@ -90,6 +90,7 @@ export function useWorkspaceWatcher() {
     try {
       const qs = showHidden ? "?showHidden=1" : "";
       const res = await fetch(`/api/workspace/tree${qs}`);
+      if (!res.ok) throw new Error("Failed to load workspace tree");
       const data = await res.json();
       if (mountedRef.current && fetchVersionRef.current === version) {
         setTree(stabilizeTree(data.tree ?? []));
@@ -108,9 +109,11 @@ export function useWorkspaceWatcher() {
   const fetchBrowseTree = useCallback(async (dir: string) => {
     const version = ++fetchVersionRef.current;
     try {
-      setLoading(true);
+      // Directory navigation sets loading synchronously in setBrowseDir.
+      // SSE, polling and manual refreshes keep the last good listing mounted.
       const hiddenQs = showHidden ? "&showHidden=1" : "";
       const res = await fetch(`/api/workspace/browse?dir=${encodeURIComponent(dir)}${hiddenQs}`);
+      if (!res.ok) throw new Error("Failed to browse workspace directory");
       const data = await res.json();
       if (mountedRef.current && fetchVersionRef.current === version) {
         setTree(data.entries ?? []);

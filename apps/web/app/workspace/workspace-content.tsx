@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { WorkspaceSidebar } from "../components/workspace/workspace-sidebar";
 import { FileManagerTree, type TreeNode } from "../components/workspace/file-manager-tree";
 import { useWorkspaceWatcher } from "../hooks/use-workspace-watcher";
+import { notifyWorkspaceObjectsChanged, useCrmNavigationTree } from "../hooks/use-crm-navigation-tree";
 import { resolveWorkspaceFileReference } from "@/lib/workspace-file-reference";
 import { RightPanelContent } from "../components/workspace/right-panel-content";
 import type {
@@ -540,6 +541,7 @@ function WorkspacePageInner() {
     activeWorkspace: workspaceName,
     showHidden, setShowHidden, subscribeChanges,
   } = useWorkspaceWatcher();
+  const { tree: crmNavigationTree, loading: crmNavigationLoading, refresh: refreshCrmNavigation } = useCrmNavigationTree();
 
   // The multi-megabyte search index loads only when search is first used.
   // Filesystem events must not refetch it on every workspace-tree change.
@@ -1265,6 +1267,7 @@ function WorkspacePageInner() {
   }, [fetchGatewaySessions]);
 
   const handleWorkspaceChanged = useCallback(() => {
+    void refreshCrmNavigation();
     resetWorkspaceStateOnSwitch({
       setBrowseDir,
       clearActiveContent: () => dispatch({ type: "activateContent", id: null }),
@@ -1287,7 +1290,7 @@ function WorkspacePageInner() {
         void refreshContext();
       },
     });
-  }, [reconnectWorkspaceWatcher, refreshContext, refreshSessions, router, setBrowseDir]);
+  }, [reconnectWorkspaceWatcher, refreshContext, refreshSessions, router, setBrowseDir, refreshCrmNavigation]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
@@ -1686,8 +1689,8 @@ function WorkspacePageInner() {
   // have their own dedicated pages) so custom objects like `task` still
   // show up under "Home" as dynamic CRM entries.
   const sidebarNavTree = useMemo(
-    () => tree.filter((node) => !CRM_HIDDEN_TREE_PATHS.has(node.path)),
-    [tree, CRM_HIDDEN_TREE_PATHS],
+    () => crmNavigationTree.filter((node) => !CRM_HIDDEN_TREE_PATHS.has(node.path)),
+    [crmNavigationTree, CRM_HIDDEN_TREE_PATHS],
   );
 
   // Compute the effective parentDir for ".." navigation.
@@ -2414,15 +2417,13 @@ function WorkspacePageInner() {
     dispatch({ type: "closeContent", id: tabId });
   }, []);
 
-  // Custom CRM tables surfaced in the sidebar's CRM section. Derived from
-  // the sidebar-scoped tree (which still contains object nodes) rather
-  // than the file-tree-scoped one (which strips them).
+  // CRM metadata is independent of the current file directory and chat list.
   const customCrmObjects = useMemo(() => collectCrmObjectNodes(sidebarNavTree), [sidebarNavTree]);
 
   const sidebarCommonProps = {
     conversationFilter: hermesChats.enabled ? { value: hermesChats.filter, profiles: hermesChats.listing?.profiles ?? [], onChange: hermesChats.setFilter } : undefined,
     activePath: null,
-    loading: treeLoading,
+    loading: crmNavigationLoading,
     orgName: context?.organization?.name,
     browseDir,
     onFileSearchSelect: handleFileSearchSelect,
@@ -2610,7 +2611,6 @@ function WorkspacePageInner() {
             tree={enhancedTree}
             onSelect={(node) => { setNarrowPane("chat"); handleNodeSelect(node); }}
             onRefresh={refreshTree}
-            loading={treeLoading}
             parentDir={effectiveParentDir}
             onNavigateUp={handleNavigateUp}
             onGoHome={handleGoHome}
@@ -2646,7 +2646,6 @@ function WorkspacePageInner() {
               tree={enhancedTree}
               onSelect={handleNodeSelect}
               onRefresh={refreshTree}
-              loading={treeLoading}
               parentDir={effectiveParentDir}
               onNavigateUp={handleNavigateUp}
               onGoHome={handleGoHome}
@@ -3962,6 +3961,7 @@ function ObjectView({
                 return;
               }
               onRefreshObject();
+              notifyWorkspaceObjectsChanged();
               onRefreshTree?.();
             }}
             title={`Change icon for ${displayObjectName(data.object.name)}`}

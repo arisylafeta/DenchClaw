@@ -1,4 +1,5 @@
 "use client";
+import { notifyWorkspaceObjectsChanged } from "../../hooks/use-crm-navigation-tree";
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
@@ -261,7 +262,9 @@ async function apiCreateTable(name: string, parentPath: string = "") {
       ...(parentPath ? { parentPath } : {}),
     }),
   });
-  return res.json();
+  const result = await res.json();
+  if (res.ok && result.ok) notifyWorkspaceObjectsChanged();
+  return result;
 }
 
 async function apiCreateFile(path: string, content: string = "") {
