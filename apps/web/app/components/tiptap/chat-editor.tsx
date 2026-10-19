@@ -13,6 +13,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Suggestion from "@tiptap/suggestion";
 import { Extension } from "@tiptap/core";
 import { FileMentionNode, chatFileMentionPluginKey } from "./file-mention-extension";
+import { agentMentionPluginKey, createAgentMentionRenderer, filterAgents, type MentionAgent } from "./agent-mention";
 import {
 	createFileMentionRenderer,
 	type SuggestItem,
@@ -54,6 +55,8 @@ type ChatEditorProps = {
 	multiline?: boolean;
 	/** Client-side search function for instant @ mention results. */
 	searchFn?: (query: string, limit?: number) => import("@/lib/search-index").SearchIndexItem[];
+	/** Members of a group chat, addressed with `@`. Empty outside groups, where `@` stays plain text. */
+	agents?: readonly MentionAgent[];
 };
 
 // ── Helpers ──
@@ -117,7 +120,7 @@ function createChatFileMentionSuggestion(searchFnRef?: React.RefObject<((query: 
 			return [
 				Suggestion({
 					editor: this.editor,
-					char: "@",
+					char: "#",
 					pluginKey: chatFileMentionPluginKey,
 					startOfLine: false,
 					allowSpaces: true,
@@ -167,10 +170,35 @@ function createChatFileMentionSuggestion(searchFnRef?: React.RefObject<((query: 
 	});
 }
 
+// ── Agent mention suggestion: `@handle` addresses a member of a group chat as plain text ──
+
+function createAgentMentionSuggestion(agentsRef: React.RefObject<readonly MentionAgent[]>) {
+	return Extension.create({
+		name: "chatAgentMentionSuggestion",
+		addProseMirrorPlugins() {
+			return [
+				Suggestion({
+					editor: this.editor,
+					char: "@",
+					pluginKey: agentMentionPluginKey,
+					startOfLine: false,
+					allowSpaces: false,
+					allow: () => (agentsRef.current?.length ?? 0) > 0,
+					items: ({ query }: { query: string }) => filterAgents(agentsRef.current ?? [], query),
+					command: ({ editor, range, props }: { editor: Editor; range: { from: number; to: number }; props: MentionAgent }) => {
+						editor.chain().focus().deleteRange(range).insertContent([{ type: "text", text: `@${props.handle} ` }]).run();
+					},
+					render: createAgentMentionRenderer(),
+				}),
+			];
+		},
+	});
+}
+
 // ── Main component ──
 
 export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
-	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, submitDisabled, compact, multiline = !compact, searchFn }, ref) {
+	function ChatEditor({ onSubmit, onChange, onTextChange, onNativeFileDrop, placeholder, disabled, submitDisabled, compact, multiline = !compact, searchFn, agents }, ref) {
 		const submitDisabledRef = useRef(false);
 		submitDisabledRef.current = !!disabled || !!submitDisabled;
 		const submitRef = useRef(onSubmit);
@@ -183,6 +211,8 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 
 		const searchFnRef = useRef(searchFn ?? null);
 		searchFnRef.current = searchFn ?? null;
+		const agentsRef = useRef<readonly MentionAgent[]>(agents ?? []);
+		agentsRef.current = agents ?? [];
 
 		const editorRefInternal = useRef<Editor | null>(null);
 
@@ -204,6 +234,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 				}),
 				FileMentionNode,
 				createChatFileMentionSuggestion(searchFnRef),
+				createAgentMentionSuggestion(agentsRef),
 			],
 			editorProps: {
 				attributes: {
@@ -222,7 +253,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 						// Let the file-mention suggestion popup handle Enter
 						// when it's active (selecting a mention item).
 						const suggestState = chatFileMentionPluginKey.getState(view.state);
-						if (suggestState?.active) {
+						if (suggestState?.active || agentMentionPluginKey.getState(view.state)?.active) {
 							return false;
 						}
 						return true;
@@ -344,7 +375,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
 			const handleKeyDown = (event: KeyboardEvent) => {
 				if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
 					const suggestState = chatFileMentionPluginKey.getState(editor.state);
-					if (suggestState?.active) {return;}
+					if (suggestState?.active || agentMentionPluginKey.getState(editor.state)?.active) {return;}
 
 					event.preventDefault();
 					if (submitDisabledRef.current) { return; }

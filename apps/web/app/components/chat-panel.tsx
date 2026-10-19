@@ -1313,8 +1313,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 settled: [...new Map([...previous.settled, ...(data.settled ?? []), ...(data.messages ?? []).filter(m => m.role === "assistant" && m.memberId).map(m => ({ memberId: m.memberId, createdAt: m.createdAt }))].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)).map(s => [s.memberId, s])).values()] }));
         }, []);
         useEffect(() => { setGroupWork({ roster: [], settled: [] }); setGroupWorking(false); }, [groupKey]);
+		const [groupAgents, setGroupAgents] = useState<{ handle: string; name: string; profile: string }[]>([]);
+		useEffect(() => setGroupAgents([]), [groupKey]);
 		const applyGroupDetail = useCallback((data: GroupDetail) => {
             updateGroupWork(data);
+			const roster = (data.conversation?.participants ?? []).filter((p) => p.handle).map((p) => ({ handle: p.handle!, name: p.name || p.handle!, profile: p.profile }));
+			if (roster.length) setGroupAgents((prev) => prev.length === roster.length && prev.every((a, i) => a.handle === roster[i].handle && a.name === roster[i].name) ? prev : roster);
 			if (typeof data.cursor === "number") groupCursorRef.current = Math.max(groupCursorRef.current, data.cursor);
 			setGroupWorking(data.conversation?.working === true);
 			const incoming = data.messages ?? [];
@@ -2817,6 +2821,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					submitDisabled={submissionUnavailable}
 					compact={compact}
 					searchFn={searchFn}
+					agents={groupKey ? groupAgents : undefined}
 				/>
 				</NativeSlashComposer>
 				{conversationUnselected && onChooseConversation && <button type="button" onClick={() => onChooseConversation()} className="mx-3 mb-2 min-h-11 rounded-md px-2 text-left text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2">Choose an agent to send this draft</button>}
