@@ -27,7 +27,7 @@ describe("pre-hydration responsive CSS contracts (not layout/device QA)", () => 
     }
     expect(hidden.has(".desktopSidebar")).toBe(width < 768);
     expect(hidden.has('.contentPane[data-open="false"]')).toBe(width < 1024);
-    expect(hidden.has(".narrowNavigation")).toBe(width >= 1024);
+
   });
 
   it("never applies row hover/hidden avatar/pin overlays to the default touch input", () => {

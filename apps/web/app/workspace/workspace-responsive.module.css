@@ -14,9 +14,7 @@
 @media (max-width: 767px) {
   .desktopSidebar { display: none; }
 }
-@media (min-width: 1024px) {
-  .narrowNavigation { display: none; }
-}
+
 @media (max-width: 1023px) {
   .contentPane[data-open="false"] { display: none; }
   .contentPane {

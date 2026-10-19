@@ -2682,67 +2682,6 @@ function WorkspacePageInner() {
         aria-hidden={chatHidden}
         inert={chatHidden ? true : undefined}
       >
-        {/* Narrow-screen navigation also stays available on the empty chat screen. */}
-        {(
-          <div
-            className={`${responsiveStyles.narrowNavigation} px-2 py-1.5 border-b flex-shrink-0 flex items-center gap-1.5`}
-            style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
-          >
-            <button
-              type="button"
-              onClick={() => isMobile ? setNarrowPane("sidebar") : setLeftSidebarCollapsed((collapsed) => !collapsed)}
-              aria-label={isMobile || leftSidebarCollapsed ? "Open sidebar" : "Close sidebar"}
-              aria-expanded={isMobile ? sidebarOpen : !leftSidebarCollapsed}
-              aria-controls="workspace-sidebar"
-              className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0 focus-visible:outline focus-visible:outline-2"
-              style={{ color: "var(--color-text-muted)" }}
-              title="Open sidebar"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />
-              </svg>
-            </button>
-            <div className="flex-1 min-w-0 text-sm font-medium truncate" style={{ color: "var(--color-text)" }}>
-              {activeSessionTitle || context?.organization?.name || "Chat"}
-            </div>
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                onClick={showContent}
-                aria-label="Open files & content"
-                className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0 focus-visible:outline focus-visible:outline-2"
-                style={{ color: "var(--color-text-muted)" }}
-                title="Open files & content"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTerminalOpen((v) => !v)}
-                className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0"
-                style={{ color: terminalOpen ? "var(--color-text)" : "var(--color-text-muted)", background: terminalOpen ? "var(--color-surface-hover)" : "transparent" }}
-                title="Terminal"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 17 10 11 4 5" /><line x1="12" x2="20" y1="19" y2="19" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab()}
-                className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0"
-                style={{ color: "var(--color-text-muted)" }}
-                title="New chat"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14" /><path d="M5 12h14" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Chat panel stack — always visible, never replaced by content */}
         <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
@@ -2763,7 +2702,22 @@ function WorkspacePageInner() {
             const isVisible = tab.id === visibleMainChatTabId;
             const showLeftToggle = !isNarrow && leftSidebarCollapsed;
             const showRightToggle = !isNarrow && rightPanelCollapsed;
-            const headerLeftSlot = showLeftToggle ? (
+            const headerLeftSlot = isNarrow ? (
+              <button
+                type="button"
+                onClick={() => isMobile ? setNarrowPane("sidebar") : setLeftSidebarCollapsed(collapsed => !collapsed)}
+                aria-label={isMobile || leftSidebarCollapsed ? "Open sidebar" : "Close sidebar"}
+                aria-expanded={isMobile ? sidebarOpen : !leftSidebarCollapsed}
+                aria-controls="workspace-sidebar"
+                className="min-h-11 min-w-11 rounded-md focus-visible:outline-2"
+                style={{ color: "var(--color-text-muted)" }}
+                title={isMobile || leftSidebarCollapsed ? "Open sidebar" : "Close sidebar"}
+              >
+                <svg aria-hidden="true" className="mx-auto" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />
+                </svg>
+              </button>
+            ) : showLeftToggle ? (
               <button
                 type="button"
                 onClick={() => setLeftSidebarCollapsed(false)}
@@ -2779,7 +2733,14 @@ function WorkspacePageInner() {
                 </svg>
               </button>
             ) : undefined;
-            const headerRightSlot = !isNarrow ? (
+            const headerRightSlot = isNarrow ? (
+              <div className="flex shrink-0 items-center">
+                <button type="button" onClick={showContent} aria-label="Open files & content" title="Open files & content" className="min-h-11 min-w-11 rounded-md focus-visible:outline-2" style={{ color: "var(--color-text-muted)" }}>
+                  <svg aria-hidden="true" className="mx-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></svg>
+                </button>
+
+              </div>
+            ) : (
               <div className="flex items-center gap-0.5">
                 {showRightToggle && (
                   <button
@@ -2818,7 +2779,7 @@ function WorkspacePageInner() {
                   </svg>
                 </button>
               </div>
-            ) : undefined;
+            );
             return (
               <div
                 key={tab.id}

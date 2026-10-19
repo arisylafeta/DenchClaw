@@ -2934,7 +2934,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			>
 				{/* Header — sticky glass bar */}
 				<header
-					className={`${compact ? "pl-4 pr-2" : "pl-4 pr-2"} h-10 flex shrink-0 items-center gap-2 ${isSubagentMode ? "" : "justify-between"} z-20`}
+					data-chat-chrome="panel"
+					className={`${composerStyles.header} pl-4 pr-2 h-10 flex shrink-0 items-center gap-2 ${isSubagentMode ? "" : "justify-between"} z-20`}
 				>
 				{headerLeftSlot && <div className="flex items-center shrink-0">{headerLeftSlot}</div>}
 				{isSubagentMode ? (
@@ -2977,7 +2978,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								</h2>
 								{headerBadge}
 							</div>
-						) : null}
+						) : <span className="block truncate text-sm font-semibold lg:hidden">{sessionTitle || "Chat"}</span>}
 					</div>
 					{!hideHeaderActions && (
 					<div className="flex items-center gap-1 shrink-0">

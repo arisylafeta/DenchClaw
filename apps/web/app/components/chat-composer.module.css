@@ -1,4 +1,14 @@
 /* Only the phone composer enters flex flow. Desktop retains the floating pill. */
+@media (max-width: 1023px) {
+  .header {
+    height: auto;
+    min-height: 52px;
+    gap: 4px;
+    padding: 4px;
+  }
+  .header button { min-height: 44px; min-width: 44px; }
+}
+
 .position[data-hero] {
   top: 40px;
   bottom: auto;

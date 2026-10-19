@@ -43,9 +43,9 @@ vi.mock('../components/workspace/hermes-conversations', () => ({
 }))
 vi.mock('../components/workspace/toast', () => ({ ToastProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../components/chat-panel', () => ({
-  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing, conversationUnselected, onDraftChange }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean; conversationUnselected?: boolean; onDraftChange?: (dirty: boolean) => void }) => {
+  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing, conversationUnselected, onDraftChange, onNewChatSession, onToggleTerminal }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean; conversationUnselected?: boolean; onDraftChange?: (dirty: boolean) => void; onNewChatSession?: () => void; onToggleTerminal?: () => void }) => {
     const [draft, setDraft] = useState('')
-    return <>{headerLeftSlot}{headerRightSlot}<textarea aria-label="Draft" value={draft} onChange={e => { setDraft(e.target.value); onDraftChange?.(!!e.target.value) }} /><button disabled={initializing || conversationUnselected}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
+    return <><header data-chat-chrome="panel">{headerLeftSlot}{onNewChatSession && <button title="New chat" onClick={onNewChatSession}>New chat</button>}{onToggleTerminal && <button title="Open terminal (Cmd/Ctrl+J)" aria-label="Open terminal" onClick={onToggleTerminal}>Terminal</button>}{headerRightSlot}</header><textarea aria-label="Draft" value={draft} onChange={e => { setDraft(e.target.value); onDraftChange?.(!!e.target.value) }} /><button disabled={initializing || conversationUnselected}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
   },
 }))
 // Keep the real shell, URL/link handlers, resolver, reducer and panel containers.
@@ -239,6 +239,15 @@ describe('initial composer shell', () => {
 })
 
 describe('responsive pane navigation', () => {
+  it.each([390, 820])('uses one chat header with navigation controls at %spx', width => {
+    fixture.width = width
+    const { container } = render(<WorkspaceShell />)
+    expect(container.querySelector('main')!.querySelectorAll('[data-chat-chrome]')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^(Open|Close) sidebar$/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Open files & content' })).toHaveLength(1)
+    expect(screen.getAllByTitle('New chat')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Open terminal' })).toHaveLength(1)
+  })
   it.each([390, 768, 820, 1024])('preserves unsaved editor and draft nodes across return/reopen at %spx', async width => {
     fixture.width = width
     const { container } = render(<WorkspaceShell />)

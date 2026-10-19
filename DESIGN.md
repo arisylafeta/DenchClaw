@@ -47,6 +47,7 @@ Reference: the existing DenchClaw conversation rows and mobile drawer; Hermes De
 
 ## Narrow artifact and sidebar navigation
 
+- Render one chat header at every width. Put narrow sidebar, Files, terminal and new-chat controls in the existing ChatPanel header slots, never a second workspace bar above it; retain subagent return and conversation actions.
 - Before matchMedia hydration, CSS must hide desktop sidebar chrome below 768px. The initial chat uses the actual editable composer, not an input-shaped skeleton.
 - Keep artifact editor/cache owners mounted when returning to chat. Hide and inert inactive panes; navigation visibility must not discard drafts or dirty editor state.
 - Below 1024px, Files and the artifact use the full content width separately. Keep Back to chat and the current artifact title in a normal-flow header with safe-area padding; do not float controls over documents.
