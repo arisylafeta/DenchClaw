@@ -593,14 +593,23 @@ function WorkspacePageInner() {
     entryId: string;
   } | null>(null);
 
-  // Mobile responsive state
+  // Reuse the mobile hook for both tiers; only desktop keeps side-by-side panes.
   const isMobile = useIsMobile();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Sidebar collapse state (desktop only).
+  const isNarrow = useIsMobile(1024);
+  const [narrowPane, setNarrowPane] = useState<"chat" | "sidebar" | "content">("chat");
+  const sidebarOpen = narrowPane === "sidebar";
+  const narrowContentOpen = narrowPane === "content";
+  const showContent = useCallback(() => {
+    if (!window.matchMedia("(min-width: 1024px)").matches) {setNarrowPane("content");}
+  }, []);
+  const showChat = useCallback(() => {
+    setNarrowPane("chat");
+    setChatPanelCollapsed(false);
+  }, []);
+  // Desktop preferences stay independent of the temporary narrow-screen pane.
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [chatPanelCollapsed, setChatPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
-  const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
   // File tree (right panel's left column) is now always available, independently
   // togglable from the right-panel collapse so users can hide it on CRM/page tabs
   // when they want more horizontal space. Persisted in localStorage.
@@ -693,7 +702,34 @@ function WorkspacePageInner() {
   const activeChatTabId = tabsState.activeChatId;
   const contentTabs = tabsState.contentTabs;
   const mainChatTabs = tabsState.chatTabs;
-  const fullViewActive = !isMobile && contentUsesFullView(activePath);
+  useEffect(() => {
+    if (entryModal) {showContent();}
+  }, [entryModal, showContent]);
+  useEffect(() => {
+    if (!isMobile) {setNarrowPane((pane) => pane === "sidebar" ? "chat" : pane);}
+  }, [isMobile]);
+  const chatHidden = isNarrow ? narrowContentOpen || (isMobile && sidebarOpen) : chatPanelCollapsed;
+  const previousPane = useRef(narrowPane);
+  const paneOpener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!isNarrow) {return;}
+    if (narrowPane !== "chat") {
+      if (previousPane.current === "chat") {paneOpener.current = document.activeElement as HTMLElement;}
+      document.querySelector<HTMLButtonElement>(narrowPane === "content" ? '[aria-label="Back to chat"]' : '[aria-label="Close sidebar"]')?.focus();
+    } else if (previousPane.current !== "chat") {
+      paneOpener.current?.focus();
+    }
+    previousPane.current = narrowPane;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && narrowPane !== "chat") {
+        event.preventDefault();
+        setNarrowPane("chat");
+      }
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [isNarrow, narrowPane]);
+  const fullViewActive = !isNarrow && contentUsesFullView(activePath);
   const applyPanelLayout = useCallback((layout: WorkspacePanelLayout) => {
     setChatPanelCollapsed(layout.chatPanelCollapsed);
     setFileTreeCollapsed(layout.fileTreeCollapsed);
@@ -922,6 +958,7 @@ function WorkspacePageInner() {
     node: { path: string; name: string; type: string },
     options?: { preview?: boolean },
   ) => {
+    showContent();
     const kind = nodeToContentTabKind(node.type, node.path);
     const isObject = kind === "object";
     const title = isObject
@@ -937,7 +974,7 @@ function WorkspacePageInner() {
         preview: options?.preview ?? true,
       },
     });
-  }, []);
+  }, [showContent]);
 
   // Resizable sidebar widths (desktop only; persisted in localStorage).
   // Use static defaults so server and client match on first render (avoid hydration mismatch).
@@ -978,9 +1015,9 @@ function WorkspacePageInner() {
     if (new URLSearchParams(window.location.search).get("crm") === "inbox") {
       setRightPanelCollapsed(false);
       setRightPanelWidth(clamp(window.innerWidth - LEFT_SIDEBAR_COMPACT_WIDTH - CENTER_PANEL_MIN, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX));
-      if (!isDesktopWorkspaceViewport()) {setMobileRightPanelOpen(true);}
+      showContent();
     }
-  }, [isMobile]);
+  }, [isMobile, showContent]);
 
   // Whether the left sidebar is in compact (icon-only) mode.
   const isLeftSidebarCompact = leftSidebarWidth < LEFT_SIDEBAR_FULL_MIN;
@@ -1069,7 +1106,11 @@ function WorkspacePageInner() {
       if (mod && key === "b") {
         e.preventDefault();
         if (e.shiftKey) {
-          setRightPanelCollapsed((v) => !v);
+          if (!window.matchMedia("(min-width: 1024px)").matches) {
+            setNarrowPane((pane) => pane === "content" ? "chat" : "content");
+          } else {setRightPanelCollapsed((v) => !v);}
+        } else if (!window.matchMedia("(min-width: 768px)").matches) {
+          setNarrowPane((pane) => pane === "sidebar" ? "chat" : "sidebar");
         } else {
           setLeftSidebarCollapsed((v) => !v);
         }
@@ -1343,6 +1384,7 @@ function WorkspacePageInner() {
   // Open the right panel and widen it so the chat stays at its min width.
   // Used when the user clicks something that needs the right panel to be visible.
   const ensureRightPanelOpenWide = useCallback(() => {
+    showContent();
     if (typeof window === "undefined") {
       setRightPanelCollapsed(false);
       return;
@@ -1352,7 +1394,7 @@ function WorkspacePageInner() {
     const wideTarget = clamp(ideal, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX);
     setRightPanelCollapsed(false);
     setRightPanelWidth((current) => Math.max(current, wideTarget));
-  }, [reservedLeftSidebarWidth]);
+  }, [reservedLeftSidebarWidth, showContent]);
 
   const handleNavigate = useCallback(
     (
@@ -1443,6 +1485,7 @@ function WorkspacePageInner() {
         // The browse tab keys off `browse:<absolute-path>` so successive
         // browse navigation reuses the same slot.
         if (node.type === "folder") {
+          showContent();
           setBrowseDir(node.path);
           dispatch({
             type: "openContent",
@@ -1481,6 +1524,7 @@ function WorkspacePageInner() {
       // tree — don't open them in the main content panel.
       if (node.type === "folder") {
         if (node.truncated && workspaceRoot) {
+          showContent();
           const absolutePath = `${workspaceRoot.replace(/\/$/, "")}/${node.path}`;
           setBrowseDir(absolutePath);
           dispatch({
@@ -1506,7 +1550,7 @@ function WorkspacePageInner() {
       openTabForNode(node);
       closeEntryModalIfOpen();
     },
-    [openBlankChatTab, openSessionChatTab, openTabForNode, browseDir, workspaceRoot, openclawDir, setBrowseDir, handleNavigate, closeEntryModalIfOpen],
+    [openBlankChatTab, openSessionChatTab, openTabForNode, browseDir, workspaceRoot, openclawDir, setBrowseDir, handleNavigate, closeEntryModalIfOpen, showContent],
   );
 
   // Tab handler callbacks — pure dispatches into the tabs reducer.
@@ -1590,7 +1634,6 @@ function WorkspacePageInner() {
         if (!node) return false;
         handleNodeSelect(node);
         ensureRightPanelOpenWide();
-        if (isMobile) {setMobileRightPanelOpen(true);}
         return true;
       } catch {
         return false;
@@ -1711,6 +1754,7 @@ function WorkspacePageInner() {
   // Open entry modal handler
   const handleOpenEntry = useCallback(
     (objectName: string, entryId: string, relatedObjectId?: string) => {
+      showContent();
       // People, Company and Campaign entries have dedicated pages; other
       // objects keep the side-panel modal. Profiles return to their object list.
       //
@@ -1774,7 +1818,7 @@ function WorkspacePageInner() {
         setEntryModal({ objectName, entryId });
       }
     },
-    [],
+    [showContent],
   );
 
   // Close entry modal handler — URL sync effect drops `?entry=` automatically.
@@ -1883,6 +1927,7 @@ function WorkspacePageInner() {
       && urlState.entry?.objectName !== "campaign" && urlState.entry?.objectName !== "campaigns") {return;}
     const shell = buildShellUrlState();
     dispatch({ type: "applyUrl", url: urlState, shell });
+    if (urlState.path || urlState.crm || urlState.entry) {showContent();}
 
     // Chat-only URLs route to `openChat` so the chat strip can mount the
     // requested session/subagent.
@@ -1921,6 +1966,8 @@ function WorkspacePageInner() {
       const urlState = parseUrlState(window.location.search);
       const shell = buildShellUrlState();
       dispatch({ type: "applyUrl", url: urlState, shell });
+      if (urlState.path || urlState.crm || urlState.entry) {showContent();}
+      else {setNarrowPane("chat");}
 
       if (!urlState.path && !urlState.crm && !urlState.entry && urlState.chat) {
         if (urlState.subagent) {
@@ -1954,7 +2001,7 @@ function WorkspacePageInner() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [buildShellUrlState, openSessionChatTab, openSubagentChatTab, setBrowseDir, setShowHidden]);
+  }, [buildShellUrlState, openSessionChatTab, openSubagentChatTab, setBrowseDir, setShowHidden, showContent]);
 
   // Cron job detail resolution lives in `useTabContent` now; the cron-job
   // tab's content state derives from the live `cronJobs` array each render,
@@ -2034,6 +2081,7 @@ function WorkspacePageInner() {
       // Intermediate parent folders aren't in the browse-mode tree, so
       // resolveNode would fail — call setBrowseDir to update the sidebar.
       if (isAbsolutePath(path)) {
+        showContent();
         const name = path.split("/").pop() || path;
         setBrowseDir(path);
         dispatch({
@@ -2057,7 +2105,7 @@ function WorkspacePageInner() {
         handleNodeSelect(node);
       }
     },
-    [tree, handleNodeSelect, setBrowseDir],
+    [tree, handleNodeSelect, setBrowseDir, showContent],
   );
 
   // Navigate to an object by name (used by relation links)
@@ -2154,6 +2202,7 @@ function WorkspacePageInner() {
   // useTabContent hook resolves the actual cron job payload from the live
   // `cronJobs` list, so we only need to dispatch tab changes.
   const handleSelectCronJob = useCallback((jobId: string) => {
+    showContent();
     const path = `~cron/${jobId}`;
     dispatch({
       type: "openContent",
@@ -2166,9 +2215,10 @@ function WorkspacePageInner() {
         preview: true,
       },
     });
-  }, []);
+  }, [showContent]);
 
   const handleBackToCronDashboard = useCallback(() => {
+    showContent();
     dispatch({
       type: "openContent",
       tab: {
@@ -2181,7 +2231,7 @@ function WorkspacePageInner() {
     });
     setCronRunFilter("all");
     setCronRun(null);
-  }, []);
+  }, [showContent]);
 
   const handleCronSendCommand = useCallback((message: string) => {
     const tab = openBlankChatTab();
@@ -2351,7 +2401,7 @@ function WorkspacePageInner() {
     onFileSearchSelect: handleFileSearchSelect,
     searchFn: searchIndex,
     workspaceRoot,
-    onGoToChat: handleGoToChat,
+    onGoToChat: () => { showChat(); handleGoToChat(); },
     activeWorkspace: workspaceName,
     onWorkspaceChanged: handleWorkspaceChanged,
     activeCrmTarget: (
@@ -2378,14 +2428,14 @@ function WorkspacePageInner() {
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
     onNavigateToCrmObject: handleNavigateToObject,
-    onNewChatSession: () => hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(),
+    onNewChatSession: () => { showChat(); return hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(); },
     newChatOptions: hermesChats.enabled ? [
-      { label: "Solo chat…", onSelect: () => hermesChats.newChat("solo") },
-      { label: "Group chat…", onSelect: () => hermesChats.newChat("group") },
+      { label: "Solo chat…", onSelect: () => { showChat(); hermesChats.newChat("solo"); } },
+      { label: "Group chat…", onSelect: () => { showChat(); hermesChats.newChat("group"); } },
     ] : undefined,
     chatsLoading: !hermesChats.ready,
     chatsPanel: (
-      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={() => setChatPanelCollapsed(false)} /> : <ChatSessionsSidebar
+      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={showChat} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -2396,12 +2446,14 @@ function WorkspacePageInner() {
         gatewaySessions={gatewaySessions}
         activeGatewaySessionKey={activeGatewaySessionKey}
         onSelectSession={(sessionId) => {
+          showChat();
           const session = sessions.find((entry) => entry.id === sessionId);
           openSessionChatTab(sessionId, session?.title);
         }}
-        onNewSession={() => openPermanentBlankChatTab()}
-        onSelectSubagent={handleSelectSubagent}
+        onNewSession={() => { showChat(); openPermanentBlankChatTab(); }}
+        onSelectSubagent={(key) => { showChat(); handleSelectSubagent(key); }}
         onSelectGatewaySession={(sessionKey, sessionId) => {
+          showChat();
           const gs = gatewaySessions.find((s) => s.sessionKey === sessionKey);
           openGatewayChatTab(sessionKey, sessionId, gs?.channel, gs?.title);
         }}
@@ -2533,7 +2585,7 @@ function WorkspacePageInner() {
           <WorkspaceSidebar
             {...sidebarCommonProps}
             tree={enhancedTree}
-            onSelect={(node) => { handleNodeSelect(node); setSidebarOpen(false); }}
+            onSelect={(node) => { setNarrowPane("chat"); handleNodeSelect(node); }}
             onRefresh={refreshTree}
             loading={treeLoading}
             parentDir={effectiveParentDir}
@@ -2542,13 +2594,15 @@ function WorkspacePageInner() {
             onExternalDrop={handleSidebarExternalDrop}
             showHidden={showHidden}
             onToggleHidden={() => setShowHidden((v) => !v)}
-            onNavigate={(target) => { handleNavigate(target); setSidebarOpen(false); }}
+            onNavigate={(target) => { handleNavigate(target); }}
             mobile
-            onClose={() => setSidebarOpen(false)}
+            onClose={showChat}
           />
         )
       ) : (
         <div
+          aria-hidden={isNarrow && narrowContentOpen}
+          inert={isNarrow && narrowContentOpen ? true : undefined}
           className="sidebar-animate flex shrink-0 flex-col relative z-10 overflow-hidden"
           style={{
             width: leftSidebarCollapsed ? 0 : leftSidebarWidth,
@@ -2591,26 +2645,27 @@ function WorkspacePageInner() {
 
       {/* ── Center: chat panel ── */}
       <main
-        className={`${chatPanelCollapsed && !isMobile ? "flex-none" : "flex-1"} flex flex-col overflow-hidden relative`}
+        className={`${isNarrow ? (chatHidden ? "hidden" : "flex-1 flex") : `${chatPanelCollapsed ? "flex-none" : "flex-1"} flex`} flex-col overflow-hidden relative`}
         style={{
-          width: chatPanelCollapsed && !isMobile ? 0 : undefined,
-          minWidth: chatPanelCollapsed && !isMobile ? 0 : 300,
+          width: chatHidden ? 0 : undefined,
+          minWidth: chatHidden ? 0 : isMobile ? 0 : 300,
           background: "var(--color-main-bg)",
           transition: "width 200ms ease, min-width 200ms ease",
         }}
-        aria-hidden={chatPanelCollapsed && !isMobile}
-        inert={chatPanelCollapsed && !isMobile ? true : undefined}
+        aria-hidden={chatHidden}
+        inert={chatHidden ? true : undefined}
       >
-        {/* Mobile top bar */}
-        {isMobile && (
+        {/* Narrow-screen navigation also stays available on the empty chat screen. */}
+        {isNarrow && (
           <div
             className="px-2 py-1.5 border-b flex-shrink-0 flex items-center gap-1.5"
             style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
           >
             <button
               type="button"
-              onClick={() => setSidebarOpen(true)}
-              className="p-1.5 rounded-lg flex-shrink-0"
+              onClick={() => isMobile ? setNarrowPane("sidebar") : setLeftSidebarCollapsed((collapsed) => !collapsed)}
+              aria-label="Open sidebar"
+              className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0 focus-visible:outline focus-visible:outline-2"
               style={{ color: "var(--color-text-muted)" }}
               title="Open sidebar"
             >
@@ -2624,8 +2679,9 @@ function WorkspacePageInner() {
             <div className="flex items-center gap-0.5">
               <button
                 type="button"
-                onClick={() => setMobileRightPanelOpen(true)}
-                className="p-1.5 rounded-lg flex-shrink-0"
+                onClick={showContent}
+                aria-label="Open files & content"
+                className="min-h-11 min-w-11 p-1.5 rounded-lg flex-shrink-0 focus-visible:outline focus-visible:outline-2"
                 style={{ color: "var(--color-text-muted)" }}
                 title="Open files & content"
               >
@@ -2677,8 +2733,8 @@ function WorkspacePageInner() {
               : null;
             // Before the backend is known the draft tab would flash the home screen; keep it mounted but hidden.
             const isVisible = tab.id === visibleMainChatTabId && (!hermesChats.enabled || hermesChats.selected?.key === nativeKey) && !(chatPaneLoading && !hermesChats.enabled);
-            const showLeftToggle = !isMobile && leftSidebarCollapsed;
-            const showRightToggle = !isMobile && rightPanelCollapsed;
+            const showLeftToggle = !isNarrow && leftSidebarCollapsed;
+            const showRightToggle = !isNarrow && rightPanelCollapsed;
             const headerLeftSlot = showLeftToggle ? (
               <button
                 type="button"
@@ -2695,12 +2751,12 @@ function WorkspacePageInner() {
                 </svg>
               </button>
             ) : undefined;
-            const headerRightSlot = !isMobile ? (
+            const headerRightSlot = !isNarrow ? (
               <div className="flex items-center gap-0.5">
                 {showRightToggle && (
                   <button
                     type="button"
-                    onClick={() => setRightPanelCollapsed(false)}
+                    onClick={() => { showContent(); setRightPanelCollapsed(false); }}
                     className="p-1.5 rounded-md transition-colors cursor-pointer"
                     style={{ color: "var(--color-text-muted)" }}
                     title="Show right panel (⌘⇧B)"
@@ -2716,6 +2772,7 @@ function WorkspacePageInner() {
                 <button
                   type="button"
                   onClick={() => {
+                    showContent();
                     setChatPanelCollapsed(true);
                     setFileTreeCollapsed(true);
                     setRightPanelCollapsed(false);
@@ -2787,32 +2844,42 @@ function WorkspacePageInner() {
       </main>
 
       {/* ── Right panel ── */}
-      {!isMobile && (
+      {(!isNarrow || narrowContentOpen) && (
         <aside
-          className={`sidebar-animate flex-shrink-0 min-h-0 flex flex-col relative ${rightPanelCollapsed ? "overflow-hidden" : "border-l overflow-hidden"}`}
+          aria-label="Files and content"
+          aria-hidden={!isNarrow && rightPanelCollapsed}
+          inert={!isNarrow && rightPanelCollapsed ? true : undefined}
+          className={isNarrow ? "fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden" : `sidebar-animate flex-shrink-0 min-h-0 flex flex-col relative ${rightPanelCollapsed ? "overflow-hidden" : "border-l overflow-hidden"}`}
           style={{
-            width: effectiveRightPanelWidth,
-            minWidth: effectiveRightPanelWidth,
+            width: isNarrow ? "100%" : effectiveRightPanelWidth,
+            minWidth: isNarrow ? 0 : effectiveRightPanelWidth,
             borderColor: "var(--color-border)",
             background: "var(--color-bg)",
-            transition: "width 200ms ease, min-width 200ms ease",
+            transition: isNarrow ? undefined : "width 200ms ease, min-width 200ms ease",
           }}
         >
-          <div className="flex h-full min-h-0 flex-col relative overflow-hidden" style={{ width: renderedRightPanelWidth, minWidth: renderedRightPanelWidth }}>
-            <ResizeHandle
+          {isNarrow && (
+            <div className="flex shrink-0 items-center border-b px-2" style={{ borderColor: "var(--color-border)" }}>
+              <button type="button" onClick={showChat} aria-label="Back to chat" className="min-h-11 rounded-md px-3 text-sm focus-visible:outline focus-visible:outline-2" style={{ color: "var(--color-text)" }}>
+                Back to chat
+              </button>
+            </div>
+          )}
+          <div className="flex h-full min-h-0 flex-col relative overflow-hidden" style={{ width: isNarrow ? "100%" : renderedRightPanelWidth, minWidth: isNarrow ? 0 : renderedRightPanelWidth }}>
+            {!isNarrow && <ResizeHandle
               mode="right"
               containerRef={layoutRef}
               min={RIGHT_PANEL_MIN}
               max={availableRightPanelMaxWidth}
               onResize={setRightPanelWidth}
-            />
+            />}
             <RightPanel>
               <RightPanelContent
                 key={workspaceRoot ?? "workspace"}
                 subscribeChanges={subscribeChanges}
                 tabsState={tabsState}
                 activeContentTab={activeContentTab}
-                chatPanelCollapsed={chatPanelCollapsed}
+                chatPanelCollapsed={!isNarrow && chatPanelCollapsed}
                 fileTreeCollapsed={fileTreeCollapsed}
                 enhancedTree={enhancedTree}
                 effectiveParentDir={effectiveParentDir}
@@ -2829,9 +2896,9 @@ function WorkspacePageInner() {
                 onTreeExternalDrop={handleSidebarExternalDrop}
                 onTreeFileSearchSelect={handleFileSearchSelect}
                 onTreeGoHome={handleGoHome}
-                onShowChat={() => setChatPanelCollapsed(false)}
+                onShowChat={showChat}
                 onSetFileTreeCollapsed={setFileTreeCollapsed}
-                onSetRightPanelCollapsed={setRightPanelCollapsed}
+                onSetRightPanelCollapsed={isNarrow ? () => setNarrowPane("chat") : setRightPanelCollapsed}
                 onActivateContent={handleContentTabActivate}
                 onCloseContent={handleContentTabClose}
                 onCloseOtherContent={handleTabCloseOthers}
@@ -2848,53 +2915,6 @@ function WorkspacePageInner() {
         </aside>
       )}
 
-      {/* Mobile right panel drawer */}
-      {isMobile && (mobileRightPanelOpen || entryModal !== null) && (
-        <div className="drawer-backdrop" onClick={() => setMobileRightPanelOpen(false)}>
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-          <div onClick={(e) => e.stopPropagation()} className="fixed inset-y-0 right-0 z-50 drawer-right" style={{ width: "min(90vw, 400px)", background: "var(--color-bg)" }}>
-            <div className="flex flex-col h-full">
-              <RightPanel>
-                <RightPanelContent
-                  key={workspaceRoot ?? "workspace"}
-                  subscribeChanges={subscribeChanges}
-                  tabsState={tabsState}
-                  activeContentTab={activeContentTab}
-                  chatPanelCollapsed={false}
-                  fileTreeCollapsed={fileTreeCollapsed}
-                  enhancedTree={enhancedTree}
-                  effectiveParentDir={effectiveParentDir}
-                  browseDir={browseDir}
-                  workspaceRoot={workspaceRoot}
-                  fileSearchFn={searchIndex}
-                  entryModal={entryModal}
-                  onCloseEntryDetail={handleCloseEntry}
-                  tree={tree}
-                  cronJobs={cronJobs}
-                  onTreeNodeSelect={handleNodeSelect}
-                  onTreeRefresh={refreshTree}
-                  onTreeNavigateUp={handleNavigateUp}
-                  onTreeFileSearchSelect={handleFileSearchSelect}
-                  onTreeGoHome={handleGoHome}
-                  onShowChat={() => setChatPanelCollapsed(false)}
-                  onSetFileTreeCollapsed={setFileTreeCollapsed}
-                  onSetRightPanelCollapsed={() => setMobileRightPanelOpen(false)}
-                  onActivateContent={handleContentTabActivate}
-                  onCloseContent={handleContentTabClose}
-                  onCloseOtherContent={handleTabCloseOthers}
-                  onCloseContentToRight={handleTabCloseToRight}
-                  onCloseAllContent={handleTabCloseAll}
-                  onDuckDBMissing={handleDuckDBMissing}
-                  onRefreshActiveChange={handleRefreshActiveChange}
-                  renderContent={renderRightPanelContentBody}
-                  renderEntryDetail={renderRightPanelEntryDetail}
-                  renderPlaceholder={renderRightPanelPlaceholder}
-                />
-              </RightPanel>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

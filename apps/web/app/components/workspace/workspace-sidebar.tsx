@@ -694,6 +694,11 @@ export function WorkspaceSidebar({
 						)}
 					/>
 				</div>
+				{mobile && (
+					<button type="button" onClick={onClose} aria-label="Close sidebar" className="min-h-11 min-w-11 rounded-md px-2 text-sm focus-visible:outline focus-visible:outline-2" style={{ color: "var(--color-text)" }}>
+						Back
+					</button>
+				)}
 				{(onToggleCompact || onCollapse) && (
 					<button
 						type="button"
