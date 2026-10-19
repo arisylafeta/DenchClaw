@@ -45,6 +45,8 @@ export interface PendingRequest { id: string | number; requestId?: string; kind:
 export interface ChatState {
   sessionId: string | null; storedSessionId: string | null; messages: ChatMessage[]
   model: string | null; provider: string | null; reasoningEffort: string | null; reasoningEffortWire: string | null
+  /** Priority service tier (`/fast`) for this session; null until Hermes reports it. */
+  fast: boolean | null
   busy: boolean; live: boolean; awaitingResponse: boolean; interrupted: boolean; needsInput: boolean
   streamId: string | null; heartbeatSettledStreamId: string | null
   sawAssistantPayload: boolean; adoptedRunningTurn: boolean; interimBoundaryPending: boolean
@@ -56,7 +58,7 @@ export interface ChatState {
 export function initialState(sessionId: string | null = null): ChatState {
   return {
     sessionId, storedSessionId: null, messages: [], busy: false, live: false, awaitingResponse: false,
-    model: null, provider: null, reasoningEffort: null, reasoningEffortWire: null,
+    model: null, provider: null, reasoningEffort: null, reasoningEffortWire: null, fast: null,
     interrupted: false, needsInput: false, streamId: null, heartbeatSettledStreamId: null,
     sawAssistantPayload: false, adoptedRunningTurn: false, interimBoundaryPending: false,
     turnStartedAt: null, optimisticSentAt: null, usage: null, pendingRequests: [], status: null,
@@ -249,6 +251,7 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     if (typeof p.provider === 'string') { s.provider = p.provider }
     if (typeof p.reasoning_effort === 'string') { s.reasoningEffort = p.reasoning_effort }
     if (typeof p.reasoning_effort_wire === 'string') { s.reasoningEffortWire = p.reasoning_effort_wire }
+    if (typeof p.fast === 'boolean') { s.fast = p.fast }
     if (p.running === true && !s.interrupted) {
       s.busy = true; s.live = true; s.adoptedRunningTurn = !s.sawAssistantPayload
     } else if (p.running === false && !(s.optimisticSentAt !== null && !s.live && now - s.optimisticSentAt < 15000)) {

@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
-import { Brain, Check, ChevronDown, ChevronRight, Loader2, Search } from 'lucide-react'
+import { Brain, Check, ChevronDown, ChevronRight, Loader2, Search, Zap } from 'lucide-react'
 import type { NativeHermesChat } from '@/lib/hermes-chat/use-native-chat'
 import { ProviderIcon } from '../chat-model-selector'
 
 type Provider = { slug: string; name?: string; models: string[]; capabilities?: Record<string, { reasoning?: boolean; can_disable_reasoning?: boolean }> }
-type ModelOptions = { model: string; provider: string; providers: Provider[]; reasoning?: { value?: string } }
+type ModelOptions = { model: string; provider: string; providers: Provider[]; reasoning?: { value?: string }; fast?: boolean }
 
 const LEVELS = [
   { value: 'low', label: 'Low' },
@@ -173,6 +173,11 @@ export function NativeModelControls({ conversationKey, chat, disabled = false }:
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { setSaving(false) }
   }
+  const fast = chat.state.fast ?? options?.fast ?? false
+  const toggleFast = () => {
+    setSaving(true); setError(null)
+    void chat.setFast(!fast).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setSaving(false))
+  }
   const changeEffort = (next: string) => {
     setSaving(true); setError(null)
     void chat.setReasoning(next).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setSaving(false))
@@ -190,6 +195,11 @@ export function NativeModelControls({ conversationKey, chat, disabled = false }:
       onPick={(nextModel, nextProvider) => void changeModel(nextModel, nextProvider)} />
     <ThinkingPicker effort={effort} wire={chat.state.reasoningEffortWire} busy={chat.state.busy}
       disabled={locked || capabilities?.reasoning === false} onPick={changeEffort} />
+    <button type="button" aria-label="Fast mode" aria-pressed={fast} disabled={locked} onClick={toggleFast}
+      title={fast ? 'Fast mode on: priority processing for this chat' : 'Fast mode off'}
+      className={`inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] disabled:pointer-events-none disabled:opacity-50 ${fast ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>
+      <Zap className={`size-3.5 ${fast ? 'fill-current' : ''}`} aria-hidden />
+    </button>
     {error && <span role="alert" className="min-w-0 truncate px-1 text-[11px] text-[var(--color-text-muted)]" title={error}>
       {error}{!options && <button type="button" className="ml-1.5 underline" onClick={() => setReload(value => value + 1)}>Retry</button>}
     </span>}
