@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { activeBulkTradesTab, type BulkTradesRoute, type BulkTradesTab } from "@/lib/bulk-trades-url";
 import { useBulkTradesRoute } from "./use-bulk-trades-route";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
@@ -71,12 +71,15 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const updateRoute = useCallback((patch: Partial<BulkTradesRoute>, mode: "push" | "replace") =>
     navigate({ ...pinned, ...patch }, mode), [navigate, route, pinned.tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const [data, inbox] = await Promise.all([
         sharedGet<{ trades: BulkTrade[]; owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades"),
         sharedGet<{ possible?: Proposal[]; accepted?: Proposal[] }>("/api/bulk-trades/demand"),
       ]);
+      if (seq !== loadSeq.current) return; // a newer load is already on its way
       setTrades(data.trades);
       setOwners(data.owners);
       setCheck(data.check ?? null);

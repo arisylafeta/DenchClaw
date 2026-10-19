@@ -69,16 +69,21 @@ describe("Bulk Trades loading", () => {
     expect(screen.getByRole("button", { name: /Green Voltage/ })).toBeInTheDocument();
   });
 
-  it("a saved change is not replaced by the older copy that was cached before it", async () => {
-    const calls: string[] = [];
-    stubApi(calls, { demand: false });
-    window.history.replaceState(null, "", "/?path=bulk_trade&tab=demand");
-    const BulkTradesView = await freshView();
-    const { peekShared, request } = await import("./trade-ui");
-    render(<BulkTradesView />);
-    await screen.findByRole("button", { name: /Green Voltage/ });
-    expect(peekShared("/api/bulk-trades/demand")).toBeDefined();
-    await request("/api/bulk-trades/demand/d1", { method: "PATCH", body: "{}" });
-    expect(peekShared("/api/bulk-trades/demand")).toBeUndefined();
+  it("a read that started before a save never delivers its older copy", async () => {
+    let status = "old";
+    const releases: Array<() => void> = [];
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") { status = "saved"; return Promise.resolve(new Response("{}")); }
+      const snapshot = status; // what the server holds when this read is served
+      return new Promise<Response>((resolve) => releases.push(() => resolve(new Response(JSON.stringify({ status: snapshot })))));
+    }));
+    vi.resetModules();
+    const { sharedGet, request } = await import("./trade-ui");
+    const early = sharedGet<{ status: string }>("/api/x"); // read begins, still waiting on the server
+    await request("/api/x/1", { method: "PATCH", body: "{}" });
+    releases[0](); // the pre-save read now answers with the old snapshot
+    await vi.waitFor(() => expect(releases).toHaveLength(2)); // it re-reads instead of delivering it
+    releases[1]();
+    expect(await early).toEqual({ status: "saved" });
   });
 });

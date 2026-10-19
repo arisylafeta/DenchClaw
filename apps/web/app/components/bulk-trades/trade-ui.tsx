@@ -65,14 +65,17 @@ export function sharedGet<T>(url: string): Promise<T> {
   return promise;
 }
 
-export async function request<T>(url: string, init?: RequestInit): Promise<T> {
+export async function request<T>(url: string, init?: RequestInit, retried = false): Promise<T> {
   const write = !!init?.method && init.method !== "GET";
   if (write) forgetShared();
+  const startedAt = writeGeneration;
   const headers = init?.body instanceof FormData ? undefined : { "content-type": "application/json" };
   try {
     const response = await fetch(url, { ...init, headers });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+    // A save finished while this read was in flight, so it may predate the save: read again.
+    if (!write && !retried && startedAt !== writeGeneration) return request<T>(url, init, true);
     return body as T;
   } finally {
     if (write) forgetShared();
