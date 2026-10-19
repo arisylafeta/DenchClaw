@@ -3,6 +3,8 @@
 @media (max-width: 1023px) {
   .shell {
     height: var(--workspace-visible-height, 100dvh);
+    transform: translateY(var(--workspace-visible-top, 0px));
+    overscroll-behavior: none;
     min-height: 0;
     overflow: hidden;
     box-sizing: border-box;

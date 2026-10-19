@@ -21,7 +21,7 @@ const LEVELS = [
 ] as const
 /** Efforts set elsewhere (CLI, config) still read correctly on the trigger. */
 const OTHER_EFFORT_LABEL: Record<string, string> = { none: 'Off', minimal: 'Minimal', max: 'Max', ultra: 'Ultra' }
-const TRIGGER = 'inline-flex h-7 min-w-0 max-w-[14rem] shrink items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] data-[popup-open]:bg-[var(--color-surface-hover)] data-[popup-open]:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] disabled:pointer-events-none disabled:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0'
+const TRIGGER = 'inline-flex h-7 min-w-0 max-w-[7.5rem] sm:max-w-[14rem] shrink items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] data-[popup-open]:bg-[var(--color-surface-hover)] data-[popup-open]:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] disabled:pointer-events-none disabled:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0'
 const POPUP = 'rounded-2xl bg-[var(--color-surface)] text-[var(--color-text)] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_2px_6px_rgba(0,0,0,0.08)] outline-none'
 const QUIET_BUTTON = 'inline-flex h-7 items-center rounded-full px-2.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:opacity-50'
 
@@ -117,8 +117,8 @@ function ThinkingPicker({ effort, wire, busy, disabled, onPick }: {
     <Popover.Trigger className={TRIGGER} disabled={disabled} aria-label="Thinking"
       title={wire && wire !== effort ? `Thinking: ${label} (sends ${wire} on this route)` : 'Thinking'}>
       <Brain aria-hidden />
-      <span className="truncate">{label}</span>
-      <ChevronDown aria-hidden />
+      <span className="hidden truncate sm:inline">{label}</span>
+      <ChevronDown aria-hidden className="hidden sm:block" />
     </Popover.Trigger>
     <Panel className="w-[17rem] max-w-[calc(100vw-2rem)] p-3.5">
       <div className="mb-3 flex items-baseline justify-between">
@@ -194,7 +194,7 @@ export function NativeModelControls({ conversationKey, chat, disabled = false }:
       <button type="button" className={QUIET_BUTTON} disabled={saving} onClick={() => setConfirmation(null)}>Cancel</button>
     </div>
   }
-  return <div className="flex min-w-0 flex-wrap items-center gap-0.5" aria-label="Session model settings">
+  return <div className="flex min-w-0 max-w-full flex-nowrap items-center gap-0.5 overflow-hidden sm:flex-wrap sm:overflow-visible" aria-label="Session model settings">
     <ContextUsage usage={chat.connection === 'connected' ? chat.state.usage : null} />
     <ModelPicker options={options} model={model} provider={provider} busy={chat.state.busy} disabled={locked} saving={saving} error={error}
       onPick={(nextModel, nextProvider) => void changeModel(nextModel, nextProvider)} />

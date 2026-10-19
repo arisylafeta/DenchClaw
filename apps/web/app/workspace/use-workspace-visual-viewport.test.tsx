@@ -37,3 +37,13 @@ it("keeps the CSS viewport fallback when the visual viewport API is unavailable"
   render(<Shell />);
   expect(screen.getByTestId("shell").style.getPropertyValue("--workspace-visible-height")).toBe("");
 });
+it("pins the shell to the visible area when iOS pans the page for the keyboard", () => {
+  const viewport = Object.assign(new EventTarget(), { height: 400, scale: 1, offsetTop: 0 });
+  vi.stubGlobal("visualViewport", viewport);
+  vi.stubGlobal("matchMedia", vi.fn(() => Object.assign(new EventTarget(), { matches: true })));
+  render(<Shell />);
+  const shell = screen.getByTestId("shell");
+  expect(shell.style.getPropertyValue("--workspace-visible-top")).toBe("0px");
+  act(() => { viewport.offsetTop = 120; viewport.dispatchEvent(new Event("scroll")); });
+  expect(shell.style.getPropertyValue("--workspace-visible-top")).toBe("120px");
+});

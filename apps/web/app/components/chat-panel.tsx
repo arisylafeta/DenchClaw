@@ -2769,7 +2769,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				{conversationUnselected && onChooseConversation && <button type="button" onClick={() => onChooseConversation()} className="mx-3 mb-2 min-h-11 rounded-md px-2 text-left text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2">Choose an agent to send this draft</button>}
 
 				<div className={`flex items-center justify-between ${compact ? "px-2 pb-1.5" : "px-3 pb-2.5"}`}>
-					<div className="flex min-w-0 items-center gap-1">
+					<div className="flex min-w-0 flex-1 items-center gap-1">
 						{!isSubagentMode && (
 							<>
 								<input
