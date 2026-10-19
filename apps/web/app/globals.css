@@ -2410,6 +2410,20 @@ body {
 body.resizing .sidebar-animate {
   transition: none !important;
 }
+body.resizing .right-panel-animate > div {
+  transition: none !important;
+}
+@keyframes right-panel-slide-in {
+  from { transform: translateX(100%); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.right-panel-enter-mobile {
+  animation: right-panel-slide-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .right-panel-animate, .right-panel-animate > div { transition: none !important; }
+  .right-panel-enter-mobile { animation: none; }
+}
 
 /* ─── DataTable column resize handles ─── */
 .dt-resize-handle {

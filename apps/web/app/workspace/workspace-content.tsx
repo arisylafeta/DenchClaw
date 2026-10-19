@@ -2841,17 +2841,18 @@ function WorkspacePageInner() {
           data-open={narrowContentOpen}
           aria-hidden={isNarrow ? !narrowContentOpen : rightPanelCollapsed}
           inert={(isNarrow ? !narrowContentOpen : rightPanelCollapsed) ? true : undefined}
-          className={`${responsiveStyles.contentPane} ${isNarrow ? `${narrowContentOpen ? "flex" : "hidden"} fixed inset-0 z-50 min-h-0 flex-col overflow-hidden` : `sidebar-animate flex-shrink-0 min-h-0 flex flex-col relative ${rightPanelCollapsed ? "overflow-hidden" : "border-l overflow-hidden"}`}`}
+          className={`${responsiveStyles.contentPane} ${isNarrow ? `${narrowContentOpen ? "flex" : "hidden"} fixed inset-0 z-50 min-h-0 flex-col overflow-hidden` : `sidebar-animate right-panel-animate flex-shrink-0 min-h-0 flex flex-col relative border-l overflow-hidden`}${isNarrow && narrowContentOpen ? " right-panel-enter-mobile" : ""}`}
           style={{
             width: isNarrow ? "100%" : effectiveRightPanelWidth,
             minWidth: isNarrow ? 0 : effectiveRightPanelWidth,
-            borderColor: "var(--color-border)",
+            borderColor: !isNarrow && rightPanelCollapsed ? "transparent" : "var(--color-border)",
             background: "var(--color-bg)",
-            transition: isNarrow ? undefined : "width 200ms ease, min-width 200ms ease",
+            boxShadow: !isNarrow && !rightPanelCollapsed ? "-8px 0 24px -16px rgba(0,0,0,0.18)" : "none",
+            transition: isNarrow ? undefined : "width 320ms cubic-bezier(0.22, 1, 0.36, 1), min-width 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 200ms ease, box-shadow 320ms ease",
           }}
         >
 
-          <div className="flex flex-1 min-h-0 flex-col relative overflow-hidden" style={{ width: isNarrow ? "100%" : renderedRightPanelWidth, minWidth: isNarrow ? 0 : renderedRightPanelWidth }}>
+          <div className="flex flex-1 min-h-0 flex-col relative overflow-hidden" style={{ width: isNarrow ? "100%" : renderedRightPanelWidth, minWidth: isNarrow ? 0 : renderedRightPanelWidth, opacity: !isNarrow && rightPanelCollapsed ? 0 : 1, transform: !isNarrow && rightPanelCollapsed ? "translateX(32px)" : "translateX(0)", transition: isNarrow ? undefined : "opacity 260ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1)", transitionDelay: !isNarrow && !rightPanelCollapsed ? "60ms" : "0ms" }}>
             {!isNarrow && <ResizeHandle
               mode="right"
               containerRef={layoutRef}
