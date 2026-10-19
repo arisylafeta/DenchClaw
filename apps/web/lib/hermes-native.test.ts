@@ -7,6 +7,8 @@ vi.mock("./hermes-session-names", () => ({ sessionDisplayNames: vi.fn(async () =
 import { sessionDisplayNames } from "./hermes-session-names";
 vi.mock("./hermes-session-projects", () => ({ sessionProjectLabels: vi.fn(async () => ({})) }));
 import { sessionProjectLabels } from "./hermes-session-projects";
+vi.mock("./hermes-session-activity", () => ({ recentlyActiveSessionIds: vi.fn(async () => new Set<string>()) }));
+import { recentlyActiveSessionIds } from "./hermes-session-activity";
 import { createConversation, groupRpc, listConversations, nativeFetch, readConversation } from "./hermes-native";
 import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
@@ -98,6 +100,27 @@ it("shares a short TTL status poll and caps parallel warm attachments", async ()
   await listConversations();
   expect(call).toHaveBeenCalledTimes(2);
   expect(attach).toHaveBeenCalledTimes(16);
+});
+it("shows a CLI-agent session as working when the dashboard gateway has no live runtime for it", async () => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.advanceTimersByTime(60_000);
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "oneshot-live", title: "Spawned", source: "oneshot" }, { id: "idle", title: "Idle" }] })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [] } as never);
+  vi.mocked(recentlyActiveSessionIds).mockImplementation(async (profile, ids) => new Set(profile === "alpha" ? ids.filter(id => id === "oneshot-live") : []));
+  try {
+    const result = await listConversations();
+    expect(result.sessions.find(row => row.profile === "alpha" && row.id === "oneshot-live")?.working).toBe(true);
+    expect(result.sessions.find(row => row.profile === "alpha" && row.id === "idle")?.working).toBe(false);
+    expect(result.sessions.find(row => row.profile === "default" && row.id === "oneshot-live")?.working).toBe(false);
+    // An unreachable gateway leaves status unknown, but a fresh state.db heartbeat is still proof of work.
+    call.mockRejectedValue(new Error("offline"));
+    vi.advanceTimersByTime(5_001);
+    const offline = await listConversations();
+    expect(offline.sessions.find(row => row.profile === "alpha" && row.id === "oneshot-live")?.working).toBe(true);
+    expect(offline.sessions.find(row => row.profile === "alpha" && row.id === "idle")?.working).toBeNull();
+  } finally { call.mockRestore(); vi.mocked(recentlyActiveSessionIds).mockImplementation(async () => new Set<string>()); }
 });
 describe("native Hermes conversations", () => {
   it("keeps profile-scoped identities stable and filtering never rewrites them", () => {

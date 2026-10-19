@@ -7,6 +7,7 @@ import { discoverWorkspaces } from "./workspace";
 import { conversationKey, messagingConversation, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
 import { sessionDisplayNames } from "./hermes-session-names";
 import { sessionProjectLabels } from "./hermes-session-projects";
+import { recentlyActiveSessionIds } from "./hermes-session-activity";
 import { hermesChatTransport } from "./hermes-gateway/transport-flag";
 import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
@@ -197,6 +198,16 @@ export async function listConversations() {
       }
     } catch { /* Unknown status is not idle. */ }
   }
+  // Sessions run by a CLI agent live in their own process, so neither the stream map nor the
+  // dashboard gateway sees them. A fresh state.db heartbeat proves work either way.
+  await Promise.all(soloLists.map(async (rows) => {
+    const idle = rows.filter((row) => row.working !== true);
+    for (let offset = 0; offset < idle.length; offset += 200) {
+      const batch = idle.slice(offset, offset + 200);
+      const active = await recentlyActiveSessionIds(batch[0].profile!, batch.map((row) => row.id));
+      for (const row of batch) if (active.has(row.id)) row.working = true;
+    }
+  }));
   const rooms = new Map<string, HermesConversation>();
   if (groupsConfigured()) {
     try {
