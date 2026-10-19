@@ -42,4 +42,11 @@
     min-width: 44px;
     min-height: 44px;
   }
+  /* In-flow phone composer has no transcript behind it: render the desktop glass colour as a flat fill,
+     so mobile WebKit's backdrop blur/saturate cannot tint it differently. */
+  .position [data-composer-pill="glass"] {
+    background: color-mix(in srgb, var(--color-surface) 75%, var(--color-main-bg)) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
 }
