@@ -95,15 +95,29 @@ function respond(url: string, rows: Demand[], matches: Record<string, BestMatchL
   if (url.endsWith("/context")) return { buyer: null, mail: [] };
   return { demand: rows };
 }
-function setup(rows: Demand[], matches: Record<string, BestMatchLine> = {}) {
+function setup(rows: Demand[], matches: Record<string, BestMatchLine> = {}, pageProps: Partial<React.ComponentProps<typeof DemandPage>> = {}) {
   const fetchMock = vi.fn(
     async (url: string, _init?: RequestInit) => new Response(JSON.stringify(respond(url, rows, matches))),
   );
   vi.stubGlobal("fetch", fetchMock);
-  render(<DemandPage today="2026-10-16" onOpenTrade={() => {}} />);
+  render(<DemandPage today="2026-10-16" onOpenTrade={() => {}} {...pageProps} />);
   return fetchMock;
 }
 describe("Demand visualization", () => {
+  it("opens a demand, filter and search from the URL and reports changes back to it", async () => {
+    const onRouteChange = vi.fn();
+    setup([
+      row({ id: "live", buyer: "Live buyer" }),
+      row({ id: "reply", buyer: "Reply buyer", status: "closed", closed_reason: "offer_reply" }),
+    ], {}, { route: { demand: null, status: "closed", query: "reply", category: null }, onRouteChange });
+    expect(await screen.findByRole("button", { name: /Reply buyer/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Live buyer/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toHaveValue("reply");
+
+    await userEvent.click(screen.getByRole("button", { name: /Reply buyer/ }));
+    expect(onRouteChange).toHaveBeenCalledWith({ demand: "reply" }, "push");
+  });
+
   it("renders context conflicts and unknown design without changing quantity", async () => {
     setup([row({ quantity: "12 packs", context: {
       application: "Synthetic storage pilot", min_usable_energy_kwh_per_pack: 42,

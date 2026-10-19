@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { activeBulkTradesTab, type BulkTradesRoute, type BulkTradesTab } from "@/lib/bulk-trades-url";
+import { useBulkTradesRoute } from "./use-bulk-trades-route";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import {
@@ -21,13 +23,14 @@ import { ErrorText, request, buttonClass, buttonStyle } from "./trade-ui";
 import { TradesBoard } from "./trades-board";
 import { TodayDashboard } from "./today-dashboard";
 
-type Mode = "today" | "board" | "demand" | "supply";
 const MODE_KEY = "bulk-trades:view";
 
-function storedMode(): Mode {
+/** The viewer's last tab, used only when the URL names none. */
+function storedTab(): BulkTradesTab {
   try {
     const stored = window.localStorage.getItem(MODE_KEY);
-    return stored === "demand" || stored === "supply" || stored === "board" ? stored : "today";
+    if (stored === "board") return "trades";
+    return stored === "demand" || stored === "supply" || stored === "trades" ? stored : "today";
   } catch {
     return "today";
   }
@@ -38,7 +41,9 @@ type Props = {
 };
 
 export function BulkTradesView({ onOpenEntry }: Props) {
-  const [mode, setMode] = useState<Mode>("today");
+  const { route, navigate } = useBulkTradesRoute();
+  const [fallbackTab, setFallbackTab] = useState<BulkTradesTab>("today");
+  const mode = activeBulkTradesTab(route, fallbackTab);
   const [trades, setTrades] = useState<BulkTrade[]>([]);
   const [owners, setOwners] = useState<TradeOwner[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -49,20 +54,22 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   const [possible, setPossible] = useState<Proposal[]>([]);
   const [acceptedDemand, setAcceptedDemand] = useState<Proposal[]>([]);
   const [showPossible, setShowPossible] = useState(false);
-  const [openTradeId, setOpenTradeId] = useState<string | null>(null);
-  const [openDemandId, setOpenDemandId] = useState<string | null>(null);
+  const openTradeId = route.trade;
   const [demandRevision, setDemandRevision] = useState(0);
-  const [openSupplyId, setOpenSupplyId] = useState<string | null>(null);
   const [holding, setHolding] = useState<BulkTrade | null>(null);
   const today = todayInLondon();
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("trade")) setOpenTradeId(params.get("trade"));
-    if (params.get("supply")) { setOpenSupplyId(params.get("supply")); setMode("supply"); }
-    else if (params.get("demand")) { setOpenDemandId(params.get("demand")); setMode("demand"); }
-    else setMode(storedMode());
-  }, []);
+  // Read after mount so server and client render the same first frame.
+  useEffect(() => { setFallbackTab(storedTab()); }, []);
+
+  /** Opens a trade over the current page; Back returns to exactly what was showing. */
+  const pinned = { ...route, tab: route.tab ?? mode };
+  const setOpenTradeId = useCallback((id: string | null) => navigate({ ...pinned, trade: id }), [navigate, pinned.tab, route]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openDemand = (id: string) => navigate({ demand: id });
+  const openSupply = (id: string) => navigate({ supply: id });
+  /** Selecting a record is a new page (push); filters and search refine the current one (replace). */
+  const updateRoute = useCallback((patch: Partial<BulkTradesRoute>, mode: "push" | "replace") =>
+    navigate({ ...pinned, ...patch }, mode), [navigate, route, pinned.tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     try {
@@ -84,8 +91,8 @@ export function BulkTradesView({ onOpenEntry }: Props) {
 
   useEffect(() => { void load(); }, [load]);
 
-  function switchMode(next: Mode) {
-    setMode(next);
+  function switchMode(next: BulkTradesTab) {
+    navigate({ tab: next });
     try { window.localStorage.setItem(MODE_KEY, next); } catch { /* per-viewer convenience only */ }
   }
 
@@ -97,7 +104,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
     const { trade } = await request<{ trade: BulkTrade }>("/api/bulk-trades", { method: "POST", body: JSON.stringify(patch) });
     setTrades((current) => [...current, trade]);
     setCreating(false);
-    setOpenTradeId(trade.id);
+    navigate({ ...pinned, trade: trade.id });
   }
 
   async function move(trade: BulkTrade, stage: TradeStage, hold?: { hold_until: string; hold_reason: string }) {
@@ -127,7 +134,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
           tradeId={openTradeId}
           owners={owners}
           today={today}
-          onBack={() => { setOpenTradeId(null); void load(); }}
+          onBack={() => { navigate({ ...pinned, trade: null }); void load(); }}
           onTradeSaved={replace}
           onOpenEvidence={onOpenEntry ? () => onOpenEntry("bulk_trade", openTradeId) : undefined}
         />
@@ -136,7 +143,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
   }
 
   const open = (trade: BulkTrade) => setOpenTradeId(trade.id);
-  const tab = (value: Mode, label: string) => (
+  const tab = (value: BulkTradesTab, label: string) => (
     <button
       type="button"
       aria-pressed={mode === value}
@@ -156,7 +163,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
         <nav aria-label="View" className="ml-2 flex rounded-none p-[3px]" style={{ background: "var(--bt-segment)" }}>
           {tab("today", "Today")}
-          {tab("board", "Trades")}
+          {tab("trades", "Trades")}
           {tab("demand", "Demand")}
           {tab("supply", "Supply")}
         </nav>
@@ -181,12 +188,12 @@ export function BulkTradesView({ onOpenEntry }: Props) {
         <ErrorText error={loadError} />
         <ErrorText error={actionError} />
         {mode === "demand"
-          ? <DemandPage key={demandRevision} today={today} onOpenTrade={setOpenTradeId} initialDemandId={openDemandId} onOpenSupply={(id) => { setOpenSupplyId(id); switchMode("supply"); }} />
+          ? <DemandPage key={demandRevision} today={today} onOpenTrade={setOpenTradeId} route={route} onRouteChange={updateRoute} onOpenSupply={openSupply} />
           : mode === "supply"
-            ? <SupplyPage initialSupplyId={openSupplyId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} />
+            ? <SupplyPage route={route} onRouteChange={updateRoute} onOpenDemand={openDemand} />
             : mode === "today"
               ? tradesLoaded
-                ? <TodayDashboard trades={trades} today={today} demandRevision={demandRevision} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={(id) => { setOpenDemandId(id); switchMode("demand"); }} onOpenInbox={() => setShowPossible(true)} />
+                ? <TodayDashboard trades={trades} today={today} demandRevision={demandRevision} proposalCount={possible.length} onOpenTrade={setOpenTradeId} onOpenDemand={openDemand} onOpenInbox={() => setShowPossible(true)} />
                 : <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{loadError ? "Today's work unavailable." : "Loading today's work…"}</p>
               : <TradesBoard trades={trades} today={today} onOpen={open} onMove={move} />}
       </main>
@@ -200,7 +207,7 @@ export function BulkTradesView({ onOpenEntry }: Props) {
             if (action === "accept") {
               if (decided.kind === "possible_demand") setDemandRevision((revision) => revision + 1);
               void load();
-              if (lotId) { setOpenTradeId(lotId); setShowPossible(false); }
+              if (lotId) { navigate({ ...pinned, trade: lotId }); setShowPossible(false); }
             }
           }} />)}
           {!!acceptedDemand.length && <section className="mt-6" aria-label="Accepted demand">

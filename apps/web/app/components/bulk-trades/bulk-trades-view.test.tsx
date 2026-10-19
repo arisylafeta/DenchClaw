@@ -6,6 +6,24 @@ import userEvent from "@testing-library/user-event";
 import { todayInLondon, type BulkTrade } from "@/lib/bulk-trades";
 import { BulkTradesView } from "./bulk-trades-view";
 
+// `useSearchParams` follows the History API the way Next's router does.
+const urlListeners = new Set<() => void>();
+vi.mock("next/navigation", async () => {
+  const react = await import("react");
+  return {
+    useSearchParams: () => {
+      const [, rerender] = react.useReducer((n: number) => n + 1, 0);
+      react.useEffect(() => { urlListeners.add(rerender); return () => { urlListeners.delete(rerender); }; }, []);
+      return new URLSearchParams(window.location.search);
+    },
+  };
+});
+const nativePush = window.history.pushState.bind(window.history);
+const nativeReplace = window.history.replaceState.bind(window.history);
+window.history.pushState = (...args) => { nativePush(...args); urlListeners.forEach((l) => l()); };
+window.history.replaceState = (...args) => { nativeReplace(...args); urlListeners.forEach((l) => l()); };
+window.addEventListener("popstate", () => urlListeners.forEach((l) => l()));
+
 const today = todayInLondon();
 
 function trade(overrides: Partial<BulkTrade>): BulkTrade {
@@ -42,7 +60,7 @@ function dataTransfer() {
 }
 
 describe("BulkTradesView", () => {
-  beforeEach(() => { window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); });
+  beforeEach(() => { window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); nativeReplace(null, "", "/?path=bulk_trade"); });
   afterEach(() => vi.unstubAllGlobals());
 
   it("defaults to Today and never shows empty work lists before trades have loaded", async () => {
@@ -220,5 +238,35 @@ describe("BulkTradesView", () => {
     const body = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")![1]!.body));
     expect(body).toMatchObject({ trade_stage: "On hold", hold_reason: "Seller relocating stock" });
     expect(body.hold_until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("opens the trade named in the URL and keeps it in the URL", async () => {
+    nativeReplace(null, "", "/?path=bulk_trade&trade=bt_1");
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
+    expect(await screen.findByRole("region", { name: "With buyers" })).toBeInTheDocument();
+    expect(window.location.search).not.toContain("trade=");
+  });
+
+  it("keeps the tab in the URL, and back/forward move between tabs", async () => {
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+    await userEvent.click(await screen.findByRole("button", { name: "Demand" }));
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("demand");
+    expect(screen.getByRole("button", { name: "Demand" })).toHaveAttribute("aria-pressed", "true");
+
+    nativeReplace(null, "", "/?path=bulk_trade&tab=today");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("opens a demand link on the Demand tab even when Trades was the last tab", async () => {
+    nativeReplace(null, "", "/?path=bulk_trade&demand=dm_1");
+    vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
+    render(<BulkTradesView />);
+    expect(await screen.findByRole("button", { name: "Demand" })).toHaveAttribute("aria-pressed", "true");
   });
 });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Supply, SupplyFeedRow } from "@/lib/bulk-supply";
+import type { BulkTradesRoute } from "@/lib/bulk-trades-url";
 import type { Demand } from "@/lib/bulk-demand";
 import { checkReason } from "@/lib/bulk-demand";
 import { todayInLondon } from "@/lib/bulk-trades";
@@ -26,16 +27,25 @@ const KIND = {
 export function SupplyPage({
   onOpenDemand,
   initialSupplyId,
+  route,
+  onRouteChange,
 }: {
   onOpenDemand?: (id: string) => void;
   initialSupplyId?: string | null;
+  /** The page's URL state. Without it the page keeps its state locally. */
+  route?: Pick<BulkTradesRoute, "supply" | "status" | "query">;
+  onRouteChange?: (patch: Partial<BulkTradesRoute>, mode: "push" | "replace") => void;
 }) {
+  initialSupplyId = route ? route.supply : initialSupplyId;
   const [supply, setSupply] = useState<Supply[]>([]);
   const [feed, setFeed] = useState<SupplyFeedRow[]>([]);
   const [demand, setDemand] = useState<Demand[]>([]);
-  const [selectedId, setSelectedId] = useState(initialSupplyId ?? null);
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("open");
+  const [selectedId, setSelectedState] = useState(initialSupplyId ?? null);
+  const [query, setQueryState] = useState(route?.query ?? "");
+  const [filter, setFilterState] = useState(route?.status ?? "open");
+  const setSelectedId = (id: string | null) => { setSelectedState(id); onRouteChange?.({ supply: id }, "push"); };
+  const setQuery = (value: string) => { setQueryState(value); onRouteChange?.({ query: value || null }, "replace"); };
+  const setFilter = (value: string) => { setFilterState(value); onRouteChange?.({ status: value === "open" ? null : value }, "replace"); };
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
@@ -59,8 +69,13 @@ export function SupplyPage({
     void load();
   }, [load]);
   useEffect(() => {
-    setSelectedId(initialSupplyId ?? null);
+    setSelectedState(initialSupplyId ?? null);
   }, [initialSupplyId]);
+  useEffect(() => {
+    if (!route) return;
+    setFilterState(route.status ?? "open");
+    setQueryState(route.query ?? "");
+  }, [route?.status, route?.query]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = todayInLondon();
   const closedSupply: SupplyFeedRow[] = supply
     .filter((row) => row.status === "closed")

@@ -42,6 +42,7 @@ import { CompanyProfile } from "../components/crm/company-profile";
 import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../components/chat-panel";
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
+import { BULK_TRADES_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, parseBulkTradesRoute } from "@/lib/bulk-trades-url";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
@@ -1921,7 +1922,8 @@ function WorkspacePageInner() {
     const current = new URLSearchParams(window.location.search);
     const merged = selectActiveContentTab(tabsState)?.kind === "campaigns"
       ? projected : mergePreservedTableView(projected, current);
-    const nextQs = serializeUrlState(merged);
+    // Bulk Trades owns its record and filter params; keep them while the page is unchanged.
+    const nextQs = carryBulkTradesParams(serializeUrlState(merged), current);
     const currentQs = current.toString();
     if (nextQs !== currentQs) {
       const url = nextQs ? `/?${nextQs}` : "/";
@@ -2153,16 +2155,29 @@ function WorkspacePageInner() {
         }
         return null;
       }
+      // CRM objects resolve against the CRM navigation, which is independent of the
+      // folder the file browser is showing; the file tree is only the fallback.
       const node = objectName === "campaign"
         ? resolveCrmObjectNode(tree, "campaign")
-        : findObjectNode(tree);
+        : findObjectNode(crmNavigationTree) ?? findObjectNode(tree);
       if (node) {
         ensureRightPanelOpenWide();
         handleNodeSelect(node);
       }
     },
-    [tree, handleNodeSelect, ensureRightPanelOpenWide],
+    [tree, crmNavigationTree, handleNodeSelect, ensureRightPanelOpenWide],
   );
+
+  /**
+   * Opens Bulk Trades. With an href, opens exactly what it names (trade, demand, supply, tab,
+   * filters); without one, opens the Bulk Trades home. The destination goes into the URL first,
+   * so the shell's own projection keeps it instead of rewriting it to a bare path.
+   */
+  const openBulkTrades = useCallback((href?: string) => {
+    const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
+    window.history.pushState(window.history.state, "", buildBulkTradesUrl(route));
+    handleNavigateToObject(BULK_TRADES_PATH);
+  }, [handleNavigateToObject]);
 
   /**
    * Unified navigate handler for links in the editor and read mode.
@@ -2181,6 +2196,10 @@ function WorkspacePageInner() {
           handleNavigateToObject("campaign");
           return;
         }
+        if (isBulkTradesHref(href)) {
+          openBulkTrades(href);
+          return;
+        }
         // File/object link -- resolve using the path from the URL
         void handleFilePathClickFromChat(parsed.path);
         return;
@@ -2194,7 +2213,7 @@ function WorkspacePageInner() {
         handleNodeSelect(node);
       }
     },
-    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject, handleFilePathClickFromChat],
+    [tree, handleNodeSelect, handleOpenEntry, handleNavigateToObject, openBulkTrades, handleFilePathClickFromChat],
   );
 
   // Refresh callback for the currently displayed object — exposed via the
@@ -2455,7 +2474,7 @@ function WorkspacePageInner() {
       : null,
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
-    onNavigateToCrmObject: handleNavigateToObject,
+    onNavigateToCrmObject: (objectName: string) => (objectName === BULK_TRADES_PATH ? openBulkTrades() : handleNavigateToObject(objectName)),
     onNewChatSession: () => { showChat(); return hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(); },
     chatsLoading: !hermesChats.ready,
     chatsPanel: (

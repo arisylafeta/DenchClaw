@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
+import type { BulkTradesRoute } from "@/lib/bulk-trades-url";
 import { CLOSED_REASON_LABEL, HISTORY_CATEGORIES } from "@/lib/bulk-demand";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
@@ -141,17 +142,28 @@ export function DemandPage({
   onOpenTrade,
   onOpenSupply,
   initialDemandId,
+  route,
+  onRouteChange,
 }: {
   today: string;
   onOpenTrade: (id: string) => void;
   onOpenSupply?: (id: string) => void;
   initialDemandId?: string | null;
+  /** The page's URL state. Without it the page keeps its state locally. */
+  route?: Pick<BulkTradesRoute, "demand" | "status" | "query" | "category">;
+  onRouteChange?: (patch: Partial<BulkTradesRoute>, mode: "push" | "replace") => void;
 }) {
+  initialDemandId = route ? route.demand : initialDemandId;
   const [demand, setDemand] = useState<Demand[]>([]);
-  const [filter, setFilter] = useState("open");
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("all");
-  const [selectedId, setSelectedId] = useState(initialDemandId ?? null);
+  const [filter, setFilterState] = useState(route?.status ?? "open");
+  const [query, setQueryState] = useState(route?.query ?? "");
+  const [category, setCategoryState] = useState(route?.category ?? "all");
+  const [selectedId, setSelectedState] = useState(initialDemandId ?? null);
+  // Defaults stay out of the URL so shared links are short.
+  const setFilter = (value: string) => { setFilterState(value); onRouteChange?.({ status: value === "open" ? null : value, category: null }, "replace"); setCategoryState("all"); };
+  const setQuery = (value: string) => { setQueryState(value); onRouteChange?.({ query: value || null }, "replace"); };
+  const setCategory = (value: string) => { setCategoryState(value); onRouteChange?.({ category: value === "all" ? null : value }, "replace"); };
+  const setSelectedId = (id: string | null) => { setSelectedState(id); onRouteChange?.({ demand: id }, "push"); };
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,8 +194,15 @@ export function DemandPage({
     void load();
   }, [load]);
   useEffect(() => {
-    setSelectedId(initialDemandId ?? null);
+    setSelectedState(initialDemandId ?? null);
   }, [initialDemandId]);
+  // Back/forward and pasted links change the URL under us.
+  useEffect(() => {
+    if (!route) return;
+    setFilterState(route.status ?? "open");
+    setQueryState(route.query ?? "");
+    setCategoryState(route.category ?? "all");
+  }, [route?.status, route?.query, route?.category]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = useMemo(
     () =>
       demand.filter(
