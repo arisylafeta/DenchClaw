@@ -2,9 +2,7 @@ import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import { z } from "zod";
 import { buildAgentMessage, stripAgentMessageContext, type WorkspaceContext } from "../agent-message";
-import type { ImageAttachment } from "../agent-runner";
 import { hydrateMessageImageAttachments, buildChatImageHydrationErrorMessage } from "../chat-image-attachments";
-import { CHAT_IMAGE_EXTENSION_TO_MIME, MAX_CHAT_IMAGE_BYTES } from "../chat-image-common";
 import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "../hermes-conversations";
 import { assertProfile, nativeFetch, readConversation, soloConversation } from "../hermes-native";
 import { getHermesGatewayManager, type HermesGatewayManager, type LiveSessionSnapshot, type PendingServerRequest } from "./manager";
@@ -34,14 +32,12 @@ export interface GatewayChatSnapshot {
 }
 export interface GatewayPrompt {
   text: string;
-  images?: ImageAttachment[];
   context?: WorkspaceContext;
   clientMessageId?: string;
   html?: string;
 }
 const promptSchema = z.object({
   text: z.string().min(1),
-  images: z.array(z.object({ content: z.string(), mimeType: z.string(), fileName: z.string().optional() })).optional(),
   clientMessageId: z.string().min(1).optional(),
   html: z.string().optional(),
   context: z.object({
@@ -199,15 +195,12 @@ export class HermesChatService {
       const hydrated = hydrateMessageImageAttachments(text, workspace);
       const hydrationError = buildChatImageHydrationErrorMessage(hydrated.skipped);
       if (hydrationError) throw new ChatServiceError(400, hydrationError);
-      const images = [...hydrated.attachments, ...(prompt.images ?? [])];
-      for (const image of images) {
-        if (!image || typeof image.content !== "string" || !Object.values(CHAT_IMAGE_EXTENSION_TO_MIME).includes(image.mimeType as typeof CHAT_IMAGE_EXTENSION_TO_MIME[".png"]) || Buffer.byteLength(image.content, "base64") > MAX_CHAT_IMAGE_BYTES) throw new ChatServiceError(400, "invalid_image");
-      }
+      const images = hydrated.attachments;
       const attached: string[] = [];
       const imageHashes = new Set<string>();
       try {
         for (const image of images) {
-          // Uploaded images also appear in the attachment prefix; stage each byte payload once.
+          // The same file may be attached twice; stage each byte payload once.
           const hash = createHash("sha256").update(Buffer.from(image.content, "base64")).digest("hex");
           if (imageHashes.has(hash)) continue;
           imageHashes.add(hash);

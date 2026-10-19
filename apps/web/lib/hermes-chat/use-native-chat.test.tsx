@@ -35,15 +35,18 @@ describe('native controller', () => {
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).endsWith('subscriptions') && JSON.parse(String(init?.body)).remove.includes('second'))).toBe(true))
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/interrupt'))).toBe(false)
   })
-  it('sends images and a stable client id, surfaces a 409, and never retries a prompt', async () => {
-    vi.mocked(fetch).mockImplementation(async url => String(url).endsWith('/prompt') ? Response.json({ error: 'gateway_transport' }, { status: 409 }) : Response.json({}))
+  it.each([
+    ['JSON 409', () => Response.json({ error: 'gateway_transport' }, { status: 409 }), 'gateway_transport'],
+    ['proxy HTML 413', () => new Response('<html>\r\n<head><title>413 Request Entity Too Large</title></head></html>', { status: 413, headers: { 'Content-Type': 'text/html' } }), 'Gateway prompt failed (413)'],
+  ])('sends a stable client id, surfaces a %s, and never retries a prompt', async (_label, failure, shown) => {
+    vi.mocked(fetch).mockImplementation(async url => String(url).endsWith('/prompt') ? failure() : Response.json({}))
     const { result } = renderHook(() => useNativeHermesChat({ conversationKey: 'first', enabled: true }))
     FakeSource.instance.emit('snapshot', snapshot('first', 'history'))
-    await act(() => result.current.send({ text: 'picture', images: [{ content: 'AAAA', mimeType: 'image/png', fileName: 'pic.png' }], html: '<p>picture</p>' }))
+    await act(() => result.current.send({ text: '[Attached files: assets/pic.png]\n\npicture', html: '<p>picture</p>' }))
     const prompts = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/prompt'))
     expect(prompts).toHaveLength(1)
-    expect(JSON.parse(String(prompts[0][1]?.body))).toMatchObject({ clientMessageId: expect.any(String), html: '<p>picture</p>', images: [{ content: 'AAAA', mimeType: 'image/png', fileName: 'pic.png' }] })
-    expect(result.current.state.messages.some(message => message.error === 'gateway_transport')).toBe(true)
+    expect(JSON.parse(String(prompts[0][1]?.body))).toMatchObject({ clientMessageId: expect.any(String), html: '<p>picture</p>' })
+    expect(result.current.state.messages.some(message => message.error === shown)).toBe(true)
     expect(result.current.state.busy).toBe(false)
   })
 })

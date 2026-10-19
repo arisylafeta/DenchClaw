@@ -10,7 +10,7 @@ import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 import type { SlashCompletion } from './slash-commands'
 import { initialSubagents } from './subagents'
 
-export interface NativePrompt { text: string; images?: { content: string; mimeType: string; fileName?: string }[]; context?: WorkspaceContext; html?: string }
+export interface NativePrompt { text: string; context?: WorkspaceContext; html?: string }
 export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
 const context = { now: () => Date.now(), id: () => crypto.randomUUID() }
 export interface NativeHermesChat {
@@ -125,7 +125,8 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     if (connection === 'lost') throw new Error('Gateway disconnected')
     try {
       const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const result = await response.json()
+      // Proxy errors (413, 502) arrive as HTML; report the status instead of a JSON parse error.
+      const result = await response.json().catch(() => ({}))
       if (!response.ok) {
         if (result.error === 'automation_read_only' && activeKey.current === key) setReadOnly({ source: 'automation' })
         if (response.status === 503 && result.error === 'gateway_unavailable' && activeKey.current === key) setConnection('lost')

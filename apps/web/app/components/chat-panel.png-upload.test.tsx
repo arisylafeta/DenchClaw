@@ -81,28 +81,6 @@ describe("PNG file-picker ingestion", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("ignores image-read errors after moving to a different conversation", async () => {
-    const raw = deferred<Response>();
-    let reading = false;
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url === "/api/workspace/upload") return Response.json({ ok: true, path: "assets/synthetic.png" });
-      if (url.startsWith("/api/workspace/raw-file")) { reading = true; return raw.promise; }
-      return Response.json({});
-    }));
-    const ref = React.createRef<ChatPanelHandle>();
-    const { container, rerender } = render(<ChatPanel ref={ref} nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
-    snapshot();
-    pick(container);
-    await waitFor(() => expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" }));
-    let sending!: Promise<void>;
-    act(() => { sending = ref.current!.sendNewMessage("Inspect this"); });
-    await waitFor(() => expect(reading).toBe(true));
-    rerender(<ChatPanel ref={ref} nativeConversationKey={otherKey} initialSessionId={otherKey} nativeTransport="gateway" />);
-    snapshot(otherKey);
-    await act(async () => { raw.reject(new Error("old image read failed")); await sending; });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
   it("dismisses an attachment failure without removing a successfully attached file", async () => {
     let attempt = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/workspace/upload"
@@ -167,28 +145,6 @@ describe("PNG file-picker ingestion", () => {
     await screen.findByRole("alert");
     rerender(<ChatPanel nativeConversationKey={otherKey} initialSessionId={otherKey} nativeTransport="gateway" />);
     snapshot(otherKey);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("preserves valid PNG bytes and the exact profile in the send payload", async () => {
-    const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
-    const png = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
-      if (url === "/api/workspace/upload") return Response.json({ ok: true, path: "assets/synthetic.png" });
-      if (url.startsWith("/api/workspace/raw-file")) return { ok: true, blob: async () => new Blob([png], { type: "image/png" }) };
-      return Response.json({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const ref = React.createRef<ChatPanelHandle>();
-    const { container } = render(<ChatPanel ref={ref} nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
-    FakeEventSource.instance.emit("connection", { connectionId: "fixture" });
-    FakeEventSource.instance.emit("snapshot", { key, gateway: "connected", conversation: { id: "png-fixture", profile: "alpha", working: false, source: "crm" }, messages: [], pendingRequests: [], running: false, generation: 1, seq: 0 });
-    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File([png], "synthetic.png", { type: "image/png" })] } });
-    await waitFor(() => expect(screen.getByAltText("synthetic.png")).toHaveStyle({ opacity: "1" }));
-    await act(() => ref.current!.sendNewMessage("Inspect this"));
-    const post = fetchMock.mock.calls.find(([url]) => url === `/api/hermes/conversations/${encodeURIComponent(key)}/prompt`);
-    expect(post).toBeDefined();
-    expect(JSON.parse(String(post![1]!.body))).toMatchObject({ text: "[Attached files: assets/synthetic.png]\n\nInspect this", images: [{ content: base64, mimeType: "image/png", fileName: "synthetic.png" }] });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 

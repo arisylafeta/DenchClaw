@@ -71,6 +71,11 @@ let socket: FakeSocket;
 let service: HermesChatService;
 const key = conversationKey("solo", "one", "ari");
 async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
+const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
+/** The next send's `[Attached files: …]` prefix resolves to these images on disk. */
+function attachOnNextSend(...images: typeof image[]) {
+  vi.mocked(hydrateMessageImageAttachments).mockReturnValueOnce({ attachmentPaths: images.map(i => i.fileName), imagePaths: images.map(i => i.fileName), attachments: images, skipped: [] });
+}
 beforeEach(async () => {
   vi.clearAllMocks();
   vi.mocked(nativeFetch).mockImplementation(async () => Response.json({ source: "crm" }));
@@ -223,22 +228,21 @@ describe("gateway chat service", () => {
   });
   it("serializes attachment staging; images cannot ride a steer so they submit plainly, never queued", async () => {
     socket.busy = true;
-    const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
-    await Promise.all([service.sendPrompt(key, { text: "first", images: [image] }), service.sendPrompt(key, { text: "second", images: [image] })]);
+    attachOnNextSend(image); attachOnNextSend(image);
+    await Promise.all([service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" }), service.sendPrompt(key, { text: "[Attached files: a.png]\n\nsecond" })]);
     expect(socket.frames.filter(frame => ["image.attach_bytes", "prompt.submit"].includes(frame.method ?? "")).map(frame => frame.method)).toEqual(["image.attach_bytes", "prompt.submit", "image.attach_bytes", "prompt.submit"]);
     expect(socket.frames.filter(frame => frame.method === "prompt.submit").every(frame => frame.params?.queued === undefined)).toBe(true);
   });
-  it("attaches matching prefix and explicit image bytes only once, retaining distinct images", async () => {
-    const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
-    vi.mocked(hydrateMessageImageAttachments).mockReturnValueOnce({ attachmentPaths: ["a.png"], imagePaths: ["a.png"], attachments: [image], skipped: [] });
-    await service.sendPrompt(key, { text: "[Attached files: a.png]\n\nInspect", images: [{ ...image, fileName: "renamed.png" }, { ...image, content: "ZGlmZmVyZW50", fileName: "b.png" }] });
+  it("stages a file attached twice only once, retaining distinct images", async () => {
+    attachOnNextSend(image, { ...image, fileName: "renamed.png" }, { ...image, content: "ZGlmZmVyZW50", fileName: "b.png" });
+    await service.sendPrompt(key, { text: "[Attached files: a.png, renamed.png, b.png]\n\nInspect" });
     const staged = socket.frames.filter(frame => frame.method === "image.attach_bytes");
-    expect(staged).toHaveLength(2);
     expect(staged.map(frame => frame.params?.content_base64)).toEqual(["aGVsbG8=", "ZGlmZmVyZW50"]);
   });
   it("detaches staged images and never retries stale prompt mutations", async () => {
     socket.failPrompt = true;
-    await expect(service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" }] })).rejects.toThrow("session_not_live");
+    attachOnNextSend(image);
+    await expect(service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" })).rejects.toThrow("session_not_live");
     expect(socket.frames.filter(frame => frame.method === "prompt.submit")).toHaveLength(1);
     expect(socket.frames.find(frame => frame.method === "image.detach")?.params).toMatchObject({ session_id: "runtime-one", path: "/image" });
   });
@@ -296,10 +300,10 @@ describe("gateway chat service", () => {
   });
   it("holds staged images until the streaming turn claims them, even after acknowledgement", async () => {
     socket.deferConsumption = true;
-    const image = { content: "aGVsbG8=", mimeType: "image/png" };
-    const first = service.sendPrompt(key, { text: "first", images: [image] });
+    attachOnNextSend(image); attachOnNextSend(image);
+    const first = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     await flush(); await flush();
-    const second = service.sendPrompt(key, { text: "second", images: [image] });
+    const second = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nsecond" });
     await flush(); await flush();
     expect(socket.frames.filter(frame => frame.method === "image.attach_bytes")).toHaveLength(1);
     socket.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: 100, payload: {} } });
@@ -344,10 +348,10 @@ describe("gateway chat service", () => {
   it("retains accepted media beyond the former deadline and serializes the next image", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     socket.deferConsumption = true;
-    const image = { content: "aGVsbG8=", mimeType: "image/png" };
-    const first = service.sendPrompt(key, { text: "first", images: [image] });
+    attachOnNextSend(image); attachOnNextSend(image);
+    const first = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     await flush(); await flush();
-    const second = service.sendPrompt(key, { text: "second", images: [image] });
+    const second = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nsecond" });
     await flush();
     // Keep the manager transport alive while Hermes spends >120s constructing.
     for (let i = 0; i < 9; i++) {
@@ -387,7 +391,7 @@ describe("gateway chat service", () => {
   });
   it("releases unclaimed media on a confirmed cancellation", async () => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     const rejected = expect(pending).rejects.toThrow("prompt_cancelled");
     await flush(); await flush();
     await service.command(key, "interrupt", {});
@@ -396,7 +400,7 @@ describe("gateway chat service", () => {
   });
   it.each(["message.complete", "error"])("rejects initialization %s before media admission", async type => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     const rejected = expect(pending).rejects.toMatchObject({ status: 502, message: "prompt_failed" });
     await flush(); await flush();
     socket.receive({ method: "event", params: { type, session_id: "runtime-one", seq: 100, payload: type === "error" ? { message: "Agent initialization failed" } : { text: "", status: "error", error: "Agent initialization failed", recoverable: true, error_surface: { layer: "runtime", code: "agent_init_failed", retryable: true } } } });
@@ -405,7 +409,7 @@ describe("gateway chat service", () => {
   });
   it("keeps accepted media through disconnect and reconciles the claim via events.since", async () => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     await flush(); await flush();
     const oldSocket = socket;
     oldSocket.emit("close", { code: 1006 });
@@ -420,7 +424,7 @@ describe("gateway chat service", () => {
   });
   it("cleans up accepted media only after reconnect confirms a retained initialization failure", async () => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     const rejected = expect(pending).rejects.toMatchObject({ status: 502, message: "prompt_failed" });
     await flush(); await flush();
     const oldSocket = socket;
@@ -435,7 +439,7 @@ describe("gateway chat service", () => {
   });
   it("does not detach accepted media when interrupt reports not_interrupted", async () => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     await flush(); await flush();
     const call = vi.spyOn(manager, "callSession").mockResolvedValueOnce({ status: "not_interrupted", interrupted: false } as never);
     await service.command(key, "interrupt", {}); await flush();
@@ -450,7 +454,7 @@ describe("gateway chat service", () => {
     ["tool.complete", { tool_id: "call-1", name: "terminal", result: "/workspace" }],
   ])("accepts a real %s event as media claim when start was missed", async (type, payload) => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     await flush(); await flush();
     socket.receive({ method: "event", params: { type, session_id: "runtime-one", seq: 100, payload } });
     await pending;
@@ -458,7 +462,7 @@ describe("gateway chat service", () => {
   });
   it("detaches unclaimed images on an interrupted terminal event", async () => {
     socket.deferConsumption = true;
-    const pending = service.sendPrompt(key, { text: "first", images: [{ content: "aGVsbG8=", mimeType: "image/png" }] });
+    attachOnNextSend(image); const pending = service.sendPrompt(key, { text: "[Attached files: a.png]\n\nfirst" });
     const rejected = expect(pending).rejects.toMatchObject({ status: 409, message: "prompt_cancelled" });
     await flush(); await flush();
     socket.receive({ method: "event", params: { type: "message.complete", session_id: "runtime-one", seq: 100, payload: { text: "", status: "interrupted" } } });

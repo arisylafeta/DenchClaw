@@ -51,7 +51,6 @@ import {
 } from "./chat-stream-status";
 import type { ChatModelOption } from "@/lib/chat-models";
 import { prepareFilesForChatUpload } from "@/lib/chat-image-preparation";
-import { CHAT_IMAGE_EXTENSION_TO_MIME, MAX_CHAT_IMAGE_BYTES } from "@/lib/chat-image-common";
 import { formatTableSelectionContext, type TableSelectionContext } from "@/lib/table-selection";
 import type { WorkspaceContext } from "@/lib/agent-message";
 
@@ -2170,31 +2169,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 				if (nativeGateway) {
 					// Gateway owns its aggregate queue; Stop interrupts the run AND clears that queue.
-					const scope = attachmentScopeRef.current;
-					const attempt = ++attachmentAttemptRef.current;
+					// Uploaded images travel as their workspace paths in the `[Attached files: …]` prefix;
+					// the server reads the bytes from disk. Inlining base64 here pushed image prompts past
+					// the proxy's 1 MB request-body cap (HTML 413 -> "Unexpected token '<'").
+					attachmentAttemptRef.current++;
 					setAttachmentError(null);
-					try {
-						const images = await Promise.all(currentAttachments.filter(file => getFileCategory(file.name) === "image").map(async file => {
-							const response = await fetch(`/api/workspace/raw-file?path=${encodeURIComponent(file.path)}`);
-							if (!response.ok) throw new Error(`Couldn't attach image ${file.name}`);
-							const blob = await response.blob();
-							if (blob.size > MAX_CHAT_IMAGE_BYTES) throw new Error(`Image ${file.name} exceeds the 5 MB limit`);
-							const content = await new Promise<string>((resolve, reject) => {
-								const reader = new FileReader();
-								reader.onload = () => resolve(String(reader.result).split(",")[1]);
-								reader.onerror = () => reject(new Error(`Couldn't read image ${file.name}`));
-								reader.readAsDataURL(blob);
-							});
-							const extension = `.${file.name.split(".").pop()?.toLowerCase()}` as keyof typeof CHAT_IMAGE_EXTENSION_TO_MIME;
-							return { content, mimeType: CHAT_IMAGE_EXTENSION_TO_MIME[extension] ?? blob.type, fileName: file.name };
-						}));
-						if (scope !== attachmentScopeRef.current || submissionUnavailableRef.current) return;
-						await nativeChat.send({ text: messageText, images: images.length ? images : undefined, context: workspaceContext, html });
-					} catch (cause) {
-						if (scope === attachmentScopeRef.current && attempt === attachmentAttemptRef.current) {
-							setAttachmentError(cause instanceof Error ? cause.message : String(cause));
-						}
-					}
+					await nativeChat.send({ text: messageText, context: workspaceContext, html });
 				} else if (gatewaySessionKey) {
 					// The gateway flow is a separate transport (POST /api/gateway/chat
 					// sends `{message: string}` to an upstream gateway that owns

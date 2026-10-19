@@ -118,10 +118,9 @@ describe("existing ChatPanel with a native Hermes group", () => {
 });
 
 describe("gateway ChatPanel solo transport", () => {
-  it("sends uploaded image bytes, attachment prefixes and context through imperative sends", async () => {
+  it("sends uploaded images as attachment paths with context, never as inline bytes", async () => {
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === "/api/workspace/upload") return Response.json({ ok: true, path: "uploads/pic.png" });
-      if (url.startsWith("/api/workspace/raw-file")) return { ok: true, blob: async () => new Blob(["picture"], { type: "image/png" }) };
       return Response.json({});
     });
     const ref = React.createRef<ChatPanelHandle>();
@@ -135,7 +134,11 @@ describe("gateway ChatPanel solo transport", () => {
     await act(() => ref.current!.sendNewMessage("Inspect image"));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === `${endpoint}/prompt`)).toBe(true));
     const post = fetchMock.mock.calls.find(([url]) => url === `${endpoint}/prompt`)!;
-    expect(JSON.parse(post[1].body)).toMatchObject({ text: "[Attached files: uploads/pic.png]\n\nInspect image", context: { filePath: "notes.md" }, html: "<p>Inspect image</p>", images: [{ content: "cGljdHVyZQ==", mimeType: "image/png", fileName: "pic.png" }] });
+    const body = JSON.parse(post[1].body);
+    expect(body).toMatchObject({ text: "[Attached files: uploads/pic.png]\n\nInspect image", context: { filePath: "notes.md" }, html: "<p>Inspect image</p>" });
+    // Image bytes in the prompt body exceed the proxy's 1 MB cap; the server reads the uploaded file.
+    expect(body).not.toHaveProperty("images");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/workspace/raw-file"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/chat")).toBe(false);
   });
   it("renders snapshot tools and updates a live tool in place without the SDK transport", async () => {
