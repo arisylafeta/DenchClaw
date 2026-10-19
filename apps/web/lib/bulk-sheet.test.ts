@@ -22,8 +22,9 @@ describe("sheet rows", () => {
     expect(demand({ linked_trades: 1 })).toMatchObject({ progress: "On a trade" });
   });
 
-  it("a trade with both sides identified is 'both'; one without a buyer follows its origin", () => {
-    expect(trade({ has_buyer: true })).toMatchObject({ side: "both" });
+  it("a trade starts on the side it began on, even once both parties are identified", () => {
+    expect(trade({ has_buyer: true })).toMatchObject({ side: "seller" });
+    expect(trade({ origin: "demand", has_seller: true, has_buyer: true })).toMatchObject({ side: "buyer" });
     expect(trade({ origin: "demand", has_seller: false })).toMatchObject({ side: "buyer" });
     expect(trade()).toMatchObject({ side: "seller", progress: "With buyers", next_action: "Call buyer", owner: "Alex", latest: { label: "Waiting on them" } });
   });
@@ -71,5 +72,6 @@ describe("sheet filters in the URL", () => {
     expect(filtersFromRoute({ ...route, tab: "supply" }).side).toBe("seller");
     expect(filtersFromRoute({ ...route, tab: "today" }).side).toBe("all");
     expect(filtersFromRoute({ ...route, side: "bogus" }).side).toBe("all");
+    expect(filtersFromRoute({ ...route, side: "both" }).side).toBe("all"); // retired value in an old shared link
   });
 });

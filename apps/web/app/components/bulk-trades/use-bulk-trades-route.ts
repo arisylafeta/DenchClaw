@@ -19,8 +19,11 @@ export function useBulkTradesRoute(page: string = BULK_TRADES_PATH) {
   const navigate = useCallback((next: Partial<BulkTradesRoute>, mode: "push" | "replace" = "push") => {
     const url = buildBulkTradesUrl(next, new URLSearchParams(window.location.search), page);
     if (url === `${window.location.pathname}${window.location.search}`) return;
-    if (mode === "replace") window.history.replaceState(window.history.state, "", url);
-    else window.history.pushState(window.history.state, "", url);
+    // State is null on purpose: Next's own entries carry `__NA`, and passing that state back makes Next treat
+    // this as its internal call and skip updating `useSearchParams`, so the URL changes but nothing re-renders.
+    // With null, Next copies its internal state itself and syncs the router.
+    if (mode === "replace") window.history.replaceState(null, "", url);
+    else window.history.pushState(null, "", url);
   }, [page]);
 
   return { route, navigate };

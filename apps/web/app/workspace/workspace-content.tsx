@@ -2183,14 +2183,15 @@ function WorkspacePageInner() {
    */
   const openBulkTrades = useCallback((href?: string) => {
     const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
-    window.history.pushState(window.history.state, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search)));
+    // null state: see use-bulk-trades-route.ts (Next ignores a push that carries its own `__NA` state).
+    window.history.pushState(null, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search)));
     handleNavigateToObject(BULK_TRADES_PATH);
   }, [handleNavigateToObject]);
 
   /** Opens Trades Preview the same way: the named record or filter, or its home when no href is given. */
   const openTradesPreview = useCallback((href?: string) => {
     const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
-    window.history.pushState(window.history.state, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search), TRADES_PREVIEW_PATH));
+    window.history.pushState(null, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search), TRADES_PREVIEW_PATH));
     handleNavigate("trades-preview");
   }, [handleNavigate]);
 

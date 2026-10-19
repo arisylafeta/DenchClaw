@@ -21,8 +21,13 @@ vi.mock("next/navigation", async () => {
 });
 const nativePush = window.history.pushState.bind(window.history);
 const nativeReplace = window.history.replaceState.bind(window.history);
-window.history.pushState = (...args) => { nativePush(...args); urlListeners.forEach((l) => l()); };
-window.history.replaceState = (...args) => { nativeReplace(...args); urlListeners.forEach((l) => l()); };
+// Next's patched History API only syncs `useSearchParams` for calls that do NOT carry its own `__NA` state;
+// a call that does is treated as Next's internal one and skipped. This mock keeps that rule, and the tests
+// seed `__NA` into the starting state the way Next does, so a push that passes `history.state` along fails here.
+const NEXT_STATE = { __NA: true };
+const isInternal = (data: unknown) => !!(data as { __NA?: boolean } | null)?.__NA;
+window.history.pushState = (data, unused, url) => { nativePush(data, unused, url); if (!isInternal(data)) urlListeners.forEach((l) => l()); };
+window.history.replaceState = (data, unused, url) => { nativeReplace(data, unused, url); if (!isInternal(data)) urlListeners.forEach((l) => l()); };
 window.addEventListener("popstate", () => urlListeners.forEach((l) => l()));
 
 const today = todayInLondon();
@@ -61,7 +66,7 @@ function dataTransfer() {
 }
 
 describe("BulkTradesView", () => {
-  beforeEach(() => { forgetShared(); window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); nativeReplace(null, "", "/?path=bulk_trade"); });
+  beforeEach(() => { forgetShared(); window.localStorage.clear(); window.localStorage.setItem("bulk-trades:view", "board"); nativeReplace(NEXT_STATE, "", "/?path=bulk_trade"); });
   afterEach(() => vi.unstubAllGlobals());
 
   it("defaults to Today and never shows empty work lists before trades have loaded", async () => {
@@ -242,7 +247,7 @@ describe("BulkTradesView", () => {
   });
 
   it("opens the trade named in the URL and keeps it in the URL", async () => {
-    nativeReplace(null, "", "/?path=bulk_trade&trade=bt_1");
+    nativeReplace(NEXT_STATE, "", "/?path=bulk_trade&trade=bt_1");
     vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
     expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
@@ -259,13 +264,13 @@ describe("BulkTradesView", () => {
     expect(new URLSearchParams(window.location.search).get("tab")).toBe("demand");
     expect(screen.getByRole("button", { name: "Demand" })).toHaveAttribute("aria-pressed", "true");
 
-    nativeReplace(null, "", "/?path=bulk_trade&tab=today");
+    nativeReplace(NEXT_STATE, "", "/?path=bulk_trade&tab=today");
     window.dispatchEvent(new PopStateEvent("popstate"));
     await waitFor(() => expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true"));
   });
 
   it("opens a demand link on the Demand tab even when Trades was the last tab", async () => {
-    nativeReplace(null, "", "/?path=bulk_trade&demand=dm_1");
+    nativeReplace(NEXT_STATE, "", "/?path=bulk_trade&demand=dm_1");
     vi.stubGlobal("fetch", mockFetch(() => new Response("{}")));
     render(<BulkTradesView />);
     expect(await screen.findByRole("button", { name: "Demand" })).toHaveAttribute("aria-pressed", "true");

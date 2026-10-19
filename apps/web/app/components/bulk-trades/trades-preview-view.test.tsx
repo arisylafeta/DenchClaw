@@ -22,8 +22,13 @@ vi.mock("next/navigation", async () => {
 });
 const nativePush = window.history.pushState.bind(window.history);
 const nativeReplace = window.history.replaceState.bind(window.history);
-window.history.pushState = (...args) => { nativePush(...args); urlListeners.forEach((l) => l()); };
-window.history.replaceState = (...args) => { nativeReplace(...args); urlListeners.forEach((l) => l()); };
+// Next's patched History API only syncs `useSearchParams` for calls that do NOT carry its own `__NA` state;
+// a call that does is treated as Next's internal one and skipped. This mock keeps that rule, and the tests
+// seed `__NA` into the starting state the way Next does, so a push that passes `history.state` along fails here.
+const NEXT_STATE = { __NA: true };
+const isInternal = (data: unknown) => !!(data as { __NA?: boolean } | null)?.__NA;
+window.history.pushState = (data, unused, url) => { nativePush(data, unused, url); if (!isInternal(data)) urlListeners.forEach((l) => l()); };
+window.history.replaceState = (data, unused, url) => { nativeReplace(data, unused, url); if (!isInternal(data)) urlListeners.forEach((l) => l()); };
 window.addEventListener("popstate", () => urlListeners.forEach((l) => l()));
 
 const today = todayInLondon();
@@ -40,7 +45,7 @@ const ROWS: SheetRow[] = [
   row({}),
   row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Offered",
     latest: { label: "Offer by email", at: "2026-10-07" } }),
-  row({ key: "trade:bt_1", kind: "trade", id: "bt_1", side: "both", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "With buyers",
+  row({ key: "trade:bt_1", kind: "trade", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "With buyers",
     tone: "active", next_action: "Call the buyer", owner: "Alex", next_due: today }),
 ];
 
@@ -66,7 +71,7 @@ function mockApi({ inbox, sheet = ROWS, hangInbox }: Api = {}) {
 }
 
 describe("Trades Preview sheet", () => {
-  beforeEach(() => { forgetShared(); window.localStorage.clear(); nativeReplace(null, "", "/?path=%7Etrades-preview"); });
+  beforeEach(() => { forgetShared(); window.localStorage.clear(); nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview"); });
   afterEach(() => vi.unstubAllGlobals());
 
   it("shows one row per source record with its company, progress, latest development and next action, and no tabs", async () => {
@@ -95,12 +100,16 @@ describe("Trades Preview sheet", () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await screen.findByRole("button", { name: /12 Ioniq packs/ });
-    await userEvent.click(screen.getByRole("button", { name: "Seller-led" }));
+    await userEvent.click(screen.getByRole("button", { name: "Selling" }));
     expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
     expect(new URLSearchParams(window.location.search).get("side")).toBe("seller");
 
-    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    await userEvent.click(screen.getByRole("button", { name: "Selling" })); // pressing it again clears the filter
+    expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).has("side")).toBe(false);
+    expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Both/ })).not.toBeInTheDocument();
     await userEvent.type(screen.getByRole("searchbox"), "nolden");
     expect(screen.getByText("1 of 3 open")).toBeInTheDocument();
     expect(new URLSearchParams(window.location.search).get("q")).toBe("nolden");
@@ -111,17 +120,17 @@ describe("Trades Preview sheet", () => {
   });
 
   it("opens a filtered view from a link, and an older tab=demand link as buyer-led", async () => {
-    nativeReplace(null, "", "/?path=%7Etrades-preview&progress=Offered");
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&progress=Offered");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
     expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
     expect(screen.getByLabelText("Progress")).toHaveValue("Offered");
     first.unmount();
 
-    nativeReplace(null, "", "/?path=%7Etrades-preview&tab=demand");
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&tab=demand");
     render(<TradesPreviewView />);
     expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Buyer-led" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Buying" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("keeps the spaces while a multiword search is typed", async () => {
@@ -134,7 +143,7 @@ describe("Trades Preview sheet", () => {
   });
 
   it("an older tab=demand link keeps its filter through open and back, and Back refreshes the list", async () => {
-    nativeReplace(null, "", "/?path=%7Etrades-preview&tab=demand");
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&tab=demand");
     const fetchMock = mockApi();
     vi.stubGlobal("fetch", fetchMock);
     render(<TradesPreviewView />);
@@ -143,14 +152,14 @@ describe("Trades Preview sheet", () => {
     const loads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/bulk-trades/sheet").length;
     const before = loads();
 
-    nativeReplace(null, "", "/?path=%7Etrades-preview&side=buyer"); // browser Back, not the breadcrumb
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&side=buyer"); // browser Back, not the breadcrumb
     window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(await screen.findByRole("button", { name: "Buyer-led" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("button", { name: "Buying" })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(loads()).toBeGreaterThan(before));
   });
 
   it("opens a trade by link or by click, and Back returns to the same filtered sheet", async () => {
-    nativeReplace(null, "", "/?path=%7Etrades-preview&side=both");
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&side=seller");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
@@ -158,8 +167,8 @@ describe("Trades Preview sheet", () => {
     expect(new URLSearchParams(window.location.search).get("trade")).toBe("bt_1");
 
     await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
-    expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
-    expect(window.location.search).toBe("?path=%7Etrades-preview&side=both");
+    expect(await screen.findByText("2 of 3 open")).toBeInTheDocument();
+    expect(window.location.search).toBe("?path=%7Etrades-preview&side=seller");
   });
 
   it("clicking a demand row opens that demand by id", async () => {
@@ -238,7 +247,7 @@ describe("Trades Preview sheet", () => {
   });
 
   it("sends only the changed fields when a trade is edited", async () => {
-    nativeReplace(null, "", "/?path=%7Etrades-preview&trade=bt_1");
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&trade=bt_1");
     const fetchMock = mockApi();
     vi.stubGlobal("fetch", fetchMock);
     render(<TradesPreviewView />);

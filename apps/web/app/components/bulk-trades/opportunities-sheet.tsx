@@ -86,7 +86,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
   const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
-  const sides: [SheetFilters["side"], string][] = [["all", "All"], ["buyer", SIDE_LABEL.buyer], ["seller", SIDE_LABEL.seller], ["both", SIDE_LABEL.both]];
+  const sides = ["buyer", "seller"] as const;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -96,14 +96,15 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
           <input type="search" value={filters.query} onChange={(event) => set({ query: event.target.value })}
             placeholder="Search buyers, offers, trades" className={`${field} w-full pl-9`} style={fieldStyle} />
         </label>
-        <div role="group" aria-label="Starting point" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
-          {sides.map(([value, label]) => (
-            <button key={value} type="button" aria-pressed={filters.side === value} onClick={() => set({ side: value })}
+        {/* Starting point. Neither selected shows everything; pressing the selected one again clears it. */}
+        <div role="group" aria-label="Starting point" className="flex rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
+          {sides.map((value) => (
+            <button key={value} type="button" aria-pressed={filters.side === value} onClick={() => set({ side: filters.side === value ? "all" : value })}
               className="h-8 shrink-0 rounded-md px-3 text-[13px] whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"
               style={filters.side === value
                 ? { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" }
                 : { color: "var(--bt-text-2)" }}>
-              {label}
+              {SIDE_LABEL[value]}
             </button>
           ))}
         </div>

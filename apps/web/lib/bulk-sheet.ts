@@ -8,7 +8,8 @@ import type { TradeStage } from "./bulk-trades";
 import type { BulkTradesRoute } from "./bulk-trades-url";
 
 export type SheetKind = "demand" | "supply" | "trade";
-export type SheetSide = "buyer" | "seller" | "both";
+/** Starting point: a buyer asking for something, or a seller offering it. A buyer-seller connection is shown in progress and details, not here. */
+export type SheetSide = "buyer" | "seller";
 export type SheetTone = "new" | "active" | "waiting" | "closing" | "hold";
 
 export type SheetRow = {
@@ -16,7 +17,7 @@ export type SheetRow = {
   key: string;
   kind: SheetKind;
   id: string;
-  /** Where the work started: a buyer's need, a seller's stock, or a trade with both sides identified. */
+  /** Where the work started: a buyer's need (Buying) or a seller's stock (Selling). */
   side: SheetSide;
   title: string;
   company: string | null;
@@ -44,7 +45,7 @@ export type SheetFilters = {
 
 export const NO_FILTERS: SheetFilters = { query: "", side: "all", progress: "all", company: "all", category: "all" };
 
-export const SIDE_LABEL: Record<SheetSide, string> = { buyer: "Buyer-led", seller: "Seller-led", both: "Both sides" };
+export const SIDE_LABEL: Record<SheetSide, string> = { buyer: "Buying", seller: "Selling" };
 
 const text = (value: string | null | undefined) => (value && value.trim() ? value.trim() : null);
 
@@ -102,13 +103,12 @@ const TRADE_TONE: Partial<Record<TradeStage, SheetTone>> = {
 };
 
 export function tradeRow(input: TradeInput): SheetRow {
-  const both = input.has_seller && input.has_buyer;
   const latest = input.waiting_since
     ? { label: input.waiting_on === "them" ? "Waiting on them" : "Waiting on us", at: input.waiting_since }
     : input.last_touched ? { label: "Last touched", at: input.last_touched } : null;
   return {
     key: `trade:${input.id}`, kind: "trade", id: input.id,
-    side: both ? "both" : input.origin === "demand" ? "buyer" : "seller",
+    side: input.origin === "demand" ? "buyer" : "seller",
     title: input.title, company: text(input.seller_name), company_id: null,
     category: text(input.trade_kind),
     progress: input.trade_stage, tone: TRADE_TONE[input.trade_stage] ?? "active",
@@ -140,7 +140,7 @@ export function sheetOptions(rows: SheetRow[]) {
   return { progress: distinct((row) => row.progress), company: distinct((row) => row.company), category: distinct((row) => row.category) };
 }
 
-const SIDES: readonly string[] = ["buyer", "seller", "both"];
+const SIDES: readonly string[] = ["buyer", "seller"];
 
 /** The sheet filters a URL asks for. Older tab=demand / tab=supply links mean buyer-led / seller-led. */
 export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" | "progress" | "company" | "category" | "tab">): SheetFilters {
