@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
@@ -28,6 +29,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   const [sheetLoaded, setSheetLoaded] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [owners, setOwners] = useState<TradeOwner[]>([]);
+  const [inboxLoaded, setInboxLoaded] = useState(false);
   const [check, setCheck] = useState<CheckStatus>(null);
   const [possible, setPossible] = useState<Proposal[]>([]);
   const [acceptedDemand, setAcceptedDemand] = useState<Proposal[]>([]);
@@ -60,6 +62,8 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
       setAcceptedDemand(inbox.accepted ?? []);
     } catch {
       /* the inbox is secondary: the sheet stays usable without it */
+    } finally {
+      setInboxLoaded(true);
     }
   }, []);
   const load = useCallback(() => { void loadSheet(); void loadInbox(); }, [loadSheet, loadInbox]);
@@ -129,7 +133,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
         <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Trades Preview</h1>
         <div className="flex-1" />
         <button type="button" onClick={() => setShowPossible(true)} className={`${buttonClass} h-9 rounded-lg`} style={buttonStyle}>
-          {check && <CheckLine check={check} />}Inbox · {possible.length}
+          <ShBlock on={!inboxLoaded} size={8}>{check && <CheckLine check={check} />}</ShBlock>Inbox · <Sh on={!inboxLoaded} chars={2}>{possible.length}</Sh>
         </button>
         <div className="relative">
           <button type="button" aria-haspopup="menu" aria-expanded={adding} onClick={() => setAdding((value) => !value)}
@@ -156,9 +160,9 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
 
       <Dialog open={showPossible} onOpenChange={setShowPossible}>
         <DialogContent aria-describedby={undefined} showCloseButton={false} className="bulk-trades bt-preview top-0 left-auto right-0 h-full max-w-2xl translate-x-0 translate-y-0 overflow-auto rounded-lg sm:max-w-2xl block" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-          <header className="mb-4 flex items-center justify-between"><DialogTitle>Inbox · {possible.length}</DialogTitle><button type="button" onClick={() => setShowPossible(false)}>Close</button></header>
+          <header className="mb-4 flex items-center justify-between"><DialogTitle>Inbox · <Sh on={!inboxLoaded} chars={2}>{possible.length}</Sh></DialogTitle><button type="button" onClick={() => setShowPossible(false)}>Close</button></header>
           <ErrorText error={actionError} />
-          {!possible.length && <p className="text-sm">Inbox clear.</p>}
+          <BusyRegion busy={!inboxLoaded} label="Loading inbox">{!possible.length && <p className="text-sm"><Sh on={!inboxLoaded} chars={18}>Inbox clear.</Sh></p>}</BusyRegion>
           {possible.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={(decided, action, lotId) => {
             setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
             if (action === "accept") {

@@ -1,5 +1,6 @@
 "use client";
 
+import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Search, Flag } from "lucide-react";
 import { SIDE_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
@@ -68,31 +69,37 @@ function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: 
   );
 }
 
-function SheetRowItem({ row, today, onOpen, onNext }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
+function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
   const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
   return (
-    <li onClick={() => onOpen(row)}
+    <li aria-hidden={loading || undefined} onClick={() => { if (!loading) onOpen(row); }}
       className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
-      <span className="hidden md:block"><ScoreCircle score={row.score} /></span>
+      <span className="hidden md:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       <span className="min-w-0">
-        <button type="button" title={row.title}
-          className="line-clamp-2 w-full text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">{row.title}</button>
-        {row.company && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
-        <span className="mt-1 inline-flex md:hidden"><ScoreCircle score={row.score} /></span>
+        <button type="button" disabled={loading} title={row.title}
+          className="line-clamp-2 w-full text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
+        {(loading || row.company) && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company}</Sh></span>}
+        <span className="mt-1 inline-flex md:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       </span>
-      <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}>{row.company ?? "—"}</span>
-      <span><ProgressChip row={row} /></span>
+      <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company ?? "—"}</Sh></span>
+      <span><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh></span>
       <span className="hidden min-w-0 lg:block">
-        {row.latest ? (
+        {loading ? <Sh on chars={7} /> : row.latest ? (
           <IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} />
         ) : <span style={{ color: "var(--bt-muted)" }}>—</span>}
       </span>
       <span className="min-w-0">
-        <NextActionCell value={row.next_action} due={row.next_due} owner={row.owner} today={today} onSave={(text) => onNext(row, text)} />
+        <NextActionCell loading={loading} value={row.next_action} due={row.next_due} owner={row.owner} today={today} onSave={(text) => onNext(row, text)} />
       </span>
     </li>
   );
 }
+
+const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
+  key: `loading:${index}`, id: "", kind: "demand", side: "buyer", title: "", company: null,
+  company_id: null, category: null, progress: "", tone: "new", score: null,
+  latest: null, next_action: null, next_due: null, owner: null, touched: null,
+}));
 
 export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, onFilters, onOpen, onNext }: {
   rows: SheetRow[];
@@ -105,12 +112,14 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
   onOpen: (row: SheetRow) => void;
   onNext: (row: SheetRow, text: string | null) => Promise<void>;
 }) {
+  const busy = loading && !rows.length;
+  const displayRows = busy ? PLACEHOLDER_ROWS : shown;
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
   const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
   const sides = ["buyer", "seller"] as const;
   return (
-    <div className="flex flex-col gap-4">
+    <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative min-w-0 flex-1 basis-full sm:basis-64">
           <span className="sr-only">Search opportunities</span>
@@ -143,7 +152,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
 
       <ErrorText error={error} />
       <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">
-        {loading && !rows.length ? "Loading…" : `${shown.length} of ${rows.length} open`}
+        <Sh on={busy} chars={14}>{`${shown.length} of ${rows.length} open`}</Sh>
       </p>
 
       <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -151,18 +160,9 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
           <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span>Next action</span>
         </div>
-        {shown.length > 0 ? (
+        {displayRows.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">
-            {shown.map((row) => <SheetRowItem key={row.key} row={row} today={today} onOpen={onOpen} onNext={onNext} />)}
-          </ul>
-        ) : loading && !rows.length ? (
-          <ul aria-hidden="true" className="divide-y divide-[var(--bt-divider)]">
-            {[0, 1, 2, 3].map((n) => (
-              <li key={n} className="flex animate-pulse flex-col gap-2 px-2 py-4 motion-reduce:animate-none">
-                <span className="h-3.5 w-2/5 rounded" style={{ background: "var(--bt-segment)" }} />
-                <span className="h-3 w-1/4 rounded" style={{ background: "var(--bt-segment)" }} />
-              </li>
-            ))}
+            {displayRows.map((row) => <SheetRowItem key={row.key} row={row} loading={busy} today={today} onOpen={onOpen} onNext={onNext} />)}
           </ul>
         ) : (
           <p className="px-2 py-10 text-center text-[13px]" style={{ color: "var(--bt-muted)" }}>
@@ -171,6 +171,6 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
         )}
         </div>
       </div>
-    </div>
+    </BusyRegion>
   );
 }

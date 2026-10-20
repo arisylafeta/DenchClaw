@@ -1,5 +1,6 @@
 "use client";
 
+import { Sh } from "./bt-shimmer";
 import { useRef, useState } from "react";
 import { shortDate } from "@/lib/bulk-trade-details";
 
@@ -7,7 +8,8 @@ import { shortDate } from "@/lib/bulk-trade-details";
  * The next action of a listing as a cell you edit in place: click, type, Enter or click away to save, Escape to cancel.
  * Clearing the text clears the action. The click never opens the row it sits in.
  */
-export function NextActionCell({ value, due, owner, today, onSave }: {
+export function NextActionCell({ value, due, owner, today, onSave, loading = false }: {
+  loading?: boolean;
   value: string | null;
   due: string | null;
   owner?: string | null;
@@ -64,9 +66,9 @@ export function NextActionCell({ value, due, owner, today, onSave }: {
   }
   const overdue = !!due && due < today;
   return (
-    <button type="button" onClick={start} aria-label={value ? `Edit next action: ${value}` : "Add next action"}
+    <button type="button" disabled={loading} onClick={start} aria-label={value ? `Edit next action: ${value}` : "Add next action"}
       className="group flex w-full min-w-0 flex-col items-start gap-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
-      {value
+      {loading ? <span className="text-[13px] leading-snug"><Sh on chars={22} /></span> : value
         ? <span className="line-clamp-2 text-[13px] leading-snug group-hover:underline">{value}</span>
         : <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Add next step</span>}
       {value && (due || owner) && (
