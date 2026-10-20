@@ -33,8 +33,8 @@ export function MailDraftCard({ artifact, autoOpen, onOpen }: { artifact: Extrac
   const open = () => { void onOpen?.(mailDraftPath(artifact.id), { title }); };
 
   useEffect(() => {
-    if (!autoOpen || !draft || !onOpen || autoOpened.has(artifact.id)) {return;}
-    autoOpened.add(artifact.id);
+    if (!autoOpen || !draft || !onOpen || autoOpened.has(`${artifact.id}:${draft.updated_at}`)) {return;}
+    autoOpened.add(`${artifact.id}:${draft.updated_at}`);
     void onOpen(mailDraftPath(artifact.id), { title });
   }, [autoOpen, draft, onOpen, artifact.id, title]);
 

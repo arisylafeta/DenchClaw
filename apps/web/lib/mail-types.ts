@@ -32,7 +32,7 @@ export type MailDraft = {
   id: string; state: string; identity_key: string | null; transport: MailTransport; purpose: MailPurpose | null;
   from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null;
   body_text: string | null; body_html: string | null; thread_id: string | null; campaign_id: string | null;
-  created_at: string; links: { cta_key: string; destination_url: string }[]; warnings: string[];
+  created_at: string; updated_at: string; links: { cta_key: string; destination_url: string }[]; warnings: string[];
   approval: MailApproval | null;
 };
 export type MailDraftListRow = Pick<MailDraft, 'id' | 'state' | 'identity_key' | 'from_email' | 'to_emails' | 'subject' | 'created_at'> & { body_preview: string | null };

@@ -7,19 +7,37 @@ import { MessageBody } from "./message-body";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; draft: MailDraft };
 
+const POLL_MS = 10_000;
+
+/** Loads a draft and keeps it fresh: agents edit saved drafts in place, so refetch on focus and every 10s while visible. */
 export function useMailDraft(id: string): Load {
   const [state, setState] = useState<{ id: string; load: Load } | null>(null);
   useEffect(() => {
     let live = true;
-    void fetch(`/api/mail/drafts/${encodeURIComponent(id)}`)
-      .then(async (res) => {
-        if (res.status === 404) {return { status: "error", message: "This draft was not found." } as Load;}
-        if (!res.ok) {return { status: "error", message: "Could not load this draft." } as Load;}
-        return { status: "ready", draft: (await res.json()) as MailDraft } as Load;
-      })
-      .catch((): Load => ({ status: "error", message: "Could not load this draft." }))
-      .then((load) => { if (live) {setState({ id, load });} });
-    return () => { live = false; };
+    const fetchDraft = async () => {
+      let load: Load;
+      try {
+        const res = await fetch(`/api/mail/drafts/${encodeURIComponent(id)}`);
+        if (res.status === 404) {load = { status: "error", message: "This draft was not found." };}
+        else if (!res.ok) {load = { status: "error", message: "Could not load this draft." };}
+        else {load = { status: "ready", draft: (await res.json()) as MailDraft };}
+      } catch {
+        load = { status: "error", message: "Could not load this draft." };
+      }
+      if (!live) {return;}
+      setState((prev) => {
+        // Keep the last good draft on a transient failure, and skip no-op updates.
+        if (load.status === "error" && prev?.id === id && prev.load.status === "ready") {return prev;}
+        if (load.status === "ready" && prev?.id === id && prev.load.status === "ready" && prev.load.draft.updated_at === load.draft.updated_at && prev.load.draft.state === load.draft.state) {return prev;}
+        return { id, load };
+      });
+    };
+    void fetchDraft();
+    const tick = () => { if (document.visibilityState === "visible") {void fetchDraft();} };
+    const timer = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    return () => { live = false; clearInterval(timer); document.removeEventListener("visibilitychange", tick); window.removeEventListener("focus", tick); };
   }, [id]);
   return state?.id === id ? state.load : { status: "loading" };
 }

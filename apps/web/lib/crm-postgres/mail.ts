@@ -152,7 +152,7 @@ const DRAFT_STATES = "('draft','frozen')";
 export async function readMailDraft(id: string, userId: string): Promise<MailDraft | null> {
   const [row] = await queryPg<Omit<MailDraft, 'links' | 'warnings' | 'approval'> & { personalization: { oneoff?: { warnings?: unknown[] } } | null }>(
     `select m.id,m.state,m.identity_key,m.transport,m.purpose,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
-       coalesce(m.bcc_emails,'{}') as bcc_emails,m.subject,m.body_text,m.body_html,m.thread_id,m.campaign_id,m.created_at,m.personalization
+       coalesce(m.bcc_emails,'{}') as bcc_emails,m.subject,m.body_text,m.body_html,m.thread_id,m.campaign_id,m.created_at,m.updated_at,m.personalization
      from mail_message m where m.id = $1 and m.direction = 'outbound' and (m.mailbox_owner_id is null or m.mailbox_owner_id = $2::uuid)`, [id, userId]);
   if (!row) return null;
   const links = await queryPg<{ cta_key: string; destination_url: string }>('select cta_key,destination_url from mail_message_link where message_id = $1 order by cta_key', [id]);
