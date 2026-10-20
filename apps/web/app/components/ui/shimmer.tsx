@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import styles from "./shimmer.module.css";
 
 /** One animated placeholder block. Decorative: pair it with a labelled status wrapper. */
@@ -47,8 +47,16 @@ export function TableShimmer({ rows = 6, cols = 5 }: { rows?: number; cols?: num
 
 const VARIANTS = { rows: RowsShimmer, cards: CardRowsShimmer, chat: ChatShimmer, detail: DetailShimmer, table: TableShimmer } as const;
 
-/** Labelled loading state with a skeleton. The label stays available to screen readers and tests. */
-export function Loading({ label, variant = "rows" }: { label: string; variant?: keyof typeof VARIANTS }) {
+/**
+ * Labelled loading state. Pass `children` built from the real component (same classes, same paddings, same dividers)
+ * so the layout does not shift when data arrives; the generic variants are only a fallback for screens without one.
+ */
+export function Loading({ label, variant = "rows", children }: { label: string; variant?: keyof typeof VARIANTS; children?: ReactNode }) {
   const Variant = VARIANTS[variant];
-  return <div role="status" aria-busy="true"><span className="sr-only">{label}</span><Variant /></div>;
+  return <div role="status" aria-busy="true"><span className="sr-only">{label}</span>{children ?? <Variant />}</div>;
+}
+
+/** A line of text that keeps its line height while loading. */
+export function ShimmerText({ w = "60%", lineHeight = 20, h = 12 }: { w?: number | string; lineHeight?: number; h?: number }) {
+  return <span aria-hidden className="flex items-center" style={{ height: lineHeight }}><ShimmerBar w={w} h={h} /></span>;
 }

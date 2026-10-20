@@ -6,7 +6,7 @@ import { whatsappChatLabel } from "@/lib/whatsapp-display";
 import { WhatsappConversation } from "../whatsapp-chat";
 import { Loading } from "../../ui/shimmer";
 import { InboxLayout, PANEL_LAYOUT } from "./inbox-layout";
-import { MailLine } from "./mail-line";
+import { MailLine, MailLineSkeleton } from "./mail-line";
 import styles from "./mail.module.css";
 
 const pageSize = 50;
@@ -50,7 +50,7 @@ export function WhatsappView({ query, selectedId, onSelect, onOpenPerson }: { qu
   ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const shown = needle ? entries.filter((entry) => `${entry.name} ${entry.last}`.toLowerCase().includes(needle)) : entries;
   const list = <div className="h-full min-h-0 overflow-y-auto text-[13px]" style={{ background: "var(--color-bg)" }}>
-    {state === "loading" && !rows.length && <Loading label="Loading WhatsApp chats…" />}
+    {state === "loading" && !rows.length && <Loading label="Loading WhatsApp chats…">{Array.from({ length: 9 }, (_, i) => <MailLineSkeleton key={i} index={i} />)}</Loading>}
     {state === "error" && <p role="alert" className="px-6 py-6" style={{ color: "var(--color-error)" }}>Could not load WhatsApp chats.</p>}
     {state === "ready" && !shown.length && <p className="px-6 py-8" style={{ color: "var(--color-text-muted)" }}>No captured WhatsApp chats{needle ? " match your search" : ""}.</p>}
     <ul aria-label="WhatsApp chats">{shown.map((entry) => <li key={entry.id}>

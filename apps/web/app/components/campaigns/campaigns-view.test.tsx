@@ -196,6 +196,8 @@ describe("CampaignsView", () => {
     render(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
     expect(within(metrics).getAllByText("Not tracked")).toHaveLength(3);
+    // Untracked values read as a dash on screen, with the words kept for screen readers.
+    expect(within(metrics).getAllByText("Not tracked")[0].parentElement).toHaveTextContent("—");
     expect(within(metrics).queryByText("Unknown")).not.toBeInTheDocument();
     const row = screen.getByText("Sent from Gmail").closest("tr")!;
     expect(within(row).getAllByText("Not tracked")).toHaveLength(2);

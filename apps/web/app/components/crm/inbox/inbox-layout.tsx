@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 const STORAGE_KEY = "denchclaw.crm-inbox.list-width";
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 420;
 const COLLAPSE_BREAKPOINT = 900;
+const COLLAPSE_DRAG_SLACK = 70;
 /** WhatsApp and Campaigns: list and open item share the pane down to a narrow width, like mail threads. */
 export const PANEL_LAYOUT = { collapseBelow: 560, defaultWidth: 380, minWidth: 280, storageKey: "denchclaw.crm-inbox.panel-width" } as const;
 
@@ -42,6 +44,8 @@ export function InboxLayout({
 }) {
   const [width, setWidth] = useState<number>(defaultWidth);
   const [isNarrow, setIsNarrow] = useState<boolean>(false);
+  // Dragging the divider well past the minimum width, or the handle, hides the list so the open item can fill the pane.
+  const [collapsed, setCollapsed] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -82,8 +86,9 @@ export function InboxLayout({
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current) {return;}
       const delta = e.clientX - dragRef.current.startX;
-      const next = clamp(dragRef.current.startWidth + delta, minWidth, MAX_WIDTH);
-      setWidth(next);
+      const raw = dragRef.current.startWidth + delta;
+      if (raw < minWidth - COLLAPSE_DRAG_SLACK) { dragRef.current = null; setCollapsed(true); return; }
+      setWidth(clamp(raw, minWidth, MAX_WIDTH));
     };
     const onUp = () => {
       if (dragRef.current) {
@@ -113,9 +118,10 @@ export function InboxLayout({
   }
 
   // ─── Two-pane split ───────────────────────────────────────────────────
+  const showList = !collapsed || !hasSelection;
   return (
     <div ref={containerRef} className="flex h-full min-h-0 w-full">
-      <div
+      {showList && <div
         className="flex h-full min-h-0 flex-col"
         style={{
           width,
@@ -125,8 +131,8 @@ export function InboxLayout({
         }}
       >
         {list}
-      </div>
-      <div
+      </div>}
+      {showList && <div
         role="separator"
         aria-orientation="vertical"
         onMouseDown={handleMouseDown}
@@ -144,8 +150,15 @@ export function InboxLayout({
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLElement).style.background = "transparent";
         }}
-      />
-      <div className="flex-1 min-w-0 h-full min-h-0">{conversation}</div>
+      />}
+      <div className="relative flex-1 min-w-0 h-full min-h-0">
+        {hasSelection && <button type="button" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Show list" : "Hide list"} title={collapsed ? "Show list" : "Hide list"}
+          className="absolute bottom-3 left-3 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm hover:bg-[var(--color-surface-hover)]"
+          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
+          {collapsed ? <PanelLeftOpen size={15} aria-hidden /> : <PanelLeftClose size={15} aria-hidden />}
+        </button>}
+        {conversation}
+      </div>
     </div>
   );
 }

@@ -10,10 +10,50 @@ import { request } from "../bulk-trades/trade-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../platform-admin/ui/tabs";
 import { CampaignRecipients } from "./campaign-recipients";
 import { CampaignListings, CampaignWebsiteActivity } from "./campaign-activity-panel";
-import { CampaignDate, CampaignPin, MetricRow, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import tableStyles from "../ui/data-table.module.css";
+import { ShimmerBar } from "../ui/shimmer";
+import stackStyles from "./stack-table.module.css";
+import { CampaignDate, CampaignPin, MetricRow, StatusTag, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
 type Props = { detail: MailCampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
 type ActivityState = { campaignId: string; activity: CampaignActivity | null; failed: boolean };
+
+/** The campaign page with its real header, metric strip, tabs and recipient table, holding placeholders where data goes. */
+export function CampaignPageSkeleton() {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto" role="status" aria-busy="true">
+      <span className="sr-only">Loading campaign…</span>
+      <header aria-hidden className="flex flex-col gap-3 border-b px-4 pb-4 pt-4 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="inline-flex h-7 w-7 items-center justify-center"><ShimmerBar w={15} h={15} round /></span>
+          <ShimmerBar w={12} h={12} round />
+          <ShimmerBar w="min(320px, 55%)" h={28} />
+          <ShimmerBar w={72} h={24} round />
+        </div>
+        <p className="h-5"><ShimmerBar w="min(360px, 70%)" h={13} style={{ marginTop: 3 }} /></p>
+        <section className="flex flex-col gap-3 rounded-lg border px-4 py-3" style={{ borderColor: "var(--bt-border)", background: "var(--bt-bg)" }}>
+          <MetricRow size="lg" loading />
+          <div className="h-1 w-full rounded-full" style={{ background: "var(--bt-divider)" }} />
+        </section>
+        <p className="h-4"><ShimmerBar w={130} h={11} /></p>
+      </header>
+      <main aria-hidden className="min-w-0 px-4 pb-8 pt-4 sm:px-8">
+        <div className="flex gap-0 border-b" style={{ borderColor: "var(--bt-border)" }}>
+          {[96, 76, 70].map((width, i) => <span key={i} className="px-3.5 py-3"><ShimmerBar w={width} h={20} /></span>)}
+        </div>
+        <div className={`bulk-trades ${tableStyles.surface} mt-4 overflow-hidden border`} style={{ borderColor: "var(--bt-border)" }}>
+          <div className="flex flex-wrap items-center gap-2.5 border-b px-3.5 py-3" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}>
+            <ShimmerBar w="min(320px, 100%)" h={32} /><ShimmerBar w={280} h={32} />
+          </div>
+          <table className={`${tableStyles.table} ${stackStyles.stack}`}>
+            <thead style={{ background: "var(--bt-table-head)" }}><tr>{[0, 1, 2, 3, 4, 5, 6].map((i) => <th key={i} scope="col" className={tableStyles.headerCell} style={cellStyle}><ShimmerBar w="60%" h={10} /></th>)}</tr></thead>
+            <tbody>{Array.from({ length: 6 }, (_, row) => <tr key={row}>{[0, 1, 2, 3, 4, 5, 6].map((i) => <td key={i} className={tableStyles.cell} style={cellStyle}><ShimmerBar w={i === 0 ? "78%" : "56%"} h={12} style={{ margin: "4px 0" }} /></td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+  );
+}
 
 export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
   const [tab, setTab] = useState("recipients");
@@ -96,8 +136,8 @@ function DismantlerFunnel({ funnel }: { funnel: NonNullable<MailCampaignDetail["
   return (
     <section aria-label="Dismantler progress" className="flex flex-col gap-1.5">
       <span className="bt-label">Dismantlers</span>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
-        {steps.map(([label, count]) => <span key={label}><span style={mutedStyle}>{label}</span> <span className="bt-mono font-semibold">{count.toLocaleString("en-GB")}</span></span>)}
+      <div className="grid gap-x-4 gap-y-1 text-[13px]" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
+        {steps.map(([label, count]) => <span key={label} className="flex items-baseline justify-between gap-2 border-b py-0.5" style={{ borderColor: "var(--bt-divider)" }}><span style={mutedStyle}>{label}</span> <span className="bt-mono font-semibold">{count.toLocaleString("en-GB")}</span></span>)}
       </div>
     </section>
   );

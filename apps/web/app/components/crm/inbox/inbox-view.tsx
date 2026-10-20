@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MailFilters, MailFollowup, MailMessageListRow, MailPage } from "@/lib/mail-types";
 import { WhatsappView } from "./whatsapp-view";
-import { MailLine } from "./mail-line";
+import { MailLine, MailLineSkeleton } from "./mail-line";
 import { Loading } from "../../ui/shimmer";
 import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
@@ -147,7 +147,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
     } catch (failure) {setError(failure instanceof Error ? failure.message : "Could not load mail.");}
   }
   return <div className="text-[13px]">
-    {loading && <Loading label={`Loading ${views[view].toLowerCase()}…`} />}
+    {loading && <Loading label={`Loading ${views[view].toLowerCase()}…`}>{Array.from({ length: 9 }, (_, i) => <MailLineSkeleton key={i} index={i} />)}</Loading>}
     {error && <p role="alert" className="px-8 py-6">{error}</p>}
     {!loading && !error && !rows.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No {views[view].toLowerCase()} match these filters.</p>}
     <ul>{rows.map((row) => {

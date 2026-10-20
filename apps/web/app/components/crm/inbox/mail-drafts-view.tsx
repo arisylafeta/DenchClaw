@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { MailDraftListRow } from "@/lib/mail-types";
 import { Loading } from "../../ui/shimmer";
-import { MailLine } from "./mail-line";
+import { MailLine, MailLineSkeleton } from "./mail-line";
 import styles from "./mail.module.css";
 
 /** Prepared drafts waiting for review. Opening one shows it in the content panel. */
@@ -24,7 +24,7 @@ export function MailDraftsView({ query, onOpenDraft }: { query: string; onOpenDr
   }, [query]);
   const shown = rows;
   return <div className="text-[13px]">
-    {state === "loading" && <Loading label="Loading drafts…" />}
+    {state === "loading" && <Loading label="Loading drafts…">{Array.from({ length: 8 }, (_, i) => <MailLineSkeleton key={i} index={i} />)}</Loading>}
     {state === "error" && <p role="alert" className="px-8 py-6" style={{ color: "var(--color-error)" }}>Could not load drafts.</p>}
     {state === "ready" && !shown.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No drafts waiting. Ask mailvin to prepare one.</p>}
     <ul>{shown.map((row) => {

@@ -1,0 +1,16 @@
+/* Phones: a table row becomes a labelled card, so nothing scrolls sideways. */
+@media (max-width: 767px) {
+  .stack { min-width: 0 !important; width: 100%; }
+  .stack thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .stack, .stack tbody, .stack tr, .stack td { display: block; }
+  .stack tr { padding: 12px 16px; border-bottom: 1px solid var(--bt-divider); }
+  .stack td { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 3px 0 !important; border: 0 !important; min-width: 0 !important; }
+  .stack td::before { content: attr(data-label); flex: 0 0 34%; max-width: 34%; color: var(--bt-muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  .stack td:first-child { display: block; font-size: 13px; font-weight: 600; padding-bottom: 6px !important; }
+  .stack td:first-child::before, .stack td[colspan]::before { display: none; }
+  .stack td > div { flex: 1; min-width: 0; text-align: right; }
+  .stack td:first-child > div { text-align: left; }
+  .stack [data-table-part="cell-value"] { display: block !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; padding-inline-end: 0 !important; }
+  .stack [data-table-part="cell-value"] * { white-space: normal !important; }
+  .stack button[aria-label$="cell content"] { display: none; }
+}

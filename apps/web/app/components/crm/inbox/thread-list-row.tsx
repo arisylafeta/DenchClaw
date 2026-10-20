@@ -3,6 +3,7 @@
 import { useState, type MouseEvent } from "react";
 import { Check, Copy } from "lucide-react";
 import { SenderAvatar } from "../sender-avatar";
+import { ShimmerBar, ShimmerText } from "../../ui/shimmer";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import type { Thread } from "./types";
 
@@ -13,6 +14,24 @@ const SENDER_TYPE_COLOR: Record<string, string> = {
   "Mailing List": "#8b5cf6",
   Automated: "#94a3b8",
 };
+
+const ROW_COLUMNS = "16px minmax(110px, 190px) minmax(0, 1fr) auto";
+
+/** Same grid, paddings, 20px lines and divider as a ThreadListRow, with placeholders for the content. */
+export function ThreadListRowSkeleton({ index = 0 }: { index?: number }) {
+  const widths = ["56%", "70%", "44%", "64%", "50%"];
+  return (
+    <div aria-hidden className="relative w-full grid items-center gap-x-4 px-4 py-2.5"
+      style={{ gridTemplateColumns: ROW_COLUMNS, borderLeft: "2px solid transparent", borderBottom: "1px solid var(--color-border)" }}>
+      <span className="inline-block h-4 w-4 rounded border" style={{ borderColor: "var(--color-border-strong)", opacity: 0.5 }} />
+      <span className="inline-flex min-w-0 items-center gap-2 border-r pr-4" style={{ borderColor: "var(--color-border)" }}>
+        <ShimmerBar w={20} h={20} round /><span className="min-w-0 flex-1"><ShimmerText w="68%" h={11} /></span>
+      </span>
+      <span className="min-w-0"><ShimmerText w={widths[index % widths.length]} h={11} /></span>
+      <span className="inline-flex items-center gap-2"><span className="inline-block h-5 w-5" /><span className="inline-block min-w-[44px]"><ShimmerText w="100%" h={9} /></span></span>
+    </div>
+  );
+}
 
 /** Single-line conversation row: sender | subject — snippet | copy id + time. Checkbox spans the row; hover reveals the id copy. */
 export function ThreadListRow({
@@ -51,7 +70,7 @@ export function ThreadListRow({
       data-thread-row="true"
       className="group relative w-full grid items-center gap-x-4 px-4 py-2.5 text-left transition-colors"
       style={{
-        gridTemplateColumns: "16px minmax(110px, 190px) minmax(0, 1fr) auto",
+        gridTemplateColumns: ROW_COLUMNS,
         background: selected
           ? "color-mix(in oklab, var(--color-text) 4%, transparent)"
           : inBulkSelection
@@ -111,7 +130,7 @@ export function ThreadListRow({
           className="!h-5 !w-5 !text-[9px] shrink-0"
         />
         <span
-          className="truncate text-[13px]"
+          className="truncate text-[13px] leading-5"
           style={{
             color: "var(--color-text)",
             fontWeight: read ? 400 : 600,
@@ -146,7 +165,7 @@ export function ThreadListRow({
           />
         )}
         <span
-          className="max-w-[60%] shrink-0 truncate text-[13px]"
+          className="max-w-[60%] shrink-0 truncate text-[13px] leading-5"
           style={{
             color: "color-mix(in oklab, var(--color-text) 85%, var(--color-text-muted))",
             fontWeight: read ? 400 : 600,
@@ -172,7 +191,7 @@ export function ThreadListRow({
         )}
         {thread.snippet?.trim() && (
           <span
-            className="min-w-0 flex-1 truncate text-[13px]"
+            className="min-w-0 flex-1 truncate text-[13px] leading-5"
             style={{
               color: "var(--color-text-muted)",
             }}
@@ -196,7 +215,7 @@ export function ThreadListRow({
           {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
         </span>
         <span
-          className="min-w-[44px] text-right text-[11px] tabular-nums"
+          className="min-w-[44px] text-right text-[11px] leading-5 tabular-nums"
           style={{ color: "var(--color-text-muted)" }}
           title={thread.last_message_at ? formatAbsoluteDate(thread.last_message_at) : undefined}
         >

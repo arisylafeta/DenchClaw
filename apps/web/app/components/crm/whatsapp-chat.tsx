@@ -5,7 +5,7 @@ import type { WhatsappConversationData, WhatsappMessage } from "@/lib/crm-postgr
 import { ARCHIVE_PREFIX } from "@/lib/whatsapp-archive";
 import { initialsOf, whatsappChatLabel } from "@/lib/whatsapp-display";
 import styles from "./whatsapp.module.css";
-import { Loading } from "../ui/shimmer";
+import { Loading, ShimmerBar } from "../ui/shimmer";
 import { WhatsappTradeLinks } from "./whatsapp-trade-links";
 
 const pageSize = 50;
@@ -109,9 +109,9 @@ export function WhatsappConversation({ id, embedded = false, onClose, onOpenPers
   return <div className={`${styles.wa} ${styles.pane} ${embedded ? "" : "mx-auto min-h-screen max-w-[920px]"}`}>
     <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }}>
       {(onClose || !embedded) && <button type="button" aria-label="Back to Inbox" onClick={onClose ?? (() => { window.location.href = "/?crm=inbox&view=whatsapp"; })} className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }}><ArrowLeft size={16} aria-hidden /></button>}
-      <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>{group ? <Users size={17} /> : initialsOf(label.text)}</span>
+      <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>{!data ? null : group ? <Users size={17} /> : initialsOf(label.text)}</span>
       <div className="min-w-0 flex-1">
-        <h1 className="flex items-baseline gap-1.5 truncate text-[15px] font-semibold leading-5" title={label.hint}>{label.text}{label.inferred && <span className="text-[12px] font-normal" style={{ color: "var(--color-text-muted)" }}>~ inferred</span>}</h1>
+        <h1 className="flex items-baseline gap-1.5 truncate text-[15px] font-semibold leading-5" title={label.hint}>{!data ? <ShimmerBar w={140} h={14} style={{ marginTop: 3 }} /> : label.text}{data && label.inferred && <span className="text-[12px] font-normal" style={{ color: "var(--color-text-muted)" }}>~ inferred</span>}</h1>
         <p className="truncate text-[12px] leading-4" style={{ color: "var(--color-text-muted)" }}>{group ? "Group · read only" : "Read only"}</p>
       </div>
       {thread?.person_id && onOpenPerson && <button type="button" onClick={() => onOpenPerson(thread.person_id!)} className="rounded-md border px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--color-surface-hover)]" style={{ borderColor: "var(--color-border)" }}>View in CRM</button>}
@@ -121,7 +121,15 @@ export function WhatsappConversation({ id, embedded = false, onClose, onOpenPers
       {!imported && <WhatsappTradeLinks threadId={id} />}
       {error && <p role="alert" className={styles.notice} style={{ color: "#b3261e" }}>{error}</p>}
       {hasEarlier && <button type="button" className={styles.pager} disabled={loading} onClick={() => go(start - pageSize, true)}>Earlier messages</button>}
-      {loading && !data ? <Loading label="Loading conversation…" variant="chat" /> : null}
+      {loading && !data ? <Loading label="Loading conversation…"><div aria-hidden>
+        <time className={styles.chip}><ShimmerBar w={64} h={12} style={{ margin: "4px 0" }} /></time>
+        {[[62, 2, false], [38, 1, false], [54, 3, true], [30, 1, true], [58, 2, false]].map(([width, lines, out], i) => <div key={i} className={`${styles.row} ${i === 0 || i === 2 || i === 4 ? styles.rowFirst : ""} ${out ? styles.rowOut : ""}`}>
+          <span className={`${styles.bubble} ${out ? styles.out : ""} ${i === 0 || i === 2 || i === 4 ? (out ? styles.tailOut : styles.tailIn) : ""}`} style={{ width: `${width}%` }}>
+            {Array.from({ length: lines as number }, (_, l) => <span key={l} className="block" style={{ height: 19, paddingTop: 4 }}><ShimmerBar w={l === (lines as number) - 1 ? "70%" : "100%"} h={11} /></span>)}
+            <span className={styles.meta}><ShimmerBar w={28} h={9} /></span>
+          </span>
+        </div>)}
+      </div></Loading> : null}
       {data && !runs.length && !loading && <p className={styles.chip}>No messages captured for this chat</p>}
       <div aria-busy={loading} style={{ opacity: loading && data ? 0.6 : 1 }}>
         {runs.map((run) => <Fragment key={run.key}>

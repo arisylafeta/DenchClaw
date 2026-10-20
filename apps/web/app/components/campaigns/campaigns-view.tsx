@@ -7,9 +7,9 @@ import type { MailCampaignDetail, MailCampaignSummary } from "@/lib/mail-types";
 import { buildEntryLink, buildFileLink } from "@/lib/workspace-links";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
-import { Loading } from "../ui/shimmer";
+import { Loading, ShimmerBar } from "../ui/shimmer";
 import { InboxLayout, PANEL_LAYOUT } from "../crm/inbox/inbox-layout";
-import { CampaignPage } from "./campaign-page";
+import { CampaignPage, CampaignPageSkeleton } from "./campaign-page";
 import { CampaignDate, CampaignPin, LIST_METRICS, PAGE_SIZE, Pagination, StatusTag, followInApp, humanize, metricRate, mutedStyle } from "./campaign-ui";
 
 export type CampaignsViewProps = {
@@ -61,12 +61,27 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
           <main className="min-w-0 flex-1 pb-8 pt-6">
             {current?.error ? <div className="flex flex-col items-start gap-3 px-4 sm:px-8"><ErrorText error={current.error} /><button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button></div>
               : current?.payload?.kind === "list" ? <CampaignsList campaigns={current.payload.campaigns} onOpenCampaign={onOpenCampaign} search={search} status={status} />
-              : <Loading label={`Loading ${campaignId == null ? "campaigns" : "campaign"}…`} variant={campaignId == null ? "cards" : "detail"} />}
+              : campaignId == null ? <CampaignListSkeleton /> : <CampaignPageSkeleton />}
           </main>
         </>
       )}
     </div>
   );
+}
+
+/** Same row as a campaign: pin, title, three metrics, status pill, date, with the same height and divider. */
+function CampaignRowSkeleton({ compact, index, single }: { compact: boolean; index: number; single: boolean }) {
+  const widths = ["52%", "64%", "40%", "58%"];
+  return <li aria-hidden className={`flex min-h-[52px] items-center gap-3 border-b px-4 py-3 last:border-b-0 ${compact ? "" : "sm:px-8"}`} style={{ borderColor: "var(--bt-divider)" }}>
+    <ShimmerBar w={10} h={10} round />
+    <span className="min-w-0 flex-1"><ShimmerBar w={widths[index % widths.length]} h={14} /></span>
+    <span className={`flex shrink-0 items-center ${compact ? "gap-3" : "gap-4"}`}>{Array.from({ length: single ? 1 : 3 }, (_, i) => <ShimmerBar key={i} w={compact ? 22 : 56} h={12} />)}</span>
+    <ShimmerBar w={64} h={22} round />
+    <ShimmerBar w={compact ? 68 : 84} h={12} className="shrink-0" />
+  </li>;
+}
+export function CampaignListSkeleton({ compact = false, single = false, rows = 8 }: { compact?: boolean; single?: boolean; rows?: number }) {
+  return <Loading label="Loading campaigns…"><ul className="border-y" style={{ borderColor: "var(--bt-divider)" }}>{Array.from({ length: rows }, (_, i) => <CampaignRowSkeleton key={i} index={i} compact={compact} single={single} />)}</ul></Loading>;
 }
 
 function CampaignsList({ campaigns, onOpenCampaign, search, status, compact = false, selectedId = null }: { campaigns: (CampaignSummary & MailCampaignSummary)[]; onOpenCampaign: (id: string) => void; search?: string; status: string; compact?: boolean; selectedId?: string | null }) {
@@ -88,7 +103,7 @@ function CampaignsList({ campaigns, onOpenCampaign, search, status, compact = fa
       <ul ref={list} aria-label="Campaigns" className="border-y" style={{ borderColor: "var(--bt-divider)" }}>
         {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => {
           const selected = selectedId === campaign.id;
-          return <li key={campaign.id} aria-current={selected ? "true" : undefined} className={`flex items-center gap-3 border-b px-4 py-3 last:border-b-0 hover:bg-[var(--bt-row-hover)] ${compact ? "cursor-pointer" : "sm:px-8"}`}
+          return <li key={campaign.id} aria-current={selected ? "true" : undefined} className={`flex min-h-[52px] items-center gap-3 border-b px-4 py-3 last:border-b-0 hover:bg-[var(--bt-row-hover)] ${compact ? "cursor-pointer" : "sm:px-8"}`}
             style={{ borderColor: "var(--bt-divider)", background: selected ? "color-mix(in srgb, var(--color-accent-fill) 14%, transparent)" : undefined, boxShadow: selected ? "inset 3px 0 0 var(--color-accent)" : undefined }} onClick={compact ? () => onOpenCampaign(campaign.id) : undefined}>
             <CampaignPin id={campaign.id} />
             <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="min-w-0 flex-1 truncate text-[14px] font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
@@ -135,11 +150,11 @@ export function CampaignsPanel({ campaignId, onOpenCampaign, onBack, onNavigateP
     list={<div className="bulk-trades h-full min-h-0 overflow-y-auto pt-3" style={{ background: "var(--color-bg)" }}>
       {list.error ? <div className="flex flex-col items-start gap-3 px-4"><ErrorText error={list.error} />{retry}</div>
         : list.campaigns ? <CampaignsList compact campaigns={list.campaigns} selectedId={campaignId} onOpenCampaign={onOpenCampaign} search={search} status={status} />
-        : <Loading label="Loading campaigns…" variant="cards" />}
+        : <CampaignListSkeleton compact single={campaignId != null} />}
     </div>}
     conversation={campaignId == null
       ? <div className="flex h-full flex-col items-center justify-center gap-1.5 px-8 text-center" style={{ background: "var(--color-main-bg)" }}><span className="text-lg font-medium">Pick a campaign</span><span className="max-w-xs text-[13px]" style={mutedStyle}>Open a campaign to see its delivery, engagement and recipients here.</span></div>
       : detail?.error ? <div className="flex flex-col items-start gap-3 p-6"><ErrorText error={detail.error} />{retry}</div>
       : detail?.value && detail.id === campaignId ? <div className="bulk-trades flex h-full min-h-0 min-w-0 flex-col"><CampaignPage key={campaignId} detail={detail.value} onBack={onBack} onNavigatePerson={onNavigatePerson} /></div>
-      : <Loading label="Loading campaign…" variant="detail" />} />;
+      : <CampaignPageSkeleton />} />;
 }

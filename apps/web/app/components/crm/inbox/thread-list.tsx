@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { CrmEmptyState, CrmLoadingState } from "../crm-list-shell";
-import { ThreadListRow } from "./thread-list-row";
+import { CrmEmptyState } from "../crm-list-shell";
+import { Loading, ShimmerBar } from "../../ui/shimmer";
+import { ThreadListRow, ThreadListRowSkeleton } from "./thread-list-row";
 import type { Thread } from "./types";
 
 /**
@@ -70,7 +71,12 @@ export function ThreadList({
   const groups = useMemo(() => groupByDay(threads), [threads]);
 
   if (loading && threads.length === 0) {
-    return <CrmLoadingState />;
+    return <Loading label="Loading…">
+      <section>
+        <h3 className="px-4 py-1.5" style={{ background: "var(--color-bg)", borderBottom: "1px solid var(--color-border)" }}><ShimmerBar w={72} h={10} style={{ margin: "2px 0" }} /></h3>
+        <div>{Array.from({ length: 9 }, (_, i) => <ThreadListRowSkeleton key={i} index={i} />)}</div>
+      </section>
+    </Loading>;
   }
   if (threads.length === 0) {
     return (

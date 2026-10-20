@@ -4,6 +4,7 @@ import type { MouseEvent, ReactNode } from "react";
 import type { CampaignRecipient, CampaignSummary } from "@/lib/campaigns";
 import { buildEntryLink } from "@/lib/workspace-links";
 import { buttonClass, buttonStyle } from "../bulk-trades/trade-ui";
+import { ShimmerBar } from "../ui/shimmer";
 
 export const PAGE_SIZE = 25;
 export const mutedStyle = { color: "var(--bt-muted)" };
@@ -56,35 +57,23 @@ export function metricRate(counts: Counts, key: typeof METRIC_KEYS[number]): str
   return `${new Intl.NumberFormat("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format((100 * value) / base)}%`;
 }
 
-/** One compact strip of the seven mail-log metrics with counts and rates. */
-export function MetricRow({ counts, notTracked = [], size = "sm", compact = false }: { counts: Counts; notTracked?: readonly string[]; size?: "sm" | "lg"; compact?: boolean }) {
-  return <dl className={`grid grid-cols-4 gap-x-4 gap-y-2 ${compact ? "" : "sm:grid-cols-7"}`}>
+/** One compact strip of the seven mail-log metrics with counts and rates. Columns reflow to the width, so it never scrolls sideways. `loading` keeps the exact structure with placeholder values. */
+export function MetricRow({ counts, notTracked = [], size = "sm", compact = false, loading = false }: { counts?: Counts; notTracked?: readonly string[]; size?: "sm" | "lg"; compact?: boolean; loading?: boolean }) {
+  const lg = size === "lg";
+  return <dl className="grid gap-x-4 gap-y-3" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${compact ? 64 : lg ? 84 : 72}px, 1fr))` }}>
     {METRIC_KEYS.map((key) => {
-      const value = counts[key]; const rate = metricRate(counts, key);
+      const value = counts?.[key]; const rate = counts ? metricRate(counts, key) : null;
       return <div key={key} className="min-w-0">
-        <dt className="text-[11px] uppercase tracking-[0.04em]" style={mutedStyle}>{humanize(key)}</dt>
-        <dd className={`bt-mono font-semibold tabular-nums ${size === "lg" ? "text-[22px] leading-8" : "text-[15px] leading-6"}`}>{notTracked.includes(key) ? <span className="text-[13px] font-normal" style={mutedStyle}>Not tracked</span> : value == null ? (size === "lg" ? "Unknown" : "—") : value.toLocaleString("en-GB")}</dd>
-        <dd className="text-[11px] tabular-nums" style={mutedStyle}>{rate ?? "\u00a0"}</dd>
+        <dt className="h-4 text-[11px] uppercase leading-4 tracking-[0.04em]" style={mutedStyle}>{humanize(key)}</dt>
+        <dd className={`bt-mono font-semibold tabular-nums ${lg ? "h-8 text-[22px] leading-8" : "h-6 text-[15px] leading-6"}`}>
+          {loading ? <ShimmerBar w="55%" h={lg ? 22 : 14} style={{ marginTop: lg ? 5 : 5 }} />
+            : notTracked.includes(key) ? <span title="Not tracked" style={mutedStyle}>—<span className="sr-only">Not tracked</span></span>
+            : value == null ? (lg ? "Unknown" : "—") : value.toLocaleString("en-GB")}
+        </dd>
+        <dd className="h-4 text-[11px] leading-4 tabular-nums" style={mutedStyle}>{loading ? <ShimmerBar w="40%" h={9} style={{ marginTop: 3 }} /> : rate ?? "\u00a0"}</dd>
       </div>;
     })}
   </dl>;
-}
-
-export function MetricsStrip({ campaign }: { campaign: CampaignSummary }) {
-  const cells: Array<readonly [string, number | null]> = [["Sent", campaign.metrics.sent], ["Delivered", campaign.metrics.delivered], ["Tracked opens", campaign.metrics.opened], ["Tracked clicks", campaign.metrics.clicked]];
-  // Replies are counted from synced email, so only the send ledger has them.
-  if (campaign.metrics_basis === "ledger") { cells.splice(2, 0, ["Replied", campaign.metrics.replied]); }
-  return (
-    <section aria-label="Campaign metrics" className={`grid grid-cols-2 rounded-none border ${cells.length === 5 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`} style={borderStyle}>
-      {cells.map(([label, value], index) => (
-        <div key={label} className="flex flex-col gap-1 border-r px-3.5 py-2.5 last:border-r-0" style={{ borderColor: "var(--bt-divider)", background: index === 0 ? "var(--bt-bg)" : "var(--bt-surface)" }}>
-          <span className="bt-label">{label}</span>
-          <span className="bt-mono text-[22px] font-semibold">{value != null ? value.toLocaleString("en-GB") : campaign.channel === "email-gmail" ? "Not tracked" : "Unknown"}</span>
-          {value == null && campaign.metrics_basis === "ledger" && campaign.tracking_pending > 0 && <span className="text-xs" style={mutedStyle}>Tracking pending</span>}
-        </div>
-      ))}
-    </section>
-  );
 }
 
 export function Observation({ at, recipient }: { at: string | null; recipient: CampaignRecipient }) {
