@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, FileText, HandCoins, History } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, FileText, History } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { useRegistry } from "./use-registry";
@@ -92,7 +92,7 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
 }
 
 const TABS = ["Details", "Documents", "Offers", "History"];
-const TAB_ICONS = { Details: ClipboardList, Documents: FileText, Offers: HandCoins, History: History };
+const TAB_ICONS = { Details: ClipboardList, Documents: FileText, Offers: ArrowLeftRight, History: History };
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
   demand: Demand;

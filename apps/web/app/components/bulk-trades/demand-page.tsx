@@ -96,7 +96,7 @@ export function SheetTabs({
   return (
     <nav
       aria-label="Detail sections"
-      className={`flex gap-5 border-b${centered ? " justify-center" : ""}`}
+      className={`flex border-b${centered ? "" : " gap-5"}`}
       style={{ borderColor: "var(--bt-border)" }}
     >
       {tabs.map((tab) => (
@@ -105,7 +105,7 @@ export function SheetTabs({
           type="button"
           aria-pressed={value === tab}
           onClick={() => onChange(tab)}
-          className={`${rowFocus} inline-flex items-center gap-1.5 border-b-2 py-3 text-[13px] font-medium`}
+          className={`${rowFocus} inline-flex items-center gap-1.5 border-b-2 py-3 text-[13px] font-medium${centered ? " flex-1 justify-center" : ""}`}
           style={{
             borderColor: value === tab ? "var(--bt-accent)" : "transparent",
             color: value === tab ? "var(--bt-text)" : "var(--bt-muted)",
