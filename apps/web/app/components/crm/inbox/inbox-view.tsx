@@ -9,15 +9,20 @@ import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
 import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsView } from "../../campaigns/campaigns-view";
-import { Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
+import { Mail, Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
 import { mailCounterparty } from "@/lib/mail-counterparty";
 
 export type MailView = NonNullable<MailFilters["view"]>;
 const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", drafts: "Drafts", sent: "Sent", followups: "Follow-ups", whatsapp: "WhatsApp" };
-// Campaigns has its own button; Follow-ups has no tab (still reachable by URL).
-const tabless: MailView[] = ["campaigns", "followups", "whatsapp"];
+// Two tab levels. Upper: Mail, WhatsApp, Campaigns. Inner (inside Mail): Conversations, Drafts, Sent. Follow-ups has no tab (still reachable by URL).
+const mailViews: MailView[] = ["conversations", "drafts", "sent"];
+const sections: { key: string; label: string; view: MailView; views: MailView[]; icon: typeof Mail }[] = [
+  { key: "mail", label: "Mail", view: "conversations", views: [...mailViews, "followups"], icon: Mail },
+  { key: "whatsapp", label: "WhatsApp", view: "whatsapp", views: ["whatsapp"], icon: MessageCircle },
+  { key: "campaigns", label: "Campaigns", view: "campaigns", views: ["campaigns"], icon: Megaphone },
+];
 const filterOptions: Record<string, string[]> = {
   direction: ["inbound", "outbound"], transport: ["gmail", "postmark-broadcast", "postmark-transactional"],
   purpose: ["personal", "marketing", "transactional"], state: ["draft", "frozen", "approved", "sending", "unknown", "accepted", "failed", "received"],
@@ -58,15 +63,9 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly", "showInternal"].includes(key) && value !== "" && value !== undefined);
   return <div className={`${styles.page} flex h-full min-h-0 flex-col`}>
     <header className={styles.header}>
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Mail</h1>
-        <div className="flex items-center gap-2">
-        <button type="button" aria-pressed={view === "whatsapp"} className={`${styles.control} ${styles.button}`} onClick={() => update("view", "whatsapp")}><MessageCircle size={14} aria-hidden />WhatsApp</button>
-        <button type="button" aria-pressed={view === "campaigns"} className={`${styles.control} ${styles.button}`} onClick={() => update("view", "campaigns")}><Megaphone size={14} aria-hidden />Campaigns</button>
-        </div>
-      </div>
-      <nav role="tablist" aria-label="Mail views" className={styles.tabs}>
-        {(Object.entries(views) as [MailView, string][]).filter(([key]) => !tabless.includes(key)).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} className={styles.tab} onClick={() => update("view", key)}>{label}</button>)}
+      <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Inbox</h1>
+      <nav role="tablist" aria-label="Inbox sections" className={styles.tabs}>
+        {sections.map(({ key, label, view: target, views: group, icon: Icon }) => <button key={key} role="tab" aria-selected={group.includes(view)} className={`${styles.tab} inline-flex items-center gap-1.5`} onClick={() => { if (!group.includes(view)) {update("view", target);} }}><Icon size={14} aria-hidden />{label}</button>)}
       </nav>
     </header>
     <div role="group" aria-label="Mail filters" className={styles.toolbar}>
@@ -85,14 +84,19 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
       {(["since", "until"] as const).map((key) => <label key={key} className={styles.filter}><span className="capitalize">{key}</span><input className={styles.control} type="date" value={filters[key] ?? ""} onChange={(event) => update(key, event.target.value)} /></label>)}
     </div>}
     <div className={styles.body}>
-    {(view === "conversations" || view === "sent" || view === "drafts") && <AccountRail query={query} identity={filters.identity ?? ""} showCounts={view !== "drafts"} onSelect={(value) => update("identity", value)} />}
-    <section role="tabpanel" aria-label={views[view]} className="min-h-0 min-w-0 flex-1 overflow-auto">
-      {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
-      {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query={query} />}
-      {view === "whatsapp" && <WhatsappView query={query} />}
-      {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
-      {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
-    </section>
+    {mailViews.includes(view) && <AccountRail query={query} identity={filters.identity ?? ""} showCounts={view !== "drafts"} onSelect={(value) => update("identity", value)} />}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {mailViews.includes(view) && <nav role="tablist" aria-label="Mail folders" className={styles.subtabs}>
+        {mailViews.map((key) => <button key={key} role="tab" aria-selected={view === key} className={styles.subtab} onClick={() => update("view", key)}>{views[key]}</button>)}
+      </nav>}
+      <section role="tabpanel" aria-label={views[view]} className="min-h-0 min-w-0 flex-1 overflow-auto">
+        {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
+        {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query={query} />}
+        {view === "whatsapp" && <WhatsappView query={query} />}
+        {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
+        {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
+      </section>
+    </div>
     </div>
   </div>;
 }

@@ -36,15 +36,21 @@ describe("merged mail", () => {
     render(<InboxView />);
     expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: "Follow-ups" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Campaigns" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
+    const upper = within(screen.getByRole("tablist", { name: "Inbox sections" }));
+    expect(upper.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Mail", "WhatsApp", "Campaigns"]);
+    expect(upper.getByRole("tab", { name: "Mail" })).toHaveAttribute("aria-selected", "true");
+    expect(within(screen.getByRole("tablist", { name: "Mail folders" })).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Conversations", "Drafts", "Sent"]);
     for (const label of ["Drafts", "Sent", "Conversations"]) {
       fireEvent.click(screen.getByRole("tab", { name: label }));
       expect(screen.getByRole("tabpanel", { name: label })).toBeInTheDocument();
     }
-    fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
+    fireEvent.click(upper.getByRole("tab", { name: "Campaigns" }));
     expect(screen.getByRole("tabpanel", { name: "Campaigns" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Campaigns" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("tab", { name: "Conversations" }));
+    expect(screen.queryByRole("tablist", { name: "Mail folders" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Mail accounts" })).not.toBeInTheDocument();
+    fireEvent.click(upper.getByRole("tab", { name: "Mail" }));
+    expect(screen.getByRole("tabpanel", { name: "Conversations" })).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/messages?"), expect.anything()));
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns?"), expect.anything());
   });
@@ -122,12 +128,12 @@ describe("merged mail", () => {
     expect(within(row as HTMLElement).getByText(view === "sent" ? "— Sent body" : "— Draft body")).toBeInTheDocument();
     expect(within(row as HTMLElement).getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
-  it("opens a WhatsApp chat list from the header button", async () => {
+  it("opens a WhatsApp chat list from the upper tab", async () => {
     vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(String(url).includes("/api/whatsapp/inbox")
       ? { threads: [{ id: "t1", kind: "direct", name: "Mathieu", last_captured_at: at, message_count: 4, last_body: "Collection is Thursday", last_direction: "inbound", last_at: at }] }
       : { items: [], nextCursor: null })));
     render(<InboxView />);
-    fireEvent.click(screen.getByRole("button", { name: "WhatsApp" }));
+    fireEvent.click(screen.getByRole("tab", { name: "WhatsApp" }));
     expect(await screen.findByText("Collection is Thursday")).toBeInTheDocument();
     expect(screen.getByRole("tabpanel", { name: "WhatsApp" })).toBeInTheDocument();
     expect(screen.getByText("Mathieu").closest("a")).toHaveAttribute("href", "/whatsapp/threads/t1");
