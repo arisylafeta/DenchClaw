@@ -10,7 +10,7 @@ import { request } from "../bulk-trades/trade-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../platform-admin/ui/tabs";
 import { CampaignRecipients } from "./campaign-recipients";
 import { CampaignListings, CampaignWebsiteActivity } from "./campaign-activity-panel";
-import { CampaignDate, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignDate, MetricRow, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
 type Props = { detail: MailCampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
 type ActivityState = { campaignId: string; activity: CampaignActivity | null; failed: boolean };
@@ -47,7 +47,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
           <a href={buildFileLink("campaign")} onClick={(event) => followInApp(event, onBack)} className="inline-flex items-center gap-1.5 hover:underline"><ArrowLeft size={14} aria-hidden="true" />Back to Campaigns</a>
         </nav>
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="min-w-0 break-words text-[26px] font-semibold tracking-[-0.01em]">{campaign.name}</h1>
+          <h1 className="min-w-0 break-words text-[24px] font-semibold tracking-[-0.01em]">{campaign.name}</h1>
           <StatusTag status={detail.mail_state ?? campaign.status} />
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]" style={{ color: "var(--bt-text-2)" }}>
@@ -56,18 +56,21 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
           <span>Audience: {campaign.audience ? humanize(campaign.audience) : "Unknown"}{campaign.audience_size != null ? ` · ${campaign.audience_size.toLocaleString("en-GB")}` : ""}</span>
           <span>Sent: <CampaignDate value={campaign.launched_at || campaign.last_invite_at} /></span>
         </div>
-        <section aria-label="Campaign metrics" className="grid grid-cols-2 border sm:grid-cols-7" style={{ borderColor: "var(--bt-border)" }}>
-          {(["sent", "delivered", "bounced", "opened", "clicked", "unsubscribed", "replied"] as const).map((key) => <div key={key} className="p-3"><span className="bt-label">{humanize(key)}</span><p className="text-xl font-semibold">{campaign.channel === "email-gmail" && ["delivered", "opened", "clicked"].includes(key) ? "Not tracked" : detail[key] ?? "Unknown"}</p></div>)}
+        <section aria-label="Campaign metrics" className="flex flex-col gap-3 rounded-lg border px-4 py-3.5" style={{ borderColor: "var(--bt-border)", background: "var(--bt-bg)" }}>
+          <MetricRow size="lg" counts={detail} notTracked={campaign.channel === "email-gmail" ? ["delivered", "opened", "clicked"] : []} />
+          {detail.sent && detail.delivered != null && <div role="img" aria-label={`${detail.delivered} of ${detail.sent} delivered`} className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--bt-divider)" }}><div className="h-full rounded-full" style={{ width: `${Math.min(100, (100 * detail.delivered) / detail.sent)}%`, background: "var(--color-accent-fill)" }} /></div>}
         </section>
         <p role="note" className="text-xs" style={mutedStyle}>Scanner evidence: {detail.scanner_evidence ? "recorded" : "not recorded"} · Proxy evidence: {detail.proxy_evidence ? "recorded" : "not recorded"}. Opens and clicks do not prove human engagement.</p>
         {detail.dismantler_funnel && <DismantlerFunnel funnel={detail.dismantler_funnel} />}
-        <section aria-label="Metrics provenance" className="flex flex-col gap-1 text-xs" style={mutedStyle}>
+        <details className="text-xs" style={mutedStyle}><summary className="cursor-pointer text-[13px] font-medium" style={{ color: "var(--bt-text-2)" }}>How these numbers are counted</summary>
+        <section aria-label="Metrics provenance" className="mt-2 flex flex-col gap-1">
           <p>The seven totals above come from the mail log. Historical snapshot metadata is kept separately below.</p>
           <p>{campaign.metrics_basis === "snapshot" ? "Historical snapshot" : "Recipient ledger totals"} · {campaign.metrics_basis === "snapshot" ? `Original sent: ${campaign.metrics.sent ?? "Unknown"} · ` : ""}Retained recipients: {campaign.recipient_count.toLocaleString("en-GB")}</p>
           <p>{campaign.metrics_basis === "snapshot" ? "Saved totals are preserved; the retained recipient ledger below may not cover every original send." : "Totals come from the retained send ledger and its available tracking observations."}</p>
           <p>{campaign.metrics_observed_at ? <>{campaign.metrics_basis === "snapshot" ? "Snapshot refreshed" : "Latest recipient check"}: <CampaignDate value={campaign.metrics_observed_at} withTime />. This does not mean every recipient was checked.</> : "Observation freshness is unknown."}</p>
           <p>Open and click tracking may include automated activity; these counts do not verify human reads or website visits.</p>
-        </section>
+          <p>Delivery and bounce rates are shares of sent. Opens, clicks, replies and unsubscribes are shares of delivered.</p>
+        </section></details>
         {campaign.tracking_pending > 0 && <p role="status" className="border px-3 py-2 text-[13px]" style={{ background: "var(--bt-amber-bg)", borderColor: "var(--bt-amber-border)", color: "var(--bt-amber)" }}>{campaign.tracking_pending} accepted {campaign.tracking_pending === 1 ? "send has" : "sends have"} not been synced. Tracking is pending, not evidence of no engagement; any recorded events remain visible.</p>}
         <CampaignWebsiteActivity activity={activity} loading={activityLoading} />
       </header>

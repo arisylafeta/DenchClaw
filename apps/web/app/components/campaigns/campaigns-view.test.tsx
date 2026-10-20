@@ -79,12 +79,23 @@ describe("CampaignsView", () => {
     const query = "view=campaigns&identity=ari&event=clicked&crmOnly=true";
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/historical") ? { ...detail, ...counts } : { items: [{ ...summary, ...counts }] }))));
     const view = render(<CampaignsView {...props} embedded campaignId={null} query={query} />);
-    await screen.findByRole("table", { name: "Campaigns" });
+    await screen.findByRole("list", { name: "Campaigns" });
     expect(screen.queryByRole("heading", { name: "Campaigns" })).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns?${query}`, expect.anything());
     view.rerender(<CampaignsView {...props} embedded query={query} />);
     await screen.findByRole("table", { name: "Recipients" });
     expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns/historical?${query}`, expect.anything());
+  });
+  it("shows rates against the right denominator and the list needs no search box of its own when the host owns search", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [{ ...summary, ...counts }, { ...summary, id: "other", name: "Other offer", ...counts, mail_state: "retired" }] }))));
+    render(<CampaignsView {...props} campaignId={null} search="" status="retired" />);
+    const list = await screen.findByRole("list", { name: "Campaigns" });
+    expect(screen.queryByRole("searchbox", { name: "Search campaigns" })).not.toBeInTheDocument();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    const row = within(list).getAllByRole("listitem")[0];
+    expect(row).toHaveTextContent("98.3%");
+    expect(row).toHaveTextContent("21.2%");
+    expect(row).toHaveTextContent("2.6%");
   });
   it("opens a campaign within the merged view without also opening a workspace tab", async () => {
     const outerNavigation = vi.fn();
@@ -99,9 +110,9 @@ describe("CampaignsView", () => {
   it("renders each mail-log count separately in the list and detail", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/activity") ? unavailable : url === "/api/mail/campaigns" ? { items: [{ ...summary, ...counts }] } : { ...detail, ...counts, scanner_evidence: true, proxy_evidence: true, links: [{ id: "link", cta_key: "offer", destination_url: "https://example.test/offer", first_clicked_at: AT }] }))));
     const view = render(<CampaignsView {...props} campaignId={null} />);
-    const table = await screen.findByRole("table", { name: "Campaigns" });
-    for (const name of ["Sent", "Delivered", "Bounced", "Opened", "Clicked", "Unsubscribed", "Replied"]) {expect(within(table).getByRole("columnheader", { name })).toBeInTheDocument();}
-    expect(within(table).getAllByRole("row")[1].textContent).toContain("1151133241321");
+    const list = await screen.findByRole("list", { name: "Campaigns" });
+    const row = within(list).getAllByRole("listitem")[0];
+    for (const [key, value] of Object.entries(counts)) {expect(within(row).getAllByText(key[0].toUpperCase() + key.slice(1), { exact: true }).find((node) => node.tagName === "DT")!.parentElement).toHaveTextContent(String(value));}
     view.rerender(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
     for (const [key, value] of Object.entries(counts)) {expect(within(metrics).getByText(key[0].toUpperCase() + key.slice(1), { exact: true }).parentElement).toHaveTextContent(String(value));}

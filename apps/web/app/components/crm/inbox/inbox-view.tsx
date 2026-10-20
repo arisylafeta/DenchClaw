@@ -23,6 +23,7 @@ const sections: { key: string; label: string; view: MailView; views: MailView[];
   { key: "whatsapp", label: "WhatsApp", view: "whatsapp", views: ["whatsapp"], icon: MessageCircle },
   { key: "campaigns", label: "Campaigns", view: "campaigns", views: ["campaigns"], icon: Megaphone },
 ];
+const campaignStatuses = ["sending", "sent", "launched", "completed", "retired", "legacy"];
 const filterOptions: Record<string, string[]> = {
   direction: ["inbound", "outbound"], transport: ["gmail", "postmark-broadcast", "postmark-transactional"],
   purpose: ["personal", "marketing", "transactional"], state: ["draft", "frozen", "approved", "sending", "unknown", "accepted", "failed", "received"],
@@ -45,8 +46,10 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   }));
   const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId ?? params.get("campaignDetail"));
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [campaignStatus, setCampaignStatus] = useState("");
   const query = mailQuery(filters);
   const view = filters.view ?? "conversations";
+  const section = (sections.find((entry) => entry.views.includes(view)) ?? sections[0]).key;
   useEffect(() => {
     const next = new URLSearchParams(params.toString());
     next.set("crm", "inbox");
@@ -65,10 +68,10 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
     <header className={styles.header}>
       <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Inbox</h1>
       <nav role="tablist" aria-label="Inbox sections" className={styles.tabs}>
-        {sections.map(({ key, label, view: target, views: group, icon: Icon }) => <button key={key} role="tab" aria-selected={group.includes(view)} className={`${styles.tab} inline-flex items-center gap-1.5`} onClick={() => { if (!group.includes(view)) {update("view", target);} }}><Icon size={14} aria-hidden />{label}</button>)}
+        {sections.map(({ key, label, view: target, views: group, icon: Icon }) => <button key={key} role="tab" aria-selected={group.includes(view)} className={`${styles.tab} inline-flex items-center gap-1.5`} onClick={() => { if (!group.includes(view)) { setFilters((current) => ({ ...current, view: target, q: "" })); setFiltersOpen(false); } }}><Icon size={14} aria-hidden />{label}</button>)}
       </nav>
     </header>
-    <div role="group" aria-label="Mail filters" className={styles.toolbar}>
+    {section === "mail" && <div role="group" aria-label="Mail filters" className={styles.toolbar}>
       <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
         <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
         <input aria-label="Search mail" placeholder="Search mail…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
@@ -77,8 +80,23 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
       <label className="ml-1 flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.crmOnly} onChange={(event) => update("crmOnly", event.target.checked)} />CRM-only</label>
       <label className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.showInternal === true} onChange={(event) => setFilters((current) => { const { showInternal: _omit, ...rest } = current; return event.target.checked ? { ...rest, showInternal: true } : rest; })} />Show internal</label>
       {activeFilters.map(([key, value]) => <button key={key} className={styles.chip} aria-label={`Remove ${key} filter`} onClick={() => update(key, "")}><span className="capitalize">{key}</span>: {String(value)}<X size={11} aria-hidden /></button>)}
-    </div>
-    {filtersOpen && <div id="mail-filter-options" className={styles.filters}>
+    </div>}
+    {section === "whatsapp" && <div role="group" aria-label="WhatsApp search" className={styles.toolbar}>
+      <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
+        <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
+        <input aria-label="Search chats" placeholder="Search chats…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
+      </label>
+    </div>}
+    {section === "campaigns" && !campaignId && <div role="group" aria-label="Campaign filters" className={styles.toolbar}>
+      <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
+        <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
+        <input aria-label="Search campaigns" placeholder="Search campaigns…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
+      </label>
+      <label className="flex items-center gap-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Status
+        <select aria-label="Campaign status" className={styles.control} value={campaignStatus} onChange={(event) => setCampaignStatus(event.target.value)}><option value="">All</option>{campaignStatuses.map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select>
+      </label>
+    </div>}
+    {section === "mail" && filtersOpen && <div id="mail-filter-options" className={styles.filters}>
       {Object.entries(filterOptions).map(([key, options]) => <label key={key} className={styles.filter}><span className="capitalize">{key}</span><select aria-label={key} className={styles.control} value={String(filters[key as keyof MailFilters] ?? "")} onChange={(event) => update(key, event.target.value)}><option value="">All</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>)}
       {(["campaign", "from", "to", "thread"] as const).map((key) => <label key={key} className={styles.filter}><span className="capitalize">{key}</span><input className={styles.control} value={filters[key] ?? ""} onChange={(event) => update(key, event.target.value)} /></label>)}
       {(["since", "until"] as const).map((key) => <label key={key} className={styles.filter}><span className="capitalize">{key}</span><input className={styles.control} type="date" value={filters[key] ?? ""} onChange={(event) => update(key, event.target.value)} /></label>)}
@@ -91,8 +109,8 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
       </nav>}
       <section role="tabpanel" aria-label={views[view]} className="min-h-0 min-w-0 flex-1 overflow-auto">
         {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
-        {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query={query} />}
-        {view === "whatsapp" && <WhatsappView query={query} />}
+        {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query="" search={filters.q ?? ""} status={campaignStatus} />}
+        {view === "whatsapp" && <WhatsappView query={`q=${encodeURIComponent(filters.q ?? "")}`} />}
         {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
         {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
       </section>

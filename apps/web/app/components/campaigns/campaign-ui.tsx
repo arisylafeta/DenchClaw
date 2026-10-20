@@ -35,8 +35,39 @@ export function PersonLink({ id, children, onNavigate }: { id: string; children:
   return <a href={buildEntryLink("people", id)} onClick={(event) => followInApp(event, () => onNavigate(id))} className="font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{children}</a>;
 }
 
+const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
+  sent: { bg: "color-mix(in srgb, var(--color-accent-fill) 35%, transparent)", fg: "var(--bt-text)" },
+  sending: { bg: "var(--bt-amber-bg)", fg: "var(--bt-amber)" },
+  scheduled: { bg: "var(--bt-amber-bg)", fg: "var(--bt-amber)" },
+  failed: { bg: "color-mix(in srgb, var(--bt-red) 12%, transparent)", fg: "var(--bt-red)" },
+};
 export function StatusTag({ status }: { status: string }) {
-  return <span className="inline-flex rounded-none border px-2 py-0.5 text-xs font-medium" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-border)", color: "var(--bt-text-2)" }}>{humanize(status)}</span>;
+  const tone = STATUS_TONE[status.toLowerCase()];
+  return <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium" style={{ background: tone?.bg ?? "var(--bt-bg)", borderColor: "var(--bt-border)", color: tone?.fg ?? "var(--bt-text-2)" }}>{humanize(status)}</span>;
+}
+
+type Counts = { sent: number | null; delivered: number | null; bounced: number | null; opened: number | null; clicked: number | null; unsubscribed: number | null; replied: number | null };
+export const METRIC_KEYS = ["sent", "delivered", "opened", "clicked", "replied", "bounced", "unsubscribed"] as const;
+/** Delivery and bounce are shares of sent; opens, clicks, replies and unsubscribes are shares of delivered. No denominator renders as no rate, never 0%. */
+export function metricRate(counts: Counts, key: typeof METRIC_KEYS[number]): string | null {
+  if (key === "sent") { return null; }
+  const value = counts[key]; const base = key === "delivered" || key === "bounced" ? counts.sent : counts.delivered;
+  if (value == null || !base) { return null; }
+  return `${new Intl.NumberFormat("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format((100 * value) / base)}%`;
+}
+
+/** One compact strip of the seven mail-log metrics with counts and rates. */
+export function MetricRow({ counts, notTracked = [], size = "sm" }: { counts: Counts; notTracked?: readonly string[]; size?: "sm" | "lg" }) {
+  return <dl className="grid grid-cols-4 gap-x-4 gap-y-2 sm:grid-cols-7">
+    {METRIC_KEYS.map((key) => {
+      const value = counts[key]; const rate = metricRate(counts, key);
+      return <div key={key} className="min-w-0">
+        <dt className="text-[11px] uppercase tracking-[0.04em]" style={mutedStyle}>{humanize(key)}</dt>
+        <dd className={`bt-mono font-semibold tabular-nums ${size === "lg" ? "text-[22px] leading-8" : "text-[15px] leading-6"}`}>{notTracked.includes(key) ? <span className="text-[13px] font-normal" style={mutedStyle}>Not tracked</span> : value == null ? (size === "lg" ? "Unknown" : "—") : value.toLocaleString("en-GB")}</dd>
+        <dd className="text-[11px] tabular-nums" style={mutedStyle}>{rate ?? "\u00a0"}</dd>
+      </div>;
+    })}
+  </dl>;
 }
 
 export function MetricsStrip({ campaign }: { campaign: CampaignSummary }) {

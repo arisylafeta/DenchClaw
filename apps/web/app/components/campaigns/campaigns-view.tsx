@@ -1,7 +1,5 @@
 "use client";
 
-import tableStyles from "../ui/data-table.module.css";
-import { TableCell } from "../ui/table-cell";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CampaignSummary } from "@/lib/campaigns";
@@ -10,7 +8,7 @@ import { buildEntryLink, buildFileLink } from "@/lib/workspace-links";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import { CampaignPage } from "./campaign-page";
-import { CampaignDate, PAGE_SIZE, Pagination, StatusTag, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignDate, MetricRow, PAGE_SIZE, Pagination, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
 export type CampaignsViewProps = {
   campaignId: string | null;
@@ -19,12 +17,15 @@ export type CampaignsViewProps = {
   onNavigatePerson: (id: string) => void;
   query?: string;
   embedded?: boolean;
+  /** When set, the host toolbar owns search and status; the list shows no search box of its own. */
+  search?: string;
+  status?: string;
 };
 
 type Payload = { kind: "list"; campaigns: (CampaignSummary & MailCampaignSummary)[] } | { kind: "detail"; detail: MailCampaignDetail };
 type Resource = { key: string; payload: Payload | null; error: string | null };
 
-export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePerson, query = "", embedded = false }: CampaignsViewProps) {
+export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePerson, query = "", embedded = false, search, status = "" }: CampaignsViewProps) {
   const key = campaignId == null ? `list:${query}` : `campaign:${campaignId}:${query}`;
   const [attempt, setAttempt] = useState(0);
   const [resource, setResource] = useState<Resource>({ key, payload: null, error: null });
@@ -57,7 +58,7 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
           </header>}
           <main className="min-w-0 flex-1 pb-8 pt-6">
             {current?.error ? <div className="flex flex-col items-start gap-3 px-4 sm:px-8"><ErrorText error={current.error} /><button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button></div>
-              : current?.payload?.kind === "list" ? <CampaignsList campaigns={current.payload.campaigns} onOpenCampaign={onOpenCampaign} />
+              : current?.payload?.kind === "list" ? <CampaignsList campaigns={current.payload.campaigns} onOpenCampaign={onOpenCampaign} search={search} status={status} />
               : <p role="status" className="px-4 text-[13px] sm:px-8" style={mutedStyle}>Loading {campaignId == null ? "campaigns" : "campaign"}…</p>}
           </main>
         </>
@@ -66,38 +67,35 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
   );
 }
 
-function CampaignsList({ campaigns, onOpenCampaign }: { campaigns: (CampaignSummary & MailCampaignSummary)[]; onOpenCampaign: (id: string) => void }) {
-  const [query, setQuery] = useState("");
+function CampaignsList({ campaigns, onOpenCampaign, search, status }: { campaigns: (CampaignSummary & MailCampaignSummary)[]; onOpenCampaign: (id: string) => void; search?: string; status: string }) {
+  const [localQuery, setLocalQuery] = useState("");
   const [page, setPage] = useState(0);
-  const table = useRef<HTMLTableElement>(null);
-  const term = query.trim().toLocaleLowerCase();
-  const rows = campaigns.filter((campaign) => !term || [campaign.name, campaign.audience, campaign.status].some((value) => value?.toLocaleLowerCase().replace(/[_-]+/g, " ").includes(term)));
+  const list = useRef<HTMLUListElement>(null);
+  const term = (search ?? localQuery).trim().toLocaleLowerCase();
+  const rows = campaigns.filter((campaign) => (!status || (campaign.mail_state ?? campaign.status) === status)
+    && (!term || [campaign.name, campaign.audience, campaign.status, campaign.mail_state].some((value) => value?.toLocaleLowerCase().replace(/[_-]+/g, " ").includes(term))));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1));
 
   if (!campaigns.length) { return <p className="px-4 py-8 text-[13px] sm:px-8" style={mutedStyle}>No campaigns are recorded yet.</p>; }
   return (
-    <section aria-label="Campaign list" className={`bulk-trades ${tableStyles.surface}`}>
-      <div data-table-part="toolbar" className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 sm:px-8">
-        <Input data-table-part="search" type="search" aria-label="Search campaigns" placeholder="Search campaign, audience or status" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
-        <span data-table-part="count" className="text-[12px]" style={mutedStyle}>{campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"}</span>
-      </div>
-      <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
-        <table ref={table} tabIndex={-1} aria-label="Campaigns" className={`${tableStyles.table} min-w-[780px] focus:outline-none`}>
-          <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Campaign", "Sent date / audience", "Status", "Sent", "Delivered", "Bounced", "Opened", "Clicked", "Unsubscribed", "Replied"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
-          <tbody>
-            {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => <tr key={campaign.id} className="hover:bg-[var(--bt-row-hover)]">
-              <TableCell className={`${tableStyles.cell} min-w-[190px]`} style={cellStyle}><a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
-              <div className="mt-0.5 text-xs" style={mutedStyle}>Mail log · {campaign.recipient_count} deliveries</div>
-              {campaign.tracking_pending > 0 && <div className="mt-0.5 text-xs" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</div>}</TableCell>
-              <TableCell className={tableStyles.cell} style={cellStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /><div className="mt-0.5" style={mutedStyle}>{humanize(campaign.audience)}</div></TableCell>
-              <TableCell className={tableStyles.cell} style={cellStyle}><StatusTag status={campaign.mail_state ?? campaign.status} /></TableCell>
-              {[campaign.sent, campaign.delivered, campaign.bounced, campaign.opened, campaign.clicked, campaign.unsubscribed, campaign.replied].map((value, index) => <TableCell key={index} className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{value == null ? "Unknown" : value.toLocaleString("en-GB")}</TableCell>)}
-            </tr>)}
-            {!rows.length && <tr><td colSpan={10} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your search.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <div data-table-part="footer"><Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} /></div>
+    <section aria-label="Campaign list" className="bulk-trades">
+      {search === undefined && <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 sm:px-8">
+        <Input type="search" aria-label="Search campaigns" placeholder="Search campaign, audience or status" value={localQuery} onChange={(event) => { setLocalQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
+      </div>}
+      <p className="px-4 pb-2 text-[12px] sm:px-8" style={mutedStyle} aria-live="polite">{rows.length === campaigns.length ? `${campaigns.length} ${campaigns.length === 1 ? "campaign" : "campaigns"}` : `${rows.length} of ${campaigns.length} campaigns`}</p>
+      <ul ref={list} aria-label="Campaigns" className="border-y" style={{ borderColor: "var(--bt-divider)" }}>
+        {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => <li key={campaign.id} className="flex flex-col gap-2.5 border-b px-4 py-3.5 last:border-b-0 hover:bg-[var(--bt-row-hover)] sm:px-8" style={{ borderColor: "var(--bt-divider)" }}>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="min-w-0 max-w-full truncate text-[15px] font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
+            <span className="text-[12px]" style={mutedStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /> · {humanize(campaign.audience)} · {campaign.recipient_count.toLocaleString("en-GB")} deliveries</span>
+            {campaign.tracking_pending > 0 && <span className="text-[12px]" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</span>}
+            <span className="ml-auto"><StatusTag status={campaign.mail_state ?? campaign.status} /></span>
+          </div>
+          <MetricRow counts={campaign} />
+        </li>)}
+        {!rows.length && <li className="px-4 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your filters.</li>}
+      </ul>
+      <Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); list.current?.focus({ preventScroll: true }); }} />
     </section>
   );
 }

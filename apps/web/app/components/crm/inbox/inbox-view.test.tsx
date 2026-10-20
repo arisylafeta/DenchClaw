@@ -52,7 +52,7 @@ describe("merged mail", () => {
     fireEvent.click(upper.getByRole("tab", { name: "Mail" }));
     expect(screen.getByRole("tabpanel", { name: "Conversations" })).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/messages?"), expect.anything()));
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns?"), expect.anything());
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns"), expect.anything());
   });
   it("counts unread per server thread, keeps real message totals and includes latest outbound replies", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [
@@ -138,6 +138,22 @@ describe("merged mail", () => {
     expect(screen.getByRole("tabpanel", { name: "WhatsApp" })).toBeInTheDocument();
     expect(screen.getByText("Mathieu").closest("a")).toHaveAttribute("href", "/whatsapp/threads/t1");
     expect(screen.getByText("1:1 · 4")).toBeInTheDocument();
+  });
+  it("adapts the toolbar to each section: mail filters only on Mail, one search on Campaigns and WhatsApp", async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [], threads: [], nextCursor: null })));
+    render(<InboxView />);
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "WhatsApp" }));
+    expect(screen.getByRole("searchbox", { name: "Search chats" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /CRM-only|show internal/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Campaigns" }));
+    expect(screen.getAllByRole("searchbox")).toHaveLength(1);
+    expect(screen.getByRole("searchbox", { name: "Search campaigns" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Campaign status" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Mail" }));
+    expect(screen.getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
   });
   it("flags sending and unknown outcomes without offering a send action", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({ id: "unknown", state: "unknown", direction: "outbound" }), message({ id: "sending", state: "sending", direction: "outbound" })], nextCursor: null })));
