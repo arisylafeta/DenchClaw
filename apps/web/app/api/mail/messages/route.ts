@@ -11,6 +11,7 @@ export async function GET(req: Request) {
   const value = params.get(key); if (value) Object.assign(filters,{[key]:value});
  }
  filters.crmOnly = params.get('crmOnly') === 'true';
+ filters.showInternal = params.get('showInternal') === 'true';
  filters.limit = Number(params.get('limit')) || 50;
  try { return Response.json(await searchMail(filters)); }
  catch (error) { if (error instanceof Error && error.message === 'invalid_cursor') return Response.json({error:'invalid_cursor'},{status:400}); throw error; }

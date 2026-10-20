@@ -5,6 +5,7 @@ export function mailFilters(req: Request, scope?: MailFilters['view']): MailFilt
  for (const key of ['q','from','to','identity','campaign','thread','person','direction','transport','purpose','state','event','since','until'] as const) {
   const value = params.get(key); if (value) Object.assign(filters,{[key]:value});
  }
+ filters.showInternal = params.get('showInternal') === 'true';
  filters.crmOnly = scope !== 'campaigns' && params.get('crmOnly') === 'true';
  return filters;
 }

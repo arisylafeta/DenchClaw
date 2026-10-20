@@ -71,6 +71,15 @@ describe.skipIf(!enabled)('unified mail log', () => {
   expect((await searchMail({mailboxOwnerId:owner,campaign:prefix,purpose:'marketing',to:'one@example.test'})).items.map(m=>m.id)).toEqual([`${prefix}_c`]);
   expect((await searchMail({mailboxOwnerId:owner,identity:'ari'})).items).toEqual([]);
  });
+ it('hides rebattery.io to rebattery.io mail unless asked, keeping mixed recipients',async () => {
+  await queryPg(`insert into mail_message(id,direction,transport,purpose,state,mailbox_owner_id,from_email,to_emails,cc_emails,sent_at) values
+   ($1||'_int','outbound','gmail','personal','accepted',$2,'alex@rebattery.io','{ari@rebattery.io}','{}','2026-02-01T10:00:00Z'),
+   ($1||'_mix','outbound','gmail','personal','accepted',$2,'alex@rebattery.io','{ari@rebattery.io}','{buyer@example.test}','2026-02-01T11:00:00Z'),
+   ($1||'_evil','outbound','gmail','personal','accepted',$2,'alex@rebattery.io','{x@rebattery.io.evil.com}','{}','2026-02-01T12:00:00Z')`,[prefix,owner]);
+  const ids=async(showInternal?:boolean)=>(await searchMail({mailboxOwnerId:owner,view:'sent',since:'2026-02-01',showInternal})).items.map(m=>m.id).sort();
+  expect(await ids()).toEqual([`${prefix}_evil`,`${prefix}_mix`]);
+  expect(await ids(true)).toEqual([`${prefix}_evil`,`${prefix}_int`,`${prefix}_mix`]);
+ });
  it('reads ordered thread messages and events without crossing mailbox owners',async () => {
   const thread=await readMailThread(prefix,owner); expect(thread?.messages).toHaveLength(2); expect(thread?.messages[0].events?.[0].type).toBe('replied');
   expect(await readMailThread(prefix,'00000000-0000-0000-0000-000000000000')).toBeNull();

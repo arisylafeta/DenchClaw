@@ -33,7 +33,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   const requestedView = params.get("view");
   const [filters, setFilters] = useState<MailFilters>(() => ({
     ...Object.fromEntries(["q", "from", "to", "thread", "identity", "direction", "transport", "purpose", "state", "event", "campaign", "since", "until"].map((key) => [key, params.get(key) ?? ""])),
-    view: initialView ?? (requestedView && requestedView in views ? requestedView as MailView : "conversations"), crmOnly: params.get("crmOnly") !== "false", limit: 100,
+    view: initialView ?? (requestedView && requestedView in views ? requestedView as MailView : "conversations"), crmOnly: params.get("crmOnly") !== "false", ...(params.get("showInternal") === "true" ? { showInternal: true } : {}), limit: 100,
   }));
   const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId ?? params.get("campaignDetail"));
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -42,7 +42,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   useEffect(() => {
     const next = new URLSearchParams(params.toString());
     next.set("crm", "inbox");
-    for (const key of ["view", "q", "from", "to", "thread", "identity", "direction", "transport", "purpose", "state", "event", "campaign", "since", "until", "crmOnly"]) {
+    for (const key of ["view", "q", "from", "to", "thread", "identity", "direction", "transport", "purpose", "state", "event", "campaign", "since", "until", "crmOnly", "showInternal"]) {
       const value = new URLSearchParams(query).get(key);
       if (value !== null) {next.set(key, value);} else {next.delete(key);}
     }
@@ -52,7 +52,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, campaignId, router]);
   const update = (key: string, value: string | boolean) => setFilters((current) => ({ ...current, [key]: value }));
-  const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly"].includes(key) && value !== "" && value !== undefined);
+  const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly", "showInternal"].includes(key) && value !== "" && value !== undefined);
   return <div className={`${styles.page} flex h-full min-h-0 flex-col`}>
     <header className={styles.header}>
       <h1 className="flex items-center gap-2 text-[26px] font-semibold tracking-[-0.01em]"><Mail size={22} strokeWidth={1.5} aria-hidden />Mail</h1>
@@ -67,6 +67,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
       </label>
       <button type="button" aria-expanded={filtersOpen} aria-controls="mail-filter-options" className={`${styles.control} ${styles.button}`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden />Filters{activeFilters.length > 0 && <span aria-label={`${activeFilters.length} active filters`} className="inline-flex min-w-4 items-center justify-center rounded bg-[var(--color-surface-hover)] px-1 text-[10px] font-medium">{activeFilters.length}</span>}</button>
       <label className="ml-1 flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.crmOnly} onChange={(event) => update("crmOnly", event.target.checked)} />CRM-only</label>
+      <label className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.showInternal === true} onChange={(event) => setFilters((current) => { const { showInternal: _omit, ...rest } = current; return event.target.checked ? { ...rest, showInternal: true } : rest; })} />Show internal</label>
       {activeFilters.map(([key, value]) => <button key={key} className={styles.chip} aria-label={`Remove ${key} filter`} onClick={() => update(key, "")}><span className="capitalize">{key}</span>: {String(value)}<X size={11} aria-hidden /></button>)}
     </div>
     {filtersOpen && <div id="mail-filter-options" className={styles.filters}>

@@ -7,6 +7,11 @@ function selfAddressSql(column: string) {
   return `(coalesce(lower(${column}) like '%@rebattery.io',false) or exists (select 1 from mail_identity identity where lower(identity.address) = lower(${column})))`;
 }
 
+export function internalMessageSql(alias: string) {
+  const recipients = `(coalesce(${alias}.to_emails,'{}') || coalesce(${alias}.cc_emails,'{}') || coalesce(${alias}.bcc_emails,'{}') || array[${alias}.recipient_email])`;
+  return `(lower(coalesce(${alias}.from_email,'')) like '%@rebattery.io' and exists (select 1 from unnest(${recipients}) r where coalesce(r,'') <> '') and not exists (select 1 from unnest(${recipients}) r where coalesce(r,'') <> '' and lower(r) not like '%@rebattery.io'))`;
+}
+
 function counterpartySql() {
   return `(select jsonb_build_object('email',recipient.email,'name',case when ${selfAddressSql('recipient.email')} then null else (select p.full_name from crm_people p where lower(p.email)=lower(recipient.email) order by p.id limit 1) end)
     from unnest(case when ${selfAddressSql('m.from_email')} then coalesce(m.to_emails,'{}') || array[m.recipient_email] || coalesce(m.cc_emails,'{}') else array[m.from_email] end) with ordinality as recipient(email,position)
@@ -28,6 +33,8 @@ function mailWhere(filters: MailFilters = {}) {
     if (value) where.push(`m.${column} = ${bind(value)}`);
   }
   if (filters.crmOnly && filters.view !== 'campaigns') where.push(filters.view === 'sent' ? '(m.crm_visible or m.campaign_id is not null)' : 'm.crm_visible');
+  // Hide rebattery.io to rebattery.io mail by default. A message is internal when the sender and every recipient are on the exact domain; mixed messages stay visible.
+  if (!filters.showInternal && filters.view !== 'campaigns') where.push(`not (${internalMessageSql('m')})`);
   if (filters.view === 'sent') where.push("m.direction = 'outbound'");
   if (filters.view === 'campaigns') where.push('m.campaign_id is not null');
   if (filters.view === 'followups') where.push("exists (select 1 from mail_followup f where (f.message_id = m.id or f.thread_id = m.thread_id) and f.state in ('pending','drafted','paused'))");

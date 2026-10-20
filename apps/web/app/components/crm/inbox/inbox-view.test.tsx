@@ -56,7 +56,14 @@ describe("merged mail", () => {
     expect(screen.getByText("Campaign reply")).toBeInTheDocument();
     expect(screen.getByText("Latest outbound reply")).toBeInTheDocument();
     expect(screen.getByText("(7)")).toBeInTheDocument();
-    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(5);
+  });
+  it("hides internal mail by default and requests it only when Show internal is ticked", async () => {
+    render(<InboxView />);
+    await screen.findByRole("checkbox", { name: /show internal/i });
+    expect(vi.mocked(fetch).mock.calls.every(([url]) => !String(url).includes("showInternal"))).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /show internal/i }));
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(expect.stringContaining("showInternal=true"), expect.anything()));
   });
   it.each(["conversations", "sent"] as const)("shows counterparties instead of You in %s", async (view) => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ items: [
