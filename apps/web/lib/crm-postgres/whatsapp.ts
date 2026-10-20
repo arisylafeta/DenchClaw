@@ -21,6 +21,8 @@ export type WhatsappThread = {
   id: string;
   kind: "direct" | "group";
   subject: string | null;
+  name?: string | null;
+  name_source?: WhatsappNameSource;
   last_captured_at: string;
   message_count: string;
   shared_context: boolean;
@@ -66,23 +68,19 @@ export async function whatsappThreads(
   );
   return { threads, limit, offset };
 }
+export type WhatsappNameSource = "subject" | "person" | "identity" | "phone" | "greeting" | null;
 export type WhatsappInboxRow = {
-  id: string; kind: "direct" | "group"; name: string | null; last_captured_at: string; message_count: number;
+  id: string; kind: "direct" | "group"; name: string | null; name_source: WhatsappNameSource; last_captured_at: string; message_count: number;
   last_body: string | null; last_direction: string | null; last_at: string | null;
 };
 /** Every captured chat, newest first, with a display name and the latest visible message for a list row. */
 export async function whatsappInbox(limit = 50, offset = 0) {
   whatsappPagination(limit, offset);
   const threads = await queryPg<WhatsappInboxRow>(
-    `select t.id,t.kind,t.last_captured_at,
-      coalesce(nullif(t.subject,''),nullif(i.display_name,''),i.e164,
-        (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.account_id=t.account_id and l.identity_id=t.identity_id and l.valid_to is null order by l.valid_from desc limit 1),
-        (select string_agg(distinct coalesce(nullif(mi.display_name,''),mi.e164),', ') from whatsapp_thread_member tm
-          join whatsapp_identity mi on mi.account_id=tm.account_id and mi.id=tm.identity_id where tm.thread_id=t.id and not mi.shared)) as name,
+    `select t.id,t.kind,t.last_captured_at,${NAME_SQL} as name,${NAME_SOURCE_SQL} as name_source,
       (select count(*)::int from whatsapp_message m where m.thread_id=t.id) as message_count,
       lm.body as last_body,lm.direction as last_direction,coalesce(lm.occurred_at,lm.captured_at) as last_at
-    from whatsapp_thread t
-    left join whatsapp_identity i on i.account_id=t.account_id and i.id=t.identity_id
+    from whatsapp_thread t ${NAME_JOIN}
     left join lateral (select ${visibleBody("m")} as body,m.direction,m.occurred_at,m.captured_at from whatsapp_message m where m.thread_id=t.id
       order by coalesce(m.occurred_at,m.captured_at) desc,m.id desc limit 1) lm on true
     order by t.last_captured_at desc,t.id limit $1 offset $2`,
@@ -100,9 +98,20 @@ export type WhatsappConversationData = {
 };
 const visibleBody = (alias: string) =>
   `case when ${alias}.deleted_at is not null or (${alias}.metadata->'flags'->>'viewOnce')::boolean is true or nullif(${alias}.metadata->'flags'->>'expiresAt','')::timestamptz <= now() then null else ${alias}.body end`;
+
+const GREETING = "^[[:space:]]*(Hi|Hello|Hey|Dear)[[:space:]]+([A-Z][a-z][A-Za-z-]*)";
+/** Joins `nm` with a display name for a thread. Order: thread subject, linked CRM person, identity name, phone, then the first name from our own opening greeting (inferred). */
+const NAME_JOIN = `left join whatsapp_identity i on i.account_id=t.account_id and i.id=t.identity_id
+  left join lateral (select
+    (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.account_id=t.account_id and l.identity_id=t.identity_id and l.valid_to is null order by l.valid_from desc limit 1) as person_name,
+    (select (regexp_match(g.body,'${GREETING}'))[2] from (select ${visibleBody("m")} as body from whatsapp_message m where m.thread_id=t.id and m.direction='outbound' order by coalesce(m.occurred_at,m.captured_at),m.id limit 5) g
+      where g.body ~ '${GREETING}' limit 1) as greeting) nm on true`;
+const NAME_SQL = `coalesce(nullif(t.subject,''),nm.person_name,nullif(i.display_name,''),i.e164,nm.greeting)`;
+const NAME_SOURCE_SQL = `case when nullif(t.subject,'') is not null then 'subject' when nm.person_name is not null then 'person' when nullif(i.display_name,'') is not null then 'identity'
+  when i.e164 is not null then 'phone' when nm.greeting is not null then 'greeting' end`;
 export async function whatsappConversation(id: string, limit = 50, offset = 0) {
   whatsappPagination(limit, offset);
-  const [thread] = await queryPg<WhatsappThread>(`select * from whatsapp_thread where id=$1`, [id]);
+  const [thread] = await queryPg<WhatsappThread>(`select t.*,${NAME_SQL} as name,${NAME_SOURCE_SQL} as name_source from whatsapp_thread t ${NAME_JOIN} where t.id=$1`, [id]);
   if (!thread) {
     return null;
   }

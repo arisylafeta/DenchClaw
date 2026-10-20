@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { MailLine } from "./mail-line";
 import styles from "./mail.module.css";
 import type { WhatsappInboxRow } from "@/lib/crm-postgres/whatsapp";
+import { whatsappChatLabel } from "@/lib/whatsapp-display";
 
 const pageSize = 50;
 
@@ -35,10 +36,11 @@ export function WhatsappView({ query }: { query?: string }) {
     {state === "error" && <p role="alert" className="px-8 py-6" style={{ color: "var(--color-error)" }}>Could not load WhatsApp chats.</p>}
     {state === "ready" && !shown.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No captured WhatsApp chats{needle ? " match your search" : ""}.</p>}
     <ul>{shown.map((row) => {
-      const title = row.name || `${row.kind === "group" ? "Unnamed group" : "Direct chat"} ${row.id.slice(0, 6)}`;
+      const label = whatsappChatLabel(row);
+      const title = label.inferred ? `${label.text} ~` : label.text;
       return <li key={row.id}>
         <a href={`/whatsapp/threads/${encodeURIComponent(row.id)}`} className="block">
-          <MailLine id={row.id} prefix={row.last_direction === "outbound" ? "You:" : undefined} name={title} email={null}
+          <MailLine id={row.id} prefix={row.last_direction === "outbound" ? "You:" : undefined} name={title} nameTitle={label.hint} email={null}
             subject={row.last_body?.trim().split("\n")[0] || "(no text)"} snippet={null} at={row.last_at ?? row.last_captured_at}
             tag={<span className={styles.chip} title={row.kind === "group" ? "Group chat: shared context, not proof every message concerns one contact" : "One-to-one chat"}>{row.kind === "group" ? "Group" : "1:1"} · {row.message_count}</span>} />
         </a>

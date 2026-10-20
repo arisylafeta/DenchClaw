@@ -64,7 +64,8 @@ describe("WhatsApp read-only context", () => {
     );
     render(<WhatsappConversation id="group" />);
     expect(await screen.findByText("Edited fixture")).toBeInTheDocument();
-    expect(screen.getAllByText("Unknown sender")).toHaveLength(3);
+    // Consecutive unknown-sender messages share one run, so the sender is named once.
+    expect(screen.getAllByText("Unknown sender")).toHaveLength(1);
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.getByText("Message deleted")).toBeInTheDocument();
     expect(screen.getByText(/audio · content not downloaded/)).toBeInTheDocument();
@@ -106,5 +107,23 @@ describe("WhatsApp read-only context", () => {
         }),
       ),
     );
+  });
+});
+
+import { groupRuns } from "./whatsapp-chat";
+import type { WhatsappMessage } from "@/lib/crm-postgres/whatsapp";
+import { whatsappChatLabel } from "@/lib/whatsapp-display";
+const msg = (id: string, direction: string, at: string): WhatsappMessage => ({ id, direction, body: id, sender_name: null, sender_person_name: null, attachment: null, occurred_at: at, captured_at: at, timestamp_source: "provider", reply_to_provider_id: null, reply_to_message_id: null, reply_body: null, edit_version: 0, deleted_at: null, metadata: {} });
+describe("WhatsApp transcript grouping and names", () => {
+  it("groups same-side messages under five minutes and breaks on side, gap and day", () => {
+    const runs = groupRuns([msg("a", "inbound", "2026-10-20T09:00:00Z"), msg("b", "inbound", "2026-10-20T09:03:00Z"), msg("c", "outbound", "2026-10-20T09:04:00Z"), msg("d", "outbound", "2026-10-20T09:20:00Z"), msg("e", "outbound", "2026-10-21T09:20:00Z")]);
+    expect(runs.map((run) => run.messages.map((m) => m.id).join(""))).toEqual(["ab", "c", "d", "e"]);
+    expect(runs.map((run) => run.newDay)).toEqual([true, false, false, true]);
+  });
+  it("marks greeting-inferred names and falls back to a short id", () => {
+    expect(whatsappChatLabel({ id: "abcdef123", kind: "direct", name: "Jakub", name_source: "greeting" })).toMatchObject({ text: "Jakub", inferred: true });
+    expect(whatsappChatLabel({ id: "abcdef123", kind: "direct", name: "Mathieu", name_source: "person" }).inferred).toBe(false);
+    expect(whatsappChatLabel({ id: "abcdef123", kind: "group" }).text).toBe("Group abcdef");
+    expect(whatsappChatLabel({ id: "abcdef123", kind: "direct" }).text).toBe("Contact abcdef");
   });
 });
