@@ -1,5 +1,6 @@
 "use client";
 
+import { Sh } from "./bt-shimmer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { PreviewDemandPanel } from "./preview-demand-panel";
@@ -39,9 +40,16 @@ export function DemandDetail({ id, today, onClose, onOpenTrade, onOpenSupply, on
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
       <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Trades Preview</button>
       <ErrorText error={error} />
-      <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        {demand && !error ? "This demand no longer exists." : error ? "" : "Loading…"}
-      </p>
+      {!demand && !error ? (
+        <div role="status" aria-busy="true" className="flex flex-col gap-3 pt-2">
+          <span className="sr-only">Loading demand</span>
+          <h2 className="text-[20px] font-semibold"><Sh on chars={32} /></h2>
+          <p className="text-[13px]"><Sh on chars={48} /></p>
+          <p className="text-[13px]"><Sh on chars={64} /></p>
+        </div>
+      ) : (
+        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{demand && !error ? "This demand no longer exists." : ""}</p>
+      )}
     </div>
   );
 }

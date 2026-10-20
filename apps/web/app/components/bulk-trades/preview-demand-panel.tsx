@@ -160,7 +160,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         </div>
       )}
       {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
-      {tab === "Offers" && <OffersTab demandId={demand.id} supply={supply} onChanged={onChanged} />}
+      {tab === "Offers" && <OffersTab demandId={demand.id} supply={supply} supplyLoading={supplyLoading} onChanged={onChanged} />}
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}
