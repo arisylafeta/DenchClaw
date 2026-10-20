@@ -12,7 +12,7 @@ function Source({ claim }: { claim: Claim }) {
   return claim.url ? <a href={claim.url} target="_blank" rel="noreferrer">{text}</a> : <span>{text}</span>;
 }
 
-function Tile({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) => void; onResolve?: (fact: Fact, choice: number) => void }) {
+function Cell({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) => void; onResolve?: (fact: Fact, choice: number) => void }) {
   const conflict = fact.status === "conflict" && fact.claims.length > 1;
   const gap = !fact.value && !conflict;
   const wide = conflict || (fact.value?.length ?? 0) > 44;
@@ -40,18 +40,18 @@ function Tile({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) =
             </span>
           ))}
         </span>
-      ) : gap ? <span className={css.ask}>{onEdit ? "Missing" : "Missing, ask the buyer"}</span> : <span className={css.value}>{fact.value}</span>}
+      ) : gap ? <span className={css.gap} data-critical={fact.critical}>{onEdit ? "Missing" : "Not stated"}</span> : <span className={css.value}>{fact.value}</span>}
       {meta}
     </>
   );
-  const props = { className: css.tile, "data-status": fact.status, "data-gap": gap, "data-wide": wide };
+  const props = { className: css.cell, "data-wide": wide };
   return onEdit && !conflict
     ? <button type="button" aria-label={`Edit ${fact.label}`} onClick={() => onEdit(fact)} {...props}>{body}</button>
     : <div {...props}>{body}</div>;
 }
 
 /**
- * The Details of any bulk listing: facts as coloured tiles by section, readiness per step, and what is still missing.
+ * The Details of any bulk listing: facts in a plain grid by section, readiness per step, and what is still missing.
  * Trade facts are editable (onEdit) and conflicts can be settled (onResolve); a demand's are read only.
  * Renders nothing when the listing has no recorded facts.
  */
@@ -74,16 +74,16 @@ export function ListingDetails({ facts, onEdit, onResolve }: {
         </div>
       )}
       {sections.map((section) => (
-        <section key={section.group} className={css.section} data-group={section.group}>
+        <section key={section.group} className={css.section}>
           <h3 className={css.label}>{section.group}</h3>
           <div className={css.grid}>
-            {section.facts.map((fact) => <Tile key={fact.key} fact={fact} onEdit={onEdit} onResolve={onResolve} />)}
+            {section.facts.map((fact) => <Cell key={fact.key} fact={fact} onEdit={onEdit} onResolve={onResolve} />)}
           </div>
         </section>
       ))}
       {needed.length > 0 && (
         <section className={css.needed} aria-label="Still needed">
-          <h3 className={css.label} style={{ ["--tone" as string]: "var(--bt-amber)" }}>Still needed</h3>
+          <h3 className={css.label}>Still needed</h3>
           {needed.map((entry) => (
             <div key={entry.step} className={css.neededRow}>
               <span>{entry.step}</span>

@@ -1,8 +1,7 @@
 .panel { min-width: 0; }
 .panel nav[aria-label="Detail sections"] { gap: 0; }
 .panel nav[aria-label="Detail sections"] > button { flex: 1; min-width: 0; min-height: 44px; padding: 8px 4px; font-size: 12px; font-weight: 700; }
-.panel [data-preview-details] { grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
-@media (min-width: 1000px) { .panel [data-preview-details] { grid-template-columns: minmax(0, 1fr) 360px; } }
+.panel [data-preview-details] { width: 100%; }
 
 .card { background: var(--bt-surface); }
 

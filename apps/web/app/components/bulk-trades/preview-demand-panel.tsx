@@ -17,7 +17,7 @@ import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
 import { DemandHeader } from "./demand-header";
-import { PartyCard, type PartyChip } from "./party-card";
+import { PartyCard } from "./party-card";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
@@ -47,20 +47,14 @@ function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | nul
   );
 }
 
-/** The buyer as a card: who they are and where they stand, with a way into the CRM. */
+/** The buyer, as a full-width person strip: who they are, where they stand, and a way into the CRM. */
 function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: BuyerContext | null; onOpenDemand?: (id: string) => void }) {
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
-  const chips: PartyChip[] = [
-    profile?.tier ? { label: `${profile.tier}-tier`, tone: "tier" as const } : null,
-    profile?.stage ? { label: profile.stage, tone: "stage" as const } : null,
-    profile?.owner ? { label: `Owner ${profile.owner}`, tone: "owner" as const } : null,
-  ].filter((chip) => chip !== null);
-  const stats = [
-    engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null,
-    others.length > 0 ? { label: "Other open asks", value: String(others.length) } : null,
-  ].filter((stat) => stat !== null);
+  const chips = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage, profile?.owner ? `Owner ${profile.owner}` : null]
+    .filter((chip) => chip !== null && chip !== undefined);
+  const stats = [engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null].filter((stat) => stat !== null);
   const notes = [
     profile?.buyer_profile?.wants ? { label: "Usually buys", value: profile.buyer_profile.wants } : null,
     profile?.outreach_notes ? { label: "Notes", value: profile.outreach_notes } : null,
@@ -166,11 +160,9 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       </div>
       <ErrorText error={error} />
       {tab === "Details" && (
-        <div data-preview-details className={css.details}>
-          <div className="flex flex-col gap-6">
-            <TheAsk demand={demand} supply={supply} />
-          </div>
+        <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
+          <TheAsk demand={demand} supply={supply} />
         </div>
       )}
       {tab === "Supply matching" && (

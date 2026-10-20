@@ -1,102 +1,95 @@
 "use client";
 
-import { ExternalLink, Mail, User } from "lucide-react";
+import { ExternalLink, Mail } from "lucide-react";
 import { buildEntryLink } from "@/lib/workspace-links";
-import css from "./party-card.module.css";
+import { CompanyFavicon } from "../crm/company-favicon";
+import { PersonAvatar } from "../crm/person-avatar";
 
-const initials = (name: string) => {
-  const words = name.replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean);
-  return ((words[0]?.[0] ?? "?") + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase();
-};
-/** A stable hue per name, so the same company always has the same colours. */
-const hue = (name: string) => {
-  let hash = 0;
-  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash % 360;
+const FREE_MAIL = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com"]);
+const domainOf = (email: string | null) => {
+  const domain = email?.split("@")[1]?.toLowerCase();
+  return domain && !FREE_MAIL.has(domain) ? domain : null;
 };
 
-export type PartyChip = { label: string; tone?: "tier" | "stage" | "owner" };
+const actionClass = "inline-flex h-8 items-center justify-center gap-1.5 rounded-none border px-2.5 text-[12px] font-medium hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]";
+const actionStyle = { background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" };
+
 export type PartyCardProps = {
   /** "Buyer" or "Seller". */
   role: string;
+  /** The company, as written on the listing. */
   name: string;
   companyId: string | null;
   personId: string | null;
+  /** The person we deal with. */
   contact: string | null;
   email: string | null;
-  chips?: PartyChip[];
-  /** Short figures shown as tiles, e.g. Last heard. */
+  /** Small facts in one line under the name, e.g. A-tier, In conversation, Owner Alex. */
+  chips?: string[];
+  /** Figures in one line, e.g. Last heard 29 days ago. */
   stats?: { label: string; value: string }[];
-  /** Longer notes, e.g. what they usually buy. `bad` marks a warning. */
   notes?: { label: string; value: React.ReactNode; bad?: boolean }[];
-  /** Related items as chips, e.g. other open asks from the same buyer. */
   related?: { label: string; items: { id: string; label: string; onOpen?: () => void }[] };
 };
 
-/** Who is on the other side of a listing: a coloured identity block, their standing, the contact and a way into the CRM. */
+/**
+ * The person on the other side of a listing, laid out like a CRM person header: avatar, name, email and company,
+ * actions on the right, then what we know about them. Full width.
+ */
 export function PartyCard({ role, name, companyId, personId, contact, email, chips = [], stats = [], notes = [], related }: PartyCardProps) {
-  const profile = companyId ? buildEntryLink("company", companyId) : null;
+  const company = companyId ? buildEntryLink("company", companyId) : null;
   const person = personId ? buildEntryLink("people", personId) : null;
-  const h = hue(name);
-  const style = {
-    "--hue-band": `linear-gradient(120deg, hsl(${h} 70% 86%), hsl(${(h + 40) % 360} 70% 92%))`,
-    "--hue-fill": `hsl(${h} 60% 78%)`,
-    "--hue-ink": `hsl(${h} 55% 22%)`,
-  } as React.CSSProperties;
+  const crm = person ?? company;
+  const shown = contact?.trim() || name;
+  const hasMore = chips.length > 0 || stats.length > 0 || notes.length > 0 || (related?.items.length ?? 0) > 0;
   return (
-    <section className={css.card} aria-label={`${role} card`} style={style}>
-      <div className={css.band} aria-hidden="true" />
-      <div className={css.body}>
-        <div className={css.top}>
-          <span className={css.avatar} aria-hidden="true">{initials(name)}</span>
-          <div className={css.titles}>
-            <div className={css.role}>{role}</div>
-            <div className={css.name}>{profile ? <a href={profile}>{name}</a> : name}</div>
+    <section aria-label={`${role} card`} className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+      <div className="flex flex-wrap items-start gap-3 px-4 py-3">
+        <PersonAvatar name={shown} seed={email ?? personId ?? name} size="lg" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] uppercase tracking-[0.08em]" style={{ color: "var(--bt-muted)" }}>{role}</div>
+          <div className="text-[15px] font-semibold leading-tight">{crm ? <a href={crm} className="hover:underline">{shown}</a> : shown}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: "var(--bt-text-2)" }}>
+            {email && <a href={`mailto:${email}`} className="truncate hover:underline">{email}</a>}
+            {contact && name !== contact && (
+              <span className="inline-flex items-center gap-1.5">
+                <CompanyFavicon domain={domainOf(email)} name={name} size="sm" />
+                {company ? <a href={company} className="hover:underline">{name}</a> : name}
+              </span>
+            )}
+            {chips.map((chip) => <span key={chip} className="border px-1.5 py-px" style={{ borderColor: "var(--bt-border)" }}>{chip}</span>)}
           </div>
         </div>
-        {chips.length > 0 && (
-          <div className={css.chips}>{chips.map((chip) => <span key={chip.label} className={css.chip} data-tone={chip.tone}>{chip.label}</span>)}</div>
-        )}
-        {(contact || email) && (
-          <div className={css.person}>
-            <span className={css.personIcon} aria-hidden="true"><User size={16} /></span>
-            <span className={css.personText}>
-              {contact && <strong>{person ? <a href={person}>{contact}</a> : contact}</strong>}
-              {email && <a className="mail" href={`mailto:${email}`}>{email}</a>}
-            </span>
-          </div>
-        )}
-        {stats.length > 0 && (
-          <div className={css.stats}>{stats.map((stat) => <div key={stat.label} className={css.stat}><span>{stat.label}</span><span>{stat.value}</span></div>)}</div>
-        )}
-        {(notes.length > 0 || related) && (
-          <dl className={css.notes}>
-            {notes.map((note) => (
-              <div key={note.label}>
-                <dt>{note.label}</dt>
-                <dd className={note.bad ? css.bad : undefined}>{note.value}</dd>
-              </div>
-            ))}
-            {related && related.items.length > 0 && (
-              <div>
-                <dt>{related.label}</dt>
-                <dd className={css.asks}>
-                  {related.items.map((item) => item.onOpen
-                    ? <button key={item.id} type="button" className={css.ask} onClick={item.onOpen}>{item.label}</button>
-                    : <span key={item.id} className={css.ask}>{item.label}</span>)}
-                </dd>
-              </div>
-            )}
-          </dl>
-        )}
-        {!companyId && <p className={css.unlinked}>Not linked to a CRM company yet.</p>}
-        {(profile || email) && (
-          <div className={css.actions}>
-            {profile && <a className={css.primary} href={profile}><ExternalLink size={14} aria-hidden="true" />Open in CRM</a>}
-            {email && <a className={css.secondary} href={`mailto:${email}`}><Mail size={14} aria-hidden="true" />Email</a>}
-          </div>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {email && <a href={`mailto:${email}`} className={actionClass} style={actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</a>}
+          {crm && <a href={crm} className={actionClass} style={actionStyle}><ExternalLink size={14} aria-hidden="true" /> Open in CRM</a>}
+        </div>
       </div>
+      {hasMore && (
+        <div className="flex flex-col gap-2 border-t px-4 py-3 text-[13px]" style={{ borderColor: "var(--bt-divider)" }}>
+          {stats.length > 0 && (
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              {stats.map((stat) => <span key={stat.label}><span style={{ color: "var(--bt-muted)" }}>{stat.label} </span>{stat.value}</span>)}
+            </div>
+          )}
+          {notes.map((note) => (
+            <p key={note.label} style={note.bad ? { color: "var(--bt-red)" } : undefined}>
+              <span style={{ color: note.bad ? undefined : "var(--bt-muted)" }}>{note.label} </span>{note.value}
+            </p>
+          ))}
+          {related && related.items.length > 0 && (
+            <p>
+              <span style={{ color: "var(--bt-muted)" }}>{related.label} </span>
+              {related.items.map((item, index) => (
+                <span key={item.id}>{index > 0 && ", "}
+                  {item.onOpen ? <button type="button" className="underline" onClick={item.onOpen}>{item.label}</button> : item.label}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      )}
+      {!companyId && <p className="border-t px-4 py-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>Not linked to a CRM company yet.</p>}
     </section>
   );
 }
