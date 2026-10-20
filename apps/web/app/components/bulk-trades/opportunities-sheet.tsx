@@ -40,23 +40,18 @@ function ProgressChip({ row }: { row: SheetRow }) {
   );
 }
 
-/** Compact circular score badge, matching the ring used in the demand detail header. */
-function ScoreCircle({ score, size = 22 }: { score: number | null; size?: number }) {
-  const color = score == null ? "var(--bt-border-strong)" : score >= 80 ? "var(--bt-green)" : score >= 60 ? "var(--bt-amber)" : "var(--bt-muted)";
-  const radius = (size - 4) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const center = size / 2;
+/** A solid, coloured dot — bigger and simpler than a thin ring, reads at a glance without squinting at a number. */
+function ScoreCircle({ score, size = 28 }: { score: number | null; size?: number }) {
+  const tone = score == null
+    ? { bg: "var(--bt-segment)", fg: "var(--bt-muted)" }
+    : score >= 80 ? { bg: "var(--bt-green-bg)", fg: "var(--bt-green)" }
+    : score >= 60 ? { bg: "var(--bt-amber-bg)", fg: "var(--bt-amber)" }
+    : { bg: "var(--bt-segment)", fg: "var(--bt-muted)" };
   return (
-    <span className="relative inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size }}
+    <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums"
+      style={{ width: size, height: size, background: tone.bg, color: tone.fg }}
       role="img" aria-label={score == null ? "Not scored" : `Score ${score} out of 100`}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)" }} aria-hidden>
-        <circle cx={center} cy={center} r={radius} fill="none" stroke="var(--bt-segment)" strokeWidth="2.5" />
-        {score != null && (
-          <circle cx={center} cy={center} r={radius} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"
-            strokeDasharray={circumference} strokeDashoffset={circumference * (1 - Math.min(Math.max(score, 0), 100) / 100)} />
-        )}
-      </svg>
-      <span className="absolute text-[9px] font-semibold tabular-nums" style={{ color: score == null ? "var(--bt-muted)" : undefined }}>{score ?? "–"}</span>
+      {score ?? "–"}
     </span>
   );
 }
