@@ -197,7 +197,7 @@ class Writing(unittest.TestCase):
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 self.assertTrue(survey.insert(cur, survey.link(cur, survey.map_formbricks(old))))
                 self.assertTrue(survey.insert(cur, survey.link(cur, survey.map_formbricks(done))))
-                cur.execute("select kind, basis, needed_by::text, note from crm_bulk_trade_demand where source_id = 'formbricks:fb_refresh_timing'")
+                cur.execute("select kind, basis, needed_by::text, note from crm_bulk_demand where source_id = 'formbricks:fb_refresh_timing'")
                 row = cur.fetchone()
                 self.assertEqual((row['kind'], row['basis'], row['needed_by']), ('request', None, '2026-11-15'))
                 self.assertIn('400V only', row['note'])
@@ -224,13 +224,13 @@ class Writing(unittest.TestCase):
                 profile = cur.fetchone()
                 self.assertEqual(profile["buyer_profile_basis"], "stated")
                 self.assertEqual(profile["buyer_profile"]["chemistries"], ["LFP"])
-                cur.execute("select count(*) as n from crm_bulk_trade_demand where source_id = 'saved_search:synthetic-search'")
+                cur.execute("select count(*) as n from crm_bulk_demand where source_id = 'saved_search:synthetic-search'")
                 self.assertEqual(cur.fetchone()["n"], 0)
                 request = saved_search.map_sourcing_request({"id": "synthetic-request", "email": "saved@synthetic.test",
                     "wants": "20 Nissan Leaf packs", "quantity": "many", "timing": "now", "created_at": "2026-10-16",
                     "filters": {"format": ["pack"]}, "target_price": 1000, "target_currency": "EUR"})
                 self.assertTrue(survey.insert(cur, survey.link(cur, request)))
-                cur.execute("select status from crm_bulk_trade_demand where source_id = 'sourcing_request:synthetic-request'")
+                cur.execute("select status from crm_bulk_demand where source_id = 'sourcing_request:synthetic-request'")
                 self.assertEqual(cur.fetchone()["status"], "qualifying")
         finally:
             conn.rollback()
@@ -249,7 +249,7 @@ class Writing(unittest.TestCase):
             self.assertTrue(survey.insert(cur, row))
             self.assertFalse(survey.insert(cur, survey.link(cur, survey.map_typeform_row(HEADER, CONNECTED))))
             cur.execute("""select status, kind, basis, confirmed_on::text, volume::float8, spec
-                           from crm_bulk_trade_demand where source_id = 'typeform:resp1'""")
+                           from crm_bulk_demand where source_id = 'typeform:resp1'""")
             saved = cur.fetchone()
         conn.close()
         self.assertEqual((saved["status"], saved["kind"], saved["basis"], saved["confirmed_on"], saved["volume"]),
@@ -272,7 +272,7 @@ class Writing(unittest.TestCase):
             self.assertEqual(saved["formats"], ["Packs"])
             self.assertEqual(saved["chemistries"], ["LFP"])
             self.assertEqual(saved["min_soh"], 80)
-            cur.execute("select count(*) as n from crm_bulk_trade_demand where source_id = 'formbricks:fb_up'")
+            cur.execute("select count(*) as n from crm_bulk_demand where source_id = 'formbricks:fb_up'")
             self.assertEqual(cur.fetchone()["n"], 0)
         conn.close()
 

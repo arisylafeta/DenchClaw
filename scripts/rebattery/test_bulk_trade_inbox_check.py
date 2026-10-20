@@ -470,7 +470,7 @@ class FullRun(unittest.TestCase):
                            where source_id in ('g-msg-new', 'g-msg-small', 'g-msg-recy', 'g-msg-two') order by source_id""")
             screened = cur.fetchall()
             cur.execute("""select s.seller, s.offers, s.est_tonnes::float8, s.status, s.source_quote, c.purpose
-                           from crm_bulk_trade_supply s left join crm_companies c on c.id = s.company_id
+                           from crm_bulk_supply s left join crm_companies c on c.id = s.company_id
                            where s.email = 'sophie@dismantler.test'""")
             supply = cur.fetchall()
             cur.execute("""select c.purpose from crm_people p join crm_companies c on c.id = p.company_id
@@ -606,24 +606,24 @@ class DemandRun(unittest.TestCase):
         try:
             with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""insert into crm_companies (id, name) values ('co_age', 'Ageing Buyer');
-                  insert into crm_bulk_trade_demand
+                  insert into crm_bulk_demand
                     (id, buyer, company_id, wants, kind, product_family, observed_on, status, spec, basis)
                   values ('btd_age_old', 'Ageing Buyer', 'co_age', 'Leaf packs', 'standing', 'leaf', '2026-06-01', 'open', '{"formats":["Packs"]}', 'stated'),
                     ('btd_age_confirm', 'Ageing Buyer', 'co_age', 'Cells', 'standing', '21700', '2026-08-01', 'open', '{}', 'stated'),
                     ('btd_age_request', 'Ageing Buyer', 'co_age', 'Modules', 'request', 'meb', '2026-06-01', 'qualifying', '{}', null)""")
                 self.assertEqual(existing_demand(cur, {"company_id": "co_age"}, " LEAF "), "btd_age_old")
-                cur.execute("""update crm_bulk_trade_demand set status = 'qualifying' where id = 'btd_age_old';
-                  update crm_bulk_trade_demand set qualify_asked_on = '2026-09-25' where id in ('btd_age_old', 'btd_age_request')""")
+                cur.execute("""update crm_bulk_demand set status = 'qualifying' where id = 'btd_age_old';
+                  update crm_bulk_demand set qualify_asked_on = '2026-09-25' where id in ('btd_age_old', 'btd_age_request')""")
                 self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com"), "anon")
                 self.assertEqual(reputation_for(cur, "co_age", email="buyer@gmail.com", two_way=True), "email")
-                cur.execute("update crm_bulk_trade_demand set match_hash = 'old', supply_match_hash = 'old' where id = 'btd_age_confirm'")
+                cur.execute("update crm_bulk_demand set match_hash = 'old', supply_match_hash = 'old' where id = 'btd_age_confirm'")
                 expire_demand(cur, today)
-                cur.execute("select id, status, closed_reason, qualify_question from crm_bulk_trade_demand where company_id = 'co_age' order by id")
+                cur.execute("select id, status, closed_reason, qualify_question from crm_bulk_demand where company_id = 'co_age' order by id")
                 rows = {r["id"]: r for r in cur.fetchall()}
                 self.assertEqual(rows["btd_age_old"]["closed_reason"], "moved_to_profile")
                 self.assertEqual(rows["btd_age_confirm"]["status"], "qualifying")
                 self.assertEqual(rows["btd_age_confirm"]["qualify_question"], "Still buying?")
-                cur.execute("select match_hash, supply_match_hash from crm_bulk_trade_demand where id = 'btd_age_confirm'")
+                cur.execute("select match_hash, supply_match_hash from crm_bulk_demand where id = 'btd_age_confirm'")
                 self.assertEqual(dict(cur.fetchone()), {'match_hash': None, 'supply_match_hash': None})
                 self.assertEqual(rows["btd_age_request"]["closed_reason"], "expired")
                 cur.execute("select buyer_profile from crm_companies where id = 'co_age'")
@@ -638,12 +638,12 @@ class DemandRun(unittest.TestCase):
             cur.execute("""
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
                 values ('bt_dem', 'supply', 'Demand match trade', '', '', 'confirmed', 'With buyers', 'packs') on conflict do nothing;
-              insert into crm_bulk_trade_demand (id, buyer, email, wants, confirmed_on)
+              insert into crm_bulk_demand (id, buyer, email, wants, confirmed_on)
                 values ('btd_open', 'Green Voltage', 'adam@gv.example', 'Matched packs in repeat batches', '2026-09-18'),
                        ('btd_hid', 'Somerset EV', null, 'MEB modules', '2026-08-14') on conflict do nothing;
               insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason, hidden)
                 values ('btd_hid', 'bt_dem', 'partial', 'old', true) on conflict do nothing;
-              update crm_bulk_trade_demand set status = 'open', closed_reason = null where id in ('btd_open', 'btd_hid');
+              update crm_bulk_demand set status = 'open', closed_reason = null where id in ('btd_open', 'btd_hid');
             """)
 
     def tearDown(self):
@@ -679,7 +679,7 @@ class DemandRun(unittest.TestCase):
               insert into crm_people (id, full_name, email, company_id, tags) values
                 ('p_auto', 'Fern', 'fern@autocells.example', 'co_auto', '{"Supply Update"}'),
                 ('p_no', 'Nia', 'nia@nothanks.example', 'co_no', '{"Supply Update"}') on conflict do nothing;
-              insert into crm_bulk_trade_demand (id, buyer, company_id, email, wants, kind, basis) values
+              insert into crm_bulk_demand (id, buyer, company_id, email, wants, kind, basis) values
                 ('btd_est_auto', 'Auto Cells Ltd', 'co_auto', 'fern@autocells.example', 'Cells and modules', 'standing', 'estimated')
                 on conflict do nothing;""")
         reply_source = {**SOURCE, "id": "r1", "from": "fern@autocells.example",
@@ -699,7 +699,7 @@ class DemandRun(unittest.TestCase):
             check.settle_all(cur, None, None, [demand], None, ctx, report, False)
             check.settle_declines(cur, [decline], report, False)
             check.settle_all(cur, None, None, [demand], None, ctx, report, False)  # the same email again changes nothing
-            cur.execute("select status, basis, wants, company_id from crm_bulk_trade_demand where company_id = 'co_auto' order by basis")
+            cur.execute("select status, basis, wants, company_id from crm_bulk_demand where company_id = 'co_auto' order by basis")
             rows = cur.fetchall()
             cur.execute("select id, relationship_stage, buyer_stage, buyer_exclusion_reason from crm_companies where id in ('co_auto', 'co_no') order by id")
             companies = {r["id"]: r for r in cur.fetchall()}
@@ -733,7 +733,7 @@ class DemandRun(unittest.TestCase):
                            from crm_people p join crm_companies c on c.id = p.company_id
                            where p.email in ('ola@newbuyer.example', 'sales@newseller.example') order by p.email""")
             rows = cur.fetchall()
-            cur.execute("select count(*) as n from crm_bulk_trade_demand where email = 'ola@newbuyer.example'")
+            cur.execute("select count(*) as n from crm_bulk_demand where email = 'ola@newbuyer.example'")
             count = cur.fetchone()["n"]
         self.assertEqual(count, 0)
         self.assertEqual([(r["name"], r["purpose"], r["relationship_stage"], r["source"], r["main"]) for r in rows],
@@ -751,7 +751,7 @@ class DemandRun(unittest.TestCase):
     def test_matching_judges_only_what_changed_and_keeps_not_a_fit_hidden(self):
         with self.conn, self.conn.cursor() as cur:  # start from a trade and rows never judged
             cur.execute("""update crm_bulk_trade_lots set demand_fingerprint = null where id = 'bt_dem';
-                           update crm_bulk_trade_demand set match_hash = null, status = 'open', closed_reason = null,
+                           update crm_bulk_demand set match_hash = null, status = 'open', closed_reason = null,
                              wants = 'Matched packs in repeat batches' where id in ('btd_open', 'btd_hid');
                            delete from crm_bulk_trade_demand_matches where lot_id = 'bt_dem' and not hidden;""")
         calls = []
@@ -783,12 +783,12 @@ class DemandRun(unittest.TestCase):
             calls.clear()
             again = check.match_demand(self.conn, "k")
             with self.conn, self.conn.cursor() as cur:  # "Still wanted": not a matching change
-                cur.execute("update crm_bulk_trade_demand set confirmed_on = current_date, updated_at = now() where id = 'btd_open'")
+                cur.execute("update crm_bulk_demand set confirmed_on = current_date, updated_at = now() where id = 'btd_open'")
             check.match_demand(self.conn, "k")
             self.assertEqual((calls, again["model_calls"]), ([], 0))
 
             with self.conn, self.conn.cursor() as cur:  # a changed want: that row only, against the steady trades
-                cur.execute("update crm_bulk_trade_demand set wants = 'Matched packs, 300 kWh builds' where id = 'btd_open'")
+                cur.execute("update crm_bulk_demand set wants = 'Matched packs, 300 kWh builds' where id = 'btd_open'")
             check.match_demand(self.conn, "k")
             self.assertEqual(len(calls), 1)
             self.assertIn("Demand match trade", calls[0][0])
@@ -796,7 +796,7 @@ class DemandRun(unittest.TestCase):
 
             calls.clear()
             with self.conn, self.conn.cursor() as cur:  # closed: suggestion gone, no call
-                cur.execute("update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other' where id = 'btd_open'")
+                cur.execute("update crm_bulk_demand set status = 'closed', closed_reason = 'other' where id = 'btd_open'")
             check.match_demand(self.conn, "k")
             self.assertEqual(calls, [])
             self.assertEqual(matches(), [("btd_hid", "partial", True)])
@@ -808,17 +808,17 @@ class DemandRun(unittest.TestCase):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""
               delete from crm_bulk_trade_supply_matches;
-              update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other' where id not in ('btd_open', 'btd_hid');
-              update crm_bulk_trade_supply set status = 'closed', closed_reason = 'other' where id <> 'bts_small';
-              update crm_bulk_trade_demand set status = 'open', closed_reason = null, supply_match_hash = null,
+              update crm_bulk_demand set status = 'closed', closed_reason = 'other' where id not in ('btd_open', 'btd_hid');
+              update crm_bulk_supply set status = 'closed', closed_reason = 'other' where id <> 'bts_small';
+              update crm_bulk_demand set status = 'open', closed_reason = null, supply_match_hash = null,
                 wants = 'Matched packs in repeat batches' where id in ('btd_open', 'btd_hid');
-              insert into crm_bulk_trade_demand (id, buyer, wants, kind, status) values ('btd_est', 'Qualifying Co', 'Any packs', 'standing', 'qualifying')
+              insert into crm_bulk_demand (id, buyer, wants, kind, status) values ('btd_est', 'Qualifying Co', 'Any packs', 'standing', 'qualifying')
                 on conflict do nothing;
-              update crm_bulk_trade_demand set status = 'qualifying', closed_reason = null where id = 'btd_est';
-              insert into crm_bulk_trade_supply (id, seller, offers, trade_kind, quantity, est_tonnes)
+              update crm_bulk_demand set status = 'qualifying', closed_reason = null where id = 'btd_est';
+              insert into crm_bulk_supply (id, seller, offers, trade_kind, quantity, est_tonnes)
                 values ('bts_small', 'Dismantler Ltd', '3 Toyota Prius hybrid packs', 'packs', 'three', 0.12)
                 on conflict do nothing;
-              update crm_bulk_trade_supply set status = 'open', closed_reason = null, match_hash = null where id = 'bts_small';
+              update crm_bulk_supply set status = 'open', closed_reason = null, match_hash = null where id = 'bts_small';
               insert into crm_bulk_trade_supply_matches (supply_id, demand_id, strength, reason, hidden)
                 values ('bts_small', 'btd_hid', 'partial', 'old', true);
             """)
@@ -850,13 +850,13 @@ class DemandRun(unittest.TestCase):
             self.assertEqual(calls, [])  # nothing changed, no call
 
             with self.conn, self.conn.cursor() as cur:  # a changed want: that row only, against the steady batch
-                cur.execute("update crm_bulk_trade_demand set wants = 'Hybrid packs for tests' where id = 'btd_open'")
+                cur.execute("update crm_bulk_demand set wants = 'Hybrid packs for tests' where id = 'btd_open'")
             check.match_supply(self.conn, "k")
             self.assertEqual(calls, [(["3 Toyota Prius hybrid packs"], ["Green Voltage"])])
 
             calls.clear()
             with self.conn, self.conn.cursor() as cur:  # a closed batch loses its open suggestions, without a call
-                cur.execute("update crm_bulk_trade_supply set status = 'closed', closed_reason = 'sold' where id = 'bts_small'")
+                cur.execute("update crm_bulk_supply set status = 'closed', closed_reason = 'sold' where id = 'bts_small'")
             check.match_supply(self.conn, "k")
             self.assertEqual(calls, [])
             self.assertEqual(matches(), [("btd_hid", "partial", True)])
@@ -876,7 +876,7 @@ class DemandRun(unittest.TestCase):
         with self.conn, self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
             check.settle_all(cur, None, None, [item("sd1", "3 Prius hybrid packs", 7)], None, {"warnings": []}, report, False)
             check.settle_all(cur, None, None, [item("sd2", "Photos of the 3 Prius packs attached", 9)], None, {"warnings": []}, report, False)
-            cur.execute("""select offers, to_char(observed_on, 'YYYY-MM-DD') as seen, source_thread from crm_bulk_trade_supply
+            cur.execute("""select offers, to_char(observed_on, 'YYYY-MM-DD') as seen, source_thread from crm_bulk_supply
                            where email = 'pat@smallseller.example'""")
             rows = cur.fetchall()
         self.assertEqual([(r["offers"], r["seen"], r["source_thread"]) for r in rows],
@@ -946,7 +946,7 @@ class DemandRun(unittest.TestCase):
 
     def test_matching_sends_kind_basis_and_spec_and_skips_requests_past_their_date(self):
         with self.conn, self.conn.cursor() as cur:
-            cur.execute("""insert into crm_bulk_trade_demand (id, kind, basis, buyer, wants, needed_by, spec) values
+            cur.execute("""insert into crm_bulk_demand (id, kind, basis, buyer, wants, needed_by, spec) values
                              ('btd_req', 'request', null, 'Live request', 'LFP cells', '2099-01-01', '{"chemistries": ["LFP"]}'),
                              ('btd_late', 'request', null, 'Late request', 'LFP cells', '2020-01-01', '{}'),
                              ('btd_est', 'standing', 'estimated', 'Gridturn', 'EV modules', null, '{}')
@@ -970,7 +970,7 @@ class DemandRun(unittest.TestCase):
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""insert into crm_companies (id, name, country, region) values ('co_where', 'Where Buyer', 'Poland', 'CEE')
                            on conflict do nothing;
-                           insert into crm_bulk_trade_demand (id, kind, basis, buyer, company_id, wants) values
+                           insert into crm_bulk_demand (id, kind, basis, buyer, company_id, wants) values
                              ('btd_where', 'standing', 'stated', 'Where Buyer', 'co_where', 'NMC modules')
                            on conflict do nothing""")
         seen = []
@@ -1007,7 +1007,7 @@ class DemandRun(unittest.TestCase):
 
     def test_matching_sees_the_note(self):
         with self.conn, self.conn.cursor() as cur:
-            cur.execute("""insert into crm_bulk_trade_demand (id, buyer, wants, note) values
+            cur.execute("""insert into crm_bulk_demand (id, buyer, wants, note) values
                              ('btd_note', 'Volt buyer', 'EV packs', 'Voltage: 48V') on conflict do nothing""")
         seen = []
         with patch.object(check, "call_model", lambda system, user, key: seen.extend(json.loads(user)["DEMAND"]) or {"matches": []}):
@@ -1025,7 +1025,7 @@ class DemandRun(unittest.TestCase):
                 ('p_ooo', 'Otto Away', 'otto@away.example', null) on conflict do nothing;
               insert into crm_bulk_trade_lots (id, lot_kind, title, summary, observed_outcome, confidence, trade_stage, trade_kind)
                 values ('bt_sum', 'supply', 'Summary trade', '', '', 'confirmed', 'With buyers', 'cells') on conflict do nothing;
-              insert into crm_bulk_trade_demand (id, kind, basis, buyer, person_id, company_id, wants, needed_by, confirmed_on) values
+              insert into crm_bulk_demand (id, kind, basis, buyer, person_id, company_id, wants, needed_by, confirmed_on) values
                 ('btd_w', 'standing', 'agreed', 'Waiting Energy', 'p_wait', 'co_wait', 'LFP packs', null, '2026-01-05'),
                 ('btd_d', 'standing', 'stated', 'Answered Ltd', 'p_done', null, 'Modules', null, %(today)s),
                 ('btd_o', 'request', null, 'Away GmbH', 'p_ooo', null, 'CATL cells', %(soon)s, %(today)s) on conflict do nothing;

@@ -28,7 +28,7 @@ def resolve_entity(cur, email=None, contact=None, company=None):
 def reputation_for(cur, company_id=None, person_id=None, email=None, two_way=False, has_thread=False):
     """Observed commercial history wins over channel priors; never infer payment from interest."""
     cur.execute("""select
-      exists(select 1 from crm_bulk_trade_demand where company_id = %(company)s
+      exists(select 1 from crm_bulk_demand where company_id = %(company)s
         and status = 'closed' and closed_reason = 'bought_from_us')
       or exists(select 1 from crm_bulk_trade_buyers b join crm_people p on p.id = b.person_id
         join crm_bulk_trade_lots l on l.id = b.lot_id
@@ -58,7 +58,7 @@ def family_key(value):
 
 
 def existing_demand(cur, entity, family):
-    cur.execute("""select id from crm_bulk_trade_demand where status in ('open', 'qualifying')
+    cur.execute("""select id from crm_bulk_demand where status in ('open', 'qualifying')
       and lower(product_family) = %s
       and ((%s::text is not null and company_id = %s)
         or (%s::text is not null and person_id = %s)
@@ -130,7 +130,7 @@ def merge_profile(cur, row, basis='stated'):
 
 def expire_demand(cur, today=None):
     today = today or dt.date.today()
-    cur.execute("""select * from crm_bulk_trade_demand where status in ('open', 'qualifying') for update""")
+    cur.execute("""select * from crm_bulk_demand where status in ('open', 'qualifying') for update""")
     changes = []
     for row in cur.fetchall():
         action = expiry_transition(row, today)
@@ -148,17 +148,17 @@ def expire_demand(cur, today=None):
                     cur.execute("insert into crm_companies (id, name, purpose, source) values (%s, %s, '{Buyer}', 'Inbound')",
                                 (company_id, row['buyer']))
                 row['company_id'] = company_id
-                cur.execute("update crm_bulk_trade_demand set company_id = %s where id = %s", (company_id, row['id']))
+                cur.execute("update crm_bulk_demand set company_id = %s where id = %s", (company_id, row['id']))
                 person_id = row.get('person_id') or entity.get('person_id')
                 if person_id:
                     cur.execute("update crm_people set company_id = coalesce(company_id, %s) where id = %s", (company_id, person_id))
             merge_profile(cur, row)
         if action == 'qualifying':
-            cur.execute("""update crm_bulk_trade_demand set status = 'qualifying', qualify_question = 'Still buying?',
+            cur.execute("""update crm_bulk_demand set status = 'qualifying', qualify_question = 'Still buying?',
                            qualify_entered_on = %s, qualify_asked_on = null,
                            match_hash = null, supply_match_hash = null, updated_at = now() where id = %s""", (today, row['id']))
         else:
-            cur.execute("""update crm_bulk_trade_demand set status = 'closed', closed_reason = %s,
+            cur.execute("""update crm_bulk_demand set status = 'closed', closed_reason = %s,
               moved_to = %s, updated_at = now() where id = %s""",
               (action, 'company_profile' if action == 'moved_to_profile' else None, row['id']))
         changes.append({'id': row['id'], 'action': action})

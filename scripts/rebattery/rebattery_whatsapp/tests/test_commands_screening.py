@@ -44,7 +44,7 @@ def test_pending_once_no_email_inference_and_ignored_replay(screened_db, tmp_pat
     assert card['proposed']['buyer'] == 'Synthetic Company'
     assert card['proposed']['email'] is None
     assert card['proposed']['contact'] == 'Synthetic Person'
-    assert rows(db, 'crm_bulk_trade_demand') == []
+    assert rows(db, 'crm_bulk_demand') == []
     with db, cursor(db) as cur:
         cur.execute("update crm_bulk_trade_proposals set status='ignored'")
         cur.execute('delete from whatsapp_screen_checkpoint')

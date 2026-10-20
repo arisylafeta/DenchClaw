@@ -319,14 +319,7 @@ All surfaces show muted category chips and newest-first dates; company profiles
 also filter by category. These internal notes can contain commercial terms and
 must not be forwarded as buyer-facing copy.
 
-For the October audit repair, restore the pre-simplify dump into a separate
-scratch database, then run `uv run --with 'psycopg[binary]'
-scripts/rebattery/restore_demand_context.py --source-db audit_old` (dry-run).
-`--apply` commits the reviewed context and exact teaser-linked lot buyers in one
-transaction with read-back. It prints one decision per original row, preserves
-original observation dates and demand IDs, and never reopens demand. Deterministic
-IDs prevent duplicate notes on rerun; existing repaired notes are not overwritten.
-Drop the scratch database afterward; never restore the dump into `denchclaw`.
+The October audit repair scripts (`restore_demand_context.py`, `restore_demand_history.py`, `demand_recategorize.py`) were one-off tools and have been removed; they remain in git history.
 
 Migration `044` separates current sourcing work from buyer discovery. **Demand**
 is a buyer's own dated, actionable request or standing ask with an identified
@@ -409,16 +402,6 @@ History includes every closed category. All counts every closed row but hides
 Research profile rows until that category is selected. Category changes are
 available in the detail header; Reopen remains an explicit separate action.
 Closed rows have no qualification gaps, score, expected fee or supply suggestions.
-
-`scripts/rebattery/restore_demand_history.py` reads a separately restored
-pre-audit database. It defaults to an exact-write/read-back dry run with rollback;
-`--apply` commits one transaction. It preserves original fields and dates,
-nulls dangling identity links, matching hashes and moved-to pointers, clears
-priority, and appends provenance. Original `moved_to_lot` becomes `offer_reply`;
-research-origin `moved_to_profile` becomes `research_profile`. Unique source
-collisions are reported, not overwritten. Existing context notes remain intact.
-Only missing rows are inserted; existing lot buyers with empty demand links are
-re-linked to their restored original demand IDs. Replaying inserts zero rows.
 The survey importer refreshes unfinished answers only while open or qualifying;
 closed History evidence cannot be overwritten by a later survey refresh.
 

@@ -953,7 +953,7 @@ def apply_supply(cur, lot_id, p, trade, ctx):
     person_id, company_id = ensure_lead(cur, d.get("email"), d.get("contact"), d.get("seller"), "Supplier",
                                         f"Inbox check {on}: offered {d['offers']}")
     cur.execute(
-        """select id from crm_bulk_trade_supply where status = 'open'
+        """select id from crm_bulk_supply where status = 'open'
              and ((%s::text is not null and source_thread = %s)
                   or (lower(offers) = lower(%s)
                       and ((%s::text is not null and company_id = %s) or (%s::text is not null and email = %s))))
@@ -961,12 +961,12 @@ def apply_supply(cur, lot_id, p, trade, ctx):
         (source.get("thread"), source.get("thread"), d["offers"], company_id, company_id, d.get("email"), d.get("email")))
     same = cur.fetchone()
     if same:
-        cur.execute("update crm_bulk_trade_supply set observed_on = greatest(observed_on, %s::date), updated_at = now() where id = %s",
+        cur.execute("update crm_bulk_supply set observed_on = greatest(observed_on, %s::date), updated_at = now() where id = %s",
                     (on, same["id"]))
         return {"refreshed": same["id"]}
     supply_id = "bts_" + str(uuid.uuid4())
     cur.execute(
-        """insert into crm_bulk_trade_supply (id, seller, company_id, person_id, contact, email, offers, trade_kind, quantity,
+        """insert into crm_bulk_supply (id, seller, company_id, person_id, contact, email, offers, trade_kind, quantity,
              location, est_tonnes, est_value_usd, size_note, source_kind, source_id, source_thread, source_label, source_url,
              source_quote, observed_on)
            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1247,7 +1247,7 @@ def screen_demand(cur, sources, key, report, model=None):
     for row in cur.fetchall():
         trades[row["lot_id"]]["emails"] |= emails_in([row["email"]])
     cur.execute("""select id, company_id, person_id, email, buyer, product_family, wants
-                   from crm_bulk_trade_demand where status in ('open', 'qualifying')""")
+                   from crm_bulk_demand where status in ('open', 'qualifying')""")
     existing = cur.fetchall()
     contexts = {}
     for s in candidates:
@@ -1493,7 +1493,7 @@ def match_demand(conn, key, report=None, dry_run=False):
                           d.max_price::float8 as max_price, d.price_currency, d.price_unit, d.spec, left(d.note, 600) as note,
                           to_char(d.confirmed_on, 'YYYY-MM-DD') as confirmed, d.match_hash,
                           nullif(c.country, '') as buyer_country, c.region as buyer_region
-                   from crm_bulk_trade_demand d left join crm_companies c on c.id = d.company_id
+                   from crm_bulk_demand d left join crm_companies c on c.id = d.company_id
                    where d.status = 'open' and (d.kind <> 'request' or d.needed_by is null or d.needed_by >= current_date)
                    order by d.id""")
             demand = cur.fetchall()
@@ -1537,7 +1537,7 @@ def match_demand(conn, key, report=None, dry_run=False):
 
             if not dry_run:
                 for row_id in judged_rows:
-                    cur.execute("update crm_bulk_trade_demand set match_hash = %s where id = %s", (row_hash[row_id], row_id))
+                    cur.execute("update crm_bulk_demand set match_hash = %s where id = %s", (row_hash[row_id], row_id))
                 # 3. closed or expired rows, and trades no longer live, keep no open suggestions
                 cur.execute(
                     """delete from crm_bulk_trade_demand_matches m
@@ -1597,7 +1597,7 @@ def match_supply(conn, key, report=None, dry_run=False):
                           to_char(d.needed_by, 'YYYY-MM-DD') as needed_by, d.volume::float8 as volume, d.volume_unit,
                           d.max_price::float8 as max_price, d.price_currency, d.price_unit, d.spec, left(d.note, 600) as note,
                           d.supply_match_hash, nullif(c.country, '') as buyer_country, c.region as buyer_region
-                   from crm_bulk_trade_demand d left join crm_companies c on c.id = d.company_id
+                   from crm_bulk_demand d left join crm_companies c on c.id = d.company_id
                    where d.status = 'open'
                      and (d.kind <> 'request' or d.needed_by is null or d.needed_by >= current_date)
                    order by d.id""")
@@ -1605,7 +1605,7 @@ def match_supply(conn, key, report=None, dry_run=False):
             cur.execute(
                 """select id, offers, trade_kind, quantity, location, est_tonnes::float8 as est_tonnes,
                           est_value_usd::float8 as est_value_usd, match_hash
-                   from crm_bulk_trade_supply where status = 'open' order by id""")
+                   from crm_bulk_supply where status = 'open' order by id""")
             supply = cur.fetchall()
 
             facts = {b["id"]: supply_facts(b) for b in supply}
@@ -1628,7 +1628,7 @@ def match_supply(conn, key, report=None, dry_run=False):
                 out["matches"] += pairs
                 if not dry_run:
                     store_supply_pairs(cur, [supply_id], all_ids, pairs)
-                    cur.execute("update crm_bulk_trade_supply set match_hash = %s where id = %s", (batch_hash[supply_id], supply_id))
+                    cur.execute("update crm_bulk_supply set match_hash = %s where id = %s", (batch_hash[supply_id], supply_id))
                     conn.commit()
 
             judged_rows = changed_rows if every_batch_judged else []
@@ -1644,7 +1644,7 @@ def match_supply(conn, key, report=None, dry_run=False):
 
             if not dry_run:
                 for row_id in judged_rows:
-                    cur.execute("update crm_bulk_trade_demand set supply_match_hash = %s where id = %s", (row_hash[row_id], row_id))
+                    cur.execute("update crm_bulk_demand set supply_match_hash = %s where id = %s", (row_hash[row_id], row_id))
                 # Closed batches and rows no longer open keep no open suggestions.
                 cur.execute(
                     """delete from crm_bulk_trade_supply_matches m
@@ -2106,7 +2106,7 @@ def summary(conn):
                                                              when d.basis = 'stated' then 2 else 3 end, d.buyer)
                         filter (where not (d.basis = 'estimated' and coalesce(c.relationship_stage, 'New') = 'New' and c.buyer_tier is null)) as buyers,
                       count(*) filter (where d.basis = 'estimated' and coalesce(c.relationship_stage, 'New') = 'New' and c.buyer_tier is null) as introduce
-               from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand d on d.id = m.demand_id
+               from crm_bulk_trade_demand_matches m join crm_bulk_demand d on d.id = m.demand_id
                join crm_bulk_trade_lots l on l.id = m.lot_id left join crm_companies c on c.id = d.company_id
                where m.strength = 'strong' and not m.hidden and m.buyer_id is null and d.status = 'open'
                  and (d.kind <> 'request' or d.needed_by is null or d.needed_by >= current_date)
@@ -2124,13 +2124,13 @@ def summary(conn):
                     % WAITING_DAYS)
         older_waiting = cur.fetchone()["n"]
         cur.execute(
-            """select d.buyer, d.wants, d.needed_by from crm_bulk_trade_demand d
+            """select d.buyer, d.wants, d.needed_by from crm_bulk_demand d
                where d.status = 'open' and d.kind = 'request' and d.needed_by between %s and %s
                  and not exists (select 1 from crm_bulk_trade_buyers b where b.demand_id = d.id and b.status <> 'To contact')
                order by d.needed_by, d.buyer""", (today, today + dt.timedelta(days=7)))
         due = cur.fetchall()
         cur.execute(
-            """select d.buyer, d.basis from crm_bulk_trade_demand d
+            """select d.buyer, d.basis from crm_bulk_demand d
                where d.status = 'open' and d.kind = 'standing' and d.basis in ('stated', 'agreed')
                  and (d.confirmed_on is null or d.confirmed_on < %s)
                order by d.basis = 'agreed' desc, d.confirmed_on nulls first, d.buyer""", (today - dt.timedelta(days=STALE_DAYS),))

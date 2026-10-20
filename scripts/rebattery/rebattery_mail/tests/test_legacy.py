@@ -47,7 +47,7 @@ def test_import_reconciliation_and_clean_cutover(db):
           insert into crm_fields (id,object_id,name,type,canonical_column)
             values ('legacy_body_field','seed_obj_email_message_00000000','Body','text','body');
           insert into crm_companies (id,name,purpose) values ('legacy_co','Synthetic Buyer',array['Buyer']);
-          insert into crm_bulk_trade_demand (id,buyer,company_id,wants)
+          insert into crm_bulk_demand (id,buyer,company_id,wants)
             values ('legacy_demand','Synthetic Buyer','legacy_co','Used traction packs');
           insert into campaigns (id,campaign_name,sender_identity) values
             ('legacy_campaign','Historical cohort','Supply @ ReBattery <SUPPLY@rebattery.io>'), ('legacy_pending','No receipt','unmapped');

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loads a reviewed list of buyer demand into Bulk Trades (crm_bulk_trade_demand).
+"""Loads a reviewed list of buyer demand into Bulk Trades (crm_bulk_demand).
 
   load_demand_seed.py FILE.json            # show what would be added
   load_demand_seed.py FILE.json --apply    # add it
@@ -30,7 +30,7 @@ def main():
         for row in rows:
             buyer = row["buyer"].strip("[]")
             email = (row.get("email") or "").strip().lower() or None
-            cur.execute("select 1 from crm_bulk_trade_demand where status = 'open' and lower(buyer) = lower(%s) and lower(wants) = lower(%s)",
+            cur.execute("select 1 from crm_bulk_demand where status = 'open' and lower(buyer) = lower(%s) and lower(wants) = lower(%s)",
                         (buyer, row["wants"]))
             if cur.fetchone():
                 print("skip (already there):", buyer)
@@ -43,7 +43,7 @@ def main():
             print(f"add: {buyer} | {row['wants'][:70]} | person {'yes' if person else 'no'} | company {'yes' if company_id else 'no'}")
             if args.apply:
                 cur.execute(
-                    """insert into crm_bulk_trade_demand (id, buyer, company_id, person_id, contact, email, wants, quantity, location,
+                    """insert into crm_bulk_demand (id, buyer, company_id, person_id, contact, email, wants, quantity, location,
                          source_label, confirmed_on) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (f"btd_{uuid.uuid4()}", buyer, company_id, person and person["id"], row.get("contact"), email, row["wants"],
                      row.get("quantity"), row.get("where"), row.get("source"), row.get("confirmed")))

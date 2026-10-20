@@ -426,7 +426,7 @@ def insert(cur, row):
         return merge_profile(cur, row, "researched" if row.get("source_kind") == "research" else "stated")
     row = {**row, "status": "qualifying", "product_family": family_key(row.get("product_family") or row["wants"]),
            "reputation": reputation_for(cur, row.get("company_id"), row.get("person_id"), row.get("email"))}
-    cur.execute("select id from crm_bulk_trade_demand where source_kind = %s and source_id = %s",
+    cur.execute("select id from crm_bulk_demand where source_kind = %s and source_id = %s",
                 (row.get("source_kind"), row.get("source_id")))
     same_source = cur.fetchone()
     if not same_source and existing_demand(cur, row, row["product_family"]):
@@ -439,7 +439,7 @@ def insert(cur, row):
     if same_source:
         # Only an unfinished survey answer that nobody has touched since is replaced by the finished one.
         cur.execute(
-            """update crm_bulk_trade_demand set wants = %s, spec = %s::jsonb, note = %s, quantity = %s, location = %s,
+            """update crm_bulk_demand set wants = %s, spec = %s::jsonb, note = %s, quantity = %s, location = %s,
                  observed_on = %s, confirmed_on = %s, kind = %s, basis = %s, needed_by = %s, updated_at = now()
                where id = %s and status in ('open', 'qualifying') and note like 'Unfinished survey.%%'
                  and %s is distinct from note and (basis = 'stated' or kind = 'request') and updated_at = created_at
@@ -448,7 +448,7 @@ def insert(cur, row):
              row["confirmed_on"], row.get("kind"), row.get("basis"), row.get("needed_by"), same_source["id"], row.get("note")])
         return cur.fetchone() is not None
     cur.execute(
-        f"""insert into crm_bulk_trade_demand (id, {', '.join(COLUMNS)})
+        f"""insert into crm_bulk_demand (id, {', '.join(COLUMNS)})
             values (%s, {', '.join(['%s'] * len(COLUMNS))}) returning id""",
         [f"btd_{uuid.uuid4()}", *values])
     return cur.fetchone() is not None

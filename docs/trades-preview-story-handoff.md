@@ -72,7 +72,7 @@ status go through the API or DB directly.
   record) wherever you have it. Don't fabricate a link.
 
 **Via Postgres** (bulk work across many rows): local `denchclaw` DB,
-`crm_bulk_trade_demand` and `crm_bulk_trade_demand_activity` tables. Back up
+`crm_bulk_demand` (typed view over `crm_bulk_listings`) and `crm_bulk_listing_activity` (`bulk_listing_id`). Back up
 the table before any bulk UPDATE (`pg_dump -t <table> denchclaw > backup.sql`,
 verify it's non-empty) and use `context = context || jsonb_build_object(...)`
 to merge rather than overwrite.

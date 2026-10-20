@@ -11,7 +11,7 @@ asking: Daniel (Ser Limited), Rahul (Exigo), Zibi, Attero, STN, Connected Energy
 
 ## The model
 
-Demand lives in `crm_bulk_trade_demand` (migrations 015 to 017), shown on the Demand page of Bulk Trades.
+Demand lives in `crm_bulk_demand` (migrations 015 to 017), shown on the Demand page of Bulk Trades.
 
 | Column | Meaning |
 | --- | --- |
@@ -42,7 +42,7 @@ Trade buyers added from a buy-box carry its `demand_id`, so offers and wins show
    select id, full_name, email, job_title, notes from crm_people where company_id = $1;
    -- existing demand, including survey answers
    select id, kind, basis, wants, spec, volume, volume_unit, max_price, price_currency, location, note, source_kind,
-          observed_on, confirmed_on, status from crm_bulk_trade_demand where company_id = $1 order by observed_on desc;
+          observed_on, confirmed_on, status from crm_bulk_demand where company_id = $1 order by observed_on desc;
    -- trades they were offered, bids, auction activity
    select l.title, b.status, b.wants, b.last_touch_on from crm_bulk_trade_buyers b join crm_bulk_trade_lots l on l.id = b.lot_id
    join crm_people p on p.id = b.person_id where p.company_id = $1;

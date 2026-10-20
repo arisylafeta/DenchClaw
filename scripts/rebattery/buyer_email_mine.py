@@ -499,7 +499,7 @@ def apply(conn, args):
                 survey.link(cur, row)
                 new = survey.insert(cur, row)
                 if new and box["status"] != "open":
-                    cur.execute("""update crm_bulk_trade_demand set status = 'closed', closed_reason = %s
+                    cur.execute("""update crm_bulk_demand set status = 'closed', closed_reason = %s
                                    where source_kind = %s and source_id = %s""", (box["status"], source_kind, row["source_id"]))
                 added += new
                 print(f"{'add' if new else 'already in'}: {r['name']} | {box['kind']} {box['status']} | {box['wants'][:70]}")
