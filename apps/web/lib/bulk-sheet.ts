@@ -26,6 +26,8 @@ export type SheetRow = {
   category: string | null;
   progress: string;
   tone: SheetTone;
+  /** Demand score 0-100; null when not scored or not a demand row. */
+  score: number | null;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
   latest: { label: string; at: string | null; kind?: string } | null;
   next_action: string | null;
@@ -52,7 +54,7 @@ const text = (value: string | null | undefined) => (value && value.trim() ? valu
 type DemandInput = {
   id: string; buyer: string; company_id: string | null; wants: string; product_family: string | null;
   activity_count: number; linked_trades: number; latest_kind: string | null; latest_title: string | null;
-  latest_at: string | null; asked_on: string | null; updated_at: string;
+  latest_at: string | null; asked_on: string | null; updated_at: string; score: number | null;
 };
 
 const ACTIVITY_LABEL: Record<string, string> = {
@@ -67,6 +69,7 @@ export function demandRow(input: DemandInput): SheetRow {
     category: text(input.product_family),
     progress: input.linked_trades > 0 ? "On a trade" : worked ? "Being worked" : "New",
     tone: input.linked_trades > 0 ? "closing" : worked ? "active" : "new",
+    score: input.score,
     latest: input.latest_title
       ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" }
       : null,
@@ -85,7 +88,7 @@ export function supplyRow(input: SupplyInput): SheetRow {
   return {
     key: `supply:${input.id}`, kind: "supply", id: input.id, side: "seller",
     title: input.offers, company: text(input.seller), company_id: input.company_id,
-    category: text(input.trade_kind), progress: "Offered", tone: "new",
+    category: text(input.trade_kind), progress: "Offered", tone: "new", score: null,
     latest: { label: via, at: input.observed_on },
     next_action: null, next_due: null, owner: null, touched: input.observed_on ?? input.updated_at,
   };
@@ -111,7 +114,7 @@ export function tradeRow(input: TradeInput): SheetRow {
     side: input.origin === "demand" ? "buyer" : "seller",
     title: input.title, company: text(input.seller_name), company_id: null,
     category: text(input.trade_kind),
-    progress: input.trade_stage, tone: TRADE_TONE[input.trade_stage] ?? "active",
+    progress: input.trade_stage, tone: TRADE_TONE[input.trade_stage] ?? "active", score: null,
     latest, next_action: text(input.next_step), next_due: input.next_step_due, owner: text(input.owner_name),
     touched: input.last_touched ?? input.updated_at,
   };

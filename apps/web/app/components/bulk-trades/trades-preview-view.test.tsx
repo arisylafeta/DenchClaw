@@ -36,7 +36,7 @@ const today = todayInLondon();
 function row(overrides: Partial<SheetRow>): SheetRow {
   return {
     key: "demand:d1", kind: "demand", id: "d1", side: "buyer", title: "12 Ioniq packs", company: "H. Nolden", company_id: null,
-    category: "Ioniq", progress: "New", tone: "new", latest: null, next_action: null, next_due: null, owner: null, touched: "2026-10-01",
+    category: "Ioniq", progress: "New", tone: "new", score: null, latest: null, next_action: null, next_due: null, owner: null, touched: "2026-10-01",
     ...overrides,
   };
 }
@@ -81,8 +81,8 @@ describe("Trades Preview sheet", () => {
     expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
     const trade = screen.getByRole("button", { name: /Synthetic eBS37/ });
     expect(within(trade).getByText("With buyers")).toBeInTheDocument();
-    expect(within(trade).getByText("Call the buyer")).toBeInTheDocument();
-    expect(within(trade).getByText(/Alex/)).toBeInTheDocument();
+    expect(within(trade).getByTitle(/Call the buyer/)).toBeInTheDocument();
+    expect(within(trade).getByTitle(/Alex/)).toBeInTheDocument();
     expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
     for (const gone of ["Today", "Trades", "Demand", "Supply"]) expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
   });

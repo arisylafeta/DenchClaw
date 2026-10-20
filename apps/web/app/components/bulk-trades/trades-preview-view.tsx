@@ -118,7 +118,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
 
   return (
     <div className="bulk-trades bt-preview flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-3 px-4 pb-3 pt-5 sm:px-8">
+      <header className="flex flex-wrap items-center gap-3 px-2 pb-3 pt-5 sm:px-3">
         <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Trades Preview</h1>
         <div className="flex-1" />
         <button type="button" onClick={() => setShowPossible(true)} className={`${buttonClass} h-9 rounded-lg`} style={buttonStyle}>
@@ -139,7 +139,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto px-4 pb-8 pt-2 sm:px-8">
+      <main className="flex-1 overflow-auto px-2 pb-8 pt-2 sm:px-3">
         <ErrorText error={actionError} />
         <OpportunitiesSheet rows={rows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
           onFilters={setFilters} onOpen={open} />

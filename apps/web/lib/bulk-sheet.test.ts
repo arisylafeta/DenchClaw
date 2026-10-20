@@ -3,7 +3,7 @@ import { demandRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS,
 
 const demand = (over = {}) => demandRow({
   id: "d1", buyer: "H. Nolden", company_id: "c1", wants: "Complete packs", product_family: "Ioniq", activity_count: 0, linked_trades: 0,
-  latest_kind: null, latest_title: null, latest_at: null, asked_on: "2026-10-01", updated_at: "2026-10-02", ...over,
+  latest_kind: null, latest_title: null, latest_at: null, asked_on: "2026-10-01", updated_at: "2026-10-02", score: null, ...over,
 });
 const trade = (over = {}) => tradeRow({
   id: "t1", title: "eBS37 lot", origin: "supply", seller_name: "Seller", has_seller: true, has_buyer: false, trade_stage: "With buyers",

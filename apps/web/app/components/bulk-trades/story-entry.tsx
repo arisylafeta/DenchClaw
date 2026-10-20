@@ -17,7 +17,7 @@ export function storyLabel(entry: Pick<DemandActivity, "kind" | "ref_kind" | "re
 }
 
 /** The icon for the kind. Every badge is the same neutral grey — no colour-coding by type. */
-function iconFor(label: string): typeof Mail {
+export function iconForLabel(label: string): typeof Mail {
   switch (label) {
     case "Email": case "Mail": return Mail;
     case "Granola call": return PhoneCall;
@@ -74,7 +74,7 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
   const openable = refId && (entry.ref_kind === "lot" || entry.ref_kind === "supply" || /^https?:\/\//i.test(refId));
   const expandable = !!body || !!openable;
   const label = storyLabel(entry);
-  const Icon = iconFor(label);
+  const Icon = iconForLabel(label);
   const openEvidence = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (entry.ref_kind === "lot") onOpenTrade(refId!);

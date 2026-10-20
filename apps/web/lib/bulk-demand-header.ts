@@ -16,13 +16,12 @@ const money = (amount: number, currency: string) =>
   `${currency} ${new Intl.NumberFormat("en-GB", { notation: amount >= 10_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(amount)}`;
 const unitKey = (unit: string | null) => (unit ?? "").toLowerCase().replace(/s$/, "");
 
-/** Buyer's price times volume when both use the same unit (packs and pack, kWh and kWh); never a guess. */
+/** Buyer's price times volume when both use the same unit (packs and pack, kWh and kWh): the full potential lot value. */
 export function demandValue(demand: Pick<Demand, "max_price" | "price_currency" | "price_unit" | "volume" | "volume_unit" | "expected_fee">): { text: string; note: string | null } | null {
   const { max_price: price, price_currency: currency, volume } = demand;
   if (price != null && currency && volume != null && unitKey(demand.price_unit) === unitKey(demand.volume_unit) && unitKey(demand.price_unit)) {
     return { text: `≈ ${money(price * volume, currency)}`, note: demand.expected_fee != null ? `fee ≈ ${money(demand.expected_fee, "EUR")}` : null };
   }
-  if (demand.expected_fee != null) return { text: `≈ ${money(demand.expected_fee, "EUR")}`, note: "our fee" };
   return null;
 }
 
