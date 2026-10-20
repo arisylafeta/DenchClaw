@@ -280,8 +280,8 @@ export async function matchVerdicts(demandId: string): Promise<Map<string, Match
   const rows = await queryPg<{ key: string; verdict: string; at: string; note: string | null }>(
     `select distinct on (data->'match'->>'key') data->'match'->>'key' as key, data->'match'->>'verdict' as verdict,
        occurred_at::text as at, body as note
-     from crm_bulk_trade_demand_activity
-     where demand_id = $1 and kind = 'supply' and data ? 'match'
+     from crm_bulk_listing_activity
+     where bulk_listing_id = $1 and kind = 'supply' and data ? 'match'
      order by data->'match'->>'key', occurred_at desc, id desc`,
     [demandId],
   );

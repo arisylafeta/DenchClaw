@@ -15,18 +15,18 @@ export async function listSheet(): Promise<SheetRow[]> {
     queryPg<Parameters<typeof demandRow>[0]>(`
       select demand.id, demand.buyer, demand.company_id, demand.wants, demand.product_family, demand.context,
         bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation, greatest(demand.observed_on, demand.confirmed_on)) as score,
-        (select count(*)::int from crm_bulk_trade_demand_activity a where a.demand_id = demand.id and a.kind <> 'status') as activity_count,
+        (select count(*)::int from crm_bulk_listing_activity a where a.bulk_listing_id = demand.id and a.kind <> 'status') as activity_count,
         (select count(*)::int from crm_bulk_trade_buyers b where b.demand_id = demand.id) as linked_trades,
         latest.kind as latest_kind, latest.title as latest_title, latest.occurred_at::text as latest_at,
         to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on, demand.updated_at::text
-      from crm_bulk_trade_demand demand
-      left join lateral (select a.kind, a.title, a.occurred_at from crm_bulk_trade_demand_activity a
-        where a.demand_id = demand.id and a.kind <> 'status' order by a.occurred_at desc, a.id desc limit 1) latest on true
+      from crm_bulk_demand demand
+      left join lateral (select a.kind, a.title, a.occurred_at from crm_bulk_listing_activity a
+        where a.bulk_listing_id = demand.id and a.kind <> 'status' order by a.occurred_at desc, a.id desc limit 1) latest on true
       where demand.status = 'open'`),
     queryPg<Parameters<typeof supplyRow>[0]>(`
       select supply.id, supply.seller, supply.company_id, supply.offers, supply.trade_kind, supply.source_kind,
         supply.source_label, to_char(supply.observed_on, 'YYYY-MM-DD') as observed_on, supply.updated_at::text
-      from crm_bulk_trade_supply supply where supply.status = 'open'`),
+      from crm_bulk_supply supply where supply.status = 'open'`),
     // Only the columns a row shows, and only live trades: the full trade list also totals mail, bids and
     // proposals for every trade ever made, which the sheet never displays.
     queryPg<Parameters<typeof tradeRow>[0]>(`

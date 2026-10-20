@@ -60,7 +60,7 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     const legacy = await demand.addDemand({ buyer: "Legacy Synthetic Buyer", wants: "Packs" }, user.id);
     expect(legacy.context).toEqual({});
     for (const invalid of ["[]", "null", "42"]) {
-      await expect(pg.queryPg("update crm_bulk_trade_demand set context = $2::jsonb where id = $1", [row.id, invalid])).rejects.toThrow();
+      await expect(pg.queryPg("update crm_bulk_demand set context = $2::jsonb where id = $1", [row.id, invalid])).rejects.toThrow();
     }
   });
 
@@ -169,14 +169,14 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     await demand.updateDemand(row.id, { status: "qualifying" });
     expect(await demand.getDemand(row.id)).toMatchObject({ status: "qualifying", qualify_asked_on: null });
     expect((await activity.listDemandActivity(row.id)).map((a) => a.title)).toContain("Still wanted");
-    await pg.queryPg("delete from crm_bulk_trade_demand where id = $1", [row.id]);
+    await pg.queryPg("delete from crm_bulk_demand where id = $1", [row.id]);
     expect(await activity.listDemandActivity(row.id)).toEqual([]);
   });
 
   it("invalidates matching when qualifying and when reopening through edits or confirmation", async () => {
     const row = await demand.addDemand({ buyer: "Reconfirm Buyer", wants: "Leaf packs", status: "open" }, user.id);
-    const seed = () => pg.queryPg("update crm_bulk_trade_demand set match_hash = 'matched', supply_match_hash = 'matched' where id = $1", [row.id]);
-    const hashes = async () => (await pg.queryPg("select match_hash, supply_match_hash from crm_bulk_trade_demand where id = $1", [row.id]))[0];
+    const seed = () => pg.queryPg("update crm_bulk_demand set match_hash = 'matched', supply_match_hash = 'matched' where id = $1", [row.id]);
+    const hashes = async () => (await pg.queryPg("select match_hash, supply_match_hash from crm_bulk_demand where id = $1", [row.id]))[0];
     await seed();
     await demand.updateDemand(row.id, { status: "qualifying" });
     expect(await hashes()).toEqual({ match_hash: null, supply_match_hash: null });
@@ -257,9 +257,9 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     expect(await demand.makeStanding(request.id)).toBeNull();
 
     // The database refuses a request with a basis and a standing row with a date.
-    await expect(pg.queryPg("update crm_bulk_trade_demand set kind = 'request' where id = $1", [estimate.id])).rejects.toThrow();
-    await expect(pg.queryPg("update crm_bulk_trade_demand set needed_by = '2026-12-01' where id = $1", [estimate.id])).rejects.toThrow();
-    await expect(pg.queryPg("update crm_bulk_trade_demand set volume = 5 where id = $1", [estimate.id])).rejects.toThrow(); // no unit
+    await expect(pg.queryPg("update crm_bulk_demand set kind = 'request' where id = $1", [estimate.id])).rejects.toThrow();
+    await expect(pg.queryPg("update crm_bulk_demand set needed_by = '2026-12-01' where id = $1", [estimate.id])).rejects.toThrow();
+    await expect(pg.queryPg("update crm_bulk_demand set volume = 5 where id = $1", [estimate.id])).rejects.toThrow(); // no unit
   });
 
   it("ranks suggestions requests first, then agreed, stated and estimated, drops past requests, and links the buyer", async () => {
@@ -281,7 +281,7 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
 
     // A tier-A buyer outranks everything else, whatever the kind of its row.
     await pg.queryPg(`insert into crm_companies (id, name, buyer_tier) values ('co_tier_a', 'Tier A Co', 'A') on conflict do nothing`);
-    await pg.queryPg("update crm_bulk_trade_demand set company_id = 'co_tier_a' where id = $1", [estimated.id]);
+    await pg.queryPg("update crm_bulk_demand set company_id = 'co_tier_a' where id = $1", [estimated.id]);
     const ranked = await demand.suggestedBuyers(lot);
     expect(ranked.map((s) => [s.buyer, s.tier])[0]).toEqual(["Estimated Co", "A"]);
     expect((await demand.getDemand(estimated.id))?.tier).toBe("A");

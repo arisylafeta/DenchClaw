@@ -38,8 +38,8 @@ const DEMAND_SELECT = `
     demand.qualify_question, demand.moved_to,
     to_char(demand.qualify_asked_on, 'YYYY-MM-DD') as qualify_asked_on,
     to_char(demand.qualify_entered_on, 'YYYY-MM-DD') as qualify_entered_on,
-    (select count(*)::int from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as activity_count,
-    (select max(activity.occurred_at)::text from crm_bulk_trade_demand_activity activity where activity.demand_id = demand.id) as last_activity_at,
+    (select count(*)::int from crm_bulk_listing_activity activity where activity.bulk_listing_id = demand.id) as activity_count,
+    (select max(activity.occurred_at)::text from crm_bulk_listing_activity activity where activity.bulk_listing_id = demand.id) as last_activity_at,
     to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on,
     case when demand.status <> 'closed' then bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on)) end as score,
@@ -65,7 +65,7 @@ const DEMAND_SELECT = `
       where buyer.demand_id = demand.id
     ), '[]'::json) as trades,
     (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier
-  from crm_bulk_trade_demand demand`;
+  from crm_bulk_demand demand`;
 
 // Live requests first (soonest date first), then agreed, stated and estimated buy-boxes.
 const RANK = `case when demand.kind = 'request' then 0 when demand.basis = 'agreed' then 1 when demand.basis = 'stated' then 2 else 3 end`;
@@ -182,7 +182,7 @@ export async function addDemand(input: DemandInput & { buyer: string; wants: str
   const values = INSERT_KEYS.map((key) => row[key] ?? null);
   const sourceKeys = ["source_kind", "source_id", "source_label", "source_url", "source_quote"] as const;
   await queryPg(
-    `insert into crm_bulk_trade_demand (id, ${[...INSERT_KEYS, ...sourceKeys, "created_by"].join(", ")})
+    `insert into crm_bulk_demand (id, ${[...INSERT_KEYS, ...sourceKeys, "created_by"].join(", ")})
      values ($1, ${[...INSERT_KEYS, ...sourceKeys, "created_by"].map((_, i) => `$${i + 2}`).join(", ")})`,
     [id, ...values, ...sourceKeys.map((key) => source[key] ?? null), userId],
   );
@@ -205,7 +205,7 @@ export async function updateDemand(id: string, input: DemandInput, source: Sourc
     : input.status === "open" ? ", match_hash = case when status <> 'open' then null else match_hash end, supply_match_hash = case when status <> 'open' then null else supply_match_hash end" : "";
   if (keys.length) {
     const rows = await queryPg(
-      `update crm_bulk_trade_demand set ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")}${basisFix}${matchingFix}, updated_at = now()
+      `update crm_bulk_demand set ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")}${basisFix}${matchingFix}, updated_at = now()
        where id = $1 returning id`,
       [id, ...keys.map((key) => patch[key])],
     );
@@ -217,7 +217,7 @@ export async function updateDemand(id: string, input: DemandInput, source: Sourc
 /** Moves a standing buy-box to a basis. Agreeing with the buyer also confirms it today. */
 export async function setBasis(id: string, basis: Basis): Promise<Demand | null> {
   const rows = await queryPg(
-    `update crm_bulk_trade_demand set basis = $2,
+    `update crm_bulk_demand set basis = $2,
        confirmed_on = case when $2 = 'estimated' then confirmed_on else $3::date end, updated_at = now()
      where id = $1 and kind = 'standing' returning id`,
     [id, basis, todayInLondon()],
@@ -228,7 +228,7 @@ export async function setBasis(id: string, basis: Basis): Promise<Demand | null>
 /** A request that keeps coming back becomes a standing buy-box the buyer stated, keeping its history. */
 export async function makeStanding(id: string): Promise<Demand | null> {
   const rows = await queryPg(
-    `update crm_bulk_trade_demand set kind = 'standing', basis = 'stated', needed_by = null, updated_at = now()
+    `update crm_bulk_demand set kind = 'standing', basis = 'stated', needed_by = null, updated_at = now()
      where id = $1 and kind = 'request' returning id`,
     [id],
   );
@@ -241,7 +241,7 @@ export async function confirmDemand(id: string): Promise<Demand | null> {
   const current = await getDemand(id);
   const rows = await queryPg(
     // A reopened row lost its suggestions when it closed, so the next matching passes judge it again.
-    `update crm_bulk_trade_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now(),
+    `update crm_bulk_demand set confirmed_on = $2, status = 'open', closed_reason = null, updated_at = now(),
        match_hash = case when status <> 'open' then null else match_hash end,
        supply_match_hash = case when status <> 'open' then null else supply_match_hash end
      where id = $1 returning id`,
@@ -255,7 +255,7 @@ export async function confirmDemand(id: string): Promise<Demand | null> {
 
 export async function closeDemand(id: string, reason: ClosedReason): Promise<Demand | null> {
   const rows = await queryPg(
-    "update crm_bulk_trade_demand set status = 'closed', closed_reason = $2, updated_at = now() where id = $1 returning id",
+    "update crm_bulk_demand set status = 'closed', closed_reason = $2, updated_at = now() where id = $1 returning id",
     [id, reason],
   );
   return rows.length ? getDemand(id) : null;
@@ -264,7 +264,7 @@ export async function closeDemand(id: string, reason: ClosedReason): Promise<Dem
 /** Categorizing History never confirms, reopens or changes matching state. */
 export async function categorizeDemand(id: string, reason: ClosedReason): Promise<Demand | null> {
   const rows = await queryPg(
-    "update crm_bulk_trade_demand set closed_reason = $2, updated_at = now() where id = $1 and status = 'closed' returning id",
+    "update crm_bulk_demand set closed_reason = $2, updated_at = now() where id = $1 and status = 'closed' returning id",
     [id, reason],
   );
   return rows.length ? getDemand(id) : null;
@@ -298,7 +298,7 @@ export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> 
          ${TIER_RANK} as tier_rank,
          row_number() over (partition by ${BUYER_KEY}
            order by m.strength desc, ${RANK}, demand.needed_by nulls last, demand.confirmed_on desc nulls last, demand.id) as place
-       from crm_bulk_trade_demand_matches m join crm_bulk_trade_demand demand on demand.id = m.demand_id
+       from crm_bulk_trade_demand_matches m join crm_bulk_demand demand on demand.id = m.demand_id
          left join crm_companies company on company.id = demand.company_id
        where m.lot_id = $1 and not m.hidden and m.buyer_id is null and demand.status = 'open'
          and (demand.kind <> 'request' or demand.needed_by is null or demand.needed_by >= current_date)
@@ -324,9 +324,9 @@ export async function suggestedBuyers(lotId: string): Promise<SuggestedBuyer[]> 
 export async function hideSuggestion(lotId: string, demandId: string): Promise<boolean> {
   const rows = await queryPg(
     `update crm_bulk_trade_demand_matches m set hidden = true
-     from crm_bulk_trade_demand demand
+     from crm_bulk_demand demand
      where m.lot_id = $1 and demand.id = m.demand_id
-       and ${BUYER_KEY} = (select ${BUYER_KEY} from crm_bulk_trade_demand demand where demand.id = $2)
+       and ${BUYER_KEY} = (select ${BUYER_KEY} from crm_bulk_demand demand where demand.id = $2)
      returning m.demand_id`,
     [lotId, demandId],
   );

@@ -13,10 +13,10 @@ const SUPPLY_SELECT = `
       select json_agg(json_build_object('demand_id', demand.id, 'buyer', demand.buyer, 'contact', demand.contact,
         'email', demand.email, 'wants', demand.wants, 'kind', demand.kind, 'basis', demand.basis, 'strength', m.strength,
         'reason', m.reason) order by m.strength desc, demand.buyer)
-      from crm_bulk_trade_supply_matches m join crm_bulk_trade_demand demand on demand.id = m.demand_id
+      from crm_bulk_trade_supply_matches m join crm_bulk_demand demand on demand.id = m.demand_id
       where m.supply_id = supply.id and not m.hidden and demand.status = 'open'
     ), '[]'::json) as fits
-  from crm_bulk_trade_supply supply`;
+  from crm_bulk_supply supply`;
 
 /** Every batch: open first, newest first. */
 export async function listSupply(): Promise<Supply[]> {
@@ -35,7 +35,7 @@ export async function getSupply(id: string): Promise<Supply | null> {
 
 export async function closeSupply(id: string, reason: SupplyClosedReason): Promise<Supply | null> {
   const rows = await queryPg(
-    "update crm_bulk_trade_supply set status = 'closed', closed_reason = $2, updated_at = now() where id = $1 returning id",
+    "update crm_bulk_supply set status = 'closed', closed_reason = $2, updated_at = now() where id = $1 returning id",
     [id, reason],
   );
   return rows.length ? getSupply(id) : null;
@@ -45,7 +45,7 @@ export async function closeSupply(id: string, reason: SupplyClosedReason): Promi
 export async function reopenSupply(id: string): Promise<Supply | null> {
   const rows = await queryPg(
     // Closing dropped its suggestions; clearing the hash has the next matching pass judge it again.
-    "update crm_bulk_trade_supply set status = 'open', closed_reason = null, match_hash = null, updated_at = now() where id = $1 returning id",
+    "update crm_bulk_supply set status = 'open', closed_reason = null, match_hash = null, updated_at = now() where id = $1 returning id",
     [id],
   );
   return rows.length ? getSupply(id) : null;

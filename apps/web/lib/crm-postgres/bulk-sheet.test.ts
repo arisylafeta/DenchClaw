@@ -12,21 +12,21 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     pg = await import("../postgres");
     sheet = await import("./bulk-sheet");
     await pg.queryPg(`
-      delete from crm_bulk_trade_demand where id like 'btd_sheet_%';
-      delete from crm_bulk_trade_supply where id like 'bts_sheet_%';
+      delete from crm_bulk_demand where id like 'btd_sheet_%';
+      delete from crm_bulk_supply where id like 'bts_sheet_%';
       delete from crm_bulk_trade_lots where id like 'btl_sheet_%';
-      insert into crm_bulk_trade_demand (id, buyer, wants, kind, basis, product_family) values
+      insert into crm_bulk_demand (id, buyer, wants, kind, basis, product_family) values
         ('btd_sheet_new', 'New Buyer', '12 Ioniq packs', 'request', null, 'Ioniq'),
         ('btd_sheet_worked', 'Worked Buyer', 'LFP systems', 'standing', 'stated', null),
         ('btd_sheet_closed', 'Closed Buyer', 'Anything', 'standing', 'stated', null),
         ('btd_sheet_qual', 'Qualifying Buyer', 'Something vague', 'standing', 'stated', null);
-      update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other' where id = 'btd_sheet_closed';
-      update crm_bulk_trade_demand set status = 'qualifying' where id = 'btd_sheet_qual';
-      insert into crm_bulk_trade_demand_activity (demand_id, kind, title, occurred_at) values
+      update crm_bulk_demand set status = 'closed', closed_reason = 'other' where id = 'btd_sheet_closed';
+      update crm_bulk_demand set status = 'qualifying' where id = 'btd_sheet_qual';
+      insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, occurred_at) values
         ('btd_sheet_worked', 'research', 'Found two sources', '2026-10-01'),
         ('btd_sheet_worked', 'outreach', 'Asked supplier A', '2026-10-05');
-      insert into crm_bulk_trade_supply (id, seller, offers, observed_on) values ('bts_sheet_open', 'Seller Ltd', '3 hybrid packs', '2026-10-07');
-      insert into crm_bulk_trade_supply (id, seller, offers, status, closed_reason) values ('bts_sheet_shut', 'Gone Ltd', 'Old cells', 'closed', 'gone');
+      insert into crm_bulk_supply (id, seller, offers, observed_on) values ('bts_sheet_open', 'Seller Ltd', '3 hybrid packs', '2026-10-07');
+      insert into crm_bulk_supply (id, seller, offers, status, closed_reason) values ('bts_sheet_shut', 'Gone Ltd', 'Old cells', 'closed', 'gone');
       insert into crm_bulk_trade_lots (id, title, trade_stage, origin, lot_kind, summary, observed_outcome, confidence) values
         ('btl_sheet_live', 'Live lot', 'With buyers', 'supply', 'supply', 'x', 'x', 'probable'),
         ('btl_sheet_done', 'Done lot', 'Done', 'supply', 'supply', 'x', 'x', 'probable');

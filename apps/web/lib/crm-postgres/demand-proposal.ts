@@ -37,14 +37,14 @@ export async function acceptDemand(client: PgTransaction, p: Record<string, any>
   }
   // Serialise identity/family upserts, including two different cards accepted concurrently.
   await client.query('select pg_advisory_xact_lock(hashtext($1))', [JSON.stringify([companyId,personId,email,proposed.product_family])]);
-  const { rows } = await client.query(`select d.*,to_jsonb(d) as snapshot from crm_bulk_trade_demand d where status in ('open','qualifying')
+  const { rows } = await client.query(`select d.*,to_jsonb(d) as snapshot from crm_bulk_demand d where status in ('open','qualifying')
     and lower(product_family)=lower($1) and (($2::text is not null and company_id=$2)
       or ($3::text is not null and person_id=$3) or ($4::text is not null and lower(email)=lower($4)))
     order by observed_on desc nulls last limit 1 for update`, [text(proposed.product_family), companyId, personId, email]);
   let before = rows[0] ?? null;
   const target = before?.id ?? text(proposed.existing_demand_id) ?? text(proposed.demand_id);
   if (target && !before) {
-    const result = await client.query('select d.*,to_jsonb(d) as snapshot from crm_bulk_trade_demand d where id=$1 for update', [target]);
+    const result = await client.query('select d.*,to_jsonb(d) as snapshot from crm_bulk_demand d where id=$1 for update', [target]);
     before = result.rows[0];
     if (!before || before.status === 'closed') throw new Error('That demand no longer accepts updates.');
     if ((companyId && before.company_id !== companyId) || (personId && before.person_id !== personId))
@@ -74,9 +74,9 @@ export async function acceptDemand(client: PgTransaction, p: Record<string, any>
   const id = before?.id ?? `btd_${randomUUID()}`;
   const keys = KEYS.filter(k => k in data);
   const values = keys.map(k => k === 'spec' ? JSON.stringify(data[k]) : data[k]);
-  if (before) await client.query(`update crm_bulk_trade_demand set ${keys.map((k,i)=>`${k}=$${i+2}`).join(',')},updated_at=now() where id=$1`, [id,...values]);
-  else await client.query(`insert into crm_bulk_trade_demand(id,${keys.join(',')},created_by) values($1,${keys.map((_,i)=>`$${i+2}`).join(',')},$${keys.length+2})`, [id,...values,userId]);
-  const after = (await client.query('select to_jsonb(d) as snapshot from crm_bulk_trade_demand d where id=$1', [id])).rows[0].snapshot;
+  if (before) await client.query(`update crm_bulk_demand set ${keys.map((k,i)=>`${k}=$${i+2}`).join(',')},updated_at=now() where id=$1`, [id,...values]);
+  else await client.query(`insert into crm_bulk_demand(id,${keys.join(',')},created_by) values($1,${keys.map((_,i)=>`$${i+2}`).join(',')},$${keys.length+2})`, [id,...values,userId]);
+  const after = (await client.query('select to_jsonb(d) as snapshot from crm_bulk_demand d where id=$1', [id])).rows[0].snapshot;
   // JSON normalisation is handled by PostgreSQL to preserve dates and numeric representations.
   const beforeSnapshot = before?.snapshot ?? null;
   await client.query(`update crm_bulk_trade_proposals set status='applied',applied_at=now(),undo=$2 where id=$1`,
@@ -84,17 +84,17 @@ export async function acceptDemand(client: PgTransaction, p: Record<string, any>
 }
 
 export async function reverseDemand(client: PgTransaction, undo: Record<string,any>) {
-  const { rows } = await client.query('select to_jsonb(d) as snapshot from crm_bulk_trade_demand d where id=$1 for update', [undo.demand_id]);
+  const { rows } = await client.query('select to_jsonb(d) as snapshot from crm_bulk_demand d where id=$1 for update', [undo.demand_id]);
   // Compare in PostgreSQL, not JS object order or lossy numeric conversions.
   const equal = (await client.query('select $1::jsonb=$2::jsonb as same', [JSON.stringify(rows[0]?.snapshot),JSON.stringify(undo.after)])).rows[0].same;
   if (!equal) throw new Error('That demand has changed since; edit it by hand.');
   if (!undo.before) {
     const used = (await client.query(`select exists(select 1 from crm_bulk_trade_buyers where demand_id=$1) as used`, [undo.demand_id])).rows[0].used;
     if (used) throw new Error('That demand is linked to a buyer; edit it by hand.');
-    await client.query('delete from crm_bulk_trade_demand where id=$1', [undo.demand_id]);
+    await client.query('delete from crm_bulk_demand where id=$1', [undo.demand_id]);
   } else {
     // Only schema-owned column names from the stored row type, never proposal/model keys.
-    const columns = (await client.query(`select attname from pg_attribute where attrelid='crm_bulk_trade_demand'::regclass and attnum>0 and not attisdropped and attgenerated='' and attname<>'id'`)).rows.map(r=>r.attname as string);
-    await client.query(`update crm_bulk_trade_demand d set ${columns.map(k=>`"${k}"=b."${k}"`).join(',')} from jsonb_populate_record(null::crm_bulk_trade_demand,$2::jsonb) b where d.id=$1`, [undo.demand_id,JSON.stringify(undo.before)]);
+    const columns = (await client.query(`select attname from pg_attribute where attrelid='crm_bulk_demand'::regclass and attnum>0 and not attisdropped and attgenerated='' and attname<>'id'`)).rows.map(r=>r.attname as string);
+    await client.query(`update crm_bulk_demand d set ${columns.map(k=>`"${k}"=b."${k}"`).join(',')} from jsonb_populate_record(null::crm_bulk_demand,$2::jsonb) b where d.id=$1`, [undo.demand_id,JSON.stringify(undo.before)]);
   }
 }

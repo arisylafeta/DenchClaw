@@ -14,14 +14,14 @@ describe.skipIf(!TEST_URL)("supply list", () => {
     supply = await import("./bulk-supply");
     demand = await import("./bulk-demand");
     await pg.queryPg(`
-      delete from crm_bulk_trade_supply where id like 'bts_sup_%';
-      delete from crm_bulk_trade_demand where id like 'btd_sup_%';
-      insert into crm_bulk_trade_demand (id, buyer, contact, wants, kind, basis) values
+      delete from crm_bulk_supply where id like 'bts_sup_%';
+      delete from crm_bulk_demand where id like 'btd_sup_%';
+      insert into crm_bulk_demand (id, buyer, contact, wants, kind, basis) values
         ('btd_sup_a', 'Lab Buyer', 'Massimo', 'Two 60 kWh packs for testing', 'request', null),
         ('btd_sup_b', 'Other Buyer', null, 'Hybrid packs', 'standing', 'stated'),
         ('btd_sup_c', 'Closed Buyer', null, 'Anything', 'standing', 'stated');
-      update crm_bulk_trade_demand set status = 'closed', closed_reason = 'other' where id = 'btd_sup_c';
-      insert into crm_bulk_trade_supply (id, seller, offers, est_tonnes, observed_on) values
+      update crm_bulk_demand set status = 'closed', closed_reason = 'other' where id = 'btd_sup_c';
+      insert into crm_bulk_supply (id, seller, offers, est_tonnes, observed_on) values
         ('bts_sup_1', 'Dismantler Ltd', '3 Prius hybrid packs', 0.12, '2026-10-07'),
         ('bts_sup_2', 'Older Seller', '20 18650 cells', null, '2026-10-01');
       insert into crm_bulk_trade_supply_matches (supply_id, demand_id, strength, reason) values
@@ -72,8 +72,8 @@ describe.skipIf(!TEST_URL)("supply list", () => {
         ('context_feed_new', 'company_feed_context', 'Latest call', 'call', 'transcript:latest', '2026-10-16');
       update crm_company_context_notes set category='bid', source_url='https://example.com/evidence'
         where id='context_feed_new';
-      update crm_bulk_trade_supply set company_id = 'company_feed_context' where id = 'bts_sup_1';
-      update crm_bulk_trade_demand set company_id = 'company_feed_context' where id = 'btd_sup_a';
+      update crm_bulk_supply set company_id = 'company_feed_context' where id = 'bts_sup_1';
+      update crm_bulk_demand set company_id = 'company_feed_context' where id = 'btd_sup_a';
     `);
     // DATABASE_URL is assigned in beforeAll; static import would initialize the pool too early.
     const { listCompanyContextNotes } = await import("./company-context");
@@ -91,20 +91,20 @@ describe.skipIf(!TEST_URL)("supply list", () => {
     expect(await supply.closeSupply("bts_sup_1", "sold")).toMatchObject({ status: "closed", closed_reason: "sold" });
     const rows = (await supply.listSupply()).filter((row) => row.id.startsWith("bts_sup_"));
     expect(rows.map((row) => row.id)).toEqual(["bts_sup_2", "bts_sup_1"]); // open first
-    await pg.queryPg("update crm_bulk_trade_supply set match_hash = 'judged' where id = 'bts_sup_1'");
+    await pg.queryPg("update crm_bulk_supply set match_hash = 'judged' where id = 'bts_sup_1'");
     expect(await supply.reopenSupply("bts_sup_1")).toMatchObject({ status: "open", closed_reason: null });
     // Closing dropped its suggestions, so reopening has the next matching pass judge it again.
-    const [hash] = await pg.queryPg<{ match_hash: string | null }>("select match_hash from crm_bulk_trade_supply where id = 'bts_sup_1'");
+    const [hash] = await pg.queryPg<{ match_hash: string | null }>("select match_hash from crm_bulk_supply where id = 'bts_sup_1'");
     expect(hash.match_hash).toBeNull();
     expect(await supply.closeSupply("bts_missing", "sold")).toBeNull();
   });
 
   it("clears a reopened demand row's matching hashes, but not on a plain Still wanted", async () => {
-    await pg.queryPg("update crm_bulk_trade_demand set match_hash = 'm', supply_match_hash = 's' where id in ('btd_sup_b', 'btd_sup_c')");
+    await pg.queryPg("update crm_bulk_demand set match_hash = 'm', supply_match_hash = 's' where id in ('btd_sup_b', 'btd_sup_c')");
     await demand.confirmDemand("btd_sup_c"); // was closed
     await demand.confirmDemand("btd_sup_b"); // was open
     const rows = await pg.queryPg<{ id: string; match_hash: string | null; supply_match_hash: string | null }>(
-      "select id, match_hash, supply_match_hash from crm_bulk_trade_demand where id in ('btd_sup_b', 'btd_sup_c') order by id",
+      "select id, match_hash, supply_match_hash from crm_bulk_demand where id in ('btd_sup_b', 'btd_sup_c') order by id",
     );
     expect(rows).toEqual([
       { id: "btd_sup_b", match_hash: "m", supply_match_hash: "s" },

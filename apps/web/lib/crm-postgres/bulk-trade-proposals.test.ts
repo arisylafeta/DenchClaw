@@ -86,7 +86,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     }, null);
     expect(await proposals.decideProposal(initial, "accept", user)).toMatchObject({ ok: true });
     const [first] = await pg.queryPg<{ id: string; status: string }>(
-      "select id, status from crm_bulk_trade_demand where email = $1", [email]);
+      "select id, status from crm_bulk_demand where email = $1", [email]);
     expect(first.status).toBe("qualifying");
     const followup = await propose("possible_demand", null, {
       buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf", kind: "request",
@@ -94,20 +94,20 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
       price_basis: "buyer", reputation: "email", existing_demand_id: first.id,
     }, null);
     expect(await proposals.decideProposal(followup, "accept", user)).toMatchObject({ ok: true });
-    expect(await pg.queryPg("select id, status, wants, fee_eur::float8 from crm_bulk_trade_demand where email = $1", [email]))
+    expect(await pg.queryPg("select id, status, wants, fee_eur::float8 from crm_bulk_demand where email = $1", [email]))
       .toEqual([{ id: first.id, status: "open", wants: "Another Leaf batch", fee_eur: 2000 }]);
     const changed = await propose("possible_demand", null, {
       buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf",
       volume: 10, volume_unit: "packs", existing_demand_id: first.id,
     }, null);
     expect(await proposals.decideProposal(changed, "accept", user)).toMatchObject({ ok: true });
-    expect((await pg.queryPg<{ fee: number }>("select fee_eur::float8 as fee from crm_bulk_trade_demand where id = $1", [first.id]))[0].fee).toBe(1000);
+    expect((await pg.queryPg<{ fee: number }>("select fee_eur::float8 as fee from crm_bulk_demand where id = $1", [first.id]))[0].fee).toBe(1000);
     const foreignCurrency = await propose("possible_demand", null, {
       buyer: "Demand Buyer", email, wants: "Another Leaf batch", product_family: "nissan leaf",
       max_price: 1000, price_currency: "USD", price_unit: "pack", existing_demand_id: first.id,
     }, null);
     expect(await proposals.decideProposal(foreignCurrency, "accept", user)).toMatchObject({ ok: true });
-    expect((await pg.queryPg("select fee_eur from crm_bulk_trade_demand where id = $1", [first.id]))[0].fee_eur).toBeNull();
+    expect((await pg.queryPg("select fee_eur from crm_bulk_demand where id = $1", [first.id]))[0].fee_eur).toBeNull();
   });
 
   it("undoes demand inserts and updates without a trade, and refuses conflicting human edits", async () => {
@@ -116,21 +116,21 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
       buyer:"Synthetic undo buyer",email,wants:"100 cells",quantity:"100 cells",product_family:"lfp cells",
     }, null);
     expect(await proposals.decideProposal(first,"accept",user)).toEqual({ok:true,lot_id:null});
-    const [created] = await pg.queryPg<{id:string}>("select id from crm_bulk_trade_demand where email=$1",[email]);
+    const [created] = await pg.queryPg<{id:string}>("select id from crm_bulk_demand where email=$1",[email]);
     const update = await propose("possible_demand",null,{
       buyer:"Synthetic undo buyer",email,wants:"200 cells",quantity:"200 cells",product_family:"lfp cells",
     },null);
     expect(await proposals.decideProposal(update,"accept",user)).toEqual({ok:true,lot_id:null});
     expect(await proposals.undoChange(update,user.id)).toEqual({ok:true,lot_id:null});
-    expect((await pg.queryPg("select wants from crm_bulk_trade_demand where id=$1",[created.id]))[0].wants).toBe("100 cells");
+    expect((await pg.queryPg("select wants from crm_bulk_demand where id=$1",[created.id]))[0].wants).toBe("100 cells");
     // Restoring the exact before snapshot permits undoing the earlier insert too.
     expect(await proposals.undoChange(first,user.id)).toEqual({ok:true,lot_id:null});
-    expect(await pg.queryPg("select id from crm_bulk_trade_demand where id=$1",[created.id])).toEqual([]);
+    expect(await pg.queryPg("select id from crm_bulk_demand where id=$1",[created.id])).toEqual([]);
     const conflict = await propose("possible_demand",null,{buyer:"Synthetic undo buyer",email,wants:"300 cells"},null);
     expect((await proposals.decideProposal(conflict,"accept",user)).ok).toBe(true);
-    await pg.queryPg("update crm_bulk_trade_demand set wants='Human edit',updated_at=now() where email=$1",[email]);
+    await pg.queryPg("update crm_bulk_demand set wants='Human edit',updated_at=now() where email=$1",[email]);
     expect(await proposals.undoChange(conflict,user.id)).toMatchObject({ok:false,status:409});
-    expect((await pg.queryPg("select wants from crm_bulk_trade_demand where email=$1",[email]))[0].wants).toBe("Human edit");
+    expect((await pg.queryPg("select wants from crm_bulk_demand where email=$1",[email]))[0].wants).toBe("Human edit");
   });
 
   it("revalidates WhatsApp source versions and identity mapping at acceptance", async () => {
@@ -153,7 +153,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(await proposals.decideProposal(id,"accept",user)).toMatchObject({ok:false,status:422});
     await pg.queryPg("update whatsapp_identity_link set valid_to=null where id=$1",[key]);
     expect(await proposals.decideProposal(id,"accept",user)).toEqual({ok:true,lot_id:null});
-    expect((await pg.queryPg("select source_kind,source_id from crm_bulk_trade_demand where person_id=$1",[person]))[0])
+    expect((await pg.queryPg("select source_kind,source_id from crm_bulk_demand where person_id=$1",[person]))[0])
       .toEqual({source_kind:"whatsapp",source_id:message});
     expect(await proposals.undoChange(id,user.id)).toEqual({ok:true,lot_id:null});
     await pg.queryPg("update crm_bulk_trade_proposals set status='new' where id=$1",[id]);

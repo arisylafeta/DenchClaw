@@ -26,18 +26,18 @@ export type DemandActivityInput = {
   occurredAt?: string;
   actorUserId?: string | null;
 };
-const SELECT = `select id::text, demand_id, kind, title, body, ref_kind, ref_id, data, actor_user_id,
-  occurred_at::text, created_at::text from crm_bulk_trade_demand_activity`;
+const SELECT = `select id::text, bulk_listing_id as demand_id, kind, title, body, ref_kind, ref_id, data, actor_user_id,
+  occurred_at::text, created_at::text from crm_bulk_listing_activity`;
 
 export async function listDemandActivity(demandId: string): Promise<DemandActivity[]> {
-  return queryPg<DemandActivity>(`${SELECT} where demand_id = $1 order by occurred_at desc, crm_bulk_trade_demand_activity.id desc`, [demandId]);
+  return queryPg<DemandActivity>(`${SELECT} where bulk_listing_id = $1 order by occurred_at desc, crm_bulk_listing_activity.id desc`, [demandId]);
 }
 
 export async function addDemandActivity(input: DemandActivityInput): Promise<DemandActivity> {
   const [row] = await queryPg<DemandActivity>(
-    `insert into crm_bulk_trade_demand_activity (demand_id, kind, title, body, ref_kind, ref_id, data, occurred_at, actor_user_id)
+    `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, ref_kind, ref_id, data, occurred_at, actor_user_id)
      values ($1, $2, $3, $4, $5, $6, $7::jsonb, coalesce($8::timestamptz, now()), $9)
-     returning id::text, demand_id, kind, title, body, ref_kind, ref_id, data, actor_user_id, occurred_at::text, created_at::text`,
+     returning id::text, bulk_listing_id as demand_id, kind, title, body, ref_kind, ref_id, data, actor_user_id, occurred_at::text, created_at::text`,
     [input.demandId, input.kind, input.title.trim(), input.body ?? null, input.refKind ?? null, input.refId ?? null,
       JSON.stringify(input.data ?? {}), input.occurredAt ?? null, input.actorUserId ?? null],
   );
@@ -45,5 +45,5 @@ export async function addDemandActivity(input: DemandActivityInput): Promise<Dem
 }
 
 export async function deleteDemandActivity(demandId: string, id: string): Promise<boolean> {
-  return (await queryPg("delete from crm_bulk_trade_demand_activity where demand_id = $1 and id = $2 returning id", [demandId, id])).length > 0;
+  return (await queryPg("delete from crm_bulk_listing_activity where bulk_listing_id = $1 and id = $2 returning id", [demandId, id])).length > 0;
 }
