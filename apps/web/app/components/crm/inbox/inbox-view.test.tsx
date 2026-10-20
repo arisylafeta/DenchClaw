@@ -157,7 +157,9 @@ describe("merged mail", () => {
     expect(await screen.findByText("Hyundai Kona 64 kWh packs")).toBeInTheDocument();
     expect(screen.getByLabelText("History limitations")).toHaveTextContent("Imported WhatsApp export");
     fireEvent.click(screen.getByRole("tab", { name: "Campaigns" }));
-    expect(await screen.findByText("Pick a campaign")).toBeInTheDocument();
+    // With nothing open the campaign list is the whole screen: no empty detail pane.
+    expect(await screen.findByRole("link", { name: "Battery offer" })).toBeInTheDocument();
+    expect(screen.queryByText("Pick a campaign")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "Battery offer" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/mail/campaigns/c1", expect.anything()));
     expect(await screen.findByText(/detail unavailable in this test/)).toBeInTheDocument();

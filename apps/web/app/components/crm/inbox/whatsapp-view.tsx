@@ -60,6 +60,8 @@ export function WhatsappView({ query, selectedId, onSelect, onOpenPerson }: { qu
     </li>)}</ul>
     {hasMore && <button type="button" className={`${styles.control} m-4`} disabled={state === "loading"} onClick={() => setOffset((current) => current + pageSize)}>Load more</button>}
   </div>;
-  return <InboxLayout {...PANEL_LAYOUT} hasSelection={Boolean(selected)} list={list}
-    conversation={selected ? <WhatsappConversation key={selected} id={selected} embedded onClose={() => select(null)} onOpenPerson={onOpenPerson} /> : <div className="flex h-full flex-col items-center justify-center gap-1.5 px-8 text-center" style={{ background: "var(--color-main-bg)" }}><span className="text-lg font-medium">Pick a chat</span><span className="max-w-xs text-[13px]" style={{ color: "var(--color-text-muted)" }}>Open a chat to read its captured history here. Read only.</span></div>} />;
+  // Nothing open: the chat list is the whole screen, with no empty pane beside it.
+  if (!selected) {return list;}
+  return <InboxLayout {...PANEL_LAYOUT} hasSelection list={list}
+    conversation={<WhatsappConversation key={selected} id={selected} embedded onClose={() => select(null)} onOpenPerson={onOpenPerson} />} />;
 }
