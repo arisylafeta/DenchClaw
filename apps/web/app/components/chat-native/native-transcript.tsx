@@ -11,6 +11,8 @@ import { transcriptBlocks } from "./transcript-blocks";
 import { NoticeLine } from "./notice-line";
 import { AttachmentChips } from "./attachment-chips";
 import { parseUserAttachments } from "./attachments";
+import { hasArtifactBlocks, splitArtifactBlocks } from "@/lib/mail-artifacts";
+import { MailDraftCard } from "../mail-draft-card";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
   const [content, setContent] = useState<ReactNode>(text);
@@ -29,7 +31,14 @@ function UserContent({ html, text }: { html?: string; text: string }) {
   }, [html, text]);
   return <div className="whitespace-pre-wrap break-words">{content}</div>;
 }
-export function NativeTranscript({ state, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [] }: NativeTranscriptProps) {
+function AnswerText({ text, live, renderMarkdown, onOpenArtifact }: { text: string; live: boolean; renderMarkdown?: (text: string) => ReactNode; onOpenArtifact?: NativeTranscriptProps["onOpenArtifact"] }) {
+  const markdown = (value: string) => renderMarkdown ? renderMarkdown(value) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>;
+  if (!hasArtifactBlocks(text)) {return <>{markdown(text)}</>;}
+  return <>{splitArtifactBlocks(text).map((piece, index) => piece.type === "artifact"
+    ? <MailDraftCard key={`artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />
+    : <Fragment key={`text-${index}`}>{markdown(piece.text)}</Fragment>)}</>;
+}
+export function NativeTranscript({ state, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact }: NativeTranscriptProps) {
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => {
@@ -50,7 +59,7 @@ export function NativeTranscript({ state, todos = state.todos, callbacks, render
             const next = blocks[index + 1];
             return block.type === "work"
               ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && !message.steerBoundary && index === blocks.length - 1} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
-              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words">{renderMarkdown ? renderMarkdown(block.segment.text) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.segment.text}</ReactMarkdown>}</div>;
+              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words"><AnswerText text={block.segment.text} live={state.live && message.pending} renderMarkdown={renderMarkdown} onOpenArtifact={onOpenArtifact} /></div>;
           })}
         </Fragment>;
       })()}

@@ -22,5 +22,7 @@ export interface NativeTranscriptProps {
   /** HTML is parsed as inert formatting/mention spans, never inserted as executable HTML. */
   userHtml?: (messageId: string) => string | undefined;
   queuedMessageIds?: readonly string[];
+  /** Opens a workspace path (such as a mail draft artifact) in the content panel. */
+  onOpenArtifact?: (path: string, options?: { title?: string }) => Promise<boolean | void> | boolean | void;
   subagentTails?: Readonly<Record<string, string>>;
 }

@@ -109,7 +109,7 @@ After `draft ... --apply` succeeds, end the reply with an artifact block naming 
 ```
 ````
 
-Preparing a revision creates a new draft id; emit a new block for it. The panel is read-only: approval and sending stay in this CLI. Keep the reply's own summary (ask count, holds, approval status) beside the block.
+Preparing a revision creates a new draft id; emit a new block for it. The panel is read-only: approval and sending stay in this CLI. The card already shows subject, recipients, an excerpt and approval status, so do not repeat From, To, Subject or the body in the reply. Write one or two lines (ask count, holds, what needs approval), then the block.
 
 ### Dynamic one-offs without HTML
 

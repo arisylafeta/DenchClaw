@@ -352,3 +352,19 @@ describe("subagent group", () => {
     expect(group.querySelector('[aria-label="Recent activity"]')).toBeNull();
   });
 });
+
+describe("artifact blocks in native answers", () => {
+  const block = '```artifact\n{"kind":"mail_draft","id":"nat1"}\n```';
+  const draft = { id: "nat1", state: "draft", subject: "Native draft", to_emails: ["a@example.test"], cc_emails: [], bcc_emails: [], from_email: "ari@example.test", body_text: "Hello there", body_html: null, links: [], warnings: [], approval: null };
+  it("renders a draft card instead of a code block and opens it from the card", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(draft))));
+    const open = vi.fn();
+    const state = events([["message.start", {}], ["message.delta", { text: `Saved.\n\n${block}` }], ["message.complete", { text: `Saved.\n\n${block}` }]]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} onOpenArtifact={open} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open email draft: Native draft" }));
+    expect(open).toHaveBeenCalledWith("~mail/draft/nat1", { title: "Native draft" });
+    expect(container.querySelector("pre")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
