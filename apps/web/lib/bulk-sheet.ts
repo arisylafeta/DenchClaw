@@ -6,6 +6,8 @@
 
 import type { TradeStage } from "./bulk-trades";
 import type { BulkTradesRoute } from "./bulk-trades-url";
+import { demandTitle } from "./bulk-demand-header";
+import type { BuyerContext } from "./buyer-context";
 
 export type SheetKind = "demand" | "supply" | "trade";
 /** Starting point: a buyer asking for something, or a seller offering it. A buyer-seller connection is shown in progress and details, not here. */
@@ -52,7 +54,7 @@ export const SIDE_LABEL: Record<SheetSide, string> = { buyer: "Buying", seller: 
 const text = (value: string | null | undefined) => (value && value.trim() ? value.trim() : null);
 
 type DemandInput = {
-  id: string; buyer: string; company_id: string | null; wants: string; product_family: string | null;
+  id: string; buyer: string; company_id: string | null; wants: string; product_family: string | null; context: BuyerContext;
   activity_count: number; linked_trades: number; latest_kind: string | null; latest_title: string | null;
   latest_at: string | null; asked_on: string | null; updated_at: string; score: number | null;
 };
@@ -65,7 +67,9 @@ export function demandRow(input: DemandInput): SheetRow {
   const worked = input.activity_count > 0;
   return {
     key: `demand:${input.id}`, kind: "demand", id: input.id, side: "buyer",
-    title: input.wants, company: text(input.buyer), company_id: input.company_id,
+    // Same title the demand detail header shows: a curated listing_title if one is set, else derived from wants.
+    title: demandTitle({ wants: input.wants, product_family: input.product_family, buyer: input.buyer, context: input.context }),
+    company: text(input.buyer), company_id: input.company_id,
     category: text(input.product_family),
     progress: input.linked_trades > 0 ? "On a trade" : worked ? "Being worked" : "New",
     tone: input.linked_trades > 0 ? "closing" : worked ? "active" : "new",

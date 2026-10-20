@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { demandRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, supplyRow, tradeRow } from "./bulk-sheet";
 
 const demand = (over = {}) => demandRow({
-  id: "d1", buyer: "H. Nolden", company_id: "c1", wants: "Complete packs", product_family: "Ioniq", activity_count: 0, linked_trades: 0,
+  id: "d1", buyer: "H. Nolden", company_id: "c1", wants: "Complete packs", product_family: "Ioniq", context: {}, activity_count: 0, linked_trades: 0,
   latest_kind: null, latest_title: null, latest_at: null, asked_on: "2026-10-01", updated_at: "2026-10-02", score: null, ...over,
 });
 const trade = (over = {}) => tradeRow({
