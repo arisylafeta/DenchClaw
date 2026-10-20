@@ -1,0 +1,8 @@
+/* Shimmer for the text and values of Trades Preview. Only the glyph area shimmers; cards, borders and layout stay real. */
+.bar { display: inline-block; vertical-align: baseline; max-width: 100%; border-radius: 4px; color: transparent !important; user-select: none; pointer-events: none; overflow: hidden; white-space: nowrap;
+  background-color: color-mix(in srgb, var(--bt-text) 7%, transparent);
+  background-image: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--bt-text) 10%, transparent) 50%, transparent 80%);
+  background-size: 220% 100%; background-repeat: no-repeat; animation: btShimmer 1.5s ease-in-out infinite; }
+.round { border-radius: 9999px; }
+@keyframes btShimmer { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+@media (prefers-reduced-motion: reduce) { .bar { animation: none; } }
