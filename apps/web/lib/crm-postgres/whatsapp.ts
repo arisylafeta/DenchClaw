@@ -66,6 +66,30 @@ export async function whatsappThreads(
   );
   return { threads, limit, offset };
 }
+export type WhatsappInboxRow = {
+  id: string; kind: "direct" | "group"; name: string | null; last_captured_at: string; message_count: number;
+  last_body: string | null; last_direction: string | null; last_at: string | null;
+};
+/** Every captured chat, newest first, with a display name and the latest visible message for a list row. */
+export async function whatsappInbox(limit = 50, offset = 0) {
+  whatsappPagination(limit, offset);
+  const threads = await queryPg<WhatsappInboxRow>(
+    `select t.id,t.kind,t.last_captured_at,
+      coalesce(nullif(t.subject,''),nullif(i.display_name,''),i.e164,
+        (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.account_id=t.account_id and l.identity_id=t.identity_id and l.valid_to is null order by l.valid_from desc limit 1),
+        (select string_agg(distinct coalesce(nullif(mi.display_name,''),mi.e164),', ') from whatsapp_thread_member tm
+          join whatsapp_identity mi on mi.account_id=tm.account_id and mi.id=tm.identity_id where tm.thread_id=t.id and not mi.shared)) as name,
+      (select count(*)::int from whatsapp_message m where m.thread_id=t.id) as message_count,
+      lm.body as last_body,lm.direction as last_direction,coalesce(lm.occurred_at,lm.captured_at) as last_at
+    from whatsapp_thread t
+    left join whatsapp_identity i on i.account_id=t.account_id and i.id=t.identity_id
+    left join lateral (select ${visibleBody("m")} as body,m.direction,m.occurred_at,m.captured_at from whatsapp_message m where m.thread_id=t.id
+      order by coalesce(m.occurred_at,m.captured_at) desc,m.id desc limit 1) lm on true
+    order by t.last_captured_at desc,t.id limit $1 offset $2`,
+    [limit, offset],
+  );
+  return { threads, limit, offset };
+}
 export type WhatsappConversationData = {
   thread: WhatsappThread;
   messages: WhatsappMessage[];

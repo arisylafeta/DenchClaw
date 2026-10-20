@@ -3,20 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MailFilters, MailFollowup, MailMessageListRow, MailPage } from "@/lib/mail-types";
+import { WhatsappView } from "./whatsapp-view";
 import { MailLine } from "./mail-line";
 import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
 import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsView } from "../../campaigns/campaigns-view";
-import { Megaphone, Search, SlidersHorizontal, X } from "lucide-react";
+import { Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
 import { mailCounterparty } from "@/lib/mail-counterparty";
 
 export type MailView = NonNullable<MailFilters["view"]>;
-const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", drafts: "Drafts", sent: "Sent", followups: "Follow-ups" };
+const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", drafts: "Drafts", sent: "Sent", followups: "Follow-ups", whatsapp: "WhatsApp" };
 // Campaigns has its own button; Follow-ups has no tab (still reachable by URL).
-const tabless: MailView[] = ["campaigns", "followups"];
+const tabless: MailView[] = ["campaigns", "followups", "whatsapp"];
 const filterOptions: Record<string, string[]> = {
   direction: ["inbound", "outbound"], transport: ["gmail", "postmark-broadcast", "postmark-transactional"],
   purpose: ["personal", "marketing", "transactional"], state: ["draft", "frozen", "approved", "sending", "unknown", "accepted", "failed", "received"],
@@ -59,7 +60,10 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
     <header className={styles.header}>
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Mail</h1>
+        <div className="flex items-center gap-2">
+        <button type="button" aria-pressed={view === "whatsapp"} className={`${styles.control} ${styles.button}`} onClick={() => update("view", "whatsapp")}><MessageCircle size={14} aria-hidden />WhatsApp</button>
         <button type="button" aria-pressed={view === "campaigns"} className={`${styles.control} ${styles.button}`} onClick={() => update("view", "campaigns")}><Megaphone size={14} aria-hidden />Campaigns</button>
+        </div>
       </div>
       <nav role="tablist" aria-label="Mail views" className={styles.tabs}>
         {(Object.entries(views) as [MailView, string][]).filter(([key]) => !tabless.includes(key)).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} className={styles.tab} onClick={() => update("view", key)}>{label}</button>)}
@@ -85,6 +89,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
     <section role="tabpanel" aria-label={views[view]} className="min-h-0 min-w-0 flex-1 overflow-auto">
       {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
       {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query={query} />}
+      {view === "whatsapp" && <WhatsappView query={query} />}
       {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
       {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
     </section>

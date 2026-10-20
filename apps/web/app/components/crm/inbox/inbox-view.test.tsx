@@ -122,6 +122,17 @@ describe("merged mail", () => {
     expect(within(row as HTMLElement).getByText(view === "sent" ? "— Sent body" : "— Draft body")).toBeInTheDocument();
     expect(within(row as HTMLElement).getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
+  it("opens a WhatsApp chat list from the header button", async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(String(url).includes("/api/whatsapp/inbox")
+      ? { threads: [{ id: "t1", kind: "direct", name: "Mathieu", last_captured_at: at, message_count: 4, last_body: "Collection is Thursday", last_direction: "inbound", last_at: at }] }
+      : { items: [], nextCursor: null })));
+    render(<InboxView />);
+    fireEvent.click(screen.getByRole("button", { name: "WhatsApp" }));
+    expect(await screen.findByText("Collection is Thursday")).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "WhatsApp" })).toBeInTheDocument();
+    expect(screen.getByText("Mathieu").closest("a")).toHaveAttribute("href", "/whatsapp/threads/t1");
+    expect(screen.getByText("1:1 · 4")).toBeInTheDocument();
+  });
   it("flags sending and unknown outcomes without offering a send action", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({ id: "unknown", state: "unknown", direction: "outbound" }), message({ id: "sending", state: "sending", direction: "outbound" })], nextCursor: null })));
     render(<InboxView initialView="sent" />);
