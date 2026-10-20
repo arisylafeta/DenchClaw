@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowUpRight, Mail } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { mailDraftPath, type ArtifactRef } from "@/lib/mail-artifacts";
 import { approvalLabel, useMailDraft } from "./crm/inbox/mail-draft-view";
 
@@ -51,10 +51,7 @@ export function MailDraftCard({ artifact, autoOpen, onOpen }: { artifact: Extrac
       className="not-prose my-3 w-full max-w-[560px] overflow-hidden rounded-[5px] border p-3.5 sm:p-4"
       style={{ borderColor: "var(--color-border-strong)", background: "var(--color-surface)", color: "var(--color-text)", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}
     >
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="min-w-0 text-[15px] font-semibold leading-snug tracking-tight [overflow-wrap:anywhere]">{title}</h3>
-        <Mail className="mt-0.5 size-4 shrink-0" strokeWidth={1.75} aria-hidden style={{ color: "var(--color-text-muted)" }} />
-      </div>
+      <h3 className="text-[15px] font-semibold leading-snug tracking-tight [overflow-wrap:anywhere]">{title}</h3>
       {load.status === "error"
         ? <p className="mt-1 text-xs" style={{ color: "var(--color-error)" }}>{load.message}</p>
         : <p className="mt-1 break-words text-xs" style={{ color: "var(--color-text-muted)" }}>
