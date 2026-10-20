@@ -358,4 +358,10 @@ describe("artifact blocks", () => {
     rerender(<ChatMessage message={{ ...message }} isStreaming onFilePathClick={onFilePathClick} />);
     expect(onFilePathClick).toHaveBeenCalledTimes(1);
   });
+  it("keeps splitting other structured blocks beside an artifact block", () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ id: "d2", subject: "Mixed", to_emails: [], approval: null, state: "draft" }))) as typeof fetch;
+    const text = '```artifact\n{"kind":"mail_draft","id":"d2"}\n```\n```diff\n-old\n+new\n```';
+    const { container } = render(<ChatMessage message={{ id: "mixed", role: "assistant", parts: [{ type: "text", text }] }} />);
+    expect(container.textContent).not.toContain("```diff");
+  });
 });

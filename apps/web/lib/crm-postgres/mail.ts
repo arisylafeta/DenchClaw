@@ -164,9 +164,23 @@ export async function readMailDraft(id: string, userId: string): Promise<MailDra
   return { ...message, links, warnings, approval: approval ?? null };
 }
 
-export async function listMailDrafts(userId: string, limit = 50): Promise<MailDraftListRow[]> {
+export type MailDraftFilters = Pick<MailFilters, 'q' | 'identity' | 'to' | 'from' | 'purpose' | 'transport' | 'state' | 'since' | 'until'>;
+
+export async function listMailDrafts(userId: string, limit = 50, filters: MailDraftFilters = {}): Promise<MailDraftListRow[]> {
+  const values: unknown[] = [userId];
+  const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
+  const where = [`m.direction = 'outbound'`, `m.state in ${DRAFT_STATES}`, `(m.mailbox_owner_id is null or m.mailbox_owner_id = $1::uuid)`];
+  for (const [key, column] of Object.entries({ identity: 'identity_key', purpose: 'purpose', transport: 'transport', from: 'from_email' })) {
+    const value = filters[key as keyof MailDraftFilters];
+    if (value) where.push(`m.${column} = ${bind(value)}`);
+  }
+  if (filters.state === 'draft' || filters.state === 'frozen') where.push(`m.state = ${bind(filters.state)}`);
+  if (filters.to) { const p = bind(filters.to); where.push(`(${p} = any(m.to_emails) or ${p} = any(m.cc_emails) or ${p} = any(m.bcc_emails) or m.recipient_email = ${p})`); }
+  if (filters.q) where.push(`to_tsvector('english',coalesce(m.subject,'') || ' ' || coalesce(m.body_text,m.body_preview,'')) @@ websearch_to_tsquery('english',${bind(filters.q)})`);
+  if (filters.since) where.push(`m.created_at >= ${bind(filters.since)}::timestamptz`);
+  if (filters.until) where.push(`m.created_at <= ${bind(filters.until)}::timestamptz`);
+  const bound = bind(Math.max(1, Math.min(200, limit)));
   return queryPg<MailDraftListRow>(
     `select m.id,m.state,m.identity_key,m.from_email,coalesce(m.to_emails,'{}') as to_emails,m.subject,m.created_at,m.body_preview
-     from mail_message m where m.direction = 'outbound' and m.state in ${DRAFT_STATES} and (m.mailbox_owner_id is null or m.mailbox_owner_id = $1::uuid)
-     order by m.created_at desc, m.id limit $2`, [userId, Math.max(1, Math.min(200, limit))]);
+     from mail_message m where ${where.join(' and ')} order by m.created_at desc, m.id limit ${bound}`, values);
 }

@@ -14,7 +14,9 @@ it('rejects unauthenticated list and read before querying',async()=>{
 it('scopes both reads to the signed-in user',async()=>{
  currentUser.mockResolvedValue({id:'u1'}); listMailDrafts.mockResolvedValue([]); readMailDraft.mockResolvedValue({id:'d1'});
  expect(await (await list(new Request('http://localhost/api/mail/drafts?limit=5'))).json()).toEqual({items:[]});
- expect(listMailDrafts).toHaveBeenCalledWith('u1',5);
+ expect(listMailDrafts).toHaveBeenCalledWith('u1',5,{});
+ await list(new Request('http://localhost/api/mail/drafts?q=ioniq&identity=ari&to=a@example.test&mailboxOwnerId=other'));
+ expect(listMailDrafts).toHaveBeenLastCalledWith('u1',50,{q:'ioniq',identity:'ari',to:'a@example.test'});
  expect(await (await read(new Request('http://localhost/x'),{params:Promise.resolve({id:'d1'})})).json()).toEqual({id:'d1'});
  expect(readMailDraft).toHaveBeenCalledWith('d1','u1');
 });

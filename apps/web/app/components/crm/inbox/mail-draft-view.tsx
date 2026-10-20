@@ -38,6 +38,7 @@ const TONE: Record<"ok" | "muted" | "warn", string> = { ok: "var(--color-success
 function plainCopy(draft: MailDraft): string {
   const lines = [`To: ${draft.to_emails.join(", ")}`];
   if (draft.cc_emails.length) {lines.push(`Cc: ${draft.cc_emails.join(", ")}`);}
+  if (draft.bcc_emails.length) {lines.push(`Bcc: ${draft.bcc_emails.join(", ")}`);}
   lines.push(`Subject: ${draft.subject ?? ""}`, "", draft.body_text ?? "");
   return lines.join("\n");
 }
@@ -95,6 +96,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
           <Field label="From">{d.from_email ?? d.identity_key ?? "Unknown sender"}</Field>
           <Field label="To">{d.to_emails.length ? d.to_emails.join(", ") : <span style={{ color: "var(--color-warning)" }}>No recipient</span>}</Field>
           {d.cc_emails.length > 0 && <Field label="Cc">{d.cc_emails.join(", ")}</Field>}
+          {d.bcc_emails.length > 0 && <Field label="Bcc">{d.bcc_emails.join(", ")}</Field>}
           <Field label="Subject">{d.subject ?? ""}</Field>
         </dl>
 

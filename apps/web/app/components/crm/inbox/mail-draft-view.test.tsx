@@ -44,6 +44,11 @@ describe("MailDraftView", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Copy draft as text" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("To: admin@example.test\nSubject: Ioniq 5 battery enquiry\n\nHi team,\n\nHow many packs?"));
   });
+  it("shows Bcc recipients so reviewers see every address", async () => {
+    respond({ ...draft, bcc_emails: ["hidden@example.test"] });
+    render(<MailDraftView draftId="d1" />);
+    expect(await screen.findByText("hidden@example.test")).toBeInTheDocument();
+  });
   it("reports a missing draft", async () => {
     respond({ error: "Not found" }, 404);
     render(<MailDraftView draftId="nope" />);

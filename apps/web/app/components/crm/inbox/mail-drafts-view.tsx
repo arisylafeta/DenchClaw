@@ -13,7 +13,7 @@ export function MailDraftsView({ query, onOpenDraft }: { query: string; onOpenDr
   useEffect(() => {
     const controller = new AbortController();
     setState("loading");
-    void fetch("/api/mail/drafts?limit=100", { signal: controller.signal })
+    void fetch(`/api/mail/drafts?${query}`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
         const page = (await res.json()) as { items: MailDraftListRow[] };
@@ -21,9 +21,8 @@ export function MailDraftsView({ query, onOpenDraft }: { query: string; onOpenDr
       })
       .catch(() => { if (!controller.signal.aborted) {setState("error");} });
     return () => controller.abort();
-  }, []);
-  const needle = new URLSearchParams(query).get("q")?.toLowerCase() ?? "";
-  const shown = needle ? rows.filter((r) => `${r.subject ?? ""} ${r.to_emails.join(" ")} ${r.body_preview ?? ""}`.toLowerCase().includes(needle)) : rows;
+  }, [query]);
+  const shown = rows;
   return <div className="text-[13px]">
     {state === "loading" && <p role="status" className="px-8 py-6" style={{ color: "var(--color-text-muted)" }}>Loading drafts…</p>}
     {state === "error" && <p role="alert" className="px-8 py-6" style={{ color: "var(--color-error)" }}>Could not load drafts.</p>}

@@ -109,24 +109,20 @@ function groupParts(parts: UIMessage["parts"]): MessageSegment[] {
 			for (const questionSegment of splitQuestionBlocks(text)) {
 				if (questionSegment.type === "question") {
 					segments.push({ type: "question", question: questionSegment.question });
-				} else if (hasArtifactBlocks(questionSegment.text)) {
-					for (const seg of splitArtifactBlocks(questionSegment.text)) {
-						segments.push(seg.type === "artifact" ? { type: "artifact", artifact: seg.artifact } : { type: "text", text: seg.text });
-					}
-				} else if (hasReportBlocks(questionSegment.text)) {
-					segments.push(
-						...(splitReportBlocks(questionSegment.text) as MessageSegment[]),
-					);
-				} else if (hasDiffBlocks(questionSegment.text)) {
-					for (const seg of splitDiffBlocks(questionSegment.text)) {
-						if (seg.type === "diff-artifact") {
-							segments.push({ type: "diff-artifact", diff: seg.diff });
+				} else if (questionSegment.text) {
+					for (const piece of hasArtifactBlocks(questionSegment.text) ? splitArtifactBlocks(questionSegment.text) : [{ type: "text" as const, text: questionSegment.text }]) {
+						if (piece.type === "artifact") {
+							segments.push({ type: "artifact", artifact: piece.artifact });
+						} else if (hasReportBlocks(piece.text)) {
+							segments.push(...(splitReportBlocks(piece.text) as MessageSegment[]));
+						} else if (hasDiffBlocks(piece.text)) {
+							for (const seg of splitDiffBlocks(piece.text)) {
+								segments.push(seg.type === "diff-artifact" ? { type: "diff-artifact", diff: seg.diff } : { type: "text", text: seg.text });
+							}
 						} else {
-							segments.push({ type: "text", text: seg.text });
+							segments.push({ type: "text", text: piece.text });
 						}
 					}
-				} else if (questionSegment.text) {
-					segments.push({ type: "text", text: questionSegment.text });
 				}
 			}
 		} else if (part.type === "reasoning") {
