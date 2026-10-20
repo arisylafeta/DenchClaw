@@ -6,9 +6,7 @@ import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
 import {
   FIELD_STATUSES,
-  FIELD_TEMPLATES,
   FILE_TYPES,
-  REQUIRED_FILES,
   VISIBILITIES,
   VISIBILITY_LABEL,
   previewType,
@@ -37,7 +35,9 @@ import {
   tradeUrl,
   useForm,
 } from "./trade-ui";
+import type { Registry } from "@/lib/bulk-registry";
 import { ProposalRow } from "./proposal-row";
+import { useRegistry } from "./use-registry";
 import { FileLink, FileThumb, fileUrl } from "./file-preview";
 
 const FIELD_COLUMNS = "grid-cols-[200px_minmax(0,1fr)_250px_110px_110px]";
@@ -79,18 +79,21 @@ const clip = (text: string, length = 28) => (text.length > length ? `${text.slic
 
 export function TradeData({ detail, onField, onFile, onTradePatch, onProposalDecided }: Props) {
   const { trade } = detail;
+  const registry = useRegistry();
+  if (!registry) return <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Loading…</p>;
   return (
     <div className="flex flex-col gap-6">
-      {trade.trade_kind ? <FieldsCard trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField}
+      {trade.trade_kind ? <FieldsCard registry={registry} trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField}
         proposals={[]} onProposalDecided={onProposalDecided} />
         : <Card label="Data" className="px-5 py-4"><KindPicker label="Trade kind" onPick={(kind) => void onTradePatch({ trade_kind: kind })} /></Card>}
-      <FilesCard trade={trade} files={detail.files} onFile={onFile}
+      <FilesCard registry={registry} trade={trade} files={detail.files} onFile={onFile}
         proposals={[]} onProposalDecided={onProposalDecided} />
     </div>
   );
 }
 
-function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided }: {
+function FieldsCard({ registry, trade, kind, fields, onField, proposals, onProposalDecided }: {
+  registry: Registry;
   trade: BulkTrade;
   kind: NonNullable<BulkTrade["trade_kind"]>;
   fields: TradeField[];
@@ -101,7 +104,7 @@ function FieldsCard({ trade, kind, fields, onField, proposals, onProposalDecided
   const [editing, setEditing] = useState<TemplateField | null>(null);
   const [error, setError] = useState<string | null>(null);
   const byKey = new Map(fields.map((field) => [field.field_key, field]));
-  const templates = FIELD_TEMPLATES[kind];
+  const templates = registry.fields[kind];
   const conflicts = templates
     .map((template) => ({ template, row: byKey.get(template.key) }))
     .filter(({ row }) => row?.status === "conflict" && row.alternatives.length);
@@ -251,7 +254,8 @@ function FieldDialog({ trade, template, field, onClose, onSaved }: {
   );
 }
 
-function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
+function FilesCard({ registry, trade, files, onFile, proposals, onProposalDecided }: {
+  registry: Registry;
   trade: BulkTrade;
   files: TradeFile[];
   onFile: (file: TradeFile) => void;
@@ -261,7 +265,7 @@ function FilesCard({ trade, files, onFile, proposals, onProposalDecided }: {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uploaded = new Set(files.map((file) => file.file_type));
-  const stillNeeded = REQUIRED_FILES.filter((file) => !uploaded.has(file.type)).map((file) => file.label.toLowerCase());
+  const stillNeeded = registry.requiredFiles.filter((file) => !uploaded.has(file.type)).map((file) => file.label.toLowerCase());
 
   async function changeVisibility(file: TradeFile, visibility: Visibility) {
     setError(null);

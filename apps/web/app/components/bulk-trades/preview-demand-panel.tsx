@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
-import { KIND_LABEL, BASIS_LABEL, SPEC_LABELS, priceLabel, volumeLabel } from "@/lib/bulk-demand";
+import { KIND_LABEL, BASIS_LABEL, priceLabel, volumeLabel } from "@/lib/bulk-demand";
+import { useRegistry } from "./use-registry";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
 import type { BuyerProfile, BuyerEngagement } from "@/lib/buyer-profile";
@@ -33,6 +34,7 @@ const Ask = ({ children = "Missing, ask the buyer" }: { children?: React.ReactNo
 
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
 function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
+  const registry = useRegistry();
   const spec = demand.spec ?? {};
   const kwh = spec.kwh_min != null || spec.kwh_max != null
     ? spec.kwh_min === spec.kwh_max ? `${spec.kwh_min} kWh` : `${spec.kwh_min ?? "?"}–${spec.kwh_max ?? "?"} kWh` : null;
@@ -51,9 +53,9 @@ function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | nul
     ["Min. SOH", spec.min_soh != null ? `${spec.min_soh}%` : null, false],
     ["Proof needed", list(spec.evidence), false],
     ["Must not have", list(spec.excludes), false],
-    [SPEC_LABELS.makes ?? "Makes", list(spec.makes), false],
-    [SPEC_LABELS.cell_formats ?? "Cell format", list(spec.cell_formats), false],
-    [SPEC_LABELS.cell_makers ?? "Cell makers", list(spec.cell_makers), false],
+    [registry?.specLabels.makes ?? "Makes", list(spec.makes), false],
+    [registry?.specLabels.cell_formats ?? "Cell format", list(spec.cell_formats), false],
+    [registry?.specLabels.cell_makers ?? "Cell makers", list(spec.cell_makers), false],
   ];
   return (
     <section className="flex flex-col gap-3">

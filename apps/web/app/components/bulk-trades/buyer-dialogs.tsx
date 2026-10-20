@@ -1,5 +1,7 @@
 "use client";
 
+import type { Registry } from "@/lib/bulk-registry";
+import { useRegistry } from "./use-registry";
 import { useEffect, useState } from "react";
 import type { BulkTrade } from "@/lib/bulk-trades";
 import {
@@ -140,7 +142,8 @@ export function BidDialog({ trade, buyer, onClose, onSaved }: {
  * Teaser draft for the selected buyers. It can make one Gmail draft per buyer with an email;
  * nothing is sent, and buyers move to "Teaser sent" only when Alex confirms.
  */
-export function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onMarked }: {
+function TeaserDialogForm({ registry, trade, fields, buyers, linkTracking, onClose, onMarked }: {
+  registry: Registry;
   trade: BulkTrade;
   fields: TradeField[];
   buyers: Buyer[];
@@ -148,7 +151,7 @@ export function TeaserDialog({ trade, fields, buyers, linkTracking, onClose, onM
   onClose: () => void;
   onMarked: (buyers: Buyer[]) => void;
 }) {
-  const [text, setText] = useState(() => teaserText(trade, fields));
+  const [text, setText] = useState(() => teaserText(registry, trade, fields));
   const [copied, setCopied] = useState(false);
   // Buyers whose draft already exists, so a retry after a failure never duplicates one.
   const [drafted, setDrafted] = useState<Set<string>>(new Set());
@@ -280,4 +283,10 @@ export function CrmSearch({ onCompany, onPerson }: {
       )}
     </FormField>
   );
+}
+
+export function TeaserDialog(props: { trade: BulkTrade; fields: TradeField[]; buyers: Buyer[]; linkTracking: boolean; onClose: () => void; onMarked: (buyers: Buyer[]) => void }) {
+  const registry = useRegistry();
+  if (!registry) return null;
+  return <TeaserDialogForm registry={registry} {...props} />;
 }

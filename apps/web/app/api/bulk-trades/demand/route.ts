@@ -1,5 +1,6 @@
 import { parseDemandInput } from "@/lib/bulk-demand";
 import { acceptedDemandProposals, addDemand, crmIdsForEmail, lastMatchRun, listDemand, possibleDemand } from "@/lib/crm-postgres/bulk-demand";
+import { loadRegistry } from "@/lib/crm-postgres/bulk-registry";
 import { badRequest, guardBulkTrades, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
-  const parsed = parseDemandInput(await readJson(req), true);
+  const parsed = parseDemandInput(await readJson(req), true, await loadRegistry());
   if ("error" in parsed) return badRequest(parsed.error);
   const input = parsed.value as typeof parsed.value & { buyer: string; wants: string };
   const crm = input.person_id ? {} : await crmIdsForEmail(input.email);

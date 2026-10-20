@@ -1,4 +1,5 @@
 import type { Demand } from "./bulk-demand";
+import type { Registry } from "./bulk-registry";
 import { priceLabel, specLines, volumeLabel } from "./bulk-demand";
 import { shortDate } from "./bulk-trade-details";
 
@@ -39,7 +40,7 @@ const sentence = (text: string) => {
 };
 
 /** A short brief built only from what is recorded on the demand and its buyer context. Capped at 200 words. */
-export function demandDescription(demand: Demand, maxWords = 200): string {
+export function demandDescription(demand: Demand, maxWords = 200, registry: Registry | null = null): string {
   const parts: string[] = [];
   const asked = demand.wants.trim().replace(/[.\s]+$/, "");
   if (asked) parts.push(`${demand.buyer} ${demand.kind === "standing" ? "regularly buys" : "is asking for"}: ${asked}.`);
@@ -47,7 +48,7 @@ export function demandDescription(demand: Demand, maxWords = 200): string {
   const facts = [volumeLabel(demand) && `Volume ${volumeLabel(demand)}`, priceLabel(demand) && `target price ${priceLabel(demand)}`,
     demand.needed_by && `needed by ${shortDate(demand.needed_by)}`, demand.location && `delivery to ${demand.location}`].filter(Boolean) as string[];
   if (facts.length) parts.push(`${facts.join(", ")}.`);
-  const spec = specLines(demand.spec ?? {});
+  const spec = specLines(demand.spec ?? {}, registry);
   if (spec.length) parts.push(`Requirements: ${spec.join("; ")}.`);
   for (const note of (demand.context_notes ?? []).slice(0, 3)) parts.push(sentence(note.note));
   if (demand.note) parts.push(sentence(demand.note));

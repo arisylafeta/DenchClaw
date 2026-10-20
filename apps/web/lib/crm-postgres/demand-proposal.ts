@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PgTransaction } from '../postgres';
 import { cleanSpec, demandFee, parseDemandInput } from '../bulk-demand';
+import { loadRegistry } from './bulk-registry';
 
 const text = (v: unknown) => typeof v === 'string' && v.trim() ? v.trim() : null;
 const KEYS = ['kind','basis','buyer','company_id','person_id','contact','email','wants','quantity','location',
@@ -55,7 +56,8 @@ export async function acceptDemand(client: PgTransaction, p: Record<string, any>
     'price_unit','product_family','fee_eur','price_basis','reputation']) {
     if (proposed[key] !== undefined && proposed[key] !== null && proposed[key] !== '') patch[key] = proposed[key];
   }
-  const spec = cleanSpec(proposed.spec);
+  const registry = await loadRegistry();
+  const spec = cleanSpec(proposed.spec, registry);
   if (Object.keys(spec).length) patch.spec = { ...(before?.spec ?? {}), ...spec };
   if (before) { delete patch.kind; if (before.kind === 'standing') delete patch.needed_by; }
   else Object.assign(patch, { buyer: text(proposed.buyer), contact: text(proposed.contact), email,
@@ -64,7 +66,7 @@ export async function acceptDemand(client: PgTransaction, p: Record<string, any>
   patch.status = combined.product_family && (combined.quantity || combined.volume) && combined.max_price ? 'open' : 'qualifying';
   patch.qualify_question = patch.status === 'qualifying' ? 'What quantity and unit price?' : null;
   if (p.source_date) { patch.observed_on = p.source_date; patch.confirmed_on = p.source_date; }
-  const parsed = parseDemandInput(patch, !before);
+  const parsed = parseDemandInput(patch, !before, registry);
   if ('error' in parsed) throw new Error(parsed.error);
   const sourceKind: Record<string,string> = { gmail:'email', granola:'call', whatsapp:'whatsapp', auction:'auction' };
   if (!sourceKind[p.source_kind]) throw new Error('Unsupported demand source.');

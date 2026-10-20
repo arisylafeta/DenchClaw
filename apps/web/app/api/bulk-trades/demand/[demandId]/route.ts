@@ -1,5 +1,6 @@
 import { BASES, CLOSED_REASONS, parseDemandInput, type Basis, type ClosedReason } from "@/lib/bulk-demand";
 import { categorizeDemand, closeDemand, confirmDemand, makeStanding, setBasis, updateDemand } from "@/lib/crm-postgres/bulk-demand";
+import { loadRegistry } from "@/lib/crm-postgres/bulk-registry";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ demand
   } else if (body?.action === "make_standing") {
     demand = await makeStanding(demandId);
   } else {
-    const parsed = parseDemandInput(body, false);
+    const parsed = parseDemandInput(body, false, await loadRegistry());
     if ("error" in parsed) return badRequest(parsed.error);
     demand = await updateDemand(demandId, parsed.value);
   }

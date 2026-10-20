@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDemandInput } from "./bulk-demand";
+import { TEST_REGISTRY } from "./bulk-registry.fixture";
 import { parseBuyerContext } from "./buyer-context";
 
 const contextFixture = {
@@ -31,19 +32,19 @@ const contextFixture = {
 
 describe("buyer context validation", () => {
   it("preserves typed context on create and patch without changing demand facts", () => {
-    expect(parseDemandInput({ context: contextFixture }, false)).toEqual({
+    expect(parseDemandInput({ context: contextFixture }, false, TEST_REGISTRY)).toEqual({
       value: { context: contextFixture },
     });
     expect(
-      parseDemandInput({ buyer: "Synthetic buyer", wants: "Packs", context: contextFixture }, true),
+      parseDemandInput({ buyer: "Synthetic buyer", wants: "Packs", context: contextFixture }, true, TEST_REGISTRY),
     ).toMatchObject({ value: { context: contextFixture } });
-    expect(parseDemandInput({ note: "Only narrative changed" }, false)).toEqual({
+    expect(parseDemandInput({ note: "Only narrative changed" }, false, TEST_REGISTRY)).toEqual({
       value: { note: "Only narrative changed" },
     });
-    expect(parseDemandInput({ context: {} }, false)).toEqual({ value: { context: {} } });
+    expect(parseDemandInput({ context: {} }, false, TEST_REGISTRY)).toEqual({ value: { context: {} } });
   });
   it.each([null, [], "text", 4, true])("rejects non-object context: %j", (context) => {
-    expect(parseDemandInput({ context }, false)).toEqual({ error: "context must be an object." });
+    expect(parseDemandInput({ context }, false, TEST_REGISTRY)).toEqual({ error: "context must be an object." });
   });
   it.each([
     { listing_title: 12 },

@@ -1,7 +1,6 @@
 import { parseShape, type Parsed, type Rule } from "./bulk-trade-details";
 import type { PriceBasis, Reputation } from "./bulk-demand-score";
-// The lists live in buy-box-spec.json so the Python inbox check reads the same ones.
-import specConfig from "./buy-box-spec.json";
+import type { Registry } from "./bulk-registry";
 import type { CompanyContextNote } from "./crm-postgres/company-context";
 import type { SupplyFeedRow } from "./bulk-supply";
 import { parseBuyerContext, type BuyerContext } from "./buyer-context";
@@ -39,19 +38,15 @@ export const BASES = ["estimated", "stated", "agreed"] as const;
 export type Basis = (typeof BASES)[number];
 export const BASIS_LABEL: Record<Basis, string> = { estimated: "Estimated", stated: "Stated", agreed: "Agreed" };
 
-export const SPEC_LISTS = specConfig.lists;
-export type SpecListKey = keyof typeof SPEC_LISTS;
-export const SPEC_LIST_KEYS = Object.keys(SPEC_LISTS) as SpecListKey[];
-export const SPEC_LABELS = specConfig.labels as Record<SpecListKey, string>;
-export const SPEC_NUMBERS = specConfig.numbers;
-export type SpecNumberKey = keyof typeof SPEC_NUMBERS;
-export const SPEC_NUMBER_KEYS = Object.keys(SPEC_NUMBERS) as SpecNumberKey[];
-export const VOLUME_UNITS = specConfig.volume_units;
-export const PRICE_UNITS = specConfig.price_units;
-export const CURRENCIES = specConfig.currencies;
+// The buyer-ask lists, number ranges, units and currencies live in the database (see bulk-registry.ts).
+export type SpecListKey = string;
+export type SpecNumberKey = string;
 
 /** Structured criteria. Every key is optional; an empty spec means only "wants" describes the demand. */
-export type Spec = Partial<Record<SpecListKey, string[]> & Record<SpecNumberKey, number> & { mixed_ok: boolean }>;
+type SpecLists = "chemistries" | "formats" | "cell_formats" | "conditions" | "origins" | "makes" | "cell_makers" | "system_brands" | "evidence" | "excludes";
+type SpecNumbers = "kwh_min" | "kwh_max" | "min_soh";
+/** The keys the app code reads directly are typed; the registry (database) decides which keys are allowed. */
+export type Spec = Partial<Record<SpecLists, string[]> & Record<SpecNumbers, number> & { mixed_ok: boolean }> & Record<string, unknown>;
 
 /** A live trade a demand row fits, from the matching. */
 export type DemandFit = { lot_id: string; title: string; strength: "strong" | "partial"; reason: string; buyer_id: string | null };
@@ -161,27 +156,29 @@ const DEMAND_RULES: Record<string, Rule> = {
   status: ["open", "qualifying", "closed"], product_family: "text", qualify_question: "text", qualify_asked_on: "date", moved_to: "text",
 };
 const NUMBER_KEYS = ["volume", "max_price", "fee_eur"] as const;
-const OPTION_KEYS = { volume_unit: VOLUME_UNITS, price_currency: CURRENCIES, price_unit: PRICE_UNITS,
-  price_basis: ["buyer", "estimate"], reputation: ["paid", "active", "email", "inbound", "anon"] } as const;
+const optionKeys = (registry: Registry): Record<string, readonly string[]> => ({
+  volume_unit: registry.volumeUnits, price_currency: registry.currencies, price_unit: registry.priceUnits,
+  price_basis: ["buyer", "estimate"], reputation: ["paid", "active", "email", "inbound", "anon"],
+});
 
-/** Checks a spec: known keys only, list values from buy-box-spec.json, numbers in range. Empty values are dropped. */
-export function parseSpec(value: unknown): Parsed<Spec> {
+/** Checks a spec: known keys only, list values from the registry, numbers in range. Empty values are dropped. */
+export function parseSpec(value: unknown, registry: Registry): Parsed<Spec> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "spec must be an object." };
   const out: Spec = {};
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (raw === null || raw === undefined) continue;
-    if (key in SPEC_LISTS) {
-      const allowed = SPEC_LISTS[key as SpecListKey];
+    if (key in registry.specLists) {
+      const allowed = registry.specLists[key];
       if (!Array.isArray(raw) || raw.some((item) => !allowed.includes(item as string))) {
         return { error: `spec.${key} must be a list from: ${allowed.join(", ")}.` };
       }
-      if (raw.length) out[key as SpecListKey] = [...new Set(raw as string[])];
-    } else if (key in SPEC_NUMBERS) {
-      const range = SPEC_NUMBERS[key as SpecNumberKey];
+      if (raw.length) out[key] = [...new Set(raw as string[])];
+    } else if (key in registry.specNumbers) {
+      const range = registry.specNumbers[key];
       if (typeof raw !== "number" || !Number.isFinite(raw) || raw < range.min || raw > range.max) {
         return { error: `spec.${key} must be a number from ${range.min} to ${range.max}.` };
       }
-      out[key as SpecNumberKey] = raw;
+      out[key] = raw;
     } else if (key === "mixed_ok") {
       if (typeof raw !== "boolean") return { error: "spec.mixed_ok must be true or false." };
       out.mixed_ok = raw;
@@ -196,24 +193,24 @@ export function parseSpec(value: unknown): Parsed<Spec> {
 }
 
 /** For specs a model wrote: keeps the valid parts and drops the rest, instead of rejecting the whole spec. */
-export function cleanSpec(value: unknown): Spec {
+export function cleanSpec(value: unknown, registry: Registry): Spec {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (key in SPEC_LISTS && Array.isArray(raw)) {
-      const kept = raw.filter((item) => SPEC_LISTS[key as SpecListKey].includes(item as string));
+    if (key in registry.specLists && Array.isArray(raw)) {
+      const kept = raw.filter((item) => registry.specLists[key].includes(item as string));
       if (kept.length) out[key] = kept;
-    } else if (key in SPEC_NUMBERS || key === "mixed_ok") {
+    } else if (key in registry.specNumbers || key === "mixed_ok") {
       out[key] = raw;
     }
   }
-  const checked = parseSpec(out);
+  const checked = parseSpec(out, registry);
   if (!("error" in checked)) return checked.value;
   // A bad number or flag: keep the lists only.
-  return Object.fromEntries(Object.entries(out).filter(([key]) => key in SPEC_LISTS)) as Spec;
+  return Object.fromEntries(Object.entries(out).filter(([key]) => key in registry.specLists)) as Spec;
 }
 
-export function parseDemandInput(body: unknown, creating: boolean): Parsed<DemandInput> {
+export function parseDemandInput(body: unknown, creating: boolean, registry: Registry): Parsed<DemandInput> {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Body must be an object." };
   const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
   const extra: DemandInput = {};
@@ -236,16 +233,16 @@ export function parseDemandInput(body: unknown, creating: boolean): Parsed<Deman
     else if (typeof value === "number" && Number.isFinite(value) && (key === "fee_eur" ? value >= 0 : value > 0)) extra[key] = value;
     else return { error: `${key} must be ${key === "fee_eur" ? "a non-negative" : "a positive"} number.` };
   }
-  for (const [key, allowed] of Object.entries(OPTION_KEYS) as [keyof typeof OPTION_KEYS, readonly string[]][]) {
+  for (const [key, allowed] of Object.entries(optionKeys(registry))) {
     if (!(key in rest)) continue;
     const value = rest[key];
     delete rest[key];
-    if (value === null || value === "") extra[key] = null;
+    if (value === null || value === "") Object.assign(extra, { [key]: null });
     else if (typeof value === "string" && allowed.includes(value)) Object.assign(extra, { [key]: value });
     else return { error: `${key} must be one of: ${allowed.join(", ")}.` };
   }
   if ("spec" in rest) {
-    const spec = parseSpec(rest.spec);
+    const spec = parseSpec(rest.spec, registry);
     delete rest.spec;
     if ("error" in spec) return spec;
     extra.spec = spec.value;
@@ -336,14 +333,15 @@ export function waitingLabel(since: string, now: Date = new Date()): string {
 }
 
 /** One line per filled spec field, e.g. ["Chemistry: LFP, NMC", "Min SOH %: 70"]. */
-export function specLines(spec: Spec): string[] {
+export function specLines(spec: Spec, registry: Registry | null): string[] {
   const lines: string[] = [];
-  for (const key of SPEC_LIST_KEYS) {
+  if (!registry) return lines;
+  for (const key of Object.keys(registry.specLists)) {
     const values = spec[key];
-    if (values?.length) lines.push(`${SPEC_LABELS[key]}: ${values.join(", ")}`);
+    if (Array.isArray(values) && values.length) lines.push(`${registry.specLabels[key]}: ${values.join(", ")}`);
   }
-  for (const key of SPEC_NUMBER_KEYS) {
-    if (spec[key] !== undefined) lines.push(`${SPEC_NUMBERS[key].label}: ${spec[key]}`);
+  for (const key of Object.keys(registry.specNumbers)) {
+    if (spec[key] !== undefined) lines.push(`${registry.specNumbers[key].label}: ${spec[key]}`);
   }
   if (spec.mixed_ok !== undefined) lines.push(spec.mixed_ok ? "Mixed batches OK" : "One make and model per batch");
   return lines;

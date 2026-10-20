@@ -6,6 +6,7 @@ import type { Demand } from "@/lib/bulk-demand";
 import { demandDescription, demandStarted, demandTitle, demandValue } from "@/lib/bulk-demand-header";
 import type { DemandSupply } from "@/lib/demand-supply-types";
 import css from "./demand-header.module.css";
+import { useRegistry } from "./use-registry";
 
 /** A circular score: the ring fills with the score out of 100. */
 export function ScoreRing({ score }: { score: number | null }) {
@@ -31,7 +32,8 @@ export function DemandHeader({ demand, supply, actions, onBack }: {
   demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; onBack?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const description = demandDescription(demand);
+  const registry = useRegistry();
+  const description = demandDescription(demand, 200, registry);
   const words = description.split(/\s+/);
   const long = words.length > 42;
   const value = demandValue(demand);

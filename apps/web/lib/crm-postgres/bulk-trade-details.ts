@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction, type PgTransaction } from "../postgres";
 import { todayInLondon, type BulkTrade } from "../bulk-trades";
+import { loadRegistry } from "./bulk-registry";
+import { templateField } from "../bulk-registry";
 import {
-  templateField,
   type AuctionActivity,
   type BidInput,
   type Buyer,
@@ -307,10 +308,11 @@ export async function setField(
   input: FieldInput,
   userId: string,
 ): Promise<TradeField | null | "unknown_field"> {
+  const registry = await loadRegistry();
   return withPgTransaction(async (client) => {
     const lot = await tradeKind(client, lotId);
     if (!lot) return null;
-    const template = templateField(lot.trade_kind ?? "packs", key);
+    const template = templateField(registry, lot.trade_kind ?? "packs", key);
     if (!template) return "unknown_field";
 
     const current = await client.query(`${FIELD_SELECT} where lot_id = $1 and field_key = $2 for update`, [lotId, key]);

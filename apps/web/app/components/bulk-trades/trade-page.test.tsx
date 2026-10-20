@@ -6,6 +6,10 @@ import userEvent from "@testing-library/user-event";
 import { todayInLondon, type BulkTrade } from "@/lib/bulk-trades";
 import type { Buyer, TradeDetail, TradeField } from "@/lib/bulk-trade-details";
 import { TradePage } from "./trade-page";
+vi.mock("./use-registry", async () => {
+  const { TEST_REGISTRY } = await import("@/lib/bulk-registry.fixture");
+  return { useRegistry: () => TEST_REGISTRY };
+});
 
 const today = todayInLondon();
 

@@ -1,7 +1,7 @@
 // Bulk Trades v3, trade page: buyers, bids, contacts, field data and files. Safe for client and server.
 
 import type { BulkTrade, TradeKind } from "./bulk-trades";
-import templates from "./bulk-trade-templates.json";
+import type { Registry } from "./bulk-registry";
 
 export const BUYER_STATUSES = [
   "To contact", "Teaser sent", "No reply", "NDA, specs sent", "Bid in", "LOI or deposit", "Won",
@@ -276,32 +276,24 @@ export type TemplateField = {
   visibility: Visibility;
 };
 
-// The templates live in bulk-trade-templates.json so the Python inbox check reads the same list.
-export const FIELD_TEMPLATES = templates.fields as Record<TradeKind, TemplateField[]>;
-
-/** Files every trade needs, and the step each one unlocks. */
-export const REQUIRED_FILES = templates.requiredFiles as { type: FileType; label: string; neededFor: NeededFor }[];
-
-export function templateField(kind: TradeKind, key: string): TemplateField | undefined {
-  return FIELD_TEMPLATES[kind].find((field) => field.key === key);
-}
+// The templates and required files live in the database (see bulk-registry.ts), not in this file.
 
 export type MissingItem = { key: string; label: string; neededFor: NeededFor };
 
 const NEEDED_ORDER: NeededFor[] = ["Teaser", "Bids", "Shipping", "Closing"];
 
 /** Template fields without a usable value and required files not yet uploaded, most urgent step first. */
-export function missingItems(kind: TradeKind, fields: TradeField[], files: TradeFile[]): MissingItem[] {
+export function missingItems(registry: Registry, kind: TradeKind, fields: TradeField[], files: TradeFile[]): MissingItem[] {
   const byKey = new Map(fields.map((field) => [field.field_key, field]));
   const items: MissingItem[] = [];
-  for (const field of FIELD_TEMPLATES[kind]) {
+  for (const field of registry.fields[kind]) {
     const row = byKey.get(field.key);
     if (!row || row.status === "missing" || !row.value?.trim()) {
       items.push({ key: `field:${field.key}`, label: field.label, neededFor: field.neededFor });
     }
   }
   const uploaded = new Set(files.map((file) => file.file_type));
-  for (const file of REQUIRED_FILES) {
+  for (const file of registry.requiredFiles) {
     if (!uploaded.has(file.type)) items.push({ key: `file:${file.type}`, label: file.label, neededFor: file.neededFor });
   }
   return items.sort((a, b) => NEEDED_ORDER.indexOf(a.neededFor) - NEEDED_ORDER.indexOf(b.neededFor));
@@ -327,10 +319,10 @@ export function greeting(name?: string | null): string {
   return first ? `Hi ${first},` : "Hi,";
 }
 
-export function teaserText(trade: BulkTrade, fields: TradeField[], recipient?: string | null): string {
+export function teaserText(registry: Registry, trade: BulkTrade, fields: TradeField[], recipient?: string | null): string {
   const kind = trade.trade_kind ?? "packs";
   const byKey = new Map(fields.map((field) => [field.field_key, field]));
-  const lines = FIELD_TEMPLATES[kind]
+  const lines = registry.fields[kind]
     .filter((template) => !NEVER_IN_TEASER.has(template.key))
     .map((template) => ({ template, row: byKey.get(template.key) }))
     .filter(({ row }) => row && row.visibility === "teaser" && row.value?.trim()

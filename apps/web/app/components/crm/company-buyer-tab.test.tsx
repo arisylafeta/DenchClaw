@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { BuyerTab, type BuyerData } from "./company-buyer-tab";
+
+vi.mock("../bulk-trades/use-registry", async () => {
+  const { TEST_REGISTRY } = await import("@/lib/bulk-registry.fixture");
+  return { useRegistry: () => TEST_REGISTRY };
+});
 
 function buyer(profile: Partial<BuyerData["profile"]>): BuyerData {
   return { profile: { capabilities: [], ...profile } as BuyerData["profile"], engagement: null, demand: [], changes: [] };

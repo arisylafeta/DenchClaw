@@ -12,20 +12,15 @@ import {
 import { formatFee, REPUTATION_LABEL } from "@/lib/bulk-demand-score";
 import {
   BASES,
-  CURRENCIES,
-  PRICE_UNITS,
-  SPEC_LABELS,
   demandFee,
-  SPEC_LISTS,
-  SPEC_NUMBERS,
-  SPEC_NUMBER_KEYS,
-  VOLUME_UNITS,
   type Demand,
   type DemandInput,
   type Spec,
   type SpecListKey,
 } from "@/lib/bulk-demand";
+import type { Registry } from "@/lib/bulk-registry";
 import { CrmSearch } from "./buyer-dialogs";
+import { useRegistry } from "./use-registry";
 import {
   ErrorText,
   FormField,
@@ -55,10 +50,12 @@ const MORE_LISTS: SpecListKey[] = [
 
 /** Toggle chips for one spec list. */
 function SpecChips({
+  registry,
   name,
   selected,
   onChange,
 }: {
+  registry: Registry;
   name: SpecListKey;
   selected: string[];
   onChange: (values: string[]) => void;
@@ -66,17 +63,17 @@ function SpecChips({
   return (
     <div
       role="group"
-      aria-label={SPEC_LABELS[name]}
+      aria-label={registry.specLabels[name]}
       className="flex flex-col gap-1"
     >
       <span
         className="text-xs font-medium"
         style={{ color: "var(--bt-muted)" }}
       >
-        {SPEC_LABELS[name]}
+        {registry.specLabels[name]}
       </span>
       <div className="flex flex-wrap gap-1.5">
-        {SPEC_LISTS[name].map((value) => {
+        {registry.specLists[name].map((value) => {
           const on = selected.includes(value);
           return (
             <button
@@ -119,15 +116,18 @@ const numberText = (value: number | null | undefined) =>
 const toNumber = (value: string) =>
   value.trim() === "" ? null : Number(value);
 
-export function DemandDialog({
+function DemandDialogForm({
+  registry,
   demand,
   onClose,
   onSaved,
 }: {
+  registry: Registry;
   demand: Demand | null;
   onClose: () => void;
   onSaved: (demand: Demand) => void;
 }) {
+  const specNumberKeys = Object.keys(registry.specNumbers);
   const [paste, setPaste] = useState("");
   const [showRequired, setShowRequired] = useState(false);
   const [filling, setFilling] = useState(false);
@@ -135,10 +135,10 @@ export function DemandDialog({
     person_id?: string | null;
     company_id?: string | null;
   }>({});
-  const [lists, setLists] = useState<Partial<Record<SpecListKey, string[]>>>(
+  const [lists, setLists] = useState<Record<string, string[]>>(
     () =>
       Object.fromEntries(
-        Object.entries(demand?.spec ?? {}).filter(([key]) => key in SPEC_LISTS),
+        Object.entries(demand?.spec ?? {}).filter(([key]) => key in registry.specLists) as [string, string[]][],
       ),
   );
   const form = useForm(
@@ -158,9 +158,7 @@ export function DemandDialog({
       max_price: numberText(demand?.max_price),
       price_currency: demand?.price_currency ?? "EUR",
       price_unit: demand?.price_unit ?? "kWh",
-      kwh_min: numberText(demand?.spec.kwh_min),
-      kwh_max: numberText(demand?.spec.kwh_max),
-      min_soh: numberText(demand?.spec.min_soh),
+      ...Object.fromEntries(specNumberKeys.map((key) => [key, numberText(demand?.spec[key] as number | undefined)])),
       mixed_ok:
         demand?.spec.mixed_ok === undefined
           ? ""
@@ -173,11 +171,11 @@ export function DemandDialog({
       reputation: demand?.reputation ?? "anon",
       status: demand?.status ?? "open",
       qualify_question: demand?.qualify_question ?? "",
-    },
+    } as Record<string, string>,
     async (draft) => {
       const request_ = draft.kind === "request";
       const spec: Spec = { ...lists };
-      for (const key of SPEC_NUMBER_KEYS) {
+      for (const key of specNumberKeys) {
         const value = toNumber(draft[key]);
         if (value !== null) spec[key] = value;
       }
@@ -243,7 +241,7 @@ export function DemandDialog({
           ...(volume != null ? { volume: String(volume) } : {}),
           ...(maxPrice != null ? { max_price: String(maxPrice) } : {}),
           ...Object.fromEntries(
-            SPEC_NUMBER_KEYS.filter((key) => spec?.[key] !== undefined).map(
+            specNumberKeys.filter((key) => spec?.[key] !== undefined).map(
               (key) => [key, String(spec![key])],
             ),
           ),
@@ -254,9 +252,9 @@ export function DemandDialog({
         if (spec)
           setLists((current) => ({
             ...current,
-            ...Object.fromEntries(
-              Object.entries(spec).filter(([key]) => key in SPEC_LISTS),
-            ),
+            ...(Object.fromEntries(
+              Object.entries(spec).filter(([key]) => key in registry.specLists),
+            ) as Record<string, string[]>),
           }));
       } finally {
         setFilling(false);
@@ -499,7 +497,7 @@ export function DemandDialog({
           <FormField label={isRequest ? "Quantity" : "Quantity / month"}>
             {form.input("volume", { type: "number", min: 0, step: "any" })}
           </FormField>
-          {select("volume_unit", "Unit", VOLUME_UNITS)}
+          {select("volume_unit", "Unit", registry.volumeUnits)}
         </div>
         <FormField label="Quantity in their words">
           {form.input("quantity", {
@@ -510,8 +508,8 @@ export function DemandDialog({
           <FormField label="Max price">
             {form.input("max_price", { type: "number", min: 0, step: "any" })}
           </FormField>
-          {select("price_currency", "Currency", CURRENCIES)}
-          {select("price_unit", "Per", PRICE_UNITS)}
+          {select("price_currency", "Currency", registry.currencies)}
+          {select("price_unit", "Per", registry.priceUnits)}
         </div>
         <div className="grid grid-cols-2 gap-3">
           {isRequest ? (
@@ -579,6 +577,7 @@ export function DemandDialog({
           <legend className="text-sm font-semibold">Spec</legend>
           {MAIN_LISTS.map((key) => (
             <SpecChips
+              registry={registry}
               key={key}
               name={key}
               selected={lists[key] ?? []}
@@ -586,12 +585,12 @@ export function DemandDialog({
             />
           ))}
           <div className="grid grid-cols-2 gap-3">
-            {SPEC_NUMBER_KEYS.map((key) => (
-              <FormField key={key} label={SPEC_NUMBERS[key].label}>
+            {specNumberKeys.map((key) => (
+              <FormField key={key} label={registry.specNumbers[key].label}>
                 {form.input(key, {
                   type: "number",
-                  min: SPEC_NUMBERS[key].min,
-                  max: SPEC_NUMBERS[key].max,
+                  min: registry.specNumbers[key].min,
+                  max: registry.specNumbers[key].max,
                   step: "any",
                 })}
               </FormField>
@@ -609,6 +608,7 @@ export function DemandDialog({
             <div className="mt-3 flex flex-col gap-3">
               {MORE_LISTS.map((key) => (
                 <SpecChips
+                  registry={registry}
                   key={key}
                   name={key}
                   selected={lists[key] ?? []}
@@ -623,4 +623,11 @@ export function DemandDialog({
       <ErrorText error={form.error} />
     </DetailSheet>
   );
+}
+
+/** The demand form. It waits for the attribute registry, which supplies its lists, units and ranges. */
+export function DemandDialog(props: { demand: Demand | null; onClose: () => void; onSaved: (demand: Demand) => void }) {
+  const registry = useRegistry();
+  if (!registry) return null;
+  return <DemandDialogForm registry={registry} {...props} />;
 }

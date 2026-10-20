@@ -8,6 +8,10 @@ import type { Check } from "@/lib/demand-match";
 import type { BestMatchLine, DemandSupply, SupplyUnitView } from "@/lib/demand-supply-types";
 import { DemandPage } from "./demand-page";
 import { forgetShared } from "./trade-ui";
+vi.mock("./use-registry", async () => {
+  const { TEST_REGISTRY } = await import("@/lib/bulk-registry.fixture");
+  return { useRegistry: () => TEST_REGISTRY };
+});
 function row(overrides: Partial<Demand>): Demand {
   return {
     priority: false,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TEST_REGISTRY } from "./bulk-registry.fixture";
 import type { BulkTrade } from "./bulk-trades";
 import {
   auctionLabel,
@@ -38,7 +39,7 @@ describe("missingItems", () => {
       field("test_data", "", { status: "missing" }), field("seller_price", "€20–25/kWh", { visibility: "never" }),
       field("sale_route", "Auction"), field("clear_by", "Mid-Nov"),
     ];
-    const items = missingItems("packs", fields, [file("Datasheet")]);
+    const items = missingItems(TEST_REGISTRY, "packs", fields, [file("Datasheet")]);
 
     expect(items.map((item) => `${item.label} · ${item.neededFor}`)).toEqual([
       "Manufacture date · Teaser",
@@ -54,7 +55,7 @@ describe("missingItems", () => {
 
 describe("teaserText", () => {
   it("uses only Teaser values and never price, location or unresolved claims", () => {
-    const text = teaserText(TRADE, [
+    const text = teaserText(TEST_REGISTRY, TRADE, [
       field("model", "FPT eBS37"),
       field("quantity", "about 200", { status: "conflict" }),
       field("seller_price", "€20–25/kWh", { visibility: "teaser" }),

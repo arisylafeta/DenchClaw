@@ -16,6 +16,7 @@ import {
   type BuyerProfileChange,
 } from "@/lib/buyer-profile";
 import { Button } from "../ui/button";
+import { useRegistry } from "../bulk-trades/use-registry";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
 
 export type BuyerData = {
@@ -86,6 +87,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
   onSaved: () => void;
 }) {
   const { profile, engagement, demand, changes } = buyer;
+  const registry = useRegistry();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => toDraft(profile));
   const [saving, setSaving] = useState(false);
@@ -208,7 +210,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
           ? <p className="text-[13px]" style={muted}>No buyer profile on file.</p>
           : <div className="space-y-2 text-[13px]" style={{ color: "var(--color-text)" }}>
             {profile.buyer_profile?.wants && <p>{profile.buyer_profile.wants}</p>}
-            <ul className="space-y-1">{specLines(profile.buyer_profile ?? {}).map((line) => <li key={line}>{line}</li>)}</ul>
+            <ul className="space-y-1">{specLines(profile.buyer_profile ?? {}, registry).map((line) => <li key={line}>{line}</li>)}</ul>
             {profile.buyer_profile?.evidence_url && /^https?:\/\//i.test(profile.buyer_profile.evidence_url) && (
               <a href={profile.buyer_profile.evidence_url} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--color-accent)" }}>Evidence</a>
             )}
@@ -233,7 +235,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
                   {check && <span className="text-[12px]" style={{ color: "var(--color-warning, #8a5300)" }}>{CHECK_LABEL[check]}</span>}
                 </div>
                 <div className="mt-1 text-[12px]" style={muted}>
-                  {[volumeLabel(row), priceLabel(row) && `max ${priceLabel(row)}`, row.location, ...specLines(row.spec).slice(0, 3),
+                  {[volumeLabel(row), priceLabel(row) && `max ${priceLabel(row)}`, row.location, ...specLines(row.spec, registry).slice(0, 3),
                     row.kind === "request" && row.needed_by ? `needed by ${formatDayLabel(row.needed_by)}` : null,
                     row.confirmed_on ? `confirmed ${formatDayLabel(row.confirmed_on)}` : row.basis === "estimated" ? "our estimate" : null]
                     .filter(Boolean).join(" · ")}
