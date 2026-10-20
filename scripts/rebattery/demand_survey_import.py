@@ -436,20 +436,20 @@ def insert(cur, row):
     confirmed = None if row.get("basis") == "estimated" else observed
     row = {**row, "observed_on": observed, "confirmed_on": confirmed, "spec": json.dumps(row.get("spec") or {})}
     values = [row.get(c) for c in COLUMNS]
+    if same_source:
+        # Only an unfinished survey answer that nobody has touched since is replaced by the finished one.
+        cur.execute(
+            """update crm_bulk_trade_demand set wants = %s, spec = %s::jsonb, note = %s, quantity = %s, location = %s,
+                 observed_on = %s, confirmed_on = %s, kind = %s, basis = %s, needed_by = %s, updated_at = now()
+               where id = %s and status in ('open', 'qualifying') and note like 'Unfinished survey.%%'
+                 and %s is distinct from note and (basis = 'stated' or kind = 'request') and updated_at = created_at
+               returning id""",
+            [row["wants"], row["spec"], row.get("note"), row.get("quantity"), row.get("location"), row["observed_on"],
+             row["confirmed_on"], row.get("kind"), row.get("basis"), row.get("needed_by"), same_source["id"], row.get("note")])
+        return cur.fetchone() is not None
     cur.execute(
         f"""insert into crm_bulk_trade_demand (id, {', '.join(COLUMNS)})
-            values (%s, {', '.join(['%s'] * len(COLUMNS))})
-            on conflict (source_kind, source_id) where source_id is not null do update set
-              wants = excluded.wants, spec = excluded.spec, note = excluded.note, quantity = excluded.quantity,
-              location = excluded.location, observed_on = excluded.observed_on, confirmed_on = excluded.confirmed_on,
-              kind = excluded.kind, basis = excluded.basis, needed_by = excluded.needed_by,
-              updated_at = now()
-            -- Only an unfinished survey answer that nobody has touched since is replaced by the finished one.
-            where crm_bulk_trade_demand.status in ('open', 'qualifying')
-              and crm_bulk_trade_demand.note like 'Unfinished survey.%%' and excluded.note is distinct from crm_bulk_trade_demand.note
-              and (crm_bulk_trade_demand.basis = 'stated' or crm_bulk_trade_demand.kind = 'request')
-              and crm_bulk_trade_demand.updated_at = crm_bulk_trade_demand.created_at
-            returning id""",
+            values (%s, {', '.join(['%s'] * len(COLUMNS))}) returning id""",
         [f"btd_{uuid.uuid4()}", *values])
     return cur.fetchone() is not None
 

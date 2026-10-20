@@ -813,10 +813,12 @@ class DemandRun(unittest.TestCase):
               update crm_bulk_trade_demand set status = 'open', closed_reason = null, supply_match_hash = null,
                 wants = 'Matched packs in repeat batches' where id in ('btd_open', 'btd_hid');
               insert into crm_bulk_trade_demand (id, buyer, wants, kind, status) values ('btd_est', 'Qualifying Co', 'Any packs', 'standing', 'qualifying')
-                on conflict (id) do update set status = 'qualifying', closed_reason = null;
+                on conflict do nothing;
+              update crm_bulk_trade_demand set status = 'qualifying', closed_reason = null where id = 'btd_est';
               insert into crm_bulk_trade_supply (id, seller, offers, trade_kind, quantity, est_tonnes)
                 values ('bts_small', 'Dismantler Ltd', '3 Toyota Prius hybrid packs', 'packs', 'three', 0.12)
-                on conflict (id) do update set status = 'open', closed_reason = null, match_hash = null;
+                on conflict do nothing;
+              update crm_bulk_trade_supply set status = 'open', closed_reason = null, match_hash = null where id = 'bts_small';
               insert into crm_bulk_trade_supply_matches (supply_id, demand_id, strength, reason, hidden)
                 values ('bts_small', 'btd_hid', 'partial', 'old', true);
             """)
