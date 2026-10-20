@@ -174,3 +174,15 @@ def test_visible_html_urls_match_text_and_campaign_tracking():
     message = {'body_html': '<p>Shared shell</p>', 'body_text': 'Shared shell',
                'personalization': {'template_link_scope': content}}
     campaign.validate_links(message, [{'key': 'view', 'url': content['text']}])
+
+
+def test_text_only_draft_gets_html_body(monkeypatch):
+    author = {'address': 'alex@example.test', 'signature_text': 'Alex', 'signature_html': '<p>sig</p>'}
+    monkeypatch.setattr(draft.policy, 'identity', lambda db, key, purpose, transport: (author, 'gmail'))
+    monkeypatch.setattr(draft.policy, 'content', lambda row: None)
+    row, _ = draft.prepare(None, 'alex', ['synthetic@example.test'], subject='Hi', body='Hello <b>there</b>\nline two\n\nSecond paragraph')
+    assert row['body_html'].startswith('<p')
+    assert 'Hello &lt;b&gt;there&lt;/b&gt;<br>\nline two' in row['body_html']
+    assert '<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">Second paragraph</p>' in row['body_html']
+    assert row['body_html'].endswith('<p>sig</p>')
+    assert row['body_text'].startswith('Hello <b>there</b>') and row['body_text'].endswith('Alex')
