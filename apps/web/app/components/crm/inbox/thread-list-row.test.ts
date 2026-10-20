@@ -78,13 +78,13 @@ describe("pickSenderDisplay", () => {
   });
 });
 
-describe("two-line thread row", () => {
+describe("single-line thread row", () => {
   function row(read: boolean, thread: Partial<Thread> = {}) {
-    const onSelect = vi.fn(), onToggleSelected = vi.fn(), onToggleStarred = vi.fn();
-    const result = render(createElement(ThreadListRow, { thread: makeThread({ primary_sender_email: "buyer@example.test", ...thread }), selected: false, read, starred: false, inBulkSelection: false, onSelect, onToggleSelected, onToggleStarred }));
-    return { ...result, onSelect, onToggleSelected, onToggleStarred };
+    const onSelect = vi.fn(), onToggleSelected = vi.fn();
+    const result = render(createElement(ThreadListRow, { thread: makeThread({ primary_sender_email: "buyer@example.test", ...thread }), selected: false, read, inBulkSelection: false, onSelect, onToggleSelected }));
+    return { ...result, onSelect, onToggleSelected };
   }
-  it.each([false, true])("uses two lines with read=%s and the correct weight", (read) => {
+  it.each([false, true])("uses one line with read=%s and the correct weight", (read) => {
     const { container } = row(read);
     expect(screen.getByText("buyer@example.test")).toHaveStyle({ fontWeight: read ? "400" : "600" });
     expect(screen.getByText("subject")).toHaveStyle({ fontWeight: read ? "400" : "600" });
@@ -99,6 +99,16 @@ describe("two-line thread row", () => {
     expect(screen.queryByText("You")).not.toBeInTheDocument();
     expect(screen.getByText("To:")).toHaveStyle({ fontWeight: "400", color: "var(--color-text-muted)" });
   });
+  it("has no star and copies the thread id from the hover button without opening the row", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const { onSelect } = row(true);
+    expect(screen.queryByTitle("Star")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy thread id" }));
+    expect(writeText).toHaveBeenCalledWith(makeThread({}).id);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(await screen.findByTitle("Copied")).toBeInTheDocument();
+  });
   it("does not substitute a participant for a missing inbound sender", () => {
     row(false, { primary_sender_email: null, participants: [{ id: "recipient", name: "Alex", email: "alex@rebattery.io", avatar_url: null }] });
     expect(screen.getByText("Unknown sender")).toBeInTheDocument();
@@ -108,12 +118,10 @@ describe("two-line thread row", () => {
     expect(screen.queryByText(primary_sender_type, { exact: true })).toBeNull();
   });
   it("keeps genuine exception chips and independent selection controls", () => {
-    const { onSelect, onToggleSelected, onToggleStarred } = row(false, { primary_sender_type: "Marketing" });
+    const { onSelect, onToggleSelected } = row(false, { primary_sender_type: "Marketing" });
     expect(screen.getByText("Marketing")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByTitle("Star"));
     expect(onToggleSelected).toHaveBeenCalledOnce();
-    expect(onToggleStarred).toHaveBeenCalledOnce();
     expect(onSelect).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("subject"));
     expect(onSelect).toHaveBeenCalledOnce();

@@ -56,20 +56,16 @@ export function ThreadList({
   selectedThreadId,
   selectedIds,
   isRead,
-  isStarred,
   onSelect,
   onToggleSelected,
-  onToggleStarred,
 }: {
   threads: ReadonlyArray<Thread>;
   loading: boolean;
   selectedThreadId: string | null;
   selectedIds: ReadonlySet<string>;
   isRead: (id: string) => boolean;
-  isStarred: (id: string) => boolean;
   onSelect: (thread: Thread) => void;
   onToggleSelected: (id: string) => void;
-  onToggleStarred: (id: string) => void;
 }) {
   const groups = useMemo(() => groupByDay(threads), [threads]);
 
@@ -108,11 +104,9 @@ export function ThreadList({
                   thread={thread}
                   selected={selectedThreadId === thread.id}
                   read={Boolean(thread.is_self) || isRead(thread.id)}
-                  starred={isStarred(thread.id)}
                   inBulkSelection={selectedIds.has(thread.id)}
                   onSelect={() => onSelect(thread)}
                   onToggleSelected={() => onToggleSelected(thread.id)}
-                  onToggleStarred={() => onToggleStarred(thread.id)}
                 />
               </li>
             ))}

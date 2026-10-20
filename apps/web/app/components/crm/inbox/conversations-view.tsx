@@ -268,10 +268,8 @@ export function ConversationsView({
                 selectedThreadId={selectedThreadId}
                 selectedIds={selection.set}
                 isRead={readState.has}
-                isStarred={starred.has}
                 onSelect={handleSelect}
                 onToggleSelected={selection.toggle}
-                onToggleStarred={starred.toggle}
               />
               {nextCursor && <button className="m-4 rounded border px-3 py-2 text-xs" disabled={loading} onClick={() => {if (activeRequest.current) {void load(activeRequest.current.signal, nextCursor);}}}>Load more conversations</button>}
             </div>

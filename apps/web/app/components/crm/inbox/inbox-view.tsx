@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MailFilters, MailFollowup, MailMessageListRow, MailPage } from "@/lib/mail-types";
+import { ContourBackground } from "./contour-background";
 import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
 import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsView } from "../../campaigns/campaigns-view";
-import { Mail, Megaphone, Search, SlidersHorizontal, X } from "lucide-react";
+import { Megaphone, Search, SlidersHorizontal, X } from "lucide-react";
 import { SenderAvatar } from "../sender-avatar";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
@@ -57,8 +58,9 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly", "showInternal"].includes(key) && value !== "" && value !== undefined);
   return <div className={`${styles.page} flex h-full min-h-0 flex-col`}>
     <header className={styles.header}>
+      <ContourBackground className={styles.contour} />
       <div className="flex items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-[26px] font-semibold tracking-[-0.01em]"><Mail size={22} strokeWidth={1.5} aria-hidden />Mail</h1>
+        <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Mail</h1>
         <button type="button" aria-pressed={view === "campaigns"} className={`${styles.control} ${styles.button}`} onClick={() => update("view", "campaigns")}><Megaphone size={14} aria-hidden />Campaigns</button>
       </div>
       <nav role="tablist" aria-label="Mail views" className={styles.tabs}>

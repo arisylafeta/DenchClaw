@@ -1,6 +1,7 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import { useState, type MouseEvent } from "react";
+import { Check, Copy } from "lucide-react";
 import { SenderAvatar } from "../sender-avatar";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import type { Thread } from "./types";
@@ -13,31 +14,34 @@ const SENDER_TYPE_COLOR: Record<string, string> = {
   Automated: "#94a3b8",
 };
 
-/** Compact two-line conversation row. Selection controls span both lines. */
+/** Single-line conversation row: sender | subject — snippet | copy id + time. Checkbox spans the row; hover reveals the id copy. */
 export function ThreadListRow({
   thread,
   selected,
   read,
-  starred,
   inBulkSelection,
   onSelect,
   onToggleSelected,
-  onToggleStarred,
 }: {
   thread: Thread;
   selected: boolean;
   read: boolean;
-  starred: boolean;
   inBulkSelection: boolean;
   onSelect: () => void;
   onToggleSelected: () => void;
-  onToggleStarred: () => void;
 }) {
   const sender = pickSenderDisplay(thread);
   const senderTypeColor = !thread.is_self && thread.primary_sender_type
     ? SENDER_TYPE_COLOR[thread.primary_sender_type] ?? null : null;
-
+  const [copied, setCopied] = useState(false);
   const stop = (e: MouseEvent) => e.stopPropagation();
+  const copyId = (e: MouseEvent) => {
+    stop(e);
+    void navigator.clipboard?.writeText(thread.id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
 
   return (
     <button
@@ -45,10 +49,9 @@ export function ThreadListRow({
       onClick={onSelect}
       data-thread-id={thread.id}
       data-thread-row="true"
-      className="group relative w-full grid items-center gap-x-2 gap-y-0.5 px-4 py-2 text-left transition-colors"
+      className="group relative w-full grid items-center gap-x-4 px-4 py-2.5 text-left transition-colors"
       style={{
-        gridTemplateColumns: "20px 16px minmax(0, 1fr) auto",
-        gridTemplateRows: "18px 20px",
+        gridTemplateColumns: "16px minmax(110px, 190px) minmax(0, 1fr) auto",
         background: selected
           ? "color-mix(in oklab, var(--color-text) 4%, transparent)"
           : inBulkSelection
@@ -83,7 +86,7 @@ export function ThreadListRow({
             onToggleSelected();
           }
         }}
-        className="row-span-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border cursor-pointer"
+        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border cursor-pointer"
         style={{
           background: inBulkSelection ? "var(--color-accent-fill)" : "transparent",
           borderColor: inBulkSelection ? "var(--color-accent)" : "var(--color-border-strong)",
@@ -96,34 +99,8 @@ export function ThreadListRow({
         )}
       </span>
 
-      {/* Star */}
-      <span
-        role="button"
-        tabIndex={-1}
-        onClick={(e) => {
-          stop(e);
-          onToggleStarred();
-        }}
-        title={starred ? "Unstar" : "Star"}
-        className="row-span-2 inline-flex h-4 w-4 shrink-0 items-center justify-center cursor-pointer"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill={starred ? "#f59e0b" : "none"}
-          stroke={starred ? "#f59e0b" : "var(--color-text-muted)"}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-      </span>
-
-      {/* Avatar + sender */}
-      <span data-mail-line="sender" className="col-start-3 row-start-1 inline-flex items-center gap-1.5 min-w-0">
+      {/* Avatar + sender: the darkest text on the row */}
+      <span data-mail-line="sender" className="inline-flex items-center gap-2 min-w-0 border-r pr-4" style={{ borderColor: "var(--color-border)" }}>
         <SenderAvatar
           avatarUrl={sender.avatar_url}
           name={sender.name}
@@ -131,7 +108,7 @@ export function ThreadListRow({
           seed={sender.email ?? thread.id}
           senderType={thread.primary_sender_type}
           size="sm"
-          className="!h-4 !w-4 !text-[9px]"
+          className="!h-5 !w-5 !text-[9px] shrink-0"
         />
         <span
           className="truncate text-[13px]"
@@ -154,8 +131,8 @@ export function ThreadListRow({
         </span>
       </span>
 
-      {/* Subject + snippet */}
-      <span data-mail-line="subject" className="col-start-3 col-span-2 row-start-2 min-w-0 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+      {/* Subject (mid shade) + snippet (muted) */}
+      <span data-mail-line="subject" className="min-w-0 flex items-center gap-2 overflow-hidden whitespace-nowrap">
         {!read && (
           <span
             aria-hidden
@@ -169,10 +146,9 @@ export function ThreadListRow({
           />
         )}
         <span
-          className="max-w-[70%] shrink-0 truncate text-[14px]"
+          className="max-w-[60%] shrink-0 truncate text-[13px]"
           style={{
-            color: "var(--color-text)",
-            fontSize: 14,
+            color: "color-mix(in oklab, var(--color-text) 85%, var(--color-text-muted))",
             fontWeight: read ? 400 : 600,
           }}
         >
@@ -206,13 +182,26 @@ export function ThreadListRow({
         )}
       </span>
 
-      {/* Time */}
-      <span
-        className="col-start-4 row-start-1 text-right text-[11px] tabular-nums shrink-0"
-        style={{ color: "var(--color-text-muted)" }}
-        title={thread.last_message_at ? formatAbsoluteDate(thread.last_message_at) : undefined}
-      >
-        {thread.last_message_at && formatRelativeDate(thread.last_message_at)}
+      {/* Copy id (hover) + time */}
+      <span className="inline-flex items-center gap-2 shrink-0">
+        <span
+          role="button"
+          tabIndex={-1}
+          onClick={copyId}
+          title={copied ? "Copied" : "Copy thread id"}
+          aria-label="Copy thread id"
+          className={`inline-flex h-5 w-5 items-center justify-center rounded cursor-pointer transition-opacity hover:bg-[var(--color-surface-hover)] ${copied ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+        </span>
+        <span
+          className="min-w-[44px] text-right text-[11px] tabular-nums"
+          style={{ color: "var(--color-text-muted)" }}
+          title={thread.last_message_at ? formatAbsoluteDate(thread.last_message_at) : undefined}
+        >
+          {thread.last_message_at && formatRelativeDate(thread.last_message_at)}
+        </span>
       </span>
     </button>
   );
