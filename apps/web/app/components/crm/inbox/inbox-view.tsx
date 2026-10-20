@@ -7,7 +7,7 @@ import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
 import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsView } from "../../campaigns/campaigns-view";
-import { Mail, Search, SlidersHorizontal, X } from "lucide-react";
+import { Mail, Megaphone, Search, SlidersHorizontal, X } from "lucide-react";
 import { SenderAvatar } from "../sender-avatar";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
@@ -15,6 +15,8 @@ import { mailCounterparty } from "@/lib/mail-counterparty";
 
 export type MailView = NonNullable<MailFilters["view"]>;
 const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", drafts: "Drafts", sent: "Sent", followups: "Follow-ups" };
+// Campaigns has its own button; Follow-ups has no tab (still reachable by URL).
+const tabless: MailView[] = ["campaigns", "followups"];
 const filterOptions: Record<string, string[]> = {
   direction: ["inbound", "outbound"], transport: ["gmail", "postmark-broadcast", "postmark-transactional"],
   purpose: ["personal", "marketing", "transactional"], state: ["draft", "frozen", "approved", "sending", "unknown", "accepted", "failed", "received"],
@@ -55,9 +57,12 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly", "showInternal"].includes(key) && value !== "" && value !== undefined);
   return <div className={`${styles.page} flex h-full min-h-0 flex-col`}>
     <header className={styles.header}>
-      <h1 className="flex items-center gap-2 text-[26px] font-semibold tracking-[-0.01em]"><Mail size={22} strokeWidth={1.5} aria-hidden />Mail</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="flex items-center gap-2 text-[26px] font-semibold tracking-[-0.01em]"><Mail size={22} strokeWidth={1.5} aria-hidden />Mail</h1>
+        <button type="button" aria-pressed={view === "campaigns"} className={`${styles.control} ${styles.button}`} onClick={() => update("view", "campaigns")}><Megaphone size={14} aria-hidden />Campaigns</button>
+      </div>
       <nav role="tablist" aria-label="Mail views" className={styles.tabs}>
-        {(Object.entries(views) as [MailView, string][]).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} className={styles.tab} onClick={() => update("view", key)}>{label}</button>)}
+        {(Object.entries(views) as [MailView, string][]).filter(([key]) => !tabless.includes(key)).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} className={styles.tab} onClick={() => update("view", key)}>{label}</button>)}
       </nav>
     </header>
     <div role="group" aria-label="Mail filters" className={styles.toolbar}>

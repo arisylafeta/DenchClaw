@@ -32,16 +32,21 @@ describe("merged mail", () => {
     await screen.findByRole("combobox", { name: "direction" });
     expect(navigation.replace).not.toHaveBeenCalled();
   });
-  it("switches all five views and loads the matching shared-store APIs", async () => {
+  it("switches the mail views and loads the matching shared-store APIs", async () => {
     render(<InboxView />);
     expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute("aria-selected", "true");
-    for (const label of ["Campaigns", "Drafts", "Sent", "Follow-ups", "Conversations"]) {
+    expect(screen.queryByRole("tab", { name: "Follow-ups" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Campaigns" })).not.toBeInTheDocument();
+    for (const label of ["Drafts", "Sent", "Conversations"]) {
       fireEvent.click(screen.getByRole("tab", { name: label }));
       expect(screen.getByRole("tabpanel", { name: label })).toBeInTheDocument();
     }
+    fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
+    expect(screen.getByRole("tabpanel", { name: "Campaigns" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Campaigns" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Conversations" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/messages?"), expect.anything()));
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns?"), expect.anything());
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/followups?"), expect.anything());
   });
   it("counts unread per server thread, keeps real message totals and includes latest outbound replies", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [
