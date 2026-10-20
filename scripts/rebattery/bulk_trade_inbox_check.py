@@ -60,11 +60,10 @@ from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
+from bulk_registry import BUY_BOX, TEMPLATES  # read from the database, loaded on first use
 from demand_lifecycle import resolve_entity, reputation_for, family_key, existing_demand, expire_demand
 
 REPO = Path(__file__).resolve().parents[2]
-TEMPLATES = json.loads((REPO / "apps/web/lib/bulk-trade-templates.json").read_text())
-BUY_BOX = json.loads((REPO / "apps/web/lib/buy-box-spec.json").read_text())
 GRANOLA_DIR = Path(os.environ.get("GRANOLA_DATA_DIR", "/root/.local/share/rebattery/granola"))
 GRANOLA_BIN = os.environ.get("GRANOLA_INGESTION_BIN", "/root/.local/bin/granola-ingestion")
 GATEWAY_URL = os.environ.get("HERMES_API_BASE_URL", "http://127.0.0.1:8642") + "/v1/chat/completions"

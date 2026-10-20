@@ -18,7 +18,7 @@ Demand lives in `crm_bulk_demand` (migrations 015 to 017), shown on the Demand p
 | `kind` | `request`: one-off, a quantity by `needed_by`. `standing`: an ongoing buy-box. |
 | `basis` | Standing only. `estimated` (our research), `stated` (the buyer said so), `agreed` (confirmed with the buyer, with price and volume). |
 | `wants` | One line in the buyer's terms. |
-| `spec` | Lists and numbers from `apps/web/lib/buy-box-spec.json`: chemistries, formats, cell_formats, conditions, origins, makes, cell_makers, evidence, excludes, kwh_min, kwh_max, min_soh, mixed_ok. Values must match the lists exactly. |
+| `spec` | Lists and numbers from the attribute registry in the database (`crm_bulk_attributes`, `crm_bulk_attribute_options`): chemistries, formats, cell_formats, conditions, origins, makes, cell_makers, evidence, excludes, kwh_min, kwh_max, min_soh, mixed_ok. Values must match the lists exactly. |
 | `volume`, `volume_unit` | Total for a request, per month for standing. |
 | `max_price`, `price_currency`, `price_unit` | Their ceiling. |
 | `location` | Delivery country or region. |

@@ -22,10 +22,10 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from bulk_registry import BUY_BOX  # read from the database, loaded on first use
 from demand_lifecycle import merge_profile, family_key, existing_demand, reputation_for
 
 REPO = Path(__file__).resolve().parents[2]
-BUY_BOX = json.loads((REPO / "apps/web/lib/buy-box-spec.json").read_text())
 FORMBRICKS_CONTAINER = "formbricks-postgres-1"
 FORMBRICKS_SURVEY = "Buyer Sourcing Criteria"
 
