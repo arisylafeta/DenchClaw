@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction } from "../postgres";
+import { ARCHIVE_PREFIX } from "../whatsapp-archive";
 
 /** Current two-operator deployment. Replace here with the later role flag. */
 export function canReadWhatsapp(user: unknown): boolean {
@@ -44,6 +45,8 @@ export type WhatsappMessage = {
   edit_version: number;
   deleted_at: string | null;
   metadata: Record<string, unknown>;
+  /** Trades this message is explicitly linked to as evidence. */
+  trade_links?: Array<{ lot_id: string; title: string }>;
 };
 export async function whatsappThreads(
   context: { personId?: string; companyId?: string; tradeId?: string },
@@ -125,7 +128,9 @@ export async function whatsappConversation(id: string, limit = 50, offset = 0, t
     i.display_name as sender_name,
     case when not i.shared and (select count(*) from whatsapp_identity_link l where l.identity_id=i.id and l.valid_to is null)=1
       then (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.identity_id=i.id and l.valid_to is null limit 1) end as sender_person_name,
-    ${visibleBody("r")} as reply_body
+    ${visibleBody("r")} as reply_body,
+    coalesce((select jsonb_agg(jsonb_build_object('lot_id',e.lot_id,'title',l.title) order by l.title) from crm_bulk_trade_evidence_links e join crm_bulk_trade_lots l on l.id=e.lot_id
+      where e.evidence_id=m.id and e.evidence_kind='whatsapp_live_message'),'[]'::jsonb) as trade_links
     from whatsapp_message m left join whatsapp_identity i on i.id=m.sender_identity_id
     left join whatsapp_message r on r.thread_id=m.thread_id and r.provider_message_id=m.reply_to_provider_id
     where m.thread_id=$1 order by m.occurred_at,m.id limit $2 offset $3`,
@@ -236,4 +241,36 @@ export async function decideWhatsappIdentity(
     );
     return { id };
   });
+}
+
+/** Imported WhatsApp exports (trader history): real contact names, with the messages explicitly linked to trades. */
+export { ARCHIVE_PREFIX };
+const OWN_SENDER = "Alex";
+export type WhatsappArchiveRow = { id: string; kind: "direct"; name: string; message_count: number; last_body: string | null; last_direction: string | null; last_at: string; linked_trades: number };
+export async function whatsappArchiveChats() {
+  const rows = await queryPg<Omit<WhatsappArchiveRow, "id" | "kind"> & { conversation: string }>(
+    `select m.conversation as conversation,m.conversation as name,count(*)::int as message_count,max(m.occurred_at) as last_at,
+      (array_agg(m.body order by m.occurred_at desc,m.message_index desc))[1] as last_body,
+      (array_agg(case when m.sender=$1 then 'outbound' else 'inbound' end order by m.occurred_at desc,m.message_index desc))[1] as last_direction,
+      (select count(*)::int from crm_bulk_trade_evidence_links e join crm_trade_evidence_messages x on x.id=e.evidence_id where e.evidence_kind='whatsapp_message' and x.conversation=m.conversation) as linked_trades
+    from crm_trade_evidence_messages m group by m.conversation order by max(m.occurred_at) desc`, [OWN_SENDER]);
+  return { chats: rows.map(({ conversation, ...row }) => ({ ...row, id: `${ARCHIVE_PREFIX}${conversation}`, kind: "direct" as const })) };
+}
+export async function whatsappArchiveConversation(conversation: string, limit = 50, offset = 0, tail = false) {
+  whatsappPagination(limit, offset);
+  const [{ count }] = await queryPg<{ count: string }>(`select count(*) from crm_trade_evidence_messages where conversation=$1`, [conversation]);
+  const total = Number(count);
+  if (!total) { return null; }
+  if (tail) { offset = Math.max(0, total - limit); }
+  const rows = await queryPg<{ id: string; sender: string; body: string; occurred_at: string; trade_links: Array<{ lot_id: string; title: string }> }>(
+    `select m.id,m.sender,m.body,m.occurred_at,
+      coalesce((select jsonb_agg(jsonb_build_object('lot_id',e.lot_id,'title',l.title) order by l.title) from crm_bulk_trade_evidence_links e join crm_bulk_trade_lots l on l.id=e.lot_id where e.evidence_id=m.id and e.evidence_kind='whatsapp_message'),'[]'::jsonb) as trade_links
+    from crm_trade_evidence_messages m where m.conversation=$1 order by m.occurred_at,m.message_index limit $2 offset $3`, [conversation, limit, offset]);
+  const messages: WhatsappMessage[] = rows.map((row) => ({
+    id: row.id, direction: row.sender === OWN_SENDER ? "outbound" : "inbound", body: row.body, sender_name: row.sender === OWN_SENDER ? null : row.sender, sender_person_name: null,
+    attachment: null, occurred_at: row.occurred_at, captured_at: row.occurred_at, timestamp_source: "provider", reply_to_provider_id: null, reply_to_message_id: null,
+    reply_body: null, edit_version: 0, deleted_at: null, metadata: {}, trade_links: row.trade_links,
+  }));
+  const thread = { id: `${ARCHIVE_PREFIX}${conversation}`, kind: "direct" as const, subject: conversation, name: conversation, name_source: "subject" as const, last_captured_at: rows.at(-1)?.occurred_at ?? "", message_count: total, shared_context: false, metadata: {} };
+  return { thread, messages, capture_status: null, history_complete: true, limit, offset, imported: true };
 }

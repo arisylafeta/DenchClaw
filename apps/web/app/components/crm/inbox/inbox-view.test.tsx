@@ -133,7 +133,9 @@ describe("merged mail", () => {
     vi.mocked(fetch).mockImplementation(async (url) => {
       const href = String(url);
       if (href.includes("/api/mail/campaigns/c1")) { return new Response(JSON.stringify({ error: "detail unavailable in this test" }), { status: 404 }); }
-      const body = href.includes("/api/whatsapp/inbox") ? { threads: [{ id: "t1", kind: "direct", name: "Mathieu", name_source: "person", last_captured_at: at, message_count: 1, last_body: "Collection is Thursday", last_direction: "inbound", last_at: at }] }
+      if (href.includes("/api/whatsapp/archive?chat=")) { return new Response(JSON.stringify({ thread: { ...thread, id: "archive:Zibi", name: "Zibi", subject: "Zibi", name_source: "subject", message_count: 1 }, messages: [{ id: "wam:1", direction: "outbound", body: "We have 18x Kona packs", sender_name: null, sender_person_name: null, attachment: null, occurred_at: at, captured_at: at, timestamp_source: "provider", reply_to_provider_id: null, reply_to_message_id: null, reply_body: null, edit_version: 0, deleted_at: null, metadata: {}, trade_links: [{ lot_id: "bulk-kona-18", title: "Hyundai Kona 64 kWh packs" }] }], capture_status: null, history_complete: true, limit: 50, offset: 0 })); }
+      const body = href.includes("/api/whatsapp/archive") ? { chats: [{ id: "archive:Zibi", kind: "direct", name: "Zibi", message_count: 1, last_body: "We have 18x Kona packs", last_direction: "outbound", last_at: at, linked_trades: 1 }] }
+        : href.includes("/api/whatsapp/inbox") ? { threads: [{ id: "t1", kind: "direct", name: "Mathieu", name_source: "person", last_captured_at: at, message_count: 1, last_body: "Collection is Thursday", last_direction: "inbound", last_at: at }] }
         : href.includes("/api/whatsapp/threads/t1") ? { thread, messages: [{ id: "m1", direction: "inbound", body: "Collection is Thursday", sender_name: null, sender_person_name: null, attachment: null, occurred_at: at, captured_at: at, timestamp_source: "provider", reply_to_provider_id: null, reply_to_message_id: null, reply_body: null, edit_version: 0, deleted_at: null, metadata: {} }], capture_status: null, history_complete: false, limit: 50, offset: 0 }
         : href.includes("/api/mail/campaigns") ? { items: [{ id: "c1", name: "Battery offer", audience: "dismantlers", status: "sent", mail_state: "sent", recipient_count: 3, tracking_pending: 0, launched_at: at, last_invite_at: null, sent: 3, delivered: 3, bounced: 0, opened: 1, clicked: 0, unsubscribed: 0, replied: 0 }] }
         : { items: [], nextCursor: null };
@@ -145,9 +147,13 @@ describe("merged mail", () => {
     fireEvent.click(chat);
     expect(await screen.findByRole("heading", { name: "Mathieu" })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith("/api/whatsapp/threads/t1?limit=50&tail=1", expect.anything());
-    expect(screen.getByText(/Captured history · Read only/)).toBeInTheDocument();
+    expect(screen.getByText(/1:1 · read only/)).toBeInTheDocument();
     // The chat opens beside the list, which keeps the chosen row highlighted.
     expect(screen.getByRole("button", { name: "Open chat: Mathieu" })).toHaveAttribute("aria-current", "true");
+    // Imported export chats appear in the same list and show the trades their messages are linked to.
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat: Zibi" }));
+    expect(await screen.findByText("Hyundai Kona 64 kWh packs")).toBeInTheDocument();
+    expect(screen.getByLabelText("History limitations")).toHaveTextContent("Imported WhatsApp export");
     fireEvent.click(screen.getByRole("tab", { name: "Campaigns" }));
     expect(await screen.findByText("Pick a campaign")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "Battery offer" }));

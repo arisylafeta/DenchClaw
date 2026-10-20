@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { WhatsappInboxRow } from "@/lib/crm-postgres/whatsapp";
+import type { WhatsappArchiveRow, WhatsappInboxRow } from "@/lib/crm-postgres/whatsapp";
 import { whatsappChatLabel } from "@/lib/whatsapp-display";
 import { WhatsappConversation } from "../whatsapp-chat";
 import { Loading } from "../../ui/shimmer";
@@ -13,12 +13,20 @@ const pageSize = 50;
 /** Captured WhatsApp chats as a panel: single-line chat rows on the left, the open chat on the right. */
 export function WhatsappView({ query, selectedId, onSelect }: { query?: string; selectedId?: string; onSelect?: (id: string) => void }) {
   const [rows, setRows] = useState<WhatsappInboxRow[]>([]);
+  const [archive, setArchive] = useState<WhatsappArchiveRow[]>([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [local, setLocal] = useState<string | null>(null);
   const selected = selectedId ?? local ?? null;
   const select = (id: string | null) => { setLocal(id); onSelect?.(id ?? ""); };
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/whatsapp/archive", { signal: controller.signal })
+      .then(async (res) => { if (res.ok) { const body = await res.json() as { chats: WhatsappArchiveRow[] }; if (!controller.signal.aborted && Array.isArray(body.chats)) { setArchive(body.chats); } } })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
   const needle = new URLSearchParams(query ?? "").get("q")?.trim().toLowerCase() ?? "";
   useEffect(() => {
     const controller = new AbortController();
@@ -35,20 +43,21 @@ export function WhatsappView({ query, selectedId, onSelect }: { query?: string; 
       .catch(() => { if (!controller.signal.aborted) {setState("error");} });
     return () => controller.abort();
   }, [offset]);
-  const shown = needle ? rows.filter((row) => `${whatsappChatLabel(row).text} ${row.last_body ?? ""}`.toLowerCase().includes(needle)) : rows;
+  type Entry = { id: string; name: string; hint?: string; inferred: boolean; last: string; outbound: boolean; at: string; tag: string; tagTitle: string };
+  const entries: Entry[] = [
+    ...rows.map((row): Entry => { const label = whatsappChatLabel(row); return { id: row.id, name: label.text, hint: label.hint, inferred: label.inferred, last: row.last_body?.trim().split("\n")[0] || "(no text)", outbound: row.last_direction === "outbound", at: row.last_at ?? row.last_captured_at, tag: `${row.kind === "group" ? "Group" : "1:1"} · ${row.message_count}`, tagTitle: row.kind === "group" ? "Group chat: shared context, not proof every message concerns one contact" : "One-to-one chat" }; }),
+    ...archive.map((chat): Entry => ({ id: chat.id, name: chat.name, hint: "Imported WhatsApp export", inferred: false, last: chat.last_body?.trim().split("\n")[0] || "(no text)", outbound: chat.last_direction === "outbound", at: chat.last_at, tag: `Imported · ${chat.message_count}${chat.linked_trades ? ` · ${chat.linked_trades} linked` : ""}`, tagTitle: chat.linked_trades ? `${chat.linked_trades} messages explicitly linked to trades` : "Imported from a WhatsApp export" })),
+  ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const shown = needle ? entries.filter((entry) => `${entry.name} ${entry.last}`.toLowerCase().includes(needle)) : entries;
   const list = <div className="h-full min-h-0 overflow-y-auto text-[13px]" style={{ background: "var(--color-bg)" }}>
     {state === "loading" && !rows.length && <Loading label="Loading WhatsApp chats…" />}
     {state === "error" && <p role="alert" className="px-6 py-6" style={{ color: "var(--color-error)" }}>Could not load WhatsApp chats.</p>}
     {state === "ready" && !shown.length && <p className="px-6 py-8" style={{ color: "var(--color-text-muted)" }}>No captured WhatsApp chats{needle ? " match your search" : ""}.</p>}
-    <ul aria-label="WhatsApp chats">{shown.map((row) => {
-      const label = whatsappChatLabel(row);
-      return <li key={row.id}>
-        <MailLine id={row.id} prefix={row.last_direction === "outbound" ? "You:" : undefined} name={label.inferred ? `${label.text} ~` : label.text} nameTitle={label.hint} email={null}
-          subject={row.last_body?.trim().split("\n")[0] || "(no text)"} snippet={null} at={row.last_at ?? row.last_captured_at} selected={selected === row.id}
-          label={`Open chat: ${label.text}`} onOpen={() => select(row.id)}
-          tag={<span className={styles.chip} title={row.kind === "group" ? "Group chat: shared context, not proof every message concerns one contact" : "One-to-one chat"}>{row.kind === "group" ? "Group" : "1:1"} · {row.message_count}</span>} />
-      </li>;
-    })}</ul>
+    <ul aria-label="WhatsApp chats">{shown.map((entry) => <li key={entry.id}>
+      <MailLine id={entry.id} prefix={entry.outbound ? "You:" : undefined} name={entry.inferred ? `${entry.name} ~` : entry.name} nameTitle={entry.hint} email={null}
+        subject={entry.last} snippet={null} at={entry.at} selected={selected === entry.id} label={`Open chat: ${entry.name}`} onOpen={() => select(entry.id)}
+        tag={<span className={styles.chip} title={entry.tagTitle}>{entry.tag}</span>} />
+    </li>)}</ul>
     {hasMore && <button type="button" className={`${styles.control} m-4`} disabled={state === "loading"} onClick={() => setOffset((current) => current + pageSize)}>Load more</button>}
   </div>;
   return <InboxLayout {...PANEL_LAYOUT} hasSelection={Boolean(selected)} list={list}
