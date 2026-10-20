@@ -2716,15 +2716,13 @@ body:has(.bt-preview) .bulk-trades[class*="sheet"] { border-radius: 8px !importa
   .chat-shimmer-label { animation: none; background-image: none; color: var(--color-text-muted); }
 }
 
-/* Task stepper (chat-native TodoPanel) */
-@keyframes todo-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
-@keyframes todo-pop { 0% { transform: scale(0.4); opacity: 0; } 70% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
-@keyframes todo-seg-glow { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
-.todo-node-active { animation: todo-pulse 1.6s ease-out infinite; }
+/* Task stepper (chat-native TodoPanel): flat, opacity-only motion */
+@keyframes todo-pop { 0% { transform: scale(0.4); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes todo-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.todo-node-active { animation: todo-breathe 1.6s ease-in-out infinite; }
 .todo-check { animation: todo-pop 0.28s ease-out; }
 .todo-seg { transition: background-color 0.3s ease; }
-.todo-seg-active { animation: todo-seg-glow 1.6s ease-in-out infinite; }
-.todo-detail { animation: drawer-fade-in 0.15s ease-out; }
+.todo-seg-active { animation: todo-breathe 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .todo-node-active, .todo-check, .todo-seg-active, .todo-detail { animation: none; }
+  .todo-node-active, .todo-check, .todo-seg-active { animation: none; }
 }

@@ -2908,10 +2908,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const inputBarContainer = (onDragOverHandler: React.DragEventHandler, onDragLeaveHandler: React.DragEventHandler, onDropHandler: React.DragEventHandler) => (
 			<div
 				data-chat-drop-target=""
-				data-composer-pill={nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0) ? "gradient" : "glass"}
+				data-composer-pill={nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0) ? "gradient" : "glass"}
 				className={`${compact ? "rounded-2xl" : "rounded-3xl"} overflow-hidden border shadow-[0_0_32px_rgba(0,0,0,0.07)] transition-[outline,box-shadow,border-color] motion-reduce:transition-none duration-150 ease-out focus-within:border-[var(--color-border-strong)]! data-drag-hover:outline-2 data-drag-hover:outline-dashed data-drag-hover:outline-(--color-accent) data-drag-hover:-outline-offset-2 data-drag-hover:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-accent)_15%,transparent),0_0_32px_rgba(0,0,0,0.07)]!`}
 				style={{
-					background: nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0)
+					background: nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0)
 						? "linear-gradient(to bottom, var(--color-surface-hover) 0%, var(--color-bg) min(300px, 70%), var(--color-bg) 100%)"
 						: "color-mix(in srgb, var(--color-surface) 75%, transparent)",
 					backdropFilter: "blur(16px) saturate(180%)",

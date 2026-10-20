@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { TodoPanel, splitTodo } from "./todo-panel";
 import type { TodoState } from "@/lib/hermes-chat/todos";
 
+const isOpen = (text: string) => screen.getByText(text).closest("[data-open]")?.getAttribute("data-open") === "true";
 const state = (visible: TodoState["visible"]): TodoState => ({ visible, retained: [] }) as unknown as TodoState;
 const items = [
   { id: "a", content: "Worktree ready: created and symlinked", status: "completed" },
@@ -29,10 +30,10 @@ describe("TodoPanel", () => {
     const { container } = render(<TodoPanel todos={state(items)} />);
     expect(screen.getByText("1/3 done")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
-    expect(screen.getByText("skeletons built from the real structure")).toBeInTheDocument();
-    expect(screen.queryByText("created and symlinked")).toBeNull();
+    expect(isOpen("skeletons built from the real structure")).toBe(true);
+    expect(isOpen("created and symlinked")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: /Worktree ready/ }));
-    expect(screen.getByText("created and symlinked")).toBeInTheDocument();
+    expect(isOpen("created and symlinked")).toBe(true);
     expect(container.querySelector('[data-todo-id="b"]')?.getAttribute("data-status")).toBe("in_progress");
   });
   it("hides finished rows on demand", () => {
@@ -44,8 +45,8 @@ describe("TodoPanel", () => {
   it("collapses to one line showing the active task and starts collapsed when everything is done", () => {
     const { rerender } = render(<TodoPanel todos={state(items)} />);
     fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
-    expect(screen.queryByText("created and symlinked")).toBeNull();
-    expect(screen.getByText("Shimmer rework")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Tasks" }).getAttribute("data-open")).toBe("false");
+    expect(screen.getAllByText("Shimmer rework")[0]).toBeInTheDocument();
     rerender(<TodoPanel key="all-done" todos={state(items.map(item => ({ ...item, status: "completed" })) as TodoState["visible"])} />);
     expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-expanded", "false");
   });

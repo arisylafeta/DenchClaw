@@ -18,12 +18,20 @@ export function splitTodo(content: string): { title: string; detail: string } {
 
 const statusLabel: Record<TodoStatus, string> = { pending: "Pending", in_progress: "In progress", completed: "Done", cancelled: "Cancelled" };
 
+/** Flat status marks: solid shapes, no rings or shadows. Active breathes (opacity only). */
 function Node({ status }: { status: TodoStatus }) {
-  const base = "relative z-10 mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border";
-  if (status === "completed") return <span aria-hidden="true" className={`${base} border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-foreground,#fff)]`}><Check className="todo-check size-2.5" strokeWidth={3} /></span>;
-  if (status === "cancelled") return <span aria-hidden="true" className={`${base} border-[var(--color-border)] bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]`}><X className="size-2.5" strokeWidth={3} /></span>;
-  if (status === "in_progress") return <span aria-hidden="true" className={`${base} todo-node-active border-[var(--color-accent)] bg-[var(--color-surface,#fff)]`}><span className="size-1.5 rounded-full bg-[var(--color-accent)]" /></span>;
-  return <span aria-hidden="true" className={`${base} border-[var(--color-border)] bg-[var(--color-surface,#fff)]`} />;
+  const base = "relative z-10 mt-[3px] flex size-3.5 shrink-0 items-center justify-center rounded-full";
+  if (status === "completed") return <span aria-hidden="true" className={`${base} bg-[var(--color-accent)] text-[var(--color-accent-foreground,#fff)]`}><Check className="todo-check size-2.5" strokeWidth={3.5} /></span>;
+  if (status === "cancelled") return <span aria-hidden="true" className={`${base} bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]`}><X className="size-2.5" strokeWidth={3.5} /></span>;
+  if (status === "in_progress") return <span aria-hidden="true" className={`${base} todo-node-active bg-[var(--color-accent)]`}><span className="size-1.5 rounded-full bg-[var(--color-surface,#fff)]" /></span>;
+  return <span aria-hidden="true" className={`${base} bg-[var(--color-border)]`} />;
+}
+
+/** Height-animating disclosure: content stays mounted so it can slide both ways; inert while closed. */
+function Collapse({ open, children, className = "" }: { open: boolean; children: React.ReactNode; className?: string }) {
+  return <div data-open={open} className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"} ${className}`} aria-hidden={!open} inert={!open}>
+    <div className="min-h-0 overflow-hidden">{children}</div>
+  </div>;
 }
 
 export interface TodoPanelProps { todos: TodoState }
@@ -55,18 +63,18 @@ export function TodoPanel({ todos }: TodoPanelProps) {
         {!last && <span aria-hidden="true" className={`absolute left-[7.5px] top-4 bottom-[-2px] w-px ${item.status === "completed" ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`} />}
         <span className="absolute left-0 top-1"><Node status={item.status} /></span>
         {detail ? <button type="button" aria-expanded={expanded} onClick={() => setOverrides(prev => ({ ...prev, [item.id]: !expanded }))} className="group/todo flex w-full min-w-0 items-start gap-1 rounded py-0.5 text-left focus-visible:outline-2">
-          <span className={`min-w-0 flex-1 ${expanded ? "" : "truncate"} font-medium ${muted ? "text-[var(--color-text-muted)] line-through decoration-[var(--color-border)]" : item.status === "in_progress" ? "todo-title-active" : ""}`}>{title}</span>
+          <span className={`min-w-0 flex-1 truncate font-medium ${muted ? "text-[var(--color-text-muted)] line-through decoration-[var(--color-border)]" : item.status === "in_progress" ? "" : ""}`}>{title}</span>
           <ChevronRight aria-hidden="true" className={`mt-1 size-3 shrink-0 text-[var(--color-text-muted)] opacity-0 transition group-hover/todo:opacity-100 group-focus-visible/todo:opacity-100 ${expanded ? "rotate-90 opacity-100" : ""}`} />
-        </button> : <p className={`py-0.5 font-medium ${muted ? "text-[var(--color-text-muted)] line-through decoration-[var(--color-border)]" : item.status === "in_progress" ? "todo-title-active" : ""}`}>{title}</p>}
+        </button> : <p className={`py-0.5 font-medium ${muted ? "text-[var(--color-text-muted)] line-through decoration-[var(--color-border)]" : item.status === "in_progress" ? "" : ""}`}>{title}</p>}
         <span className="sr-only">{statusLabel[item.status]}</span>
-        {expanded && <p className="todo-detail pb-1.5 text-[12px] leading-5 text-[var(--color-text-muted)]">{detail}</p>}
+        {detail && <Collapse open={expanded}><p className="pb-1.5 text-[12px] leading-5 text-[var(--color-text-muted)]">{detail}</p></Collapse>}
         {renderItems(items.filter(child => child.parent === item.id), [...ancestors, item.id], true)}
       </li>;
     })}</ul>;
   };
   const active = items.find(item => item.status === "in_progress");
   const expandedPanel = openOverride ?? done < items.length;
-  return <section aria-label="Tasks" className="todo-panel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] leading-5" data-open={expandedPanel}>
+  return <section aria-label="Tasks" className="todo-panel px-3 pb-1 pt-2.5 text-[13px] leading-5" data-open={expandedPanel}>
     <header className="flex items-center gap-2">
       <button type="button" aria-expanded={expandedPanel} aria-label="Tasks" onClick={() => setOpenOverride(!expandedPanel)} className="flex min-w-0 items-center gap-2 rounded text-left focus-visible:outline-2">
         <ChevronRight aria-hidden="true" className={`size-3 shrink-0 text-[var(--color-text-muted)] transition-transform motion-reduce:transition-none ${expandedPanel ? "rotate-90" : ""}`} />
@@ -79,6 +87,6 @@ export function TodoPanel({ todos }: TodoPanelProps) {
       </div>
       {expandedPanel && done > 0 && <button type="button" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2" onClick={() => setHideDone(value => !value)}>{hideDone ? `Show done (${done})` : "Hide done"}</button>}
     </header>
-    {expandedPanel && <div className="mt-2 max-h-[40dvh] overflow-y-auto pr-1">{renderItems(roots, [], false)}</div>}
+    <Collapse open={expandedPanel}><div className="max-h-[40dvh] overflow-y-auto pb-1 pr-1 pt-2">{renderItems(roots, [], false)}</div></Collapse>
   </section>;
 }
