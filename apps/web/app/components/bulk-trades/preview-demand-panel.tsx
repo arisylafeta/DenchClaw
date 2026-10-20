@@ -91,7 +91,7 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
   );
 }
 
-const TABS = ["Details", "Documents", "Offers", "History"];
+const TABS = ["Details", "Offers", "Documents", "History"];
 const TAB_ICONS = { Details: ClipboardList, Documents: FileText, Offers: ArrowLeftRight, History: History };
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
