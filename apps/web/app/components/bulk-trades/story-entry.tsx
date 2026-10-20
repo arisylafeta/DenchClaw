@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Trash2, Mail, Send, PhoneCall, Phone, Search, MessageSquare, FileText, Package, Clock } from "lucide-react";
+import { Trash2, Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown } from "lucide-react";
 import type { DemandActivity } from "@/lib/crm-postgres/bulk-demand-activity";
 import { shortDate } from "@/lib/bulk-trade-details";
 
@@ -10,31 +10,36 @@ export function storyLabel(entry: Pick<DemandActivity, "kind" | "ref_kind" | "re
   const source = String(entry.data?.source ?? "").toLowerCase();
   if (entry.kind === "call") return source === "granola" || /granola/i.test(entry.ref_id ?? "") ? "Granola call" : "Call";
   if (entry.kind === "outreach") return entry.ref_kind === "email" ? "Email" : "Outreach";
-  return { research: "Research", quote: "Quote", note: "Note", supply: "Supply", status: "Status" }[entry.kind] ?? "Activity";
+  return {
+    research: "Research", quote: "Quote", note: "Note", supply: "Supply", status: "Status",
+    document: "Document", mail: "Mail", whatsapp: "WhatsApp",
+  }[entry.kind] ?? "Activity";
 }
 
-/** The icon and accent colour for the kind, so the timeline reads at a glance. */
-function iconFor(label: string): { Icon: typeof Mail; color: string } {
+/** The icon for the kind. Every badge is the same neutral grey — no colour-coding by type. */
+function iconFor(label: string): typeof Mail {
   switch (label) {
-    case "Email": return { Icon: Mail, color: "var(--bt-accent)" };
-    case "Granola call": return { Icon: PhoneCall, color: "var(--bt-accent)" };
-    case "Call": return { Icon: Phone, color: "var(--bt-accent)" };
-    case "Research": return { Icon: Search, color: "var(--bt-amber)" };
-    case "Quote": return { Icon: FileText, color: "var(--bt-green)" };
-    case "Supply": return { Icon: Package, color: "var(--bt-green)" };
-    case "Outreach": return { Icon: Send, color: "var(--bt-accent)" };
-    case "Status": return { Icon: Clock, color: "var(--bt-muted)" };
-    default: return { Icon: MessageSquare, color: "var(--bt-muted)" };
+    case "Email": case "Mail": return Mail;
+    case "Granola call": return PhoneCall;
+    case "Call": return Phone;
+    case "Research": return Search;
+    case "Quote": case "Document": return FileText;
+    case "WhatsApp": return MessageCircle;
+    case "Status": return Clock;
+    default: return MessageSquare;
   }
 }
 
 /** One short line of what this kind of entry actually means, only from what's recorded. */
 function shortDescription(entry: DemandActivity, label: string, state: string | null): string {
   if (label === "Email") return state === "draft" ? "Drafted, not sent yet" : state === "sent" ? "Sent to the buyer" : "Email on this request";
+  if (label === "Mail") return "Mail on this request";
+  if (label === "WhatsApp") return "WhatsApp message";
   if (label === "Granola call") return "Notes from a recorded call";
   if (label === "Call") return "Phone call logged";
   if (label === "Research") return "Findings from research";
   if (label === "Quote") return "Price or terms quoted";
+  if (label === "Document") return "A prepared document";
   if (label === "Supply") return "Linked to a supplier offer";
   if (label === "Outreach") return "Outreach logged";
   if (label === "Status") return "Automatic status change";
@@ -50,8 +55,6 @@ function evidenceLabel(entry: DemandActivity): string {
   return "Open source";
 }
 
-const LONG = 220;
-
 export function StoryEntry({ entry, busy, last, animate, delay, onDelete, onOpenTrade, onOpenSupply }: {
   entry: DemandActivity;
   busy: boolean;
@@ -62,23 +65,22 @@ export function StoryEntry({ entry, busy, last, animate, delay, onDelete, onOpen
   onOpenTrade: (id: string) => void;
   onOpenSupply?: (id: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const quiet = entry.kind === "status";
   const body = entry.body?.trim() ?? "";
-  const long = body.length > LONG;
   const state = typeof entry.data?.state === "string" ? entry.data.state : null; // "draft" / "sent", only when recorded
   const refId = entry.ref_id;
   const openable = refId && (entry.ref_kind === "lot" || entry.ref_kind === "supply" || /^https?:\/\//i.test(refId));
+  const expandable = !!body || !!openable;
   const label = storyLabel(entry);
-  const { Icon, color } = iconFor(label);
+  const Icon = iconFor(label);
   return (
     <li className="group relative flex min-w-0 gap-3 py-3" style={{ opacity: quiet ? 0.7 : 1 }}>
       <div className="flex shrink-0 flex-col items-center" aria-hidden>
         <span
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-[transform,opacity] duration-300 ease-out"
           style={{
-            background: quiet ? "var(--bt-segment)" : color,
-            color: quiet ? "var(--bt-muted)" : "var(--bt-on-accent)",
+            background: "var(--bt-segment)", color: "var(--bt-muted)",
             transitionDelay: `${delay ?? 0}ms`,
             transform: animate ? "scale(1)" : "scale(0.4)",
             opacity: animate ? 1 : 0,
@@ -93,38 +95,36 @@ export function StoryEntry({ entry, busy, last, animate, delay, onDelete, onOpen
           />
         )}
       </div>
-      <div className="min-w-0 flex-1 pb-1">
-        <div className="flex items-baseline gap-2 pr-9">
-          <span className="text-[12px] font-semibold" style={{ color: "var(--bt-text)" }}>{label}</span>
+      <button type="button" disabled={!expandable} aria-expanded={open} onClick={() => expandable && setOpen((v) => !v)}
+        className="min-w-0 flex-1 pb-1 text-left disabled:cursor-default">
+        <p className="pr-9 text-[14px] font-semibold leading-snug">
+          {entry.title}
+          {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
+        </p>
+        <div className="mt-0.5 flex items-baseline gap-2 pr-9">
+          <span className="text-[11.5px] font-medium" style={{ color: "var(--bt-muted)" }}>{label}</span>
           <span className="text-[11.5px]" style={{ color: "var(--bt-muted)" }}>{shortDescription(entry, label, state)}</span>
           <time className="ml-auto shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
             {shortDate(entry.occurred_at.slice(0, 10))}
           </time>
         </div>
-        <p className="mt-1 pr-9 text-[14px] leading-snug" style={{ fontWeight: quiet ? 400 : 600 }}>
-          {entry.title}
-          {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
-        </p>
-        {body && (
-          <p className="mt-1 whitespace-pre-wrap text-[13px] leading-snug" style={{ color: "var(--bt-text-2)" }}>
-            {long && !expanded ? `${body.slice(0, LONG).trimEnd()}…` : body}
-            {long && (
-              <button type="button" className="ml-1 underline" onClick={() => setExpanded((value) => !value)}>
-                {expanded ? "Show less" : "Show more"}
-              </button>
-            )}
-          </p>
+        {open && body && (
+          <p className="mt-2 whitespace-pre-wrap text-[13px] leading-snug" style={{ color: "var(--bt-text-2)" }}>{body}</p>
         )}
-        {openable && (entry.ref_kind === "lot" || entry.ref_kind === "supply" ? (
-          <button type="button" className="mt-1.5 text-[13px] underline" style={{ color: "var(--bt-link)" }}
-            onClick={() => (entry.ref_kind === "lot" ? onOpenTrade(refId) : onOpenSupply?.(refId))}>{evidenceLabel(entry)}</button>
+        {open && openable && (entry.ref_kind === "lot" || entry.ref_kind === "supply" ? (
+          <span role="button" tabIndex={0} className="mt-1.5 inline-block text-[13px] underline" style={{ color: "var(--bt-link)" }}
+            onClick={(e) => { e.stopPropagation(); entry.ref_kind === "lot" ? onOpenTrade(refId) : onOpenSupply?.(refId); }}>{evidenceLabel(entry)}</span>
         ) : (
-          <a className="mt-1.5 inline-block text-[13px] underline" style={{ color: "var(--bt-link)" }} href={refId} target="_blank" rel="noreferrer">{evidenceLabel(entry)}</a>
+          <a className="mt-1.5 inline-block text-[13px] underline" style={{ color: "var(--bt-link)" }} href={refId} target="_blank" rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}>{evidenceLabel(entry)}</a>
         ))}
-        {!openable && refId && entry.ref_kind === "email" && (
+        {open && !openable && refId && entry.ref_kind === "email" && (
           <p className="mt-1.5 text-[12px]" style={{ color: "var(--bt-muted)" }}>Email recorded; no link to open it.</p>
         )}
-      </div>
+      </button>
+      {expandable && (
+        <ChevronDown size={14} aria-hidden className="absolute right-9 top-3.5 shrink-0 transition-transform" style={{ color: "var(--bt-muted)", transform: open ? "rotate(180deg)" : "none" }} />
+      )}
       <button type="button" disabled={busy} aria-label={`Delete ${entry.title}`} onClick={onDelete}
         className="absolute right-0 top-2 h-11 w-9 rounded-md opacity-0 hover:bg-[var(--bt-row-hover)] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60"
         style={{ color: "var(--bt-muted)" }}>

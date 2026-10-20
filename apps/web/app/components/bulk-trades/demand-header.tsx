@@ -55,8 +55,8 @@ export function DemandHeader({ demand, supply, actions, onBack }: {
             {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
           </div>
         </div>
+        <div className={`${css.status} ${css.actions}`}>{actions}</div>
       </div>
-      <div className={css.actions}>{actions}</div>
       <dl className={css.facts}>
         <div className={css.fact}>
           <dt>Supplier</dt>

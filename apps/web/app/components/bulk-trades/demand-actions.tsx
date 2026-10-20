@@ -348,12 +348,13 @@ export function DemandActions({
             {activity.length}
           </span>
         </h3>
-        {!logging && (
+        {!story && !logging && (
           <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setLogging(true)}>
             <Plus size={14} />
             Log activity
           </button>
         )}
+        {!story && (
         <form
           style={logging ? undefined : { display: "none" }}
           className={styles.composer}
@@ -477,6 +478,7 @@ export function DemandActions({
             Add activity
           </button>
         </form>
+        )}
         {!activity.length && (
           <p
             className="py-5 text-center text-xs"

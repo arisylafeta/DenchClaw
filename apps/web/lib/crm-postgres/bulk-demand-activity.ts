@@ -1,6 +1,6 @@
 import { queryPg } from "../postgres";
 
-export const ACTIVITY_KINDS = ["note", "research", "outreach", "call", "quote", "supply", "status"] as const;
+export const ACTIVITY_KINDS = ["note", "research", "outreach", "call", "quote", "supply", "status", "document", "mail", "whatsapp"] as const;
 export const ACTIVITY_REF_KINDS = ["lot", "supply", "stock", "email", "person", "company", "url"] as const;
 export type DemandActivity = {
   id: string;
