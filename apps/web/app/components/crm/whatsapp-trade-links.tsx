@@ -93,9 +93,10 @@ export function WhatsappTradeLinks({
   return (
     <details
       onToggle={(event) => setOpen(event.currentTarget.open)}
-      className="my-3 border p-3 text-sm"
+      className={messageId ? "mt-1 text-[12px] opacity-0 transition-opacity open:opacity-100 focus-within:opacity-100 group-hover:opacity-100" : "my-2 rounded-lg border px-3 py-2 text-[12px]"}
+      style={{ color: "var(--color-text-muted)" }}
     >
-      <summary>{messageId ? "Message trade links" : "Explicit trade links"}</summary>
+      <summary className="cursor-pointer select-none list-none">{messageId ? "Link to trade" : "Explicit trade links"}</summary>
       <p className="my-2">
         Link only relevant evidence. Group membership alone is not a trade relationship.
       </p>

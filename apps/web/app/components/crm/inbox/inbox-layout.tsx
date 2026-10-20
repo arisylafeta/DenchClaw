@@ -7,6 +7,8 @@ const MIN_WIDTH = 320;
 const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 420;
 const COLLAPSE_BREAKPOINT = 900;
+/** WhatsApp and Campaigns: list and open item share the pane down to a narrow width, like mail threads. */
+export const PANEL_LAYOUT = { collapseBelow: 560, defaultWidth: 380, minWidth: 280, storageKey: "denchclaw.crm-inbox.panel-width" } as const;
 
 /**
  * Responsive shell for the inbox.
@@ -24,12 +26,21 @@ export function InboxLayout({
   list,
   conversation,
   hasSelection,
+  collapseBelow = COLLAPSE_BREAKPOINT,
+  defaultWidth = DEFAULT_WIDTH,
+  minWidth = MIN_WIDTH,
+  storageKey = STORAGE_KEY,
 }: {
   list: ReactNode;
   conversation: ReactNode;
   hasSelection: boolean;
+  /** Container width under which the list and the open item stop sharing the screen. */
+  collapseBelow?: number;
+  defaultWidth?: number;
+  minWidth?: number;
+  storageKey?: string;
 }) {
-  const [width, setWidth] = useState<number>(DEFAULT_WIDTH);
+  const [width, setWidth] = useState<number>(defaultWidth);
   const [isNarrow, setIsNarrow] = useState<boolean>(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -38,11 +49,11 @@ export function InboxLayout({
   useEffect(() => {
     if (typeof window === "undefined") {return;}
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw = window.localStorage.getItem(storageKey);
       if (raw) {
         const parsed = parseInt(raw, 10);
         if (Number.isFinite(parsed)) {
-          setWidth(clamp(parsed, MIN_WIDTH, MAX_WIDTH));
+          setWidth(clamp(parsed, minWidth, MAX_WIDTH));
         }
       }
     } catch {
@@ -56,7 +67,7 @@ export function InboxLayout({
   useEffect(() => {
     if (typeof ResizeObserver === "undefined" || !containerRef.current) {return;}
     const observer = new ResizeObserver(([entry]) => {
-      setIsNarrow(entry.contentRect.width < COLLAPSE_BREAKPOINT);
+      setIsNarrow(entry.contentRect.width < collapseBelow);
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
@@ -71,13 +82,13 @@ export function InboxLayout({
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current) {return;}
       const delta = e.clientX - dragRef.current.startX;
-      const next = clamp(dragRef.current.startWidth + delta, MIN_WIDTH, MAX_WIDTH);
+      const next = clamp(dragRef.current.startWidth + delta, minWidth, MAX_WIDTH);
       setWidth(next);
     };
     const onUp = () => {
       if (dragRef.current) {
         try {
-          window.localStorage.setItem(STORAGE_KEY, String(width));
+          window.localStorage.setItem(storageKey, String(width));
         } catch {
           /* ignore */
         }
@@ -108,7 +119,7 @@ export function InboxLayout({
         className="flex h-full min-h-0 flex-col"
         style={{
           width,
-          minWidth: MIN_WIDTH,
+          minWidth,
           background: "var(--color-bg)",
           borderRight: "1px solid var(--color-border)",
         }}

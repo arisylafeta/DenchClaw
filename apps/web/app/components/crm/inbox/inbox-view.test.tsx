@@ -10,7 +10,7 @@ import CampaignPage from "../../../campaigns/[id]/page";
 
 const navigation = vi.hoisted(() => ({ replace: vi.fn(), redirect: vi.fn(), params: new URLSearchParams() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: navigation.replace }), useSearchParams: () => navigation.params, redirect: navigation.redirect }));
-vi.mock("./inbox-layout", () => ({ InboxLayout: ({ list, conversation }: { list: React.ReactNode; conversation: React.ReactNode }) => <div>{list}{conversation}</div> }));
+vi.mock("./inbox-layout", () => ({ PANEL_LAYOUT: {}, InboxLayout: ({ list, conversation }: { list: React.ReactNode; conversation: React.ReactNode }) => <div>{list}{conversation}</div> }));
 vi.mock("./conversation-pane", () => ({ ConversationPane: () => <div>Conversation pane</div> }));
 const at = "2026-10-16T10:00:00Z";
 const message = (overrides: Partial<MailMessageRow>): MailMessageRow => ({
@@ -141,17 +141,19 @@ describe("merged mail", () => {
     });
     render(<InboxView />);
     fireEvent.click(screen.getByRole("tab", { name: "WhatsApp" }));
-    const chat = await screen.findByRole("button", { name: /Mathieu/ });
+    const chat = await screen.findByRole("button", { name: "Open chat: Mathieu" });
     fireEvent.click(chat);
     expect(await screen.findByRole("heading", { name: "Mathieu" })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith("/api/whatsapp/threads/t1?limit=50&tail=1", expect.anything());
-    expect(screen.getByText("Read only. This is captured history, nothing can be sent from here.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Mathieu/ })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByText(/Captured history · Read only/)).toBeInTheDocument();
+    // The chat opens beside the list, which keeps the chosen row highlighted.
+    expect(screen.getByRole("button", { name: "Open chat: Mathieu" })).toHaveAttribute("aria-current", "true");
     fireEvent.click(screen.getByRole("tab", { name: "Campaigns" }));
     expect(await screen.findByText("Pick a campaign")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "Battery offer" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/mail/campaigns/c1", expect.anything()));
     expect(await screen.findByText(/detail unavailable in this test/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Battery offer" })).toBeInTheDocument();
     expect(screen.queryByText("Pick a campaign")).not.toBeInTheDocument();
   });
   it("adapts the toolbar to each section: mail filters only on Mail, one search on Campaigns and WhatsApp", async () => {

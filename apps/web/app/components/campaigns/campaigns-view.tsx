@@ -8,7 +8,7 @@ import { buildEntryLink, buildFileLink } from "@/lib/workspace-links";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import { Loading } from "../ui/shimmer";
-import { InboxLayout } from "../crm/inbox/inbox-layout";
+import { InboxLayout, PANEL_LAYOUT } from "../crm/inbox/inbox-layout";
 import { CampaignPage } from "./campaign-page";
 import { CampaignDate, MetricRow, PAGE_SIZE, Pagination, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
@@ -124,7 +124,7 @@ export function CampaignsPanel({ campaignId, onOpenCampaign, onBack, onNavigateP
     return () => controller.abort();
   }, [campaignId, attempt]);
   const retry = <button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button>;
-  return <InboxLayout hasSelection={campaignId != null}
+  return <InboxLayout {...PANEL_LAYOUT} hasSelection={campaignId != null}
     list={<div className="bulk-trades h-full min-h-0 overflow-y-auto pt-3" style={{ background: "var(--color-bg)" }}>
       {list.error ? <div className="flex flex-col items-start gap-3 px-4"><ErrorText error={list.error} />{retry}</div>
         : list.campaigns ? <CampaignsList compact campaigns={list.campaigns} selectedId={campaignId} onOpenCampaign={onOpenCampaign} search={search} status={status} />

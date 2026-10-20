@@ -10,9 +10,9 @@ import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date"
  * avatar + sender | subject — snippet | tag, copy id (hover), time. The tag sits outside the clipped text
  * so a popover opened from it floats above the rows below.
  */
-export function MailLine({ id, prefix, name, nameTitle, email, subject, snippet, at, tag, onOpen, label }: {
+export function MailLine({ id, prefix, name, nameTitle, email, subject, snippet, at, tag, onOpen, label, selected }: {
   id: string; prefix?: string; name: string | null; nameTitle?: string; email: string | null; subject: string; snippet?: string | null; at: string | null;
-  tag?: ReactNode; onOpen?: () => void; label?: string;
+  tag?: ReactNode; onOpen?: () => void; label?: string; selected?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const copy = (event: MouseEvent) => {
@@ -20,9 +20,9 @@ export function MailLine({ id, prefix, name, nameTitle, email, subject, snippet,
     void navigator.clipboard?.writeText(id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
   };
   const Root = onOpen ? "button" : "div";
-  return <Root {...(onOpen ? { type: "button" as const, onClick: onOpen, "aria-label": label } : {})} data-mail-row={id}
+  return <Root {...(onOpen ? { type: "button" as const, onClick: onOpen, "aria-label": label, "aria-current": selected ? "true" : undefined } : {})} data-mail-row={id}
     className="group relative grid w-full items-center gap-x-4 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-    style={{ gridTemplateColumns: "minmax(110px, 190px) minmax(0, 1fr) auto", borderBottom: "1px solid var(--color-border)" }}>
+    style={{ gridTemplateColumns: "minmax(96px, 170px) minmax(0, 1fr) auto", borderBottom: "1px solid var(--color-border)", background: selected ? "color-mix(in srgb, var(--color-accent-fill) 14%, transparent)" : undefined, boxShadow: selected ? "inset 3px 0 0 var(--color-accent)" : undefined }}>
     <span data-mail-line="sender" className="inline-flex min-w-0 items-center gap-2 border-r pr-4" style={{ borderColor: "var(--color-border)" }}>
       <SenderAvatar name={name} email={email} seed={email ?? id} size="sm" className="!h-5 !w-5 !text-[9px] shrink-0" />
       <span className="truncate text-[13px]" style={{ color: "var(--color-text)" }} title={nameTitle ?? email ?? name ?? undefined}>

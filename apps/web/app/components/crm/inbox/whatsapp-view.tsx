@@ -1,18 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { User, Users } from "lucide-react";
 import type { WhatsappInboxRow } from "@/lib/crm-postgres/whatsapp";
 import { whatsappChatLabel } from "@/lib/whatsapp-display";
-import { formatRelativeDate } from "../format-relative-date";
 import { WhatsappConversation } from "../whatsapp-chat";
-import { InboxLayout } from "./inbox-layout";
-import styles from "../whatsapp.module.css";
 import { Loading } from "../../ui/shimmer";
+import { InboxLayout, PANEL_LAYOUT } from "./inbox-layout";
+import { MailLine } from "./mail-line";
+import styles from "./mail.module.css";
 
 const pageSize = 50;
-
-/** Captured WhatsApp chats as a panel: WhatsApp-style chat list on the left, the open chat on the right. */
+/** Captured WhatsApp chats as a panel: single-line chat rows on the left, the open chat on the right. */
 export function WhatsappView({ query, selectedId, onSelect }: { query?: string; selectedId?: string; onSelect?: (id: string) => void }) {
   const [rows, setRows] = useState<WhatsappInboxRow[]>([]);
   const [offset, setOffset] = useState(0);
@@ -38,28 +36,21 @@ export function WhatsappView({ query, selectedId, onSelect }: { query?: string; 
     return () => controller.abort();
   }, [offset]);
   const shown = needle ? rows.filter((row) => `${whatsappChatLabel(row).text} ${row.last_body ?? ""}`.toLowerCase().includes(needle)) : rows;
-  const list = <div className={`${styles.wa} ${styles.list}`}>
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      {state === "loading" && !rows.length && <Loading label="Loading WhatsApp chats…" />}
-      {state === "error" && <p role="alert" className={styles.listSearchEmpty} style={{ color: "#b3261e" }}>Could not load WhatsApp chats.</p>}
-      {state === "ready" && !shown.length && <p className={styles.listSearchEmpty}>No captured WhatsApp chats{needle ? " match your search" : ""}.</p>}
-      <ul aria-label="WhatsApp chats">{shown.map((row) => {
-        const label = whatsappChatLabel(row);
-        const preview = row.last_body?.trim().split("\n")[0] || "(no text)";
-        return <li key={row.id}>
-          <button type="button" className={styles.item} aria-current={selected === row.id ? "true" : undefined} data-chat-id={row.id} onClick={() => select(row.id)}>
-            <span aria-hidden className={styles.avatar} style={{ width: 49, height: 49 }}>{row.kind === "group" ? <Users size={26} /> : <User size={26} />}</span>
-            <span className={styles.itemBody}>
-              <span className={styles.itemName} title={label.hint}>{label.text}{label.inferred && <span className="ml-1 text-[12px]" style={{ color: "var(--wa-muted)" }}>~</span>}</span>
-              <span className={styles.itemPreview}>{row.last_direction === "outbound" ? "You: " : ""}{preview}</span>
-            </span>
-            <span className={`${styles.itemBody} ${styles.itemTime}`}>{formatRelativeDate(row.last_at ?? row.last_captured_at)}</span>
-          </button>
-        </li>;
-      })}</ul>
-      {hasMore && <button type="button" className={styles.pager} disabled={state === "loading"} onClick={() => setOffset((current) => current + pageSize)}>Load more chats</button>}
-    </div>
+  const list = <div className="h-full min-h-0 overflow-y-auto text-[13px]" style={{ background: "var(--color-bg)" }}>
+    {state === "loading" && !rows.length && <Loading label="Loading WhatsApp chats…" />}
+    {state === "error" && <p role="alert" className="px-6 py-6" style={{ color: "var(--color-error)" }}>Could not load WhatsApp chats.</p>}
+    {state === "ready" && !shown.length && <p className="px-6 py-8" style={{ color: "var(--color-text-muted)" }}>No captured WhatsApp chats{needle ? " match your search" : ""}.</p>}
+    <ul aria-label="WhatsApp chats">{shown.map((row) => {
+      const label = whatsappChatLabel(row);
+      return <li key={row.id}>
+        <MailLine id={row.id} prefix={row.last_direction === "outbound" ? "You:" : undefined} name={label.inferred ? `${label.text} ~` : label.text} nameTitle={label.hint} email={null}
+          subject={row.last_body?.trim().split("\n")[0] || "(no text)"} snippet={null} at={row.last_at ?? row.last_captured_at} selected={selected === row.id}
+          label={`Open chat: ${label.text}`} onOpen={() => select(row.id)}
+          tag={<span className={styles.chip} title={row.kind === "group" ? "Group chat: shared context, not proof every message concerns one contact" : "One-to-one chat"}>{row.kind === "group" ? "Group" : "1:1"} · {row.message_count}</span>} />
+      </li>;
+    })}</ul>
+    {hasMore && <button type="button" className={`${styles.control} m-4`} disabled={state === "loading"} onClick={() => setOffset((current) => current + pageSize)}>Load more</button>}
   </div>;
-  return <InboxLayout hasSelection={Boolean(selected)} list={list}
-    conversation={selected ? <WhatsappConversation key={selected} id={selected} embedded onClose={() => select(null)} /> : <div className={`${styles.wa} ${styles.empty}`}><span className="text-[28px] font-light" style={{ color: "var(--wa-text)" }}>WhatsApp history</span><span className="max-w-sm text-[14px]">Pick a chat to read its captured history. Read only, nothing can be sent from here.</span></div>} />;
+  return <InboxLayout {...PANEL_LAYOUT} hasSelection={Boolean(selected)} list={list}
+    conversation={selected ? <WhatsappConversation key={selected} id={selected} embedded onClose={() => select(null)} /> : <div className="flex h-full flex-col items-center justify-center gap-1.5 px-8 text-center" style={{ background: "var(--color-main-bg)" }}><span className="text-lg font-medium">Pick a chat</span><span className="max-w-xs text-[13px]" style={{ color: "var(--color-text-muted)" }}>Open a chat to read its captured history here. Read only.</span></div>} />;
 }
