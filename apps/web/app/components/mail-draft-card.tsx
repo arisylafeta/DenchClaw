@@ -13,8 +13,11 @@ const autoOpened = new Set<string>();
 
 const TONE = { ok: "var(--color-success)", muted: "var(--color-text-muted)", warn: "var(--color-warning)" } as const;
 
-function excerpt(text: string | null): string {
-  return (text ?? "").replace(/\s+/g, " ").trim().slice(0, 320);
+/** The opening of the message: skips the greeting and stops before the signature and footer paragraphs. */
+export function excerpt(text: string | null): string {
+  const paragraphs = (text ?? "").split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const body = paragraphs.filter((p, i) => !(i === 0 && /^(hi|hello|dear|hey)\b[^.!?]{0,60},?$/i.test(p)));
+  return body.slice(0, 2).join(" ").slice(0, 320);
 }
 
 /**
@@ -48,18 +51,10 @@ export function MailDraftCard({ artifact, autoOpen, onOpen }: { artifact: Extrac
       className="not-prose my-3 w-full max-w-[560px] overflow-hidden rounded-[5px] border p-3.5 sm:p-4"
       style={{ borderColor: "var(--color-border-strong)", background: "var(--color-surface)", color: "var(--color-text)", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}
     >
-      <div className="flex items-center gap-2.5">
-        <Mail className="size-4 shrink-0" strokeWidth={1.75} aria-hidden style={{ color: "var(--color-text-muted)" }} />
-        <span className="font-mono text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--color-text-secondary)" }}>Email draft</span>
-        {approval && (
-          <span className="ml-auto inline-flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px]" style={{ background: "var(--color-main-bg)", color: TONE[approval.tone] }}>
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: TONE[approval.tone] }} />
-            <span className="truncate">{approval.text}</span>
-          </span>
-        )}
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="min-w-0 text-[15px] font-semibold leading-snug tracking-tight [overflow-wrap:anywhere]">{title}</h3>
+        <Mail className="mt-0.5 size-4 shrink-0" strokeWidth={1.75} aria-hidden style={{ color: "var(--color-text-muted)" }} />
       </div>
-
-      <h3 className="mt-3 text-[15px] font-semibold leading-snug tracking-tight [overflow-wrap:anywhere]">{title}</h3>
       {load.status === "error"
         ? <p className="mt-1 text-xs" style={{ color: "var(--color-error)" }}>{load.message}</p>
         : <p className="mt-1 break-words text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -69,7 +64,10 @@ export function MailDraftCard({ artifact, autoOpen, onOpen }: { artifact: Extrac
       {snippet && <p className="mt-3 line-clamp-3 border-t pt-3 text-[13px] leading-relaxed [text-wrap:pretty]" style={{ ...divider, color: "var(--color-text-secondary)" }}>{snippet}</p>}
 
       <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3" style={divider}>
-        <span className="font-mono text-[11px] tracking-[0.06em]" style={{ color: "var(--color-text-muted)" }}>Not sent</span>
+        <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-[11px] tracking-[0.06em]" style={{ color: approval && approval.tone !== "muted" ? TONE[approval.tone] : "var(--color-text-muted)" }}>
+          {approval && approval.tone !== "muted" && <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: TONE[approval.tone] }} />}
+          <span className="truncate">{approval && approval.tone !== "muted" ? `${approval.text} · not sent` : "Not sent"}</span>
+        </span>
         <button type="button" onClick={open} disabled={!onOpen || load.status === "error"} aria-label={`Open email draft: ${title}`}
           className="group inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors hover:bg-[var(--color-accent-fill-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] disabled:opacity-40"
           style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
