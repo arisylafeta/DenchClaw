@@ -117,13 +117,17 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   const loadSupply = useCallback(async () => {
     const sequence = ++supplySequence.current;
     setSupplyLoading(true);
+    // Inventory matching can be slow; never shimmer for ever: give up after 12s and show what the demand itself says.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 12_000);
     try {
-      const result = await request<DemandSupply>(`${endpoint}/supply`);
+      const result = await request<DemandSupply>(`${endpoint}/supply`, { signal: abort.signal });
       if (!Array.isArray(result?.groups)) throw new Error("Could not check inventory.");
       if (sequence === supplySequence.current) setSupply(result);
     } catch {
       if (sequence === supplySequence.current) setSupply(null);
     } finally {
+      clearTimeout(timer);
       if (sequence === supplySequence.current) setSupplyLoading(false);
     }
   }, [endpoint]);
@@ -131,7 +135,9 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   useEffect(() => {
     let cancelled = false;
     setContext(null);
-    void request<BuyerContext>(`${endpoint}/context`).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 12_000);
+    void request<BuyerContext>(`${endpoint}/context`, { signal: abort.signal }).finally(() => clearTimeout(timer)).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
     return () => { cancelled = true; };
   }, [endpoint]);
   const top = useRef<HTMLDivElement>(null);

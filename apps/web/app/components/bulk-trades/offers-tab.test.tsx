@@ -57,11 +57,11 @@ describe("Offers tab", () => {
     render(<OffersTab demandId="d1" supply={null} onChanged={() => {}} />);
     await userEvent.click(await screen.findByText("Attero Recycling"));
     expect(screen.getByRole("status")).toHaveTextContent("Loading thread");
-    expect(screen.getByRole("button", { name: "Back to offers" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Attero Recycling/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("combobox", { name: "Stage" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Next step" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Add to thread" })).toBeDisabled();
-    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
     expect(screen.queryByText("Re: packs")).not.toBeInTheDocument();
     await act(async () => resolve(new Response(JSON.stringify({ offer, thread }))));
     expect(await screen.findByText("Re: packs")).toBeInTheDocument();
@@ -78,7 +78,16 @@ describe("Offers tab", () => {
     await userEvent.click(screen.getByText("Attero Recycling"));
     expect(await screen.findByText("Re: packs")).toBeInTheDocument();
     expect(screen.getByText("Called, wants specs")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Stage" }), "loi");
+    // Threads and messages are accordions: the row stays, a message opens to its full text.
+    expect(screen.getByRole("button", { name: /Attero Recycling/ })).toHaveAttribute("aria-expanded", "true");
+    const message = screen.getByRole("button", { name: /Re: packs/ });
+    expect(message).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(message);
+    expect(message).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(screen.getByRole("button", { name: /Attero Recycling/ }));
+    expect(screen.queryByText("Called, wants specs")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Attero Recycling/ }));
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Stage" }), "loi");
     expect(calls.some((c) => c.method === "PATCH" && c.body === JSON.stringify({ stage: "loi" }))).toBe(true);
   });
 });

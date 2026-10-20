@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Calendar, Mail, MessageCircle, Phone, Plus, Send, StickyNote, Tag, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { Calendar, ChevronDown, ChevronRight, Mail, MessageCircle, Phone, Plus, Send, StickyNote, Tag, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Offer, OfferStage, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import type { DemandSupply } from "@/lib/demand-supply-types";
@@ -50,22 +50,19 @@ function Avatar({ name, size = 32, loading = false }: { name: string | null; siz
 export function OffersTab({ demandId, supply, supplyLoading = false, onChanged }: { demandId: string; supply: DemandSupply | null; supplyLoading?: boolean; onChanged: () => void }) {
   const base = `/api/bulk-trades/demand/${encodeURIComponent(demandId)}/offers`;
   const [offers, setOffers] = useState<Offer[] | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try { setOffers((await request<{ offers: Offer[] }>(base)).offers); setError(null); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not load offers."); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
-  if (open) {
-    return <Thread base={base} offerId={open} onBack={() => { setOpen(null); void load(); onChanged(); }} />;
-  }
-  return <OfferList offers={offers} error={error} supply={supply} supplyLoading={supplyLoading} base={base} onOpen={setOpen} onCreated={(o) => { void load(); onChanged(); setOpen(o.id); }} />;
+  return <OfferList offers={offers} error={error} supply={supply} supplyLoading={supplyLoading} base={base} onUpdated={() => { void load(); onChanged(); }} />;
 }
 
-function OfferList({ offers, error, supply, supplyLoading, base, onOpen, onCreated }: {
-  offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onOpen: (id: string) => void; onCreated: (o: Offer) => void;
+function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
+  offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onUpdated: () => void;
 }) {
+  const [openId, setOpenId] = useState<string | null>(null);
   const loading = offers === null && !error;
   const suggestionsLoading = supply === null && supplyLoading;
   const [adding, setAdding] = useState(false);
@@ -87,7 +84,7 @@ function OfferList({ offers, error, supply, supplyLoading, base, onOpen, onCreat
   }, [offers, supply]);
   async function create(input: { name: string; contact?: string; wants?: string }) {
     setBusy(true); setFormError(null);
-    try { onCreated((await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer); setName(""); setContact(""); setAdding(false); }
+    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer; onUpdated(); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
     catch (err) { setFormError(err instanceof Error ? err.message : "Could not add."); }
     finally { setBusy(false); }
   }
@@ -115,7 +112,8 @@ function OfferList({ offers, error, supply, supplyLoading, base, onOpen, onCreat
             const terms = termsLine(o);
             return (
               <li key={o.id} className="border-t first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <button type="button" disabled={loading} onClick={() => onOpen(o.id)} className={`${rowFocus} flex w-full items-center gap-3 px-1 py-3 text-left`}>
+                <button type="button" disabled={loading} aria-expanded={loading ? undefined : openId === o.id} onClick={() => setOpenId(openId === o.id ? null : o.id)} className={`${rowFocus} flex w-full items-center gap-3 px-1 py-3 text-left`}>
+                  <span className="shrink-0" style={{ color: "var(--bt-muted)" }} aria-hidden>{openId === o.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
                   <Avatar name={o.name} loading={loading} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
@@ -128,6 +126,7 @@ function OfferList({ offers, error, supply, supplyLoading, base, onOpen, onCreat
                   </span>
                   {o.messages > 0 && <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages}</Sh></span>}
                 </button>
+                {!loading && openId === o.id && <ThreadPanel base={base} offerId={o.id} onUpdated={onUpdated} />}
               </li>
             );
           })}
@@ -154,7 +153,8 @@ function OfferList({ offers, error, supply, supplyLoading, base, onOpen, onCreat
   );
 }
 
-function Thread({ base, offerId, onBack }: { base: string; offerId: string; onBack: () => void }) {
+/** The open thread inside its offer row: stage, terms, next step, a composer and the messages, each an accordion item. */
+function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: string; onUpdated: () => void }) {
   const url = `${base}/${encodeURIComponent(offerId)}`;
   const [offer, setOffer] = useState<Offer | null>(null);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
@@ -171,31 +171,22 @@ function Thread({ base, offerId, onBack }: { base: string; offerId: string; onBa
   useEffect(() => { let live = true; request<{ offer: Offer; thread: ThreadEntry[] }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
   async function patch(body: Record<string, unknown>) {
     setBusy(true); setError(null);
-    try { const r = await request<{ offer: Offer }>(url, { method: "PATCH", body: JSON.stringify(body) }); setOffer(r.offer); const t = await request<{ offer: Offer; thread: ThreadEntry[] }>(url); apply(t); }
+    try { const r = await request<{ offer: Offer }>(url, { method: "PATCH", body: JSON.stringify(body) }); setOffer(r.offer); const t = await request<{ offer: Offer; thread: ThreadEntry[] }>(url); apply(t); onUpdated(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
   }
   async function post() {
     if (!text.trim()) return;
     setBusy(true); setError(null);
-    try { const line = text.trim(); apply(await request(url, { method: "POST", body: JSON.stringify({ kind, title: line.split("\n")[0].slice(0, 120), body: line.includes("\n") || line.length > 120 ? line : null }) })); setText(""); }
+    try { const line = text.trim(); apply(await request(url, { method: "POST", body: JSON.stringify({ kind, title: line.split("\n")[0].slice(0, 120), body: line.includes("\n") || line.length > 120 ? line : null }) })); setText(""); onUpdated(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
   }
   const loading = offer === null && !error;
   const current = offer ?? PLACEHOLDER_OFFER;
   const terms = termsLine(current);
   return (
-    <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-5">
+    <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-9 pr-1">
       <div className="flex items-center gap-3">
-        <button type="button" onClick={onBack} aria-label="Back to offers" className={`${rowFocus} inline-flex items-center gap-1 text-[13px]`} style={{ color: "var(--bt-muted)" }}>
-          <ArrowLeft size={14} aria-hidden /> Offers
-        </button>
-      </div>
-      <div className="flex items-center gap-3">
-        <Avatar name={current.name} size={40} loading={loading} />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[16px] font-semibold"><Sh on={loading} chars={20}>{current.name}</Sh></h3>
-          <p className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ")}</Sh></p>
-        </div>
+        <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
         <select aria-label="Stage" value={current.stage ?? "to_contact"} disabled={busy || !offer} onChange={(e) => void patch({ stage: e.target.value })}
           className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -224,25 +215,40 @@ function Thread({ base, offerId, onBack }: { base: string; offerId: string; onBa
       <section aria-label="Thread">
         {offer && thread.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Nothing yet. Email and WhatsApp with this person appear here once they are linked to a CRM person or email.</p>}
         <ul>
-          {(loading ? PLACEHOLDER_THREAD : thread).map((e) => {
-            const Icon = CHANNEL_ICON[e.channel];
-            const Dir = e.direction === "inbound" ? ArrowDownLeft : e.direction === "outbound" ? ArrowUpRight : null;
-            return (
-              <li key={e.id} className="flex gap-3 border-t py-3 first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--bt-segment)", color: "var(--bt-muted)" }}><Icon size={13} aria-hidden /></span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-semibold"><Sh on={loading} chars={24}>{e.title}</Sh></span>
-                    {Dir && <Dir size={12} aria-label={e.direction ?? ""} style={{ color: "var(--bt-muted)" }} />}
-                    <time className="ml-auto shrink-0 text-[11px] font-bold" style={{ color: "var(--bt-text-2)" }} dateTime={e.at}><Sh on={loading} chars={7}>{dateOf(e.at)}</Sh></time>
-                  </div>
-                  {e.body && <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={36}>{e.body}</Sh></p>}
-                </div>
-              </li>
-            );
-          })}
+          {(loading ? PLACEHOLDER_THREAD : thread).map((e) => <MessageItem key={e.id} entry={e} loading={loading} />)}
         </ul>
       </section>
     </BusyRegion>
+  );
+}
+
+/** One message in a thread. Collapsed it is a line (channel, title, date); open it shows the whole message. */
+function MessageItem({ entry: e, loading }: { entry: ThreadEntry; loading: boolean }) {
+  const [open, setOpen] = useState(false);
+  const Icon = CHANNEL_ICON[e.channel];
+  const Dir = e.direction === "inbound" ? ArrowDownLeft : e.direction === "outbound" ? ArrowUpRight : null;
+  const expandable = !loading && !!e.body;
+  const head = (
+    <>
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--bt-segment)", color: "var(--bt-muted)" }}><Icon size={13} aria-hidden /></span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-[13px] font-semibold"><Sh on={loading} chars={24}>{e.title}</Sh></span>
+          {Dir && <Dir size={12} aria-label={e.direction ?? ""} style={{ color: "var(--bt-muted)" }} />}
+          <time className="ml-auto shrink-0 text-[11px] font-bold" style={{ color: "var(--bt-text-2)" }} dateTime={e.at}><Sh on={loading} chars={7}>{dateOf(e.at)}</Sh></time>
+          {expandable && <span className="shrink-0" style={{ color: "var(--bt-muted)" }} aria-hidden>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>}
+        </span>
+        {e.body && (
+          <span className={`mt-0.5 block whitespace-pre-wrap text-[12px] ${open ? "" : "line-clamp-1"}`} style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={36}>{e.body}</Sh></span>
+        )}
+      </span>
+    </>
+  );
+  return (
+    <li className="border-t first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
+      {expandable
+        ? <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={`${rowFocus} flex w-full gap-3 py-3 text-left`}>{head}</button>
+        : <div className="flex gap-3 py-3">{head}</div>}
+    </li>
   );
 }
