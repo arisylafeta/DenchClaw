@@ -13,6 +13,8 @@ import { AttachmentChips } from "./attachment-chips";
 import { parseUserAttachments } from "./attachments";
 import { hasArtifactBlocks, splitArtifactBlocks } from "@/lib/mail-artifacts";
 import { MailDraftCard } from "../mail-draft-card";
+import { splitVisualBlocks } from "@/lib/visual-blocks";
+import { VisualBlock } from "./visual-block";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
   const [content, setContent] = useState<ReactNode>(text);
@@ -31,14 +33,16 @@ function UserContent({ html, text }: { html?: string; text: string }) {
   }, [html, text]);
   return <div className="whitespace-pre-wrap break-words">{content}</div>;
 }
-function AnswerText({ text, live, renderMarkdown, onOpenArtifact }: { text: string; live: boolean; renderMarkdown?: (text: string) => ReactNode; onOpenArtifact?: NativeTranscriptProps["onOpenArtifact"] }) {
+function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }: { text: string; live: boolean; renderMarkdown?: (text: string) => ReactNode; onOpenArtifact?: NativeTranscriptProps["onOpenArtifact"]; onSendPrompt?: NativeTranscriptProps["onSendPrompt"] }) {
   const markdown = (value: string) => renderMarkdown ? renderMarkdown(value) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>;
-  if (!hasArtifactBlocks(text)) {return <>{markdown(text)}</>;}
-  return <>{splitArtifactBlocks(text).map((piece, index) => piece.type === "artifact"
-    ? <MailDraftCard key={`artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />
-    : <Fragment key={`text-${index}`}>{markdown(piece.text)}</Fragment>)}</>;
+  const withArtifacts = (value: string, keyPrefix: string) => !hasArtifactBlocks(value) ? markdown(value) : <>{splitArtifactBlocks(value).map((piece, index) => piece.type === "artifact"
+    ? <MailDraftCard key={`${keyPrefix}-artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />
+    : <Fragment key={`${keyPrefix}-text-${index}`}>{markdown(piece.text)}</Fragment>)}</>;
+  return <>{splitVisualBlocks(text).map((piece, index) => piece.type === "visual"
+    ? <VisualBlock key={`visual-${index}`} code={piece.code} closed={piece.closed} onSendPrompt={onSendPrompt} />
+    : <Fragment key={`piece-${index}`}>{withArtifacts(piece.text, `p${index}`)}</Fragment>)}</>;
 }
-export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact }: NativeTranscriptProps) {
+export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact, onSendPrompt }: NativeTranscriptProps) {
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => {
@@ -59,7 +63,7 @@ export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, q
             const next = blocks[index + 1];
             return block.type === "work"
               ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && !message.steerBoundary && index === blocks.length - 1} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
-              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words"><AnswerText text={block.segment.text} live={state.live && message.pending} renderMarkdown={renderMarkdown} onOpenArtifact={onOpenArtifact} /></div>;
+              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words"><AnswerText text={block.segment.text} live={state.live && message.pending} renderMarkdown={renderMarkdown} onOpenArtifact={onOpenArtifact} onSendPrompt={onSendPrompt} /></div>;
           })}
         </Fragment>;
       })()}

@@ -3124,7 +3124,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									if (container) container.scrollTop = top + container.scrollHeight - height;
 								});
 							}}>{nativeChat.loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}</button>}
-							<NativeTranscript state={nativeChat.state} onOpenArtifact={onFilePathClick} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
+							<NativeTranscript state={nativeChat.state} onOpenArtifact={onFilePathClick} onSendPrompt={text => nativeChat.send({ text })} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
                                 onCancelNotice: () => { setDeferredSlash(null); setCommandStatus(null); },
 								onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 								onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,

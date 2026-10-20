@@ -21,6 +21,8 @@ export interface NativeTranscriptProps {
   userHtml?: (messageId: string) => string | undefined;
   queuedMessageIds?: readonly string[];
   /** Opens a workspace path (such as a mail draft artifact) in the content panel. */
+  /** Sends a follow-up the user confirmed from inside an agent-drawn visual. */
+  onSendPrompt?: (text: string) => void | Promise<void>;
   onOpenArtifact?: (path: string, options?: { title?: string }) => Promise<boolean | void> | boolean | void;
   subagentTails?: Readonly<Record<string, string>>;
 }

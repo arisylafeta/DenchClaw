@@ -369,3 +369,13 @@ describe("artifact blocks in native answers", () => {
   });
 });
 
+
+describe("agent-drawn visuals", () => {
+  it("renders ```visual fences as sandboxed drawings inside the transcript", async () => {
+    const state = events([["message.start", {}], ["message.delta", { text: "Here:\n```visual\n<svg viewBox=\"0 0 10 10\"></svg>\n```\nDone." }], ["message.complete", { text: "Here:\n```visual\n<svg viewBox=\"0 0 10 10\"></svg>\n```\nDone." }]]);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
+    await waitFor(() => expect(container.querySelector("[data-visual-block] iframe")).not.toBeNull());
+    expect(screen.getByText("Here:")).toBeInTheDocument();
+    expect(screen.getByText("Done.")).toBeInTheDocument();
+  });
+});
