@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Trash2, Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown } from "lucide-react";
+import { Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown } from "lucide-react";
 import type { DemandActivity } from "@/lib/crm-postgres/bulk-demand-activity";
 import { shortDate } from "@/lib/bulk-trade-details";
 
@@ -55,13 +55,11 @@ function evidenceLabel(entry: DemandActivity): string {
   return "Open source";
 }
 
-export function StoryEntry({ entry, busy, last, animate, delay, onDelete, onOpenTrade, onOpenSupply }: {
+export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSupply }: {
   entry: DemandActivity;
-  busy: boolean;
   last?: boolean;
   animate?: boolean;
   delay?: number;
-  onDelete: () => void;
   onOpenTrade: (id: string) => void;
   onOpenSupply?: (id: string) => void;
 }) {
@@ -97,11 +95,11 @@ export function StoryEntry({ entry, busy, last, animate, delay, onDelete, onOpen
       </div>
       <button type="button" disabled={!expandable} aria-expanded={open} onClick={() => expandable && setOpen((v) => !v)}
         className="min-w-0 flex-1 pb-1 text-left disabled:cursor-default">
-        <p className="pr-9 text-[14px] font-semibold leading-snug">
+        <p className="pr-6 text-[14px] font-semibold leading-snug">
           {entry.title}
           {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
         </p>
-        <div className="mt-0.5 flex items-baseline gap-2 pr-9">
+        <div className="mt-0.5 flex items-baseline gap-2 pr-6">
           <span className="text-[11.5px] font-medium" style={{ color: "var(--bt-muted)" }}>{label}</span>
           <span className="text-[11.5px]" style={{ color: "var(--bt-muted)" }}>{shortDescription(entry, label, state)}</span>
           <time className="ml-auto shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
@@ -123,22 +121,15 @@ export function StoryEntry({ entry, busy, last, animate, delay, onDelete, onOpen
         )}
       </button>
       {expandable && (
-        <ChevronDown size={14} aria-hidden className="absolute right-9 top-3.5 shrink-0 transition-transform" style={{ color: "var(--bt-muted)", transform: open ? "rotate(180deg)" : "none" }} />
+        <ChevronDown size={14} aria-hidden className="absolute right-0 top-3.5 shrink-0 transition-transform" style={{ color: "var(--bt-muted)", transform: open ? "rotate(180deg)" : "none" }} />
       )}
-      <button type="button" disabled={busy} aria-label={`Delete ${entry.title}`} onClick={onDelete}
-        className="absolute right-0 top-2 h-11 w-9 rounded-md opacity-0 hover:bg-[var(--bt-row-hover)] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60"
-        style={{ color: "var(--bt-muted)" }}>
-        <Trash2 size={13} className="mx-auto" />
-      </button>
     </li>
   );
 }
 
 /** The whole story, as a connected, animated timeline that draws itself in every time it opens. */
-export function Story({ activity, busy, onDelete, onOpenTrade, onOpenSupply }: {
+export function Story({ activity, onOpenTrade, onOpenSupply }: {
   activity: DemandActivity[];
-  busy: boolean;
-  onDelete: (id: string) => void;
   onOpenTrade: (id: string) => void;
   onOpenSupply?: (id: string) => void;
 }) {
@@ -150,9 +141,9 @@ export function Story({ activity, busy, onDelete, onOpenTrade, onOpenSupply }: {
   return (
     <ol className="flex flex-col">
       {activity.map((entry, index) => (
-        <StoryEntry key={entry.id} entry={entry} busy={busy} last={index === activity.length - 1}
+        <StoryEntry key={entry.id} entry={entry} last={index === activity.length - 1}
           animate={animate} delay={Math.min(index * 50, 400)}
-          onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} onDelete={() => onDelete(entry.id)} />
+          onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
       ))}
     </ol>
   );

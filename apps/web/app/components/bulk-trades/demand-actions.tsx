@@ -488,8 +488,7 @@ export function DemandActions({
           </p>
         )}
         {story ? (
-          <Story activity={activity} busy={busy} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply}
-            onDelete={(id) => run(() => request(`${endpoint}/activity/${id}`, { method: "DELETE" }))} />
+          <Story activity={activity} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
         ) : (
         <ol className={styles.timeline}>
           {activity.map((entry) => {
