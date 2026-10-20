@@ -519,6 +519,7 @@ export const TEST_REGISTRY: Registry = {
       "max": 100
     }
   },
+  "documentTypes": ["Photos", "Stock list", "Test report", "Datasheet", "Transport documents", "RFQ", "RFS", "Proposal", "Quote", "NDA", "Contract", "Order", "Deck", "Other"],
   "volumeUnits": [
     "packs",
     "modules",

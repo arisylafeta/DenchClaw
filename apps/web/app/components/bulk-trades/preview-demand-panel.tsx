@@ -18,6 +18,7 @@ import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
 import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
+import { DocumentsTab } from "./documents-tab";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
@@ -89,7 +90,7 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
   );
 }
 
-const TABS = ["Story", "Details", "Supply matching"];
+const TABS = ["Story", "Details", "Documents", "Supply matching"];
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
   demand: Demand;
@@ -169,6 +170,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           <TheAsk demand={demand} supply={supply} />
         </div>
       )}
+      {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
       {tab === "Supply matching" && (
         <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy} leads={leads} />
       )}

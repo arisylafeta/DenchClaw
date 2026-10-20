@@ -389,22 +389,26 @@ describe("TradePage overview", () => {
     expect(screen.getByText("Tess Buyer · tess@example.test")).toBeInTheDocument();
   });
 
-  it("opens PDFs and photos in a new tab and shows photos as thumbnails", async () => {
-    const files = [
-      { id: "f1", file_name: "pack.jpg", file_type: "Photos", byte_size: 1, source_label: null, source_date: null, visibility: "never", created_at: "" },
-      { id: "f2", file_name: "Datasheet.pdf", file_type: "Datasheet", byte_size: 1, source_label: null, source_date: null, visibility: "teaser", created_at: "" },
-      { id: "f3", file_name: "stock.xlsx", file_type: "Stock list", byte_size: 1, source_label: null, source_date: null, visibility: "never", created_at: "" },
+  it("lists documents on their own tab: photos as thumbnails, PDFs open in a tab, required types shown as needed", async () => {
+    const doc = (over: object) => ({ title: "x", doc_type: "Other", state: "received", direction: "received", has_file: true, file_name: "x", content_type: null,
+      byte_size: 1, url: null, note: null, source_label: null, source_date: null, visibility: "never", created_at: "2026-10-01T00:00:00Z", ...over });
+    const documents = [
+      doc({ id: "f1", title: "Pack photo", doc_type: "Photos", file_name: "pack.jpg" }),
+      doc({ id: "f2", title: "Datasheet", doc_type: "Datasheet", file_name: "Datasheet.pdf" }),
     ];
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ...DETAIL, files }))));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/documents") ? { documents } : { ...DETAIL, files: [] }))));
     renderPage();
-    await userEvent.click(await screen.findByRole("tab", { name: "Details" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "Documents" }));
 
-    const card = await screen.findByRole("region", { name: "Files" });
-    const pdf = within(card).getByRole("link", { name: /Datasheet.pdf/ });
-    expect(pdf).toHaveAttribute("href", "/api/bulk-trades/bt_1/files/f2?view=1");
+    const pdf = await screen.findByRole("link", { name: "Datasheet" });
+    expect(pdf).toHaveAttribute("href", "/api/bulk-listings/bt_1/documents/f2/file?view=1");
     expect(pdf).toHaveAttribute("target", "_blank");
-    expect(within(card).getByRole("link", { name: /stock.xlsx/ })).toHaveAttribute("href", "/api/bulk-trades/bt_1/files/f3");
-    expect(card.querySelector("img")).toHaveAttribute("src", "/api/bulk-trades/bt_1/files/f1?view=1");
+    expect(document.querySelector("img")).toHaveAttribute("src", "/api/bulk-listings/bt_1/documents/f1/file?view=1");
+    // Test report and Transport documents have nothing recorded yet, so they are wanted.
+    const needed = screen.getByRole("heading", { name: /Needed/ }).closest("section")!;
+    expect(within(needed).getByText("BMS or test report")).toBeInTheDocument();
+    expect(within(needed).getByText("Transport documents")).toBeInTheDocument();
+    expect(within(needed).queryByText("Datasheet")).not.toBeInTheDocument();
   });
 
   it("shows the next step as one line with who it is for, and emails that person", async () => {

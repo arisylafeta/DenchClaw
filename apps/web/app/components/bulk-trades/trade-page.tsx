@@ -5,6 +5,7 @@ import { WhatsappContext } from "../crm/whatsapp-context";
 import { HOLD_STAGE, TRADE_STAGES, holdLabel, type BulkTrade, type TradeOwner, type TradePatch, type TradeStage } from "@/lib/bulk-trades";
 import { shortDate, type Buyer, type Contact, type HistoryStatus, type TradeDetail, type TradeField, type TradeFile } from "@/lib/bulk-trade-details";
 import { TradeData } from "./trade-data";
+import { DocumentsTab } from "./documents-tab";
 import { HoldDialog } from "./hold-dialog";
 import { TradeEditor } from "./trade-editor";
 import { ContactsCard, NextStepStrip, ShippingCard, TradeOverview } from "./trade-overview";
@@ -12,7 +13,7 @@ import { InboxUpdates } from "./inbox-updates";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
 
-type Tab = "buyers" | "details" | "activity" | "whatsapp";
+type Tab = "buyers" | "details" | "documents" | "activity" | "whatsapp";
 
 type Props = {
   tradeId: string;
@@ -143,6 +144,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         <div role="tablist" aria-label="Trade sections" className="flex gap-1">
           {tabButton("buyers", "Buyers")}
           {tabButton("details", "Details")}
+          {tabButton("documents", "Documents")}
           {tabButton("activity", "Activity")}
           {tabButton("whatsapp", "WhatsApp")}
         </div>
@@ -162,12 +164,10 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
           <div className="flex flex-col gap-4">
           <TradeData
             detail={detail}
-            onProposalDecided={() => void load()}
             onField={(field: TradeField) => update((current) => ({
               ...current,
               fields: [...current.fields.filter((candidate) => candidate.field_key !== field.field_key), field],
             }))}
-            onFile={(file: TradeFile) => update((current) => ({ ...current, files: upsert(current.files, file) }))}
             onTradePatch={patchTrade}
           />
           <div className="grid gap-4 lg:grid-cols-2">
@@ -175,7 +175,8 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
             <ContactsCard trade={trade} contacts={detail.contacts} onContacts={(contacts) => update((current) => ({ ...current, contacts }))} />
           </div>
           </div>
-        ) : tab === "whatsapp" ? <WhatsappContext key={tradeId} tradeId={tradeId} /> : (
+        ) : tab === "documents" ? <DocumentsTab key={tradeId} listingId={tradeId} wantsRequired />
+        : tab === "whatsapp" ? <WhatsappContext key={tradeId} tradeId={tradeId} /> : (
           <div className="flex flex-col gap-3">
             {!!detail.proposals?.length && <section aria-label="Pending updates" className="border" style={{ borderColor: "var(--bt-border)" }}>
               {detail.proposals.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} onDecided={() => void load()} />)}

@@ -17,6 +17,8 @@ export type Registry = {
   specGroups: Record<string, string>;
   /** Buyer-ask numbers (kwh_min, min_soh ...) with their allowed range. */
   specNumbers: Record<string, { label: string; min: number; max: number }>;
+  /** Document types, in display order (Photos, Test report, RFQ ...). */
+  documentTypes: string[];
   volumeUnits: string[];
   priceUnits: string[];
   currencies: string[];
@@ -28,6 +30,7 @@ export type RegistryRows = {
   kinds: { attribute_key: string; kind: TradeKind; label: string; sort_order: number }[];
   options: { attribute_key: string; value: string; sort_order: number }[];
   requiredFiles: { file_type: FileType; label: string; needed_for: NeededFor; sort_order: number }[];
+  documentTypes: { doc_type: string; sort_order: number }[];
 };
 
 const bySort = <T extends { sort_order: number }>(a: T, b: T) => a.sort_order - b.sort_order;
@@ -54,6 +57,7 @@ export function buildRegistry(rows: RegistryRows): Registry {
     fields,
     requiredFiles: [...rows.requiredFiles].sort(bySort).map((row) => ({ type: row.file_type, label: row.label, neededFor: row.needed_for })),
     specLists, specLabels, specGroups, specNumbers,
+    documentTypes: [...rows.documentTypes].sort(bySort).map((row) => row.doc_type),
     volumeUnits: optionsOf("volume_unit"),
     priceUnits: optionsOf("price_unit"),
     currencies: optionsOf("price_currency"),
