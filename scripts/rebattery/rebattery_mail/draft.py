@@ -144,6 +144,8 @@ def edit(args):
                 policy.identity(db, row['identity_key'], purpose, row['transport'])
                 if row['purpose'] == 'marketing':
                     text, html = _strip_unsubscribe(text, html)
+            if 'body' in changes and 'html' not in changes and html:
+                raise Refused('html_required_with_body', 'Pass --html too so both versions carry the new copy')
             text, html = changes.get('body', text), changes.get('html', html)
             row.update(purpose=purpose, subject=changes.get('subject', row['subject']), body_text=text, body_html=html)
             policy.content(row)

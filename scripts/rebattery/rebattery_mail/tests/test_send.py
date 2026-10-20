@@ -809,7 +809,7 @@ def test_catch_all_sends_with_a_note_and_other_unverified_still_blocks(env):
         for evidence in ({'status':'do_not_mail','sub_status':'role_based_catch_all'},{'status':'catch-all'}):
             assert policy.recipient(db,email,{email:evidence})==email
             assert 'catch-all' in policy.verification_note(evidence)
-        for evidence in ({'status':'invalid'},{'status':'do_not_mail','sub_status':'disposable'},{}):
+        for evidence in ({'status':'invalid'},{'status':'do_not_mail','sub_status':'disposable'},{'status':'invalid','sub_status':'not_catch_all'},{'status':'unknown','sub_status':'catch_all_check_failed'},{}):
             with pytest.raises(Refused,match='recipient_unverified'):policy.recipient(db,email,{email:evidence})
         override={'status':'unknown','override_by':'Ari'}
         assert policy.recipient(db,email,{email:override})==email
@@ -857,6 +857,8 @@ def test_edit_draft_purpose_drops_unsubscribe_and_refuses_marketing_or_sent(env)
     edited=draft.edit(NS(target=row['id'],purpose='personal',subject=None,body=None,html=None))['message']
     assert edited['purpose']=='personal' and 'nsubscribe' not in edited['body_text'] and 'nsubscribe' not in edited['body_html']
     assert edited['subject']=='Hi' and edited['to_emails']==[email]
+    with pytest.raises(Refused,match='html_required_with_body'):
+        draft.edit(NS(target=row['id'],purpose=None,subject=None,body='New',html=None))
     with pytest.raises(Refused,match='use_new_draft_for_marketing'):
         draft.edit(NS(target=row['id'],purpose='marketing',subject=None,body=None,html=None))
     send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),Fake())

@@ -55,8 +55,9 @@ def content(message):
 
 
 def catch_all(evidence):
-    text = ' '.join(str(evidence.get(key) or '') for key in ('status', 'sub_status')).lower().replace('-', '_')
-    return 'catch_all' in text
+    status = str(evidence.get('status') or '').lower().replace('-', '_')
+    sub = str(evidence.get('sub_status') or '').lower().replace('-', '_')
+    return status == 'catch_all' or (status in ('valid', 'do_not_mail') and sub in ('catch_all', 'role_based_catch_all'))
 
 
 def verification_note(evidence):
