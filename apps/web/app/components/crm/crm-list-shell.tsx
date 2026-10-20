@@ -1,6 +1,6 @@
-import { Loading } from "../ui/shimmer";
 "use client";
 
+import { Loading } from "../ui/shimmer";
 import { type ReactNode } from "react";
 
 /**
