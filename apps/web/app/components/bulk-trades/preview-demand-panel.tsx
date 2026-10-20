@@ -9,14 +9,14 @@ import { demandFacts } from "@/lib/listing-facts";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
 import type { BuyerProfile, BuyerEngagement } from "@/lib/buyer-profile";
-import type { DemandSupply, MarketLead, SupplyUnitView } from "@/lib/demand-supply-types";
+import type { DemandSupply } from "@/lib/demand-supply-types";
 import { buildEntryLink } from "@/lib/workspace-links";
-import { ErrorText, request } from "./trade-ui";
+import { request } from "./trade-ui";
 import { SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
-import { SupplyTab } from "./demand-supply-tab";
+import { OffersTab } from "./offers-tab";
 import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
 import { DocumentsTab } from "./documents-tab";
@@ -106,23 +106,15 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   // Opens on the details; history (what was asked, said and done) comes last.
   const [tab, setTab] = useState("Details");
   const [supply, setSupply] = useState<DemandSupply | null>(null);
-  const [supplyError, setSupplyError] = useState<string | null>(null);
-  const [loadingSupply, setLoadingSupply] = useState(true);
   const [context, setContext] = useState<BuyerContext | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
   const loadSupply = useCallback(async () => {
-    setLoadingSupply(true);
     try {
       const result = await request<DemandSupply>(`${endpoint}/supply`);
       if (!Array.isArray(result?.groups)) throw new Error("Could not check inventory.");
       setSupply(result);
-      setSupplyError(null);
-    } catch (err) {
-      setSupplyError(err instanceof Error ? err.message : "Could not check inventory.");
-    } finally {
-      setLoadingSupply(false);
+    } catch {
+      setSupply(null);
     }
   }, [endpoint]);
   useEffect(() => { void loadSupply(); }, [loadSupply, demand.updated_at]);
@@ -131,23 +123,6 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
     void request<BuyerContext>(`${endpoint}/context`).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
     return () => { cancelled = true; };
   }, [endpoint]);
-  const leads: MarketLead[] = [];
-  async function verdict(unit: SupplyUnitView, value: "shortlist" | "not_a_fit" | "clear") {
-    setBusy(true);
-    setError(null);
-    try {
-      await request(`${endpoint}/supply`, { method: "POST", body: JSON.stringify({
-        key: unit.key, verdict: value, title: [unit.make, unit.model].filter(Boolean).join(" ") || unit.title, seller: unit.seller,
-        eurPerKwh: unit.eurPerKwh, href: unit.href,
-      }) });
-      await loadSupply();
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-    } finally {
-      setBusy(false);
-    }
-  }
   const top = useRef<HTMLDivElement>(null);
   useEffect(() => { top.current?.scrollIntoView?.({ block: "start" }); }, [demand.id]);
   const actions = (section: string) => (
@@ -161,13 +136,11 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         <SheetTabs
           tabs={TABS}
           icons={TAB_ICONS}
-          labels={{ Offers: supply ? `Offers · ${supply.totalGroups}` : "Offers" }}
           centered
           value={tab}
           onChange={setTab}
         />
       </div>
-      <ErrorText error={error} />
       {tab === "Details" && (
         <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
@@ -175,9 +148,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         </div>
       )}
       {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
-      {tab === "Offers" && (
-        <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy} leads={leads} />
-      )}
+      {tab === "Offers" && <OffersTab demandId={demand.id} supply={supply} onChanged={onChanged} />}
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}
