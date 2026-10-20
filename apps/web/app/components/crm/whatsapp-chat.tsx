@@ -1,9 +1,9 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, FileText, Image as ImageIcon, Link2, Mic, Paperclip, User, Users } from "lucide-react";
+import { ArrowLeft, FileText, Image as ImageIcon, Link2, Mic, Paperclip, Users } from "lucide-react";
 import type { WhatsappConversationData, WhatsappMessage } from "@/lib/crm-postgres/whatsapp";
 import { ARCHIVE_PREFIX } from "@/lib/whatsapp-archive";
-import { whatsappChatLabel } from "@/lib/whatsapp-display";
+import { initialsOf, whatsappChatLabel } from "@/lib/whatsapp-display";
 import styles from "./whatsapp.module.css";
 import { Loading } from "../ui/shimmer";
 import { WhatsappTradeLinks } from "./whatsapp-trade-links";
@@ -74,7 +74,7 @@ function Bubble({ m, outbound, first, group, sender, threadId, editable }: { m: 
 }
 
 /** WhatsApp Web look for captured history. Read only. `embedded` fills a panel; otherwise it is a full page. */
-export function WhatsappConversation({ id, embedded = false, onClose }: { id: string; embedded?: boolean; onClose?: () => void }) {
+export function WhatsappConversation({ id, embedded = false, onClose, onOpenPerson }: { id: string; embedded?: boolean; onClose?: () => void; onOpenPerson?: (personId: string) => void }) {
   const [data, setData] = useState<WhatsappConversationData | null>(null);
   const [offset, setOffset] = useState<number | "tail">("tail");
   const [error, setError] = useState("");
@@ -107,14 +107,14 @@ export function WhatsappConversation({ id, embedded = false, onClose }: { id: st
   const group = thread?.kind === "group";
   const imported = id.startsWith(ARCHIVE_PREFIX);
   return <div className={`${styles.wa} ${styles.pane} ${embedded ? "" : "mx-auto min-h-screen max-w-[920px]"}`}>
-    <header className={styles.header}>
-      {(onClose || !embedded) && <button type="button" aria-label="Back to Inbox" onClick={onClose ?? (() => { window.location.href = "/?crm=inbox&view=whatsapp"; })} className="inline-flex h-8 w-8 items-center justify-center rounded-full" style={{ color: "var(--wa-muted)" }}><ArrowLeft size={18} aria-hidden /></button>}
-      <span aria-hidden className={styles.avatar} style={{ width: 40, height: 40 }}>{group ? <Users size={22} /> : <User size={22} />}</span>
+    <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }}>
+      {(onClose || !embedded) && <button type="button" aria-label="Back to Inbox" onClick={onClose ?? (() => { window.location.href = "/?crm=inbox&view=whatsapp"; })} className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }}><ArrowLeft size={16} aria-hidden /></button>}
+      <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>{group ? <Users size={17} /> : initialsOf(label.text)}</span>
       <div className="min-w-0 flex-1">
-        <h1 className={styles.name} title={label.hint}>{label.text}{label.inferred && <span className="ml-1.5 text-[12px]" style={{ color: "var(--wa-muted)" }}>~ inferred</span>}</h1>
-        <p className={styles.sub}>{group ? "Group · shared context" : "1:1"} · read only{total ? ` · ${total.toLocaleString("en-GB")} messages` : ""}</p>
+        <h1 className="flex items-baseline gap-1.5 truncate text-[15px] font-semibold leading-5" title={label.hint}>{label.text}{label.inferred && <span className="text-[12px] font-normal" style={{ color: "var(--color-text-muted)" }}>~ inferred</span>}</h1>
+        <p className="truncate text-[12px] leading-4" style={{ color: "var(--color-text-muted)" }}>{group ? "Group · read only" : "Read only"}</p>
       </div>
-      <a className="text-[12px] underline" style={{ color: "var(--wa-muted)" }} href="/whatsapp/identities">Identity links</a>
+      {thread?.person_id && onOpenPerson && <button type="button" onClick={() => onOpenPerson(thread.person_id!)} className="rounded-md border px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--color-surface-hover)]" style={{ borderColor: "var(--color-border)" }}>View in CRM</button>}
     </header>
     <div ref={scroller} className={styles.scroller}>
       <p aria-label="History limitations" className={styles.notice}>{imported ? "Imported WhatsApp export" : "Captured history, gaps possible"}</p>
@@ -133,6 +133,5 @@ export function WhatsappConversation({ id, embedded = false, onClose }: { id: st
       </div>
       {hasLater && <button type="button" className={styles.pager} disabled={loading} onClick={() => go(start + pageSize, false)}>Later messages</button>}
     </div>
-    <footer className={styles.footer}>Read only</footer>
   </div>;
 }

@@ -111,7 +111,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
       <section role="tabpanel" aria-label={views[view]} className="min-h-0 min-w-0 flex-1 overflow-auto">
         {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
         {view === "campaigns" && <CampaignsPanel campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} search={filters.q ?? ""} status={campaignStatus} />}
-        {view === "whatsapp" && <WhatsappView query={`q=${encodeURIComponent(filters.q ?? "")}`} selectedId={filters.thread || undefined} onSelect={(chat) => update("thread", chat)} />}
+        {view === "whatsapp" && <WhatsappView query={`q=${encodeURIComponent(filters.q ?? "")}`} selectedId={filters.thread || undefined} onSelect={(chat) => update("thread", chat)} onOpenPerson={onOpenPerson} />}
         {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
         {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
       </section>

@@ -24,6 +24,8 @@ export type WhatsappThread = {
   subject: string | null;
   name?: string | null;
   name_source?: WhatsappNameSource;
+  /** Linked CRM person, when the chat has been matched. */
+  person_id?: string | null;
   last_captured_at: string;
   message_count: string | number;
   shared_context: boolean;
@@ -107,6 +109,7 @@ const GREETING = "^[[:space:]]*(Hi|Hello|Hey|Dear)[[:space:]]+([A-Z][a-z][A-Za-z
 const NAME_JOIN = `left join whatsapp_identity i on i.account_id=t.account_id and i.id=t.identity_id
   left join lateral (select
     (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.account_id=t.account_id and l.identity_id=t.identity_id and l.valid_to is null order by l.valid_from desc limit 1) as person_name,
+    (select l.person_id from whatsapp_identity_link l where l.account_id=t.account_id and l.identity_id=t.identity_id and l.valid_to is null and l.person_id is not null order by l.valid_from desc limit 1) as person_id,
     (select (regexp_match(g.body,'${GREETING}'))[2] from (select ${visibleBody("m")} as body from whatsapp_message m where m.thread_id=t.id and m.direction='outbound' order by coalesce(m.occurred_at,m.captured_at),m.id limit 5) g
       where g.body ~ '${GREETING}' limit 1) as greeting) nm on true`;
 const NAME_SQL = `coalesce(nullif(t.subject,''),nm.person_name,nullif(i.display_name,''),i.e164,nm.greeting)`;
@@ -114,7 +117,7 @@ const NAME_SOURCE_SQL = `case when nullif(t.subject,'') is not null then 'subjec
   when i.e164 is not null then 'phone' when nm.greeting is not null then 'greeting' end`;
 export async function whatsappConversation(id: string, limit = 50, offset = 0, tail = false) {
   whatsappPagination(limit, offset);
-  const [thread] = await queryPg<WhatsappThread>(`select t.*,${NAME_SQL} as name,${NAME_SOURCE_SQL} as name_source,(select count(*)::int from whatsapp_message mc where mc.thread_id=t.id) as message_count from whatsapp_thread t ${NAME_JOIN} where t.id=$1`, [id]);
+  const [thread] = await queryPg<WhatsappThread>(`select t.*,${NAME_SQL} as name,${NAME_SOURCE_SQL} as name_source,nm.person_id as person_id,(select count(*)::int from whatsapp_message mc where mc.thread_id=t.id) as message_count from whatsapp_thread t ${NAME_JOIN} where t.id=$1`, [id]);
   if (!thread) {
     return null;
   }

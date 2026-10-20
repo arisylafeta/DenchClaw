@@ -147,7 +147,9 @@ describe("merged mail", () => {
     fireEvent.click(chat);
     expect(await screen.findByRole("heading", { name: "Mathieu" })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith("/api/whatsapp/threads/t1?limit=50&tail=1", expect.anything());
-    expect(screen.getByText(/1:1 · read only/)).toBeInTheDocument();
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(screen.queryByText(/1:1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/identity links/i)).not.toBeInTheDocument();
     // The chat opens beside the list, which keeps the chosen row highlighted.
     expect(screen.getByRole("button", { name: "Open chat: Mathieu" })).toHaveAttribute("aria-current", "true");
     // Imported export chats appear in the same list and show the trades their messages are linked to.
