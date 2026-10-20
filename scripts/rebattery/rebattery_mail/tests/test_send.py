@@ -898,3 +898,27 @@ def test_gmail_auth_failure_is_a_clean_refusal_not_unknown(env,monkeypatch):
     with pytest.raises(ProviderError,match='gmail_auth_unavailable'):
         GmailSendDriver().preflight({'gmail_account':'alex@rebattery.io'},row)
     assert state(row['id'])=='draft'
+
+
+def test_gmail_send_passes_cc_to_gog():
+    seen={}
+    def runner(args,**kwargs):
+        seen['args']=args
+        return NS(returncode=0,stdout='{"id":"receipt"}')
+    with patch('rebattery_mail.drivers.live_gate'):
+        GmailSendDriver(runner).send({'gmail_account':'alex@rebattery.io','address':'alex@rebattery.io'},{'to_emails':['b@example.test'],'cc_emails':['c@example.test','d@example.test'],'subject':'S','body_text':'Hi'})
+    assert seen['args'][seen['args'].index('--cc')+1]=='c@example.test,d@example.test'
+
+
+def test_cc_thread_collects_participants_without_own_or_to(env):
+    thread=env+'cct'
+    with connection() as db,db.cursor() as cur:
+        cur.execute('insert into mail_thread(id) values (%s)',(thread,))
+        cur.execute("insert into mail_message(id,direction,transport,thread_id,state,from_email,to_emails,cc_emails,rfc_message_id,gmail_message_id) values (%s,'inbound','gmail',%s,'received',%s,%s,%s,'<x@e>','gx')",
+                    (env+'cc1',thread,'Buyer@example.test',['alex@rebattery.io'],['third@example.test','Ari@rebattery.io']))
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',['buyer@example.test'],subject='S',body='B',thread=thread,cc=['extra@example.test'],cc_thread=True,verification={})
+    assert row['cc_emails']==['extra@example.test','third@example.test'] or set(row['cc_emails'])=={'extra@example.test','third@example.test'}
+    with connection() as db:
+        with pytest.raises(Refused,match='cc_thread_requires_thread'):
+            draft.prepare(db,'alex',['buyer@example.test'],subject='S',body='B',cc_thread=True)

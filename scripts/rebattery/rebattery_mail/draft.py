@@ -28,7 +28,7 @@ def text_to_html(text):
 
 def prepare(db, identity_key, recipients, purpose='personal', template=None, variables=None,
             subject=None, body=None, html=None, thread=None, campaign=None, verification=None, transport=None, message_id=None,
-            oneoff_blocks=None, allow_multiple_cta=False):
+            oneoff_blocks=None, allow_multiple_cta=False, cc=None, cc_thread=False):
     author, transport = policy.identity(db,identity_key,purpose,transport)
     variables = variables or {}
     generated = None
@@ -61,7 +61,7 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
             rendered['html'] = text_to_html(rendered['text'])
     row = {'id':message_id or uuid4().hex,'direction':'outbound','state':'draft','identity_key':identity_key,
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
-           'cc_emails':[],'bcc_emails':[],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
+           'cc_emails':sorted(set(e.strip().lower() for e in (cc or []) if e.strip())),'bcc_emails':[],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
            'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and generated is None and author.get('signature_text') else ''),
            'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template and generated is None else ''),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
@@ -81,8 +81,28 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
             row['in_reply_to'] = previous['rfc_message_id']
             row['rfc_references'] = ' '.join(filter(None,[previous['rfc_references'],previous['rfc_message_id']]))
             row['personalization']['reply_gmail_message_id'] = previous['gmail_message_id']
+    if cc_thread:
+        if not thread:
+            raise Refused('cc_thread_requires_thread')
+        row['cc_emails'] = sorted(set(row['cc_emails']) | thread_participants(db,thread,author))
+    row['cc_emails'] = [e for e in row['cc_emails'] if e not in row['to_emails']]
+    if row['cc_emails'] and transport != 'gmail':
+        raise Refused('cc_requires_gmail')
     policy.content(row)
     return row, author
+
+
+def thread_participants(db, thread, author):
+    """Everyone who sent or received mail in the thread, minus ReBattery's own mailboxes and the sender identity."""
+    with dict_cursor(db) as cur:
+        cur.execute("select address,reply_to,gmail_account from mail_identity")
+        own = {str(v).strip().lower() for r in cur.fetchall() for v in r.values() if v}
+        own.add(author['address'].lower())
+        cur.execute("select from_email,to_emails,cc_emails from mail_message where thread_id=%s and state in ('received','accepted')",(thread,))
+        found = set()
+        for r in cur.fetchall():
+            found.update(a for a in [r['from_email'],*(r['to_emails'] or []),*(r['cc_emails'] or [])] if a)
+    return {a.strip().lower() for a in found} - own
 
 
 def insert(db,row):
@@ -101,9 +121,10 @@ def create(args):
         from .blocks import read_blocks
         blocks = read_blocks(args.oneoff_blocks) if getattr(args, 'oneoff_blocks', None) is not None else None
         row, author = prepare(db,args.identity,args.to.split(','),args.purpose,args.template,json.loads(args.vars),args.subject,args.body,args.html,args.thread,args.campaign,json.loads(args.verification),args.transport,args.id,
-                              oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False))
+                              oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False),
+                              cc=args.cc.split(',') if getattr(args,'cc',None) else None, cc_thread=getattr(args,'cc_thread',False))
         exclusions = []
-        for email in row['to_emails']:
+        for email in [*row['to_emails'],*row['cc_emails']]:
             try:
                 policy.recipient(db,email,row['personalization']['verification'])
             except Refused as exc:
@@ -186,6 +207,8 @@ def register(subparsers):
     parser.add_argument('--to',required=True)
     parser.add_argument('--id')
     parser.add_argument('--thread')
+    parser.add_argument('--cc', help='Comma-separated CC addresses (gmail transport only)')
+    parser.add_argument('--cc-thread', action='store_true', help='CC everyone already on --thread (senders, To and CC), except ReBattery mailboxes and the To recipients')
     parser.add_argument('--campaign')
     parser.add_argument('--apply',action='store_true')
     parser.set_defaults(handler=create)

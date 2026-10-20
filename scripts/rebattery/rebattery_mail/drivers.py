@@ -147,6 +147,8 @@ class GmailSendDriver:
             raise Refused('live_send_disabled')
         args = ['gog','--account',identity['gmail_account'],'--json','gmail','send','--from',identity['address'],
                 '--to',','.join(message['to_emails']),'--subject',message['subject'],'--body',message['body_text'] or '']
+        if message.get('cc_emails'):
+            args += ['--cc',','.join(message['cc_emails'])]
         if identity.get('reply_to'):
             args += ['--reply-to',identity['reply_to']]
         if message.get('body_html'):
