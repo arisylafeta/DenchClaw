@@ -96,7 +96,7 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
 }
 
 export const STAGE_LABEL: Record<OfferStage, string> = {
-  to_contact: "To contact", teaser_sent: "Teaser sent", specs_nda: "Specs and NDA", bid_in: "Bid in", loi: "LOI", won: "Won", declined: "Declined", lost: "Lost",
+  to_contact: "To contact", teaser_sent: "Sent", specs_nda: "Specs and NDA", bid_in: "Bid in", loi: "LOI", won: "Won", declined: "Declined", lost: "Lost",
 };
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
