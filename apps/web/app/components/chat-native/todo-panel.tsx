@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Check, ChevronRight, X } from "lucide-react";
 import type { TodoItem, TodoState, TodoStatus } from "@/lib/hermes-chat/todos";
-import { cardClass } from "./tool-run";
 
 const TITLE_MAX = 64;
 
@@ -33,6 +32,7 @@ export interface TodoPanelProps { todos: TodoState }
 export function TodoPanel({ todos }: TodoPanelProps) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [hideDone, setHideDone] = useState(false);
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const items = todos.visible.length ? todos.visible : todos.retained;
   if (!items.length) return null;
   // Missing or cyclic parents remain visible as roots, never disappear or recurse forever.
@@ -64,15 +64,21 @@ export function TodoPanel({ todos }: TodoPanelProps) {
       </li>;
     })}</ul>;
   };
-  return <section aria-label="Tasks" className={`${cardClass} todo-panel`}>
+  const active = items.find(item => item.status === "in_progress");
+  const expandedPanel = openOverride ?? done < items.length;
+  return <section aria-label="Tasks" className="todo-panel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] leading-5" data-open={expandedPanel}>
     <header className="flex items-center gap-2">
-      <h3 className="text-[13px] font-semibold">Tasks</h3>
-      <span className="font-mono text-[11px] text-[var(--color-text-muted)]">{done}/{items.length} done</span>
-      <div role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={items.length} aria-valuenow={done} className="flex min-w-0 flex-1 gap-0.5">
+      <button type="button" aria-expanded={expandedPanel} aria-label="Tasks" onClick={() => setOpenOverride(!expandedPanel)} className="flex min-w-0 items-center gap-2 rounded text-left focus-visible:outline-2">
+        <ChevronRight aria-hidden="true" className={`size-3 shrink-0 text-[var(--color-text-muted)] transition-transform motion-reduce:transition-none ${expandedPanel ? "rotate-90" : ""}`} />
+        <span className="text-[13px] font-semibold">Tasks</span>
+        <span className="font-mono text-[11px] text-[var(--color-text-muted)]">{done}/{items.length} done</span>
+        {!expandedPanel && active && <span className="todo-title-active min-w-0 truncate text-[12px]">{splitTodo(active.content).title}</span>}
+      </button>
+      <div role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={items.length} aria-valuenow={done} className="flex min-w-6 flex-1 gap-0.5">
         {items.map(item => <span key={item.id} className={`todo-seg h-1 min-w-1 flex-1 rounded-full ${item.status === "completed" ? "bg-[var(--color-accent)]" : item.status === "in_progress" ? "todo-seg-active bg-[var(--color-accent)]/40" : "bg-[var(--color-border)]"}`} />)}
       </div>
-      {done > 0 && <button type="button" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2" onClick={() => setHideDone(value => !value)}>{hideDone ? `Show done (${done})` : "Hide done"}</button>}
+      {expandedPanel && done > 0 && <button type="button" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2" onClick={() => setHideDone(value => !value)}>{hideDone ? `Show done (${done})` : "Hide done"}</button>}
     </header>
-    {renderItems(roots, [], false)}
+    {expandedPanel && <div className="mt-2 max-h-[40dvh] overflow-y-auto pr-1">{renderItems(roots, [], false)}</div>}
   </section>;
 }

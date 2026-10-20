@@ -264,10 +264,11 @@ describe("native transcript", () => {
     expect(container.querySelector('[data-preview="code"]')).not.toBeNull();
   });
 
-  it("nests todos and never shows token or context usage in the transcript", () => {
+  it("docks nested todos above the input, keeps them out of the transcript, and never shows token or context usage", () => {
     const state = events([["todo.updated", { todos: [{ id: "p", content: "Ship", status: "in_progress" }, { id: "c", parent: "p", content: "Review", status: "completed" }] }], ["session.usage", { usage: { input: 10, output: 20, context_used: 50, context_max: 100, cost_usd: 0.02 } }]]);
-    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
-    expect(container.querySelector('[data-todo-id="p"] [data-todo-id="c"]')).not.toBeNull();
+    const { container } = render(<><NativeTranscript state={state} callbacks={callbacks()} /><PromptDock state={state} subagents={state.subagents} todos={state.todos} callbacks={callbacks()} /></>);
+    expect(container.querySelector('[data-prompt-dock] [data-todo-id="p"] [data-todo-id="c"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Native Hermes transcript"] [data-todo-id]')).toBeNull();
     expect(screen.getByText("1/2 done")).toBeInTheDocument();
     expect(screen.queryByText(/tokens in/)).toBeNull();
     expect(screen.queryByRole("meter")).toBeNull();

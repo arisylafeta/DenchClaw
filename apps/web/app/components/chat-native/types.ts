@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import type { ChatState, PendingRequest } from "@/lib/hermes-chat/reducer";
 import type { SubagentState } from "@/lib/hermes-chat/subagents";
-import type { TodoState } from "@/lib/hermes-chat/todos";
 
 export type ApprovalChoice = "once" | "session" | "always" | "deny";
 export interface NativeTranscriptCallbacks {
@@ -16,7 +15,6 @@ export interface NativeTranscriptCallbacks {
 export interface NativeTranscriptProps {
   state: ChatState;
   subagents?: SubagentState;
-  todos?: TodoState;
   callbacks: NativeTranscriptCallbacks;
   renderMarkdown?: (text: string) => ReactNode;
   /** HTML is parsed as inert formatting/mention spans, never inserted as executable HTML. */

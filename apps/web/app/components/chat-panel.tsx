@@ -2757,7 +2757,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
 		) : (
 			<>
-				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} tails={nativeChat.tails} callbacks={{
+				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} tails={nativeChat.tails} callbacks={{
 					onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
 					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
@@ -3124,7 +3124,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									if (container) container.scrollTop = top + container.scrollHeight - height;
 								});
 							}}>{nativeChat.loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}</button>}
-							<NativeTranscript state={nativeChat.state} todos={nativeChat.todos} onOpenArtifact={onFilePathClick} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
+							<NativeTranscript state={nativeChat.state} onOpenArtifact={onFilePathClick} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
                                 onCancelNotice: () => { setDeferredSlash(null); setCommandStatus(null); },
 								onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 								onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,

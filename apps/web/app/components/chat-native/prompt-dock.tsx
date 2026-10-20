@@ -5,6 +5,8 @@ import type { ChatState } from "@/lib/hermes-chat/reducer";
 import { buildSubagentTree, isTerminalSubagent, type Subagent, type SubagentNode, type SubagentState } from "@/lib/hermes-chat/subagents";
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { SubagentCard } from "./panels";
+import { TodoPanel } from "./todo-panel";
+import type { TodoState } from "@/lib/hermes-chat/todos";
 import { ThinkingIndicator } from "./thinking";
 import { ChevronRight } from "lucide-react";
 import type { NativeTranscriptCallbacks } from "./types";
@@ -13,9 +15,10 @@ import type { NativeTranscriptCallbacks } from "./types";
  * Everything the agent needs from you, or is running on the side, docks on top of the input box instead of
  * scrolling away in the transcript: questions, approvals, and subagents with their own activity.
  */
-export function PromptDock({ state, subagents, tails, callbacks, composerTarget, disabled }: {
+export function PromptDock({ state, subagents, todos, tails, callbacks, composerTarget, disabled }: {
   state: Pick<ChatState, "pendingRequests" | "sessionId">;
   subagents: SubagentState;
+  todos?: TodoState;
   tails?: Readonly<Record<string, string>>;
   callbacks: NativeTranscriptCallbacks;
   composerTarget?: HTMLElement | null;
@@ -27,11 +30,13 @@ export function PromptDock({ state, subagents, tails, callbacks, composerTarget,
     ?? requests.find(request => request.kind === "clarify");
   activeKey.current = front ? `${state.sessionId}-${front.id}` : null;
   const roots = buildSubagentTree(subagents.items);
-  if (!requests.length && !roots.length) return null;
+  const hasTodos = !!todos && (todos.visible.length > 0 || todos.retained.length > 0);
+  if (!requests.length && !roots.length && !hasTodos) return null;
   return <div className="w-full" data-prompt-dock>
     {requests.map(request => request.kind === "approval"
       ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} />
       : request === front || composerTarget === undefined ? <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} composerTarget={composerTarget} disabled={disabled} /> : <p key={request.id} className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">Another question is waiting</p>)}
+    {todos && hasTodos && <div className="px-1 pb-1"><TodoPanel todos={todos} /></div>}
     {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} />}
   </div>;
 }

@@ -41,4 +41,12 @@ describe("TodoPanel", () => {
     expect(screen.queryByText("Worktree ready")).toBeNull();
     expect(screen.getByRole("button", { name: "Show done (1)" })).toBeInTheDocument();
   });
+  it("collapses to one line showing the active task and starts collapsed when everything is done", () => {
+    const { rerender } = render(<TodoPanel todos={state(items)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    expect(screen.queryByText("created and symlinked")).toBeNull();
+    expect(screen.getByText("Shimmer rework")).toBeInTheDocument();
+    rerender(<TodoPanel key="all-done" todos={state(items.map(item => ({ ...item, status: "completed" })) as TodoState["visible"])} />);
+    expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-expanded", "false");
+  });
 });

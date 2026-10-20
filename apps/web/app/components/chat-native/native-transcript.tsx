@@ -6,7 +6,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { NativeTranscriptProps } from "./types";
 import { ErrorCard } from "./panels";
-import { TodoPanel } from "./todo-panel";
 import { displayTurns, WorkBlock } from "./work-block";
 import { transcriptBlocks } from "./transcript-blocks";
 import { NoticeLine } from "./notice-line";
@@ -39,7 +38,7 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact }: { text: stri
     ? <MailDraftCard key={`artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />
     : <Fragment key={`text-${index}`}>{markdown(piece.text)}</Fragment>)}</>;
 }
-export function NativeTranscript({ state, todos = state.todos, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact }: NativeTranscriptProps) {
+export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact }: NativeTranscriptProps) {
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => {
@@ -66,7 +65,6 @@ export function NativeTranscript({ state, todos = state.todos, callbacks, render
       })()}
       {message.error_surface ? <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={callbacks.onRetry} /> : message.error ? <p role="alert">{message.error}</p> : null}
     </article>)}
-    <TodoPanel todos={todos} />
     <p role="status">{state.pendingRequests.some(request => request.kind === "approval") ? "Waiting for approval" : state.pendingRequests.some(request => request.kind === "clarify") ? "Waiting for your answer" : state.interrupted ? "Interrupted" : ""}</p>
   </div>;
 }
