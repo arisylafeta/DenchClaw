@@ -13,7 +13,8 @@ const WORKING_STAGES: string[] = [...LIVE_STAGES, HOLD_STAGE];
 export async function listSheet(): Promise<SheetRow[]> {
   const [demand, supply, trades] = await Promise.all([
     queryPg<Parameters<typeof demandRow>[0]>(`
-      select demand.id, demand.buyer, demand.company_id, demand.wants, demand.product_family, demand.score,
+      select demand.id, demand.buyer, demand.company_id, demand.wants, demand.product_family,
+        bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation, greatest(demand.observed_on, demand.confirmed_on)) as score,
         (select count(*)::int from crm_bulk_trade_demand_activity a where a.demand_id = demand.id and a.kind <> 'status') as activity_count,
         (select count(*)::int from crm_bulk_trade_buyers b where b.demand_id = demand.id) as linked_trades,
         latest.kind as latest_kind, latest.title as latest_title, latest.occurred_at::text as latest_at,
