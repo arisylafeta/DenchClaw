@@ -32,10 +32,10 @@ describe("merged mail", () => {
     await screen.findByRole("combobox", { name: "identity" });
     expect(navigation.replace).not.toHaveBeenCalled();
   });
-  it("switches all four views and loads the matching shared-store APIs", async () => {
+  it("switches all five views and loads the matching shared-store APIs", async () => {
     render(<InboxView />);
     expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute("aria-selected", "true");
-    for (const label of ["Campaigns", "Sent", "Follow-ups", "Conversations"]) {
+    for (const label of ["Campaigns", "Drafts", "Sent", "Follow-ups", "Conversations"]) {
       fireEvent.click(screen.getByRole("tab", { name: label }));
       expect(screen.getByRole("tabpanel", { name: label })).toBeInTheDocument();
     }

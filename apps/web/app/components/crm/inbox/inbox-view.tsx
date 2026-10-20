@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MailFilters, MailFollowup, MailMessageListRow, MailPage } from "@/lib/mail-types";
 import { ConversationsView } from "./conversations-view";
+import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsView } from "../../campaigns/campaigns-view";
 import { Mail, Search, SlidersHorizontal, X } from "lucide-react";
 import { SenderAvatar } from "../sender-avatar";
@@ -12,7 +13,7 @@ import styles from "./mail.module.css";
 import { mailCounterparty } from "@/lib/mail-counterparty";
 
 export type MailView = NonNullable<MailFilters["view"]>;
-const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", sent: "Sent", followups: "Follow-ups" };
+const views: Record<MailView, string> = { conversations: "Conversations", campaigns: "Campaigns", drafts: "Drafts", sent: "Sent", followups: "Follow-ups" };
 const filterOptions: Record<string, string[]> = {
   identity: ["alex", "ari", "supply", "hello", "support", "enterprise"],
   direction: ["inbound", "outbound"], transport: ["gmail", "postmark-broadcast", "postmark-transactional"],
@@ -26,7 +27,7 @@ export function mailQuery(filters: MailFilters): string {
   }
   return params.toString();
 }
-export function InboxView({ onOpenPerson, initialView, initialCampaignId }: { onOpenPerson?: (id: string) => void; initialView?: MailView; initialCampaignId?: string | null }) {
+export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampaignId }: { onOpenPerson?: (id: string) => void; onOpenDraft?: (id: string, title: string) => void; initialView?: MailView; initialCampaignId?: string | null }) {
   const router = useRouter();
   const params = useSearchParams();
   const requestedView = params.get("view");
@@ -76,6 +77,7 @@ export function InboxView({ onOpenPerson, initialView, initialCampaignId }: { on
     <section role="tabpanel" aria-label={views[view]} className="min-h-0 flex-1 overflow-auto">
       {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
       {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query={query} />}
+      {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
       {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
     </section>
   </div>;

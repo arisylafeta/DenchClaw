@@ -337,3 +337,25 @@ describe("ChatMessage", () => {
     expect(screen.queryByRole("dialog", { name: "Image preview screenshot.png" })).not.toBeInTheDocument();
   });
 });
+
+describe("artifact blocks", () => {
+  it("renders a mail draft card and opens it by workspace path", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ id: "d1", subject: "Ioniq 5 enquiry", to_emails: ["a@example.test"], approval: null, state: "draft" }))) as typeof fetch;
+    const onFilePathClick = vi.fn();
+    const text = 'Draft ready.\n```artifact\n{"kind":"mail_draft","id":"d1"}\n```';
+    render(<ChatMessage message={{ id: "artifact", role: "assistant", parts: [{ type: "text", text }] }} onFilePathClick={onFilePathClick} />);
+    const card = await screen.findByRole("button", { name: "Open email draft: Ioniq 5 enquiry" });
+    expect(onFilePathClick).not.toHaveBeenCalled();
+    fireEvent.click(card);
+    expect(onFilePathClick).toHaveBeenCalledWith("~mail/draft/d1", { title: "Ioniq 5 enquiry" });
+  });
+  it("auto-opens once, only while the message is streaming", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ id: "live1", subject: "Live", to_emails: [], approval: null, state: "draft" }))) as typeof fetch;
+    const onFilePathClick = vi.fn();
+    const message = { id: "live", role: "assistant" as const, parts: [{ type: "text" as const, text: '```artifact\n{"kind":"mail_draft","id":"live1"}\n```' }] };
+    const { rerender } = render(<ChatMessage message={message} isStreaming onFilePathClick={onFilePathClick} />);
+    await vi.waitFor(() => expect(onFilePathClick).toHaveBeenCalledTimes(1));
+    rerender(<ChatMessage message={{ ...message }} isStreaming onFilePathClick={onFilePathClick} />);
+    expect(onFilePathClick).toHaveBeenCalledTimes(1);
+  });
+});

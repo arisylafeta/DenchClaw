@@ -43,6 +43,8 @@ import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../comp
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { TradesPreviewView } from "../components/bulk-trades/trades-preview-view";
+import { MailDraftView } from "../components/crm/inbox/mail-draft-view";
+import { mailDraftPath, parseMailDraftPath } from "@/lib/mail-artifacts";
 import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute } from "@/lib/bulk-trades-url";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
@@ -421,6 +423,7 @@ export function nodeToContentTabKind(nodeType: string, path: string): ContentTab
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === TRADES_PREVIEW_PATH) return "trades-preview";
+  if (parseMailDraftPath(path)) return "mail-draft";
   switch (nodeType) {
     case "object": return "object";
     case "document": return "document";
@@ -1660,9 +1663,16 @@ function WorkspacePageInner() {
 
   // Open inline file-path mentions from chat in a new workspace tab.
   const handleFilePathClickFromChat = useCallback(
-    async (rawPath: string) => {
+    async (rawPath: string, options?: { title?: string }) => {
       const inputPath = normalizeChatPath(rawPath);
       if (!inputPath) {return false;}
+
+      // Mail draft artifacts open as their own content tab, not as a file.
+      if (parseMailDraftPath(inputPath)) {
+        openTabForNode({ path: inputPath, name: options?.title || "Email draft", type: "folder" }, { preview: false });
+        ensureRightPanelOpenWide();
+        return true;
+      }
 
       try {
         const node = await resolveWorkspaceFileReference(inputPath, tree, workspaceRoot);
@@ -1674,7 +1684,7 @@ function WorkspacePageInner() {
         return false;
       }
     },
-    [tree, handleNodeSelect, workspaceRoot, ensureRightPanelOpenWide, isMobile],
+    [tree, handleNodeSelect, workspaceRoot, ensureRightPanelOpenWide, isMobile, openTabForNode],
   );
 
   // Paths that should stay out of the CRM nav because they already have
@@ -2601,6 +2611,7 @@ function WorkspacePageInner() {
       onRefreshTree={refreshTree}
       onNavigate={handleEditorNavigate}
       onOpenEntry={handleOpenEntry}
+      onOpenMailDraft={(id, title) => { void handleFilePathClickFromChat(mailDraftPath(id), { title }); }}
       activeEntryId={undefined}
       searchFn={searchIndex}
       onSelectCronJob={handleSelectCronJob}
@@ -2967,6 +2978,7 @@ function ContentRenderer({
   onRefreshTree,
   onNavigate,
   onOpenEntry,
+  onOpenMailDraft,
   activeEntryId,
   searchFn,
   onSelectCronJob,
@@ -3004,6 +3016,7 @@ function ContentRenderer({
     entryId: string,
     relatedObjectId?: string,
   ) => void;
+  onOpenMailDraft?: (id: string, title: string) => void;
   activeEntryId?: string;
   searchFn: (query: string, limit?: number) => import("@/lib/search-index").SearchIndexItem[];
   onSelectCronJob: (jobId: string) => void;
@@ -3260,10 +3273,13 @@ function ContentRenderer({
       return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
     case "crm-inbox":
-      return <InboxView key="mail-conversations" onOpenPerson={(id) => onOpenEntry("people", id)} />;
+      return <InboxView key="mail-conversations" onOpenPerson={(id) => onOpenEntry("people", id)} onOpenDraft={onOpenMailDraft} />;
 
     case "trades-preview":
       return <TradesPreviewView onOpenEntry={onOpenEntry} />;
+
+    case "mail-draft":
+      return <MailDraftView key={content.draftId} draftId={content.draftId} />;
 
     case "crm-calendar":
       return (

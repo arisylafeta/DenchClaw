@@ -888,7 +888,7 @@ type ChatPanelProps = {
 	/** Called when user clicks a subagent card in the chat to view its output. */
 	onSubagentClick?: (task: string) => void;
 	/** Called when user clicks an inline file path in chat output. */
-	onFilePathClick?: (path: string) => Promise<boolean | void> | boolean | void;
+	onFilePathClick?: (path: string, options?: { title?: string }) => Promise<boolean | void> | boolean | void;
 	/** Called when user deletes the current session (e.g. from header menu). */
 	onDeleteSession?: (sessionId: string) => void;
 	/** Called when user renames the current session. */

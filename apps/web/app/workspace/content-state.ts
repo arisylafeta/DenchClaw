@@ -120,5 +120,6 @@ export type ContentState =
   | { kind: "crm-leaderboard" }
   | { kind: "crm-calendar" }
   | { kind: "trades-preview" }
+  | { kind: "mail-draft"; draftId: string }
   | { kind: "crm-person"; entryId: string; profileTab?: string }
   | { kind: "crm-company"; entryId: string; profileTab?: string };

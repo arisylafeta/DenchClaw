@@ -15,6 +15,8 @@ import { isStatusReasoningText } from "./chat-stream-status";
 import { splitReportBlocks, hasReportBlocks } from "@/lib/report-blocks";
 import { splitDiffBlocks, hasDiffBlocks } from "@/lib/diff-blocks";
 import { splitQuestionBlocks, type QuestionBlock } from "@/lib/question-blocks";
+import { hasArtifactBlocks, splitArtifactBlocks, type ArtifactRef } from "@/lib/mail-artifacts";
+import { MailDraftCard } from "./mail-draft-card";
 import type { ReportConfig } from "./charts/types";
 import { DiffCard } from "./diff-viewer";
 import { MessageVoiceButton } from "./message-voice-button";
@@ -57,6 +59,7 @@ type MessageSegment =
 	| { type: "chain"; parts: ChainPart[] }
 	| { type: "report-artifact"; config: ReportConfig }
 	| { type: "diff-artifact"; diff: string }
+	| { type: "artifact"; artifact: ArtifactRef }
 	| { type: "question"; question: QuestionBlock }
 	| { type: "subagent-card"; task: string; label?: string; sessionKey?: string; status: "running" | "done" | "error" };
 
@@ -106,6 +109,10 @@ function groupParts(parts: UIMessage["parts"]): MessageSegment[] {
 			for (const questionSegment of splitQuestionBlocks(text)) {
 				if (questionSegment.type === "question") {
 					segments.push({ type: "question", question: questionSegment.question });
+				} else if (hasArtifactBlocks(questionSegment.text)) {
+					for (const seg of splitArtifactBlocks(questionSegment.text)) {
+						segments.push(seg.type === "artifact" ? { type: "artifact", artifact: seg.artifact } : { type: "text", text: seg.text });
+					}
 				} else if (hasReportBlocks(questionSegment.text)) {
 					segments.push(
 						...(splitReportBlocks(questionSegment.text) as MessageSegment[]),
@@ -640,6 +647,7 @@ async function openFilePath(path: string, reveal = false) {
 
 type FilePathClickHandler = (
 	path: string,
+	options?: { title?: string },
 ) => Promise<boolean | void> | boolean | void;
 
 /** Convert file:// URLs to local paths for in-app preview routing. */
@@ -1209,6 +1217,11 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 						onAnswer={onQuestionAnswer}
 					/>
 				</motion.div>
+			);
+		}
+		if (segment.type === "artifact") {
+			return (
+				<MailDraftCard key={`artifact-${index}`} artifact={segment.artifact} autoOpen={Boolean(isStreaming)} onOpen={onFilePathClick} />
 			);
 		}
 		if (segment.type === "diff-artifact") {

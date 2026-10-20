@@ -99,6 +99,18 @@ copy. Marketing footers are automatically inserted: the Postmark Broadcast
 token in both formats, or Gmail's `Unsubscribe: mailto:<sender>?subject=unsubscribe`
 and matching HTML link. Shared shell/signature links are not campaign CTAs.
 
+### Show a draft in the DenchClaw panel
+
+After `draft ... --apply` succeeds, end the reply with an artifact block naming the saved message id. DenchClaw shows a card in chat, opens the draft in the content panel while the reply streams in, and lists it under Mail > Drafts. The panel reads `mail_message`, so only a persisted draft can be shown; never paste copy into the block.
+
+````
+```artifact
+{"kind":"mail_draft","id":"<message id from draft --apply>"}
+```
+````
+
+Preparing a revision creates a new draft id; emit a new block for it. The panel is read-only: approval and sending stay in this CLI. Keep the reply's own summary (ask count, holds, approval status) beside the block.
+
 ### Dynamic one-offs without HTML
 
 Prefer a catalogue template when it fits. Otherwise use semantic blocks, not
