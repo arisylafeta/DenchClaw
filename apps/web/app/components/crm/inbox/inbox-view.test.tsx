@@ -35,10 +35,15 @@ describe("merged mail", () => {
   it("switches all five views and loads the matching shared-store APIs", async () => {
     render(<InboxView />);
     expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute("aria-selected", "true");
-    for (const label of ["Campaigns", "Drafts", "Sent", "Follow-ups", "Conversations"]) {
-      fireEvent.click(screen.getByRole("tab", { name: label }));
-      expect(screen.getByRole("tabpanel", { name: label })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Inbox" })).toHaveAttribute("aria-selected", "true");
+    for (const label of ["Drafts", "Sent", "Conversations"]) { expect(within(screen.getByRole("tablist", { name: "Inbox folders" })).getByRole("tab", { name: label })).toBeInTheDocument(); }
+    for (const [tab, panel] of [["Drafts", "Drafts"], ["Sent", "Sent"], ["Campaigns", "Campaigns"], ["Follow-ups", "Follow-ups"], ["Inbox", "Conversations"]]) {
+      fireEvent.click(screen.getByRole("tab", { name: tab }));
+      expect(screen.getByRole("tabpanel", { name: panel })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("tablist", { name: "Inbox folders" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Campaigns" }));
+    expect(screen.queryByRole("tablist", { name: "Inbox folders" })).not.toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/messages?"), expect.anything()));
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/campaigns?"), expect.anything());
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/mail/followups?"), expect.anything());
