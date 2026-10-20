@@ -99,12 +99,12 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
           {entry.title}
           {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
         </p>
+        <time className="mt-0.5 block text-[11px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
+          {shortDate(entry.occurred_at.slice(0, 10))}
+        </time>
         <div className="mt-0.5 flex items-baseline gap-2 pr-6">
           <span className="text-[11.5px] font-medium" style={{ color: "var(--bt-muted)" }}>{label}</span>
           <span className="text-[11.5px]" style={{ color: "var(--bt-muted)" }}>{shortDescription(entry, label, state)}</span>
-          <time className="ml-auto shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
-            {shortDate(entry.occurred_at.slice(0, 10))}
-          </time>
         </div>
         {open && body && (
           <p className="mt-2 whitespace-pre-wrap text-[13px] leading-snug" style={{ color: "var(--bt-text-2)" }}>{body}</p>
@@ -139,7 +139,7 @@ export function Story({ activity, onOpenTrade, onOpenSupply }: {
     return () => cancelAnimationFrame(frame);
   }, []);
   return (
-    <ol className="flex flex-col">
+    <ol className="flex flex-col px-2 sm:px-3">
       {activity.map((entry, index) => (
         <StoryEntry key={entry.id} entry={entry} last={index === activity.length - 1}
           animate={animate} delay={Math.min(index * 50, 400)}
