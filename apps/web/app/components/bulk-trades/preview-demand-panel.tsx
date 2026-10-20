@@ -1,5 +1,6 @@
 "use client";
 
+import { ClipboardList, FileText, Layers, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { useRegistry } from "./use-registry";
@@ -91,6 +92,7 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
 }
 
 const TABS = ["Story", "Details", "Documents", "Supply matching"];
+const TAB_ICONS = { Story: ScrollText, Details: ClipboardList, Documents: FileText, "Supply matching": Layers };
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
   demand: Demand;
@@ -158,6 +160,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         <DemandHeader demand={demand} supply={supply} actions={actions("Overview")} onBack={onClose} />
         <SheetTabs
           tabs={TABS}
+          icons={TAB_ICONS}
           labels={{ "Supply matching": supply ? `Matches · ${supply.totalGroups}` : "Matches" }}
           value={tab}
           onChange={setTab}

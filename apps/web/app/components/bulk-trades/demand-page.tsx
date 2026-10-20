@@ -1,5 +1,6 @@
 "use client";
 
+import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import type { BulkTradesRoute } from "@/lib/bulk-trades-url";
@@ -82,11 +83,13 @@ export function SheetTabs({
   value,
   onChange,
   labels,
+  icons,
 }: {
   tabs: string[];
   value: string;
   onChange: (tab: string) => void;
   labels?: Record<string, string>;
+  icons?: Record<string, LucideIcon>;
 }) {
   return (
     <nav
@@ -100,12 +103,13 @@ export function SheetTabs({
           type="button"
           aria-pressed={value === tab}
           onClick={() => onChange(tab)}
-          className={`${rowFocus} border-b-2 py-3 text-[13px] font-medium`}
+          className={`${rowFocus} inline-flex items-center gap-1.5 border-b-2 py-3 text-[13px] font-medium`}
           style={{
             borderColor: value === tab ? "var(--bt-accent)" : "transparent",
             color: value === tab ? "var(--bt-text)" : "var(--bt-muted)",
           }}
         >
+          {icons?.[tab] && (() => { const Icon = icons[tab]; return <Icon size={14} aria-hidden="true" />; })()}
           {labels?.[tab] ?? tab}
         </button>
       ))}

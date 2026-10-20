@@ -5,7 +5,7 @@ import { FileText, Link2, Paperclip, Trash2 } from "lucide-react";
 import { DIRECTION_LABEL, DOC_STATES, STATE_LABEL, documentSection, type DocState, type ListingDocument } from "@/lib/bulk-documents";
 import type { Registry } from "@/lib/bulk-registry";
 import { isImage, shortDate, type NeededFor } from "@/lib/bulk-trade-details";
-import { ErrorText, FormField, Modal, buttonClass, buttonStyle, darkButtonClass, darkButtonStyle, request, useForm } from "./trade-ui";
+import { ErrorText, request } from "./trade-ui";
 import { useRegistry } from "./use-registry";
 
 const docsUrl = (listingId: string, path = "") => `/api/bulk-listings/${encodeURIComponent(listingId)}/documents${path}`;
@@ -114,43 +114,6 @@ function WantedCard({ listingId, item, onAdded, onError }: { listingId: string; 
   );
 }
 
-type Mode = "upload" | "link" | "request";
-const MODE_TITLE: Record<Mode, string> = { upload: "Upload a file", link: "Add a link", request: "Ask for a document" };
-
-function AddDialog({ listingId, mode, registry, onClose, onAdded }: { listingId: string; mode: Mode; registry: Registry; onClose: () => void; onAdded: (doc: ListingDocument) => void }) {
-  const picker = useRef<HTMLInputElement>(null);
-  const form = useForm({ title: "", doc_type: "Other", url: "", note: "", direction: "received" }, async (draft) => {
-    if (mode === "upload") {
-      const file = picker.current?.files?.[0];
-      if (!file) throw new Error("Choose a file.");
-      const body = new FormData();
-      body.set("file", file); body.set("title", draft.title.trim() || file.name); body.set("doc_type", draft.doc_type); body.set("direction", draft.direction);
-      if (draft.note.trim()) body.set("note", draft.note.trim());
-      onAdded((await request<{ document: ListingDocument }>(docsUrl(listingId), { method: "POST", body })).document);
-      return;
-    }
-    if (!draft.title.trim()) throw new Error("Give it a title.");
-    onAdded((await request<{ document: ListingDocument }>(docsUrl(listingId), { method: "POST", body: JSON.stringify({
-      title: draft.title.trim(), doc_type: draft.doc_type, direction: draft.direction, note: draft.note.trim() || null,
-      ...(mode === "link" ? { url: draft.url.trim(), state: draft.direction === "received" ? "received" : "sent" } : { state: "needed" }),
-    }) })).document);
-  });
-  return (
-    <Modal title={MODE_TITLE[mode]} onClose={onClose} onSubmit={form.submit}
-      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>{form.saving ? "Saving" : "Save"}</button>}>
-      {mode === "upload" && <FormField label="File (up to 25 MB)"><input ref={picker} type="file" required className="text-sm" /></FormField>}
-      <FormField label="Title">{form.input("title", { autoFocus: mode !== "upload", placeholder: mode === "request" ? "Toyota pack datasheet" : "" })}</FormField>
-      {mode === "link" && <FormField label="Link">{form.input("url", { type: "url", required: true, placeholder: "https://" })}</FormField>}
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label="Type">{form.select("doc_type", registry.documentTypes)}</FormField>
-        {mode !== "request" && <FormField label="From">{form.select("direction", ["received", "sent", "prepared"], DIRECTION_LABEL)}</FormField>}
-      </div>
-      <FormField label="Note">{form.input("note", { placeholder: "Optional" })}</FormField>
-      <ErrorText error={form.error} />
-    </Modal>
-  );
-}
-
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
@@ -168,7 +131,6 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
   const registry = useRegistry();
   const [docs, setDocs] = useState<ListingDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState<Mode | null>(null);
   const load = useCallback(async () => {
     try { setDocs((await request<{ documents: ListingDocument[] }>(docsUrl(listingId))).documents); setError(null); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not load documents."); }
@@ -192,12 +154,7 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
   const card = (doc: ListingDocument) => <DocCard key={doc.id} listingId={listingId} doc={doc} onChange={upsert} onRemove={remove} onError={setError} />;
   return (
     <div className="flex w-full flex-col gap-6" data-documents>
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={`${buttonClass} !h-8`} style={buttonStyle} onClick={() => setAdding("upload")}>Upload</button>
-        <button type="button" className={`${buttonClass} !h-8`} style={buttonStyle} onClick={() => setAdding("link")}>Add link</button>
-        <button type="button" className={`${buttonClass} !h-8`} style={buttonStyle} onClick={() => setAdding("request")}>Ask for a document</button>
-        <ErrorText error={error} />
-      </div>
+      <ErrorText error={error} />
       {sections.needed.length + required.length > 0 && (
         <Section title="Needed" count={sections.needed.length + required.length}>
           {sections.needed.map(card)}
@@ -206,8 +163,7 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
       )}
       {sections.received.length > 0 && <Section title="Received" count={sections.received.length}>{sections.received.map(card)}</Section>}
       {sections.ours.length > 0 && <Section title="Ours" count={sections.ours.length}>{sections.ours.map(card)}</Section>}
-      {docs.length + required.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No documents yet. Upload a file, add a link, or ask for one.</p>}
-      {adding && <AddDialog listingId={listingId} mode={adding} registry={registry} onClose={() => setAdding(null)} onAdded={(doc) => { upsert(doc); setAdding(null); }} />}
+      {docs.length + required.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No documents yet.</p>}
     </div>
   );
 }

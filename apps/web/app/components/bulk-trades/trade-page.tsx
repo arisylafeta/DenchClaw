@@ -1,5 +1,6 @@
 "use client";
 
+import { Activity, ClipboardList, FileText, MessageCircle, Users, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { WhatsappContext } from "../crm/whatsapp-context";
 import { HOLD_STAGE, TRADE_STAGES, holdLabel, type BulkTrade, type TradeOwner, type TradePatch, type TradeStage } from "@/lib/bulk-trades";
@@ -14,6 +15,7 @@ import { ProposalRow } from "./proposal-row";
 import { ErrorText, buttonClass, buttonStyle, request, tradeUrl } from "./trade-ui";
 
 type Tab = "buyers" | "details" | "documents" | "activity" | "whatsapp";
+const TAB_ICONS: Record<Tab, LucideIcon> = { buyers: Users, details: ClipboardList, documents: FileText, activity: Activity, whatsapp: MessageCircle };
 
 type Props = {
   tradeId: string;
@@ -83,6 +85,7 @@ export function TradePage({ tradeId, owners, today, onBack, onTradeSaved, onOpen
         ? { borderColor: "var(--bt-text)", color: "var(--bt-text)", fontWeight: 600 }
         : { borderColor: "transparent", color: "var(--bt-muted)", fontWeight: 500 }}
     >
+      {(() => { const Icon = TAB_ICONS[value]; return <Icon size={14} aria-hidden="true" className="mr-1.5 inline" />; })()}
       {label}
       {value === "activity" && !!detail.proposals?.length && (
         <span className="ml-2 px-1.5 py-0.5 text-xs" style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>

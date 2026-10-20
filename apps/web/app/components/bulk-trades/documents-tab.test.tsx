@@ -32,22 +32,11 @@ describe("DocumentsTab", () => {
     expect(screen.queryByText("BMS or test report")).not.toBeInTheDocument();
   });
 
-  it("asks for a document, and a link opens in a new tab", async () => {
-    const created = doc({ id: "n2", title: "NDA", doc_type: "NDA", state: "needed", url: null });
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "POST" ? { document: created } : { documents: [doc({ id: "l1", title: "Granola call notes" })] })));
-    vi.stubGlobal("fetch", fetchMock);
+  it("opens a link in a new tab and has no add buttons", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ documents: [doc({ id: "l1", title: "Granola call notes" })] }))));
     render(<DocumentsTab listingId="d1" wantsRequired={false} />);
     expect(await screen.findByRole("link", { name: "Granola call notes" })).toHaveAttribute("target", "_blank");
-
-    await userEvent.click(screen.getByRole("button", { name: "Ask for a document" }));
-    const dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByLabelText("Title"), "NDA");
-    await userEvent.selectOptions(within(dialog).getByLabelText("Type"), "NDA");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/documents", expect.objectContaining({
-      method: "POST", body: JSON.stringify({ title: "NDA", doc_type: "NDA", direction: "received", note: null, state: "needed" }),
-    })));
-    expect(await screen.findByRole("heading", { name: "Needed · 1" })).toBeInTheDocument();
+    for (const name of ["Upload", "Add link", "Ask for a document"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
   });
 
   it("marks a required type as requested without a file", async () => {
