@@ -203,7 +203,9 @@ const LEFT_SIDEBAR_FULL_MIN = 200;
 const LEFT_SIDEBAR_FULL_DEFAULT = 260;
 const LEFT_SIDEBAR_MIN = LEFT_SIDEBAR_COMPACT_WIDTH;
 const LEFT_SIDEBAR_MAX = 480;
-const CENTER_PANEL_MIN = 300;
+const CENTER_PANEL_MIN = 480;
+/** Mail drafts read like a letter: open them at a compact width, not full-bleed. */
+const MAIL_DRAFT_PANEL_WIDTH = 600;
 const RIGHT_PANEL_MIN = 360;
 const RIGHT_PANEL_MAX = 2000;
 const STORAGE_LEFT = "dench-workspace-left-sidebar-width";
@@ -1419,7 +1421,7 @@ function WorkspacePageInner() {
 
   // Open the right panel and widen it so the chat stays at its min width.
   // Used when the user clicks something that needs the right panel to be visible.
-  const ensureRightPanelOpenWide = useCallback(() => {
+  const ensureRightPanelOpenWide = useCallback((options?: { width?: number }) => {
     showContent();
     if (typeof window === "undefined") {
       setRightPanelCollapsed(false);
@@ -1427,9 +1429,9 @@ function WorkspacePageInner() {
     }
     const totalWidth = layoutRef.current?.clientWidth ?? window.innerWidth;
     const ideal = totalWidth - reservedLeftSidebarWidth - CENTER_PANEL_MIN;
-    const wideTarget = clamp(ideal, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX);
+    const wideTarget = clamp(options?.width ? Math.min(ideal, options.width) : ideal, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX);
     setRightPanelCollapsed(false);
-    setRightPanelWidth((current) => Math.max(current, wideTarget));
+    setRightPanelWidth((current) => (options?.width ? wideTarget : Math.max(current, wideTarget)));
   }, [reservedLeftSidebarWidth, showContent]);
 
   const handleNavigate = useCallback(
@@ -1670,7 +1672,7 @@ function WorkspacePageInner() {
       // Mail draft artifacts open as their own content tab, not as a file.
       if (parseMailDraftPath(inputPath)) {
         openTabForNode({ path: inputPath, name: options?.title || "Email draft", type: "folder" }, { preview: false });
-        ensureRightPanelOpenWide();
+        ensureRightPanelOpenWide({ width: MAIL_DRAFT_PANEL_WIDTH });
         return true;
       }
 
