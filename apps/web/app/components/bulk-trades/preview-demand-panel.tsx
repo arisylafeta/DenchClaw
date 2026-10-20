@@ -209,7 +209,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       onEdit={() => setEditing(true)} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
   );
   return (
-    <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} mx-auto flex w-full min-w-0 max-w-[640px] flex-col gap-3`}>
+    <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} flex w-full min-w-0 flex-col gap-3`}>
       <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
         <button type="button" onClick={onClose} className={`${rowFocus} hover:underline`}>← Trades Preview</button>
       </nav>
