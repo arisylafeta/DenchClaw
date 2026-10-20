@@ -61,13 +61,11 @@ describe("demandFacts", () => {
     expect(byKey.location).toMatchObject({ label: "Deliver to", group: "Logistics" });
   });
 
-  it("shows the project context as facts, not as a separate block", () => {
+  it("leaves the agent-written context out of Details", () => {
     const facts = demandFacts(TEST_REGISTRY, { ...demand, context: { application: "stationary_storage", min_usable_energy_kwh_per_pack: 42,
-      repeat_supply_required: true, container_design_finalized: false, next_action: "ignored here", missing_documents: ["x"] } } as unknown as Demand);
-    const project = Object.fromEntries(facts.filter((f) => f.group === "Project").map((f) => [f.key, f.value]));
-    expect(project).toMatchObject({ application: "stationary storage", min_usable_energy: "42 kWh per pack", repeat_supply: "Required",
-      container_design: "Not final, reconfirm before sourcing", homogeneous: null });
-    expect(facts.some((f) => /next|missing|source/i.test(f.label))).toBe(false);
+      next_action: "ignored here", missing_documents: ["x"], sources: [] } } as unknown as Demand);
+    expect(facts.some((f) => /use|energy|next|missing|source|project/i.test(f.label))).toBe(false);
+    expect(facts.some((f) => f.group === "Project")).toBe(false);
   });
 
   it("flags a missing timeline as a gap only for requests", () => {

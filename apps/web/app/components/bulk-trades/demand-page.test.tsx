@@ -270,8 +270,8 @@ describe("Demand visualization", () => {
     );
     let sheet = screen.getByRole("region", { name: "Demand detail" });
     await userEvent.click(within(sheet).getByRole("button", { name: "Details" }));
-    expect(within(sheet).getByText("The ask")).toBeInTheDocument();
-    expect(within(sheet).getAllByText("Missing, ask the buyer").length).toBeGreaterThan(0);
+    // Nothing is recorded for this ask yet, so there is no empty "The ask" block.
+    expect(within(sheet).queryByText("The ask")).not.toBeInTheDocument();
     expect(
       within(sheet).getByRole("button", { name: "Edit demand" }),
     ).toBeInTheDocument();

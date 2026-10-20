@@ -35,32 +35,15 @@ const ago = (iso: string) => {
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
 function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
   const registry = useRegistry();
+  if (!registry) return null;
   return (
-    <section className="flex flex-col gap-3">
-      <h3 className={css.label}>The ask</h3>
-      {registry
-        ? <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
-        : <p className={css.note}>Loading…</p>}
+    <div className="flex flex-col gap-4">
+      <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>
       )}
-      {demand.source_quote && (
-        <p className="text-[13px]">
-          “{demand.source_quote}”{" "}
-          <span className={css.note}>
-            {[demand.source_label?.split(" · ")[0], demand.observed_on ? shortDate(demand.observed_on) : null].filter(Boolean).join(", ")}
-            {demand.source_url && <> · <a href={demand.source_url} target="_blank" rel="noreferrer" className="underline">open</a></>}
-          </span>
-        </p>
-      )}
-      {demand.note && (
-        <details className="text-[13px]">
-          <summary className="cursor-pointer" style={{ color: "var(--bt-muted)" }}>Internal notes</summary>
-          <p className="mt-2 whitespace-pre-wrap">{demand.note}</p>
-        </details>
-      )}
-    </section>
+    </div>
   );
 }
 

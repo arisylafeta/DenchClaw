@@ -33,7 +33,7 @@ export function iconForLabel(label: string): typeof Mail {
   }
 }
 
-const SUMMARY_LENGTH = 50;
+const SUMMARY_LENGTH = 280;
 
 /** The summary line: the first bit of what was actually recorded, not a generic label. Falls back when there's no body. */
 function summaryLine(entry: DemandActivity, label: string, state: string | null): string {
@@ -97,7 +97,7 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
         >
           <Icon size={13} />
         </span>
-        <time className="mt-1 whitespace-nowrap text-[10px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
+        <time className="mt-1 whitespace-nowrap text-[11px] font-bold" style={{ color: "var(--bt-text-2)" }} dateTime={entry.occurred_at}>
           {shortDate(entry.occurred_at.slice(0, 10))}
         </time>
         {!last && (
@@ -114,8 +114,8 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
           {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
         </p>
         <div className="mt-0.5 flex items-baseline gap-2 pr-6">
-          <span className="text-[11.5px] font-medium" style={{ color: "var(--bt-muted)" }}>{label}</span>
-          <span className="truncate text-[11.5px]" style={{ color: "var(--bt-muted)" }}>{summaryLine(entry, label, state)}</span>
+          <span className="shrink-0 text-[12px] font-semibold" style={{ color: "var(--bt-text-2)" }}>{label}</span>
+          <span className="line-clamp-3 text-[12.5px] leading-snug" style={{ color: "var(--bt-muted)" }}>{summaryLine(entry, label, state)}</span>
         </div>
         {open && body && (
           <p className="mt-2 whitespace-pre-wrap text-[13px] leading-snug" style={{ color: "var(--bt-text-2)" }}>{body}</p>

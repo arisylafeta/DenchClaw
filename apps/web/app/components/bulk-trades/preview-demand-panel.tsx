@@ -17,7 +17,7 @@ import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
 import { DemandHeader } from "./demand-header";
-import { PartyCard, type PartyCardProps } from "./party-card";
+import { PartyCard, type PartyChip } from "./party-card";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
@@ -35,32 +35,15 @@ const ago = (iso: string) => {
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
 function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
   const registry = useRegistry();
+  if (!registry) return null;
   return (
-    <section className="flex flex-col gap-3">
-      <h3 className={css.label}>The ask</h3>
-      {registry
-        ? <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
-        : <p className={css.note}>Loading…</p>}
+    <div className="flex flex-col gap-4">
+      <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>
       )}
-      {demand.source_quote && (
-        <p className="text-[13px]">
-          “{demand.source_quote}”{" "}
-          <span className={css.note}>
-            {[demand.source_label?.split(" · ")[0], demand.observed_on ? shortDate(demand.observed_on) : null].filter(Boolean).join(", ")}
-            {demand.source_url && <> · <a href={demand.source_url} target="_blank" rel="noreferrer" className="underline">open</a></>}
-          </span>
-        </p>
-      )}
-      {demand.note && (
-        <details className="text-[13px]">
-          <summary className="cursor-pointer" style={{ color: "var(--bt-muted)" }}>Internal notes</summary>
-          <p className="mt-2 whitespace-pre-wrap">{demand.note}</p>
-        </details>
-      )}
-    </section>
+    </div>
   );
 }
 
@@ -69,32 +52,24 @@ function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: 
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
-  const chips = [
+  const chips: PartyChip[] = [
     profile?.tier ? { label: `${profile.tier}-tier`, tone: "tier" as const } : null,
-    profile?.stage ? { label: profile.stage } : null,
-    profile?.owner ? { label: `Owner ${profile.owner}` } : null,
-  ].filter((chip): chip is { label: string; tone?: "tier" } => !!chip);
-  const rows: (PartyCardProps["rows"] extends (infer R)[] | undefined ? R | null : never)[] = [
+    profile?.stage ? { label: profile.stage, tone: "stage" as const } : null,
+    profile?.owner ? { label: `Owner ${profile.owner}`, tone: "owner" as const } : null,
+  ].filter((chip) => chip !== null);
+  const stats = [
     engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null,
+    others.length > 0 ? { label: "Other open asks", value: String(others.length) } : null,
+  ].filter((stat) => stat !== null);
+  const notes = [
     profile?.buyer_profile?.wants ? { label: "Usually buys", value: profile.buyer_profile.wants } : null,
-    others.length > 0 ? {
-      label: "Also asking for",
-      value: others.map((d, i) => (
-        <span key={d.id}>{i > 0 && ", "}
-          {onOpenDemand ? <button type="button" className={`${rowFocus} underline`} onClick={() => onOpenDemand(d.id)}>{d.product_family ?? d.wants.slice(0, 48)}</button>
-            : d.product_family ?? d.wants.slice(0, 48)}
-        </span>
-      )),
-    } : null,
     profile?.outreach_notes ? { label: "Notes", value: profile.outreach_notes } : null,
     profile?.past_issues ? { label: "Past issues", value: profile.past_issues, bad: true } : null,
-  ];
+  ].filter((note) => note !== null);
   return (
-    <div className="flex flex-col gap-4">
-      <PartyCard role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id}
-        contact={demand.contact} email={demand.email} chips={chips} rows={rows.filter((row) => row !== null)} />
-      <CompanyContext notes={demand.context_notes} />
-    </div>
+    <PartyCard role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id}
+      contact={demand.contact} email={demand.email} chips={chips} stats={stats} notes={notes}
+      related={{ label: "Also asking for", items: others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined })) }} />
   );
 }
 
@@ -202,7 +177,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy} leads={leads} />
       )}
       {tab === "Story" && (
-        <div className="flex max-w-[760px] flex-col gap-6">
+        <div className="flex w-full flex-col gap-6">
           {actions("Activity")}
           {(context?.mail ?? []).length > 0 && (
             <details>
