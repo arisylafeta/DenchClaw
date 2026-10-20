@@ -101,7 +101,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
         </dl>
 
         <article aria-label="Message body" className="rounded-lg border px-5 py-4" style={{ borderColor: "var(--color-border)", background: "#fff", color: "#1c1c1a" }}>
-          <MessageBody body={d.body_text} html={d.body_html} preview={null} />
+          <MessageBody body={d.body_text} html={d.body_html} preview={null} ownCopy />
         </article>
 
         {d.links.length > 0 && (

@@ -5,9 +5,10 @@ import { splitQuotedText } from "./quoted-message";
 import { prepareEmail } from "./sanitize-email";
 import styles from "./mail.module.css";
 
-export function MessageBody({ body, html, preview }: { body: string | null; html?: string | null; preview: string | null }) {
+/** `ownCopy`: our own prepared draft, so remote images load as the recipient will see them. Received mail keeps images blocked until the reader opts in. */
+export function MessageBody({ body, html, preview, ownCopy = false }: { body: string | null; html?: string | null; preview: string | null; ownCopy?: boolean }) {
   const text = body?.trim() || preview?.trim() || "";
-  if (html?.trim()) return <SandboxedHtmlBody key={html} html={html} />;
+  if (html?.trim()) return <SandboxedHtmlBody key={html} html={html} ownCopy={ownCopy} />;
   if (!text) return <p className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>(empty body)</p>;
   return <PlainTextBody text={text} />;
 }
@@ -24,11 +25,11 @@ function PlainTextBody({ text }: { text: string }) {
   </div>;
 }
 
-function SandboxedHtmlBody({ html }: { html: string }) {
+function SandboxedHtmlBody({ html, ownCopy }: { html: string; ownCopy: boolean }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(80);
   const [showQuoted, setShowQuoted] = useState(false);
-  const [loadImages, setLoadImages] = useState(false);
+  const [loadImages, setLoadImages] = useState(ownCopy);
   // DOM parsing is client-only: never inject unsanitised HTML during SSR.
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);

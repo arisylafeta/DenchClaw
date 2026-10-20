@@ -49,6 +49,14 @@ describe("MailDraftView", () => {
     render(<MailDraftView draftId="d1" />);
     expect(await screen.findByText("hidden@example.test")).toBeInTheDocument();
   });
+  it("loads remote images in our own draft without a privacy prompt", async () => {
+    respond({ ...draft, body_html: '<p>Hi</p><img src="https://www.rebattery.io/logo.png" alt="ReBattery">' });
+    const { container } = render(<MailDraftView draftId="d1" />);
+    await waitFor(() => expect(container.querySelector("iframe")).not.toBeNull());
+    expect(container.querySelector("iframe")!.getAttribute("srcdoc")).toContain('src="https://www.rebattery.io/logo.png"');
+    expect(container.querySelector("iframe")!.getAttribute("srcdoc")).toContain("img-src data: https:");
+    expect(screen.queryByText(/Images are hidden/)).toBeNull();
+  });
   it("reports a missing draft", async () => {
     respond({ error: "Not found" }, 404);
     render(<MailDraftView draftId="nope" />);
