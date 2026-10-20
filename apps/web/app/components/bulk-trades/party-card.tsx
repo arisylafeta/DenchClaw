@@ -5,14 +5,13 @@ import { buildEntryLink } from "@/lib/workspace-links";
 import { CompanyFavicon } from "../crm/company-favicon";
 import { PersonAvatar } from "../crm/person-avatar";
 
-const FREE_MAIL = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com"]);
-const domainOf = (email: string | null) => {
-  const domain = email?.split("@")[1]?.toLowerCase();
-  return domain && !FREE_MAIL.has(domain) ? domain : null;
-};
-
 const actionClass = "inline-flex h-8 items-center justify-center gap-1.5 rounded-none border px-2.5 text-[12px] font-medium hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]";
 const actionStyle = { background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" };
+
+export type PartyPerson = {
+  name: string | null; email: string | null; job_title: string | null; phone: string | null; linkedin_url: string | null;
+  company_name: string | null; company_domain: string | null; website: string | null;
+};
 
 export type PartyCardProps = {
   /** "Buyer" or "Seller". */
@@ -21,66 +20,71 @@ export type PartyCardProps = {
   name: string;
   companyId: string | null;
   personId: string | null;
-  /** The person we deal with. */
+  /** What the CRM knows about the person; the listing's contact and email stand in until it loads. */
+  person: PartyPerson | null;
   contact: string | null;
   email: string | null;
-  /** Small facts in one line under the name, e.g. A-tier, In conversation, Owner Alex. */
-  chips?: string[];
-  /** Figures in one line, e.g. Last heard 29 days ago. */
-  stats?: { label: string; value: string }[];
+  /** The few facts that matter, shown as small tiles: Stage, Owner, Last heard. */
+  glance?: { label: string; value: string }[];
   notes?: { label: string; value: React.ReactNode; bad?: boolean }[];
   related?: { label: string; items: { id: string; label: string; onOpen?: () => void }[] };
 };
 
-/**
- * The person on the other side of a listing, laid out like a CRM person header: avatar, name, email and company,
- * actions on the right, then what we know about them. Full width.
- */
-export function PartyCard({ role, name, companyId, personId, contact, email, chips = [], stats = [], notes = [], related }: PartyCardProps) {
+/** A compact CRM person header: avatar, name, email, role and company, actions, then what matters at a glance. */
+export function PartyCard({ role, name, companyId, personId, person, contact, email, glance = [], notes = [], related }: PartyCardProps) {
   const company = companyId ? buildEntryLink("company", companyId) : null;
-  const person = personId ? buildEntryLink("people", personId) : null;
-  const crm = person ?? company;
-  const shown = contact?.trim() || name;
-  const hasMore = chips.length > 0 || stats.length > 0 || notes.length > 0 || (related?.items.length ?? 0) > 0;
+  const profile = personId ? buildEntryLink("people", personId) : company;
+  const shown = person?.name?.trim() || contact?.trim() || name;
+  const mail = person?.email ?? email;
+  const companyName = person?.company_name ?? name;
+  const website = person?.website?.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const askRows = related && related.items.length > 0;
   return (
     <section aria-label={`${role} card`} className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-      <div className="flex flex-wrap items-start gap-3 px-4 py-3">
-        <PersonAvatar name={shown} seed={email ?? personId ?? name} size="lg" />
+      <div className="flex flex-wrap items-start gap-3 px-4 pb-3 pt-4">
+        <PersonAvatar name={shown} seed={mail ?? personId ?? name} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-[0.08em]" style={{ color: "var(--bt-muted)" }}>{role}</div>
-          <div className="text-[15px] font-semibold leading-tight">{crm ? <a href={crm} className="hover:underline">{shown}</a> : shown}</div>
+          <h3 className="text-[18px] font-semibold leading-tight tracking-[-0.01em]">
+            {profile ? <a href={profile} className="hover:underline">{shown}</a> : shown}
+          </h3>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: "var(--bt-text-2)" }}>
-            {email && <a href={`mailto:${email}`} className="truncate hover:underline">{email}</a>}
-            {contact && name !== contact && (
-              <span className="inline-flex items-center gap-1.5">
-                <CompanyFavicon domain={domainOf(email)} name={name} size="sm" />
-                {company ? <a href={company} className="hover:underline">{name}</a> : name}
-              </span>
-            )}
-            {chips.map((chip) => <span key={chip} className="border px-1.5 py-px" style={{ borderColor: "var(--bt-border)" }}>{chip}</span>)}
+            {mail && <a href={`mailto:${mail}`} className="truncate hover:underline">{mail}</a>}
+            {person?.job_title && <span>{person.job_title}</span>}
+            <span className="inline-flex items-center gap-1.5">
+              <CompanyFavicon domain={person?.company_domain} name={companyName} size="sm" />
+              {company ? <a href={company} className="hover:underline">{companyName}</a> : companyName}
+            </span>
+            {person?.phone && <a href={`tel:${person.phone}`} className="hover:underline">{person.phone}</a>}
+            {website && <a href={person!.website!} target="_blank" rel="noreferrer" className="hover:underline">{website}</a>}
+            {person?.linkedin_url && <a href={person.linkedin_url} target="_blank" rel="noreferrer" className="hover:underline">LinkedIn</a>}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {email && <a href={`mailto:${email}`} className={actionClass} style={actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</a>}
-          {crm && <a href={crm} className={actionClass} style={actionStyle}><ExternalLink size={14} aria-hidden="true" /> Open in CRM</a>}
+          {mail && <a href={`mailto:${mail}`} className={actionClass} style={actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</a>}
+          {profile && <a href={profile} className={actionClass} style={actionStyle}><ExternalLink size={14} aria-hidden="true" /> Open in CRM</a>}
         </div>
       </div>
-      {hasMore && (
-        <div className="flex flex-col gap-2 border-t px-4 py-3 text-[13px]" style={{ borderColor: "var(--bt-divider)" }}>
-          {stats.length > 0 && (
-            <div className="flex flex-wrap gap-x-6 gap-y-1">
-              {stats.map((stat) => <span key={stat.label}><span style={{ color: "var(--bt-muted)" }}>{stat.label} </span>{stat.value}</span>)}
+      {glance.length > 0 && (
+        <div className="grid gap-2 px-4 pb-3" style={{ gridTemplateColumns: `repeat(${Math.min(glance.length, 4)}, minmax(0, 1fr))` }}>
+          {glance.map((item) => (
+            <div key={item.label} className="border px-3 py-2" style={{ borderColor: "var(--bt-border)" }}>
+              <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: "var(--bt-muted)" }}>{item.label}</div>
+              <div className="mt-0.5 truncate text-[14px] font-semibold">{item.value}</div>
             </div>
-          )}
+          ))}
+        </div>
+      )}
+      {(notes.length > 0 || askRows) && (
+        <div className="mx-4 mb-4 flex flex-col gap-2 border px-3 py-2.5 text-[13px] leading-snug" style={{ borderColor: "var(--bt-border)" }}>
           {notes.map((note) => (
             <p key={note.label} style={note.bad ? { color: "var(--bt-red)" } : undefined}>
-              <span style={{ color: note.bad ? undefined : "var(--bt-muted)" }}>{note.label} </span>{note.value}
+              <span className="font-semibold">{note.label} </span>{note.value}
             </p>
           ))}
-          {related && related.items.length > 0 && (
+          {askRows && (
             <p>
-              <span style={{ color: "var(--bt-muted)" }}>{related.label} </span>
-              {related.items.map((item, index) => (
+              <span className="font-semibold">{related!.label} </span>
+              {related!.items.map((item, index) => (
                 <span key={item.id}>{index > 0 && ", "}
                   {item.onOpen ? <button type="button" className="underline" onClick={item.onOpen}>{item.label}</button> : item.label}
                 </span>

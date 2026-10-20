@@ -17,7 +17,7 @@ import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
 import { DemandHeader } from "./demand-header";
-import { PartyCard } from "./party-card";
+import { PartyCard, type PartyPerson } from "./party-card";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
@@ -25,6 +25,7 @@ type BuyerMail = { id: string; direction: "inbound" | "outbound"; subject: strin
 type BuyerContext = {
   buyer: { profile: BuyerProfile | undefined; engagement: BuyerEngagement | null; demand: Demand[] } | null;
   mail: BuyerMail[];
+  person?: PartyPerson | null;
 };
 
 const ago = (iso: string) => {
@@ -47,22 +48,25 @@ function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | nul
   );
 }
 
-/** The buyer, as a full-width person strip: who they are, where they stand, and a way into the CRM. */
+/** The buyer as a compact person card, like the CRM person page: who they are and where they stand. */
 function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: BuyerContext | null; onOpenDemand?: (id: string) => void }) {
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
-  const chips = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage, profile?.owner ? `Owner ${profile.owner}` : null]
-    .filter((chip) => chip !== null && chip !== undefined);
-  const stats = [engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null].filter((stat) => stat !== null);
+  const stage = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage].filter(Boolean).join(" · ");
+  const glance = [
+    stage ? { label: "Stage", value: stage } : null,
+    profile?.owner ? { label: "Owner", value: profile.owner } : null,
+    engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null,
+  ].filter((item) => item !== null);
   const notes = [
     profile?.buyer_profile?.wants ? { label: "Usually buys", value: profile.buyer_profile.wants } : null,
     profile?.outreach_notes ? { label: "Notes", value: profile.outreach_notes } : null,
     profile?.past_issues ? { label: "Past issues", value: profile.past_issues, bad: true } : null,
   ].filter((note) => note !== null);
   return (
-    <PartyCard role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id}
-      contact={demand.contact} email={demand.email} chips={chips} stats={stats} notes={notes}
+    <PartyCard role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id} person={context?.person ?? null}
+      contact={demand.contact} email={demand.email} glance={glance} notes={notes}
       related={{ label: "Also asking for", items: others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined })) }} />
   );
 }
@@ -121,7 +125,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   useEffect(() => { void loadSupply(); }, [loadSupply, demand.updated_at]);
   useEffect(() => {
     let cancelled = false;
-    void request<BuyerContext>(`${endpoint}/context`).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [] }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
+    void request<BuyerContext>(`${endpoint}/context`).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
     return () => { cancelled = true; };
   }, [endpoint]);
   const leads: MarketLead[] = [];
