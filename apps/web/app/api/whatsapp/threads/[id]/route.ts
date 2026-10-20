@@ -16,6 +16,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       id,
       Number(p.get("limit") ?? 50),
       Number(p.get("offset") ?? 0),
+      ...(p.get("tail") === "1" ? [true] : []),
     );
     return data ? Response.json(data) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (error) {

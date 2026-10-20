@@ -1,14 +1,16 @@
 "use client";
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Clock, FileText, Image as ImageIcon, Mic, Paperclip, Users } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, FileText, Image as ImageIcon, Mic, Paperclip, User, Users } from "lucide-react";
 import type { WhatsappConversationData, WhatsappMessage } from "@/lib/crm-postgres/whatsapp";
-import { initialsOf, whatsappChatLabel } from "@/lib/whatsapp-display";
+import { whatsappChatLabel } from "@/lib/whatsapp-display";
+import styles from "./whatsapp.module.css";
+import { Loading } from "../ui/shimmer";
 import { WhatsappTradeLinks } from "./whatsapp-trade-links";
 
 const pageSize = 50;
 const RUN_GAP_MS = 5 * 60 * 1000;
-const muted = { color: "var(--color-text-muted)" } as const;
-const border = { borderColor: "var(--color-border)" } as const;
+const SENDER_COLORS = ["#1fa855", "#53bdeb", "#e26ab6", "#ff7a8c", "#fa6533", "#a5b337", "#7f66ff", "#06cf9c", "#ffb02e"];
+const colorOf = (name: string) => SENDER_COLORS[[...name].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % SENDER_COLORS.length];
 
 const dayLabel = (d: Date) => {
   const today = new Date(); const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -45,95 +47,95 @@ function attachmentLabel(att: Record<string, unknown>) {
   return { kind, Icon: kind === "image" ? ImageIcon : kind === "audio" ? Mic : kind === "document" ? FileText : Paperclip };
 }
 
-function Bubble({ m, outbound, first, last, threadId }: { m: WhatsappMessage; outbound: boolean; first: boolean; last: boolean; threadId: string }) {
+function Bubble({ m, outbound, first, group, sender, threadId }: { m: WhatsappMessage; outbound: boolean; first: boolean; group: boolean; sender: string | null; threadId: string }) {
   const at = whenOf(m);
   const tombstone = Boolean(m.deleted_at);
   const att = !tombstone && m.attachment ? attachmentLabel(m.attachment) : null;
-  return <div id={`message-${m.id}`} className={`flex ${outbound ? "justify-end" : "justify-start"} ${first ? "mt-3" : "mt-0.5"}`}>
-    <article className="w-fit min-w-[84px] max-w-[min(88%,640px)] border px-3 py-1.5 sm:max-w-[min(78%,640px)]"
-      style={{ ...border, borderRadius: `${first ? 14 : 6}px ${first ? 14 : 6}px ${outbound ? (last ? 14 : 6) : 14}px ${outbound ? 14 : (last ? 14 : 6)}px`,
-        background: outbound ? "color-mix(in srgb, var(--color-accent-fill) 22%, var(--color-surface))" : "var(--color-surface)", opacity: tombstone ? 0.85 : 1 }}>
-      {m.reply_to_provider_id && <blockquote className="mb-1.5 border-l-2 px-2 py-0.5 text-[12px] leading-[18px]" style={{ borderColor: "var(--color-accent)", ...muted }}>
+  return <div id={`message-${m.id}`} className={`${styles.row} ${first ? styles.rowFirst : ""} ${outbound ? styles.rowOut : ""}`}>
+    <article className={`${styles.bubble} ${outbound ? styles.out : ""} ${first ? (outbound ? styles.tailOut : styles.tailIn) : ""}`}>
+      {first && !outbound && group && sender && <p className={styles.sender} style={{ color: colorOf(sender) }}>{sender}</p>}
+      {m.reply_to_provider_id && <blockquote className={styles.quote}>
         <span className="line-clamp-2">{m.reply_body || "Reply to an unavailable or removed message"}</span>
         {m.reply_to_message_id && <a className="underline" href={`#message-${m.reply_to_message_id}`}>Reply target</a>}
       </blockquote>}
       {tombstone
-        ? <p className="text-[13px] italic" style={muted}>Message deleted</p>
-        : <p className="whitespace-pre-wrap text-[14px] leading-[21px] [overflow-wrap:anywhere]" style={{ color: "var(--color-text)" }}>{m.body || (att ? "" : "Content unavailable")}</p>}
-      {att && <p className="mt-1 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px]" style={{ ...border, ...muted }}><att.Icon size={13} aria-hidden />{att.kind} · content not downloaded</p>}
-      <div className="mt-0.5 flex items-center justify-end gap-2 text-[11px] tabular-nums" style={muted}>
-        {m.edit_version > 0 && <span>Edited</span>}
+        ? <p className={`${styles.text} ${styles.tomb}`}>Message deleted</p>
+        : <p className={styles.text}>{m.body || (att ? "" : "Content unavailable")}</p>}
+      {att && <p className={styles.attach}><att.Icon size={14} aria-hidden />{att.kind} · content not downloaded</p>}
+      <span className={styles.meta}>
+        {m.edit_version > 0 && <span>Edited </span>}
         <time dateTime={at.toISOString()} title={`${at.toLocaleString("en-GB")}${m.timestamp_source === "capture" ? " · capture time, not sent time" : ""}`}>{clock(at)}{m.timestamp_source === "capture" ? "*" : ""}</time>
-      </div>
+      </span>
       <WhatsappTradeLinks threadId={threadId} messageId={m.id} />
     </article>
   </div>;
 }
 
-export function WhatsappConversation({ id }: { id: string }) {
+/** WhatsApp Web look for captured history. Read only. `embedded` fills a panel; otherwise it is a full page. */
+export function WhatsappConversation({ id, embedded = false, onClose }: { id: string; embedded?: boolean; onClose?: () => void }) {
   const [data, setData] = useState<WhatsappConversationData | null>(null);
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState<number | "tail">("tail");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const scroller = useRef<HTMLDivElement>(null);
+  const toEnd = useRef(true);
+  useEffect(() => { setData(null); setOffset("tail"); toEnd.current = true; }, [id]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError("");
-    fetch(`/api/whatsapp/threads/${encodeURIComponent(id)}?limit=${pageSize}&offset=${offset}`, { signal: controller.signal })
+    const position = offset === "tail" ? "tail=1" : `offset=${offset}`;
+    fetch(`/api/whatsapp/threads/${encodeURIComponent(id)}?limit=${pageSize}&${position}`, { signal: controller.signal })
       .then(async (r) => { if (!r.ok) { throw new Error(r.status === 404 ? "Chat not found" : "Could not load conversation"); } setData(await r.json()); })
       .catch((e) => { if (e.name !== "AbortError") { setError(e.message); } })
       .finally(() => { if (!controller.signal.aborted) { setLoading(false); } });
     return () => controller.abort();
   }, [id, offset]);
+  useEffect(() => { const el = scroller.current; if (el && data) { el.scrollTop = toEnd.current ? el.scrollHeight : 0; } }, [data]);
   const thread = data?.thread;
   const label = whatsappChatLabel({ id, kind: thread?.kind ?? "direct", name: thread?.name ?? thread?.subject, name_source: thread?.name_source });
   const runs = useMemo(() => groupRuns(data?.messages ?? []), [data]);
   const expiryUnavailable = data?.messages.some((m) => m.metadata.expiry_policy_unavailable === true);
   const status = data?.capture_status;
-  const Pager = ({ where }: { where: "top" | "bottom" }) => (offset > 0 || (data && data.messages.length >= pageSize)) ? <div className={`flex items-center justify-between py-2 ${where === "top" ? "" : "pt-4"}`}>
-    <button type="button" className="rounded-md border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-[var(--color-surface-hover)]" style={border} disabled={!offset || loading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>Earlier messages</button>
-    <button type="button" className="rounded-md border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-[var(--color-surface-hover)]" style={border} disabled={!data || data.messages.length < pageSize || loading} onClick={() => setOffset(offset + pageSize)}>Later messages</button>
-  </div> : null;
-  return <main className="mx-auto flex min-h-screen max-w-[920px] flex-col" style={{ background: "var(--color-surface)", color: "var(--color-text)" }}>
-    <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b px-5 py-3" style={{ ...border, background: "var(--color-surface)" }}>
-      <a href="/?crm=inbox&view=whatsapp" aria-label="Back to Inbox" className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)]" style={muted}><ArrowLeft size={16} aria-hidden /></a>
-      <span aria-hidden className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>
-        {thread?.kind === "group" ? <Users size={18} /> : initialsOf(label.text)}
-      </span>
+  const total = Number(thread?.message_count ?? 0);
+  const start = data?.offset ?? 0;
+  const hasEarlier = start > 0;
+  const hasLater = Boolean(data) && start + (data?.messages.length ?? 0) < total;
+  const go = (next: number, end: boolean) => { toEnd.current = end; setOffset(Math.max(0, next)); };
+  const group = thread?.kind === "group";
+  return <div className={`${styles.wa} ${styles.pane} ${embedded ? "" : "mx-auto min-h-screen max-w-[920px]"}`}>
+    <header className={styles.header}>
+      {(onClose || !embedded) && <button type="button" aria-label="Back to Inbox" onClick={onClose ?? (() => { window.location.href = "/?crm=inbox&view=whatsapp"; })} className="inline-flex h-8 w-8 items-center justify-center rounded-full" style={{ color: "var(--wa-muted)" }}><ArrowLeft size={18} aria-hidden /></button>}
+      <span aria-hidden className={styles.avatar} style={{ width: 40, height: 40 }}>{group ? <Users size={22} /> : <User size={22} />}</span>
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-[16px] font-semibold leading-6" title={label.hint}>{label.text}{label.inferred && <span className="ml-1 text-[12px] font-normal" style={muted}>~ inferred</span>}</h1>
-        <div className="flex flex-wrap items-center gap-x-3 text-[12px]" style={muted}>
-          <span>{thread?.kind === "group" ? "Group · shared context" : "1:1"}</span>
-          <span>Captured history · Read only</span>
-          {data && <span>{Number(thread?.message_count ?? data.messages.length).toLocaleString("en-GB")} messages</span>}
-        </div>
+        <h1 className={styles.name} title={label.hint}>{label.text}{label.inferred && <span className="ml-1.5 text-[12px]" style={{ color: "var(--wa-muted)" }}>~ inferred</span>}</h1>
+        <p className={styles.sub}>{group ? "Group · shared context" : "1:1"} · captured history · read only{total ? ` · ${total.toLocaleString("en-GB")} messages` : ""}</p>
       </div>
-      <a className="text-[12px] underline" style={muted} href="/whatsapp/identities">Identity links</a>
+      <a className="text-[12px] underline" style={{ color: "var(--wa-muted)" }} href="/whatsapp/identities">Identity links</a>
     </header>
-    <div className="flex-1 px-4 pb-10 pt-3 sm:px-6" style={{ background: "color-mix(in srgb, var(--color-text) 3%, var(--color-surface))" }}>
-      <aside aria-label="History limitations" className="mb-2 rounded-lg border px-3 py-2 text-[12px] leading-[18px]" style={{ ...border, ...muted, background: "var(--color-surface)" }}>
-        <span className="inline-flex items-center gap-1.5 font-medium" style={{ color: "var(--color-text)" }}><Clock size={13} aria-hidden />Captured history only</span>
-        {" "}Older messages and disconnected periods may be missing. Member observations are not a complete roster or exact membership dates.
+    <div ref={scroller} className={styles.scroller}>
+      <aside aria-label="History limitations" className={styles.notice}>
+        Captured history only. Older messages and disconnected periods may be missing. Member observations are not a complete roster or exact membership dates.
         {status && <> Saved capture state: {typeof status.state === "string" ? status.state : "unknown"}.{typeof status.gapSince === "string" && <> Disconnection gap since {status.gapSince}.</>}{status.lastGap != null && <> Last recorded gap: {JSON.stringify(status.lastGap)}.</>} This is an imported observation, not a live connection check.</>}
         {expiryUnavailable && <> Disappearing-message timers were not captured.</>}
-        <details className="mt-1"><summary className="cursor-pointer">Capture connection and gap status</summary>
-          {status ? <pre className="mt-1 overflow-auto whitespace-pre-wrap text-[11px]">{JSON.stringify(status, null, 2)}</pre> : <p className="mt-1">No imported connection status. Disconnection gaps are unknown.</p>}
+        <details><summary>Capture connection and gap status</summary>
+          {status ? <pre className="overflow-auto whitespace-pre-wrap text-left text-[11px]">{JSON.stringify(status, null, 2)}</pre> : <p>No imported connection status. Disconnection gaps are unknown.</p>}
         </details>
       </aside>
       <WhatsappTradeLinks threadId={id} />
-      {error && <p role="alert" className="py-3 text-[13px]" style={{ color: "var(--color-error)" }}>{error}</p>}
-      <Pager where="top" />
-      {loading && !data ? <p role="status" className="py-6 text-center text-[13px]" style={muted}>Loading conversation…</p> : null}
-      {data && !runs.length && !loading && <p className="py-10 text-center text-[13px]" style={muted}>No messages captured for this chat.</p>}
-      <div aria-busy={loading} className={loading ? "opacity-60" : undefined}>
+      {error && <p role="alert" className={styles.notice} style={{ color: "#b3261e" }}>{error}</p>}
+      {hasEarlier && <button type="button" className={styles.pager} disabled={loading} onClick={() => go(start - pageSize, true)}>Earlier messages</button>}
+      {loading && !data ? <Loading label="Loading conversation…" variant="chat" /> : null}
+      {data && !runs.length && !loading && <p className={styles.chip}>No messages captured for this chat</p>}
+      <div aria-busy={loading} style={{ opacity: loading && data ? 0.6 : 1 }}>
         {runs.map((run) => <Fragment key={run.key}>
-          {run.newDay && <div className="my-5 flex items-center gap-3 text-[11px] font-medium" style={muted}><span className="h-px flex-1" style={{ background: "var(--color-border)" }} />{dayLabel(whenOf(run.messages[0]))}<span className="h-px flex-1" style={{ background: "var(--color-border)" }} /></div>}
-          <section aria-label={`${run.sender} messages`} className="mt-3">
-            {(thread?.kind === "group" || !run.outbound) && <p className={`px-1 text-[11px] font-medium ${run.outbound ? "text-right" : ""}`} style={muted}>{run.sender}</p>}
-            {run.messages.map((m, i) => <Bubble key={m.id} m={m} outbound={run.outbound} first={i === 0} last={i === run.messages.length - 1} threadId={id} />)}
+          {run.newDay && <time className={styles.chip} dateTime={whenOf(run.messages[0]).toISOString()}>{dayLabel(whenOf(run.messages[0]))}</time>}
+          <section aria-label={`${run.sender} messages`}>
+            {run.messages.map((m, i) => <Bubble key={m.id} m={m} outbound={run.outbound} first={i === 0} group={group} sender={run.sender} threadId={id} />)}
           </section>
         </Fragment>)}
       </div>
-      <Pager where="bottom" />
+      {hasLater && <button type="button" className={styles.pager} disabled={loading} onClick={() => go(start + pageSize, false)}>Later messages</button>}
     </div>
-  </main>;
+    <footer className={styles.footer}>Read only. This is captured history, nothing can be sent from here.</footer>
+  </div>;
 }

@@ -24,7 +24,7 @@ export type WhatsappThread = {
   name?: string | null;
   name_source?: WhatsappNameSource;
   last_captured_at: string;
-  message_count: string;
+  message_count: string | number;
   shared_context: boolean;
   metadata: Record<string, unknown>;
 };
@@ -109,11 +109,16 @@ const NAME_JOIN = `left join whatsapp_identity i on i.account_id=t.account_id an
 const NAME_SQL = `coalesce(nullif(t.subject,''),nm.person_name,nullif(i.display_name,''),i.e164,nm.greeting)`;
 const NAME_SOURCE_SQL = `case when nullif(t.subject,'') is not null then 'subject' when nm.person_name is not null then 'person' when nullif(i.display_name,'') is not null then 'identity'
   when i.e164 is not null then 'phone' when nm.greeting is not null then 'greeting' end`;
-export async function whatsappConversation(id: string, limit = 50, offset = 0) {
+export async function whatsappConversation(id: string, limit = 50, offset = 0, tail = false) {
   whatsappPagination(limit, offset);
-  const [thread] = await queryPg<WhatsappThread>(`select t.*,${NAME_SQL} as name,${NAME_SOURCE_SQL} as name_source from whatsapp_thread t ${NAME_JOIN} where t.id=$1`, [id]);
+  const [thread] = await queryPg<WhatsappThread>(`select t.*,${NAME_SQL} as name,${NAME_SOURCE_SQL} as name_source,(select count(*)::int from whatsapp_message mc where mc.thread_id=t.id) as message_count from whatsapp_thread t ${NAME_JOIN} where t.id=$1`, [id]);
   if (!thread) {
     return null;
+  }
+  // A chat opens at its newest messages: tail starts the page so it ends at the latest one.
+  if (tail) {
+    const [{ count }] = await queryPg<{ count: string }>(`select count(*) from whatsapp_message where thread_id=$1`, [id]);
+    offset = Math.max(0, Number(count) - limit);
   }
   const messages = await queryPg<WhatsappMessage>(
     `select m.*, ${visibleBody("m")} as body,

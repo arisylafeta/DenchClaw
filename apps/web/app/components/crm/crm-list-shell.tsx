@@ -1,3 +1,4 @@
+import { Loading } from "../ui/shimmer";
 "use client";
 
 import { type ReactNode } from "react";
@@ -81,12 +82,6 @@ export function CrmEmptyState({
   );
 }
 
-export function CrmLoadingState({ label = "Loading…" }: { label?: string }) {
-  return (
-    <div className="flex items-center justify-center py-16">
-      <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-        {label}
-      </span>
-    </div>
-  );
+export function CrmLoadingState({ label = "Loading…", variant = "rows" }: { label?: string; variant?: "rows" | "cards" | "chat" | "detail" | "table" }) {
+  return <Loading label={label} variant={variant} />;
 }

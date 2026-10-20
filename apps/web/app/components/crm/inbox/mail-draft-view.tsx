@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, FileText } from "lucide-react";
 import type { MailDraft } from "@/lib/mail-types";
+import { Loading } from "../../ui/shimmer";
 import { MessageBody } from "./message-body";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; draft: MailDraft };
@@ -81,7 +82,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
   }, [draft]);
 
   if (load.status === "loading") {
-    return <div role="status" className="p-6 text-[13px]" style={{ color: "var(--color-text-muted)" }}>Loading draft…</div>;
+    return <Loading label="Loading draft…" variant="detail" />;
   }
   if (load.status === "error") {
     return <div role="alert" className="p-6 text-[13px]" style={{ color: "var(--color-error)" }}>{load.message}</div>;

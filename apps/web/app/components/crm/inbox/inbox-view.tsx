@@ -5,10 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { MailFilters, MailFollowup, MailMessageListRow, MailPage } from "@/lib/mail-types";
 import { WhatsappView } from "./whatsapp-view";
 import { MailLine } from "./mail-line";
+import { Loading } from "../../ui/shimmer";
 import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
 import { MailDraftsView } from "./mail-drafts-view";
-import { CampaignsView } from "../../campaigns/campaigns-view";
+import { CampaignsPanel } from "../../campaigns/campaigns-view";
 import { Mail, Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
@@ -68,7 +69,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
     <header className={styles.header}>
       <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Inbox</h1>
       <nav role="tablist" aria-label="Inbox sections" className={styles.tabs}>
-        {sections.map(({ key, label, view: target, views: group, icon: Icon }) => <button key={key} role="tab" aria-selected={group.includes(view)} className={`${styles.tab} inline-flex items-center gap-1.5`} onClick={() => { if (!group.includes(view)) { setFilters((current) => ({ ...current, view: target, q: "" })); setFiltersOpen(false); } }}><Icon size={14} aria-hidden />{label}</button>)}
+        {sections.map(({ key, label, view: target, views: group, icon: Icon }) => <button key={key} role="tab" aria-selected={group.includes(view)} className={`${styles.tab} inline-flex items-center gap-1.5`} onClick={() => { if (!group.includes(view)) { setFilters((current) => ({ ...current, view: target, q: "", thread: "" })); setFiltersOpen(false); } }}><Icon size={14} aria-hidden />{label}</button>)}
       </nav>
     </header>
     {section === "mail" && <div role="group" aria-label="Mail filters" className={styles.toolbar}>
@@ -87,7 +88,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
         <input aria-label="Search chats" placeholder="Search chats…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
       </label>
     </div>}
-    {section === "campaigns" && !campaignId && <div role="group" aria-label="Campaign filters" className={styles.toolbar}>
+    {section === "campaigns" && <div role="group" aria-label="Campaign filters" className={styles.toolbar}>
       <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
         <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
         <input aria-label="Search campaigns" placeholder="Search campaigns…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
@@ -109,8 +110,8 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
       </nav>}
       <section role="tabpanel" aria-label={views[view]} className="min-h-0 min-w-0 flex-1 overflow-auto">
         {view === "conversations" && <ConversationsView query={query} onSearchChange={(value) => update("q", value)} onOpenPerson={onOpenPerson} />}
-        {view === "campaigns" && <CampaignsView embedded campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} query="" search={filters.q ?? ""} status={campaignStatus} />}
-        {view === "whatsapp" && <WhatsappView query={`q=${encodeURIComponent(filters.q ?? "")}`} />}
+        {view === "campaigns" && <CampaignsPanel campaignId={campaignId} onOpenCampaign={setCampaignId} onBack={() => setCampaignId(null)} onNavigatePerson={onOpenPerson ?? (() => undefined)} search={filters.q ?? ""} status={campaignStatus} />}
+        {view === "whatsapp" && <WhatsappView query={`q=${encodeURIComponent(filters.q ?? "")}`} selectedId={filters.thread || undefined} onSelect={(chat) => update("thread", chat)} />}
         {view === "drafts" && <MailDraftsView query={query} onOpenDraft={onOpenDraft} />}
         {(view === "sent" || view === "followups") && <MailLogRows view={view} query={query} />}
       </section>
@@ -146,7 +147,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
     } catch (failure) {setError(failure instanceof Error ? failure.message : "Could not load mail.");}
   }
   return <div className="text-[13px]">
-    {loading && <p role="status" className="px-8 py-6" style={{ color: "var(--color-text-muted)" }}>Loading {views[view].toLowerCase()}…</p>}
+    {loading && <Loading label={`Loading ${views[view].toLowerCase()}…`} />}
     {error && <p role="alert" className="px-8 py-6">{error}</p>}
     {!loading && !error && !rows.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No {views[view].toLowerCase()} match these filters.</p>}
     <ul>{rows.map((row) => {

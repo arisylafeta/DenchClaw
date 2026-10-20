@@ -57,8 +57,8 @@ export function metricRate(counts: Counts, key: typeof METRIC_KEYS[number]): str
 }
 
 /** One compact strip of the seven mail-log metrics with counts and rates. */
-export function MetricRow({ counts, notTracked = [], size = "sm" }: { counts: Counts; notTracked?: readonly string[]; size?: "sm" | "lg" }) {
-  return <dl className="grid grid-cols-4 gap-x-4 gap-y-2 sm:grid-cols-7">
+export function MetricRow({ counts, notTracked = [], size = "sm", compact = false }: { counts: Counts; notTracked?: readonly string[]; size?: "sm" | "lg"; compact?: boolean }) {
+  return <dl className={`grid grid-cols-4 gap-x-4 gap-y-2 ${compact ? "" : "sm:grid-cols-7"}`}>
     {METRIC_KEYS.map((key) => {
       const value = counts[key]; const rate = metricRate(counts, key);
       return <div key={key} className="min-w-0">

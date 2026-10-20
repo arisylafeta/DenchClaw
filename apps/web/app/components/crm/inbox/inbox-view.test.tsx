@@ -128,16 +128,31 @@ describe("merged mail", () => {
     expect(within(row as HTMLElement).getByText(view === "sent" ? "— Sent body" : "— Draft body")).toBeInTheDocument();
     expect(within(row as HTMLElement).getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
-  it("opens a WhatsApp chat list from the upper tab", async () => {
-    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(String(url).includes("/api/whatsapp/inbox")
-      ? { threads: [{ id: "t1", kind: "direct", name: "Mathieu", last_captured_at: at, message_count: 4, last_body: "Collection is Thursday", last_direction: "inbound", last_at: at }] }
-      : { items: [], nextCursor: null })));
+  it("opens WhatsApp chats and campaigns as panels beside their lists", async () => {
+    const thread = { id: "t1", kind: "direct", name: "Mathieu", name_source: "person", subject: null, last_captured_at: at, message_count: 1, shared_context: false, metadata: {} };
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes("/api/mail/campaigns/c1")) { return new Response(JSON.stringify({ error: "detail unavailable in this test" }), { status: 404 }); }
+      const body = href.includes("/api/whatsapp/inbox") ? { threads: [{ id: "t1", kind: "direct", name: "Mathieu", name_source: "person", last_captured_at: at, message_count: 1, last_body: "Collection is Thursday", last_direction: "inbound", last_at: at }] }
+        : href.includes("/api/whatsapp/threads/t1") ? { thread, messages: [{ id: "m1", direction: "inbound", body: "Collection is Thursday", sender_name: null, sender_person_name: null, attachment: null, occurred_at: at, captured_at: at, timestamp_source: "provider", reply_to_provider_id: null, reply_to_message_id: null, reply_body: null, edit_version: 0, deleted_at: null, metadata: {} }], capture_status: null, history_complete: false, limit: 50, offset: 0 }
+        : href.includes("/api/mail/campaigns") ? { items: [{ id: "c1", name: "Battery offer", audience: "dismantlers", status: "sent", mail_state: "sent", recipient_count: 3, tracking_pending: 0, launched_at: at, last_invite_at: null, sent: 3, delivered: 3, bounced: 0, opened: 1, clicked: 0, unsubscribed: 0, replied: 0 }] }
+        : { items: [], nextCursor: null };
+      return new Response(JSON.stringify(body));
+    });
     render(<InboxView />);
     fireEvent.click(screen.getByRole("tab", { name: "WhatsApp" }));
-    expect(await screen.findByText("Collection is Thursday")).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "WhatsApp" })).toBeInTheDocument();
-    expect(screen.getByText("Mathieu").closest("a")).toHaveAttribute("href", "/whatsapp/threads/t1");
-    expect(screen.getByText("1:1 · 4")).toBeInTheDocument();
+    const chat = await screen.findByRole("button", { name: /Mathieu/ });
+    fireEvent.click(chat);
+    expect(await screen.findByRole("heading", { name: "Mathieu" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith("/api/whatsapp/threads/t1?limit=50&tail=1", expect.anything());
+    expect(screen.getByText("Read only. This is captured history, nothing can be sent from here.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mathieu/ })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Campaigns" }));
+    expect(await screen.findByText("Pick a campaign")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("link", { name: "Battery offer" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/mail/campaigns/c1", expect.anything()));
+    expect(await screen.findByText(/detail unavailable in this test/)).toBeInTheDocument();
+    expect(screen.queryByText("Pick a campaign")).not.toBeInTheDocument();
   });
   it("adapts the toolbar to each section: mail filters only on Mail, one search on Campaigns and WhatsApp", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [], threads: [], nextCursor: null })));
