@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown } from "lucide-react";
+import { Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown, ArrowUpRight } from "lucide-react";
 import type { DemandActivity } from "@/lib/crm-postgres/bulk-demand-activity";
 import { shortDate } from "@/lib/bulk-trade-details";
 
@@ -30,14 +30,17 @@ function iconFor(label: string): typeof Mail {
   }
 }
 
-/** One short line of what this kind of entry actually means, only from what's recorded. */
-function shortDescription(entry: DemandActivity, label: string, state: string | null): string {
+const SUMMARY_LENGTH = 50;
+
+/** The summary line: the first bit of what was actually recorded, not a generic label. Falls back when there's no body. */
+function summaryLine(entry: DemandActivity, label: string, state: string | null): string {
+  const body = entry.body?.trim().replace(/\s+/g, " ") ?? "";
+  if (body) return body.length > SUMMARY_LENGTH ? `${body.slice(0, SUMMARY_LENGTH).trimEnd()}…` : body;
   if (label === "Email") return state === "draft" ? "Drafted, not sent yet" : state === "sent" ? "Sent to the buyer" : "Email on this request";
   if (label === "Mail") return "Mail on this request";
   if (label === "WhatsApp") return "WhatsApp message";
   if (label === "Granola call") return "Notes from a recorded call";
   if (label === "Call") return "Phone call logged";
-  if (label === "Research") return "Findings from research";
   if (label === "Quote") return "Price or terms quoted";
   if (label === "Document") return "A prepared document";
   if (label === "Supply") return "Linked to a supplier offer";
@@ -48,11 +51,11 @@ function shortDescription(entry: DemandActivity, label: string, state: string | 
 
 /** The word on the evidence link, so it says what it opens. */
 function evidenceLabel(entry: DemandActivity): string {
-  if (entry.ref_kind === "lot") return "View trade";
-  if (entry.ref_kind === "supply") return "View offer";
-  if (entry.kind === "call") return "Open call";
-  if (entry.ref_kind === "email") return "Open email";
-  return "Open source";
+  if (entry.ref_kind === "lot") return "Trade";
+  if (entry.ref_kind === "supply") return "Offer";
+  if (entry.kind === "call") return "Call";
+  if (entry.ref_kind === "email") return "Email";
+  return "Source";
 }
 
 export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSupply }: {
@@ -72,6 +75,11 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
   const expandable = !!body || !!openable;
   const label = storyLabel(entry);
   const Icon = iconFor(label);
+  const openEvidence = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (entry.ref_kind === "lot") onOpenTrade(refId!);
+    else if (entry.ref_kind === "supply") onOpenSupply?.(refId!);
+  };
   return (
     <li className="group relative flex min-w-0 gap-3 py-3" style={{ opacity: quiet ? 0.7 : 1 }}>
       <div className="flex shrink-0 flex-col items-center" aria-hidden>
@@ -86,10 +94,13 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
         >
           <Icon size={13} />
         </span>
+        <time className="mt-1 whitespace-nowrap text-[10px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
+          {shortDate(entry.occurred_at.slice(0, 10))}
+        </time>
         {!last && (
           <span
             className="mt-1 w-px flex-1 origin-top transition-transform duration-500 ease-out"
-            style={{ background: "var(--bt-border)", minHeight: "20px", transitionDelay: `${delay ?? 0}ms`, transform: animate ? "scaleY(1)" : "scaleY(0)" }}
+            style={{ background: "var(--bt-border)", minHeight: "14px", transitionDelay: `${delay ?? 0}ms`, transform: animate ? "scaleY(1)" : "scaleY(0)" }}
           />
         )}
       </div>
@@ -99,22 +110,24 @@ export function StoryEntry({ entry, last, animate, delay, onOpenTrade, onOpenSup
           {entry.title}
           {state && <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{state}</span>}
         </p>
-        <time className="mt-0.5 block text-[11px]" style={{ color: "var(--bt-muted)" }} dateTime={entry.occurred_at}>
-          {shortDate(entry.occurred_at.slice(0, 10))}
-        </time>
         <div className="mt-0.5 flex items-baseline gap-2 pr-6">
           <span className="text-[11.5px] font-medium" style={{ color: "var(--bt-muted)" }}>{label}</span>
-          <span className="text-[11.5px]" style={{ color: "var(--bt-muted)" }}>{shortDescription(entry, label, state)}</span>
+          <span className="truncate text-[11.5px]" style={{ color: "var(--bt-muted)" }}>{summaryLine(entry, label, state)}</span>
         </div>
         {open && body && (
           <p className="mt-2 whitespace-pre-wrap text-[13px] leading-snug" style={{ color: "var(--bt-text-2)" }}>{body}</p>
         )}
         {open && openable && (entry.ref_kind === "lot" || entry.ref_kind === "supply" ? (
-          <span role="button" tabIndex={0} className="mt-1.5 inline-block text-[13px] underline" style={{ color: "var(--bt-link)" }}
-            onClick={(e) => { e.stopPropagation(); entry.ref_kind === "lot" ? onOpenTrade(refId) : onOpenSupply?.(refId); }}>{evidenceLabel(entry)}</span>
+          <span role="button" tabIndex={0} className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-medium"
+            style={{ background: "var(--bt-segment)", color: "var(--bt-text)" }} onClick={openEvidence}>
+            {evidenceLabel(entry)} <ArrowUpRight size={12} />
+          </span>
         ) : (
-          <a className="mt-1.5 inline-block text-[13px] underline" style={{ color: "var(--bt-link)" }} href={refId} target="_blank" rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}>{evidenceLabel(entry)}</a>
+          <a className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-medium"
+            style={{ background: "var(--bt-segment)", color: "var(--bt-text)" }} href={refId} target="_blank" rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}>
+            {evidenceLabel(entry)} <ArrowUpRight size={12} />
+          </a>
         ))}
         {open && !openable && refId && entry.ref_kind === "email" && (
           <p className="mt-1.5 text-[12px]" style={{ color: "var(--bt-muted)" }}>Email recorded; no link to open it.</p>
