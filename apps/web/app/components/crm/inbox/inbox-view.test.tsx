@@ -29,7 +29,7 @@ describe("merged mail", () => {
     navigation.params = new URLSearchParams("crm=inbox&view=conversations&crmOnly=true");
     render(<InboxView />);
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    await screen.findByRole("combobox", { name: "identity" });
+    await screen.findByRole("combobox", { name: "direction" });
     expect(navigation.replace).not.toHaveBeenCalled();
   });
   it("switches all five views and loads the matching shared-store APIs", async () => {
@@ -66,7 +66,7 @@ describe("merged mail", () => {
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(expect.stringContaining("showInternal=true"), expect.anything()));
   });
   it.each(["conversations", "sent"] as const)("shows counterparties instead of You in %s", async (view) => {
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ items: [
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [
       message({ id: "out", thread_id: "out", is_self: true, direction: "outbound", from_email: "admin@rebattery.io", to_emails: ["alex@rebattery.io", "buyer@example.test"], counterparty: { email: "buyer@example.test", name: "Synthetic Buyer" } }),
       message({ id: "internal", thread_id: "internal", is_self: true, from_email: "alex@rebattery.io", to_emails: ["ari@rebattery.io"], counterparty: { email: "ari@rebattery.io", name: null } }),
       message({ id: "missing", thread_id: "missing", from_email: null }),
@@ -80,18 +80,31 @@ describe("merged mail", () => {
   });
   it("maps all filters to API query parameters including whole-log scope", async () => {
     render(<InboxView initialView="sent" />);
-    expect(screen.queryByRole("combobox", { name: "identity" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("searchbox", { name: "Search mail" }), { target: { value: "battery" } });
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "identity" }), { target: { value: "ari" } });
+    fireEvent.click(screen.getByRole("button", { name: /^ari/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "event" }), { target: { value: "clicked" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "CRM-only" }));
-    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringMatching(/q=battery.*identity=ari.*event=clicked.*crmOnly=false/), expect.anything()));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/messages\?.*q=battery.*identity=ari.*event=clicked.*crmOnly=false/), expect.anything()));
     expect(screen.getByRole("button", { name: "Remove identity filter" })).toHaveTextContent("ari");
     fireEvent.click(screen.getByRole("button", { name: "Remove identity filter" }));
-    await waitFor(() => expect(new URLSearchParams(vi.mocked(fetch).mock.calls.at(-1)![0].toString().split("?")[1]).has("identity")).toBe(false));
+    await waitFor(() => expect(new URLSearchParams(vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/api/mail/messages")).at(-1)!.split("?")[1]).has("identity")).toBe(false));
     const query = new URLSearchParams(mailQuery({ q: "battery & pack", from: "a@example.test", to: "b@example.test", identity: "supply", direction: "outbound", transport: "postmark-broadcast", purpose: "marketing", state: "accepted", event: "opened", campaign: "campaign", thread: "thread", since: "2026-10-01", until: "2026-10-16", crmOnly: false }));
     expect(Object.fromEntries(query)).toEqual({ q: "battery & pack", from: "a@example.test", to: "b@example.test", identity: "supply", direction: "outbound", transport: "postmark-broadcast", purpose: "marketing", state: "accepted", event: "opened", campaign: "campaign", thread: "thread", since: "2026-10-01", until: "2026-10-16", crmOnly: "false" });
+  });
+  it("lists every account plus Other in the rail with counts, and Other filters to mail with no identity", async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(String(url).includes("/api/mail/identities")
+      ? { items: [{ identity_key: "alex", count: 3 }, { identity_key: null, count: 625 }] }
+      : { items: [], nextCursor: null })));
+    render(<InboxView />);
+    const rail = await screen.findByRole("navigation", { name: "Mail accounts" });
+    await waitFor(() => expect(within(rail).getByRole("button", { name: /^Other/ })).toHaveTextContent("625"));
+    expect(within(rail).getByRole("button", { name: /^alex/ })).toHaveTextContent("3");
+    expect(within(rail).getByRole("button", { name: /^All/ })).toHaveTextContent("628");
+    expect(within(rail).getByRole("button", { name: /^supply/ })).toHaveTextContent("0");
+    fireEvent.click(within(rail).getByRole("button", { name: /^Other/ }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/messages\?.*identity=none/), expect.anything()));
+    expect(within(rail).getByRole("button", { name: /^Other/ })).toHaveAttribute("aria-current", "true");
   });
   it("flags sending and unknown outcomes without offering a send action", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({ id: "unknown", state: "unknown", direction: "outbound" }), message({ id: "sending", state: "sending", direction: "outbound" })], nextCursor: null })));

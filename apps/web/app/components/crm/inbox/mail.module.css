@@ -48,3 +48,11 @@
 .replyButton:hover { background: var(--color-surface-hover); }
 .replyEditor { border: 1px solid var(--color-border); padding: 14px; background: var(--color-surface); font-family: "Inter", system-ui, sans-serif; }
 @media (max-width: 640px) { .threadHeader { padding: 14px 16px; } .threadScroller { padding: 0 16px 16px; } .messagePanel { padding-left: 0; } .threadTitle { font-size: 18px; } .messageSender { max-width: 135px; } }
+
+.body { display: flex; min-height: 0; flex: 1; }
+.rail { display: flex; width: 168px; flex-shrink: 0; flex-direction: column; gap: 2px; overflow-y: auto; border-right: 1px solid var(--color-border); padding: 12px 8px; }
+.railItem { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; padding: 6px 10px; color: var(--color-text-muted); font-size: 13px; text-align: left; }
+.railItem:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.railItem[aria-current="true"] { background: var(--color-surface-hover); color: var(--color-text); font-weight: 600; }
+.railCount { color: var(--color-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .body { flex-direction: column; } .rail { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--color-border); padding: 8px 16px; } .railItem { flex-shrink: 0; } }

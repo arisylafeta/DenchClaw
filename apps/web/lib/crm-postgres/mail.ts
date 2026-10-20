@@ -24,13 +24,17 @@ const LIST_COLUMNS = `m.id,m.thread_id,m.campaign_id,m.identity_key,m.direction,
   m.body_preview,m.sent_at,m.created_at,m.accepted_at,m.delivered_at,m.bounced_at,m.opened_at,m.clicked_at,m.replied_at,
   m.crm_visible,m.has_attachments,m.gmail_message_id`;
 
+// Filter value for mail with no identity_key (shown as "Other" in the account rail).
+export const NO_IDENTITY = 'none';
+
 function mailWhere(filters: MailFilters = {}) {
   const values: unknown[] = [];
   const where: string[] = [];
   const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
   for (const [key, column] of Object.entries({ identity: 'identity_key', campaign: 'campaign_id', thread: 'thread_id', direction: 'direction', transport: 'transport', purpose: 'purpose', state: 'state', mailboxOwnerId: 'mailbox_owner_id' })) {
     const value = filters[key as keyof MailFilters];
-    if (value) where.push(`m.${column} = ${bind(value)}`);
+    if (key === 'identity' && value === NO_IDENTITY) where.push('m.identity_key is null');
+    else if (value) where.push(`m.${column} = ${bind(value)}`);
   }
   if (filters.crmOnly && filters.view !== 'campaigns') where.push(filters.view === 'sent' ? '(m.crm_visible or m.campaign_id is not null)' : 'm.crm_visible');
   // Hide rebattery.io to rebattery.io mail by default. A message is internal when the sender and every recipient are on the exact domain; mixed messages stay visible.
@@ -87,6 +91,11 @@ export async function searchMail(filters: MailFilters = {}): Promise<MailPage<Ma
   const items = rows.slice(0, limit);
   const last = items.at(-1);
   return { items, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.cursor_timestamp, conversations ? last.thread_id : last.id])).toString('base64url') : null };
+}
+
+export async function mailIdentityCounts(filters: MailFilters = {}): Promise<{ identity_key: string | null; count: number }[]> {
+  const { values, where } = mailWhere({ ...filters, identity: undefined, cursor: undefined });
+  return queryPg<{ identity_key: string | null; count: number }>(`select m.identity_key,count(*)::int as count from mail_message m ${where.length ? `where ${where.join(' and ')}` : ''} group by m.identity_key order by count desc`, values);
 }
 
 export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnly = false) {
@@ -179,7 +188,8 @@ export async function listMailDrafts(userId: string, limit = 50, filters: MailDr
   const where = [`m.direction = 'outbound'`, `m.state in ${DRAFT_STATES}`, `(m.mailbox_owner_id is null or m.mailbox_owner_id = $1::uuid)`];
   for (const [key, column] of Object.entries({ identity: 'identity_key', purpose: 'purpose', transport: 'transport', from: 'from_email' })) {
     const value = filters[key as keyof MailDraftFilters];
-    if (value) where.push(`m.${column} = ${bind(value)}`);
+    if (key === 'identity' && value === NO_IDENTITY) where.push('m.identity_key is null');
+    else if (value) where.push(`m.${column} = ${bind(value)}`);
   }
   if (filters.state === 'draft' || filters.state === 'frozen') where.push(`m.state = ${bind(filters.state)}`);
   if (filters.to) { const p = bind(filters.to); where.push(`(${p} = any(m.to_emails) or ${p} = any(m.cc_emails) or ${p} = any(m.bcc_emails) or m.recipient_email = ${p})`); }
