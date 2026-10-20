@@ -3,7 +3,9 @@ import { priceLabel, specLines, volumeLabel } from "./bulk-demand";
 import { shortDate } from "./bulk-trade-details";
 
 /** What is being asked for, as a headline: "4 × Renault Zoe 41 kWh packs". The buyer is shown separately. */
-export function demandTitle(demand: Pick<Demand, "wants" | "product_family" | "buyer">): string {
+export function demandTitle(demand: Pick<Demand, "wants" | "product_family" | "buyer"> & Partial<Pick<Demand, "context">>): string {
+  const listingTitle = demand.context?.listing_title;
+  if (typeof listingTitle === "string" && listingTitle.trim()) return listingTitle.trim();
   const raw = (demand.wants || demand.product_family || demand.buyer).trim().replace(/\s+/g, " ");
   const first = raw.split(/(?<=[.!?])\s|\s[—–]\s|;\s/)[0].replace(/[.\s]+$/, "");
   const clipped = first.length > 90 ? `${first.slice(0, 87).replace(/\s+\S*$/, "")}…` : first;

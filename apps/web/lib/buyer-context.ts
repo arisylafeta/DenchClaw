@@ -2,6 +2,7 @@ import type { Parsed } from "./bulk-trade-details";
 
 /** Decision-relevant context. When supplied in a PATCH, replaces the full context object. */
 export type BuyerContext = {
+  listing_title?: string;
   application?: string;
   min_usable_energy_kwh_per_pack?: number;
   homogeneous_within_container?: boolean;
@@ -48,6 +49,7 @@ export function parseBuyerContext(value: unknown): Parsed<BuyerContext> {
   for (const [key, raw] of Object.entries(value)) {
     let valid = false;
     switch (key) {
+      case "listing_title":
       case "application":
       case "next_action":
         valid = typeof raw === "string";
