@@ -20,9 +20,7 @@ export const InboxToolbar = forwardRef<
     selectedCount: number;
     onClearSelection: () => void;
     onBulkAction: (action: "read" | "star" | "archive") => void;
-    onOpenShortcuts: () => void;
     hideSearch?: boolean;
-    unreadCount?: number;
   }
 >(function InboxToolbar(
   {
@@ -31,37 +29,24 @@ export const InboxToolbar = forwardRef<
     selectedCount,
     onClearSelection,
     onBulkAction,
-    onOpenShortcuts,
     hideSearch = false,
-    unreadCount = 0,
   },
   searchInputRef,
 ) {
   return (
     <div
       className="shrink-0 flex flex-col"
-      style={{ borderBottom: "1px solid var(--color-border)" }}
+      style={selectedCount > 0 || !hideSearch ? { borderBottom: "1px solid var(--color-border)" } : undefined}
     >
-      {/* Top row: search + shortcuts */}
-      <div className="flex items-center gap-2 px-4 py-2">
-        {!hideSearch && <Input
+      {!hideSearch && <div className="flex items-center gap-2 px-4 py-2">
+        <Input
           ref={searchInputRef as RefObject<HTMLInputElement>}
           placeholder="Search subject + sender…"
           value={search}
           onChange={(e: ChangeEvent<HTMLInputElement>) => onSearchChange(e.target.value)}
           className="h-8 flex-1 text-[13px]"
-        />}
-        {hideSearch && <span aria-label="Unread conversations" className="flex-1 text-[11px] font-normal" style={{ color: "var(--color-text-muted)" }}>{unreadCount} unread conversations</span>}
-        <button
-          type="button"
-          onClick={onOpenShortcuts}
-          title="Keyboard shortcuts (?)"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-surface-hover)]"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          <KbdIcon />
-        </button>
-      </div>
+        />
+      </div>}
 
       {/* Bulk action strip — only when one or more rows are checked */}
       {selectedCount > 0 && (
@@ -109,18 +94,5 @@ function BulkButton({
     >
       {children}
     </button>
-  );
-}
-
-function KbdIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="2" y="6" width="20" height="12" rx="2" />
-      <line x1="6" y1="10" x2="6.01" y2="10" />
-      <line x1="10" y1="10" x2="10.01" y2="10" />
-      <line x1="14" y1="10" x2="14.01" y2="10" />
-      <line x1="18" y1="10" x2="18.01" y2="10" />
-      <line x1="6" y1="14" x2="18" y2="14" />
-    </svg>
   );
 }

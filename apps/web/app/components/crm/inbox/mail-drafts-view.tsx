@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText } from "lucide-react";
 import type { MailDraftListRow } from "@/lib/mail-types";
-import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
+import { MailLine } from "./mail-line";
 import styles from "./mail.module.css";
 
 /** Prepared drafts waiting for review. Opening one shows it in the content panel. */
@@ -29,15 +28,11 @@ export function MailDraftsView({ query, onOpenDraft }: { query: string; onOpenDr
     {state === "ready" && !shown.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No drafts waiting. Ask mailvin to prepare one.</p>}
     <ul>{shown.map((row) => {
       const title = row.subject || "(No subject)";
+      const to = row.to_emails.join(", ") || "no recipient";
       return <li key={row.id}>
-        <button type="button" className={`${styles.logRow} flex w-full items-center gap-3 text-left`} aria-label={`Open draft: ${title}`} onClick={() => onOpenDraft?.(row.id, title)}>
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg" style={{ background: "var(--color-surface-hover)", color: "var(--color-text-secondary)" }}><FileText size={14} aria-hidden /></span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[14px]">{title}</span>
-            <span className="block truncate text-[12px]" style={{ color: "var(--color-text-muted)" }}>To {row.to_emails.join(", ") || "no recipient"}{row.identity_key ? ` · from ${row.identity_key}` : ""}</span>
-          </span>
-          <span className="shrink-0 text-[11px]" style={{ color: "var(--color-text-muted)" }} title={formatAbsoluteDate(row.created_at)}>{formatRelativeDate(row.created_at)}</span>
-        </button>
+        <MailLine id={row.id} prefix="To:" name={to} email={row.to_emails[0] ?? null} subject={title} snippet={row.body_preview} at={row.created_at}
+          label={`Open draft: ${title}`} onOpen={() => onOpenDraft?.(row.id, title)}
+          tag={row.identity_key ? <span className={styles.chip} title={`From ${row.identity_key}`}>{row.identity_key}</span> : null} />
       </li>;
     })}</ul>
   </div>;

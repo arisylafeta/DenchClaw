@@ -244,14 +244,12 @@ export function ConversationsView({
           >
             <InboxToolbar
               hideSearch
-              unreadCount={threads.filter((thread) => !thread.is_self && !readState.has(thread.id)).length}
               ref={searchInputRef}
               search={search}
               onSearchChange={onSearchChange}
               selectedCount={selection.set.size}
               onClearSelection={selection.clear}
               onBulkAction={handleBulkAction}
-              onOpenShortcuts={() => setHelpOpen(true)}
             />
             <div className="flex-1 min-h-0 overflow-y-auto">
               {error && (

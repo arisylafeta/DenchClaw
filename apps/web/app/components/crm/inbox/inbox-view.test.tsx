@@ -55,9 +55,9 @@ describe("merged mail", () => {
       {...message({ id: "campaign-reply", thread_id: "reply-thread", campaign_id: "campaign", subject: "Campaign reply" }),message_count:2},
     ], nextCursor: null })));
     render(<InboxView />);
-    expect(await screen.findByLabelText("Unread conversations")).toHaveTextContent("0 unread conversations");
     await screen.findByText("Synthetic conversation");
-    expect(screen.getByLabelText("Unread conversations")).toHaveTextContent("2 unread conversations");
+    expect(screen.queryByLabelText("Unread conversations")).toBeNull();
+    expect(screen.queryByTitle("Keyboard shortcuts (?)")).toBeNull();
     expect(screen.getByText("Campaign reply")).toBeInTheDocument();
     expect(screen.getByText("Latest outbound reply")).toBeInTheDocument();
     expect(screen.getByText("(7)")).toBeInTheDocument();
@@ -110,6 +110,17 @@ describe("merged mail", () => {
     fireEvent.click(within(rail).getByRole("button", { name: /^Other/ }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/messages\?.*identity=none/), expect.anything()));
     expect(within(rail).getByRole("button", { name: /^Other/ })).toHaveAttribute("aria-current", "true");
+  });
+  it.each(["sent", "drafts"] as const)("renders %s as single Gmail-style lines with a hover copy-id button", async (view) => {
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(String(url).includes("/api/mail/drafts")
+      ? { items: [{ id: "d1", state: "draft", identity_key: "alex", from_email: "alex@rebattery.io", to_emails: ["buyer@example.test"], subject: "Draft subject", created_at: at, body_preview: "Draft body" }] }
+      : { items: [message({ id: "s1", direction: "outbound", is_self: true, state: "accepted", subject: "Sent subject", body_preview: "Sent body", counterparty: { email: "buyer@example.test", name: "Synthetic Buyer" } })], nextCursor: null })));
+    render(<InboxView initialView={view} />);
+    const subject = await screen.findByText(view === "sent" ? "Sent subject" : "Draft subject");
+    const row = subject.closest("[data-mail-row]")!;
+    expect(row.querySelector('[data-mail-line="sender"]')).toBeTruthy();
+    expect(within(row as HTMLElement).getByText(view === "sent" ? "— Sent body" : "— Draft body")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
   it("flags sending and unknown outcomes without offering a send action", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [message({ id: "unknown", state: "unknown", direction: "outbound" }), message({ id: "sending", state: "sending", direction: "outbound" })], nextCursor: null })));
