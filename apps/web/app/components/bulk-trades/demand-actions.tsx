@@ -169,6 +169,7 @@ export function DemandActions({
   /** Trades Preview: the activity list reads as a story (labelled, dated, evidence-linked). */
   story?: boolean;
 }) {
+  const [activityLoading, setActivityLoading] = useState(true);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [kind, setKind] = useState<string>("note");
   const [title, setTitle] = useState("");
@@ -187,6 +188,7 @@ export function DemandActions({
   const [error, setError] = useState<string | null>(null);
   const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
   const loadActivity = useCallback(async () => {
+    setActivityLoading(true);
     try {
       const result = await request<{ activity: Activity[] }>(
         `${endpoint}/activity`,
@@ -194,6 +196,8 @@ export function DemandActions({
       setActivity(result.activity);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load activity.");
+    } finally {
+      setActivityLoading(false);
     }
   }, [endpoint]);
   // The status buttons and the timeline render as two instances (beside the ask, and in the Activity tab).
@@ -345,7 +349,7 @@ export function DemandActions({
             className="ml-1 font-normal"
             style={{ color: "var(--bt-muted)" }}
           >
-            {activity.length}
+            {story && activityLoading ? null : activity.length}
           </span>
         </h3>
         {!story && !logging && (
@@ -479,7 +483,7 @@ export function DemandActions({
           </button>
         </form>
         )}
-        {!activity.length && (
+        {!activity.length && !(story && activityLoading) && (
           <p
             className="py-5 text-center text-xs"
             style={{ color: "var(--bt-muted)" }}
@@ -488,7 +492,7 @@ export function DemandActions({
           </p>
         )}
         {story ? (
-          <Story activity={activity} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
+          <Story loading={activityLoading} activity={activity} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
         ) : (
         <ol className={styles.timeline}>
           {activity.map((entry) => {
