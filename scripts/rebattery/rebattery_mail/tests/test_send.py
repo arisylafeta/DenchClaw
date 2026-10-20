@@ -857,8 +857,9 @@ def test_edit_draft_purpose_drops_unsubscribe_and_refuses_marketing_or_sent(env)
     edited=draft.edit(NS(target=row['id'],purpose='personal',subject=None,body=None,html=None))['message']
     assert edited['purpose']=='personal' and 'nsubscribe' not in edited['body_text'] and 'nsubscribe' not in edited['body_html']
     assert edited['subject']=='Hi' and edited['to_emails']==[email]
-    with pytest.raises(Refused,match='html_required_with_body'):
+    with pytest.raises(Refused) as caught:
         draft.edit(NS(target=row['id'],purpose=None,subject=None,body='New',html=None))
+    assert caught.value.rule=='html_required_with_body'
     with pytest.raises(Refused,match='use_new_draft_for_marketing'):
         draft.edit(NS(target=row['id'],purpose='marketing',subject=None,body=None,html=None))
     send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),Fake())
