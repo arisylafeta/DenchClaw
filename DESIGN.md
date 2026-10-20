@@ -1,5 +1,22 @@
 # DenchClaw interface contract
 
+## Chat (approved, keep as is)
+
+The current chat is the approved reference for the whole product. Ari and Alex like it. Change it only to fix a bug or on their explicit request; new surfaces match it, not the other way round.
+
+- **Tokens, never raw values.** Light: `--color-bg #f5f5f4`, `--color-main-bg #fafaf9`, `--color-surface #fff`, `--color-text #1c1c1a`, `--color-text-muted #8a8a82`, `--color-border rgba(0,0,0,.08)`, `--color-surface-hover rgba(231,229,228,.65)`, accent `--color-accent #687000` (text and marks on light) and `--color-accent-fill #E7F346` (fills). Dark: bg `#222`, surface `#2e2e2e`, text `#f5f5f5`, accent `#E7F346`. Status colours: success `#16a34a`, warning `#d97706`, error `#dc2626`.
+- **Reading, not bubbles.** Assistant replies have no bubble or card: plain prose in the Bookerly serif (`chat-message-font`, `chat-prose`, 14px) on the main background. Only the user's message is a bubble: `--color-user-bubble`, `rounded-2xl rounded-br-sm`, right aligned, max 80% wide.
+- **Quiet work trace.** Tools and reasoning sit in a collapsed disclosure with a hairline rail at the left, 12px labels, mono 10px muted chips for durations, and a pixel-grid mark while running. Finished work collapses to its duration summary. Provider reasoning is muted 12px plain text.
+- **Composer pill.** One surface at the bottom: `rounded-3xl` (`rounded-2xl` compact), 1px `--color-border`, glass fill (`surface` 75% with 16px blur and 180% saturate), a very soft `0 0 32px rgba(0,0,0,.07)` shadow, border strengthens on focus. When the agent needs something (questions, approvals, subagents, tasks) the pill switches to a gradient from `--color-surface-hover` at the top into `--color-bg`, and those items dock inside it, borderless, above the input.
+- **Docked items are flat.** Questions, approvals, subagents and the task stepper share the composer surface: no card border, no shadow, no decorative icons, 12 to 13px type, one accent for the active state, status marks are flat solid dots or checks, motion is opacity or height only and respects reduced motion.
+- **Shape and density.** Compact rows, restrained radii (8 to 12px controls, pill for composer), 12px muted secondary text, the lucide icon set at 12 to 14px. One accent, one focal element per area.
+- **Do not add:** gradient washes outside the composer dock, nested bordered cards, heavy shadows, entrance animations on every block, tracked all-caps eyebrows, arrow-suffixed links, a second typeface.
+- **Quality floor.** Works at 390px with no horizontal overflow, visible keyboard focus, 4.5:1 text contrast, about 44px touch targets on phones, reduced motion honoured.
+
+## Agent-drawn visuals
+
+Agents may answer with a ```` ```visual ```` fence (SVG or HTML) that renders in a sandboxed, themed iframe inside the transcript (`chat-native/visual-block.tsx`). Drawings use the tokens above, flat fills only, and never post on their own: `sendPrompt` only offers a Send button.
+
 ## Chat sidebar
 
 The sidebar helps Ari and Alex find the right conversation without mixing direct chats with background work. Match the existing CRM shell, avatars and compact neutral styling rather than introducing a new theme.
