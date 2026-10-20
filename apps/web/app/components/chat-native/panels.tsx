@@ -6,7 +6,7 @@ import type { SubagentNode } from "@/lib/hermes-chat/subagents";
 import { isTerminalSubagent } from "@/lib/hermes-chat/subagents";
 import type { NativeTranscriptCallbacks } from "./types";
 import { Check, ChevronRight, CircleAlert } from "lucide-react";
-import { PixelGrid } from "./thinking";
+import { ProfileAvatar } from "../workspace/profile-avatar";
 import { buttonClass, cardClass, chipClass, Elapsed } from "./tool-run";
 
 export interface SubagentCardProps {
@@ -14,11 +14,13 @@ export interface SubagentCardProps {
   callbacks: Pick<NativeTranscriptCallbacks, "onSubagentTail" | "onSubagentSteer" | "onSubagentInterrupt">;
   tailText?: string;
   tails?: Readonly<Record<string, string>>;
+  /** The parent chat's profile; subagents without their own profile inherit it. */
+  profile?: string | null;
 }
 const compact = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value);
 const actionClass = "rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-2 disabled:opacity-40";
 /** One subagent: a single line (goal, status, time) that opens into stats, latest activity and controls. No per-agent trace. */
-export function SubagentCard({ agent, callbacks, tailText, tails }: SubagentCardProps) {
+export function SubagentCard({ agent, callbacks, tailText, tails, profile }: SubagentCardProps) {
   const [text, setText] = useState("");
   const [feedback, setFeedback] = useState("");
   const [steering, setSteering] = useState(false);
@@ -33,12 +35,13 @@ export function SubagentCard({ agent, callbacks, tailText, tails }: SubagentCard
   const latest = terminal ? agent.summary : agent.activity.at(-1)?.text;
   const stats = [agent.toolCount ? `${agent.toolCount} ${agent.toolCount === 1 ? "tool" : "tools"}` : "", agent.filesRead.length ? `${agent.filesRead.length} read` : "", agent.filesWritten.length ? `${agent.filesWritten.length} written` : "", agent.inputTokens || agent.outputTokens ? `${compact((agent.inputTokens ?? 0) + (agent.outputTokens ?? 0))} tokens` : "", agent.model ?? ""].filter(Boolean).join(" · ");
   const status = !terminal ? "Running" : agent.status === "failed" ? "Failed" : agent.status === "interrupted" ? "Stopped" : "Done";
-  const Icon = failed ? CircleAlert : terminal ? Check : null;
+  const Icon = failed ? CircleAlert : null;
+  const avatarProfile = agent.profile ?? profile;
   return <section aria-label={`Subagent: ${agent.goal}`} data-subagent-id={agent.id} className="min-w-0">
     <details className="group/agent">
       <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
         <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/agent:rotate-90" />
-        {Icon ? <Icon aria-hidden="true" className={`size-3.5 shrink-0 ${failed ? "text-[var(--color-error)]" : "text-[var(--color-text-muted)]"}`} /> : <PixelGrid />}
+        {Icon ? <Icon aria-hidden="true" className="size-3.5 shrink-0 text-[var(--color-error)]" /> : avatarProfile ? <span data-subagent-avatar={avatarProfile} className={terminal ? "opacity-60" : "todo-node-active"}><ProfileAvatar name={avatarProfile} className="size-4" /></span> : <Check aria-hidden="true" className="size-3.5 shrink-0 text-[var(--color-text-muted)]" />}
         <span className="min-w-0 flex-1 truncate font-medium">{agent.goal}</span>
         <span className={chipClass}>{status} · <Elapsed startedAt={agent.startedAt} completedAt={terminal ? agent.updatedAt : undefined} seconds={terminal ? agent.durationSeconds : undefined} /></span>
       </summary>
@@ -58,7 +61,7 @@ export function SubagentCard({ agent, callbacks, tailText, tails }: SubagentCard
         <p role="status">{feedback}</p>
       </div>
     </details>
-    {agent.children.length > 0 && <div className="ml-5" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} />)}</div>}
+    {agent.children.length > 0 && <div className="ml-5" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} profile={profile} />)}</div>}
   </section>;
 }
 export interface ErrorCardProps { error: ErrorSurface; message?: string; partial?: boolean; onRetry: NativeTranscriptCallbacks["onRetry"] }

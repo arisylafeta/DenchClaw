@@ -35,6 +35,8 @@ export interface Subagent {
   startedAt: number
   updatedAt: number
   model?: string
+  /** Hermes profile running this child, when the gateway reports one; otherwise it inherits the parent's. */
+  profile?: string
   durationSeconds?: number
   inputTokens?: number
   outputTokens?: number
@@ -95,6 +97,7 @@ export function reduceSubagents(state: SubagentState, type: string, payload: unk
     taskCount: num(p.task_count) ?? prev?.taskCount ?? 1,
     status: nextStatus, startedAt: prev?.startedAt ?? now, updatedAt: now,
     model: stringValue(p.model) || prev?.model,
+    profile: stringValue(p.profile) || prev?.profile,
     durationSeconds: num(p.duration_seconds) ?? prev?.durationSeconds,
     inputTokens: num(p.input_tokens) ?? prev?.inputTokens,
     outputTokens: num(p.output_tokens) ?? prev?.outputTokens,

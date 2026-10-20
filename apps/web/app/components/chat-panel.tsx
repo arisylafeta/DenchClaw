@@ -2757,7 +2757,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
 		) : (
 			<>
-				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} tails={nativeChat.tails} callbacks={{
+				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} profile={agentProfile} tails={nativeChat.tails} callbacks={{
 					onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
 					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
