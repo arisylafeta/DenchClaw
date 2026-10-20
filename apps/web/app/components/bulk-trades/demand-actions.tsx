@@ -15,7 +15,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { StoryEntry } from "./story-entry";
+import { Story } from "./story-entry";
 import styles from "./bulk-detail.module.css";
 import {
   CLOSED_REASON_LABEL,
@@ -486,12 +486,8 @@ export function DemandActions({
           </p>
         )}
         {story ? (
-          <ol className="divide-y divide-[var(--bt-divider)]">
-            {activity.map((entry) => (
-              <StoryEntry key={entry.id} entry={entry} busy={busy} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply}
-                onDelete={() => run(() => request(`${endpoint}/activity/${entry.id}`, { method: "DELETE" }))} />
-            ))}
-          </ol>
+          <Story activity={activity} busy={busy} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply}
+            onDelete={(id) => run(() => request(`${endpoint}/activity/${id}`, { method: "DELETE" }))} />
         ) : (
         <ol className={styles.timeline}>
           {activity.map((entry) => {
