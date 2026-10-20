@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown, ArrowUpRight } from "lucide-react";
+import { Mail, PhoneCall, Phone, Search, MessageSquare, FileText, MessageCircle, Clock, ChevronDown, ArrowUpRight, StickyNote, Send, Package } from "lucide-react";
 import type { DemandActivity } from "@/lib/crm-postgres/bulk-demand-activity";
 import { shortDate } from "@/lib/bulk-trade-details";
 
@@ -16,7 +16,7 @@ export function storyLabel(entry: Pick<DemandActivity, "kind" | "ref_kind" | "re
   }[entry.kind] ?? "Activity";
 }
 
-/** The icon for the kind. Every badge is the same neutral grey — no colour-coding by type. */
+/** The icon for the kind. One rule, applied automatically from the recorded `kind` — agents never pick an icon themselves. */
 export function iconForLabel(label: string): typeof Mail {
   switch (label) {
     case "Email": case "Mail": return Mail;
@@ -25,6 +25,9 @@ export function iconForLabel(label: string): typeof Mail {
     case "Research": return Search;
     case "Quote": case "Document": return FileText;
     case "WhatsApp": return MessageCircle;
+    case "Note": return StickyNote;
+    case "Outreach": return Send;
+    case "Supply": return Package;
     case "Status": return Clock;
     default: return MessageSquare;
   }

@@ -4,7 +4,6 @@ import { Search, Flag } from "lucide-react";
 import { SIDE_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
-import { ScorePill } from "./demand-page";
 import { ErrorText } from "./trade-ui";
 
 const TONE: Record<SheetTone, { dot: string; bg: string }> = {
@@ -41,6 +40,27 @@ function ProgressChip({ row }: { row: SheetRow }) {
   );
 }
 
+/** Compact circular score badge, matching the ring used in the demand detail header. */
+function ScoreCircle({ score, size = 22 }: { score: number | null; size?: number }) {
+  const color = score == null ? "var(--bt-border-strong)" : score >= 80 ? "var(--bt-green)" : score >= 60 ? "var(--bt-amber)" : "var(--bt-muted)";
+  const radius = (size - 4) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const center = size / 2;
+  return (
+    <span className="relative inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size }}
+      role="img" aria-label={score == null ? "Not scored" : `Score ${score} out of 100`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)" }} aria-hidden>
+        <circle cx={center} cy={center} r={radius} fill="none" stroke="var(--bt-segment)" strokeWidth="2.5" />
+        {score != null && (
+          <circle cx={center} cy={center} r={radius} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={circumference * (1 - Math.min(Math.max(score, 0), 100) / 100)} />
+        )}
+      </svg>
+      <span className="absolute text-[9px] font-semibold tabular-nums" style={{ color: score == null ? "var(--bt-muted)" : undefined }}>{score ?? "–"}</span>
+    </span>
+  );
+}
+
 /** Compact: just the icon for what happened and the date, full text on hover. */
 function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: string | null; title: string; tone?: string }) {
   if (!date) return <span title="Nothing recorded" style={{ color: "var(--bt-muted)" }}>—</span>;
@@ -59,11 +79,11 @@ function SheetRowItem({ row, today, onOpen }: { row: SheetRow; today: string; on
     <li>
       <button type="button" onClick={() => onOpen(row)}
         className={`grid w-full grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-visible:bg-[var(--bt-row-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--bt-text-2)] ${GRID}`}>
-        <span className="hidden md:block"><ScorePill score={row.score} /></span>
+        <span className="hidden md:block"><ScoreCircle score={row.score} /></span>
         <span className="min-w-0">
-          <span className="line-clamp-2 text-[14px] font-medium leading-snug" title={row.title}>{row.title}</span>
+          <span className="line-clamp-2 text-[13px] font-medium leading-snug" title={row.title}>{row.title}</span>
           {row.company && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
-          <span className="mt-1 inline-flex md:hidden"><ScorePill score={row.score} /></span>
+          <span className="mt-1 inline-flex md:hidden"><ScoreCircle score={row.score} /></span>
         </span>
         <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}>{row.company ?? "—"}</span>
         <span><ProgressChip row={row} /></span>
