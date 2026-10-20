@@ -8,6 +8,12 @@ import { shortDate } from "@/lib/bulk-trade-details";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "./trade-ui";
 import { rowFocus } from "./demand-page";
 
+import { BusyRegion, Sh } from "./bt-shimmer";
+
+const PLACEHOLDER_OFFER = { id: "loading", name: null, stage: "to_contact", messages: 1 } as Offer;
+const PLACEHOLDER_OFFERS = Array.from({ length: 4 }, (_, i) => ({ ...PLACEHOLDER_OFFER, id: `loading-${i}` }));
+const PLACEHOLDER_THREAD = Array.from({ length: 4 }, (_, i) => ({ id: `loading-${i}`, channel: "note", title: "", body: " ", at: "", direction: null } as ThreadEntry));
+
 const STAGES: [OfferStage, string][] = [
   ["to_contact", "To contact"], ["teaser_sent", "Sent"], ["specs_nda", "Specs and NDA"], ["bid_in", "Bid in"],
   ["loi", "LOI"], ["won", "Won"], ["declined", "Declined"], ["lost", "Lost"],
@@ -24,24 +30,24 @@ const termsLine = (o: Offer) => {
   return `${t.amount.toLocaleString("en-GB")} ${t.currency ?? ""}${t.unit ? `/${t.unit}` : ""}${t.firmness ? ` · ${t.firmness}` : ""}`.trim();
 };
 
-function StagePill({ stage }: { stage: OfferStage | null }) {
+function StagePill({ stage, loading = false }: { stage: OfferStage | null; loading?: boolean }) {
   if (!stage) return null;
   return (
     <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: STAGE_TONE[stage] ?? "var(--bt-muted)" }}>
-      {STAGE_LABEL[stage]}
+      <Sh on={loading} chars={7}>{STAGE_LABEL[stage]}</Sh>
     </span>
   );
 }
 
-function Avatar({ name, size = 32 }: { name: string | null; size?: number }) {
+function Avatar({ name, size = 32, loading = false }: { name: string | null; size?: number; loading?: boolean }) {
   return (
     <span className="flex shrink-0 items-center justify-center rounded-full text-[12px] font-semibold" aria-hidden
-      style={{ width: size, height: size, background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>{initials(name)}</span>
+      style={{ width: size, height: size, background: "var(--bt-segment)", color: "var(--bt-text-2)" }}><Sh on={loading} chars={2}>{initials(name)}</Sh></span>
   );
 }
 
 /** Who we offered this to, one thread each. Inside a thread: the whole conversation, stage, terms and next step. */
-export function OffersTab({ demandId, supply, onChanged }: { demandId: string; supply: DemandSupply | null; onChanged: () => void }) {
+export function OffersTab({ demandId, supply, supplyLoading = false, onChanged }: { demandId: string; supply: DemandSupply | null; supplyLoading?: boolean; onChanged: () => void }) {
   const base = `/api/bulk-trades/demand/${encodeURIComponent(demandId)}/offers`;
   const [offers, setOffers] = useState<Offer[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -54,12 +60,14 @@ export function OffersTab({ demandId, supply, onChanged }: { demandId: string; s
   if (open) {
     return <Thread base={base} offerId={open} onBack={() => { setOpen(null); void load(); onChanged(); }} />;
   }
-  return <OfferList offers={offers} error={error} supply={supply} base={base} onOpen={setOpen} onCreated={(o) => { void load(); onChanged(); setOpen(o.id); }} />;
+  return <OfferList offers={offers} error={error} supply={supply} supplyLoading={supplyLoading} base={base} onOpen={setOpen} onCreated={(o) => { void load(); onChanged(); setOpen(o.id); }} />;
 }
 
-function OfferList({ offers, error, supply, base, onOpen, onCreated }: {
-  offers: Offer[] | null; error: string | null; supply: DemandSupply | null; base: string; onOpen: (id: string) => void; onCreated: (o: Offer) => void;
+function OfferList({ offers, error, supply, supplyLoading, base, onOpen, onCreated }: {
+  offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onOpen: (id: string) => void; onCreated: (o: Offer) => void;
 }) {
+  const loading = offers === null && !error;
+  const suggestionsLoading = supply === null && supplyLoading;
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
@@ -84,10 +92,10 @@ function OfferList({ offers, error, supply, base, onOpen, onCreated }: {
     finally { setBusy(false); }
   }
   return (
-    <div className="flex w-full flex-col gap-4">
+    <BusyRegion busy={loading || suggestionsLoading} label="Loading offers" className="flex w-full flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-          {offers ? (offers.length ? `${offers.length} ${offers.length === 1 ? "thread" : "threads"}` : "Nobody offered yet") : "Loading…"}
+          <Sh on={loading} chars={9}>{offers ? (offers.length ? `${offers.length} ${offers.length === 1 ? "thread" : "threads"}` : "Nobody offered yet") : null}</Sh>
         </p>
         <button type="button" className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle} onClick={() => setAdding(!adding)}>
           <Plus size={14} aria-hidden /> New offer
@@ -101,24 +109,24 @@ function OfferList({ offers, error, supply, base, onOpen, onCreated }: {
         </form>
       )}
       <ErrorText error={error ?? formError} />
-      {offers && offers.length > 0 && (
+      {(loading || (offers && offers.length > 0)) && (
         <ul className="flex flex-col">
-          {offers.map((o) => {
+          {(loading ? PLACEHOLDER_OFFERS : offers ?? []).map((o) => {
             const terms = termsLine(o);
             return (
               <li key={o.id} className="border-t first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <button type="button" onClick={() => onOpen(o.id)} className={`${rowFocus} flex w-full items-center gap-3 px-1 py-3 text-left`}>
-                  <Avatar name={o.name} />
+                <button type="button" disabled={loading} onClick={() => onOpen(o.id)} className={`${rowFocus} flex w-full items-center gap-3 px-1 py-3 text-left`}>
+                  <Avatar name={o.name} loading={loading} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="truncate text-[14px] font-semibold">{o.name ?? "Unnamed"}</span>
-                      <StagePill stage={o.stage} />
+                      <span className="truncate text-[14px] font-semibold"><Sh on={loading} chars={18}>{o.name ?? "Unnamed"}</Sh></span>
+                      <StagePill stage={o.stage} loading={loading} />
                     </span>
                     <span className="mt-0.5 block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
-                      {[terms, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}
+                      <Sh on={loading} chars={32}>{[terms, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
                     </span>
                   </span>
-                  {o.messages > 0 && <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}>{o.messages}</span>}
+                  {o.messages > 0 && <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages}</Sh></span>}
                 </button>
               </li>
             );
@@ -128,21 +136,21 @@ function OfferList({ offers, error, supply, base, onOpen, onCreated }: {
       {offers && !offers.length && !adding && (
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Start a thread for each person you offer this to. Their emails and WhatsApp messages, bids and next steps collect there.</p>
       )}
-      {suggestions.length > 0 && (
+      {(suggestionsLoading || suggestions.length > 0) && (
         <section aria-label="Suggested" className="flex flex-col gap-1">
           <h3 className="text-[12px] font-semibold" style={{ color: "var(--bt-muted)" }}>Suggested from our inventory</h3>
           <ul>
-            {suggestions.map((s) => (
+            {(suggestionsLoading ? Array.from({ length: 3 }, (_, i) => ({ name: `loading-${i}`, note: "" })) : suggestions).map((s) => (
               <li key={s.name} className="flex items-center gap-3 border-t py-2 first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <Avatar name={s.name} size={28} />
-                <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{s.name}</span><span className="block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{s.note}</span></span>
-                <button type="button" disabled={busy} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={() => void create({ name: s.name, wants: s.note })}>Start thread</button>
+                <Avatar name={s.name} size={28} loading={suggestionsLoading} />
+                <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium"><Sh on={suggestionsLoading} chars={18}>{s.name}</Sh></span><span className="block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={suggestionsLoading} chars={26}>{s.note}</Sh></span></span>
+                <button type="button" disabled={busy || suggestionsLoading} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={() => void create({ name: s.name, wants: s.note })}>Start thread</button>
               </li>
             ))}
           </ul>
         </section>
       )}
-    </div>
+    </BusyRegion>
   );
 }
 
@@ -172,22 +180,23 @@ function Thread({ base, offerId, onBack }: { base: string; offerId: string; onBa
     try { const line = text.trim(); apply(await request(url, { method: "POST", body: JSON.stringify({ kind, title: line.split("\n")[0].slice(0, 120), body: line.includes("\n") || line.length > 120 ? line : null }) })); setText(""); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
   }
-  if (!offer) return <div className="flex flex-col gap-3"><ErrorText error={error} />{!error && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Loading…</p>}</div>;
-  const terms = termsLine(offer);
+  const loading = offer === null && !error;
+  const current = offer ?? PLACEHOLDER_OFFER;
+  const terms = termsLine(current);
   return (
-    <div className="flex w-full flex-col gap-5">
+    <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-5">
       <div className="flex items-center gap-3">
         <button type="button" onClick={onBack} aria-label="Back to offers" className={`${rowFocus} inline-flex items-center gap-1 text-[13px]`} style={{ color: "var(--bt-muted)" }}>
           <ArrowLeft size={14} aria-hidden /> Offers
         </button>
       </div>
       <div className="flex items-center gap-3">
-        <Avatar name={offer.name} size={40} />
+        <Avatar name={current.name} size={40} loading={loading} />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[16px] font-semibold">{offer.name}</h3>
-          <p className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{[offer.contact, offer.wants].filter(Boolean).join(" · ")}</p>
+          <h3 className="truncate text-[16px] font-semibold"><Sh on={loading} chars={20}>{current.name}</Sh></h3>
+          <p className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ")}</Sh></p>
         </div>
-        <select aria-label="Stage" value={offer.stage ?? "to_contact"} disabled={busy} onChange={(e) => void patch({ stage: e.target.value })}
+        <select aria-label="Stage" value={current.stage ?? "to_contact"} disabled={busy || !offer} onChange={(e) => void patch({ stage: e.target.value })}
           className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
@@ -195,27 +204,27 @@ function Thread({ base, offerId, onBack }: { base: string; offerId: string; onBa
       {terms && <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Latest terms </span><strong>{terms}</strong></p>}
       <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); void patch({ nextStep: nextStep || null, nextDue: nextDue || null }); }}>
         <Calendar size={14} aria-hidden style={{ color: "var(--bt-muted)" }} />
-        <input aria-label="Next step" placeholder="Next step" value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={`${inputClass} min-w-[200px] flex-1`} style={inputStyle} />
-        <input aria-label="Due" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} className={inputClass} style={inputStyle} />
-        <button type="submit" disabled={busy || (nextStep === (offer.next_step ?? "") && nextDue === (offer.next_due ?? ""))} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save</button>
+        <input disabled={!offer} aria-label="Next step" placeholder="Next step" value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={`${inputClass} min-w-[200px] flex-1`} style={inputStyle} />
+        <input disabled={!offer} aria-label="Due" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} className={inputClass} style={inputStyle} />
+        <button type="submit" disabled={busy || !offer || (nextStep === (current.next_step ?? "") && nextDue === (current.next_due ?? ""))} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save</button>
       </form>
       <ErrorText error={error} />
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void post(); }}>
-        <textarea aria-label="Add to thread" rows={2} placeholder="Log a note or a call" value={text} onChange={(e) => setText(e.target.value)} className={inputClass} style={inputStyle} />
+        <textarea disabled={!offer} aria-label="Add to thread" rows={2} placeholder="Log a note or a call" value={text} onChange={(e) => setText(e.target.value)} className={inputClass} style={inputStyle} />
         <div className="flex items-center gap-2">
           <div role="group" aria-label="Entry type" className="inline-flex gap-1">
             {(["note", "call"] as const).map((k) => (
-              <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={`${rowFocus} px-2 py-1 text-[12px]`}
+              <button disabled={!offer} key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={`${rowFocus} px-2 py-1 text-[12px]`}
                 style={{ background: kind === k ? "var(--bt-badge)" : "var(--bt-segment)", color: kind === k ? "var(--bt-on-badge)" : "var(--bt-muted)" }}>{k === "note" ? "Note" : "Call"}</button>
             ))}
           </div>
-          <button type="submit" disabled={busy || !text.trim()} className={`${rowFocus} ${buttonClass} ml-auto inline-flex items-center gap-1.5`} style={buttonStyle}><Send size={13} aria-hidden /> Add</button>
+          <button type="submit" disabled={busy || !offer || !text.trim()} className={`${rowFocus} ${buttonClass} ml-auto inline-flex items-center gap-1.5`} style={buttonStyle}><Send size={13} aria-hidden /> Add</button>
         </div>
       </form>
       <section aria-label="Thread">
-        {thread.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Nothing yet. Email and WhatsApp with this person appear here once they are linked to a CRM person or email.</p>}
+        {offer && thread.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Nothing yet. Email and WhatsApp with this person appear here once they are linked to a CRM person or email.</p>}
         <ul>
-          {thread.map((e) => {
+          {(loading ? PLACEHOLDER_THREAD : thread).map((e) => {
             const Icon = CHANNEL_ICON[e.channel];
             const Dir = e.direction === "inbound" ? ArrowDownLeft : e.direction === "outbound" ? ArrowUpRight : null;
             return (
@@ -223,17 +232,17 @@ function Thread({ base, offerId, onBack }: { base: string; offerId: string; onBa
                 <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--bt-segment)", color: "var(--bt-muted)" }}><Icon size={13} aria-hidden /></span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-semibold">{e.title}</span>
+                    <span className="truncate text-[13px] font-semibold"><Sh on={loading} chars={24}>{e.title}</Sh></span>
                     {Dir && <Dir size={12} aria-label={e.direction ?? ""} style={{ color: "var(--bt-muted)" }} />}
-                    <time className="ml-auto shrink-0 text-[11px] font-bold" style={{ color: "var(--bt-text-2)" }} dateTime={e.at}>{dateOf(e.at)}</time>
+                    <time className="ml-auto shrink-0 text-[11px] font-bold" style={{ color: "var(--bt-text-2)" }} dateTime={e.at}><Sh on={loading} chars={7}>{dateOf(e.at)}</Sh></time>
                   </div>
-                  {e.body && <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-[12px]" style={{ color: "var(--bt-muted)" }}>{e.body}</p>}
+                  {e.body && <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={36}>{e.body}</Sh></p>}
                 </div>
               </li>
             );
           })}
         </ul>
       </section>
-    </div>
+    </BusyRegion>
   );
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Offer, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { OffersTab } from "./offers-tab";
@@ -31,6 +31,43 @@ function stub(calls: { url: string; method: string; body?: string }[]) {
 
 describe("Offers tab", () => {
   afterEach(() => { vi.unstubAllGlobals(); forgetShared(); });
+
+  it("keeps list rows and inventory actions visible until values arrive", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { resolve = r; })));
+    const view = render(<OffersTab demandId="d1" supply={null} supplyLoading onChanged={() => {}} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+    expect(screen.getByRole("button", { name: "New offer" })).toBeEnabled();
+    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+    expect(screen.getByText("Suggested from our inventory")).toBeInTheDocument();
+    for (const button of screen.getAllByRole("button", { name: "Start thread" })) expect(button).toBeDisabled();
+    expect(screen.queryByText("Attero Recycling")).not.toBeInTheDocument();
+    await act(async () => resolve(new Response(JSON.stringify({ offers: [offer] }))));
+    view.rerender(<OffersTab demandId="d1" supply={null} onChanged={() => {}} />);
+    expect(await screen.findByText("Attero Recycling")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Suggested from our inventory")).not.toBeInTheDocument();
+  });
+
+  it("keeps the thread controls and timeline visible but disabled during hydration", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("/offers")
+      ? Promise.resolve(new Response(JSON.stringify({ offers: [offer] })))
+      : new Promise<Response>((r) => { resolve = r; })));
+    render(<OffersTab demandId="d1" supply={null} onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading thread");
+    expect(screen.getByRole("button", { name: "Back to offers" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "Stage" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Next step" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Add to thread" })).toBeDisabled();
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.queryByText("Re: packs")).not.toBeInTheDocument();
+    await act(async () => resolve(new Response(JSON.stringify({ offer, thread }))));
+    expect(await screen.findByText("Re: packs")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Stage" })).toBeEnabled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
 
   it("lists a thread per person and opens the full conversation", async () => {
     const calls: { url: string; method: string; body?: string }[] = [];

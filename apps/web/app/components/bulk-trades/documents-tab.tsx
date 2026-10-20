@@ -8,6 +8,8 @@ import { isImage, shortDate, type NeededFor } from "@/lib/bulk-trade-details";
 import { ErrorText, request } from "./trade-ui";
 import { useRegistry } from "./use-registry";
 
+import { BusyRegion, Sh } from "./bt-shimmer";
+
 const docsUrl = (listingId: string, path = "") => `/api/bulk-listings/${encodeURIComponent(listingId)}/documents${path}`;
 const fileUrl = (listingId: string, doc: ListingDocument) => docsUrl(listingId, `/${doc.id}/file?view=1`);
 
@@ -20,9 +22,10 @@ const extension = (name: string | null) => {
 };
 const host = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; } };
 
-function Thumb({ listingId, doc }: { listingId: string; doc: ListingDocument }) {
+function Thumb({ listingId, doc, loading = false }: { listingId: string; doc: ListingDocument; loading?: boolean }) {
   const box = "flex h-24 items-center justify-center border-b text-[13px] font-semibold";
   const style = { background: "var(--bt-table-head)", borderColor: "var(--bt-divider)", color: "var(--bt-muted)" };
+  if (loading) return <div className={box} style={style}><FileText size={16} aria-hidden="true" className="mr-1.5" /><Sh on chars={5} /></div>;
   if (doc.has_file && doc.file_name && isImage(doc.file_name)) {
     // eslint-disable-next-line @next/next/no-img-element -- private, auth-gated file
     return <img src={fileUrl(listingId, doc)} alt="" loading="lazy" className="h-24 w-full border-b object-cover" style={{ borderColor: "var(--bt-divider)" }} />;
@@ -32,8 +35,8 @@ function Thumb({ listingId, doc }: { listingId: string; doc: ListingDocument }) 
   return <div className={`${box} border-dashed`} style={style}>Not here yet</div>;
 }
 
-function DocCard({ listingId, doc, onChange, onRemove, onError }: {
-  listingId: string; doc: ListingDocument; onChange: (doc: ListingDocument) => void; onRemove: (id: string) => void; onError: (message: string) => void;
+function DocCard({ listingId, doc, onChange, onRemove, onError, loading = false }: {
+  listingId: string; doc: ListingDocument; loading?: boolean; onChange: (doc: ListingDocument) => void; onRemove: (id: string) => void; onError: (message: string) => void;
 }) {
   const picker = useRef<HTMLInputElement>(null);
   const wanted = documentSection(doc) === "needed";
@@ -54,31 +57,31 @@ function DocCard({ listingId, doc, onChange, onRemove, onError }: {
   }
   return (
     <li className="flex min-w-0 flex-col border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", borderStyle: wanted ? "dashed" : "solid" }}>
-      <Thumb listingId={listingId} doc={doc} />
+      <Thumb listingId={listingId} doc={doc} loading={loading} />
       <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
         <div className="line-clamp-2 text-[13px] font-semibold leading-snug" title={doc.title}>
-          {open ? <a href={open} target="_blank" rel="noreferrer" className="hover:underline">{doc.title}</a> : doc.title}
+          <Sh on={loading} chars={20}>{open ? <a href={open} target="_blank" rel="noreferrer" className="hover:underline">{doc.title}</a> : doc.title}</Sh>
         </div>
         <div className="text-[12px]" style={{ color: "var(--bt-muted)" }}>
-          {[doc.doc_type, doc.source_label, doc.source_date ? shortDate(doc.source_date) : shortDate(doc.created_at.slice(0, 10))].filter(Boolean).join(" · ")}
+          <Sh on={loading} chars={25}>{[doc.doc_type, doc.source_label, doc.source_date ? shortDate(doc.source_date) : shortDate(doc.created_at.slice(0, 10))].filter(Boolean).join(" · ")}</Sh>
         </div>
         {doc.note && <div className="line-clamp-2 text-[12px]" style={{ color: "var(--bt-text-2)" }} title={doc.note}>{doc.note}</div>}
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-          <select aria-label={`State of ${doc.title}`} value={doc.state} onChange={(event) => void save({ state: event.target.value })}
+          {loading ? <span className="flex h-7 items-center border px-1 text-[12px]" style={{ borderColor: "var(--bt-border)" }}><Sh on chars={8} /></span> : <select aria-label={`State of ${doc.title}`} value={doc.state} onChange={(event) => void save({ state: event.target.value })}
             className="h-7 border px-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             {DOC_STATES.map((state) => <option key={state} value={state}>{STATE_LABEL[state as DocState]}</option>)}
-          </select>
-          {doc.direction !== "received" && <span className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{DIRECTION_LABEL[doc.direction]}</span>}
+          </select>}
+          {doc.direction !== "received" && <span className="text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={7}>{DIRECTION_LABEL[doc.direction]}</Sh></span>}
           <span className="flex-1" />
           {wanted && (
             <>
               <input ref={picker} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void attach(file); event.target.value = ""; }} />
-              <button type="button" className="inline-flex items-center gap-1 text-[12px] font-medium hover:underline" onClick={() => picker.current?.click()}>
+              <button disabled={loading} type="button" className="inline-flex items-center gap-1 text-[12px] font-medium hover:underline" onClick={() => picker.current?.click()}>
                 <Paperclip size={12} aria-hidden="true" /> Attach file
               </button>
             </>
           )}
-          <button type="button" aria-label={`Delete ${doc.title}`} className="p-1" style={{ color: "var(--bt-muted)" }} onClick={() => void remove()}><Trash2 size={13} aria-hidden="true" /></button>
+          <button disabled={loading} type="button" aria-label={`Delete ${doc.title}`} className="p-1" style={{ color: "var(--bt-muted)" }} onClick={() => void remove()}><Trash2 size={13} aria-hidden="true" /></button>
         </div>
       </div>
     </li>
@@ -114,10 +117,10 @@ function WantedCard({ listingId, item, onAdded, onError }: { listingId: string; 
   );
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+function Section({ title, count, children, loading = false }: { title: string; count: number; loading?: boolean; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="font-mono text-[11px] uppercase tracking-[0.06em]" style={{ color: "var(--bt-muted)" }}>{title} · {count}</h3>
+      <h3 className="font-mono text-[11px] uppercase tracking-[0.06em]" style={{ color: "var(--bt-muted)" }}>{title} · <Sh on={loading} chars={1}>{count}</Sh></h3>
       <ul className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>{children}</ul>
     </section>
   );
@@ -136,8 +139,16 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
     catch (err) { setError(err instanceof Error ? err.message : "Could not load documents."); }
   }, [listingId]);
   useEffect(() => { void load(); }, [load]);
-  if (!registry) return null;
-  if (!docs) return <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>{error ?? "Loading…"}</p>;
+  if (!registry || !docs) return (
+    <BusyRegion busy={!error} label="Loading documents" className="flex w-full flex-col gap-6">
+      <ErrorText error={error} />
+      {!error && (["Needed", "Received", "Ours"] as const).map((title, i) => (
+        <Section key={title} title={title} count={1} loading>
+          <DocCard listingId={listingId} loading doc={{ id: `loading-${i}`, title: "", doc_type: "", state: i === 0 ? "needed" : "received", direction: i === 2 ? "prepared" : "received", created_at: "", has_file: false } as ListingDocument} onChange={() => {}} onRemove={() => {}} onError={setError} />
+        </Section>
+      ))}
+    </BusyRegion>
+  );
 
   const upsert = (doc: ListingDocument) => setDocs((current) => [doc, ...(current ?? []).filter((item) => item.id !== doc.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
   const remove = (id: string) => setDocs((current) => (current ?? []).filter((item) => item.id !== id));

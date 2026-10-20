@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DocumentsTab } from "./documents-tab";
 import { forgetShared } from "./trade-ui";
@@ -18,6 +18,21 @@ const doc = (over: object) => ({ id: "d1", title: "Doc", doc_type: "Other", stat
 afterEach(() => { vi.unstubAllGlobals(); forgetShared(); });
 
 describe("DocumentsTab", () => {
+  it("keeps document groups and card structure visible while values load", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { resolve = r; })));
+    render(<DocumentsTab listingId="d1" wantsRequired={false} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading documents");
+    for (const title of ["Needed", "Received", "Ours"]) expect(screen.getByRole("heading", { name: new RegExp(title) })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Attach file" })).toBeDisabled();
+    expect(screen.queryByText("Buyer spec")).not.toBeInTheDocument();
+    await act(async () => resolve(new Response(JSON.stringify({ documents: [doc({ title: "Buyer spec" })] }))));
+    expect(await screen.findByText("Buyer spec")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Received · 1" })).toBeInTheDocument();
+  });
+
   it("groups documents into needed, received and ours, and shows nothing for required types on a demand", async () => {
     const documents = [
       doc({ id: "n1", title: "Toyota pack datasheet", state: "needed" }),
