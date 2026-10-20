@@ -15,19 +15,17 @@ type Props = { detail: CampaignDetail; activity: CampaignActivity | null; loadin
 
 export function CampaignWebsiteActivity({ activity, loading }: Pick<Props, "activity" | "loading">) {
   const totals = activity?.status === "available" ? activity.totals : null;
-  const message = loading ? "Loading PostHog website evidence…" : activity?.status === "unmapped" ? "This campaign has no mapped website attribution. Website activity is unknown." : !totals ? "PostHog website evidence is unavailable. Website activity is unknown; the email ledger remains available." : null;
+  const message = loading ? "Loading website evidence…" : activity?.status === "unmapped" ? "No website attribution mapped." : !totals ? "Website evidence unavailable." : null;
   return (
     <section aria-label="PostHog website evidence" className="flex flex-col gap-2 border-t pt-3 text-[13px]" style={{ borderColor: "var(--bt-divider)" }}>
-      <h2 className="font-semibold">PostHog website evidence</h2>
+      <h2 className="font-semibold">Website activity (PostHog)</h2>
       {message ? <p role="status" style={mutedStyle}>{message}</p> : totals && <>
         <dl className="flex flex-wrap gap-x-6 gap-y-2">
           {([["Visited recipient records via assigned links", totals.visited_recipients], ["Distinct browser sessions", totals.sessions], ["Recorded submission events", totals.offer_events + totals.message_events + totals.buy_now_events]] as const).map(([label, count]) => <div key={label}><dt className="text-xs" style={mutedStyle}>{label}</dt><dd className="bt-mono mt-0.5 text-lg font-semibold">{count.toLocaleString("en-GB")}</dd></div>)}
         </dl>
         {totals.page_views === 0 && totals.offer_events + totals.message_events + totals.buy_now_events === 0 && <p role="status" style={mutedStyle}>No browser page or submission events were recorded in this period.</p>}
-        <p style={mutedStyle}>Offers: {totals.offer_events} · Messages: {totals.message_events} · Buy now: {totals.buy_now_events} · Page events: {totals.page_views}</p>
-        <p style={mutedStyle}>Period: <CampaignDate value={activity?.period_start ?? null} withTime /> – <CampaignDate value={activity?.period_end ?? null} withTime /> · Observed: <CampaignDate value={activity?.observed_at ?? null} withTime /></p>
       </>}
-      <p className="text-xs" style={mutedStyle}>Separate from historical email metrics; these observations are not a conversion rate. Assigned links can be forwarded and do not verify the named recipient. Missing consented browser events do not prove inactivity. Destination rows can overlap; totals include other destinations.</p>
+      <p className="text-xs" style={mutedStyle}>Separate from email metrics. Not a conversion rate.</p>
     </section>
   );
 }
@@ -65,7 +63,6 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
   return (
     <div className="flex flex-col gap-4">
       <Card label="Pitched listings">
-        <p className="border-b px-3.5 py-3 text-xs" style={{ ...mutedStyle, borderColor: "var(--bt-divider)" }}>Email clicks come from accepted, destination-specific tracking in the retained ledger. Website columns are separate PostHog evidence.{detail.campaign.tracking_pending > 0 ? " Email tracking is incomplete; zero observed clicks does not prove no engagement." : ""}{loading ? " Website evidence is loading." : ""}</p>
         <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
           <table aria-label="Listings" className={`${tableStyles.table} min-w-[720px]`}>
             <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Listing", "Recipients pitched", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>

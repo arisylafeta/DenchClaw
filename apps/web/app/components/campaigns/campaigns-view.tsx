@@ -10,7 +10,7 @@ import { Input } from "../ui/input";
 import { Loading } from "../ui/shimmer";
 import { InboxLayout, PANEL_LAYOUT } from "../crm/inbox/inbox-layout";
 import { CampaignPage } from "./campaign-page";
-import { CampaignDate, MetricRow, PAGE_SIZE, Pagination, StatusTag, followInApp, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignDate, CampaignPin, LIST_METRICS, PAGE_SIZE, Pagination, StatusTag, followInApp, humanize, metricRate, mutedStyle } from "./campaign-ui";
 
 export type CampaignsViewProps = {
   campaignId: string | null;
@@ -86,15 +86,22 @@ function CampaignsList({ campaigns, onOpenCampaign, search, status, compact = fa
       </div>}
       <p className="px-4 pb-2 text-[12px] sm:px-8" style={mutedStyle} aria-live="polite">{rows.length === campaigns.length ? `${campaigns.length} ${campaigns.length === 1 ? "campaign" : "campaigns"}` : `${rows.length} of ${campaigns.length} campaigns`}</p>
       <ul ref={list} aria-label="Campaigns" className="border-y" style={{ borderColor: "var(--bt-divider)" }}>
-        {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => <li key={campaign.id} aria-current={selectedId === campaign.id ? "true" : undefined} className={`flex flex-col gap-2.5 border-b px-4 py-3.5 last:border-b-0 hover:bg-[var(--bt-row-hover)] ${compact ? "" : "sm:px-8"} ${compact ? "cursor-pointer" : ""}`} style={{ borderColor: "var(--bt-divider)", background: selectedId === campaign.id ? "color-mix(in srgb, var(--color-accent-fill) 14%, transparent)" : undefined, boxShadow: selectedId === campaign.id ? "inset 3px 0 0 var(--color-accent)" : undefined }} onClick={compact ? () => onOpenCampaign(campaign.id) : undefined}>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="min-w-0 max-w-full truncate text-[15px] font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
-            <span className="text-[12px]" style={mutedStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /> · {humanize(campaign.audience)} · {campaign.recipient_count.toLocaleString("en-GB")} deliveries</span>
-            {campaign.tracking_pending > 0 && <span className="text-[12px]" style={{ color: "var(--bt-amber)" }}>{campaign.tracking_pending} tracking pending</span>}
-            <span className="ml-auto"><StatusTag status={campaign.mail_state ?? campaign.status} /></span>
-          </div>
-          <MetricRow counts={campaign} compact={compact} />
-        </li>)}
+        {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map((campaign) => {
+          const selected = selectedId === campaign.id;
+          return <li key={campaign.id} aria-current={selected ? "true" : undefined} className={`flex items-center gap-3 border-b px-4 py-3 last:border-b-0 hover:bg-[var(--bt-row-hover)] ${compact ? "cursor-pointer" : "sm:px-8"}`}
+            style={{ borderColor: "var(--bt-divider)", background: selected ? "color-mix(in srgb, var(--color-accent-fill) 14%, transparent)" : undefined, boxShadow: selected ? "inset 3px 0 0 var(--color-accent)" : undefined }} onClick={compact ? () => onOpenCampaign(campaign.id) : undefined}>
+            <CampaignPin id={campaign.id} />
+            <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="min-w-0 flex-1 truncate text-[14px] font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
+            <dl className={`flex shrink-0 items-center text-[12px] ${compact ? "gap-3" : "gap-4"}`}>
+              {(selectedId ? LIST_METRICS.slice(0, 1) : LIST_METRICS).map((key) => <div key={key} className="flex items-baseline gap-1" title={metricRate(campaign, key) ? `${humanize(key)} ${metricRate(campaign, key)}` : humanize(key)}>
+                <dd className="bt-mono font-semibold tabular-nums">{campaign[key] == null ? "—" : campaign[key]!.toLocaleString("en-GB")}</dd>
+                {!compact && <dt style={mutedStyle}>{humanize(key)}</dt>}
+              </div>)}
+            </dl>
+            <StatusTag status={campaign.mail_state ?? campaign.status} />
+            <span className={`shrink-0 text-right text-[12px] ${compact ? "w-[68px]" : "w-[84px]"}`} style={mutedStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} /></span>
+          </li>;
+        })}
         {!rows.length && <li className="px-4 py-8 text-center text-[13px]" style={mutedStyle}>No campaigns match your filters.</li>}
       </ul>
       <Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); list.current?.focus({ preventScroll: true }); }} />
@@ -124,7 +131,7 @@ export function CampaignsPanel({ campaignId, onOpenCampaign, onBack, onNavigateP
     return () => controller.abort();
   }, [campaignId, attempt]);
   const retry = <button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button>;
-  return <InboxLayout {...PANEL_LAYOUT} hasSelection={campaignId != null}
+  return <InboxLayout {...PANEL_LAYOUT} defaultWidth={520} minWidth={360} storageKey="denchclaw.crm-inbox.campaigns-width" hasSelection={campaignId != null}
     list={<div className="bulk-trades h-full min-h-0 overflow-y-auto pt-3" style={{ background: "var(--color-bg)" }}>
       {list.error ? <div className="flex flex-col items-start gap-3 px-4"><ErrorText error={list.error} />{retry}</div>
         : list.campaigns ? <CampaignsList compact campaigns={list.campaigns} selectedId={campaignId} onOpenCampaign={onOpenCampaign} search={search} status={status} />

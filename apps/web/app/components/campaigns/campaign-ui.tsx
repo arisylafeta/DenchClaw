@@ -111,3 +111,14 @@ export function Pagination({ page, count, onPage }: { page: number; count: numbe
     </nav>
   );
 }
+
+const PIN_COLORS = ["#2f9e44", "#1c7ed6", "#e8590c", "#ae3ec9", "#0c8599", "#d6336c", "#5c7cfa", "#f08c00", "#099268"];
+/** A stable colour per campaign so it can be spotted at a glance in a list. */
+export function campaignColor(id: string) {
+  return PIN_COLORS[[...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % PIN_COLORS.length];
+}
+export function CampaignPin({ id, size = 10 }: { id: string; size?: number }) {
+  return <span aria-hidden className="inline-block shrink-0 rounded-full" style={{ width: size, height: size, background: campaignColor(id) }} />;
+}
+
+export const LIST_METRICS = ["sent", "opened", "replied"] as const;

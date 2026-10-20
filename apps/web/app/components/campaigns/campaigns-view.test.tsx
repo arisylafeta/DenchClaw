@@ -86,16 +86,15 @@ describe("CampaignsView", () => {
     await screen.findByRole("table", { name: "Recipients" });
     expect(fetch).toHaveBeenCalledWith(`/api/mail/campaigns/historical?${query}`, expect.anything());
   });
-  it("shows rates against the right denominator and the list needs no search box of its own when the host owns search", async () => {
+  it("keeps the list to one line with rates in tooltips, filtered by status, with no search box of its own when the host owns search", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [{ ...summary, ...counts }, { ...summary, id: "other", name: "Other offer", ...counts, mail_state: "retired" }] }))));
     render(<CampaignsView {...props} campaignId={null} search="" status="retired" />);
     const list = await screen.findByRole("list", { name: "Campaigns" });
     expect(screen.queryByRole("searchbox", { name: "Search campaigns" })).not.toBeInTheDocument();
     expect(within(list).getAllByRole("listitem")).toHaveLength(1);
     const row = within(list).getAllByRole("listitem")[0];
-    expect(row).toHaveTextContent("98.3%");
-    expect(row).toHaveTextContent("21.2%");
-    expect(row).toHaveTextContent("2.6%");
+    expect(row).toHaveTextContent("Other offer");
+    expect(row.querySelector("[title^='Opened ']")).toHaveAttribute("title", "Opened 21.2%");
   });
   it("opens a campaign within the merged view without also opening a workspace tab", async () => {
     const outerNavigation = vi.fn();
@@ -112,7 +111,9 @@ describe("CampaignsView", () => {
     const view = render(<CampaignsView {...props} campaignId={null} />);
     const list = await screen.findByRole("list", { name: "Campaigns" });
     const row = within(list).getAllByRole("listitem")[0];
-    for (const [key, value] of Object.entries(counts)) {expect(within(row).getAllByText(key[0].toUpperCase() + key.slice(1), { exact: true }).find((node) => node.tagName === "DT")!.parentElement).toHaveTextContent(String(value));}
+    // One clean line: only the three headline metrics, plus status and date.
+    for (const key of ["sent", "opened", "replied"] as const) {expect(within(row).getAllByText(key[0].toUpperCase() + key.slice(1), { exact: true }).find((node) => node.tagName === "DT")!.parentElement).toHaveTextContent(String(counts[key]));}
+    for (const hidden of ["Delivered", "Bounced", "Clicked", "Unsubscribed"]) {expect(within(row).queryByText(hidden, { exact: true })).not.toBeInTheDocument();}
     view.rerender(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
     for (const [key, value] of Object.entries(counts)) {expect(within(metrics).getByText(key[0].toUpperCase() + key.slice(1), { exact: true }).parentElement).toHaveTextContent(String(value));}
