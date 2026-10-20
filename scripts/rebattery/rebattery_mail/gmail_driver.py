@@ -3,15 +3,13 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from .core import ProviderError
+from .core import ProviderError, gog_env
 
 
 class GmailDriver:
     def call(self, account, *args, timeout=120):
         try:
-            env = os.environ.copy()
-            env['GOG_KEYRING_PASSWORD'] = Path('/root/.hermes/workspace/.secrets/gog-keyring-password').read_text().strip()
-            env['HOME'] = '/root'
+            env = gog_env()
             # No --wrap-untrusted here: it rewrites subject and body with markers and would corrupt stored mail.
             # Untrusted-content handling is for what agents read back, not for ingestion.
             result = subprocess.run(['/usr/local/bin/gog','--account',account,*args,'--json','--no-input'], env=env, capture_output=True, text=True, timeout=timeout)

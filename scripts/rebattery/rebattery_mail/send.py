@@ -1,5 +1,7 @@
 """Approval-bound submission, with fresh gates for every provider call."""
 import json
+import os
+from types import SimpleNamespace as NS_
 from uuid import uuid4
 import psycopg2
 from .core import connection, dict_cursor, Refused, ProviderError, UnknownOutcome
@@ -297,6 +299,37 @@ def execute(args, driver=None, campaign_mode=False):
                     cur.execute('select pg_advisory_unlock(hashtextextended(%s,0))',(target,))
 
 
+def send_message(args,driver=None):
+    """One-message send. Naming the approver is the go-ahead: it records approval of the exact current
+    digest and sends. Without --approved-by this stays a dry run."""
+    name = getattr(args,'approved_by',None)
+    if not name:
+        try:
+            return execute(args,driver)
+        except Refused as exc:
+            if exc.rule != 'approval_missing':
+                raise
+        with connection(read_only=True) as db:
+            _,rows = load(db,args.target)
+        return {'subject_id':args.target,'dry_run':True,'recipients':[e for r in rows for e in r['to_emails']],
+                'subject':rows[0]['subject'],'sha256':digest(rows),'hint':'Add --approved-by NAME to send this'}
+    name = policy.human(name)
+    with connection(read_only=True) as db:
+        campaign,rows = load(db,args.target)
+        if campaign:
+            raise Refused('wrong_subject_type','Campaigns use approve and launch')
+        if not any(row['state'] in CLAIMABLE for row in rows):
+            raise Refused('duplicate_idempotency_key')
+        sha = digest(rows)
+        notes = [n for row in rows for email in row['to_emails']
+                 for n in [policy.verification_note((row['personalization'].get('verification') or {}).get(email.strip().lower(),{}))] if n]
+    args.apply = True
+    approve(NS_(target=args.target,sha256=sha,approved_by=name,scope='full',expires_at=None,apply=True))
+    os.environ['DENCH_MAIL_LIVE_SEND'] = '1'
+    result = execute(args,driver)
+    return {**result,'approved_by':name,'notes':notes}
+
+
 def launch(args,driver=None):
     return execute(args,driver,True)
 
@@ -334,10 +367,12 @@ def register(subparsers):
     parser.add_argument('--expires-at')
     parser.add_argument('--apply',action='store_true')
     parser.set_defaults(handler=approve)
-    for name,handler in [('send',execute),('launch',launch),('recover',recover)]:
+    for name,handler in [('send',send_message),('launch',launch),('recover',recover)]:
         parser = subparsers.add_parser(name)
         parser.add_argument('target')
         parser.add_argument('--apply',action='store_true')
+        if name == 'send':
+            parser.add_argument('--approved-by',help='Named human; sends the current draft for real and records their approval')
         if name == 'launch':
             parser.add_argument('--approved-sha256',required=True)
             parser.add_argument('--max-recipients',type=int)

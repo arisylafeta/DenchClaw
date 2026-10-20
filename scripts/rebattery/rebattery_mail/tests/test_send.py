@@ -799,3 +799,99 @@ def test_suppression_only_cli_defaults_to_dry_run_and_requires_stream():
     assert args.apply is False and args.handler is sync.handle
     with pytest.raises(SystemExit):
         parser.parse_args(['sync','postmark-suppressions'])
+
+
+# --- one-command send, draft edit, catch-all, gog environment ---
+
+def test_catch_all_sends_with_a_note_and_other_unverified_still_blocks(env):
+    row=one(env);email=row['recipient_email']
+    with connection(read_only=True) as db:
+        for evidence in ({'status':'do_not_mail','sub_status':'role_based_catch_all'},{'status':'catch-all'}):
+            assert policy.recipient(db,email,{email:evidence})==email
+            assert 'catch-all' in policy.verification_note(evidence)
+        for evidence in ({'status':'invalid'},{'status':'do_not_mail','sub_status':'disposable'},{}):
+            with pytest.raises(Refused,match='recipient_unverified'):policy.recipient(db,email,{email:evidence})
+        override={'status':'unknown','override_by':'Ari'}
+        assert policy.recipient(db,email,{email:override})==email
+        assert 'override' in policy.verification_note(override)
+    assert policy.verification_note({'status':'valid'}) is None
+
+
+def test_send_without_approver_is_a_dry_run_and_with_one_sends(env):
+    row=one(env)
+    fake=Fake()
+    dry=send.send_message(NS(target=row['id'],apply=False,approved_by=None),fake)
+    assert dry['dry_run'] is True and not fake.calls
+    result=send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),fake)
+    assert result['results'][0]['state']=='accepted' and result['approved_by']=='Ari' and fake.calls==[row['id']]
+    with pytest.raises(Refused,match='duplicate_idempotency_key'):
+        send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),fake)
+    assert len(fake.calls)==1
+
+
+@pytest.mark.parametrize('name',['agent','mailvin'])
+def test_send_refuses_agent_as_approver(env,name):
+    row=one(env);fake=Fake()
+    with pytest.raises(Refused,match='approval_invalid_approver'):
+        send.send_message(NS(target=row['id'],apply=False,approved_by=name),fake)
+    assert not fake.calls
+
+
+def test_send_notes_catch_all(env):
+    email=env+'0@example.test'
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',[email],subject='Synthetic',body='Hello',verification={email:{'status':'do_not_mail','sub_status':'role_based_catch_all'}},message_id=env+'catchall')
+        draft.insert(db,row)
+    result=send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),Fake())
+    assert result['results'][0]['state']=='accepted' and 'catch-all' in result['notes'][0]
+
+
+def test_edit_draft_purpose_drops_unsubscribe_and_refuses_marketing_or_sent(env):
+    email=env+'0@example.test'
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',[email],purpose='marketing',subject='Hi',
+            body='Hello\n\nUnsubscribe: mailto:alex@rebattery.io?subject=unsubscribe',
+            html='<p>Hello</p><p><a href="mailto:alex@rebattery.io?subject=unsubscribe">Unsubscribe</a></p>',verification={email:{'status':'valid'}},message_id=env+'mk')
+        draft.insert(db,row)
+    assert 'nsubscribe' in row['body_text'] and 'nsubscribe' in row['body_html']
+    edited=draft.edit(NS(target=row['id'],purpose='personal',subject=None,body=None,html=None))['message']
+    assert edited['purpose']=='personal' and 'nsubscribe' not in edited['body_text'] and 'nsubscribe' not in edited['body_html']
+    assert edited['subject']=='Hi' and edited['to_emails']==[email]
+    with pytest.raises(Refused,match='use_new_draft_for_marketing'):
+        draft.edit(NS(target=row['id'],purpose='marketing',subject=None,body=None,html=None))
+    send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),Fake())
+    with pytest.raises(Refused,match='draft_not_editable'):
+        draft.edit(NS(target=row['id'],purpose=None,subject='Late',body=None,html=None))
+
+
+def test_gog_env_always_carries_keyring_and_home(monkeypatch,tmp_path):
+    from rebattery_mail import core
+    key=tmp_path/'key';key.write_text('secret\n')
+    monkeypatch.setattr(core,'GOG_KEYRING_FILE',key)
+    monkeypatch.delenv('GOG_KEYRING_PASSWORD',raising=False)
+    monkeypatch.setenv('HOME','/nowhere')
+    env=core.gog_env()
+    assert env['GOG_KEYRING_PASSWORD']=='secret' and env['HOME']=='/root'
+    monkeypatch.setenv('GOG_KEYRING_PASSWORD','caller')
+    assert core.gog_env()['GOG_KEYRING_PASSWORD']=='caller'
+
+
+def test_gmail_send_passes_keyring_env_to_gog(monkeypatch):
+    seen={}
+    def runner(args,**kwargs):
+        seen.update(kwargs)
+        return NS(returncode=0,stdout='{"id":"receipt"}')
+    monkeypatch.setenv('GOG_KEYRING_PASSWORD','from-test')
+    with patch('rebattery_mail.drivers.live_gate'):
+        GmailSendDriver(runner).send({'gmail_account':'alex@rebattery.io','address':'alex@rebattery.io'},{'to_emails':['b@example.test'],'subject':'S','body_text':'Hi'})
+    assert seen['env']['GOG_KEYRING_PASSWORD']=='from-test'
+
+
+def test_gmail_auth_failure_is_a_clean_refusal_not_unknown(env,monkeypatch):
+    row=one(env)
+    from rebattery_mail.core import ProviderError
+    import subprocess
+    monkeypatch.setattr(subprocess,'run',lambda *a,**k: NS(returncode=1,stdout='',stderr='keyring'))
+    with pytest.raises(ProviderError,match='gmail_auth_unavailable'):
+        GmailSendDriver().preflight({'gmail_account':'alex@rebattery.io'},row)
+    assert state(row['id'])=='draft'

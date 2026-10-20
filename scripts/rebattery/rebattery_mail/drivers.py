@@ -9,7 +9,7 @@ import urllib.request
 from contextlib import nullcontext
 from datetime import datetime
 from email.utils import getaddresses
-from .core import Refused, ProviderError, UnknownOutcome, connection, dict_cursor
+from .core import Refused, ProviderError, UnknownOutcome, connection, dict_cursor, gog_env
 
 
 def live_gate():
@@ -130,6 +130,15 @@ class GmailSendDriver:
     def preflight(self, identity, message):
         if self.gmail_no_send or os.environ.get('GOG_GMAIL_NO_SEND') == '1':
             raise Refused('live_send_disabled')
+        if self.runner is subprocess.run and identity.get('gmail_account'):
+            # Prove keyring and token work before any claim, so a credential problem is a clean refusal, not an unknown send.
+            try:
+                check = subprocess.run(['gog','--account',identity['gmail_account'],'gmail','messages','search','in:sent','--max','1','--json','--no-input'],
+                                       capture_output=True, text=True, timeout=30, env=gog_env())
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise ProviderError('gmail_auth_unavailable', cause=type(exc).__name__) from exc
+            if check.returncode:
+                raise ProviderError('gmail_auth_unavailable', returncode=check.returncode)
         return {}
 
     def send(self, identity, message):
@@ -152,7 +161,7 @@ class GmailSendDriver:
         elif message.get('gmail_thread_id'):
             args += ['--thread-id',message['gmail_thread_id']]
         try:
-            response = self.runner(args, capture_output=True, text=True, timeout=30)
+            response = self.runner(args, capture_output=True, text=True, timeout=30, env=gog_env())
             if response.returncode == 2:
                 # gog exit code 2 is a usage error raised before any API call: nothing was submitted.
                 raise ProviderError('gmail_send_rejected', returncode=2)

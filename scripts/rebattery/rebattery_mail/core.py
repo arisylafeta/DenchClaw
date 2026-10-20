@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -50,6 +51,18 @@ def connection(read_only=False):
     db = psycopg2.connect(os.environ.get("DENCH_MAIL_DSN", os.environ.get("DENCH_CAMPAIGN_DSN", "dbname=denchclaw")))
     db.set_session(readonly=read_only)
     return db
+
+
+GOG_KEYRING_FILE = Path('/root/.hermes/workspace/.secrets/gog-keyring-password')
+
+
+def gog_env():
+    """Environment every gog call runs with, whoever the caller is. The keyring password never leaves this process."""
+    env = os.environ.copy()
+    env['HOME'] = '/root'
+    if not env.get('GOG_KEYRING_PASSWORD') and GOG_KEYRING_FILE.exists():
+        env['GOG_KEYRING_PASSWORD'] = GOG_KEYRING_FILE.read_text().strip()
+    return env
 
 
 def dict_cursor(db):

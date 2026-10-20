@@ -54,6 +54,21 @@ def content(message):
             raise Refused('marketing_requires_unsubscribe')
 
 
+def catch_all(evidence):
+    text = ' '.join(str(evidence.get(key) or '') for key in ('status', 'sub_status')).lower().replace('-', '_')
+    return 'catch_all' in text
+
+
+def verification_note(evidence):
+    """Plain-language caveat shown with a send; None when the address is plainly valid."""
+    evidence = evidence if isinstance(evidence, dict) else {'status': evidence}
+    if str(evidence.get('override_by') or '').strip() and evidence.get('status') != 'valid' and not catch_all(evidence):
+        return 'unverified (%s), sent on %s override' % (evidence.get('status') or 'missing', evidence['override_by'])
+    if catch_all(evidence):
+        return 'catch-all domain: deliverability cannot be confirmed'
+    return None
+
+
 def recipient(db, email, verification, suppressions=None):
     email = email.strip().lower()
     if email in (suppressions or {}):
@@ -79,8 +94,9 @@ def recipient(db, email, verification, suppressions=None):
     evidence = verification.get(email, {}) if isinstance(verification, dict) else {}
     if isinstance(evidence, str):
         evidence = {'status': evidence}
-    # ZeroBounce's role_based flag is deliberately not an exclusion.
-    if evidence.get('status') != 'valid':
+    # ZeroBounce's role_based flag is deliberately not an exclusion. Catch-all domains are deliverable but
+    # unconfirmable, so they send with a note. A named human may knowingly override anything else.
+    if evidence.get('status') != 'valid' and not catch_all(evidence) and not str(evidence.get('override_by') or '').strip():
         raise Refused('recipient_unverified', email=email, verification_status=evidence.get('status','missing'), verification_reason=evidence.get('sub_status'))
     return email
 

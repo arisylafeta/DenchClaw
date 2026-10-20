@@ -1,7 +1,8 @@
 """Prepare and preview exact outbound copy without submitting to providers."""
 import json
+import re
 from uuid import uuid4
-from .core import connection, dict_cursor, Refused, PURPOSES
+from .core import connection, dict_cursor, Refused, UsageError, PURPOSES
 from . import policy
 from .templating import render_message as _render_message
 from .templating import compose, template_variables
@@ -117,6 +118,42 @@ def preview(args):
     return {'subject_id':args.target,'messages':rows,'recipients':[e for r in rows for e in r['to_emails']], 'signature':{'text':author['signature_text'],'html':author['signature_html']},'exclusions':exclusions,'sha256':digest(rows),'dry_run':True}
 
 
+def _strip_unsubscribe(text, html):
+    text = re.sub(r'(?m)^Unsubscribe: \S+\n*', '', text or '')
+    html = re.sub(r'<p><a href="[^"]*">Unsubscribe</a></p>', '', html or '')
+    return text.replace(policy.UNSUBSCRIBE, ''), html.replace(policy.UNSUBSCRIBE, '')
+
+
+def edit(args):
+    """Change an unsent draft in place. Switching away from marketing drops the unsubscribe footer."""
+    changes = {k: getattr(args, k) for k in ('purpose', 'subject', 'body', 'html') if getattr(args, k, None) is not None}
+    if not changes:
+        raise UsageError('nothing_to_edit')
+    with connection() as db:
+        with dict_cursor(db) as cur:
+            cur.execute("select * from mail_message where id=%s and state='draft' and idempotency_key is null for update", (args.target,))
+            row = cur.fetchone()
+            if not row:
+                raise Refused('draft_not_editable', message_id=args.target)
+            row = dict(row)
+            text, html = row['body_text'] or '', row['body_html'] or ''
+            purpose = changes.get('purpose', row['purpose'])
+            if purpose != row['purpose']:
+                if purpose == 'marketing':
+                    raise Refused('use_new_draft_for_marketing')
+                policy.identity(db, row['identity_key'], purpose, row['transport'])
+                if row['purpose'] == 'marketing':
+                    text, html = _strip_unsubscribe(text, html)
+            text, html = changes.get('body', text), changes.get('html', html)
+            row.update(purpose=purpose, subject=changes.get('subject', row['subject']), body_text=text, body_html=html)
+            policy.content(row)
+            cur.execute('update mail_message set purpose=%s,subject=%s,body_text=%s,body_html=%s,updated_at=now() where id=%s',
+                        (row['purpose'], row['subject'], row['body_text'], row['body_html'], args.target))
+    with connection(read_only=True) as db:
+        _, rows = load(db, args.target)
+    return {'message': rows[0], 'sha256': digest(rows)}
+
+
 def content_flags(parser):
     parser.add_argument('--identity',required=True)
     parser.add_argument('--purpose',choices=PURPOSES,default='personal')
@@ -140,6 +177,13 @@ def register(subparsers):
     parser.add_argument('--campaign')
     parser.add_argument('--apply',action='store_true')
     parser.set_defaults(handler=create)
+    parser = subparsers.add_parser('edit')
+    parser.add_argument('target')
+    parser.add_argument('--purpose', choices=PURPOSES)
+    parser.add_argument('--subject')
+    parser.add_argument('--body')
+    parser.add_argument('--html')
+    parser.set_defaults(handler=edit)
     parser = subparsers.add_parser('preview')
     parser.add_argument('target')
     parser.set_defaults(handler=preview)
