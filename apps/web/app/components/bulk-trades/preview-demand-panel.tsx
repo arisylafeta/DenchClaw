@@ -17,6 +17,7 @@ import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
 import { DemandHeader } from "./demand-header";
+import { PartyCard, type PartyCardProps } from "./party-card";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
@@ -63,40 +64,37 @@ function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | nul
   );
 }
 
-/** Who the buyer is in three lines. Everything else lives on the company page. */
+/** The buyer as a card: who they are and where they stand, with a way into the CRM. */
 function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: BuyerContext | null; onOpenDemand?: (id: string) => void }) {
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
-  const status = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage, profile?.owner ? `Owner ${profile.owner}` : null,
-    engagement?.last_heard_at ? `last heard ${ago(engagement.last_heard_at)}` : null].filter(Boolean);
+  const chips = [
+    profile?.tier ? { label: `${profile.tier}-tier`, tone: "tier" as const } : null,
+    profile?.stage ? { label: profile.stage } : null,
+    profile?.owner ? { label: `Owner ${profile.owner}` } : null,
+  ].filter((chip): chip is { label: string; tone?: "tier" } => !!chip);
+  const rows: (PartyCardProps["rows"] extends (infer R)[] | undefined ? R | null : never)[] = [
+    engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null,
+    profile?.buyer_profile?.wants ? { label: "Usually buys", value: profile.buyer_profile.wants } : null,
+    others.length > 0 ? {
+      label: "Also asking for",
+      value: others.map((d, i) => (
+        <span key={d.id}>{i > 0 && ", "}
+          {onOpenDemand ? <button type="button" className={`${rowFocus} underline`} onClick={() => onOpenDemand(d.id)}>{d.product_family ?? d.wants.slice(0, 48)}</button>
+            : d.product_family ?? d.wants.slice(0, 48)}
+        </span>
+      )),
+    } : null,
+    profile?.outreach_notes ? { label: "Notes", value: profile.outreach_notes } : null,
+    profile?.past_issues ? { label: "Past issues", value: profile.past_issues, bad: true } : null,
+  ];
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className={css.label}>The buyer</h3>
-        {demand.company_id && <a href={buildEntryLink("company", demand.company_id)} className={`${rowFocus} text-[12px] underline`}>Full buyer profile</a>}
-      </div>
-      {!demand.company_id ? <p className={css.note}>Not linked to a CRM company yet. Link one in Edit.</p> : (
-        <>
-          {status.length > 0 && <p className="text-[13px]">{status.join(" · ")}</p>}
-          {(profile?.buyer_profile?.wants || others.length > 0) && (
-            <p className="text-[13px]">
-              {profile?.buyer_profile?.wants && <><span style={{ color: "var(--bt-muted)" }}>Usually buys </span>{profile.buyer_profile.wants} </>}
-              {others.length > 0 && <span style={{ color: "var(--bt-muted)" }}>Also asking for </span>}
-              {others.map((d, i) => (
-                <span key={d.id}>{i > 0 && ", "}
-                  {onOpenDemand ? <button type="button" className={`${rowFocus} underline`} onClick={() => onOpenDemand(d.id)}>{d.product_family ?? d.wants.slice(0, 48)}</button>
-                    : d.product_family ?? d.wants.slice(0, 48)}
-                </span>
-              ))}
-            </p>
-          )}
-          {profile?.outreach_notes && <p className="text-[13px]">{profile.outreach_notes}</p>}
-          {profile?.past_issues && <p className="text-[13px]" style={{ color: "var(--bt-red)" }}>Past issues: {profile.past_issues}</p>}
-        </>
-      )}
+    <div className="flex flex-col gap-4">
+      <PartyCard role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id}
+        contact={demand.contact} email={demand.email} chips={chips} rows={rows.filter((row) => row !== null)} />
       <CompanyContext notes={demand.context_notes} />
-    </section>
+    </div>
   );
 }
 
@@ -196,7 +194,6 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         <div data-preview-details className={css.details}>
           <div className="flex flex-col gap-6">
             <TheAsk demand={demand} supply={supply} />
-            <BuyerContext context={demand.context} />
           </div>
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
         </div>

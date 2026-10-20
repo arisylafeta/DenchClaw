@@ -27,7 +27,7 @@ export type Fact = {
   critical: boolean;
 };
 
-export const GROUPS = ["Product", "Commercial", "Logistics", "Evidence"] as const;
+export const GROUPS = ["Product", "Commercial", "Logistics", "Project", "Evidence"] as const;
 const STEPS: NeededFor[] = ["Teaser", "Bids", "Shipping", "Closing"];
 
 const present = (text: string | null | undefined) => (text && text.trim() ? text.trim() : null);
@@ -76,8 +76,17 @@ export function demandFacts(registry: Registry, demand: Demand, opts: { pinned?:
     if (key === "kwh_min" || key === "kwh_max" || spec[key] == null) continue;
     facts.push(make(key, registry.specNumbers[key].label, registry.specGroups[key] ?? "Product", key === "min_soh" ? `${spec[key]}%` : String(spec[key])));
   }
+  const context = demand.context ?? {};
+  const yesNo = (value: boolean | undefined | null, yes: string, no: string) => (value == null ? null : value ? yes : no);
   facts.push(
     make("max_price", "Max price", "Commercial", priceLabel(demand), true),
+    make("application", "Intended use", "Project", present(context.application?.replaceAll("_", " "))),
+    make("min_usable_energy", "Min usable energy", "Project",
+      context.min_usable_energy_kwh_per_pack == null ? null : `${context.min_usable_energy_kwh_per_pack} kWh per pack`),
+    make("homogeneous", "One make per container", "Project", yesNo(context.homogeneous_within_container, "Required", "Not required")),
+    make("repeat_supply", "Repeat supply", "Project", yesNo(context.repeat_supply_required, "Required", "Not required")),
+    make("container_design", "Container design", "Project",
+      context.container_design_finalized == null ? null : context.container_design_finalized ? "Finalised" : "Not final, reconfirm before sourcing"),
     make("needed_by", "Needed by", "Logistics", demand.needed_by ? shortDate(demand.needed_by) : null, demand.kind === "request"),
     make("location", "Deliver to", "Logistics", present(demand.location)),
   );

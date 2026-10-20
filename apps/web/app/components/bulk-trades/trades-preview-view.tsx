@@ -86,6 +86,13 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   const openDemand = (id: string) => navigate({ ...filterFields, demand: id });
   const openSupply = (id: string) => navigate({ ...filterFields, supply: id });
 
+  /** Saves a row's next action in place: trades on the trade, demand and supply on the listing. */
+  async function saveNext(row: SheetRow, text: string | null) {
+    if (row.kind === "trade") await request(`/api/bulk-trades/${row.id}`, { method: "PATCH", body: JSON.stringify({ next_step: text, ...(text ? {} : { next_step_due: null }) }) });
+    else await request(`/api/bulk-listings/${row.id}/next`, { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? row.next_due : null }) });
+    setRows((current) => current.map((item) => (item.key === row.key ? { ...item, next_action: text, next_due: text ? item.next_due : null } : item)));
+  }
+
   async function createTrade(patch: TradePatch) {
     const { trade } = await request<{ trade: BulkTrade }>("/api/bulk-trades", { method: "POST", body: JSON.stringify(patch) });
     setCreating(null);
@@ -142,7 +149,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
       <main className="flex-1 overflow-auto px-2 pb-8 pt-2 sm:px-3">
         <ErrorText error={actionError} />
         <OpportunitiesSheet rows={rows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-          onFilters={setFilters} onOpen={open} />
+          onFilters={setFilters} onOpen={open} onNext={saveNext} />
       </main>
 
       {route.supply && <SupplyDetail key={route.supply} id={route.supply} onClose={closeDetail} onOpenDemand={openDemand} />}

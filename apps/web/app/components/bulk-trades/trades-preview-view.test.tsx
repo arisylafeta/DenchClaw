@@ -79,10 +79,10 @@ describe("Trades Preview sheet", () => {
     render(<TradesPreviewView />);
     expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
-    const trade = screen.getByRole("button", { name: /Synthetic eBS37/ });
+    const trade = screen.getByRole("button", { name: /Synthetic eBS37/ }).closest("li")!;
     expect(within(trade).getByText("With buyers")).toBeInTheDocument();
-    expect(within(trade).getByTitle(/Call the buyer/)).toBeInTheDocument();
-    expect(within(trade).getByTitle(/Alex/)).toBeInTheDocument();
+    expect(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
+    expect(within(trade).getByText(/Alex/)).toBeInTheDocument();
     expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
     for (const gone of ["Today", "Trades", "Demand", "Supply"]) expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
   });
@@ -90,10 +90,36 @@ describe("Trades Preview sheet", () => {
   it("says plainly when a value is not recorded instead of guessing", async () => {
     vi.stubGlobal("fetch", mockApi({ sheet: [row({ company: null })] }));
     render(<TradesPreviewView />);
-    const demand = await screen.findByRole("button", { name: /12 Ioniq packs/ });
-    // Company, latest development and next action are all unrecorded: each shows a dash, never an invented value.
-    expect(within(demand).getAllByText("—")).toHaveLength(3);
-    expect(within(demand).getByTitle("No next action recorded")).toBeInTheDocument();
+    const demand = (await screen.findByRole("button", { name: /12 Ioniq packs/ })).closest("li")!;
+    // Company and latest development are unrecorded: each shows a dash, never an invented value. The next action invites one.
+    expect(within(demand).getAllByText("—")).toHaveLength(2);
+    expect(within(demand).getByRole("button", { name: "Add next action" })).toBeInTheDocument();
+  });
+
+  it("edits the next action in place for a listing and for a trade without opening the row", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/bulk-listings/d1/next" || url === "/api/bulk-trades/bt_1") return new Response(JSON.stringify({}));
+      return mockApi()(url, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TradesPreviewView />);
+    const demand = (await screen.findByRole("button", { name: /12 Ioniq packs/ })).closest("li")!;
+    await userEvent.click(within(demand).getByRole("button", { name: "Add next action" }));
+    await userEvent.type(screen.getByLabelText("Next action"), "Send price list{Enter}");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/next", expect.objectContaining({
+      method: "PUT", body: JSON.stringify({ next_action: "Send price list", next_due: null }),
+    })));
+    expect(await within(demand).findByRole("button", { name: "Edit next action: Send price list" })).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get("demand")).toBeNull();
+
+    const trade = screen.getByRole("button", { name: /Synthetic eBS37/ }).closest("li")!;
+    await userEvent.click(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ }));
+    const input = screen.getByLabelText("Next action");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Chase the bid{Enter}");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1", expect.objectContaining({
+      method: "PATCH", body: JSON.stringify({ next_step: "Chase the bid" }),
+    })));
   });
 
   it("filters by search and starting point, and keeps the filters in the URL", async () => {

@@ -4,6 +4,7 @@ import { Search, Flag } from "lucide-react";
 import { SIDE_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
+import { NextActionCell } from "./next-action-cell";
 import { ErrorText } from "./trade-ui";
 
 const TONE: Record<SheetTone, { dot: string; bg: string }> = {
@@ -14,7 +15,7 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   hold: { dot: "var(--bt-purple)", bg: "var(--bt-purple-bg)" },
 };
 
-const GRID = "md:grid-cols-[2.5rem_minmax(0,1.8fr)_minmax(7rem,1fr)_8.5rem_4.5rem_4.5rem] lg:grid-cols-[2.5rem_minmax(0,1.8fr)_minmax(8rem,1fr)_8.5rem_5rem_5rem]";
+const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_5rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -67,38 +68,33 @@ function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: 
   );
 }
 
-function SheetRowItem({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void }) {
-  const overdue = !!row.next_due && row.next_due < today;
+function SheetRowItem({ row, today, onOpen, onNext }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
   const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
   return (
-    <li>
-      <button type="button" onClick={() => onOpen(row)}
-        className={`grid w-full grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-visible:bg-[var(--bt-row-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--bt-text-2)] ${GRID}`}>
-        <span className="hidden md:block"><ScoreCircle score={row.score} /></span>
-        <span className="min-w-0">
-          <span className="line-clamp-2 text-[13px] font-medium leading-snug" title={row.title}>{row.title}</span>
-          {row.company && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
-          <span className="mt-1 inline-flex md:hidden"><ScoreCircle score={row.score} /></span>
-        </span>
-        <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}>{row.company ?? "—"}</span>
-        <span><ProgressChip row={row} /></span>
-        <span className="hidden min-w-0 lg:block">
-          {row.latest ? (
-            <IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} />
-          ) : <span style={{ color: "var(--bt-muted)" }}>—</span>}
-        </span>
-        <span className="min-w-0">
-          {row.next_action ? (
-            <IconDate icon={Flag} date={row.next_due} tone={overdue ? "var(--bt-red)" : undefined}
-              title={[row.next_action, row.owner, row.next_due ? `${overdue ? "overdue " : "due "}${shortDate(row.next_due)}` : null].filter(Boolean).join(" · ")} />
-          ) : <span title="No next action recorded" style={{ color: "var(--bt-muted)" }}>—</span>}
-        </span>
-      </button>
+    <li onClick={() => onOpen(row)}
+      className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
+      <span className="hidden md:block"><ScoreCircle score={row.score} /></span>
+      <span className="min-w-0">
+        <button type="button" title={row.title}
+          className="line-clamp-2 w-full text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">{row.title}</button>
+        {row.company && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
+        <span className="mt-1 inline-flex md:hidden"><ScoreCircle score={row.score} /></span>
+      </span>
+      <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}>{row.company ?? "—"}</span>
+      <span><ProgressChip row={row} /></span>
+      <span className="hidden min-w-0 lg:block">
+        {row.latest ? (
+          <IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} />
+        ) : <span style={{ color: "var(--bt-muted)" }}>—</span>}
+      </span>
+      <span className="min-w-0">
+        <NextActionCell value={row.next_action} due={row.next_due} owner={row.owner} today={today} onSave={(text) => onNext(row, text)} />
+      </span>
     </li>
   );
 }
 
-export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, onFilters, onOpen }: {
+export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, onFilters, onOpen, onNext }: {
   rows: SheetRow[];
   shown: SheetRow[];
   filters: SheetFilters;
@@ -107,6 +103,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
   today: string;
   onFilters: (next: SheetFilters) => void;
   onOpen: (row: SheetRow) => void;
+  onNext: (row: SheetRow, text: string | null) => Promise<void>;
 }) {
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
@@ -150,13 +147,13 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
       </p>
 
       <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <div className="md:min-w-[50rem] lg:min-w-[56rem]">
+        <div className="md:min-w-[54rem] lg:min-w-[62rem]">
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span>Next</span>
+          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span>Next action</span>
         </div>
         {shown.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">
-            {shown.map((row) => <SheetRowItem key={row.key} row={row} today={today} onOpen={onOpen} />)}
+            {shown.map((row) => <SheetRowItem key={row.key} row={row} today={today} onOpen={onOpen} onNext={onNext} />)}
           </ul>
         ) : loading && !rows.length ? (
           <ul aria-hidden="true" className="divide-y divide-[var(--bt-divider)]">

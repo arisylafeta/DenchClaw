@@ -1,0 +1,18 @@
+.card { display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--bt-border); background: var(--bt-surface); min-width: 0; }
+.head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.avatar { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 9999px; font-size: 15px; font-weight: 600; letter-spacing: 0.02em; color: var(--bt-text); }
+.name { font-size: 15px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.name a { text-decoration: none; }
+.name a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.role { font-family: var(--font-geist-mono, ui-monospace, monospace); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bt-muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.chip { padding: 1px 8px; font-size: 11px; font-weight: 500; border: 1px solid var(--bt-border); color: var(--bt-text-2); background: var(--bt-table-head); }
+.chip[data-tone="tier"] { color: var(--bt-green); border-color: var(--bt-green-border); background: var(--bt-green-bg); }
+.contact { display: flex; flex-direction: column; gap: 2px; padding-top: 12px; border-top: 1px solid var(--bt-divider); font-size: 13px; }
+.contact strong { font-weight: 600; }
+.contact a { color: var(--bt-link); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.rows { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.rows dt { display: inline; color: var(--bt-muted); }
+.rows dd { display: inline; margin: 0; }
+.bad { color: var(--bt-red); }
+.link { align-self: flex-start; font-size: 12px; color: var(--bt-link); text-decoration: underline; text-underline-offset: 2px; }

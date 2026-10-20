@@ -57,6 +57,7 @@ type DemandInput = {
   id: string; buyer: string; company_id: string | null; wants: string; product_family: string | null; context: BuyerContext;
   activity_count: number; linked_trades: number; latest_kind: string | null; latest_title: string | null;
   latest_at: string | null; asked_on: string | null; updated_at: string; score: number | null;
+  next_action?: string | null; next_due?: string | null;
 };
 
 const ACTIVITY_LABEL: Record<string, string> = {
@@ -77,7 +78,7 @@ export function demandRow(input: DemandInput): SheetRow {
     latest: input.latest_title
       ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" }
       : null,
-    next_action: null, next_due: null, owner: null,
+    next_action: text(input.next_action), next_due: input.next_due ?? null, owner: null,
     touched: input.latest_at ?? input.asked_on ?? input.updated_at,
   };
 }
@@ -85,6 +86,7 @@ export function demandRow(input: DemandInput): SheetRow {
 type SupplyInput = {
   id: string; seller: string; company_id: string | null; offers: string; trade_kind: string | null;
   source_kind: string | null; source_label: string | null; observed_on: string | null; updated_at: string;
+  next_action?: string | null; next_due?: string | null;
 };
 
 export function supplyRow(input: SupplyInput): SheetRow {
@@ -94,7 +96,7 @@ export function supplyRow(input: SupplyInput): SheetRow {
     title: input.offers, company: text(input.seller), company_id: input.company_id,
     category: text(input.trade_kind), progress: "Offered", tone: "new", score: null,
     latest: { label: via, at: input.observed_on },
-    next_action: null, next_due: null, owner: null, touched: input.observed_on ?? input.updated_at,
+    next_action: text(input.next_action), next_due: input.next_due ?? null, owner: null, touched: input.observed_on ?? input.updated_at,
   };
 }
 
