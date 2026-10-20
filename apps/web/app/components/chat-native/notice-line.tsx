@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, ChevronRight, CircleCheck, Compass, Repeat, Shuffle, SquareTerminal } from "lucide-react";
+import { Bell, ChevronRight, CircleCheck, Compass, Repeat, Shuffle, SquareTerminal, UserPlus } from "lucide-react";
 import type { Notice, NoticeKind } from "@/lib/hermes-chat/notice";
 
-const ICON = { delegation: CircleCheck, notification: Bell, resume: Repeat, steer: Compass, model: Shuffle, process: SquareTerminal } as const satisfies Record<NoticeKind, unknown>;
+const ICON = { delegation: CircleCheck, notification: Bell, resume: Repeat, steer: Compass, model: Shuffle, process: SquareTerminal, invite: UserPlus } as const satisfies Record<NoticeKind, unknown>;
 /** A system event Hermes stored as a user row: one muted line, details on demand. */
 export function NoticeLine({ notice, onCancel }: { notice: Notice; onCancel?: () => void }) {
   const [open, setOpen] = useState(false);

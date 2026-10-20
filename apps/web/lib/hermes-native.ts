@@ -335,21 +335,29 @@ export async function readConversation(key: string, sinceSeq = 0, probeCap?: num
   return { conversation, messages };
 }
 
-const HANDOFF_MESSAGES = 12, HANDOFF_MESSAGE_CHARS = 1200, HANDOFF_TOTAL_CHARS = 12_000;
-/** The invitee's first prompt. Transcript text must not contain live @mentions, which would pull extra members into round 0. */
-export function inviteHandoff(host: string, invitee: string, messages: HermesMessage[], task: string): string {
+const HANDOFF_TURN_CHARS = 600;
+/**
+ * The invitee's first prompt: a pointer to the host's transcript plus a short summary, not the transcript itself.
+ * The first line is a marker so DenchClaw shows the row as a muted notice. A room message accepts only `text` and
+ * `thread_id`, so the marker has to live in the text. Transcript text must not contain live @mentions, which would
+ * pull extra members into round 0.
+ */
+export function inviteHandoff(host: string, invitee: string, session: { id: string; title?: string }, messages: HermesMessage[], task: string): string {
   const quiet = (text: string) => text.replace(/@(?=[A-Za-z0-9])/g, "@\u200b");
-  const lines: string[] = [];
-  let used = 0;
-  for (const message of messages.filter((m) => (m.role === "user" || m.role === "assistant") && (m.text ?? "").trim()).slice(-HANDOFF_MESSAGES).reverse()) {
-    const text = quiet(message.text.trim().slice(0, HANDOFF_MESSAGE_CHARS));
-    const line = `${message.role === "user" ? "user" : host}: ${text}`;
-    if (used + line.length > HANDOFF_TOTAL_CHARS) break;
-    used += line.length; lines.unshift(line);
-  }
+  const turns = messages.filter((m) => (m.role === "user" || m.role === "assistant") && (m.text ?? "").trim());
+  const last = (role: string) => turns.findLast((m) => m.role === role);
+  const clip = (text: string) => { const t = quiet(text.trim()); return t.length > HANDOFF_TURN_CHARS ? `${t.slice(0, HANDOFF_TURN_CHARS)}…` : t; };
+  const title = session.title && session.title !== "Untitled chat" && session.title !== "New chat" ? session.title : "";
+  const ask = last("user"), reply = last("assistant");
   return [
+    `[ROOM INVITE host=${host} session=${session.id} invitee=${invitee}]`,
     `@${invitee} The user invited you into this chat. It was a one-to-one chat with ${host}, so ${host} is now your teammate here.`,
-    lines.length ? `\nRecent conversation, oldest first:\n${lines.join("\n\n")}` : "\nThe earlier chat had no messages.",
+    turns.length ? [
+      `\nEarlier chat${title ? `: ${quiet(title)}` : ""} (${turns.length} messages).`,
+      ask ? `Last user message: ${clip(ask.text)}` : "",
+      reply ? `Last reply from ${host}: ${clip(reply.text)}` : "",
+      `Full transcript, read-only: session_search(session_id="${session.id}", profile="${host}"). Open it only if you need more than this.`,
+    ].filter(Boolean).join("\n") : "\nThe earlier chat had no messages.",
     task.trim() ? `\nThe user asks you: ${task.trim()}` : "\nCatch up, then add what is useful or ask the user what they need.",
   ].join("\n");
 }
@@ -363,7 +371,7 @@ export async function inviteToConversation(key: string, invitee: string, task = 
   const title = source.conversation.title;
   const room = await createConversation([identity.profile, invitee], title && title !== "Untitled chat" && title !== "New chat" ? `${title} · ${invitee}`.slice(0, 80) : undefined);
   try {
-    await groupRpc("groups.send", { room_id: room.id, event_id: `invite-${randomUUID()}`, payload: { text: inviteHandoff(identity.profile, invitee, source.messages, task), thread_id: room.id } });
+    await groupRpc("groups.send", { room_id: room.id, event_id: `invite-${randomUUID()}`, payload: { text: inviteHandoff(identity.profile, invitee, { id: identity.id, title }, source.messages, task), thread_id: room.id } });
   } catch (error) {
     await groupRpc("groups.disband", { room_id: room.id }).catch(() => undefined);
     throw error;

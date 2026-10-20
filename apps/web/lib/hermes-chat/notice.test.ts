@@ -49,4 +49,9 @@ describe("noticeForRow", () => {
     const text = "IMPORTANT: 2 background processes completed, but please check their output";
     expect(noticeForRow({ role: "user", displayKind: "steer", text })).toMatchObject({ kind: "steer", text: `Steered: ${text}` });
   });
+  it("shows an /invite handoff as a muted notice with the handoff as details", () => {
+    const text = "[ROOM INVITE host=default session=s1 invitee=matcha]\n@matcha The user invited you.";
+    expect(noticeForRow({ role: "user", text })).toEqual({ kind: "invite", text: "Invited matcha · from default chat", details: "@matcha The user invited you." });
+    expect(noticeForRow({ role: "assistant", text })).toBeNull();
+  });
 });

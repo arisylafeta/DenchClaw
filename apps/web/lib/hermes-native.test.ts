@@ -294,15 +294,17 @@ describe("inviting an agent into a chat", () => {
     expect(roomMembers(["default", "matcha"]).map(m => m.handle)).toEqual(["default", "matcha"]);
     expect(roomMembers(["all", "my profile", "bot2"]).map(m => m.handle)).toEqual(["bot1", "bot2", "bot3"]);
   });
-  it("hands the invitee a bounded transcript with no live mentions of other members", () => {
+  it("hands the invitee a marker, a summary and a transcript pointer, with no live mentions", () => {
     const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? "assistant" : "user", text: `line ${i} @default @all ${"x".repeat(2000)}`, content: "" }));
-    const prompt = inviteHandoff("default", "matcha", [...messages, { id: "tool", role: "tool", text: "ignored", content: "" }, { id: "blank", role: "user", text: "  ", content: "" }], "price the lot");
-    expect(prompt.startsWith("@matcha ")).toBe(true);
+    const prompt = inviteHandoff("default", "matcha", { id: "s1", title: "Pricing" }, [...messages, { id: "tool", role: "tool", text: "ignored", content: "" }, { id: "blank", role: "user", text: "  ", content: "" }], "price the lot");
+    expect(prompt.startsWith("[ROOM INVITE host=default session=s1 invitee=matcha]\n@matcha ")).toBe(true);
     expect(prompt.match(/@[A-Za-z0-9]/g)).toEqual(["@m"]);
     expect(prompt).toContain("The user asks you: price the lot");
-    expect(prompt).toContain("line 29"); expect(prompt).not.toContain("line 17 "); expect(prompt).not.toContain("ignored");
-    expect(prompt.length).toBeLessThan(14_500);
-    expect(inviteHandoff("default", "matcha", [], "")).toContain("The earlier chat had no messages.");
+    expect(prompt).toContain('session_search(session_id="s1", profile="default")');
+    expect(prompt).toContain("Earlier chat: Pricing (30 messages)");
+    expect(prompt).toContain("line 28 "); expect(prompt).toContain("line 29 "); expect(prompt).not.toContain("line 27 "); expect(prompt).not.toContain("ignored");
+    expect(prompt.length).toBeLessThan(2_000);
+    expect(inviteHandoff("default", "matcha", { id: "s1" }, [], "")).toContain("The earlier chat had no messages.");
   });
   it("creates a room for host and invitee, sends the handoff to the invitee, and removes the room if the send fails", async () => {
     const created = { room_id: "ignored", name: "x", updated_at: 1, members: [] };
@@ -322,7 +324,7 @@ describe("inviting an agent into a chat", () => {
     expect(calls.find(c => c.method === "groups.create")?.params).toMatchObject({ name: "Pricing · default", members: [{ handle: "alpha", profile: "alpha" }, { handle: "default", profile: "default" }] });
     const send = calls.find(c => c.method === "groups.send")!;
     expect(send.params).toMatchObject({ room_id: room.id, payload: { thread_id: room.id } });
-    expect(String((send.params.payload as { text: string }).text)).toMatch(/^@default .*Is the Panasonic lot priced\?.*alpha: Not yet\..*take over pricing/s);
+    expect(String((send.params.payload as { text: string }).text)).toMatch(/^\[ROOM INVITE host=alpha session=s1 invitee=default\]\n@default .*Is the Panasonic lot priced\?.*Not yet\..*session_search\(session_id=\"s1\", profile=\"alpha\"\).*take over pricing/s);
     await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "alpha")).rejects.toThrow("different agent");
     await expect(inviteToConversation(conversationKey("group", "room-1"), "default")).rejects.toThrow("one-to-one");
     failSend = true; calls.length = 0;

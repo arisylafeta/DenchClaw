@@ -6,6 +6,8 @@ import { parseConversationKey } from "@/lib/hermes-conversations";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
 import { slashNotice } from "@/lib/hermes-chat/event-notices";
+import { noticeForRow } from "@/lib/hermes-chat/notice";
+import { NoticeLine } from "./chat-native/notice-line";
 import { NativeTranscript, PromptDock, ReadOnlyNotice } from "./chat-native";
 import { NativeModelControls } from "./chat-native/model-controls";
 import { NativeSlashComposer } from "./chat-native/slash-commands";
@@ -3192,6 +3194,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							}
 							return uniqueMessages.map((message, i) => {
 								const author = message.role === "assistant" ? (message.metadata as { profile?: string; name?: string; memberId?: string; turnId?: string } | undefined) : undefined;
+								const notice = groupKey && message.role === "user" ? noticeForRow({ role: "user", text: message.parts.map((part) => (part.type === "text" ? part.text : "")).join("") }) : null;
+								if (notice) return <NoticeLine key={message.id} notice={notice} />;
 								return (
 									<Fragment key={message.id}>
 										{author?.profile && <GroupAuthor profile={author.profile} name={author.name} />}
