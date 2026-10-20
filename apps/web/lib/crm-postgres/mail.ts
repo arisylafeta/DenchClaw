@@ -1,5 +1,5 @@
 import { queryPg } from '../postgres';
-import type { MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
+import type { MailDraft, MailDraftListRow, MailApproval, MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
 import { listCampaigns, getCampaignDetail } from './campaigns';
 
 // Match the complete domain, not lookalikes such as rebattery.io.evil.com.
@@ -143,4 +143,30 @@ export async function readMailCampaign(id: string, filters: MailFilters = {}) {
   const links = await queryPg(`select l.* from mail_message_link l join mail_message m on m.id = l.message_id where ${predicate} order by l.id`,values);
   const [evidence] = await queryPg<{scanner_evidence:boolean;proxy_evidence:boolean}>(`select coalesce(bool_or(e.detail->>'scanner' = 'true' or e.detail->>'scanner_evidence' = 'true' or (e.type = 'clicked' and m.delivered_at is not null and e.occurred_at between m.delivered_at and m.delivered_at + interval '10 seconds')),false) as scanner_evidence, coalesce(bool_or(e.detail->>'proxy' = 'true' or e.detail->>'proxy_evidence' = 'true' or e.detail::text ilike '%GoogleImageProxy%'),false) as proxy_evidence from mail_event e join mail_message m on m.id=e.message_id where ${predicate}`,values);
   return {...legacy,...counts,counts,delivery_rows:recipients,links,...evidence};
+}
+
+// Drafts are written by the rebattery-mail CLI without a mailbox owner, so they
+// are shared by the signed-in team. Another user's owned messages stay hidden.
+const DRAFT_STATES = "('draft','frozen')";
+
+export async function readMailDraft(id: string, userId: string): Promise<MailDraft | null> {
+  const [row] = await queryPg<Omit<MailDraft, 'links' | 'warnings' | 'approval'> & { personalization: { oneoff?: { warnings?: unknown[] } } | null }>(
+    `select m.id,m.state,m.identity_key,m.transport,m.purpose,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
+       coalesce(m.bcc_emails,'{}') as bcc_emails,m.subject,m.body_text,m.body_html,m.thread_id,m.campaign_id,m.created_at,m.personalization
+     from mail_message m where m.id = $1 and m.direction = 'outbound' and (m.mailbox_owner_id is null or m.mailbox_owner_id = $2::uuid)`, [id, userId]);
+  if (!row) return null;
+  const links = await queryPg<{ cta_key: string; destination_url: string }>('select cta_key,destination_url from mail_message_link where message_id = $1 order by cta_key', [id]);
+  const [approval] = await queryPg<MailApproval>(
+    `select id,sha256,scope,approved_by,approved_at,expires_at,revoked_at,recipient_count from mail_approval
+     where subject_type = 'message' and subject_id = $1 order by approved_at desc limit 1`, [id]);
+  const { personalization, ...message } = row;
+  const warnings = (personalization?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === 'string');
+  return { ...message, links, warnings, approval: approval ?? null };
+}
+
+export async function listMailDrafts(userId: string, limit = 50): Promise<MailDraftListRow[]> {
+  return queryPg<MailDraftListRow>(
+    `select m.id,m.state,m.identity_key,m.from_email,coalesce(m.to_emails,'{}') as to_emails,m.subject,m.created_at,m.body_preview
+     from mail_message m where m.direction = 'outbound' and m.state in ${DRAFT_STATES} and (m.mailbox_owner_id is null or m.mailbox_owner_id = $1::uuid)
+     order by m.created_at desc, m.id limit $2`, [userId, Math.max(1, Math.min(200, limit))]);
 }

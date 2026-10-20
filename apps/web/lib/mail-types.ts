@@ -26,3 +26,13 @@ export type MailCampaignDetail = CampaignDetail & MailCampaignSummary & { counts
 export type MailFollowup = { id: string; message_id: string | null; thread_id: string | null; person_id: string | null; identity_key: string | null; due_at: string; origin: string; state: string; note: string | null; paused_reason: string | null };
 export type MailFilters = { view?: 'conversations' | 'campaigns' | 'sent' | 'followups'; q?: string; from?: string; to?: string; identity?: string; campaign?: string; thread?: string; person?: string; direction?: string; transport?: string; purpose?: string; state?: string; event?: string; crmOnly?: boolean; since?: string; until?: string; cursor?: string; limit?: number; mailboxOwnerId?: string };
 export type MailPage<T> = { items: T[]; nextCursor: string | null };
+
+export type MailApproval = { id: string; sha256: string; scope: 'pilot' | 'full'; approved_by: string; approved_at: string; expires_at: string | null; revoked_at: string | null; recipient_count: number };
+export type MailDraft = {
+  id: string; state: string; identity_key: string | null; transport: MailTransport; purpose: MailPurpose | null;
+  from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null;
+  body_text: string | null; body_html: string | null; thread_id: string | null; campaign_id: string | null;
+  created_at: string; links: { cta_key: string; destination_url: string }[]; warnings: string[];
+  approval: MailApproval | null;
+};
+export type MailDraftListRow = Pick<MailDraft, 'id' | 'state' | 'identity_key' | 'from_email' | 'to_emails' | 'subject' | 'created_at'> & { body_preview: string | null };
