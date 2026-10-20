@@ -6,6 +6,7 @@ import type { Demand } from "@/lib/bulk-demand";
 import { demandDescription, demandStarted, demandTitle, demandValue } from "@/lib/bulk-demand-header";
 import type { DemandSupply } from "@/lib/demand-supply-types";
 import css from "./demand-header.module.css";
+import { Sh } from "./bt-shimmer";
 import { useRegistry } from "./use-registry";
 
 /** A circular score: the ring fills with the score out of 100. */
@@ -28,8 +29,8 @@ export function ScoreRing({ score }: { score: number | null }) {
 }
 
 /** Score, headline, buyer, status, three facts and a short brief. A fact we don't have says so quietly. */
-export function DemandHeader({ demand, supply, actions, onBack }: {
-  demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; onBack?: () => void;
+export function DemandHeader({ demand, supply, actions, onBack, loadingSupply = false }: {
+  demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const registry = useRegistry();
@@ -63,7 +64,7 @@ export function DemandHeader({ demand, supply, actions, onBack }: {
         <div className={css.fact}>
           <dt>Supplier</dt>
           <dd className={sellers.length ? undefined : css.quiet}>
-            {sellers.length ? sellers.slice(0, 2).join(", ") : supply ? "Not chosen yet" : "…"}
+            <Sh on={loadingSupply} chars={14}>{sellers.length ? sellers.slice(0, 2).join(", ") : "Not chosen yet"}</Sh>
             {sellers.length > 2 && <small>+{sellers.length - 2} more</small>}
           </dd>
         </div>

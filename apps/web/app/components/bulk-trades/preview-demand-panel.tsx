@@ -3,6 +3,8 @@
 import { ArrowLeftRight, ClipboardList, FileText, History } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
+import { BusyRegion, Sh } from "./bt-shimmer";
+import type { Registry } from "@/lib/bulk-registry";
 import { useRegistry } from "./use-registry";
 import { ListingDetails } from "./listing-details";
 import { demandFacts } from "@/lib/listing-facts";
@@ -36,12 +38,13 @@ const ago = (iso: string) => {
 };
 
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
-function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
+function TheAsk({ demand, supply, loading }: { demand: Demand; supply: DemandSupply | null; loading: boolean }) {
   const registry = useRegistry();
-  if (!registry) return null;
+  // Core demand facts do not need the attribute registry to be readable.
+  const factRegistry = registry ?? { specLists: {}, specLabels: {}, specGroups: {}, specNumbers: {} } as Registry;
   return (
     <div className="flex flex-col gap-4">
-      <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
+      <ListingDetails loading={loading ? [!demand.product_family && "product_family", demand.spec?.kwh_min == null && demand.spec?.kwh_max == null && "capacity"].filter((key): key is string => !!key) : false} facts={demandFacts(factRegistry, demand, { pinned: supply?.requirement.pinned }).map((fact) => fact.key === "capacity" ? { ...fact, critical: true } : fact)} />
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>
@@ -67,13 +70,13 @@ function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: 
     profile?.past_issues ? { label: "Past issues", value: profile.past_issues, bad: true } : null,
   ].filter((note) => note !== null);
   return (
-    <PartyCard role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id} person={context?.person ?? null}
+    <PartyCard loading={context === null} role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id} person={context?.person ?? null}
       contact={demand.contact} email={demand.email} glance={glance} notes={notes}
       related={{ label: "Also asking for", items: others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined })) }} />
   );
 }
 
-function MailList({ mail }: { mail: BuyerMail[] }) {
+function MailList({ mail, loading = false }: { mail: BuyerMail[]; loading?: boolean }) {
   return (
     <section className="flex flex-col gap-1">
       <h3 className={css.label}>Email with the buyer</h3>
@@ -86,7 +89,8 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
           </div>
         </div>
       ))}
-      {!mail.length && <p className={css.note}>No email with this buyer in your mailbox.</p>}
+      {loading && <div className={css.mail}><span className={css.dir}><Sh on chars={3} /></span><div className="min-w-0 flex-1"><strong><Sh on chars={28} /></strong><p className={css.note}><Sh on chars={36} /></p></div></div>}
+      {!loading && !mail.length && <p className={css.note}>No email with this buyer in your mailbox.</p>}
     </section>
   );
 }
@@ -106,20 +110,27 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   // Opens on the details; history (what was asked, said and done) comes last.
   const [tab, setTab] = useState("Details");
   const [supply, setSupply] = useState<DemandSupply | null>(null);
+  const [supplyLoading, setSupplyLoading] = useState(true);
+  const supplySequence = useRef(0);
   const [context, setContext] = useState<BuyerContext | null>(null);
   const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
   const loadSupply = useCallback(async () => {
+    const sequence = ++supplySequence.current;
+    setSupplyLoading(true);
     try {
       const result = await request<DemandSupply>(`${endpoint}/supply`);
       if (!Array.isArray(result?.groups)) throw new Error("Could not check inventory.");
-      setSupply(result);
+      if (sequence === supplySequence.current) setSupply(result);
     } catch {
-      setSupply(null);
+      if (sequence === supplySequence.current) setSupply(null);
+    } finally {
+      if (sequence === supplySequence.current) setSupplyLoading(false);
     }
   }, [endpoint]);
-  useEffect(() => { void loadSupply(); }, [loadSupply, demand.updated_at]);
+  useEffect(() => { void loadSupply(); return () => { supplySequence.current++; }; }, [loadSupply, demand.updated_at]);
   useEffect(() => {
     let cancelled = false;
+    setContext(null);
     void request<BuyerContext>(`${endpoint}/context`).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
     return () => { cancelled = true; };
   }, [endpoint]);
@@ -131,8 +142,9 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   );
   return (
     <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} flex w-full min-w-0 flex-col gap-3`}>
+      <BusyRegion busy={supplyLoading || context === null} label="Loading demand details" className="flex w-full min-w-0 flex-col gap-3">
       <div className={headerCss.card}>
-        <DemandHeader demand={demand} supply={supply} actions={actions("Overview")} onBack={onClose} />
+        <DemandHeader demand={demand} supply={supply} loadingSupply={supplyLoading} actions={actions("Overview")} onBack={onClose} />
         <SheetTabs
           tabs={TABS}
           icons={TAB_ICONS}
@@ -144,7 +156,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "Details" && (
         <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
-          <TheAsk demand={demand} supply={supply} />
+          <TheAsk demand={demand} supply={supply} loading={supplyLoading} />
         </div>
       )}
       {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
@@ -152,6 +164,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}
+          {context === null && <MailList mail={[]} loading />}
           {(context?.mail ?? []).length > 0 && (
             <details>
               <summary className="cursor-pointer text-[13px]" style={{ color: "var(--bt-muted)" }}>
@@ -162,6 +175,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           )}
         </div>
       )}
+      </BusyRegion>
     </div>
   );
 }

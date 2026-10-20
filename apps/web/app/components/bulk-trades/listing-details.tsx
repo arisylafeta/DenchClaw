@@ -2,6 +2,7 @@
 
 import { VISIBILITY_LABEL, shortDate } from "@/lib/bulk-trade-details";
 import { readiness, stillNeeded, visibleGroups, type Claim, type Fact } from "@/lib/listing-facts";
+import { Sh } from "./bt-shimmer";
 import css from "./listing-details.module.css";
 
 const claimText = (claim: Claim) => [claim.source, claim.date && shortDate(claim.date)].filter(Boolean).join(" · ");
@@ -12,7 +13,7 @@ function Source({ claim }: { claim: Claim }) {
   return claim.url ? <a href={claim.url} target="_blank" rel="noreferrer">{text}</a> : <span>{text}</span>;
 }
 
-function Cell({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) => void; onResolve?: (fact: Fact, choice: number) => void }) {
+function Cell({ fact, onEdit, onResolve, loading = false }: { fact: Fact; loading?: boolean; onEdit?: (fact: Fact) => void; onResolve?: (fact: Fact, choice: number) => void }) {
   const conflict = fact.status === "conflict" && fact.claims.length > 1;
   const gap = !fact.value && !conflict;
   const wide = conflict || (fact.value?.length ?? 0) > 44;
@@ -26,7 +27,7 @@ function Cell({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) =
   const body = (
     <>
       <span className={css.key}>{fact.label}</span>
-      {conflict ? (
+      {loading ? <span className={css.value}><Sh on chars={14} /></span> : conflict ? (
         <span className={css.claims}>
           <span className={css.meta}><span className={css.flag} data-status="conflict">Conflict</span></span>
           {fact.claims.map((claim, index) => (
@@ -41,7 +42,7 @@ function Cell({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) =
           ))}
         </span>
       ) : gap ? <span className={css.gap} data-critical={fact.critical}>{onEdit ? "Missing" : "Not stated"}</span> : <span className={css.value}>{fact.value}</span>}
-      {meta}
+      {!loading && meta}
     </>
   );
   const props = { className: css.cell, "data-wide": wide };
@@ -55,15 +56,18 @@ function Cell({ fact, onEdit, onResolve }: { fact: Fact; onEdit?: (fact: Fact) =
  * Trade facts are editable (onEdit) and conflicts can be settled (onResolve); a demand's are read only.
  * Renders nothing when the listing has no recorded facts.
  */
-export function ListingDetails({ facts, onEdit, onResolve }: {
+export function ListingDetails({ facts, onEdit, onResolve, loading = false }: {
   facts: Fact[];
+  /** All values, or only specific async fact keys. */
+  loading?: boolean | string[];
   onEdit?: (fact: Fact) => void;
   onResolve?: (fact: Fact, choice: number) => void;
 }) {
   const steps = readiness(facts);
   const needed = stillNeeded(facts);
-  const sections = visibleGroups(facts);
-  if (!facts.some((fact) => fact.value || fact.status === "conflict") && !needed.length) return null;
+  const loadingFact = (key: string) => Array.isArray(loading) ? loading.includes(key) : loading;
+  const sections = visibleGroups(facts.map((fact) => loadingFact(fact.key) ? { ...fact, critical: true } : fact));
+  if (!facts.some((fact) => fact.value || fact.status === "conflict" || loadingFact(fact.key)) && !needed.length) return null;
   return (
     <div className={css.root} data-listing-details>
       {steps.length > 0 && (
@@ -77,7 +81,7 @@ export function ListingDetails({ facts, onEdit, onResolve }: {
         <section key={section.group} className={css.section}>
           <h3 className={css.label}>{section.group}</h3>
           <div className={css.grid}>
-            {section.facts.map((fact) => <Cell key={fact.key} fact={fact} onEdit={onEdit} onResolve={onResolve} />)}
+            {section.facts.map((fact) => <Cell key={fact.key} fact={fact} loading={loadingFact(fact.key)} onEdit={onEdit} onResolve={onResolve} />)}
           </div>
         </section>
       ))}
