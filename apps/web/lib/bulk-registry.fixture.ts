@@ -8,79 +8,92 @@ export const TEST_REGISTRY: Registry = {
         "key": "model",
         "label": "Cell model",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "format",
         "label": "Format",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "chemistry",
         "label": "Chemistry",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "capacity",
         "label": "Capacity per cell",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "quantity",
         "label": "Quantity",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "soh",
         "label": "State of health",
         "neededFor": "Bids",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Product"
       },
       {
         "key": "test_data",
         "label": "Test data",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Product"
       },
       {
         "key": "manufacture_date",
         "label": "Manufacture date",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "seller_price",
         "label": "Seller price",
         "neededFor": "Closing",
-        "visibility": "never"
+        "visibility": "never",
+        "group": "Commercial"
       },
       {
         "key": "sale_route",
         "label": "Sale route",
         "neededFor": "Bids",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Commercial"
       },
       {
         "key": "clear_by",
         "label": "Clear warehouse by",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       },
       {
         "key": "location",
         "label": "Location",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Logistics"
       },
       {
         "key": "transport_class",
         "label": "Transport class",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       }
     ],
     "packs": [
@@ -88,73 +101,85 @@ export const TEST_REGISTRY: Registry = {
         "key": "model",
         "label": "Pack model",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "chemistry",
         "label": "Chemistry",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "capacity",
         "label": "Capacity per pack",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "quantity",
         "label": "Quantity",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "soh",
         "label": "State of health",
         "neededFor": "Bids",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Product"
       },
       {
         "key": "test_data",
         "label": "BMS or test data",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Product"
       },
       {
         "key": "manufacture_date",
         "label": "Manufacture date",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "seller_price",
         "label": "Seller price",
         "neededFor": "Closing",
-        "visibility": "never"
+        "visibility": "never",
+        "group": "Commercial"
       },
       {
         "key": "sale_route",
         "label": "Sale route",
         "neededFor": "Bids",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Commercial"
       },
       {
         "key": "clear_by",
         "label": "Clear warehouse by",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       },
       {
         "key": "location",
         "label": "Location",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Logistics"
       },
       {
         "key": "transport_class",
         "label": "Transport class",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       }
     ],
     "recycling": [
@@ -162,67 +187,78 @@ export const TEST_REGISTRY: Registry = {
         "key": "model",
         "label": "Battery type",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "chemistry",
         "label": "Chemistry",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "quantity",
         "label": "Quantity",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "weight",
         "label": "Weight (tonnes)",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "condition",
         "label": "Condition",
         "neededFor": "Bids",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Product"
       },
       {
         "key": "countries",
         "label": "Countries crossed",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       },
       {
         "key": "local_recycler",
         "label": "Local recycler",
         "neededFor": "Shipping",
-        "visibility": "never"
+        "visibility": "never",
+        "group": "Logistics"
       },
       {
         "key": "seller_price",
         "label": "Recycling fee",
         "neededFor": "Closing",
-        "visibility": "never"
+        "visibility": "never",
+        "group": "Commercial"
       },
       {
         "key": "clear_by",
         "label": "Collect by",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       },
       {
         "key": "location",
         "label": "Location",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Logistics"
       },
       {
         "key": "transport_class",
         "label": "Transport class",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       }
     ],
     "systems": [
@@ -230,79 +266,92 @@ export const TEST_REGISTRY: Registry = {
         "key": "model",
         "label": "System model",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "chemistry",
         "label": "Chemistry",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "energy",
         "label": "Energy",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "power",
         "label": "Power",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "quantity",
         "label": "Units",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "commissioned",
         "label": "Commissioned",
         "neededFor": "Teaser",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Product"
       },
       {
         "key": "soh",
         "label": "State of health",
         "neededFor": "Bids",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Product"
       },
       {
         "key": "test_data",
         "label": "Operating data",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Product"
       },
       {
         "key": "seller_price",
         "label": "Seller price",
         "neededFor": "Closing",
-        "visibility": "never"
+        "visibility": "never",
+        "group": "Commercial"
       },
       {
         "key": "sale_route",
         "label": "Sale route",
         "neededFor": "Bids",
-        "visibility": "teaser"
+        "visibility": "teaser",
+        "group": "Commercial"
       },
       {
         "key": "clear_by",
         "label": "Clear warehouse by",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       },
       {
         "key": "location",
         "label": "Location",
         "neededFor": "Bids",
-        "visibility": "after_loi"
+        "visibility": "after_loi",
+        "group": "Logistics"
       },
       {
         "key": "transport_class",
         "label": "Transport class",
         "neededFor": "Shipping",
-        "visibility": "after_nda"
+        "visibility": "after_nda",
+        "group": "Logistics"
       }
     ]
   },
@@ -437,6 +486,21 @@ export const TEST_REGISTRY: Registry = {
     "system_brands": "System brands",
     "evidence": "Evidence needed",
     "excludes": "Won't take"
+  },
+  "specGroups": {
+    "chemistries": "Product",
+    "formats": "Product",
+    "cell_formats": "Product",
+    "conditions": "Product",
+    "origins": "Product",
+    "makes": "Product",
+    "cell_makers": "Product",
+    "system_brands": "Product",
+    "evidence": "Evidence",
+    "excludes": "Evidence",
+    "kwh_min": "Product",
+    "kwh_max": "Product",
+    "min_soh": "Product"
   },
   "specNumbers": {
     "kwh_min": {

@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
-import { KIND_LABEL, BASIS_LABEL, priceLabel, volumeLabel } from "@/lib/bulk-demand";
 import { useRegistry } from "./use-registry";
+import { ListingDetails } from "./listing-details";
+import { demandFacts } from "@/lib/listing-facts";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
 import type { BuyerProfile, BuyerEngagement } from "@/lib/buyer-profile";
@@ -30,44 +31,15 @@ const ago = (iso: string) => {
   return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 60 ? `${days} days ago` : shortDate(iso.slice(0, 10));
 };
 
-const Ask = ({ children = "Missing, ask the buyer" }: { children?: React.ReactNode }) => <span className={css.ask}>{children}</span>;
-
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
 function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
   const registry = useRegistry();
-  const spec = demand.spec ?? {};
-  const kwh = spec.kwh_min != null || spec.kwh_max != null
-    ? spec.kwh_min === spec.kwh_max ? `${spec.kwh_min} kWh` : `${spec.kwh_min ?? "?"}–${spec.kwh_max ?? "?"} kWh` : null;
-  const list = (values?: string[]) => (values?.length ? values.join(", ") : null);
-  const pinned = supply?.requirement.pinned ?? [];
-  const rows: [string, React.ReactNode, boolean][] = [
-    ["Product", demand.product_family ?? (pinned[0] || null), true],
-    ["Capacity", kwh ?? pinned.find((p) => p.includes("kWh")) ?? null, false],
-    ["Chemistry", list(spec.chemistries), false],
-    ["Format", list(spec.formats), false],
-    ["Quantity", volumeLabel(demand) ?? demand.quantity, true],
-    ["Max price", priceLabel(demand), true],
-    ["Needed by", demand.needed_by ? shortDate(demand.needed_by) : null, demand.kind === "request"],
-    ["Deliver to", demand.location, false],
-    ["Condition", list(spec.conditions), false],
-    ["Min. SOH", spec.min_soh != null ? `${spec.min_soh}%` : null, false],
-    ["Proof needed", list(spec.evidence), false],
-    ["Must not have", list(spec.excludes), false],
-    [registry?.specLabels.makes ?? "Makes", list(spec.makes), false],
-    [registry?.specLabels.cell_formats ?? "Cell format", list(spec.cell_formats), false],
-    [registry?.specLabels.cell_makers ?? "Cell makers", list(spec.cell_makers), false],
-  ];
   return (
     <section className="flex flex-col gap-3">
       <h3 className={css.label}>The ask</h3>
-      <dl className={css.spec}>
-        {rows.filter(([, value, critical]) => value || critical).map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt>{label}</dt>
-            <dd>{value || <Ask />}</dd>
-          </div>
-        ))}
-      </dl>
+      {registry
+        ? <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
+        : <p className={css.note}>Loading…</p>}
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>

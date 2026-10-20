@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { BulkTrade, TradePatch } from "@/lib/bulk-trades";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
@@ -36,23 +36,17 @@ import {
   useForm,
 } from "./trade-ui";
 import type { Registry } from "@/lib/bulk-registry";
+import { supplyFacts, type Fact } from "@/lib/listing-facts";
+import { ListingDetails } from "./listing-details";
 import { ProposalRow } from "./proposal-row";
 import { useRegistry } from "./use-registry";
 import { FileLink, FileThumb, fileUrl } from "./file-preview";
 
-const FIELD_COLUMNS = "grid-cols-[200px_minmax(0,1fr)_250px_110px_110px]";
 const FILE_COLUMNS = "grid-cols-[minmax(0,1fr)_130px_250px_170px]";
 
 const STATUS_LABEL: Record<FieldStatus, string> = {
   confirmed: "Confirmed", unverified: "Unverified", conflict: "Conflict", missing: "Missing",
 };
-const STATUS_STYLE: Record<FieldStatus, React.CSSProperties> = {
-  confirmed: { background: "var(--bt-green-bg)", color: "var(--bt-green)", border: "1px solid var(--bt-green-border)" },
-  unverified: { background: "var(--bt-divider)", color: "var(--bt-text-2)", border: "1px solid var(--bt-grey-border)" },
-  conflict: { background: "var(--bt-amber-bg)", color: "var(--bt-amber)", border: "1px solid var(--bt-amber-border)" },
-  missing: { background: "var(--bt-red-bg)", color: "var(--bt-red)", border: "1px solid var(--bt-red-border)" },
-};
-
 type Props = {
   detail: TradeDetail;
   onProposalDecided: () => void;
@@ -67,24 +61,13 @@ function sourceText(source: Pick<FieldSource, "source_label" | "source_date">) {
   return [source.source_label, source.source_date && shortDate(source.source_date)].filter(Boolean).join(" · ");
 }
 
-function Source({ source }: { source: FieldSource }) {
-  const text = sourceText(source);
-  if (!text) return <span style={{ color: "var(--bt-muted)" }}>—</span>;
-  return source.source_url
-    ? <a href={source.source_url} target="_blank" rel="noreferrer" className="hover:underline" style={{ color: "var(--bt-link)" }}>{text}</a>
-    : <span style={{ color: "var(--bt-link)" }}>{text}</span>;
-}
-
-const clip = (text: string, length = 28) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);
-
 export function TradeData({ detail, onField, onFile, onTradePatch, onProposalDecided }: Props) {
   const { trade } = detail;
   const registry = useRegistry();
   if (!registry) return <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Loading…</p>;
   return (
     <div className="flex flex-col gap-6">
-      {trade.trade_kind ? <FieldsCard registry={registry} trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField}
-        proposals={[]} onProposalDecided={onProposalDecided} />
+      {trade.trade_kind ? <FieldsCard registry={registry} trade={trade} kind={trade.trade_kind} fields={detail.fields} onField={onField} />
         : <Card label="Data" className="px-5 py-4"><KindPicker label="Trade kind" onPick={(kind) => void onTradePatch({ trade_kind: kind })} /></Card>}
       <FilesCard registry={registry} trade={trade} files={detail.files} onFile={onFile}
         proposals={[]} onProposalDecided={onProposalDecided} />
@@ -92,27 +75,21 @@ export function TradeData({ detail, onField, onFile, onTradePatch, onProposalDec
   );
 }
 
-function FieldsCard({ registry, trade, kind, fields, onField, proposals, onProposalDecided }: {
+function FieldsCard({ registry, trade, kind, fields, onField }: {
   registry: Registry;
   trade: BulkTrade;
   kind: NonNullable<BulkTrade["trade_kind"]>;
   fields: TradeField[];
   onField: (field: TradeField) => void;
-  proposals: Proposal[];
-  onProposalDecided: () => void;
 }) {
   const [editing, setEditing] = useState<TemplateField | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const byKey = new Map(fields.map((field) => [field.field_key, field]));
-  const templates = registry.fields[kind];
-  const conflicts = templates
-    .map((template) => ({ template, row: byKey.get(template.key) }))
-    .filter(({ row }) => row?.status === "conflict" && row.alternatives.length);
+  const facts = supplyFacts(registry, kind, fields);
 
-  async function resolve(key: string, choice: number) {
+  async function resolve(fact: Fact, choice: number) {
     setError(null);
     try {
-      const { field } = await request<{ field: TradeField }>(tradeUrl(trade.id, `/fields/${key}/resolve`), {
+      const { field } = await request<{ field: TradeField }>(tradeUrl(trade.id, `/fields/${fact.key}/resolve`), {
         method: "POST",
         body: JSON.stringify({ choice }),
       });
@@ -123,88 +100,23 @@ function FieldsCard({ registry, trade, kind, fields, onField, proposals, onPropo
   }
 
   return (
-    <Card label="Data" className={`bulk-trades ${tableStyles.surface} overflow-hidden`}>
-      <header data-table-part="toolbar" className="flex flex-wrap items-center gap-3 border-b px-5 py-4" style={{ borderColor: "var(--bt-column)" }}>
-        <h2 className="text-base font-semibold">Data</h2>
-        <span className="flex-1" />
-      </header>
-      <div className="overflow-x-auto">
-        <div className="min-w-[860px]">
-          <div data-table-part="grid-header" className={`grid ${FIELD_COLUMNS} gap-4 border-b px-3 py-2 font-medium`} style={tableHead}>
-            <span>Field</span><span>Value</span><span>Source</span><span>Status</span><span>Buyers see at</span>
-          </div>
-          {templates.map((template) => {
-            const row = byKey.get(template.key);
-            const status: FieldStatus = row && row.value?.trim() ? row.status : row?.status === "conflict" ? "conflict" : "missing";
-            const claims: FieldSource[] = row ? [row, ...row.alternatives] : [];
-            return (
-              <Fragment key={template.key}>
-              <div
-                data-table-part="grid-row"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-                    event.preventDefault();
-                    setEditing(template);
-                  }
-                }}
-                onClick={() => setEditing(template)}
-                aria-label={`Edit ${template.label}`}
-                className={`grid w-full ${FIELD_COLUMNS} items-start gap-4 border-b px-3 py-2 text-left text-xs hover:bg-[var(--bt-row-hover)]`}
-                style={{ borderColor: "var(--bt-divider)", background: status === "conflict" ? "var(--bt-amber-tint)" : undefined }}
-              >
-                <TableCellContent><span style={{ color: "var(--bt-text-2)" }}>{template.label}</span></TableCellContent>
-                <TableCellContent>
-                <span className="flex flex-col font-medium leading-[1.4]">
-                  {claims.length ? claims.map((claim, index) => <span key={index}>{claim.value || "—"}</span>) : <span>—</span>}
-                </span>
-                </TableCellContent>
-                <TableCellContent>
-                <span className="flex flex-col text-xs leading-[1.4]">
-                  {claims.length ? claims.map((claim, index) => <Source key={index} source={claim} />) : <Source source={{ value: "", source_label: null, source_url: null, source_date: null }} />}
-                </span>
-                </TableCellContent>
-                <TableCellContent><span><span className="rounded-none px-2 py-0.5 text-xs font-semibold" style={STATUS_STYLE[status]}>{STATUS_LABEL[status]}</span></span></TableCellContent>
-                <TableCellContent><span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{VISIBILITY_LABEL[row?.visibility ?? template.visibility]}</span></TableCellContent>
-              </div>
-              {proposals.filter((proposal) => proposal.target === template.key).map((proposal) => (
-                <div key={proposal.id} className="border-b" style={{ borderColor: "var(--bt-divider)" }}>
-                  <ProposalRow proposal={{ ...proposal, summary: `${template.label}: ${String(proposal.proposed.value)}` }} onDecided={onProposalDecided} />
-                </div>
-              ))}
-              </Fragment>
-            );
-          })}
-        </div>
-      </div>
-      {conflicts.map(({ template, row }) => (
-        <div key={template.key} className="flex flex-wrap items-center gap-2.5 border-t px-5 py-3" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)" }}>
-          <span className="rounded-none px-[7px] py-0.5 text-[11px] font-semibold uppercase" style={STATUS_STYLE.conflict}>Conflict</span>
-          <span className="min-w-[240px] flex-1 text-sm">
-            {template.label}: {[row!, ...row!.alternatives].map((claim) => `${claim.value}${sourceText(claim) ? ` (${sourceText(claim)})` : ""}`).join(" or ")}?
-          </span>
-          <button type="button" className={`${buttonClass} h-8`} style={buttonStyle} onClick={() => resolve(template.key, -1)}>
-            Keep {clip(row!.value)}
-          </button>
-          {row!.alternatives.map((claim, index) => (
-            <button key={index} type="button" className={`${buttonClass} h-8`} style={buttonStyle} onClick={() => resolve(template.key, index)}>
-              Use {clip(claim.value)}
-            </button>
-          ))}
-        </div>
-      ))}
-      <div className="px-5"><ErrorText error={error} /></div>
+    <section aria-label="Data" className="flex flex-col gap-3">
+      <ListingDetails
+        facts={facts}
+        onEdit={(fact) => setEditing(registry.fields[kind].find((template) => template.key === fact.key) ?? null)}
+        onResolve={resolve}
+      />
+      <ErrorText error={error} />
       {editing && (
         <FieldDialog
           trade={trade}
           template={editing}
-          field={byKey.get(editing.key)}
+          field={fields.find((field) => field.field_key === editing.key)}
           onClose={() => setEditing(null)}
           onSaved={(field) => { onField(field); setEditing(null); }}
         />
       )}
-    </Card>
+    </section>
   );
 }
 

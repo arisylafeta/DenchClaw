@@ -274,6 +274,8 @@ export type TemplateField = {
   neededFor: NeededFor;
   /** "Buyers see at" for a new value. Seller price and supplier details are always Never. */
   visibility: Visibility;
+  /** Details section it belongs to: Product, Commercial, Logistics or Evidence. */
+  group?: string;
 };
 
 // The templates and required files live in the database (see bulk-registry.ts), not in this file.

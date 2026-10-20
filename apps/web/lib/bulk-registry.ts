@@ -13,6 +13,8 @@ export type Registry = {
   /** Buyer-ask lists (chemistries, makes ...): allowed values by key, with display labels. */
   specLists: Record<string, string[]>;
   specLabels: Record<string, string>;
+  /** Details group of each buyer-ask key (Product, Evidence ...). */
+  specGroups: Record<string, string>;
   /** Buyer-ask numbers (kwh_min, min_soh ...) with their allowed range. */
   specNumbers: Record<string, { label: string; min: number; max: number }>;
   volumeUnits: string[];
@@ -22,7 +24,7 @@ export type Registry = {
 
 export type RegistryRows = {
   attributes: { key: string; side: "listing" | "demand"; label: string; type: string; needed_for: NeededFor | null;
-    visibility: TemplateField["visibility"] | null; min: number | null; max: number | null; sort_order: number }[];
+    visibility: TemplateField["visibility"] | null; group_name: string | null; min: number | null; max: number | null; sort_order: number }[];
   kinds: { attribute_key: string; kind: TradeKind; label: string; sort_order: number }[];
   options: { attribute_key: string; value: string; sort_order: number }[];
   requiredFiles: { file_type: FileType; label: string; needed_for: NeededFor; sort_order: number }[];
@@ -36,21 +38,22 @@ export function buildRegistry(rows: RegistryRows): Registry {
   for (const row of [...rows.kinds].sort(bySort)) {
     const attr = attribute.get(row.attribute_key);
     if (!attr?.needed_for || !attr.visibility) continue;
-    fields[row.kind].push({ key: row.attribute_key, label: row.label, neededFor: attr.needed_for, visibility: attr.visibility });
+    fields[row.kind].push({ key: row.attribute_key, label: row.label, neededFor: attr.needed_for, visibility: attr.visibility, group: attr.group_name ?? "Product" });
   }
   const optionsOf = (key: string) => rows.options.filter((row) => row.attribute_key === key).sort(bySort).map((row) => row.value);
   const demand = rows.attributes.filter((row) => row.side === "demand").sort(bySort);
   const specLists: Registry["specLists"] = {};
   const specLabels: Registry["specLabels"] = {};
+  const specGroups: Registry["specGroups"] = {};
   const specNumbers: Registry["specNumbers"] = {};
   for (const row of demand) {
-    if (row.type === "set") { specLists[row.key] = optionsOf(row.key); specLabels[row.key] = row.label; }
-    else if (row.type === "number") specNumbers[row.key] = { label: row.label, min: Number(row.min), max: Number(row.max) };
+    if (row.type === "set") { specLists[row.key] = optionsOf(row.key); specLabels[row.key] = row.label; specGroups[row.key] = row.group_name ?? "Product"; }
+    else if (row.type === "number") { specNumbers[row.key] = { label: row.label, min: Number(row.min), max: Number(row.max) }; specGroups[row.key] = row.group_name ?? "Product"; }
   }
   return {
     fields,
     requiredFiles: [...rows.requiredFiles].sort(bySort).map((row) => ({ type: row.file_type, label: row.label, neededFor: row.needed_for })),
-    specLists, specLabels, specNumbers,
+    specLists, specLabels, specGroups, specNumbers,
     volumeUnits: optionsOf("volume_unit"),
     priceUnits: optionsOf("price_unit"),
     currencies: optionsOf("price_currency"),

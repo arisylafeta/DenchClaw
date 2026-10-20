@@ -79,7 +79,8 @@ describe("TradePage overview", () => {
 
     expect(screen.queryByRole("region", { name: "Missing" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Details" }));
-    expect(screen.getByRole("button", { name: "Edit Manufacture date" })).toHaveTextContent("Missing");
+    const needed = screen.getByRole("region", { name: "Still needed" });
+    expect(within(needed).getByRole("button", { name: "Add Manufacture date" })).toBeInTheDocument();
   });
 
 
@@ -137,16 +138,17 @@ describe("TradePage overview", () => {
     renderPage();
 
     await userEvent.click(await screen.findByRole("tab", { name: "Details" }));
-    const row = screen.getByRole("button", { name: "Edit Quantity" });
-    expect(row).toHaveTextContent("161 + 9 incomplete");
-    expect(row).toHaveTextContent("about 200");
-    expect(row).toHaveTextContent("Call with Sam · 18 Sep");
+    expect(screen.queryByRole("button", { name: "Edit Quantity" })).not.toBeInTheDocument();
+    expect(screen.getByText("161 + 9 incomplete")).toBeInTheDocument();
+    expect(screen.getByText("about 200")).toBeInTheDocument();
+    expect(screen.getByText("Call with Sam · 18 Sep")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Keep 161 + 9 incomplete" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1/fields/quantity/resolve", expect.objectContaining({
       body: JSON.stringify({ choice: -1 }),
     })));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Edit Quantity" })).toHaveTextContent("Confirmed"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit Quantity" })).toHaveTextContent("161 + 9 incomplete"));
+    expect(screen.queryByText("Conflict")).not.toBeInTheDocument();
   });
 
   it("shows campaign email tracking on a linked buyer", async () => {

@@ -1,0 +1,39 @@
+.root { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.label { font-family: var(--font-geist-mono, ui-monospace, monospace); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bt-muted); }
+.note { font-size: 12px; color: var(--bt-muted); }
+
+/* Readiness: facts recorded out of facts needed, per step. */
+.ready { display: flex; flex-wrap: wrap; gap: 6px; }
+.step { display: inline-flex; gap: 6px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--bt-border); color: var(--bt-text-2); font-variant-numeric: tabular-nums; }
+.step[data-done="true"] { color: var(--bt-green); border-color: var(--bt-green-border); background: var(--bt-green-bg); }
+
+/* One section per group; one row per fact. */
+.section { display: flex; flex-direction: column; gap: 8px; }
+.facts { display: grid; grid-template-columns: 150px minmax(0, 1fr); border: 1px solid var(--bt-border); }
+.facts dt, .facts dd { padding: 9px 14px; font-size: 13px; border-top: 1px solid var(--bt-divider); }
+.facts dt:first-of-type, .facts dd:first-of-type { border-top: 0; }
+.facts dt { color: var(--bt-muted); background: var(--bt-table-head); }
+.facts dd { overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 3px; }
+.facts dd[data-status="conflict"], .facts dt[data-status="conflict"] { background: var(--bt-amber-tint); }
+.edit { all: unset; cursor: pointer; display: block; width: 100%; }
+.edit:hover { text-decoration: underline; text-underline-offset: 3px; }
+.edit:focus-visible { outline: 2px solid var(--bt-text-2); outline-offset: 2px; }
+.ask { color: var(--bt-amber); font-weight: 500; }
+.meta { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--bt-muted); }
+.meta a { text-decoration: underline; text-underline-offset: 2px; color: var(--bt-link); }
+.flag { padding: 0 6px; font-size: 11px; font-weight: 600; border: 1px solid var(--bt-grey-border); color: var(--bt-text-2); background: var(--bt-divider); }
+.flag[data-status="conflict"] { color: var(--bt-amber); border-color: var(--bt-amber-border); background: var(--bt-amber-tint); }
+
+/* Conflicting claims, side by side with a way to settle them. */
+.claims { display: flex; flex-direction: column; gap: 6px; }
+.claim { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.use { padding: 1px 8px; font-size: 12px; border: 1px solid var(--bt-border); background: var(--bt-surface); }
+.use:hover { background: var(--bt-row-hover); }
+
+/* What is still missing, by the step that needs it. */
+.needed { display: flex; flex-direction: column; gap: 8px; }
+.neededRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; }
+.neededRow > span:first-child { width: 72px; color: var(--bt-muted); }
+.chip { padding: 1px 8px; font-size: 12px; border: 1px dashed var(--bt-border); color: var(--bt-text-2); background: transparent; }
+button.chip:hover { border-style: solid; background: var(--bt-row-hover); }
+@media (max-width: 520px) { .facts { grid-template-columns: 1fr; } .facts dd { border-top: 0; padding-top: 0; } }
