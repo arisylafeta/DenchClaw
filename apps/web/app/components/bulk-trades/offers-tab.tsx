@@ -9,7 +9,7 @@ import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } 
 import { rowFocus } from "./demand-page";
 
 const STAGES: [OfferStage, string][] = [
-  ["to_contact", "To contact"], ["teaser_sent", "Offered"], ["specs_nda", "Specs and NDA"], ["bid_in", "Bid in"],
+  ["to_contact", "To contact"], ["teaser_sent", "Teaser sent"], ["specs_nda", "Specs and NDA"], ["bid_in", "Bid in"],
   ["loi", "LOI"], ["won", "Won"], ["declined", "Declined"], ["lost", "Lost"],
 ];
 const STAGE_LABEL = Object.fromEntries(STAGES) as Record<OfferStage, string>;
