@@ -1,4 +1,5 @@
 """Prepare and preview exact outbound copy without submitting to providers."""
+import html as html_lib
 import json
 import re
 from uuid import uuid4
@@ -18,9 +19,16 @@ def render_message(row, variables):
         raise
 
 
+def text_to_html(text):
+    """Escaped HTML paragraphs for a plain-text body, so a text-only draft never ships a signature-only HTML part."""
+    paragraphs = [chunk for chunk in re.split(r'\n\s*\n', text.strip()) if chunk.strip()]
+    return ''.join('<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">' + html_lib.escape(chunk.strip(), quote=True).replace('\n', '<br>\n') + '</p>\n'
+                   for chunk in paragraphs)
+
+
 def prepare(db, identity_key, recipients, purpose='personal', template=None, variables=None,
             subject=None, body=None, html=None, thread=None, campaign=None, verification=None, transport=None, message_id=None,
-            oneoff_blocks=None, allow_multiple_cta=False):
+            oneoff_blocks=None, allow_multiple_cta=False, attachments=None):
     author, transport = policy.identity(db,identity_key,purpose,transport)
     variables = variables or {}
     generated = None
@@ -49,6 +57,8 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
         if subject is None or body is None:
             raise Refused('missing_variable', 'Provide a template or subject and body')
         rendered = render_message({'subject':subject,'html':html or '', 'text_body':body,'required_variables':[]},variables)
+        if not rendered['html'].strip():
+            rendered['html'] = text_to_html(rendered['text'])
     row = {'id':message_id or uuid4().hex,'direction':'outbound','state':'draft','identity_key':identity_key,
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
            'cc_emails':[],'bcc_emails':[],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
@@ -56,6 +66,12 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
            'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template and generated is None else ''),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
                               'identity_snapshot':{key:author.get(key) for key in ('address','display_name','reply_to','gmail_account','postmark_stream')}},'links':[]}
+    if attachments:
+        from .attachment import prepare_outbound
+        if transport != 'gmail':
+            raise Refused('attachments_require_gmail_transport')
+        row['personalization']['attachments'] = prepare_outbound(attachments)
+        row['has_attachments'] = True
     if generated is not None:
         row['personalization']['oneoff'] = {'warnings': generated['warnings'], 'variables_used': generated['variables_used']}
     if template and 'source_body_html' in (tpl.get('meta') or {}):
@@ -91,7 +107,7 @@ def create(args):
         from .blocks import read_blocks
         blocks = read_blocks(args.oneoff_blocks) if getattr(args, 'oneoff_blocks', None) is not None else None
         row, author = prepare(db,args.identity,args.to.split(','),args.purpose,args.template,json.loads(args.vars),args.subject,args.body,args.html,args.thread,args.campaign,json.loads(args.verification),args.transport,args.id,
-                              oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False))
+                              oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False), attachments=getattr(args, 'attach', None))
         exclusions = []
         for email in row['to_emails']:
             try:
@@ -173,6 +189,7 @@ def register(subparsers):
     content_flags(parser)
     parser.add_argument('--oneoff-blocks', help='Semantic block JSON or @file; uses the catalogue shell and policy-owned signature')
     parser.add_argument('--allow-multiple-cta', action='store_true')
+    parser.add_argument('--attach', action='append', metavar='PATH', help='File to attach (repeatable, Gmail transport, 25 MB total). Copied to the private store and covered by the approval digest')
     parser.add_argument('--to',required=True)
     parser.add_argument('--id')
     parser.add_argument('--thread')

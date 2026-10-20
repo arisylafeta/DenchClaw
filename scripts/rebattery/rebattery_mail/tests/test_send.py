@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -898,3 +899,79 @@ def test_gmail_auth_failure_is_a_clean_refusal_not_unknown(env,monkeypatch):
     with pytest.raises(ProviderError,match='gmail_auth_unavailable'):
         GmailSendDriver().preflight({'gmail_account':'alex@rebattery.io'},row)
     assert state(row['id'])=='draft'
+
+
+def test_attachment_draft_digest_and_send_flags(env,tmp_path,monkeypatch):
+    from rebattery_mail import attachment
+    monkeypatch.setattr(attachment,'STORE',tmp_path/'store')
+    book=tmp_path/'Prices Oct 2026.xlsx'
+    book.write_bytes(b'workbook-bytes')
+    with connection() as db:
+        plain,_=draft.prepare(db,'alex',[env+'a@example.test'],subject='Prices',body='See attached',message_id=env+'att-plain')
+        row,_=draft.prepare(db,'alex',[env+'a@example.test'],subject='Prices',body='See attached',message_id=env+'att-plain',attachments=[str(book)])
+    assert row['has_attachments'] and row['personalization']['attachments'][0]['filename']=='Prices Oct 2026.xlsx'
+    assert digest([plain])!=digest([row])  # approval covers the attachment bytes
+    calls=[]
+    def runner(args,**kwargs):
+        calls.append((args,kwargs))
+        return NS(returncode=0,stdout='{"id":"fake-gmail-receipt"}')
+    ident={'gmail_account':'alex@rebattery.io','address':'alex@rebattery.io'}
+    with patch('rebattery_mail.drivers.live_gate'):
+        GmailSendDriver(runner).send(ident,row)
+    args=calls[0][0]
+    assert args[args.index('--attach')+1]==row['personalization']['attachments'][0]['storedPath']
+    assert calls[0][1]['timeout']==180
+    # Tampering with the stored copy blocks the send.
+    open(row['personalization']['attachments'][0]['storedPath'],'wb').write(b'changed')
+    with patch('rebattery_mail.drivers.live_gate'),pytest.raises(Refused,match='attachment_changed_since_approval'):
+        GmailSendDriver(runner).send(ident,row)
+    assert len(calls)==1
+
+
+def test_attachment_rules(env,tmp_path,monkeypatch):
+    from rebattery_mail import attachment
+    monkeypatch.setattr(attachment,'STORE',tmp_path/'store')
+    with connection() as db:
+        with pytest.raises(Refused,match='attachment_file_missing'):
+            draft.prepare(db,'alex',[env+'a@example.test'],subject='x',body='y',attachments=[str(tmp_path/'nope.xlsx')])
+        big=tmp_path/'big.bin'
+        big.write_bytes(b'0')
+        monkeypatch.setattr(attachment,'GMAIL_LIMIT_BYTES',0)
+        with pytest.raises(Refused,match='attachments_too_large'):
+            draft.prepare(db,'alex',[env+'a@example.test'],subject='x',body='y',attachments=[str(big)])
+    with pytest.raises(Refused,match='attachments_require_gmail_transport'):
+        PostmarkSendDriver(lambda *a,**k:{}).preflight({'postmark_stream':'outbound'},{'purpose':'transactional','personalization':{'attachments':[{}]}})
+
+
+def test_attachment_listing_download_and_filters(env,tmp_path):
+    from rebattery_mail import attachment,read
+    full={'message':{'payload':{'parts':[
+        {'headers':[{'name':'Content-Disposition','value':'inline'}],'body':{'attachmentId':'inl'}},
+        {'headers':[{'name':'Content-Disposition','value':'attachment; filename="Sheet.xlsx"'}],'body':{'attachmentId':'att'}}]}},
+        'attachments':[{'filename':'logo.png','size':3,'mimeType':'image/png','attachmentId':'inl'},
+                       {'filename':'Sheet.xlsx','size':4,'mimeType':'application/vnd.ms-excel','attachmentId':'att'}]}
+    listed=attachment.describe(full)
+    assert [(a['filename'],a['inline']) for a in listed]==[('logo.png',True),('Sheet.xlsx',False)]
+    with pytest.raises(Refused,match='attachment_not_found'):
+        attachment.pick(listed,'missing')
+    assert attachment.pick(listed,'sheet')['attachmentId']=='att'
+    class Driver:
+        def fetch(self,account,message_id):
+            return full
+    with connection() as db,db.cursor() as cur:
+        cur.execute("insert into mail_message(id,direction,transport,state,gmail_message_id,has_attachments,personalization) values (%s,'inbound','gmail','received','g-att',true,%s)",(env+'in',json.dumps({'attachments':listed})))
+        cur.execute("insert into mail_message(id,direction,transport,state,has_attachments) values (%s,'inbound','gmail','received',false)",(env+'none',))
+        assert read.search(db,filename='*.xlsx',limit=50)['messages'][0]['id']==env+'in'
+        assert not [m for m in read.search(db,filename='*.pdf',limit=50)['messages'] if m['id']==env+'in']
+        assert env+'in' in [m['id'] for m in read.search(db,has_attachment=True,limit=500)['messages']]
+        assert attachment.live_attachments(db,{'has_attachments':False}) == []
+    def runner(args,**kwargs):
+        out=args[args.index('--out')+1]
+        open(out,'wb').write(b'data')
+        return NS(returncode=0,stdout='{}')
+    out=tmp_path/'Sheet.xlsx'
+    with patch.object(attachment,'account_for',return_value='alex@rebattery.io'):
+        result=attachment.get(NS(message=env+'in',attachment='Sheet.xlsx',out=str(out)),driver=Driver(),runner=runner)
+        assert result['sha256']==attachment.sha256_file(out) and result['sizeBytes']==4
+        with pytest.raises(Refused,match='output_exists'):
+            attachment.get(NS(message=env+'in',attachment='Sheet.xlsx',out=str(out)),driver=Driver(),runner=runner)

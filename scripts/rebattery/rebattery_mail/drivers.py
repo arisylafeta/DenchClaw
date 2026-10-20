@@ -139,6 +139,9 @@ class GmailSendDriver:
                 raise ProviderError('gmail_auth_unavailable', cause=type(exc).__name__) from exc
             if check.returncode:
                 raise ProviderError('gmail_auth_unavailable', returncode=check.returncode)
+        if message.get('personalization',{}).get('attachments'):
+            from .attachment import verify_outbound
+            verify_outbound(message['personalization']['attachments'])
         return {}
 
     def send(self, identity, message):
@@ -151,6 +154,11 @@ class GmailSendDriver:
             args += ['--reply-to',identity['reply_to']]
         if message.get('body_html'):
             args += ['--body-html',message['body_html']]
+        attachments = message.get('personalization', {}).get('attachments') or []
+        if attachments:
+            from .attachment import verify_outbound
+            for path in verify_outbound(attachments):
+                args += ['--attach', path]
         anchor = message.get('personalization', {}).get('reply_gmail_message_id')
         if message.get('thread_id') or anchor:
             if not anchor:
@@ -161,7 +169,7 @@ class GmailSendDriver:
         elif message.get('gmail_thread_id'):
             args += ['--thread-id',message['gmail_thread_id']]
         try:
-            response = self.runner(args, capture_output=True, text=True, timeout=30, env=gog_env())
+            response = self.runner(args, capture_output=True, text=True, timeout=180 if attachments else 30, env=gog_env())
             if response.returncode == 2:
                 # gog exit code 2 is a usage error raised before any API call: nothing was submitted.
                 raise ProviderError('gmail_send_rejected', returncode=2)
@@ -199,6 +207,8 @@ class PostmarkSendDriver:
         self.client = client or postmark
 
     def preflight(self, identity, message):
+        if message.get('personalization',{}).get('attachments'):
+            raise Refused('attachments_require_gmail_transport')
         stream = identity.get('postmark_stream')
         if message['purpose'] == 'marketing' and stream == 'outbound':
             raise Refused('postmark_broadcast_stream_required')

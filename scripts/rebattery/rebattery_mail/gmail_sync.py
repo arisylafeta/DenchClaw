@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 from .core import Refused, dict_cursor
 from .gmail_driver import GmailDriver
 from .gmail_body import extract_bodies
+from .attachment import describe
 from .crm_visibility import normalize_email, parse_email_addresses, ensure_person, visibility, is_common_email_provider, reply_matches
 
 
@@ -130,7 +131,7 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
             preview = re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',body)).strip()[:500]
             fields = {'thread_id':thread_pk,'mailbox_owner_id':owner_id,'gmail_message_id':gmail_id,'rfc_message_id':rfc_id,'in_reply_to':headers.get('in-reply-to'),'rfc_references':headers.get('references'),'subject':headers.get('subject'),'body_text':body,'body_preview':preview,'body_html':body_html,'from_email':sender,'from_person_id':from_person,'to_emails':recipients['to'],'cc_emails':recipients['cc'],'bcc_emails':recipients['bcc'],'labels':labels,'has_attachments':has_attachments,'sent_at':date,'crm_visible':visible,'crm_visible_reason':reason}
             if not outbound:
-                fields['personalization'] = json.dumps({'provider_headers':headers})
+                fields['personalization'] = json.dumps({'provider_headers':headers,**({'attachments':describe(full)} if has_attachments else {})})
             if existing:
                 # An outbound row is an immutable copy/routing snapshot. Gmail
                 # receipt normalisation must never rewrite approved content.
