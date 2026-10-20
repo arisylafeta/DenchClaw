@@ -20,13 +20,6 @@ const filterOptions: Record<string, string[]> = {
   purpose: ["personal", "marketing", "transactional"], state: ["draft", "frozen", "approved", "sending", "unknown", "accepted", "failed", "received"],
   event: ["opened", "clicked", "replied", "bounced"],
 };
-// Drafts and Sent live inside Inbox, not at the top level.
-const inboxViews: MailView[] = ["conversations", "drafts", "sent"];
-const topTabs: { key: string; label: string; view: MailView; active: MailView[] }[] = [
-  { key: "inbox", label: "Inbox", view: "conversations", active: inboxViews },
-  { key: "campaigns", label: "Campaigns", view: "campaigns", active: ["campaigns"] },
-  { key: "followups", label: "Follow-ups", view: "followups", active: ["followups"] },
-];
 export function mailQuery(filters: MailFilters): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
@@ -64,12 +57,9 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
     <header className={styles.header}>
       <h1 className="flex items-center gap-2 text-[26px] font-semibold tracking-[-0.01em]"><Mail size={22} strokeWidth={1.5} aria-hidden />Mail</h1>
       <nav role="tablist" aria-label="Mail views" className={styles.tabs}>
-        {topTabs.map((tab) => <button key={tab.key} role="tab" aria-selected={tab.active.includes(view)} className={styles.tab} onClick={() => { if (!tab.active.includes(view)) {update("view", tab.view);} }}>{tab.label}</button>)}
+        {(Object.entries(views) as [MailView, string][]).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} className={styles.tab} onClick={() => update("view", key)}>{label}</button>)}
       </nav>
     </header>
-    {inboxViews.includes(view) && <nav role="tablist" aria-label="Inbox folders" className={styles.subtabs}>
-      {inboxViews.map((key) => <button key={key} role="tab" aria-selected={view === key} className={styles.subtab} onClick={() => update("view", key)}>{views[key]}</button>)}
-    </nav>}
     <div role="group" aria-label="Mail filters" className={styles.toolbar}>
       <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
         <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
