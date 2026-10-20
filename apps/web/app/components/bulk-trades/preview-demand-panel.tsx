@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, FileText, Layers, ScrollText } from "lucide-react";
+import { ClipboardList, FileText, HandCoins, History } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { useRegistry } from "./use-registry";
@@ -91,8 +91,8 @@ function MailList({ mail }: { mail: BuyerMail[] }) {
   );
 }
 
-const TABS = ["Story", "Details", "Documents", "Supply matching"];
-const TAB_ICONS = { Story: ScrollText, Details: ClipboardList, Documents: FileText, "Supply matching": Layers };
+const TABS = ["Details", "Documents", "Offers", "History"];
+const TAB_ICONS = { Details: ClipboardList, Documents: FileText, Offers: HandCoins, History: History };
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
   demand: Demand;
@@ -103,8 +103,8 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   onOpenSupply?: (id: string) => void;
   onOpenDemand?: (id: string) => void;
 }) {
-  // Opens on the story: what was asked, said and done. Details and matching are reference.
-  const [tab, setTab] = useState("Story");
+  // Opens on the details; history (what was asked, said and done) comes last.
+  const [tab, setTab] = useState("Details");
   const [supply, setSupply] = useState<DemandSupply | null>(null);
   const [supplyError, setSupplyError] = useState<string | null>(null);
   const [loadingSupply, setLoadingSupply] = useState(true);
@@ -161,7 +161,8 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         <SheetTabs
           tabs={TABS}
           icons={TAB_ICONS}
-          labels={{ "Supply matching": supply ? `Matches · ${supply.totalGroups}` : "Matches" }}
+          labels={{ Offers: supply ? `Offers · ${supply.totalGroups}` : "Offers" }}
+          centered
           value={tab}
           onChange={setTab}
         />
@@ -174,10 +175,10 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         </div>
       )}
       {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
-      {tab === "Supply matching" && (
+      {tab === "Offers" && (
         <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy} leads={leads} />
       )}
-      {tab === "Story" && (
+      {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}
           {(context?.mail ?? []).length > 0 && (

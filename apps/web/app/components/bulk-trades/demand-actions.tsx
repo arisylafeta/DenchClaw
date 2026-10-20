@@ -338,9 +338,9 @@ export function DemandActions({
         )}
       </div>}
       <ErrorText error={error} />
-      {showsActivity && (<section aria-label={story ? "Story" : "Activity"}>
+      {showsActivity && (<section aria-label={story ? "History" : "Activity"}>
         <h3 className={story ? "sr-only" : "mb-3 text-sm font-semibold"}>
-          {story ? "Story" : "Activity"}{" "}
+          {story ? "History" : "Activity"}{" "}
           <span
             className="ml-1 font-normal"
             style={{ color: "var(--bt-muted)" }}

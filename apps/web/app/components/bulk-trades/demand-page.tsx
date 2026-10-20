@@ -84,17 +84,19 @@ export function SheetTabs({
   onChange,
   labels,
   icons,
+  centered,
 }: {
   tabs: string[];
   value: string;
   onChange: (tab: string) => void;
   labels?: Record<string, string>;
   icons?: Record<string, LucideIcon>;
+  centered?: boolean;
 }) {
   return (
     <nav
       aria-label="Detail sections"
-      className="flex gap-5 border-b"
+      className={`flex gap-5 border-b${centered ? " justify-center" : ""}`}
       style={{ borderColor: "var(--bt-border)" }}
     >
       {tabs.map((tab) => (

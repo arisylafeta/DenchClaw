@@ -68,11 +68,12 @@ describe("Trades Preview loading", () => {
     const TradesPreviewView = await freshView();
     render(<TradesPreviewView />);
     expect(await screen.findByRole("heading", { name: "12 × Ioniq packs" })).toBeInTheDocument();
-    expect(screen.getByText("Green Voltage")).toBeInTheDocument();
+    expect(screen.getAllByText("Green Voltage").length).toBeGreaterThan(0);
     expect(screen.getByText("Supplier")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Not scored" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Story" })).toHaveAttribute("aria-pressed", "true");
-    expect(await screen.findByRole("region", { name: "Story" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByRole("region", { name: "History" })).toBeInTheDocument();
     expect(calls.filter((url) => url === "/api/bulk-trades/demand")).toHaveLength(1);
   });
 
