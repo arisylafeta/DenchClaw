@@ -3,6 +3,7 @@ import { parseDemandInput } from "./bulk-demand";
 import { parseBuyerContext } from "./buyer-context";
 
 const contextFixture = {
+  listing_title: "12x EV Packs for Storage Pilot",
   application: "Synthetic container storage pilot",
   min_usable_energy_kwh_per_pack: 42,
   homogeneous_within_container: true,
@@ -45,6 +46,7 @@ describe("buyer context validation", () => {
     expect(parseDemandInput({ context }, false)).toEqual({ error: "context must be an object." });
   });
   it.each([
+    { listing_title: 12 },
     { container_design_finalized: "unknown" },
     { repeat_supply_required: null },
     { min_usable_energy_kwh_per_pack: -1 },

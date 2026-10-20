@@ -8,6 +8,13 @@ describe("demand header", () => {
     expect(demandTitle({ wants: "41 kWh packs, any make", product_family: null, buyer: "R3" })).toBe("41 kWh packs, any make");
     expect(demandTitle({ wants: "x".repeat(200), product_family: null, buyer: "R3" }).length).toBeLessThanOrEqual(91);
   });
+  it("uses a trimmed listing title verbatim, with fallback for empty or invalid values", () => {
+    const base = { wants: "4 Renault Zoe 41 kWh packs.", product_family: null, buyer: "R3" };
+    expect(demandTitle({ ...base, context: { listing_title: "  Four Zoe Packs; Grade B OK  " } })).toBe("Four Zoe Packs; Grade B OK");
+    for (const listing_title of ["", "   ", null, 42]) {
+      expect(demandTitle({ ...base, context: { listing_title } as unknown as Demand["context"] })).toBe("4 × Renault Zoe 41 kWh packs");
+    }
+  });
   it("values only matching units", () => {
     const base = { expected_fee: null, price_currency: "EUR", volume: 4 };
     expect(demandValue({ ...base, max_price: 500, price_unit: "pack", volume_unit: "packs" })?.text).toBe("≈ EUR 2,000");
