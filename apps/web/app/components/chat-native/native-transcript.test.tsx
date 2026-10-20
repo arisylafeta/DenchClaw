@@ -268,7 +268,7 @@ describe("native transcript", () => {
     const state = events([["todo.updated", { todos: [{ id: "p", content: "Ship", status: "in_progress" }, { id: "c", parent: "p", content: "Review", status: "completed" }] }], ["session.usage", { usage: { input: 10, output: 20, context_used: 50, context_max: 100, cost_usd: 0.02 } }]]);
     const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} />);
     expect(container.querySelector('[data-todo-id="p"] [data-todo-id="c"]')).not.toBeNull();
-    expect(screen.getByText("Tasks · 1/2 done")).toBeInTheDocument();
+    expect(screen.getByText("1/2 done")).toBeInTheDocument();
     expect(screen.queryByText(/tokens in/)).toBeNull();
     expect(screen.queryByRole("meter")).toBeNull();
     expect(screen.queryByText("$0.0200")).toBeNull();

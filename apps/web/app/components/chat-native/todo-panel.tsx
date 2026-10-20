@@ -1,0 +1,78 @@
+"use client";
+
+import { useState } from "react";
+import { Check, ChevronRight, X } from "lucide-react";
+import type { TodoItem, TodoState, TodoStatus } from "@/lib/hermes-chat/todos";
+import { cardClass } from "./tool-run";
+
+const TITLE_MAX = 64;
+
+/** Split a task into a short title and optional detail: text before the first ": " when short, else the first clause. */
+export function splitTodo(content: string): { title: string; detail: string } {
+  const text = content.trim();
+  const colon = text.indexOf(": ");
+  if (colon > 0 && colon <= TITLE_MAX) return { title: text.slice(0, colon), detail: text.slice(colon + 2).trim() };
+  if (text.length <= TITLE_MAX) return { title: text, detail: "" };
+  const cut = text.slice(0, TITLE_MAX).replace(/\s+\S*$/, "");
+  return { title: `${cut}…`, detail: text };
+}
+
+const statusLabel: Record<TodoStatus, string> = { pending: "Pending", in_progress: "In progress", completed: "Done", cancelled: "Cancelled" };
+
+function Node({ status }: { status: TodoStatus }) {
+  const base = "relative z-10 mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border";
+  if (status === "completed") return <span aria-hidden="true" className={`${base} border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-foreground,#fff)]`}><Check className="todo-check size-2.5" strokeWidth={3} /></span>;
+  if (status === "cancelled") return <span aria-hidden="true" className={`${base} border-[var(--color-border)] bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]`}><X className="size-2.5" strokeWidth={3} /></span>;
+  if (status === "in_progress") return <span aria-hidden="true" className={`${base} todo-node-active border-[var(--color-accent)] bg-[var(--color-surface,#fff)]`}><span className="size-1.5 rounded-full bg-[var(--color-accent)]" /></span>;
+  return <span aria-hidden="true" className={`${base} border-[var(--color-border)] bg-[var(--color-surface,#fff)]`} />;
+}
+
+export interface TodoPanelProps { todos: TodoState }
+
+/** Stepper timeline: segmented progress header, status nodes on a rail, one-line titles that open into detail. */
+export function TodoPanel({ todos }: TodoPanelProps) {
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [hideDone, setHideDone] = useState(false);
+  const items = todos.visible.length ? todos.visible : todos.retained;
+  if (!items.length) return null;
+  // Missing or cyclic parents remain visible as roots, never disappear or recurse forever.
+  const roots = items.filter(item => {
+    let parent = item.parent;
+    const seen = new Set([item.id]);
+    while (parent) { if (seen.has(parent)) return true; seen.add(parent); const node = items.find(candidate => candidate.id === parent); if (!node) return true; parent = node.parent; }
+    return !item.parent;
+  });
+  const done = items.filter(item => item.status === "completed").length;
+  const open = (item: TodoItem, detail: string) => !!detail && (overrides[item.id] ?? item.status === "in_progress");
+  const renderItems = (rows: TodoItem[], ancestors: string[], nested: boolean) => {
+    const shown = rows.filter(item => !ancestors.includes(item.id) && !(hideDone && item.status === "completed" && !items.some(child => child.parent === item.id && child.status !== "completed")));
+    return <ul className={nested ? "ml-5" : ""}>{shown.map((item, index) => {
+      const { title, detail } = splitTodo(item.content);
+      const expanded = open(item, detail);
+      const last = index === shown.length - 1;
+      const muted = item.status === "completed" || item.status === "cancelled";
+      return <li key={item.id} data-todo-id={item.id} data-status={item.status} className="relative pl-6">
+        {!last && <span aria-hidden="true" className={`absolute left-[7.5px] top-4 bottom-[-2px] w-px ${item.status === "completed" ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`} />}
+        <span className="absolute left-0 top-1"><Node status={item.status} /></span>
+        {detail ? <button type="button" aria-expanded={expanded} onClick={() => setOverrides(prev => ({ ...prev, [item.id]: !expanded }))} className="group/todo flex w-full min-w-0 items-start gap-1 rounded py-0.5 text-left focus-visible:outline-2">
+          <span className={`min-w-0 flex-1 ${expanded ? "" : "truncate"} font-medium ${muted ? "text-[var(--color-text-muted)] line-through decoration-[var(--color-border)]" : item.status === "in_progress" ? "todo-title-active" : ""}`}>{title}</span>
+          <ChevronRight aria-hidden="true" className={`mt-1 size-3 shrink-0 text-[var(--color-text-muted)] opacity-0 transition group-hover/todo:opacity-100 group-focus-visible/todo:opacity-100 ${expanded ? "rotate-90 opacity-100" : ""}`} />
+        </button> : <p className={`py-0.5 font-medium ${muted ? "text-[var(--color-text-muted)] line-through decoration-[var(--color-border)]" : item.status === "in_progress" ? "todo-title-active" : ""}`}>{title}</p>}
+        <span className="sr-only">{statusLabel[item.status]}</span>
+        {expanded && <p className="todo-detail pb-1.5 text-[12px] leading-5 text-[var(--color-text-muted)]">{detail}</p>}
+        {renderItems(items.filter(child => child.parent === item.id), [...ancestors, item.id], true)}
+      </li>;
+    })}</ul>;
+  };
+  return <section aria-label="Tasks" className={`${cardClass} todo-panel`}>
+    <header className="flex items-center gap-2">
+      <h3 className="text-[13px] font-semibold">Tasks</h3>
+      <span className="font-mono text-[11px] text-[var(--color-text-muted)]">{done}/{items.length} done</span>
+      <div role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={items.length} aria-valuenow={done} className="flex min-w-0 flex-1 gap-0.5">
+        {items.map(item => <span key={item.id} className={`todo-seg h-1 min-w-1 flex-1 rounded-full ${item.status === "completed" ? "bg-[var(--color-accent)]" : item.status === "in_progress" ? "todo-seg-active bg-[var(--color-accent)]/40" : "bg-[var(--color-border)]"}`} />)}
+      </div>
+      {done > 0 && <button type="button" className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2" onClick={() => setHideDone(value => !value)}>{hideDone ? `Show done (${done})` : "Hide done"}</button>}
+    </header>
+    {renderItems(roots, [], false)}
+  </section>;
+}

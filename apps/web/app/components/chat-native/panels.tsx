@@ -4,7 +4,6 @@ import { useState } from "react";
 import type { ErrorSurface, Usage } from "@/lib/hermes-chat/events";
 import type { SubagentNode } from "@/lib/hermes-chat/subagents";
 import { isTerminalSubagent } from "@/lib/hermes-chat/subagents";
-import type { TodoItem, TodoState } from "@/lib/hermes-chat/todos";
 import type { NativeTranscriptCallbacks } from "./types";
 import { Check, ChevronRight, CircleAlert } from "lucide-react";
 import { PixelGrid } from "./thinking";
@@ -61,20 +60,6 @@ export function SubagentCard({ agent, callbacks, tailText, tails }: SubagentCard
     </details>
     {agent.children.length > 0 && <div className="ml-5" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} />)}</div>}
   </section>;
-}
-export interface TodoPanelProps { todos: TodoState }
-export function TodoPanel({ todos }: TodoPanelProps) {
-  const items = todos.visible.length ? todos.visible : todos.retained;
-  if (!items.length) return null;
-  // Missing or cyclic parents remain visible as roots, never disappear or recurse forever.
-  const roots = items.filter(item => {
-    let parent = item.parent;
-    const seen = new Set([item.id]);
-    while (parent) { if (seen.has(parent)) return true; seen.add(parent); const node = items.find(candidate => candidate.id === parent); if (!node) return true; parent = node.parent; }
-    return !item.parent;
-  });
-  const renderItems = (rows: TodoItem[], ancestors: string[]) => <ul className="ml-4 space-y-1">{rows.filter(item => !ancestors.includes(item.id)).map(item => <li key={item.id} data-todo-id={item.id}><span>{item.content} · {item.status.replace("_", " ")}</span>{renderItems(items.filter(child => child.parent === item.id), [...ancestors, item.id])}</li>)}</ul>;
-  return <section aria-label="Tasks" className={cardClass}><h3>Tasks · {items.filter(item => item.status === "completed").length}/{items.length} done</h3>{renderItems(roots, [])}</section>;
 }
 export interface ErrorCardProps { error: ErrorSurface; message?: string; partial?: boolean; onRetry: NativeTranscriptCallbacks["onRetry"] }
 export function ErrorCard({ error, message, partial, onRetry }: ErrorCardProps) {
