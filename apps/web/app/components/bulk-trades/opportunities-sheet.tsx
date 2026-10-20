@@ -149,7 +149,8 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
         {loading && !rows.length ? "Loading…" : `${shown.length} of ${rows.length} open`}
       </p>
 
-      <div className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+      <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+        <div className="md:min-w-[50rem] lg:min-w-[56rem]">
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
           <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span>Next</span>
         </div>
@@ -171,6 +172,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
             {error ? "The sheet could not load." : filtered ? "No opportunities match these filters." : "Nothing open right now."}
           </p>
         )}
+        </div>
       </div>
     </div>
   );
