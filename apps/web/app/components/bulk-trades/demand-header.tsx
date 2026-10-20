@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import type { Demand } from "@/lib/bulk-demand";
 import { demandDescription, demandStarted, demandTitle, demandValue } from "@/lib/bulk-demand-header";
 import type { DemandSupply } from "@/lib/demand-supply-types";
@@ -25,10 +26,10 @@ export function ScoreRing({ score }: { score: number | null }) {
   );
 }
 
-
-
-/** Score, headline, buyer, three facts and a short brief. A fact we don't have says so quietly. */
-export function DemandHeader({ demand, supply, actions }: { demand: Demand; supply: DemandSupply | null; actions: React.ReactNode }) {
+/** Score, headline, buyer, status, three facts and a short brief. A fact we don't have says so quietly. */
+export function DemandHeader({ demand, supply, actions, onBack }: {
+  demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; onBack?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const description = demandDescription(demand);
   const words = description.split(/\s+/);
@@ -38,16 +39,24 @@ export function DemandHeader({ demand, supply, actions }: { demand: Demand; supp
   const sellers = [...new Set((supply?.shortlisted ?? []).map((unit) => unit.seller).filter(Boolean))] as string[];
   return (
     <header className={css.root}>
-      <ScoreRing score={demand.score} />
-      <div className="min-w-0">
-        <h2 className={css.title}>{demandTitle(demand)}</h2>
-        <div className={css.sub}>
-          <span>{demand.buyer}</span>
-          {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}
-          {demand.priority && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
-          {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
+      {onBack && (
+        <button type="button" onClick={onBack} className={css.back}>
+          <ArrowLeft size={13} aria-hidden /> Trades Preview
+        </button>
+      )}
+      <div className={css.titleRow}>
+        <ScoreRing score={demand.score} />
+        <div className="min-w-0 flex-1">
+          <h2 className={css.title}>{demandTitle(demand)}</h2>
+          <div className={css.sub}>
+            <span>{demand.buyer}</span>
+            {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}
+            {demand.priority && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
+            {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
+          </div>
         </div>
       </div>
+      <div className={css.actions}>{actions}</div>
       <dl className={css.facts}>
         <div className={css.fact}>
           <dt>Supplier</dt>
@@ -71,7 +80,6 @@ export function DemandHeader({ demand, supply, actions }: { demand: Demand; supp
           {long && <button type="button" aria-expanded={open} className={css.more} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
         </div>
       )}
-      <div className={css.actions}>{actions}</div>
     </header>
   );
 }

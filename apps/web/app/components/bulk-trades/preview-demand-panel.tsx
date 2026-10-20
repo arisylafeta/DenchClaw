@@ -11,7 +11,6 @@ import { buildEntryLink } from "@/lib/workspace-links";
 import { ErrorText, request } from "./trade-ui";
 import { SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
-import { DemandDialog } from "./demand-editor";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { SupplyTab } from "./demand-supply-tab";
@@ -158,7 +157,6 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
 }) {
   // Opens on the story: what was asked, said and done. Details and matching are reference.
   const [tab, setTab] = useState("Story");
-  const [editing, setEditing] = useState(false);
   const [supply, setSupply] = useState<DemandSupply | null>(null);
   const [supplyError, setSupplyError] = useState<string | null>(null);
   const [loadingSupply, setLoadingSupply] = useState(true);
@@ -206,20 +204,19 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   useEffect(() => { top.current?.scrollIntoView?.({ block: "start" }); }, [demand.id]);
   const actions = (section: string) => (
     <DemandActions story section={section} demand={demand} today={today} onChanged={onChanged} onClose={onClose}
-      onEdit={() => setEditing(true)} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
+      onEdit={() => {}} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
   );
   return (
     <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} flex w-full min-w-0 flex-col gap-3`}>
-      <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        <button type="button" onClick={onClose} className={`${rowFocus} hover:underline`}>← Trades Preview</button>
-      </nav>
-      <DemandHeader demand={demand} supply={supply} actions={actions("Overview")} />
-      <SheetTabs
-        tabs={TABS}
-        labels={{ "Supply matching": supply ? `Matches · ${supply.totalGroups}` : "Matches" }}
-        value={tab}
-        onChange={setTab}
-      />
+      <div className={headerCss.card}>
+        <DemandHeader demand={demand} supply={supply} actions={actions("Overview")} onBack={onClose} />
+        <SheetTabs
+          tabs={TABS}
+          labels={{ "Supply matching": supply ? `Matches · ${supply.totalGroups}` : "Matches" }}
+          value={tab}
+          onChange={setTab}
+        />
+      </div>
       <ErrorText error={error} />
       {tab === "Details" && (
         <div data-preview-details className={css.details}>
@@ -231,8 +228,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         </div>
       )}
       {tab === "Supply matching" && (
-        <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy}
-          onEdit={() => setEditing(true)} leads={leads} />
+        <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy} leads={leads} />
       )}
       {tab === "Story" && (
         <div className="flex max-w-[760px] flex-col gap-6">
@@ -246,10 +242,6 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
             </details>
           )}
         </div>
-      )}
-
-      {editing && (
-        <DemandDialog demand={demand} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />
       )}
     </div>
   );

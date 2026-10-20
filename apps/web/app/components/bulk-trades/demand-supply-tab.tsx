@@ -272,7 +272,7 @@ export function buyerOffer(units: SupplyUnitView[]): string {
 }
 
 export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, leads }: {
-  supply: DemandSupply | null; loading: boolean; error: string | null; onVerdict: Verdict; busy: boolean; onEdit: () => void;
+  supply: DemandSupply | null; loading: boolean; error: string | null; onVerdict: Verdict; busy: boolean; onEdit?: () => void;
   leads: MarketLead[];
 }) {
   const [source, setSource] = useState<SourceFilter>("all");
@@ -308,8 +308,8 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
   return (
     <div className="flex flex-col gap-4">
       <p className={css.note}>
-        Matching on {matchingOn || "the ask's wording"} ·{" "}
-        <button type="button" className={`${rowFocus} underline`} onClick={onEdit}>Edit</button>
+        Matching on {matchingOn || "the ask's wording"}
+        {onEdit && <> ·{" "}<button type="button" className={`${rowFocus} underline`} onClick={onEdit}>Edit</button></>}
         {" "}· {checked.toLocaleString("en-GB")} units checked
       </p>
       {supply.errors.map((e) => <p key={e} role="alert" className="text-[12px]" style={{ color: "var(--bt-red)" }}>{e}</p>)}

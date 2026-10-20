@@ -278,9 +278,11 @@ export function DemandActions({
             onClose={(why) => run(() => patch({ action: "close", reason: why }))}
             onCategory={(why) => run(() => patch({ action: "category", reason: why }))}
           />
-          <button aria-label="Edit demand" className={`${buttonClass} px-2.5`} style={buttonStyle} onClick={onEdit}>
-            <Pencil size={14} />
-          </button>
+          {!story && (
+            <button aria-label="Edit demand" className={`${buttonClass} px-2.5`} style={buttonStyle} onClick={onEdit}>
+              <Pencil size={14} />
+            </button>
+          )}
         </div>
         {qualifying && (
           <form
