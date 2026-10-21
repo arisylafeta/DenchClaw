@@ -23,6 +23,16 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_OPENCLAW_VERSION: openclawVersion,
   },
 
+  // Chats open only in the Inbox side panel. The old full-page thread URL lands there.
+  async redirects() {
+    return [
+      {
+        source: "/whatsapp/threads/:id",
+        destination: "/?crm=inbox&view=whatsapp&thread=:id",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {
