@@ -36,6 +36,8 @@ export type ThreadEntry = {
   body: string | null;
   at: string;
   ref: string | null;
+  /** Where to open the exact email, call notes or document this entry came from. */
+  href: string | null;
 };
 
 const SELECT = `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id, o.name, o.contact, o.stage,
@@ -126,9 +128,9 @@ export async function offerThread(offer: Offer, userId: string | null): Promise<
   const shownThreads = new Set(mail.map((m) => m.thread_id).filter((t): t is string => !!t));
   const covered = (a: { kind: string; ref_id: string | null }) => a.kind === "mail" && !!a.ref_id && [...shownThreads].some((t) => a.ref_id!.includes(t));
   const entries: ThreadEntry[] = [
-    ...activity.filter((a) => !covered(a)).map((a) => ({ id: `a${a.id}`, channel: channelOf(a.kind), direction: null, title: a.title, body: a.body, at: a.at, ref: a.ref_id })),
-    ...mail.map((m) => ({ id: `m${m.id}`, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body, at: m.at, ref: m.thread_id })),
-    ...chat.map((c) => ({ id: `w${c.id}`, channel: "whatsapp" as const, direction: c.direction, title: c.direction === "outbound" ? "You" : offer.name ?? "Them", body: c.body, at: c.at, ref: null })),
+    ...activity.filter((a) => !covered(a)).map((a) => ({ id: `a${a.id}`, channel: channelOf(a.kind), direction: null, title: a.title, body: a.body, at: a.at, ref: a.ref_id, href: a.ref_id && /^(https?:\/\/|\/)/.test(a.ref_id) ? a.ref_id : null })),
+    ...mail.map((m) => ({ id: `m${m.id}`, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body, at: m.at, ref: m.thread_id, href: m.thread_id ? `/?crm=inbox&view=conversations&thread=${encodeURIComponent(m.thread_id)}&crmOnly=false` : null })),
+    ...chat.map((c) => ({ id: `w${c.id}`, channel: "whatsapp" as const, direction: c.direction, title: c.direction === "outbound" ? "You" : offer.name ?? "Them", body: c.body, at: c.at, ref: null, href: null })),
   ];
   return entries.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }

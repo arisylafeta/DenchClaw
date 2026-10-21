@@ -14,8 +14,8 @@ const offer: Offer = {
   updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2,
 };
 const thread: ThreadEntry[] = [
-  { id: "m1", channel: "mail", direction: "inbound", title: "Re: packs", body: "We can bid 380 per pack", at: "2026-10-12T10:00:00Z", ref: "t1" },
-  { id: "a1", channel: "note", direction: null, title: "Called, wants specs", body: null, at: "2026-10-11T09:00:00Z", ref: null },
+  { id: "m1", channel: "mail", direction: "inbound", title: "Re: packs", body: "We can bid 380 per pack", at: "2026-10-12T10:00:00Z", ref: "t1", href: "/?crm=inbox&view=conversations&thread=t1&crmOnly=false" },
+  { id: "a1", channel: "note", direction: null, title: "Called, wants specs", body: null, at: "2026-10-11T09:00:00Z", ref: null, href: null },
 ];
 
 function stub(calls: { url: string; method: string; body?: string }[]) {
@@ -59,8 +59,6 @@ describe("Offers tab", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading thread");
     expect(screen.getByRole("button", { name: /Attero Recycling/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("combobox", { name: "Stage" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Next step" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Add to thread" })).toBeDisabled();
     expect(screen.getAllByRole("listitem")).toHaveLength(5);
     expect(screen.queryByText("Re: packs")).not.toBeInTheDocument();
     await act(async () => resolve(new Response(JSON.stringify({ offer, thread }))));
@@ -78,6 +76,8 @@ describe("Offers tab", () => {
     await userEvent.click(screen.getByText("Attero Recycling"));
     expect(await screen.findByText("Re: packs")).toBeInTheDocument();
     expect(screen.getByText("Called, wants specs")).toBeInTheDocument();
+    // Each mail points at the exact email in the inbox.
+    expect(screen.getByRole("link", { name: /Open email/ })).toHaveAttribute("href", "/?crm=inbox&view=conversations&thread=t1&crmOnly=false");
     // Threads and messages are accordions: the row stays, a message opens to its full text.
     expect(screen.getByRole("button", { name: /Attero Recycling/ })).toHaveAttribute("aria-expanded", "true");
     const message = screen.getByRole("button", { name: /Re: packs/ });

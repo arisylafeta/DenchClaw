@@ -1,6 +1,6 @@
 "use client";
 
-import { Calendar, ChevronDown, ChevronRight, Mail, MessageCircle, Phone, Plus, Send, StickyNote, Tag, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Mail, MessageCircle, Phone, Plus, StickyNote, Tag, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Offer, OfferStage, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import type { DemandSupply } from "@/lib/demand-supply-types";
@@ -12,7 +12,7 @@ import { BusyRegion, Sh } from "./bt-shimmer";
 
 const PLACEHOLDER_OFFER = { id: "loading", name: null, stage: "to_contact", messages: 1 } as Offer;
 const PLACEHOLDER_OFFERS = Array.from({ length: 4 }, (_, i) => ({ ...PLACEHOLDER_OFFER, id: `loading-${i}` }));
-const PLACEHOLDER_THREAD = Array.from({ length: 4 }, (_, i) => ({ id: `loading-${i}`, channel: "note", title: "", body: " ", at: "", direction: null } as ThreadEntry));
+const PLACEHOLDER_THREAD = Array.from({ length: 4 }, (_, i) => ({ id: `loading-${i}`, channel: "note", title: "", body: " ", at: "", direction: null, ref: null, href: null } as ThreadEntry));
 
 const STAGES: [OfferStage, string][] = [
   ["to_contact", "To contact"], ["teaser_sent", "Sent"], ["specs_nda", "Specs and NDA"], ["bid_in", "Bid in"],
@@ -159,25 +159,14 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
   const [offer, setOffer] = useState<Offer | null>(null);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [text, setText] = useState("");
-  const [kind, setKind] = useState<"note" | "call">("note");
-  const [nextStep, setNextStep] = useState("");
-  const [nextDue, setNextDue] = useState("");
   const [busy, setBusy] = useState(false);
   const apply = (r: { offer: Offer; thread?: ThreadEntry[] }) => {
     setOffer(r.offer); if (r.thread) setThread(r.thread);
-    setNextStep(r.offer.next_step ?? ""); setNextDue(r.offer.next_due ?? "");
   };
   useEffect(() => { let live = true; request<{ offer: Offer; thread: ThreadEntry[] }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
   async function patch(body: Record<string, unknown>) {
     setBusy(true); setError(null);
     try { const r = await request<{ offer: Offer }>(url, { method: "PATCH", body: JSON.stringify(body) }); setOffer(r.offer); const t = await request<{ offer: Offer; thread: ThreadEntry[] }>(url); apply(t); onUpdated(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
-  }
-  async function post() {
-    if (!text.trim()) return;
-    setBusy(true); setError(null);
-    try { const line = text.trim(); apply(await request(url, { method: "POST", body: JSON.stringify({ kind, title: line.split("\n")[0].slice(0, 120), body: line.includes("\n") || line.length > 120 ? line : null }) })); setText(""); onUpdated(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
   }
   const loading = offer === null && !error;
@@ -193,25 +182,7 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
         </select>
       </div>
       {terms && <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Latest terms </span><strong>{terms}</strong></p>}
-      <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); void patch({ nextStep: nextStep || null, nextDue: nextDue || null }); }}>
-        <Calendar size={14} aria-hidden style={{ color: "var(--bt-muted)" }} />
-        <input disabled={!offer} aria-label="Next step" placeholder="Next step" value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={`${inputClass} min-w-[200px] flex-1`} style={inputStyle} />
-        <input disabled={!offer} aria-label="Due" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} className={inputClass} style={inputStyle} />
-        <button type="submit" disabled={busy || !offer || (nextStep === (current.next_step ?? "") && nextDue === (current.next_due ?? ""))} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save</button>
-      </form>
       <ErrorText error={error} />
-      <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void post(); }}>
-        <textarea disabled={!offer} aria-label="Add to thread" rows={2} placeholder="Log a note or a call" value={text} onChange={(e) => setText(e.target.value)} className={inputClass} style={inputStyle} />
-        <div className="flex items-center gap-2">
-          <div role="group" aria-label="Entry type" className="inline-flex gap-1">
-            {(["note", "call"] as const).map((k) => (
-              <button disabled={!offer} key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={`${rowFocus} px-2 py-1 text-[12px]`}
-                style={{ background: kind === k ? "var(--bt-badge)" : "var(--bt-segment)", color: kind === k ? "var(--bt-on-badge)" : "var(--bt-muted)" }}>{k === "note" ? "Note" : "Call"}</button>
-            ))}
-          </div>
-          <button type="submit" disabled={busy || !offer || !text.trim()} className={`${rowFocus} ${buttonClass} ml-auto inline-flex items-center gap-1.5`} style={buttonStyle}><Send size={13} aria-hidden /> Add</button>
-        </div>
-      </form>
       <section aria-label="Thread">
         {offer && thread.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Nothing yet. Email and WhatsApp with this person appear here once they are linked to a CRM person or email.</p>}
         <ul>
@@ -249,6 +220,12 @@ function MessageItem({ entry: e, loading }: { entry: ThreadEntry; loading: boole
       {expandable
         ? <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={`${rowFocus} flex w-full gap-3 py-3 text-left`}>{head}</button>
         : <div className="flex gap-3 py-3">{head}</div>}
+      {!loading && e.href && (
+        <a href={e.href} target={e.href.startsWith("http") ? "_blank" : undefined} rel="noreferrer"
+          className={`${rowFocus} mb-3 ml-10 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]`} style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>
+          <ExternalLink size={11} aria-hidden /> {e.channel === "mail" ? "Open email" : e.channel === "call" ? "Open call notes" : "Open source"}
+        </a>
+      )}
     </li>
   );
 }
