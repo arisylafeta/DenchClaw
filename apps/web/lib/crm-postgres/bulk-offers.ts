@@ -47,11 +47,11 @@ const SELECT = `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_i
   o.data->>'next_due' as next_due, o.updated_at::text,
   nullif(greatest(
     (select max(a.occurred_at) from crm_bulk_listing_activity a where a.offer_id = o.id),
-    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and m.thread_id = any (select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb))))
+    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')))
   ), '-infinity'::timestamptz)::text as last_message_at,
   ((select count(*) from crm_bulk_listing_activity a where a.offer_id = o.id)
-   + (select count(*) from mail_message m where m.crm_visible and m.thread_id = any (select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)))))::int as messages,
-  array(select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb))) as threads
+   + (select count(*) from mail_message m where m.crm_visible and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed'))))::int as messages,
+  array((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')) as threads
   from crm_bulk_offers o`;
 
 /** Threads on a listing: the people we have offered it to (or asked), newest touch first. Contacts on the owner's side are not threads. */

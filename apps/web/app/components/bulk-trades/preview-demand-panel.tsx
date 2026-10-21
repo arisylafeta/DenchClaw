@@ -78,18 +78,19 @@ function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: 
 }
 
 /** The whole email thread with the buyer, kept under their card so the context stays with the details. Each message opens in place and links to the exact email. */
-function BuyerThread({ mail, loading, name }: { mail: BuyerMail[]; loading: boolean; name: string }) {
+function BuyerThread({ mail, conversation, loading, name }: { mail: BuyerMail[]; conversation: ThreadEntry[] | null; loading: boolean; name: string }) {
+  // Labelled threads (email and WhatsApp about this exact demand) win; until a thread is labelled we show all mail with the buyer.
   const entries: ThreadEntry[] = loading
     ? Array.from({ length: 3 }, (_, i) => ({ id: `loading-${i}`, channel: "mail", direction: null, title: "", body: " ", at: "", ref: null, href: null }))
-    : mail.map((m) => ({
+    : conversation ?? mail.map((m) => ({
       id: m.id, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body ?? m.preview, at: m.at, ref: m.thread_id,
       href: m.thread_id ? `/?crm=inbox&view=conversations&thread=${encodeURIComponent(m.thread_id)}&crmOnly=false` : null,
     }));
   return (
-    <section aria-label="Email with the buyer" className="flex flex-col gap-1">
-      <h3 className={css.label}>Email with {loading ? "the buyer" : name.split(/\s+/)[0]}</h3>
+    <section aria-label={conversation ? "Conversation with the buyer" : "Email with the buyer"} className="flex flex-col gap-1">
+      <h3 className={css.label}>{conversation ? "Conversation with" : "Email with"} {loading ? "the buyer" : name.split(/\s+/)[0]}</h3>
       <ul>{entries.map((e) => <MessageItem key={e.id} entry={e} loading={loading} />)}</ul>
-      {!loading && !mail.length && <p className={css.note}>No email with this buyer in your mailbox.</p>}
+      {!loading && !entries.length && <p className={css.note}>No email with this buyer in your mailbox.</p>}
     </section>
   );
 }
@@ -112,6 +113,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   const [supplyLoading, setSupplyLoading] = useState(true);
   const supplySequence = useRef(0);
   const [context, setContext] = useState<BuyerContext | null>(null);
+  const [conversation, setConversation] = useState<ThreadEntry[] | null | undefined>(undefined);
   const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
   const loadSupply = useCallback(async () => {
     const sequence = ++supplySequence.current;
@@ -134,6 +136,8 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   useEffect(() => {
     let cancelled = false;
     setContext(null);
+    setConversation(undefined);
+    void request<{ conversation: ThreadEntry[] | null }>(`${endpoint}/conversation`).then((r) => { if (!cancelled) setConversation(Array.isArray(r?.conversation) ? r.conversation : null); }).catch(() => { if (!cancelled) setConversation(null); });
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 12_000);
     void request<BuyerContext>(`${endpoint}/context`, { signal: abort.signal }).finally(() => clearTimeout(timer)).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
@@ -161,7 +165,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "Details" && (
         <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
-          <BuyerThread mail={context?.mail ?? []} loading={context === null} name={demand.contact ?? demand.buyer} />
+          <BuyerThread mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} name={demand.contact ?? demand.buyer} />
           <TheAsk demand={demand} supply={supply} loading={supplyLoading} />
         </div>
       )}
