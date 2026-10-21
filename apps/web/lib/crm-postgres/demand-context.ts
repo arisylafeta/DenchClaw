@@ -1,6 +1,5 @@
 import "server-only";
 
-import type { Demand } from "../bulk-demand";
 import { queryPg } from "../postgres";
 
 export type BuyerMail = {
@@ -19,7 +18,7 @@ export type BuyerMail = {
  * The latest one-to-one email with the buyer in the signed-in user's own mailbox: by the demand's email and every
  * CRM person at the buyer company. Campaign sends are left out; the same visibility rule as the company page.
  */
-export async function buyerMail(demand: Demand, userId: string | null, limit = 40): Promise<BuyerMail[]> {
+export async function buyerMail(demand: { company_id: string | null; email: string | null }, userId: string | null, limit = 40): Promise<BuyerMail[]> {
   if (!userId) return [];
   return queryPg<BuyerMail>(
     `with emails as (

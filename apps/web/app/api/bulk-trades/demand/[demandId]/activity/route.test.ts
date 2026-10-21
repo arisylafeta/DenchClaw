@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ user: vi.fn(), get: vi.fn(), list: vi.fn(), add: vi.fn(), remove: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ currentUser: mocks.user }));
-vi.mock("@/lib/crm-postgres/bulk-demand", () => ({ getDemand: mocks.get }));
+vi.mock("@/lib/crm-postgres/bulk-listings", () => ({ getListing: mocks.get }));
 vi.mock("@/lib/crm-postgres/bulk-demand-activity", async (original) => ({
   ...await original(), listDemandActivity: mocks.list, addDemandActivity: mocks.add, deleteDemandActivity: mocks.remove,
 }));
