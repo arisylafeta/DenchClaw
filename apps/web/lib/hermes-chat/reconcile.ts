@@ -280,6 +280,7 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
     }
   }
   base.usage = snapshot.usage === undefined ? state.usage : snapshot.usage
+  base.goal = snapshot.goal === undefined ? state.goal : snapshot.goal
   base.subagents = state.subagents
 
   base.interrupted = !snapshot.running && state.interrupted

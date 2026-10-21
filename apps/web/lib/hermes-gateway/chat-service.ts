@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { GOAL_ACTIONS, goalFromControl, type GoalSnapshot } from "../hermes-chat/goal";
+import { persistedSessionGoal } from "../hermes-session-goal";
 import { extname } from "node:path";
 import { z } from "zod";
 import { buildAgentMessage, stripAgentMessageContext, type WorkspaceContext } from "../agent-message";
@@ -26,6 +28,7 @@ export interface GatewayChatSnapshot {
   todo_state: SessionResumeResult["todo_state"];
   subagents?: LiveSessionSnapshot["subagents"];
   usage?: SessionUsageResult | null;
+  goal?: GoalSnapshot | null;
   html: MessageHtmlRecord[];
   gateway: "connected" | "unavailable";
   /** Opaque cursor for GET conversations/[key]/history?before=...&limit=200. */
@@ -103,6 +106,11 @@ const slashText = z.string().max(65_536).refine(value => Buffer.byteLength(value
 const slashCompletionSchema = z.object({
   text: slashText.refine(value => /^\/[^\s/]*(?:\s[\s\S]*)?$/u.test(value)),
 }).strict();
+const goalControlSchema = z.object({
+  action: z.enum(GOAL_ACTIONS),
+  args: z.object({ text: z.string().trim().min(1).max(2000).optional(), index: z.number().int().min(1).max(100).optional() }).strict().optional(),
+}).strict().refine(value => value.action !== "subgoal.add" || Boolean(value.args?.text))
+  .refine(value => value.action !== "subgoal.remove" || value.args?.index !== undefined);
 const slashExecutionSchema = z.object({
   command: slashText.refine(value => /^\/[^\s/]+(?:\s[\s\S]*)?$/u.test(value)),
 }).strict();
@@ -190,7 +198,12 @@ export class HermesChatService {
     const usage = gateway === "connected" && this.manager.session(retained)?.runtimeId
       ? await this.manager.callSession(retained, "session.usage", { session_id: "" }).catch(() => null)
       : null;
-    return { ...history, ...page, usage, gateway, generation: replay.generation, seq: replay.seq,
+    // The goal card needs the goal even for an idle chat: live state when attached, else Hermes' persisted copy.
+    const liveGoal = gateway === "connected" && this.manager.session(retained)?.runtimeId
+      ? await this.manager.callSession(retained, "session.control.read", { session_id: "" }).then(result => goalFromControl(result.control)).catch(() => undefined)
+      : undefined;
+    const goal = liveGoal !== undefined ? liveGoal : await persistedSessionGoal(profile, storedId);
+    return { ...history, ...page, usage, gateway, goal, generation: replay.generation, seq: replay.seq,
       running: Boolean(resume?.running), inflight, ...(inflightBeforeWindow ? { inflightBeforeWindow } : {}), queued, subagents: resume?.subagents,
       pendingRequests: gateway === "connected" ? this.manager.pendingRequests(retained) : [], todo_state: resume?.todo_state,
       html: await lookupMessageHtml(profile, storedId) };
@@ -392,7 +405,7 @@ export class HermesChatService {
   }
   async command(key: string, action: string, body: Record<string, unknown>) {
     const retained = await this.liveControls(key);
-    if (action === "model" || action === "reasoning" || action === "fast") {
+    if (action === "model" || action === "reasoning" || action === "fast" || action === "control") {
       // A pick is an explicit intent to use this chat, so an idle chat resumes like a send would.
       await this.manager.serialize(retained, async () => {
         if (!this.manager.session(retained)?.runtimeId) {await this.manager.resumeSession(retained);}
@@ -416,6 +429,12 @@ export class HermesChatService {
       const parsed = reasoningSelectionSchema.safeParse(body);
       if (!parsed.success) { throw new ChatServiceError(400, "invalid_reasoning"); }
       return this.manager.callSession(retained, "config.set", { session_id: "", key: "reasoning", value: parsed.data.effort, scope: "session" });
+    }
+    if (action === "control") {
+      const parsed = goalControlSchema.safeParse(body);
+      if (!parsed.success) { throw new ChatServiceError(400, "invalid_control"); }
+      const { action: control, args } = parsed.data;
+      return this.manager.callSession(retained, "session.control", { session_id: "", action: control, ...(args ? { args } : {}) });
     }
     if (action === "interrupt") {
       const result = await this.manager.callSession(retained, "session.interrupt", { session_id: "" });

@@ -1284,7 +1284,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					if (action.notice) setCommandStatus({ tone: "info", text: action.notice });
 				} else if (action.type === "send") {
 					onConversationActivity?.();
-					if (action.notice) setCommandStatus({ tone: "info", text: action.notice });
+					if (action.notice && !/^\/goal\b/i.test(command.trim())) setCommandStatus({ tone: "info", text: action.notice });
 					await nativeChat.send({ text: action.text });
 				} else { nativeChat.addNotice(slashNotice(command, action.text)); }
 			} catch (cause) {
@@ -2757,7 +2757,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
 		) : (
 			<>
-				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} profile={agentProfile} tails={nativeChat.tails} queued={nativeChat.queuedMessages} callbacks={{
+				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} profile={agentProfile} tails={nativeChat.tails} queued={nativeChat.queuedMessages} goal={nativeChat.goal} busy={nativeChat.state.busy} onGoalControl={nativeChat.goalControl} callbacks={{
 					onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
 					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
@@ -2908,10 +2908,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const inputBarContainer = (onDragOverHandler: React.DragEventHandler, onDragLeaveHandler: React.DragEventHandler, onDropHandler: React.DragEventHandler) => (
 			<div
 				data-chat-drop-target=""
-				data-composer-pill={nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0) ? "gradient" : "glass"}
+				data-composer-pill={nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0 || Boolean(nativeChat.goal)) ? "gradient" : "glass"}
 				className={`${compact ? "rounded-2xl" : "rounded-3xl"} overflow-hidden border shadow-[0_0_32px_rgba(0,0,0,0.07)] transition-[outline,box-shadow,border-color] motion-reduce:transition-none duration-150 ease-out focus-within:border-[var(--color-border-strong)]! data-drag-hover:outline-2 data-drag-hover:outline-dashed data-drag-hover:outline-(--color-accent) data-drag-hover:-outline-offset-2 data-drag-hover:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-accent)_15%,transparent),0_0_32px_rgba(0,0,0,0.07)]!`}
 				style={{
-					background: nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0)
+					background: nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0 || Boolean(nativeChat.goal))
 						? "linear-gradient(to bottom, var(--color-surface-hover) 0%, var(--color-bg) min(300px, 70%), var(--color-bg) 100%)"
 						: "color-mix(in srgb, var(--color-surface) 75%, transparent)",
 					backdropFilter: "blur(16px) saturate(180%)",

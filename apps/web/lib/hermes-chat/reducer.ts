@@ -21,6 +21,7 @@ import type { Notice } from './notice'
 import { eventNotice } from './event-notices'
 import { asRecord, stringValue, type ErrorSurface, type EventPayload, type GatewayEvent, type PersistedTurn, type Usage } from './events'
 import { initialSubagents, pruneFinishedSubagents, reduceSubagents, type SubagentState } from './subagents'
+import { goalFromControl, type GoalSnapshot } from './goal'
 import { applyTodos, expireTodos, initialTodos, isTodoToolName, settleTodos, type TodoState } from './todos'
 
 export interface ReducerContext { /** Milliseconds, like Date.now. */ now(): number; id(): string }
@@ -64,6 +65,8 @@ export interface ChatState {
   turnStartedAt: number | null; optimisticSentAt: number | null
   usage: Usage | null; pendingRequests: PendingRequest[]; status: string | null
   subagents: SubagentState; todos: TodoState
+  /** Standing goal from session.control.update; null when the chat has none. */
+  goal: GoalSnapshot | null
   generation: string | number; watermark: number; duplicates: Record<string, number>
 }
 export function initialState(sessionId: string | null = null): ChatState {
@@ -73,7 +76,7 @@ export function initialState(sessionId: string | null = null): ChatState {
     interrupted: false, needsInput: false, streamId: null, heartbeatSettledStreamId: null,
     sawAssistantPayload: false, adoptedRunningTurn: false, interimBoundaryPending: false,
     turnStartedAt: null, optimisticSentAt: null, usage: null, pendingRequests: [], status: null,
-    subagents: initialSubagents(), todos: initialTodos(), generation: 0, watermark: -1, duplicates: {}
+    subagents: initialSubagents(), todos: initialTodos(), goal: null, generation: 0, watermark: -1, duplicates: {}
   }
 }
 export const messageText = (message: ChatMessage): string => message.segments.filter((s): s is TextSegment => s.type === 'text' || s.type === 'interim').map(s => s.text).join('')
@@ -294,6 +297,7 @@ export function reduce(state: ChatState, event: GatewayEvent, ctx: ReducerContex
     s.pendingRequests = s.pendingRequests.filter(r => String(r.id) !== String(p.id ?? p.request_id) && r.requestId !== (p.id ?? p.request_id))
     s.needsInput = s.pendingRequests.length > 0; return s
   }
+  if (event.type === 'session.control.update') { s.goal = goalFromControl(asRecord(event.payload).control); return s }
   if (event.type === 'session.usage') { if (p.usage) s.usage = { ...s.usage, ...p.usage }; return s }
   if (event.type === 'session.info' || event.type === 'heartbeat') {
     s.storedSessionId = p.stored_session_id ?? s.storedSessionId

@@ -11,6 +11,7 @@ vi.mock("../hermes-native", () => ({
 vi.mock("./message-html-store", () => ({ lookupMessageHtml: vi.fn(async () => []), saveMessageHtml: vi.fn() }));
 vi.mock("../chat-image-attachments", () => ({ hydrateMessageImageAttachments: vi.fn(() => ({ attachments: [], skipped: [] })), buildChatImageHydrationErrorMessage: vi.fn(() => null) }));
 vi.mock("../workspace", () => ({ resolveAgentWorkspacePrefix: () => "/source-workspace" }));
+vi.mock("../hermes-session-goal", () => ({ persistedSessionGoal: vi.fn(async () => null) }));
 import { inviteToConversation, nativeFetch, readConversation } from "../hermes-native";
 import { hydrateMessageImageAttachments } from "../chat-image-attachments";
 import { HermesGatewayManager, type GatewaySocket } from "./manager";
@@ -245,6 +246,21 @@ describe("gateway chat service", () => {
     manager.retainSession("ari", "one", "runtime-one");
     await expect(service.command(key, action, body)).rejects.toMatchObject({ status: 400 });
     expect(socket.frames.some(frame => frame.method === "config.set")).toBe(false);
+  });
+  it("forwards allowlisted goal controls to session.control and refuses anything else", async () => {
+    manager.retainSession("ari", "one", "runtime-one");
+    await service.command(key, "control", { action: "goal.pause" });
+    await service.command(key, "control", { action: "subgoal.add", args: { text: "Tests pass" } });
+    await service.command(key, "control", { action: "subgoal.remove", args: { index: 2 } });
+    expect(socket.frames.filter(frame => frame.method === "session.control").map(frame => frame.params)).toEqual([
+      { session_id: "runtime-one", profile: "ari", action: "goal.pause" },
+      { session_id: "runtime-one", profile: "ari", action: "subgoal.add", args: { text: "Tests pass" } },
+      { session_id: "runtime-one", profile: "ari", action: "subgoal.remove", args: { index: 2 } },
+    ]);
+    for (const body of [{ action: "goal.gate.add", args: { text: "rm -rf /" } }, { action: "subgoal.add" }, { action: "subgoal.remove", args: { index: 0 } }, { action: "loop.stop" }, { action: "goal.pause", extra: true }]) {
+      await expect(service.command(key, "control", body)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(socket.frames.filter(frame => frame.method === "session.control")).toHaveLength(3);
   });
   it("does not replay a stale config mutation into another runtime", async () => {
     manager.retainSession("ari", "one", "runtime-one");

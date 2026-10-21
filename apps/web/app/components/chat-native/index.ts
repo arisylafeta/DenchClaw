@@ -26,3 +26,4 @@ export { ToolRow, Elapsed } from "./tool-run";
 export type { ToolRowProps, ElapsedProps } from "./tool-run";
 export type { NativeTranscriptProps, NativeTranscriptCallbacks, ApprovalChoice } from "./types";
 export type { TodoPanelProps } from "./todo-panel";
+export { GoalCard, goalStatus } from "./goal-card";

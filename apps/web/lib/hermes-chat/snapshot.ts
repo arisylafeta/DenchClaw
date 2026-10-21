@@ -5,6 +5,7 @@ import { applyTodos } from './todos'
 import type { MessageHtmlRow } from './html-map'
 import type { RpcMethods } from '../../vendor/hermes-gateway/gateway-events'
 import { reduceSubagents } from './subagents'
+import type { GoalSnapshot } from './goal'
 
 export interface SnapshotRow {
   /** Row time in milliseconds when the history source provides it. */
@@ -34,6 +35,8 @@ export interface GatewayChatSnapshot {
   todo_state?: { todos: unknown; revision: number } | null
   generation: number; seq: number | null; html?: MessageHtmlRow[]
   subagents?: RpcMethods['subagent.list']['result']['subagents']
+  /** The chat's standing goal (Hermes /goal), live or persisted; null when none. */
+  goal?: GoalSnapshot | null
 }
 export interface SourcedMessage extends ChatMessage {
   source?: 'durable' | 'live' | 'optimistic' | 'queued'
@@ -110,7 +113,7 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
   const state: SnapshotChatState = { ...initialState(snapshot.conversation.id), storedSessionId: snapshot.conversation.id,
     generation: snapshot.generation, watermark: snapshot.seq ?? -1,
     messages: snapshot.messages.flatMap(row => { const message = rowMessage(row); return message ? [message] : [] }),
-    usage: snapshot.usage ?? null,
+    usage: snapshot.usage ?? null, goal: snapshot.goal ?? null,
     busy: snapshot.running, live: snapshot.running, adoptedRunningTurn: snapshot.running }
   const inflight = snapshot.inflight
   if (inflight) {

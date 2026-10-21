@@ -6,6 +6,8 @@ import { buildSubagentTree, isTerminalSubagent, type Subagent, type SubagentNode
 import { ApprovalCard, ClarifyCard } from "./requests";
 import { SubagentCard } from "./panels";
 import { TodoPanel } from "./todo-panel";
+import { GoalCard, type GoalControl } from "./goal-card";
+import type { GoalSnapshot } from "@/lib/hermes-chat/goal";
 import { ProfileAvatar } from "../workspace/profile-avatar";
 import type { TodoState } from "@/lib/hermes-chat/todos";
 import { ChevronRight, Clock3, CornerDownRight } from "lucide-react";
@@ -15,7 +17,7 @@ import type { NativeTranscriptCallbacks } from "./types";
  * Everything the agent needs from you, or is running on the side, docks on top of the input box instead of
  * scrolling away in the transcript: questions, approvals, and subagents with their own activity.
  */
-export function PromptDock({ state, subagents, todos, profile, tails, callbacks, composerTarget, disabled, queued = [] }: {
+export function PromptDock({ state, subagents, todos, profile, tails, callbacks, composerTarget, disabled, queued = [], goal = null, busy = false, onGoalControl }: {
   state: Pick<ChatState, "pendingRequests" | "sessionId">;
   subagents: SubagentState;
   todos?: TodoState;
@@ -27,6 +29,10 @@ export function PromptDock({ state, subagents, todos, profile, tails, callbacks,
   disabled?: boolean;
   /** Messages sent during the running turn that Hermes has not picked up yet. */
   queued?: readonly QueuedItem[];
+  /** The chat's standing goal; shown above the tasks. */
+  goal?: GoalSnapshot | null;
+  busy?: boolean;
+  onGoalControl?: GoalControl;
 }) {
   const requests = state.pendingRequests;
   const activeKey = useRef<string | null>(null);
@@ -35,12 +41,14 @@ export function PromptDock({ state, subagents, todos, profile, tails, callbacks,
   activeKey.current = front ? `${state.sessionId}-${front.id}` : null;
   const roots = buildSubagentTree(subagents.items);
   const hasTodos = !!todos && (todos.visible.length > 0 || todos.retained.length > 0);
-  if (!requests.length && !roots.length && !hasTodos && !queued.length) return null;
+  const showGoal = Boolean(goal && onGoalControl);
+  if (!requests.length && !roots.length && !hasTodos && !queued.length && !showGoal) return null;
   return <div className="w-full" data-prompt-dock>
     {queued.length > 0 && <QueueList items={queued} />}
     {requests.map(request => request.kind === "approval"
       ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} />
       : request === front || composerTarget === undefined ? <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} composerTarget={composerTarget} disabled={disabled} /> : <p key={request.id} className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">Another question is waiting</p>)}
+    {goal && onGoalControl && <div className="px-1"><GoalCard goal={goal} busy={busy} onControl={onGoalControl} /></div>}
     {todos && hasTodos && <div className="px-1 pb-1"><TodoPanel todos={todos} /></div>}
     {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} profile={profile} />}
   </div>;

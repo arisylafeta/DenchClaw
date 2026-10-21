@@ -1,10 +1,11 @@
 import { asRecord, stringValue, type GatewayEvent } from './events'
+import { goalVerdict } from './goal'
 import type { Notice } from './notice'
 
 const clip = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 140)
 const labels: Record<string, string> = {
   'session.reclaimed': 'Session reclaimed',
-  'session.control.update': 'Session controls updated', 'session.resume_progress': 'Resuming session',
+'session.resume_progress': 'Resuming session',
   'background.complete': 'Background task finished', 'btw.complete': 'Side question answered',
   'tool.output_risk': 'Risky tool output detected', 'approval.cancelled': 'Approval cancelled',
   'request.cancel': 'Request cancelled', 'connection.request': 'Connection requested',
@@ -21,6 +22,10 @@ export function eventNotice(event: GatewayEvent, previousInfo?: Record<string, u
   }
   const p = asRecord(event.payload)
   const type = event.type
+  if (type === 'status.update' && stringValue(p.kind) === 'goal') {
+    const verdict = goalVerdict(stringValue(p.text))
+    return verdict.text ? { kind: 'goal', text: clip(verdict.text), ...(verdict.reason ? { details: verdict.reason } : {}), tone: verdict.verdict === 'blocked' ? 'error' : undefined } : null
+  }
   if (type === 'status.update' || type === 'notice' || type === 'error') {
     const text = stringValue(p.text) || stringValue(p.message)
     if (!text.trim()) return null
@@ -32,10 +37,6 @@ export function eventNotice(event: GatewayEvent, previousInfo?: Record<string, u
   const formatters: Record<string, () => string> = {
     'session.resume_progress': () => [p.phase, p.status, p.message].filter(value => typeof value === 'string' && value).join(': '),
     'tool.output_risk': () => [p.name, p.risk, ...(Array.isArray(p.findings) ? p.findings : [])].filter(value => typeof value === 'string' && value).join('\n'),
-    'session.control.update': () => {
-      const control = asRecord(p.control)
-      return ['goal', 'loop', 'heartbeat'].map(key => `${key}: ${control[key] == null ? 'off' : typeof control[key] === 'string' ? control[key] : 'updated'}`).join(', ')
-    },
   }
   const body = formatters[type]?.() || ['text', 'message', 'title', 'reason', 'detail', 'phase'].map(key => stringValue(p[key])).find(Boolean)
   return { kind: type === 'background.complete' || type === 'btw.complete' ? 'delegation' : 'notification',

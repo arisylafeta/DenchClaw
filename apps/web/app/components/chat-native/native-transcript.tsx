@@ -43,7 +43,19 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }
 }
 export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact, onSendPrompt }: NativeTranscriptProps) {
   // Waiting messages show in the dock above the composer until Hermes reads them or starts their turn.
-  const turns = displayTurns(state.messages.filter(message => !queuedMessageIds.includes(message.id)));
+  const visible = displayTurns(state.messages.filter(message => !queuedMessageIds.includes(message.id)));
+  // The judge's "continue" verdict and the continuation prompt it caused are one step: show one line and
+  // keep the prompt Hermes sent inside that line's details.
+  const turns: typeof visible = [];
+  for (const message of visible) {
+    const previous = turns.at(-1);
+    if (message.notice?.kind === "goal" && !message.localNotice && previous?.localNotice && previous.notice?.kind === "goal" && previous.notice.text.startsWith("Goal turn ")) {
+      const prompt = message.notice.details ?? message.segments.map(segment => segment.type === "tool" ? "" : segment.text).join("");
+      turns[turns.length - 1] = { ...previous, notice: { ...previous.notice, details: [previous.notice.details, prompt].filter(Boolean).join("\n\n") } };
+      continue;
+    }
+    turns.push(message);
+  }
   // Retry re-runs the latest turn, so only the latest failure offers it.
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {turns.map((message, index) => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>

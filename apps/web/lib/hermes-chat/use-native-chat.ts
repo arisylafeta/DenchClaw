@@ -6,6 +6,7 @@ import { getHermesEventsClient, type ConnectionState } from './events-client'
 import { applyLive, applySnapshot, beginHydration, initialReconcileState, markSteerPending, placeSteer, submitOptimistic, type ReconcileState } from './reconcile'
 import { messageText, reduce, withNotice, type PendingRequest } from './reducer'
 import { steerOwnText, type Notice } from './notice'
+import { goalFromControl, type GoalAction, type GoalSnapshot } from './goal'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 import type { SlashCompletion } from './slash-commands'
@@ -26,6 +27,9 @@ export interface NativeHermesChat {
   queuedMessageIds: string[]
   /** Messages waiting for the running turn: queued prompts and steers Hermes has not read yet. */
   queuedMessages: { id: string; text: string; steer: boolean }[]
+  /** The chat's standing goal (Hermes /goal), or null. */
+  goal: GoalSnapshot | null
+  goalControl(action: GoalAction, args?: { text?: string; index?: number }): Promise<Record<string, unknown>>
   olderCursor: string | null
   loadingEarlier: boolean
   loadEarlier(): Promise<void>
@@ -315,6 +319,14 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       } catch { /* surfaced */ }
     },
     steer: async (text: string) => { try { await post('steer', { text }) } catch { /* surfaced */ } },
+    goal: state.goal,
+    /** Pause, resume, clear or edit the standing goal; the returned snapshot updates the card at once. */
+    goalControl: async (action: GoalAction, args?: { text?: string; index?: number }) => {
+      const key = conversationKey
+      const result = await post('control', { action, ...(args ? { args } : {}) })
+      if (activeKey.current === key && 'control' in result) update(previous => ({ ...previous, goal: goalFromControl(result.control) }))
+      return result
+    },
     approve: (request: PendingRequest, choice: 'once' | 'session' | 'always' | 'deny') => resolveRequest(request, 'approval', { request_id: request.requestId ?? request.payload.request_id ?? request.id, choice }),
     answerClarify: (request: PendingRequest, answers: Record<string, string | null>) => resolveRequest(request, 'clarify', { request_id: request.id, answers }),
     subagentTail: async (id: string) => {

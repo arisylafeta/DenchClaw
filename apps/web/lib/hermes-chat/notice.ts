@@ -1,15 +1,17 @@
+import { GOAL_CONTINUATION } from './goal'
+
 /**
  * Hermes writes system events (finished background subagents, watcher pings, resumes, steers, model switches)
  * as `user` rows. They are not the user's words and must not render as the user's bubble.
  */
-export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model' | 'process' | 'invite'
+export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model' | 'process' | 'invite' | 'goal'
 export interface Notice { kind: NoticeKind; text: string; details?: string; tone?: 'error'; key?: string; pending?: boolean }
 
 const KINDS: Record<string, NoticeKind> = {
   async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model', background_process: 'process', process_complete: 'process',
 }
 const FALLBACK: Record<NoticeKind, string> = {
-  delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update', invite: 'An agent was invited into this chat',
+  delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update', invite: 'An agent was invited into this chat', goal: 'Continued toward the goal',
 }
 /** Hermes wraps a mid-turn steer in an out-of-band marker; only the user's words matter. */
 const OOB_OPEN = /^\s*\[OUT-OF-BAND USER MESSAGE[^\]\n]*\]\s*/
@@ -33,9 +35,10 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   const typed = row.displayKind ? KINDS[row.displayKind] : undefined
   const legacy = !typed && /^\[ASYNC DELEGATION BATCH COMPLETE/.test(text) ? 'delegation' : undefined
   const invite = !typed && !legacy && INVITE_HEAD.test(text) ? 'invite' as const : undefined
-  const process = !typed && !legacy && !invite && !legacy && /^\[IMPORTANT: (?:Background process \S+|\d+ background processes? completed)/.test(text) ? 'process' as const : undefined
-  const wrapped = !typed && !legacy && !invite && !process && OOB_OPEN.test(text) ? 'steer' as const : undefined
-  const kind = typed ?? legacy ?? invite ?? process ?? wrapped
+  const goal = !typed && !legacy && !invite && GOAL_CONTINUATION.test(text) ? 'goal' as const : undefined
+  const process = !typed && !legacy && !invite && !goal && /^\[IMPORTANT: (?:Background process \S+|\d+ background processes? completed)/.test(text) ? 'process' as const : undefined
+  const wrapped = !typed && !legacy && !invite && !goal && !process && OOB_OPEN.test(text) ? 'steer' as const : undefined
+  const kind = typed ?? legacy ?? invite ?? goal ?? process ?? wrapped
   if (!kind) return null
   const display = typeof readMetadata(row.displayMetadata).display_text === 'string' ? String(readMetadata(row.displayMetadata).display_text) : ''
   let summary = display
@@ -49,6 +52,10 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
     const head = /^\[IMPORTANT: Background process (\S+) ([^\n(]*?)(?: \(exit code (-?\d+)\))?\.?\n/.exec(text)
     const command = /^Command: ([^\n]*)/m.exec(text)?.[1]
     if (!batch && head) summary = `Background process ${head[2].trim()}${head[3] && head[3] !== '0' ? ` (exit ${head[3]})` : ''}${command ? `: ${command}` : ''}`
+  }
+  if (!summary && kind === 'goal') {
+    const gate = GOAL_CONTINUATION.exec(text)?.[1]
+    summary = gate ? `Continued toward the goal · ${gate}` : 'Continued toward the goal'
   }
   if (!summary && kind === 'invite') {
     const head = INVITE_HEAD.exec(text)

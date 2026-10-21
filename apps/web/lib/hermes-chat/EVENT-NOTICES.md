@@ -53,7 +53,7 @@ Local notices last for the mounted session, survive history resync, and yield to
 | reasoning.delta | Already handled | Transcript, usage state, todos or subagent dock owns it; avoid duplication. | hosted_room_member_activity.py:28, agent_callbacks.py:28 |
 | request.cancel | Notice | Explain a withdrawn server request; local answer resolution stays silent. | compute_host_bridge.py:152, server_requests.py:146 |
 | review.summary | Notice | Retain the background review result. | server.py:1053 |
-| session.control.update | Notice | Summarize goal, loop and heartbeat control state. | methods_session_control.py:229 |
+| session.control.update | Goal card | The docked goal card renders the snapshot; judge verdicts (`status.update` kind goal) are goal lines. | methods_session_control.py:229 |
 | session.info | Notice on change | Only changed model, branch and cwd; initial snapshot is silent. | methods_prompt.py:624, methods_session.py:1100 |
 | session.reclaimed | Notice | Explain lost live ownership before the transport requests a resync. | session_lifecycle.py:475 |
 | session.resume_progress | Notice | Coalesce history hydration phases and outcomes into one updating row. | server.py:2977 |
