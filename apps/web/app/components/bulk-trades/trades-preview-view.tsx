@@ -5,16 +5,13 @@ import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
-import { todayInLondon, type BulkTrade, type TradeOwner, type TradePatch } from "@/lib/bulk-trades";
+import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
 import { filterSheet, filtersFromRoute, routeFromFilters, type SheetFilters, type SheetRow } from "@/lib/bulk-sheet";
 import type { Demand } from "@/lib/bulk-demand";
-import { DemandDetail } from "./demand-detail";
+import { ListingDetail } from "./listing-detail";
 import { DemandDialog } from "./demand-editor";
 import { OpportunitiesSheet } from "./opportunities-sheet";
 import { ProposalRow } from "./proposal-row";
-import { SupplyDetail } from "./supply-page";
-import { TradeEditor } from "./trade-editor";
-import { TradePage } from "./trade-page";
 import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade-ui";
 import { TRADES_PREVIEW_PATH } from "@/lib/bulk-trades-url";
 import { useBulkTradesRoute } from "./use-bulk-trades-route";
@@ -28,14 +25,13 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   const [rows, setRows] = useState<SheetRow[]>([]);
   const [sheetLoaded, setSheetLoaded] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
-  const [owners, setOwners] = useState<TradeOwner[]>([]);
   const [inboxLoaded, setInboxLoaded] = useState(false);
   const [check, setCheck] = useState<CheckStatus>(null);
   const [possible, setPossible] = useState<Proposal[]>([]);
   const [acceptedDemand, setAcceptedDemand] = useState<Proposal[]>([]);
   const [showPossible, setShowPossible] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [creating, setCreating] = useState<"trade" | "demand" | null>(null);
+  const [creating, setCreating] = useState<"demand" | null>(null);
   const [adding, setAdding] = useState(false);
   const today = todayInLondon();
 
@@ -56,7 +52,6 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
         sharedGet<{ owners: TradeOwner[]; check?: CheckStatus; possible?: Proposal[] }>("/api/bulk-trades?inbox=1"),
         sharedGet<{ possible?: Proposal[]; accepted?: Proposal[] }>("/api/bulk-trades/demand"),
       ]);
-      setOwners(data.owners);
       setCheck(data.check ?? null);
       setPossible([...new Map([...(data.possible ?? []), ...(inbox.possible ?? [])].map((item) => [item.id, item])).values()]);
       setAcceptedDemand(inbox.accepted ?? []);
@@ -70,7 +65,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   useEffect(() => { load(); }, [load]);
 
   // Coming back to the list, by Back or by the breadcrumb, shows what was just saved.
-  const detailOpen = !!(route.trade || route.demand || route.supply);
+  const detailOpen = !!route.listing;
   const wasDetailOpen = useRef(false);
   useEffect(() => {
     if (wasDetailOpen.current && !detailOpen) load();
@@ -84,45 +79,19 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
 
   /** Filters refine the current page (replace); opening a record is a new page (push). */
   const setFilters = (next: SheetFilters) => navigate(routeFromFilters(next), "replace");
-  const open = (row: SheetRow) => navigate({ ...filterFields, [row.kind]: row.id });
+  const open = (row: SheetRow) => navigate({ ...filterFields, listing: row.id });
   const closeDetail = () => navigate(filterFields);
-  const openTrade = (id: string) => navigate({ ...filterFields, trade: id });
-  const openDemand = (id: string) => navigate({ ...filterFields, demand: id });
-  const openSupply = (id: string) => navigate({ ...filterFields, supply: id });
-
-  /** Saves a row's next action in place: trades on the trade, demand and supply on the listing. */
+  /** Saves a listing’s next action in place. */
   async function saveNext(row: SheetRow, text: string | null) {
-    if (row.kind === "trade") await request(`/api/bulk-trades/${row.id}`, { method: "PATCH", body: JSON.stringify({ next_step: text, ...(text ? {} : { next_step_due: null }) }) });
-    else await request(`/api/bulk-listings/${row.id}/next`, { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? row.next_due : null }) });
+    await request(`/api/bulk-listings/${row.id}/next`, { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? row.next_due : null }) });
     setRows((current) => current.map((item) => (item.key === row.key ? { ...item, next_action: text, next_due: text ? item.next_due : null } : item)));
   }
 
-  async function createTrade(patch: TradePatch) {
-    const { trade } = await request<{ trade: BulkTrade }>("/api/bulk-trades", { method: "POST", body: JSON.stringify(patch) });
-    setCreating(null);
-    navigate({ ...filterFields, trade: trade.id });
-  }
-
-  if (route.trade) {
-    return (
-      <div className="bulk-trades bt-preview h-full">
-        <TradePage
-          key={route.trade}
-          tradeId={route.trade}
-          owners={owners}
-          today={today}
-          onBack={closeDetail}
-          onTradeSaved={() => { void loadSheet(); }}
-          onOpenEvidence={onOpenEntry ? () => onOpenEntry("bulk_trade", route.trade!) : undefined}
-        />
-      </div>
-    );
-  }
-  if (route.demand) {
+  if (route.listing) {
     return (
       <div className="bulk-trades bt-preview h-full overflow-auto px-2 pb-3 pt-2">
-        <DemandDetail key={route.demand} id={route.demand} today={today} onClose={closeDetail}
-          onOpenTrade={openTrade} onOpenSupply={openSupply} onOpenDemand={openDemand} />
+        <ListingDetail key={route.listing} id={route.listing} today={today} onClose={closeDetail}
+          onOpenListing={(id) => navigate({ ...filterFields, listing: id })} />
       </div>
     );
   }
@@ -143,7 +112,6 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
           </button>
           {adding && (
             <div role="menu" className="absolute right-0 z-20 mt-1 w-44 rounded-lg border p-1 shadow-md" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-              <button type="button" role="menuitem" className="block w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-[var(--bt-row-hover)]" onClick={() => { setAdding(false); setCreating("trade"); }}>New trade</button>
               <button type="button" role="menuitem" className="block w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-[var(--bt-row-hover)]" onClick={() => { setAdding(false); setCreating("demand"); }}>Add demand</button>
             </div>
           )}
@@ -156,7 +124,6 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
           onFilters={setFilters} onOpen={open} onNext={saveNext} />
       </main>
 
-      {route.supply && <SupplyDetail key={route.supply} id={route.supply} onClose={closeDetail} onOpenDemand={openDemand} />}
 
       <Dialog open={showPossible} onOpenChange={setShowPossible}>
         <DialogContent aria-describedby={undefined} showCloseButton={false} className="bulk-trades bt-preview top-0 left-auto right-0 h-full max-w-2xl translate-x-0 translate-y-0 overflow-auto rounded-lg sm:max-w-2xl block" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -167,7 +134,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
             setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
             if (action === "accept") {
               load();
-              if (lotId) { navigate({ ...filterFields, trade: lotId }); setShowPossible(false); }
+              if (lotId) { navigate({ ...filterFields, listing: lotId }); setShowPossible(false); }
             }
           }} />)}
           {!!acceptedDemand.length && <section className="mt-6" aria-label="Accepted demand">
@@ -186,10 +153,9 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
         </DialogContent>
       </Dialog>
 
-      {creating === "trade" && <TradeEditor trade={null} owners={owners} today={today} onClose={() => setCreating(null)} onSave={createTrade} />}
       {creating === "demand" && (
         <DemandDialog demand={null} onClose={() => setCreating(null)}
-          onSaved={(saved: Demand) => { setCreating(null); navigate({ ...filterFields, demand: saved.id }); }} />
+          onSaved={(saved: Demand) => { setCreating(null); navigate({ ...filterFields, listing: saved.id }); }} />
       )}
     </div>
   );

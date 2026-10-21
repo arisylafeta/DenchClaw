@@ -13,7 +13,7 @@
 export const BULK_TRADES_PATH = "bulk_trade";
 /**
  * The Trades Preview page: the same records in one sheet, under its own path and link space. Its links
- * use the same params as Bulk Trades but never leave it: /?path=~trades-preview&demand=<id>.
+ * use listing=<id> and accept the legacy trade/demand/supply params without leaving Preview.
  */
 export const TRADES_PREVIEW_PATH = "~trades-preview";
 const PAGES: readonly string[] = [BULK_TRADES_PATH, TRADES_PREVIEW_PATH];
@@ -23,6 +23,7 @@ export type BulkTradesTab = "today" | "trades" | "demand" | "supply";
 export type BulkTradesRoute = {
   /** Explicit tab from the URL; null lets the page pick the viewer's last tab. */
   tab: BulkTradesTab | null;
+  listing: string | null;
   trade: string | null;
   demand: string | null;
   supply: string | null;
@@ -38,15 +39,16 @@ export type BulkTradesRoute = {
 
 const SHELL_PARAMS = ["terminal", "browse", "hidden"] as const;
 const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply"];
-export const BULK_TRADES_PARAMS = ["tab", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company"] as const;
+export const BULK_TRADES_PARAMS = ["tab", "listing", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company"] as const;
 
-const EMPTY: BulkTradesRoute = { tab: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null };
+const EMPTY: BulkTradesRoute = { tab: null, listing: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null };
 
 export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTradesRoute {
   const params = typeof search === "string" ? new URLSearchParams(search) : search;
   const tab = params.get("tab") as BulkTradesTab | null;
   return {
     tab: tab && TABS.includes(tab) ? tab : null,
+    listing: params.get("listing") || (params.get("path") === TRADES_PREVIEW_PATH ? params.get("trade") || params.get("demand") || params.get("supply") : null) || null,
     trade: params.get("trade") || null,
     demand: params.get("demand") || null,
     supply: params.get("supply") || null,
@@ -71,6 +73,7 @@ export function bulkTradesParams(patch: Partial<BulkTradesRoute>): URLSearchPara
   const route = { ...EMPTY, ...patch };
   const params = new URLSearchParams();
   if (route.tab) params.set("tab", route.tab);
+  if (route.listing) params.set("listing", route.listing);
   if (route.trade) params.set("trade", route.trade);
   if (route.demand) params.set("demand", route.demand);
   if (route.supply) params.set("supply", route.supply);
@@ -88,7 +91,11 @@ export function buildBulkTradesUrl(patch: Partial<BulkTradesRoute> = {}, current
   const params = new URLSearchParams({ path: page });
   // Shell state (terminal, browse folder, hidden files) is not part of the destination; keep it.
   if (current) for (const key of SHELL_PARAMS) if (current.has(key)) params.set(key, current.get(key)!);
-  for (const [key, value] of bulkTradesParams(patch)) params.set(key, value);
+  const destination = page === TRADES_PREVIEW_PATH
+    ? { ...patch, listing: patch.listing || patch.trade || patch.demand || patch.supply,
+      trade: null, demand: null, supply: null }
+    : patch;
+  for (const [key, value] of bulkTradesParams(destination)) params.set(key, value);
   return `/?${params.toString()}`;
 }
 
