@@ -50,7 +50,9 @@ export function ToolRow({ tool, connectPrevious, connectNext }: ToolRowProps) {
   const state: StepState = tool.status === "running" ? "running" : tool.status === "error" ? "error" : "done";
   const { label, icon } = describeTool(tool);
   const seconds = tool.duration_s != null ? tool.duration_s : tool.completedAt !== undefined ? (tool.completedAt - tool.startedAt) / 1000 : 0;
-  const detail = state === "error" ? "Failed" : state === "done" && seconds >= 1 ? <Elapsed startedAt={tool.startedAt} completedAt={tool.completedAt} seconds={tool.duration_s} /> : undefined;
+  // A running tool shows a live timer, so a long command reads as work in progress, not a stuck chat.
+  const detail = state === "error" ? "Failed" : state === "done" && seconds >= 1 ? <Elapsed startedAt={tool.startedAt} completedAt={tool.completedAt} seconds={tool.duration_s} />
+    : state === "running" && tool.startedAt > 0 ? <Elapsed startedAt={tool.startedAt} /> : undefined;
   const preview = state === "running" ? null : buildPreview(tool);
   // Errors are for the agent. The row shows a red failure marker; the text stays folded away.
   const failure = tool.error ? (typeof tool.error === "string" ? tool.error : tool.message || "Tool failed") : undefined;

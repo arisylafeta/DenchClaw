@@ -72,6 +72,22 @@ function prompt(id: string, text: string, source: 'live' | 'queued'): SourcedMes
   return { id, role: 'user', source, startedAt: 0, pending: source === 'queued',
     segments: [{ id: `${id}:text`, type: 'text', text, startedAt: 0 }] }
 }
+/**
+ * Hermes persists each model call of a running turn as it finishes, but the live
+ * buffer (`inflight.assistant`) keeps every streamed character of the whole turn.
+ * Rendering both shows earlier narration twice and buries the running tool under
+ * a stale copy. Keep only what no persisted row of this turn already shows.
+ */
+export function unpersistedStream(stream: string, persisted: readonly string[]): string {
+  let rest = stream
+  for (const text of persisted.map(value => value.trim()).filter(Boolean)) {
+    const head = rest.trimStart()
+    if (head.startsWith(text)) { rest = head.slice(text.length); continue }
+    const at = rest.indexOf(text)
+    if (at >= 0) rest = rest.slice(at + text.length)
+  }
+  return rest.trim() ? rest.replace(/^\s+/, '') : ''
+}
 /** Durable history is always replaced, never appended (including compaction). */
 export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerContext): SnapshotChatState {
   const state: SnapshotChatState = { ...initialState(snapshot.conversation.id), storedSessionId: snapshot.conversation.id,
@@ -85,10 +101,16 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
       state.messages.push(prompt(`${snapshot.key}:inflight:user`, inflight.user, 'live'))
     }
     const failed = Boolean(inflight.error || inflight.status === 'error')
-    if (inflight.assistant || inflight.streaming || failed) {
+    // The live turn starts at the flagged user row; an auto-continue or steer turn has no prompt of its own.
+    const flagged = state.messages.findIndex(message => message.role === 'user' && snapshot.messages.some(row => row.id === message.id && row.pending === 'inflight'))
+    const turnStart = flagged >= 0 ? flagged : inflight.user ? state.messages.length : state.messages.findLastIndex(message => message.role === 'user')
+    const persisted = state.messages.slice(turnStart + 1).filter(message => message.role === 'assistant' && !message.notice)
+      .flatMap(message => message.segments.flatMap(segment => segment.type === 'text' ? [segment.text] : []))
+    const assistant = unpersistedStream(inflight.assistant ?? '', persisted)
+    if (assistant || inflight.streaming || failed) {
       const id = `${snapshot.key}:inflight:assistant`
       state.messages.push({ id, role: 'assistant', source: 'live', startedAt: 0,
-        segments: inflight.assistant ? [{ id: `${id}:text`, type: 'text', text: inflight.assistant, startedAt: 0,
+        segments: assistant ? [{ id: `${id}:text`, type: 'text', text: assistant, startedAt: 0,
           ...(!inflight.streaming || failed ? { completedAt: 0 } : {}) }] : [],
         pending: inflight.streaming && !failed, ...(!inflight.streaming || failed ? { completedAt: 0 } : {}),
         ...(failed ? { status: 'error', error: inflight.error || 'Turn failed', partial: Boolean(inflight.assistant),

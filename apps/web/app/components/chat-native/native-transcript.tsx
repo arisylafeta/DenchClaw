@@ -62,7 +62,7 @@ export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, q
           {blocks.map((block, index) => {
             const next = blocks[index + 1];
             return block.type === "work"
-              ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && !message.steerBoundary && index === blocks.length - 1} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
+              ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && !message.steerBoundary && (index === blocks.length - 1 || block.segments.some(segment => segment.type === "tool" && segment.status === "running"))} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
               : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words"><AnswerText text={block.segment.text} live={state.live && message.pending} renderMarkdown={renderMarkdown} onOpenArtifact={onOpenArtifact} onSendPrompt={onSendPrompt} /></div>;
           })}
         </Fragment>;
