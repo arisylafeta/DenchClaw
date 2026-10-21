@@ -34,6 +34,7 @@ function stubApi(calls: string[], hold: string[] = []) {
     if (hold.includes(url)) return new Promise<Response>(() => {});
     const body = url === "/api/bulk-trades/sheet" ? { rows: [sheetRow] }
       : url === "/api/bulk-trades/demand" ? { demand: [demandRow], possible: [], accepted: [] }
+        : url === "/api/bulk-listings/d1" ? { listing: { id: "d1", kind: "demand", party: "Green Voltage", title: "12 Ioniq packs", status: "open", spec: {}, context: {}, furthest_stage: null, is_trade: false, demand: demandRow } }
         : url.startsWith("/api/bulk-trades?") ? { owners: [] }
           : url.endsWith("/activity") ? { activity: [] }
             : {};
@@ -63,7 +64,7 @@ describe("Trades Preview loading", () => {
 
   it("a demand opened by link shows its requirement and story without waiting for match calculations", async () => {
     const calls: string[] = [];
-    stubApi(calls, ["/api/bulk-trades/demand/d1/supply", "/api/bulk-trades/demand/d1/context"]);
+    stubApi(calls, ["/api/bulk-trades/demand/d1/supply", "/api/bulk-listings/d1/context"]);
     window.history.replaceState(null, "", "/?path=%7Etrades-preview&demand=d1");
     const TradesPreviewView = await freshView();
     render(<TradesPreviewView />);
@@ -74,7 +75,8 @@ describe("Trades Preview loading", () => {
     expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(screen.getByRole("button", { name: "History" }));
     expect(await screen.findByRole("region", { name: "History" })).toBeInTheDocument();
-    expect(calls.filter((url) => url === "/api/bulk-trades/demand")).toHaveLength(1);
+    // The listing arrives in one read of its own, not by loading the whole demand list again.
+    expect(calls.filter((url) => url === "/api/bulk-listings/d1")).toHaveLength(1);
   });
 
   it("a read that started before a save never delivers its older copy", async () => {
