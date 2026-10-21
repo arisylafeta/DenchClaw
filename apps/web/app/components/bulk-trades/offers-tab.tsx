@@ -59,8 +59,8 @@ function Avatar({ name, size = 32, loading = false }: { name: string | null; siz
 }
 
 /** Who we offered this to, one thread each. Inside a thread: the whole conversation, stage, terms and next step. */
-export function OffersTab({ demandId, supply, supplyLoading = false, onChanged }: { demandId: string; supply: DemandSupply | null; supplyLoading?: boolean; onChanged: () => void }) {
-  const base = `/api/bulk-trades/demand/${encodeURIComponent(demandId)}/offers`;
+export function OffersTab({ demandId, listingId, showSuggestions = true, supply, supplyLoading = false, onChanged }: { demandId: string; listingId?: string; showSuggestions?: boolean; supply: DemandSupply | null; supplyLoading?: boolean; onChanged: () => void }) {
+  const base = listingId ? `/api/bulk-listings/${encodeURIComponent(listingId)}/offers` : `/api/bulk-trades/demand/${encodeURIComponent(demandId)}/offers`;
   const [offers, setOffers] = useState<Offer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -68,11 +68,11 @@ export function OffersTab({ demandId, supply, supplyLoading = false, onChanged }
     catch (err) { setError(err instanceof Error ? err.message : "Could not load offers."); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
-  return <OfferList offers={offers} error={error} supply={supply} supplyLoading={supplyLoading} base={base} onUpdated={() => { void load(); onChanged(); }} />;
+  return <OfferList showSuggestions={showSuggestions} offers={offers} error={error} supply={supply} supplyLoading={supplyLoading} base={base} onUpdated={() => { void load(); onChanged(); }} />;
 }
 
-function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
-  offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onUpdated: () => void;
+function OfferList({ showSuggestions, offers, error, supply, supplyLoading, base, onUpdated }: {
+  showSuggestions: boolean; offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onUpdated: () => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [view, setView] = useState<"threads" | "suggested">("threads");
@@ -105,7 +105,7 @@ function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
     <BusyRegion busy={loading || suggestionsLoading} label="Loading offers" className="flex w-full flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div role="group" aria-label="Offers view" className="inline-flex gap-1 p-[3px]" style={{ background: "var(--bt-segment)" }}>
-          {([["threads", "Threads", offers?.length], ["suggested", "Suggested", suggestionsLoading ? undefined : suggestions.length]] as const).map(([value, label, n]) => (
+          {([["threads", "Threads", offers?.length], ...(showSuggestions ? [["suggested", "Suggested", suggestionsLoading ? undefined : suggestions.length] as const] : [])] as const).map(([value, label, n]) => (
             <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)} className={`${rowFocus} px-3 py-1 text-[12px]`}
               style={{ background: view === value ? "var(--bt-badge)" : "transparent", color: view === value ? "var(--bt-on-badge)" : "var(--bt-muted)" }}>
               {label} · <Sh on={n === undefined} chars={1}>{n}</Sh>

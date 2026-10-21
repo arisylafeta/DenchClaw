@@ -52,7 +52,7 @@ const ACTIVITY_ICONS = {
   supply: Package,
 };
 /** What a buyer can be asked for, and whether this row is missing it. */
-function gapsFor(demand: Demand) {
+function gapsFor(demand: Partial<Demand> & Pick<Demand, "id" | "status">) {
   const spec = demand.spec ?? {};
   return [
     { key: "price", label: "Price", missing: demand.max_price == null },
@@ -85,7 +85,7 @@ const STATUS_DOT = { open: "var(--bt-green)", qualifying: "var(--bt-amber)", clo
 
 /** One status control: shows where the row is and when we last heard, and holds every move in one menu. */
 function StatusMenu({ demand, busy, onConfirm, onNeedsInfo, onAnswered, onAsked, onClose, onCategory }: {
-  demand: Demand; busy: boolean; onConfirm: () => void; onNeedsInfo: () => void; onAnswered: () => void; onAsked: () => void;
+  demand: Partial<Demand> & Pick<Demand, "id" | "status">; busy: boolean; onConfirm: () => void; onNeedsInfo: () => void; onAnswered: () => void; onAsked: () => void;
   onClose: (reason: ClosedReason) => void; onCategory: (reason: ClosedReason) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -157,8 +157,9 @@ export function DemandActions({
   onOpenSupply,
   section,
   story = false,
+  activityEndpoint,
 }: {
-  demand: Demand;
+  demand: Partial<Demand> & Pick<Demand, "id" | "status">;
   today: string;
   onClose: () => void;
   onChanged: () => void;
@@ -168,6 +169,7 @@ export function DemandActions({
   section: string;
   /** Trades Preview: the activity list reads as a story (labelled, dated, evidence-linked). */
   story?: boolean;
+  activityEndpoint?: string;
 }) {
   const [activityLoading, setActivityLoading] = useState(true);
   const [activity, setActivity] = useState<Activity[]>([]);
@@ -191,7 +193,7 @@ export function DemandActions({
     setActivityLoading(true);
     try {
       const result = await request<{ activity: Activity[] }>(
-        `${endpoint}/activity`,
+        `${activityEndpoint ?? endpoint}/activity`,
       );
       setActivity(result.activity);
     } catch (err) {
@@ -199,7 +201,7 @@ export function DemandActions({
     } finally {
       setActivityLoading(false);
     }
-  }, [endpoint]);
+  }, [endpoint, activityEndpoint]);
   // The status buttons and the timeline render as two instances (beside the ask, and in the Activity tab).
   const showsActivity = section === "Activity";
   useEffect(() => {
@@ -254,7 +256,7 @@ export function DemandActions({
   const patch = (value: object) =>
     request(endpoint, { method: "PATCH", body: JSON.stringify(value) });
   const add = (value: object) =>
-    request(`${endpoint}/activity`, {
+    request(`${activityEndpoint ?? endpoint}/activity`, {
       method: "POST",
       body: JSON.stringify(value),
     });
@@ -521,7 +523,7 @@ export function DemandActions({
                       aria-label={`Delete ${entry.title}`}
                       onClick={() =>
                         run(() =>
-                          request(`${endpoint}/activity/${entry.id}`, {
+                          request(`${activityEndpoint ?? endpoint}/activity/${entry.id}`, {
                             method: "DELETE",
                           }),
                         )

@@ -25,7 +25,7 @@ it("shimmers header and buyer values in their real shell until async reads finis
   const card = document.querySelector('[aria-label="Buyer card"]')!;
   expect(card.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(3);
   releases["/api/bulk-trades/demand/d1/supply"](new Response(JSON.stringify({ groups: [], shortlisted: [{ seller: "Example supplier" }], requirement: { pinned: [] } })));
-  releases["/api/bulk-trades/demand/d1/context"](new Response(JSON.stringify({ buyer: { profile: { tier: "A", owner: "Alex" }, demand: [] }, mail: [], person: { name: "Example buyer", email: "buyer@example.test", company_name: "Example company" } })));
+  releases["/api/bulk-listings/d1/context"](new Response(JSON.stringify({ buyer: { profile: { tier: "A", owner: "Alex" }, demand: [] }, mail: [], person: { name: "Example buyer", email: "buyer@example.test", company_name: "Example company" } })));
   expect(await screen.findByText("Example supplier")).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "Example buyer" })).toBeInTheDocument();
   expect(screen.getByText("buyer@example.test")).toBeInTheDocument();

@@ -18,10 +18,11 @@ import { SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
-import { MessageItem, OffersTab } from "./offers-tab";
+import { OffersTab } from "./offers-tab";
 import type { ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
+import { ListingConversation } from "./listing-conversation";
 import { DocumentsTab } from "./documents-tab";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
@@ -83,55 +84,11 @@ function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; c
   );
 }
 
-/** One channel's messages with the buyer as a single white accordion: a summary line that opens to every message, plus a link to the thread itself. */
-function ChannelAccordion({ label, icon: Icon, entries, empty, linkLabel }: { label: string; icon: typeof Mail; entries: ThreadEntry[]; empty: string; linkLabel: string }) {
-  const [open, setOpen] = useState(false);
-  const newest = entries.reduce<ThreadEntry | null>((latest, e) => (!latest || Date.parse(e.at) > Date.parse(latest.at) ? e : latest), null);
-  const threadHref = entries.filter((e) => e.href).sort((x, y) => Date.parse(y.at) - Date.parse(x.at))[0]?.href ?? null;
-  const summary = entries.length ? `${entries.length} message${entries.length === 1 ? "" : "s"}${newest ? ` · last ${shortDate(newest.at.slice(0, 10))}` : ""}` : empty;
-  const bodyId = `channel-${label.toLowerCase()}`;
-  return (
-    <div className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-      <div className="flex items-center gap-2 pr-3">
-        <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)} className={`${rowFocus} flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left`}>
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--bt-segment)", color: "var(--bt-muted)" }}><Icon size={13} aria-hidden /></span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-semibold">{label}</span>
-            <span className="block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{summary}</span>
-          </span>
-          {open ? <ChevronDown size={14} aria-hidden style={{ color: "var(--bt-muted)" }} /> : <ChevronRight size={14} aria-hidden style={{ color: "var(--bt-muted)" }} />}
-        </button>
-        {threadHref && (
-          <a href={threadHref} aria-label={linkLabel} title={linkLabel} className={`${rowFocus} inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-[11px]`} style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>
-            <ExternalLink size={11} aria-hidden /> Open
-          </a>
-        )}
-      </div>
-      {open && <ul id={bodyId} className="border-t px-3" style={{ borderColor: "var(--bt-divider)" }}>{entries.map((e) => <MessageItem key={e.id} entry={e} loading={false} />)}</ul>}
-    </div>
-  );
-}
-
-/** The buyer's conversations, shown inside their card: one accordion for WhatsApp and one for email, each linking to the thread. */
-function BuyerThread({ mail, conversation, loading }: { mail: BuyerMail[]; conversation: ThreadEntry[] | null; loading: boolean }) {
-  // Labelled threads (email and WhatsApp about this exact demand) win; until a thread is labelled we show all mail with the buyer.
-  const entries: ThreadEntry[] = conversation ?? mail.map((m) => ({
-    id: m.id, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body ?? m.preview, at: m.at, ref: m.thread_id,
-    href: m.thread_id ? `/?crm=inbox&view=conversations&thread=${encodeURIComponent(m.thread_id)}&crmOnly=false` : null,
-  }));
-  if (loading) return null;
-  return (
-    <>
-      {conversation && <ChannelAccordion label="WhatsApp" icon={MessageCircle} linkLabel="Open WhatsApp chat" entries={entries.filter((e) => e.channel === "whatsapp")} empty="No WhatsApp messages linked to this demand" />}
-      <ChannelAccordion label="Email" icon={Mail} linkLabel="Open email thread" entries={entries.filter((e) => e.channel === "mail")} empty="No email linked to this demand" />
-    </>
-  );
-}
-
 const TABS = ["Details", "Offers", "Documents", "History"];
 const TAB_ICONS = { Details: ClipboardList, Documents: FileText, Offers: ArrowLeftRight, History: History };
 
-export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand }: {
+export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand, isTrade = false }: {
+  isTrade?: boolean;
   demand: Demand;
   today: string;
   onChanged: () => void;
@@ -147,7 +104,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   const supplySequence = useRef(0);
   const [context, setContext] = useState<BuyerContext | null>(null);
   const [conversation, setConversation] = useState<ThreadEntry[] | null | undefined>(undefined);
-  const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
+  const endpoint = `/api/bulk-listings/${encodeURIComponent(demand.id)}`;
   const loadSupply = useCallback(async () => {
     const sequence = ++supplySequence.current;
     setSupplyLoading(true);
@@ -155,7 +112,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 12_000);
     try {
-      const result = await request<DemandSupply>(`${endpoint}/supply`, { signal: abort.signal });
+      const result = await request<DemandSupply>(`/api/bulk-trades/demand/${encodeURIComponent(demand.id)}/supply`, { signal: abort.signal });
       if (!Array.isArray(result?.groups)) throw new Error("Could not check inventory.");
       if (sequence === supplySequence.current) setSupply(result);
     } catch {
@@ -179,14 +136,14 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
   const top = useRef<HTMLDivElement>(null);
   useEffect(() => { top.current?.scrollIntoView?.({ block: "start" }); }, [demand.id]);
   const actions = (section: string) => (
-    <DemandActions story section={section} demand={demand} today={today} onChanged={onChanged} onClose={onClose}
+    <DemandActions story activityEndpoint={endpoint} section={section} demand={demand} today={today} onChanged={onChanged} onClose={onClose}
       onEdit={() => {}} onOpenTrade={onOpenTrade} onOpenSupply={onOpenSupply} />
   );
   return (
     <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} flex w-full min-w-0 flex-col gap-3`}>
       <BusyRegion busy={supplyLoading || context === null} label="Loading demand details" className="flex w-full min-w-0 flex-col gap-3">
       <div className={headerCss.card}>
-        <DemandHeader demand={demand} supply={supply} loadingSupply={supplyLoading} actions={actions("Overview")} onBack={onClose} />
+        <DemandHeader isTrade={isTrade} demand={demand} supply={supply} loadingSupply={supplyLoading} actions={actions("Overview")} onBack={onClose} />
         <SheetTabs
           tabs={TABS}
           icons={TAB_ICONS}
@@ -198,12 +155,12 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "Details" && (
         <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand}
-            thread={<BuyerThread mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} />} />
+            thread={<ListingConversation mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} />} />
           <TheAsk demand={demand} supply={supply} loading={supplyLoading} />
         </div>
       )}
       {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
-      {tab === "Offers" && <OffersTab demandId={demand.id} supply={supply} supplyLoading={supplyLoading} onChanged={onChanged} />}
+      {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} supply={supply} supplyLoading={supplyLoading} onChanged={onChanged} />}
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}

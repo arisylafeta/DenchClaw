@@ -30,8 +30,8 @@ export function ScoreRing({ score }: { score: number | null }) {
 }
 
 /** Score, headline, buyer, status, three facts and a short brief. A fact we don't have says so quietly. */
-export function DemandHeader({ demand, supply, actions, onBack, loadingSupply = false }: {
-  demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
+export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false }: {
+  isTrade?: boolean; demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const registry = useRegistry();
@@ -53,7 +53,7 @@ export function DemandHeader({ demand, supply, actions, onBack, loadingSupply = 
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-1"><h2 className={css.title}>{demandTitle(demand)}</h2><CopyIdButton id={demand.id} className="mt-1" /></div>
           <div className={css.sub}>
-            <span>{demand.buyer}</span>
+            <span>{demand.buyer}</span>{isTrade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
             {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}
             {demand.priority && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
             {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
