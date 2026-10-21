@@ -4,6 +4,19 @@ import {
 } from "./bulk-trades-url";
 
 describe("bulk trades URLs", () => {
+  it("uses listing links in Preview and resolves legacy record links without changing the original page", () => {
+    for (const key of ["trade", "demand", "supply"]) {
+      expect(parseBulkTradesRoute(`path=~trades-preview&${key}=bulk-1`).listing).toBe("bulk-1");
+      expect(parseBulkTradesRoute(`path=bulk_trade&${key}=bulk-1`).listing).toBeNull();
+    }
+    expect(parseBulkTradesRoute("path=~trades-preview&listing=new&trade=old").listing).toBe("new");
+    const url = buildBulkTradesUrl({ listing: "bulk-1" }, undefined, "~trades-preview");
+    expect(isTradesPreviewHref(url)).toBe(true);
+    expect(parseBulkTradesRoute(new URL(url, "https://x.test").searchParams).listing).toBe("bulk-1");
+    expect(carryBulkTradesParams("path=%7Etrades-preview", "path=~trades-preview&listing=bulk-1"))
+      .toBe("path=%7Etrades-preview&listing=bulk-1");
+    expect(carryBulkTradesParams("path=bulk_trade", "path=~trades-preview&listing=bulk-1")).toBe("path=bulk_trade");
+  });
   it("round-trips records and filters through one builder and parser", () => {
     const url = buildBulkTradesUrl({ tab: "demand", status: "closed", category: "offer_reply", query: "r3 robotics" });
     expect(url).toBe("/?path=bulk_trade&tab=demand&status=closed&q=r3+robotics&category=offer_reply");
@@ -41,7 +54,7 @@ describe("bulk trades URLs", () => {
   });
 
   it("preview links stay on their own page and never mix with Bulk Trades links", () => {
-    expect(buildBulkTradesUrl({ demand: "d1", side: "buyer" }, undefined, "~trades-preview")).toBe("/?path=%7Etrades-preview&demand=d1&side=buyer");
+    expect(buildBulkTradesUrl({ demand: "d1", side: "buyer" }, undefined, "~trades-preview")).toBe("/?path=%7Etrades-preview&listing=d1&side=buyer");
     expect(isTradesPreviewHref("/?path=%7Etrades-preview&demand=d1")).toBe(true);
     expect(isTradesPreviewHref("/?path=bulk_trade&demand=d1")).toBe(false);
     expect(isBulkTradesHref("/?path=%7Etrades-preview&demand=d1")).toBe(false);

@@ -8,6 +8,11 @@ import type { SheetRow } from "@/lib/bulk-sheet";
 import { TradesPreviewView } from "./trades-preview-view";
 import { forgetShared } from "./trade-ui";
 
+vi.mock("./listing-detail", () => ({
+  ListingDetail: ({ id, onClose, onOpenListing }: { id: string; onClose: () => void; onOpenListing: (id: string) => void }) =>
+    <section><h1>Listing {id}</h1><button onClick={onClose}>Back</button><button onClick={() => onOpenListing("s1")}>Related listing</button></section>,
+}));
+
 // `useSearchParams` follows the History API the way Next's router does.
 const urlListeners = new Set<() => void>();
 vi.mock("next/navigation", async () => {
@@ -45,7 +50,7 @@ const ROWS: SheetRow[] = [
   row({}),
   row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Offered",
     latest: { label: "Offer by email", at: "2026-10-07" } }),
-  row({ key: "trade:bt_1", kind: "trade", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "With buyers",
+  row({ key: "bt_1", kind: "supply", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "With buyers",
     tone: "active", next_action: "Call the buyer", owner: "Alex", next_due: today }),
 ];
 
@@ -117,8 +122,8 @@ describe("Trades Preview sheet", () => {
     const input = screen.getByLabelText("Next action");
     await userEvent.clear(input);
     await userEvent.type(input, "Chase the bid{Enter}");
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1", expect.objectContaining({
-      method: "PATCH", body: JSON.stringify({ next_step: "Chase the bid" }),
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/bt_1/next", expect.objectContaining({
+      method: "PUT", body: JSON.stringify({ next_action: "Chase the bid", next_due: today }),
     })));
   });
 
@@ -189,10 +194,10 @@ describe("Trades Preview sheet", () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
-    expect(await screen.findByRole("heading", { level: 1, name: "Synthetic eBS37" })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("trade")).toBe("bt_1");
+    expect(await screen.findByRole("heading", { level: 1, name: "Listing bt_1" })).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get("listing")).toBe("bt_1");
 
-    await userEvent.click(screen.getByRole("button", { name: "Bulk Trades" }));
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByText("2 of 3 open")).toBeInTheDocument();
     expect(window.location.search).toBe("?path=%7Etrades-preview&side=seller");
   });
@@ -201,14 +206,14 @@ describe("Trades Preview sheet", () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
-    expect(new URLSearchParams(window.location.search).get("demand")).toBe("d1");
+    expect(new URLSearchParams(window.location.search).get("listing")).toBe("d1");
   });
 
   it("shows the rows while the inbox is still loading", async () => {
     vi.stubGlobal("fetch", mockApi({ hangInbox: true }));
     render(<TradesPreviewView />);
     expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Inbox · 0/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Inbox ·/ })).toBeInTheDocument();
   });
 
   it("distinguishes loading, an empty sheet and a filter that matches nothing", async () => {
@@ -272,22 +277,20 @@ describe("Trades Preview sheet", () => {
     await waitFor(() => expect(within(dialog).queryByText(proposal.summary)).not.toBeInTheDocument());
   });
 
-  it("sends only the changed fields when a trade is edited", async () => {
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&trade=bt_1");
-    const fetchMock = mockApi();
-    vi.stubGlobal("fetch", fetchMock);
+  it.each(["listing", "trade", "demand", "supply"])("opens %s links in the same listing detail", async (param) => {
+    nativeReplace(NEXT_STATE, "", `/?path=%7Etrades-preview&${param}=bt_1`);
+    vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: "Edit trade" }));
-    await userEvent.selectOptions(screen.getByLabelText("Waiting on"), "them");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-trades/bt_1", expect.objectContaining({ body: JSON.stringify({ waiting_on: "them" }) })));
+    expect(await screen.findByRole("heading", { name: "Listing bt_1" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Related listing" }));
+    expect(new URLSearchParams(window.location.search).get("listing")).toBe("s1");
   });
 
-  it("the Add menu starts a new trade", async () => {
+  it("the Add menu keeps demand creation but does not create separate trades", async () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: "Add" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "New trade" }));
-    expect(await screen.findByRole("button", { name: "Create trade" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "New trade" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Add demand" })).toBeInTheDocument();
   });
 });
