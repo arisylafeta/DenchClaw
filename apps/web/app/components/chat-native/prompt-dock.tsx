@@ -8,7 +8,6 @@ import { SubagentCard } from "./panels";
 import { TodoPanel } from "./todo-panel";
 import { ProfileAvatar } from "../workspace/profile-avatar";
 import type { TodoState } from "@/lib/hermes-chat/todos";
-import { ThinkingIndicator } from "./thinking";
 import { ChevronRight } from "lucide-react";
 import type { NativeTranscriptCallbacks } from "./types";
 
@@ -52,11 +51,16 @@ function SubagentGroup({ roots, callbacks, tails, profile }: { roots: readonly S
   const finished = all.length - running;
   const plural = (count: number) => `${count} ${count === 1 ? "subagent" : "subagents"}`;
   const label = running ? `${plural(running)} running${finished ? ` · ${finished} done` : ""}` : `${plural(all.length)} finished`;
+  // Running state is shown by the agents' profile icons (one per distinct profile), never the pixel grid.
+  const profiles = [...new Set((running ? all.filter(agent => !isTerminalSubagent(agent.status)) : all).map(agent => agent.profile ?? profile).filter((name): name is string => !!name))].slice(0, 3);
   return <details className="group/agents px-3 pt-1 pb-2" aria-label="Subagents">
     <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
       <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform motion-reduce:transition-none group-open/agents:rotate-90" />
-      {profile && <span data-group-avatar={profile} className={running ? "todo-node-active" : "opacity-60"}><ProfileAvatar name={profile} className="size-4" /></span>}
-      {running ? <ThinkingIndicator>{label}</ThinkingIndicator> : <span className="font-medium text-[var(--color-text-muted)]">{label}</span>}
+      <span data-group-avatars className="flex shrink-0 -space-x-1.5">
+        {profiles.length ? profiles.map(name => <span key={name} data-group-avatar={name} className={running ? "todo-node-active" : "opacity-60"}><ProfileAvatar name={name} className="size-4 ring-2 ring-[var(--color-surface)]" /></span>)
+          : <span aria-hidden="true" className={`size-2 rounded-full bg-[var(--color-accent)] ${running ? "todo-node-active" : "opacity-40"}`} />}
+      </span>
+      <span role={running ? "status" : undefined} className={`font-medium ${running ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)]"}`}>{label}</span>
     </summary>
     <div className="max-h-[40dvh] overflow-y-auto pb-1">{roots.map(agent => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={tails} profile={profile} />)}</div>
   </details>;

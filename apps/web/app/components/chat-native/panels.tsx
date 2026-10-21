@@ -41,7 +41,7 @@ export function SubagentCard({ agent, callbacks, tailText, tails, profile }: Sub
     <details className="group/agent">
       <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
         <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform group-open/agent:rotate-90" />
-        {Icon ? <Icon aria-hidden="true" className="size-3.5 shrink-0 text-[var(--color-error)]" /> : avatarProfile ? <span data-subagent-avatar={avatarProfile} className={terminal ? "opacity-60" : "todo-node-active"}><ProfileAvatar name={avatarProfile} className="size-4" /></span> : <Check aria-hidden="true" className="size-3.5 shrink-0 text-[var(--color-text-muted)]" />}
+        {Icon ? <Icon aria-hidden="true" className="size-3.5 shrink-0 text-[var(--color-error)]" /> : avatarProfile ? <span data-subagent-avatar={avatarProfile} className={terminal ? "opacity-60" : "todo-node-active"}><ProfileAvatar name={avatarProfile} className="size-4" /></span> : terminal ? <Check aria-hidden="true" className="size-3.5 shrink-0 text-[var(--color-text-muted)]" /> : <span aria-hidden="true" className="todo-node-active size-2 shrink-0 rounded-full bg-[var(--color-accent)]" />}
         <span className="min-w-0 flex-1 truncate font-medium">{agent.goal}</span>
         <span className={chipClass}>{status} · <Elapsed startedAt={agent.startedAt} completedAt={terminal ? agent.updatedAt : undefined} seconds={terminal ? agent.durationSeconds : undefined} /></span>
       </summary>

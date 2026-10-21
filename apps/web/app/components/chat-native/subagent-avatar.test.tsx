@@ -20,4 +20,17 @@ describe("subagent profile avatar", () => {
     expect(container.querySelector('[data-subagent-avatar="orchas"]')).not.toBeNull();
     expect(container.querySelector('[data-subagent-avatar="devon"]')).toBeNull();
   });
+  it("shows only icons while running: no pixel grid anywhere in the dock", () => {
+    const state = started();
+    const { container } = render(<PromptDock state={state} subagents={state.subagents} profile="devon" callbacks={cb} />);
+    expect(container.querySelector(".chat-pixel-cell")).toBeNull();
+    expect(container.querySelector('[data-group-avatar="devon"]')).not.toBeNull();
+    expect(container.querySelector('[data-subagent-avatar="devon"]')).not.toBeNull();
+  });
+  it("falls back to a flat dot, not the grid, when no profile is known", () => {
+    const state = started();
+    const { container } = render(<PromptDock state={state} subagents={state.subagents} callbacks={cb} />);
+    expect(container.querySelector(".chat-pixel-cell")).toBeNull();
+    expect(container.querySelector("[data-group-avatars] .rounded-full")).not.toBeNull();
+  });
 });
