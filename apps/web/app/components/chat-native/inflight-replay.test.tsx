@@ -67,4 +67,13 @@ describe("reload during a long tool call", () => {
     expect(screen.getAllByText(NARRATION)).toHaveLength(1);
     expect(screen.getAllByText("Done.")).toHaveLength(1);
   });
+
+  it("dedupes when the turn's user row is older than the page window", () => {
+    const full = midTurnSnapshot();
+    const paged = { ...full, olderCursor: "1", inflightBeforeWindow: true, messages: full.messages.slice(1) };
+    const state = stateFromSnapshot(paged, ctx);
+    render(<NativeTranscript state={state} callbacks={callbacks} />);
+    expect(screen.getAllByText(NARRATION)).toHaveLength(1);
+    expect(screen.queryByText("please read this trace")).toBeNull();
+  });
 });

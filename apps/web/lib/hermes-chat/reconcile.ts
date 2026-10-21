@@ -266,7 +266,8 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
     })
     const aggregate = base.messages.find(message => message.id === base.streamId)
     if (aggregate) {
-      let remainder = messageText(aggregate)
+      // Ownership is resolved against the whole-turn buffer, not its unpersisted remainder.
+      let remainder = (aggregate as SourcedMessage).stream ?? messageText(aggregate)
       // Remove prose already represented by closed blocks in timeline order.
       for (const message of tail) {
         if (message.role !== 'assistant' || message.id === state.streamId) continue

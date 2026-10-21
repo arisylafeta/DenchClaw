@@ -25,6 +25,8 @@ export interface GatewayChatSnapshot {
   key: string
   subscriptionId?: string
   olderCursor?: string | null
+  /** The live turn's user row exists but is older than this page of messages. */
+  inflightBeforeWindow?: boolean
   conversation: { id: string; profile: string; title: string; source?: string; working: boolean }
   messages: SnapshotRow[]; running: boolean; inflight?: SnapshotInflight | null
   queued?: { user: string; count?: number } | null
@@ -37,6 +39,8 @@ export interface SourcedMessage extends ChatMessage {
   source?: 'durable' | 'live' | 'optimistic' | 'queued'
   clientIds?: string[]
   recoverable?: boolean
+  /** Whole-turn live buffer before persisted text was removed; steer reconciliation needs it. */
+  stream?: string
 }
 export interface SnapshotChatState extends ChatState { messages: SourcedMessage[] }
 export const normalizeMessageText = (text: string): string => text.replace(/\s+/g, ' ').trim()
@@ -110,19 +114,20 @@ export function stateFromSnapshot(snapshot: GatewayChatSnapshot, ctx: ReducerCon
     busy: snapshot.running, live: snapshot.running, adoptedRunningTurn: snapshot.running }
   const inflight = snapshot.inflight
   if (inflight) {
-    if (inflight.user && !snapshot.messages.some(row => row.pending === 'inflight')) {
+    if (inflight.user && !snapshot.inflightBeforeWindow && !snapshot.messages.some(row => row.pending === 'inflight')) {
       state.messages.push(prompt(`${snapshot.key}:inflight:user`, inflight.user, 'live'))
     }
     const failed = Boolean(inflight.error || inflight.status === 'error')
     // The live turn starts at the flagged user row; an auto-continue or steer turn has no prompt of its own.
     const flagged = state.messages.findIndex(message => message.role === 'user' && snapshot.messages.some(row => row.id === message.id && row.pending === 'inflight'))
-    const turnStart = flagged >= 0 ? flagged : inflight.user ? state.messages.length : state.messages.findLastIndex(message => message.role === 'user')
+    // A turn older than the page window owns every row in it.
+    const turnStart = flagged >= 0 ? flagged : snapshot.inflightBeforeWindow ? -1 : inflight.user ? state.messages.length : state.messages.findLastIndex(message => message.role === 'user')
     const persisted = state.messages.slice(turnStart + 1).filter(message => message.role === 'assistant' && !message.notice)
       .flatMap(message => message.segments.flatMap(segment => segment.type === 'text' ? [segment.text] : []))
     const assistant = unpersistedStream(inflight.assistant ?? '', persisted)
     if (assistant || inflight.streaming || failed) {
       const id = `${snapshot.key}:inflight:assistant`
-      state.messages.push({ id, role: 'assistant', source: 'live', startedAt: 0,
+      state.messages.push({ id, role: 'assistant', source: 'live', startedAt: 0, ...(inflight.assistant ? { stream: inflight.assistant } : {}),
         segments: assistant ? [{ id: `${id}:text`, type: 'text', text: assistant, startedAt: 0,
           ...(!inflight.streaming || failed ? { completedAt: 0 } : {}) }] : [],
         pending: inflight.streaming && !failed, ...(!inflight.streaming || failed ? { completedAt: 0 } : {}),

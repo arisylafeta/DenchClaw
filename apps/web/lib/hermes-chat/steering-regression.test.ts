@@ -82,3 +82,19 @@ for (const reasoning of [false, true]) it(`preserves prose ownership when a stee
   ], inflight: { ...snapshot.inflight!, assistant: 'Before proseAfter' } }, 0, ctx)
   expect(state.messages.map(m => m.role === 'user' && m.id === '2' ? 'Change' : messageText(m))).toEqual(['start', 'Before prose', 'Change', 'After'])
 })
+
+it('keeps new snapshot text after a steer when the continuation is already persisted', () => {
+  let state = applySnapshot(initialReconcileState('s', 'k'), snapshot, 0, ctx)
+  state = applyLive(state, [{ type: 'reasoning.delta', seq: 1, payload: { text: 'Before' } }], ctx)
+  state = placeSteer(submitOptimistic(state, { clientId: 'one', text: 'Change' }), 'one')
+  state = applyLive(state, [{ type: 'message.delta', seq: 2, payload: { text: 'After' } }], ctx)
+  state = applySnapshot(state, { ...snapshot, seq: 3, messages: [
+    { id: '1', role: 'user', text: 'start', pending: 'inflight' },
+    { id: '2', role: 'assistant', parts: [{ type: 'reasoning', text: 'Before' }] },
+    { id: '3', role: 'user', text: '[OUT-OF-BAND USER MESSAGE]\nChange\n[/OUT-OF-BAND USER MESSAGE]' },
+    { id: '4', role: 'assistant', text: 'After' },
+  ], inflight: { ...snapshot.inflight!, assistant: 'After NEW SNAPSHOT TEXT' } }, 0, ctx)
+  const text = displayTurns(state.messages).map(messageText).join('|')
+  expect(text).toContain('NEW SNAPSHOT TEXT')
+  expect(text.match(/After/g)).toHaveLength(1)
+})
