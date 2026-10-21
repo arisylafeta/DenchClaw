@@ -3,7 +3,7 @@ import type { Notice } from './notice'
 
 const clip = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 140)
 const labels: Record<string, string> = {
-  'session.reclaimed': 'Session reclaimed', 'session.title': 'Title changed',
+  'session.reclaimed': 'Session reclaimed',
   'session.control.update': 'Session controls updated', 'session.resume_progress': 'Resuming session',
   'background.complete': 'Background task finished', 'btw.complete': 'Side question answered',
   'tool.output_risk': 'Risky tool output detected', 'approval.cancelled': 'Approval cancelled',

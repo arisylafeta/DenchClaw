@@ -6,7 +6,7 @@ export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'm
 export interface Notice { kind: NoticeKind; text: string; details?: string; tone?: 'error'; key?: string; pending?: boolean }
 
 const KINDS: Record<string, NoticeKind> = {
-  async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model', background_process: 'process',
+  async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model', background_process: 'process', process_complete: 'process',
 }
 const FALLBACK: Record<NoticeKind, string> = {
   delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update', invite: 'An agent was invited into this chat',

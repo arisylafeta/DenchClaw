@@ -57,7 +57,7 @@ Local notices last for the mounted session, survive history resync, and yield to
 | session.info | Notice on change | Only changed model, branch and cwd; initial snapshot is silent. | methods_prompt.py:624, methods_session.py:1100 |
 | session.reclaimed | Notice | Explain lost live ownership before the transport requests a resync. | session_lifecycle.py:475 |
 | session.resume_progress | Notice | Coalesce history hydration phases and outcomes into one updating row. | server.py:2977 |
-| session.title | Notice | Announce the title supplied by the live auto-title hook. | methods_session.py:1220, prompt_turn.py:797 |
+| session.title | Ignore | The sidebar and header already show the title; an auto-title row in the transcript is noise. | methods_session.py:1220, prompt_turn.py:797 |
 | session.usage | Already handled | Transcript, usage state, todos or subagent dock owns it; avoid duplication. | methods_session.py:1449, server.py:178 |
 | sessions.changed | Ignore | Separate desktop surface, refetch signal or non-conversational metadata. | change_watcher.py:288 |
 | setup.ready | Ignore | Separate desktop surface, refetch signal or non-conversational metadata. | Contract only; no literal emit site |

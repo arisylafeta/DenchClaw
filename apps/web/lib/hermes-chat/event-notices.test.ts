@@ -6,7 +6,7 @@ import type { GatewayChatSnapshot } from './snapshot'
 const ctx = { now: () => 1000, id: (() => { let n = 0; return () => `notice-${++n}` })() }
 const snapshot: GatewayChatSnapshot = { key: 'k', conversation: { id: 's', profile: 'p', title: '', working: false }, messages: [], running: false, pendingRequests: [], generation: 2, seq: 10 }
 describe('event notices', () => {
-  it.each(['status.update', 'notice', 'error', 'session.reclaimed', 'session.title', 'session.control.update', 'session.resume_progress', 'background.complete', 'btw.complete', 'tool.output_risk', 'approval.cancelled', 'request.cancel', 'connection.request', 'connection.update', 'billing.step_up.verification', 'review.summary'])('projects %s', type => {
+  it.each(['status.update', 'notice', 'error', 'session.reclaimed', 'session.control.update', 'session.resume_progress', 'background.complete', 'btw.complete', 'tool.output_risk', 'approval.cancelled', 'request.cancel', 'connection.request', 'connection.update', 'billing.step_up.verification', 'review.summary'])('projects %s', type => {
     expect(eventNotice({ type, payload: { text: 'Synthetic update', message: 'Synthetic update' } })?.text).toBeTruthy()
   })
   it.each(['message.delta', 'subagent.complete', 'agent.terminal.output', 'cron.changed', 'reaction', 'tip.show', 'unknown'])('ignores %s', type => expect(eventNotice({ type })).toBeNull())

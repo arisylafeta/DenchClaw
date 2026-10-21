@@ -41,6 +41,10 @@ export interface SourcedMessage extends ChatMessage {
 export interface SnapshotChatState extends ChatState { messages: SourcedMessage[] }
 export const normalizeMessageText = (text: string): string => text.replace(/\s+/g, ' ').trim()
 
+const parseMetadata = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== 'string') return asRecord(value)
+  try { return asRecord(JSON.parse(value)) } catch { return {} }
+}
 function rowMessage(row: SnapshotRow): SourcedMessage | null {
   if (row.role !== 'user' && row.role !== 'assistant') return null
   const at = Number(row.timestamp) > 0 ? Number(row.timestamp) : 0
@@ -63,6 +67,15 @@ function rowMessage(row: SnapshotRow): SourcedMessage | null {
     segments.push({ type: 'text', id: `${row.id}:text`, text: row.text || row.content || '', startedAt: at, completedAt: at })
   }
   const rowId = Number(row.id)
+  // Hermes closes a failed turn with a boundary row; show it as the turn's error, not as assistant prose.
+  if (row.role === 'assistant' && row.displayKind === 'failed_turn') {
+    const meta = parseMetadata(row.displayMetadata)
+    const surface = asRecord(meta.error_surface)
+    return { id: row.id, role: 'assistant', source: 'durable', segments: [], startedAt: at, completedAt: at, pending: false, status: 'error',
+      error: [stringValue(meta.error), row.text || row.content || ''].filter(Boolean).join('\n'),
+      error_surface: typeof surface.code === 'string' ? surface as unknown as ErrorSurface : null,
+      ...(Number.isSafeInteger(rowId) && rowId > 0 ? { rowId } : {}) }
+  }
   const notice = noticeForRow({ role: row.role, displayKind: row.displayKind, displayMetadata: row.displayMetadata, text: row.text || row.content })
   return { id: row.id, ...(notice ? { notice } : {}), role: row.role, source: row.pending === 'queued' ? 'queued' : 'durable', segments, startedAt: at, completedAt: at,
     clientIds: row.clientMessageId ? [row.clientMessageId] : undefined,

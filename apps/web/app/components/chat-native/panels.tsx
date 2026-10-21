@@ -8,6 +8,7 @@ import type { NativeTranscriptCallbacks } from "./types";
 import { Check, ChevronRight, CircleAlert } from "lucide-react";
 import { ProfileAvatar } from "../workspace/profile-avatar";
 import { buttonClass, cardClass, chipClass, Elapsed } from "./tool-run";
+import { describeError } from "@/lib/hermes-chat/error-copy";
 
 export interface SubagentCardProps {
   agent: SubagentNode;
@@ -64,14 +65,27 @@ export function SubagentCard({ agent, callbacks, tailText, tails, profile }: Sub
     {agent.children.length > 0 && <div className="ml-5" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} profile={profile} />)}</div>}
   </section>;
 }
-export interface ErrorCardProps { error: ErrorSurface; message?: string; partial?: boolean; onRetry: NativeTranscriptCallbacks["onRetry"] }
+export interface ErrorCardProps { error?: ErrorSurface | null; message?: string; partial?: boolean; onRetry?: NativeTranscriptCallbacks["onRetry"] }
+/** A failed turn: plain-language title and next step; the raw Hermes text stays folded under Details. */
 export function ErrorCard({ error, message, partial, onRetry }: ErrorCardProps) {
   const [retrying, setRetrying] = useState(false);
   const [failure, setFailure] = useState("");
-  return <section role="alert" className={cardClass}>
-    <h3>{message || "An error occurred"}</h3><p>{error.layer} · {error.code} · {error.retryable ? "Retryable" : "Not retryable"}</p>
-    {partial && <p>Partial response retained</p>}{error.resets_at != null && <p>Resets at {new Date(error.resets_at < 1e12 ? error.resets_at * 1000 : error.resets_at).toLocaleString()}</p>}
-    {error.retryable && <button type="button" className={buttonClass} disabled={retrying} onClick={async () => { setRetrying(true); try { await onRetry(); } catch (cause) { setFailure(cause instanceof Error ? cause.message : "Retry failed"); } finally { setRetrying(false); } }}>Retry</button>}{failure && <p>{failure}</p>}
+  const copy = describeError(message, error);
+  const resets = error?.resets_at != null ? new Date(error.resets_at < 1e12 ? error.resets_at * 1000 : error.resets_at) : null;
+  return <section role="alert" data-error-code={error?.code} className="flex gap-2.5 rounded-lg border border-[color-mix(in_srgb,var(--color-error)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-error)_6%,transparent)] px-3 py-2.5 text-[13px] leading-5">
+    <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--color-error)]" />
+    <div className="min-w-0 flex-1 space-y-1">
+      <p className="font-medium text-[var(--color-text)]">{copy.title}</p>
+      {(copy.hint || partial || resets) && <p className="flex flex-wrap gap-x-1.5 text-[12px] text-[var(--color-text-muted)]">
+        {[copy.hint, partial ? "Partial response retained" : "", resets ? `Resets at ${resets.toLocaleString()}` : ""].filter(Boolean).map((part, index) => <span key={index} className="contents">{index > 0 && <span aria-hidden="true">·</span>}<span>{part}</span></span>)}
+      </p>}
+      {copy.detail && <details className="group/err text-[11px] text-[var(--color-text-muted)]">
+        <summary className="flex w-fit cursor-pointer list-none items-center gap-1 [&::-webkit-details-marker]:hidden"><ChevronRight aria-hidden="true" className="size-3 transition-transform group-open/err:rotate-90" />Details</summary>
+        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4">{copy.detail}</pre>
+      </details>}
+      {error?.retryable && onRetry && <button type="button" className={`${buttonClass} mt-1 text-[12px]`} disabled={retrying} onClick={async () => { setRetrying(true); try { await onRetry(); } catch (cause) { setFailure(cause instanceof Error ? cause.message : "Retry failed"); } finally { setRetrying(false); } }}>Retry</button>}
+      {failure && <p className="text-[12px] text-[var(--color-error)]">{failure}</p>}
+    </div>
   </section>;
 }
 export interface ReadOnlyNoticeProps { source: string; onBranch(): void | Promise<void> }

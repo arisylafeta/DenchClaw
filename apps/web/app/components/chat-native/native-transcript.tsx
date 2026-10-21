@@ -43,8 +43,10 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }
     : <Fragment key={`piece-${index}`}>{withArtifacts(piece.text, `p${index}`)}</Fragment>)}</>;
 }
 export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact, onSendPrompt }: NativeTranscriptProps) {
+  const turns = displayTurns(state.messages);
+  // Retry re-runs the latest turn, so only the latest failure offers it.
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
-    {displayTurns(state.messages).map(message => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
+    {turns.map((message, index) => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => {
         const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join(""));
         const queued = queuedMessageIds.includes(message.id);
@@ -67,7 +69,7 @@ export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, q
           })}
         </Fragment>;
       })()}
-      {message.error_surface ? <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={callbacks.onRetry} /> : message.error ? <p role="alert">{message.error}</p> : null}
+      {(message.error_surface || message.error) && <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={index === turns.length - 1 || turns.slice(index + 1).every(item => item.notice) ? callbacks.onRetry : undefined} />}
     </article>)}
     <p role="status">{state.pendingRequests.some(request => request.kind === "approval") ? "Waiting for approval" : state.pendingRequests.some(request => request.kind === "clarify") ? "Waiting for your answer" : state.interrupted ? "Interrupted" : ""}</p>
   </div>;
