@@ -1,0 +1,439 @@
+{
+"source": "live gateway capture 2026-10-21, throwaway CRM session",
+"events": [
+{
+"t": 24,
+"local": "submit A",
+"value": {
+"status": "streaming",
+"user_row_id": 9829
+}
+},
+{
+"t": 629,
+"type": "session.info",
+"payload": {
+"model": "claude-sonnet-5-5",
+"provider": "anthropic",
+"running": true
+},
+"seq": 1,
+"generation": 1
+},
+{
+"t": 636,
+"type": "message.start",
+"seq": 2,
+"generation": 1
+},
+{
+"t": 887,
+"type": "session.title",
+"payload": {
+"session_id": "20261021_220242_dfbd53",
+"title": "Reply with exactly one short sentence about the\u2026"
+},
+"seq": 3,
+"generation": 1
+},
+{
+"t": 946,
+"type": "thinking.delta",
+"payload": {
+"text": "(\u2310\u25a0_\u25a0) mulling..."
+},
+"seq": 4,
+"generation": 1
+},
+{
+"t": 1528,
+"local": "steer B",
+"value": {
+"status": "queued",
+"text": "ones dos tres"
+}
+},
+{
+"t": 2025,
+"type": "session.title",
+"payload": {
+"session_id": "20261021_220242_dfbd53",
+"title": "Sentence about the colour blue"
+},
+"seq": 5,
+"generation": 1
+},
+{
+"t": 2241,
+"type": "thinking.delta",
+"payload": {
+"text": ""
+},
+"seq": 6,
+"generation": 1
+},
+{
+"t": 2242,
+"type": "message.delta",
+"payload": {
+"text": "Blue is the col"
+},
+"seq": 7,
+"generation": 1
+},
+{
+"t": 2818,
+"type": "message.delta",
+"payload": {
+"text": "our of a"
+},
+"seq": 8,
+"generation": 1
+},
+{
+"t": 2818,
+"type": "message.delta",
+"payload": {
+"text": " clear da"
+},
+"seq": 9,
+"generation": 1
+},
+{
+"t": 2819,
+"type": "message.delta",
+"payload": {
+"text": "ytime sky and the de"
+},
+"seq": 10,
+"generation": 1
+},
+{
+"t": 2819,
+"type": "message.delta",
+"payload": {
+"text": "ep open"
+},
+"seq": 11,
+"generation": 1
+},
+{
+"t": 2819,
+"type": "message.delta",
+"payload": {
+"text": " sea."
+},
+"seq": 12,
+"generation": 1
+},
+{
+"t": 2820,
+"type": "thinking.delta",
+"payload": {
+"text": ""
+},
+"seq": 13,
+"generation": 1
+},
+{
+"t": 3142,
+"type": "reasoning.available",
+"payload": {
+"text": "Blue is the colour of a clear daytime sky and the deep open sea."
+},
+"seq": 14,
+"generation": 1
+},
+{
+"t": 3194,
+"type": "message.complete",
+"payload": {
+"text": "Blue is the colour of a clear daytime sky and the deep open sea.",
+"status": "complete",
+"persisted_turn": {
+"row_ids": [
+9829,
+9831
+],
+"complete": true,
+"user_row_id": 9829,
+"final_assistant_row_id": 9831
+}
+},
+"seq": 15,
+"generation": 1
+},
+{
+"t": 3269,
+"type": "session.info",
+"payload": {
+"model": "claude-sonnet-5-5",
+"provider": "anthropic",
+"running": false
+},
+"seq": 16,
+"generation": 1
+},
+{
+"t": 3279,
+"type": "message.start",
+"seq": 17,
+"generation": 1
+},
+{
+"t": 3336,
+"type": "thinking.delta",
+"payload": {
+"text": "\u0669(\u0e51\u275b\u1d17\u275b\u0e51)\u06f6 processing..."
+},
+"seq": 18,
+"generation": 1
+},
+{
+"t": 6936,
+"type": "thinking.delta",
+"payload": {
+"text": ""
+},
+"seq": 19,
+"generation": 1
+},
+{
+"t": 6936,
+"type": "message.delta",
+"payload": {
+"text": "TLDR: That"
+},
+"seq": 20,
+"generation": 1
+},
+{
+"t": 6937,
+"type": "message.delta",
+"payload": {
+"text": "'s \""
+},
+"seq": 21,
+"generation": 1
+},
+{
+"t": 7431,
+"type": "message.delta",
+"payload": {
+"text": "one"
+},
+"seq": 22,
+"generation": 1
+},
+{
+"t": 7431,
+"type": "message.delta",
+"payload": {
+"text": ", two, three\" in a"
+},
+"seq": 23,
+"generation": 1
+},
+{
+"t": 7432,
+"type": "message.delta",
+"payload": {
+"text": " Spangl"
+},
+"seq": 24,
+"generation": 1
+},
+{
+"t": 7432,
+"type": "message.delta",
+"payload": {
+"text": "ish mix (\"ones\""
+},
+"seq": 25,
+"generation": 1
+},
+{
+"t": 7435,
+"type": "message.delta",
+"payload": {
+"text": " is od"
+},
+"seq": 26,
+"generation": 1
+},
+{
+"t": 7435,
+"type": "message.delta",
+"payload": {
+"text": "d, \"dos t"
+},
+"seq": 27,
+"generation": 1
+},
+{
+"t": 7436,
+"type": "message.delta",
+"payload": {
+"text": "res\" is Spanish for"
+},
+"seq": 28,
+"generation": 1
+},
+{
+"t": 7436,
+"type": "message.delta",
+"payload": {
+"text": " \"two,"
+},
+"seq": 29,
+"generation": 1
+},
+{
+"t": 7437,
+"type": "message.delta",
+"payload": {
+"text": " three\""
+},
+"seq": 30,
+"generation": 1
+},
+{
+"t": 7437,
+"type": "message.delta",
+"payload": {
+"text": "), and I'm not sure"
+},
+"seq": 31,
+"generation": 1
+},
+{
+"t": 7437,
+"type": "message.delta",
+"payload": {
+"text": " what you want from"
+},
+"seq": 32,
+"generation": 1
+},
+{
+"t": 7438,
+"type": "message.delta",
+"payload": {
+"text": " it."
+},
+"seq": 33,
+"generation": 1
+},
+{
+"t": 8135,
+"type": "message.delta",
+"payload": {
+"text": "\n\nDo you want me to transl"
+},
+"seq": 34,
+"generation": 1
+},
+{
+"t": 8135,
+"type": "message.delta",
+"payload": {
+"text": "ate something"
+},
+"seq": 35,
+"generation": 1
+},
+{
+"t": 8136,
+"type": "message.delta",
+"payload": {
+"text": ", continue the count"
+},
+"seq": 36,
+"generation": 1
+},
+{
+"t": 8136,
+"type": "message.delta",
+"payload": {
+"text": ", or work on a task"
+},
+"seq": 37,
+"generation": 1
+},
+{
+"t": 8136,
+"type": "message.delta",
+"payload": {
+"text": "?"
+},
+"seq": 38,
+"generation": 1
+},
+{
+"t": 8136,
+"type": "message.delta",
+"payload": {
+"text": " Tell me which"
+},
+"seq": 39,
+"generation": 1
+},
+{
+"t": 8137,
+"type": "message.delta",
+"payload": {
+"text": " and I'll do it."
+},
+"seq": 40,
+"generation": 1
+},
+{
+"t": 8137,
+"type": "thinking.delta",
+"payload": {
+"text": ""
+},
+"seq": 41,
+"generation": 1
+},
+{
+"t": 8137,
+"type": "reasoning.available",
+"payload": {
+"text": "TLDR: That's \"one, two, three\" in a Spanglish mix (\"ones\" is odd, \"dos tres\" is Spanish for \"two, three\"), and I'm not sure what you want from it.\n\nDo you want me to translate something, continue the count, or work on a task? Tell me which and I'll do it."
+},
+"seq": 42,
+"generation": 1
+},
+{
+"t": 8160,
+"type": "message.complete",
+"payload": {
+"text": "TLDR: That's \"one, two, three\" in a Spanglish mix (\"ones\" is odd, \"dos tres\" is Spanish for \"two, three\"), and I'm not sure what you want from it.\n\nDo you want me to translate something, continue the count, or work on a task? Tell me which and I'll do it.",
+"status": "complete",
+"persisted_turn": {
+"row_ids": [
+9832,
+9835
+],
+"complete": true,
+"user_row_id": 9832,
+"final_assistant_row_id": 9835
+}
+},
+"seq": 43,
+"generation": 1
+},
+{
+"t": 8240,
+"type": "session.info",
+"payload": {
+"model": "claude-sonnet-5-5",
+"provider": "anthropic",
+"running": false
+},
+"seq": 44,
+"generation": 1
+}
+]
+}

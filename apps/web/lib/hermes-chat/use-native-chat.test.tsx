@@ -26,12 +26,15 @@ describe('native controller', () => {
     FakeSource.instance.emit('snapshot', running)
     await act(() => result.current.send({ text: 'Change direction' }))
     const user = result.current.state.messages.find(message => message.segments.some(segment => segment.type === 'text' && segment.text === 'Change direction'))!
-    expect(result.current.queuedMessageIds).toEqual(status === 'queued' ? [user.id] : [])
-    expect(user.pending).toBe(status === 'queued')
+    // A steer waits in the queue until the agent reads it; only a redirect lands in the transcript at once.
+    expect(result.current.queuedMessageIds).toEqual(status === 'redirected' ? [] : [user.id])
+    expect(user.pending).toBe(status !== 'redirected')
+    expect(Boolean(user.steerPending)).toBe(status === 'steered')
+    expect(result.current.queuedMessages.map(item => item.steer)).toEqual(status === 'redirected' ? [] : [status === 'steered'])
     if (status === 'queued') {
       FakeSource.instance.emit('snapshot', { ...running, seq: 1, inflight: { user: 'Change direction', assistant: '', streaming: true } })
       expect(result.current.queuedMessageIds).toEqual([])
-    } else expect(result.current.state.streamId).toBeNull()
+    } else if (status === 'redirected') expect(result.current.state.streamId).toBeNull()
   })
 
   it('discards old-session snapshots and never interrupts when switching or hiding', async () => {

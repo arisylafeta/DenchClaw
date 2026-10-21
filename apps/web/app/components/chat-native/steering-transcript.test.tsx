@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { applyLive, initialReconcileState, placeSteer, submitOptimistic } from '@/lib/hermes-chat/reconcile'
 import { NativeTranscript } from './native-transcript'
+import { PromptDock } from './prompt-dock'
 const callbacks = { onApproval: vi.fn(), onClarify: vi.fn(), onSubagentTail: vi.fn(), onSubagentSteer: vi.fn(), onSubagentInterrupt: vi.fn(), onRetry: vi.fn() }
 let id = 0
 const ctx = { now: () => 1000, id: () => `id-${++id}` }
@@ -21,16 +22,14 @@ it('renders accepted steering between completed work and the live continuation',
   expect(articles[2].querySelector('details')).toHaveAttribute('open')
   expect(screen.getAllByText(/^Thinking/)).toHaveLength(1)
 })
-it('gives queued messages a dashed muted bubble, clock pill and waiting explanation, then removes them on acceptance', () => {
+it('keeps waiting messages out of the transcript and lists them flat in the dock until accepted', () => {
   const state = submitOptimistic({ ...initialReconcileState(), hydrating: false }, { clientId: 'queued', text: 'Next task' })
-  const { container, rerender } = render(<NativeTranscript state={state} queuedMessageIds={['queued']} callbacks={callbacks} />)
-  const bubble = container.querySelector('[data-queued]')!
-  expect(bubble).toHaveClass('border-dashed', 'text-[var(--color-text-muted)]')
-  expect(bubble.querySelector('svg')).not.toBeNull()
-  expect(screen.getByText('Queued')).toBeInTheDocument()
-  expect(screen.getByText('Waiting for the current turn to finish')).toBeInTheDocument()
-  rerender(<NativeTranscript state={state} queuedMessageIds={[]} callbacks={callbacks} />)
-  expect(container.querySelector('[data-queued]')).toBeNull()
-  expect(screen.queryByText('Queued')).toBeNull()
+  const { container, rerender } = render(<><NativeTranscript state={state} queuedMessageIds={['queued']} callbacks={callbacks} /><PromptDock state={state} subagents={state.subagents} callbacks={callbacks} queued={[{ id: 'queued', text: 'Next task', steer: false }]} /></>)
+  expect(container.querySelector('[aria-label="Native Hermes transcript"]')).not.toHaveTextContent('Next task')
+  const row = container.querySelector('[data-queued-id="queued"]')!
+  expect(row).toHaveTextContent('QueuedNext tasknext')
+  expect(row.querySelector('svg')).not.toBeNull()
+  rerender(<><NativeTranscript state={state} queuedMessageIds={[]} callbacks={callbacks} /><PromptDock state={state} subagents={state.subagents} callbacks={callbacks} /></>)
+  expect(container.querySelector('[data-queue]')).toBeNull()
   expect(screen.getByText('Next task')).toBeInTheDocument()
 })

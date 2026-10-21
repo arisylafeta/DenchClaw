@@ -8,14 +8,14 @@ import { SubagentCard } from "./panels";
 import { TodoPanel } from "./todo-panel";
 import { ProfileAvatar } from "../workspace/profile-avatar";
 import type { TodoState } from "@/lib/hermes-chat/todos";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Clock3, CornerDownRight } from "lucide-react";
 import type { NativeTranscriptCallbacks } from "./types";
 
 /**
  * Everything the agent needs from you, or is running on the side, docks on top of the input box instead of
  * scrolling away in the transcript: questions, approvals, and subagents with their own activity.
  */
-export function PromptDock({ state, subagents, todos, profile, tails, callbacks, composerTarget, disabled }: {
+export function PromptDock({ state, subagents, todos, profile, tails, callbacks, composerTarget, disabled, queued = [] }: {
   state: Pick<ChatState, "pendingRequests" | "sessionId">;
   subagents: SubagentState;
   todos?: TodoState;
@@ -25,6 +25,8 @@ export function PromptDock({ state, subagents, todos, profile, tails, callbacks,
   callbacks: NativeTranscriptCallbacks;
   composerTarget?: HTMLElement | null;
   disabled?: boolean;
+  /** Messages sent during the running turn that Hermes has not picked up yet. */
+  queued?: readonly QueuedItem[];
 }) {
   const requests = state.pendingRequests;
   const activeKey = useRef<string | null>(null);
@@ -33,14 +35,31 @@ export function PromptDock({ state, subagents, todos, profile, tails, callbacks,
   activeKey.current = front ? `${state.sessionId}-${front.id}` : null;
   const roots = buildSubagentTree(subagents.items);
   const hasTodos = !!todos && (todos.visible.length > 0 || todos.retained.length > 0);
-  if (!requests.length && !roots.length && !hasTodos) return null;
+  if (!requests.length && !roots.length && !hasTodos && !queued.length) return null;
   return <div className="w-full" data-prompt-dock>
+    {queued.length > 0 && <QueueList items={queued} />}
     {requests.map(request => request.kind === "approval"
       ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} />
       : request === front || composerTarget === undefined ? <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} composerTarget={composerTarget} disabled={disabled} /> : <p key={request.id} className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">Another question is waiting</p>)}
     {todos && hasTodos && <div className="px-1 pb-1"><TodoPanel todos={todos} /></div>}
     {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} profile={profile} />}
   </div>;
+}
+
+export interface QueuedItem { id: string; text: string; steer: boolean }
+/** One flat line per waiting message: what it is, its text, and when Hermes will pick it up. */
+function QueueList({ items }: { items: readonly QueuedItem[] }) {
+  return <ul aria-label="Waiting messages" data-queue className="space-y-0.5 px-3 pt-2 pb-1">
+    {items.map(item => {
+      const Icon = item.steer ? CornerDownRight : Clock3;
+      return <li key={item.id} data-queued-id={item.id} data-steer={item.steer || undefined} className="flex min-h-6 items-center gap-2 text-[12px] text-[var(--color-text-muted)]">
+        <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+        <span className="shrink-0 font-medium">{item.steer ? "Steer" : "Queued"}</span>
+        <span className="min-w-0 flex-1 truncate text-[var(--color-text)]" title={item.text}>{item.text}</span>
+        <span className="shrink-0">{item.steer ? "after this step" : "next"}</span>
+      </li>;
+    })}
+  </ul>;
 }
 
 const flatten = (nodes: readonly SubagentNode[]): Subagent[] => nodes.flatMap(node => [node, ...flatten(node.children)]);

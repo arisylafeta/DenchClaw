@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { Clock3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { NativeTranscriptProps } from "./types";
@@ -43,20 +42,18 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }
     : <Fragment key={`piece-${index}`}>{withArtifacts(piece.text, `p${index}`)}</Fragment>)}</>;
 }
 export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact, onSendPrompt }: NativeTranscriptProps) {
-  const turns = displayTurns(state.messages);
+  // Waiting messages show in the dock above the composer until Hermes reads them or starts their turn.
+  const turns = displayTurns(state.messages.filter(message => !queuedMessageIds.includes(message.id)));
   // Retry re-runs the latest turn, so only the latest failure offers it.
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
     {turns.map((message, index) => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
       {message.role === "user" ? (() => {
         const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join(""));
-        const queued = queuedMessageIds.includes(message.id);
         return <div className="flex flex-col items-end gap-1.5 py-2">
           <AttachmentChips attachments={attachments} />
-          {(body || !attachments.length || queued) && <div data-queued={queued || undefined} className={`max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font ${queued ? "border border-dashed border-[var(--color-border)] bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]" : ""}`} style={queued ? undefined : { background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}>
-            {queued && <span className="mb-1 flex w-fit items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs font-medium"><Clock3 aria-hidden="true" className="size-3" />Queued</span>}
+          {(body || !attachments.length) && <div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}>
             <UserContent html={attachments.length ? undefined : userHtml?.(message.id)} text={body} />
           </div>}
-          {queued && <span className="text-xs text-[var(--color-text-muted)]">Waiting for the current turn to finish</span>}
         </div>;
       })() : (() => {
         const blocks = transcriptBlocks(message.segments);

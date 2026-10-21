@@ -90,13 +90,12 @@ describe("native transcript", () => {
       ["message.delta", { text: "Last narration" }],
       ["message.interim", { text: "Last narration" }],
     ]);
-    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} queuedMessageIds={["user"]} userHtml={() => '<span class="mention" onclick="bad()">CRM</span><script>unsafe()</script>'} />);
+    const { container } = render(<NativeTranscript state={state} callbacks={callbacks()} userHtml={() => '<span class="mention" onclick="bad()">CRM</span><script>unsafe()</script>'} />);
     expect([...container.querySelectorAll("[data-segment]")].map(node => node.getAttribute("data-segment"))).toEqual(["interim", "work", "reasoning", "interim"]);
     expect(screen.getByText("Read README")).toBeInTheDocument();
     expect(screen.getByText("Ran a quick command")).toBeInTheDocument();
     expect(screen.queryByText(/pwd/)).not.toBeInTheDocument();
     expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
-    expect(screen.getByText("Queued")).toBeInTheDocument();
     expect(screen.getByText("CRM")).not.toHaveAttribute("onclick");
     expect(container.querySelector("script")).toBeNull();
   });

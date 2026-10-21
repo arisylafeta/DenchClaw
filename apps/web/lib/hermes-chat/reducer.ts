@@ -41,6 +41,8 @@ export interface ChatMessage {
   source?: 'durable' | 'live' | 'optimistic' | 'queued'
   /** Work before an accepted mid-turn steer remains patchable, but is no longer live. */
   steerBoundary?: boolean
+  /** Accepted steer the agent has not read yet: Hermes delivers it after the current tool batch. */
+  steerPending?: boolean
   id: string; role: 'user' | 'assistant'; segments: Segment[]; startedAt: number
   completedAt?: number; pending: boolean; interim?: boolean; interrupted?: boolean
   error?: string; error_surface?: ErrorSurface | null; status?: 'complete' | 'error' | 'interrupted'

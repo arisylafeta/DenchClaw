@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceContext } from '../agent-message'
 import type { HermesConversation } from '../hermes-conversations'
 import { getHermesEventsClient, type ConnectionState } from './events-client'
-import { applyLive, applySnapshot, beginHydration, initialReconcileState, placeSteer, submitOptimistic, type ReconcileState } from './reconcile'
+import { applyLive, applySnapshot, beginHydration, initialReconcileState, markSteerPending, placeSteer, submitOptimistic, type ReconcileState } from './reconcile'
 import { messageText, reduce, withNotice, type PendingRequest } from './reducer'
-import type { Notice } from './notice'
+import { steerOwnText, type Notice } from './notice'
 import { mapMessageHtml, type MessageHtmlRow } from './html-map'
 import { stateFromSnapshot, type GatewayChatSnapshot } from './snapshot'
 import type { SlashCompletion } from './slash-commands'
@@ -24,6 +24,8 @@ export interface NativeHermesChat {
   readOnly: { source: string } | null
   html: Map<string, string>
   queuedMessageIds: string[]
+  /** Messages waiting for the running turn: queued prompts and steers Hermes has not read yet. */
+  queuedMessages: { id: string; text: string; steer: boolean }[]
   olderCursor: string | null
   loadingEarlier: boolean
   loadEarlier(): Promise<void>
@@ -166,9 +168,19 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
           const waiting = previous.messages.find(message => message.id === clientMessageId)
           return waiting ? { ...previous, messages: [...previous.messages.filter(message => message.id !== clientMessageId), { ...waiting, source: 'queued' as const }] } : previous
         })
-      } else if (result.status === 'steered' || result.status === 'redirected') {
+      } else if (result.status === 'redirected') {
         queued.current.delete(clientMessageId)
         update(previous => placeSteer(previous, clientMessageId))
+      } else if (result.status === 'steered') {
+        // Hermes reads a steer after the current tool batch, or runs it as the next turn.
+        queued.current.delete(clientMessageId)
+        update(previous => markSteerPending(previous, clientMessageId))
+      } else if (wasBusy) {
+        // The earlier turn ended first, so this message started its own turn.
+        update(previous => {
+          const message = previous.messages.find(item => item.id === clientMessageId)
+          return message?.source === 'queued' ? { ...previous, messages: [...previous.messages.filter(item => item.id !== clientMessageId), { ...message, source: 'optimistic' as const }] } : previous
+        })
       }
       if (result.autoContinue) update(previous => ({ ...previous, status: 'Hermes is continuing an interrupted turn; your message is queued' }))
     } catch {
@@ -180,7 +192,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
           && previous.optimisticSentAt === submittedAt && previous.loadToken === loadToken
           && previous.optimistic.at(-1)?.clientId === clientMessageId
         return { ...previous, ...(ownsTurn ? { busy: false, awaitingResponse: false } : {}),
-          messages: previous.messages.map(message => message.id === clientMessageId ? { ...message, pending: false } : message) }
+          messages: previous.messages.map(message => message.id === clientMessageId ? { ...message, pending: false, steerPending: false, ...(message.source === 'queued' ? { source: 'optimistic' as const } : {}) } : message) }
       })
     }
   }, [post, readOnly, surface, update, conversationKey, connection])
@@ -287,7 +299,8 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (lastUser) await send({ text: messageText(lastUser), html: html.get(lastUser.id) })
       else resync()
     },
-    queuedMessageIds: state.messages.filter(message => queued.current.has(message.id) && message.source === 'optimistic' && message.pending || message.source === 'queued').map(message => message.id),
+    queuedMessageIds: state.messages.filter(message => message.source === 'queued').map(message => message.id),
+    queuedMessages: state.messages.filter(message => message.source === 'queued').map(message => ({ id: message.id, text: steerOwnText(messageText(message)), steer: Boolean(message.steerPending) })),
     interrupt: async () => {
       const key = conversationKey
       try {

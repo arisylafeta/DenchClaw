@@ -75,14 +75,42 @@ export function applyLive(state: ReconcileState, events: readonly GatewayEvent[]
       next = { ...next, watermark: Math.max(next.watermark, event.seq ?? -1) }
       continue
     }
+    const wasBusy = next.busy
     next = { ...reduce(next, event, ctx), overlay: [...next.overlay, event] } as ReconcileState
+    next = settleWaiting(next, event, wasBusy)
   }
   return next
+}
+/**
+ * Hermes reads an accepted steer after the current tool batch; one the turn never reached runs as the
+ * next turn instead. Waiting messages move into the transcript only when one of those happens.
+ */
+function settleWaiting(state: ReconcileState, event: GatewayEvent, wasBusy: boolean): ReconcileState {
+  const waiting = state.messages.filter(message => message.source === 'queued')
+  if (!waiting.length) return state
+  if (event.type === 'tool.complete') {
+    let next = state
+    for (const message of waiting.filter(item => item.steerPending)) {
+      next = placeSteer({ ...next, messages: next.messages.map(item => item.id === message.id ? { ...item, steerPending: false } : item) }, message.id)
+    }
+    return next
+  }
+  if (event.type === 'message.complete') return { ...state, messages: state.messages.map(message => message.steerPending ? { ...message, steerPending: false } : message) }
+  if (event.type === 'message.start' && !wasBusy) {
+    return { ...state, messages: state.messages.map(message => message.source === 'queued'
+      ? { ...message, source: message.rowId !== undefined ? 'durable' as const : 'optimistic' as const, pending: false } : message) }
+  }
+  return state
+}
+/** The gateway accepted a steer; it stays in the queue until the agent reads it. */
+export function markSteerPending(state: ReconcileState, clientId: string): ReconcileState {
+  return { ...state, messages: state.messages.map(message => message.id === clientId ? { ...message, source: 'queued' as const, steerPending: true } : message) }
 }
 /** clientId is stable CRM identity; no gateway user_row_id is needed. */
 export function submitOptimistic(state: ReconcileState, submission: OptimisticSubmission): ReconcileState {
   if (state.optimistic.some(item => item.clientId === submission.clientId)) return state
-  const message: SourcedMessage = { id: submission.clientId, role: 'user', source: 'optimistic', clientIds: [submission.clientId],
+  // A message sent during a turn waits outside the transcript until Hermes reads it or starts its turn.
+  const message: SourcedMessage = { id: submission.clientId, role: 'user', source: state.busy ? 'queued' : 'optimistic', clientIds: [submission.clientId],
     pending: true, startedAt: 0, segments: [{ id: `${submission.clientId}:text`, type: 'text', text: submission.text, startedAt: 0 }] }
   return { ...state, messages: [...state.messages, message], busy: true, awaitingResponse: true,
     optimistic: [...state.optimistic, { ...submission, knownUserIds: state.messages.filter(item => item.role === 'user' && item.source === 'durable').map(item => item.id) }] }
