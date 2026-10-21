@@ -1,0 +1,43 @@
+// One model for everything in Trades Preview: a bulk listing. Demand (a buyer wants) or supply (a seller offers).
+// There are no separate "trades": a listing is simply further along once an offer on it has been accepted (stage loi or won).
+// Threads (email, WhatsApp, calls, notes) are the primary content: the party's own conversation, and one thread per offer.
+// Safe for client and server.
+import type { Demand } from "./bulk-demand";
+import type { OfferStage } from "./crm-postgres/bulk-offers";
+
+export type ListingKind = "demand" | "supply";
+
+/** What GET /api/bulk-listings/[id] returns, for either kind. Demand carries its existing Demand shape too. */
+export type BulkListingView = {
+  id: string;
+  kind: ListingKind;
+  /** The buyer (demand) or seller (supply) as written. */
+  party: string;
+  company_id: string | null;
+  person_id: string | null;
+  contact: string | null;
+  email: string | null;
+  summary: string;
+  quantity: string | null;
+  location: string | null;
+  note: string | null;
+  status: "open" | "qualifying" | "closed";
+  closed_reason: string | null;
+  observed_on: string | null;
+  next_action: string | null;
+  next_due: string | null;
+  spec: Record<string, unknown>;
+  context: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  /** Readable title (the demand title rules, or the supply's listing_title / summary). */
+  title: string;
+  /** The furthest stage any offer on this listing has reached; null when it has no offers. */
+  furthest_stage: OfferStage | null;
+  /** True when an offer reached loi or won: the listing is now a trade. A label, not a separate record. */
+  is_trade: boolean;
+  /** Present when kind is demand: the existing Demand row the demand panel renders. */
+  demand?: Demand;
+};
+
+export const TRADE_STAGES: readonly OfferStage[] = ["loi", "won"];
