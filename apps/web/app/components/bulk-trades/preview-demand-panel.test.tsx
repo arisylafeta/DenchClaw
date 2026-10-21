@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Demand } from "@/lib/bulk-demand";
 import { PreviewDemandPanel } from "./preview-demand-panel";
 
@@ -48,6 +48,11 @@ it("keeps the buyer's email thread under their card, each message opening in pla
   } as unknown as Demand;
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
   expect(await screen.findByRole("heading", { name: "Email with Markus" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /WhatsApp/ })).not.toBeInTheDocument();
+  const accordion = await screen.findByRole("button", { name: /Email.*1 message/ });
+  expect(accordion).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("Re: pilot")).not.toBeInTheDocument();
+  fireEvent.click(accordion);
   expect(await screen.findByRole("link", { name: /Open email/ })).toHaveAttribute("href", "/?crm=inbox&view=conversations&thread=gmail_thread_9&crmOnly=false");
   const row = screen.getByRole("button", { name: /Re: pilot/ });
   expect(row).toHaveAttribute("aria-expanded", "false");
@@ -66,6 +71,13 @@ it("shows the labelled conversation, email and WhatsApp, when threads are labell
     activity_count: 0, fits: [], trades: [], missing: [], inventory_matches: [] } as unknown as Demand;
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
   expect(await screen.findByRole("heading", { name: "Conversation with Prince" })).toBeInTheDocument();
+  const whatsapp = await screen.findByRole("button", { name: /WhatsApp.*1 message/ });
+  const email = screen.getByRole("button", { name: /Email.*1 message/ });
+  // Each channel is one accordion, closed until opened.
+  expect(screen.queryByText("Can you do the Tesla modules?")).not.toBeInTheDocument();
+  expect(screen.queryByText("Re: shortlist")).not.toBeInTheDocument();
+  fireEvent.click(whatsapp);
+  fireEvent.click(email);
   expect(screen.getByText("Re: shortlist")).toBeInTheDocument();
   expect(screen.getByText("Can you do the Tesla modules?")).toBeInTheDocument();
   expect(screen.queryByText("Unrelated mail")).not.toBeInTheDocument();
