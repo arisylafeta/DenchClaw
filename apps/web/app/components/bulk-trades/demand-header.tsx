@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyIdButton } from "./copy-id-button";
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { Demand } from "@/lib/bulk-demand";
@@ -50,7 +51,7 @@ export function DemandHeader({ demand, supply, actions, onBack, loadingSupply = 
       <div className={css.titleRow}>
         <ScoreRing score={demand.score} />
         <div className="min-w-0 flex-1">
-          <h2 className={css.title}>{demandTitle(demand)}</h2>
+          <div className="flex items-start gap-1"><h2 className={css.title}>{demandTitle(demand)}</h2><CopyIdButton id={demand.id} className="mt-1" /></div>
           <div className={css.sub}>
             <span>{demand.buyer}</span>
             {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}

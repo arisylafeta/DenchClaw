@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyIdButton } from "./copy-id-button";
 import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Search, Flag } from "lucide-react";
 import { SIDE_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
@@ -76,8 +77,11 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
       className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
       <span className="hidden md:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       <span className="min-w-0">
-        <button type="button" disabled={loading} title={row.title}
-          className="line-clamp-2 w-full text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
+        <span className="flex items-start gap-1">
+          <button type="button" disabled={loading} title={row.title}
+            className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
+          {!loading && <CopyIdButton id={row.id} />}
+        </span>
         {(loading || row.company) && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company}</Sh></span>}
         <span className="mt-1 inline-flex md:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       </span>
