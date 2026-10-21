@@ -38,14 +38,18 @@ const ago = (iso: string) => {
   return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 60 ? `${days} days ago` : shortDate(iso.slice(0, 10));
 };
 
+/** Facts the pack table already says per pack, so the single-value cells are left out when it is shown. */
+const PACK_COVERED = ["product_family", "capacity", "chemistries", "formats", "makes", "origins"];
+
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
 function TheAsk({ demand, supply, loading }: { demand: Demand; supply: DemandSupply | null; loading: boolean }) {
   const registry = useRegistry();
   // Core demand facts do not need the attribute registry to be readable.
   const factRegistry = registry ?? { specLists: {}, specLabels: {}, specGroups: {}, specNumbers: {} } as Registry;
+  const packs = demand.context?.packs ?? [];
   return (
     <div className="flex flex-col gap-4">
-      <ListingDetails loading={loading ? [!demand.product_family && "product_family", demand.spec?.kwh_min == null && demand.spec?.kwh_max == null && "capacity"].filter((key): key is string => !!key) : false} facts={demandFacts(factRegistry, demand, { pinned: supply?.requirement.pinned }).map((fact) => fact.key === "capacity" ? { ...fact, critical: true } : fact)} />
+      <ListingDetails packs={packs} loading={loading ? [!demand.product_family && !packs.length && "product_family", !packs.length && demand.spec?.kwh_min == null && demand.spec?.kwh_max == null && "capacity"].filter((key): key is string => !!key) : false} facts={demandFacts(factRegistry, demand, { pinned: supply?.requirement.pinned }).filter((fact) => !packs.length || !PACK_COVERED.includes(fact.key)).map((fact) => fact.key === "capacity" ? { ...fact, critical: true } : fact)} />
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>

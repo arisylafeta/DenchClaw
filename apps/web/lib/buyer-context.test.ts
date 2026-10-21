@@ -66,3 +66,15 @@ describe("buyer context validation", () => {
     });
   });
 });
+describe("buyer context packs", () => {
+  it("accepts a one-by-one pack list and rejects unknown keys or a bad link", () => {
+    expect(parseBuyerContext({ packs: [{ title: "Tesla Model 3 57kWh", chemistry: "LFP", kwh: 57, location: "Adwick-le-Street", url: "https://www.rebattery.io/marketplace/x", status: "possible", seen_on: "2026-10-04" }] })).toHaveProperty("value");
+    expect(parseBuyerContext({ packs: [{ title: "x", price: 1 }] })).toHaveProperty("error");
+    expect(parseBuyerContext({ packs: [{ title: "x", url: "javascript:alert(1)" }] })).toHaveProperty("error");
+    expect(parseBuyerContext({ packs: [{ title: " " }] })).toHaveProperty("error");
+    expect(parseBuyerContext({ packs: [{ title: "x", status: "sold" }] })).toHaveProperty("error");
+    expect(parseBuyerContext({ packs: [{ title: "x", quantity: 2, supply_price: 1895, suggested_price: 2550 }] })).toHaveProperty("value");
+    expect(parseBuyerContext({ packs: [{ title: "x", suggested_price: -1 }] })).toHaveProperty("error");
+    expect(parseBuyerContext({ packs: [{ title: "x", quantity: 1.5 }] })).toHaveProperty("error");
+  });
+});

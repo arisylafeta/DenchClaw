@@ -20,8 +20,29 @@ export type BuyerContext = {
   missing_documents?: string[];
   next_action?: string;
   sources?: { kind: string; id?: string; url?: string; label: string }[];
+  /** The pack types the buyer asked for, one row each (for example a shortlist of marketplace listings). Shown as a table under Product. */
+  packs?: BuyerPack[];
   reviewed_at?: string;
 };
+
+export type BuyerPack = {
+  title: string;
+  /** How many of this pack; omit for one. */
+  quantity?: number;
+  chemistry?: string;
+  kwh?: number;
+  location?: string;
+  url?: string;
+  /** Our price for this pack from the supplier, in GBP. */
+  supply_price?: number;
+  /** What we suggest quoting the buyer, in GBP. */
+  suggested_price?: number;
+  /** "possible": the buyer may want it, to confirm. Omit when the buyer named it. */
+  status?: "possible";
+  seen_on?: string;
+};
+
+const PACK_KEYS = ["title", "quantity", "chemistry", "kwh", "location", "url", "status", "seen_on", "supply_price", "suggested_price"];
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -92,6 +113,26 @@ export function parseBuyerContext(value: unknown): Parsed<BuyerContext> {
               date(item.date) &&
               typeof item.source === "string" && item.source.trim().length > 0 &&
               (item.source_ref === undefined || typeof item.source_ref === "string"),
+          );
+        break;
+      case "packs":
+        valid =
+          Array.isArray(raw) &&
+          raw.length <= 50 &&
+          raw.every(
+            (item) =>
+              object(item) &&
+              Object.keys(item).every((k) => PACK_KEYS.includes(k)) &&
+              typeof item.title === "string" && item.title.trim().length > 0 &&
+              (item.quantity === undefined || (typeof item.quantity === "number" && Number.isInteger(item.quantity) && item.quantity > 0)) &&
+              (item.supply_price === undefined || (typeof item.supply_price === "number" && Number.isFinite(item.supply_price) && item.supply_price >= 0)) &&
+              (item.suggested_price === undefined || (typeof item.suggested_price === "number" && Number.isFinite(item.suggested_price) && item.suggested_price >= 0)) &&
+              (item.chemistry === undefined || typeof item.chemistry === "string") &&
+              (item.kwh === undefined || (typeof item.kwh === "number" && Number.isFinite(item.kwh) && item.kwh > 0)) &&
+              (item.location === undefined || typeof item.location === "string") &&
+              (item.url === undefined || (typeof item.url === "string" && !!safeContextUrl(item.url))) &&
+              (item.status === undefined || item.status === "possible") &&
+              (item.seen_on === undefined || date(item.seen_on)),
           );
         break;
       case "sources":

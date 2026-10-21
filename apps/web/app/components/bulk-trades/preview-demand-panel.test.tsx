@@ -87,3 +87,26 @@ it("shows the labelled conversation, email and WhatsApp, when threads are labell
   expect(screen.getByText("Can you do the Tesla modules?")).toBeInTheDocument();
   expect(screen.queryByText("Unrelated mail")).not.toBeInTheDocument();
 });
+
+it("shows several pack types as a table under Product, one row each, with prices when set, and drops the single-value cells it replaces", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ groups: [], shortlisted: [], requirement: { pinned: [] }, conversation: null, buyer: null, mail: [], person: null }))));
+  const demand = {
+    id: "d3", buyer: "Example company", contact: "Prince", wants: "10 packs", kind: "request", volume: 10, volume_unit: "packs", quantity: "10 packs", status: "open",
+    spec: { chemistries: ["LFP", "NMC"], formats: ["Packs"] }, context_notes: [], company_id: null, person_id: null, email: null, tier: null, score: null,
+    activity_count: 0, fits: [], trades: [], missing: [], inventory_matches: [],
+    context: { packs: [
+      { title: "Tesla Model 3 RWD 57kWh", chemistry: "LFP", kwh: 57, location: "Adwick-le-Street", url: "https://www.rebattery.io/marketplace/tesla-model-3-rwd-57kwh-c204", seen_on: "2026-10-04", supply_price: 1895, suggested_price: 2550 },
+      { title: "Second Tesla Model 3 RWD 57kWh", chemistry: "LFP", kwh: 57, status: "possible" },
+    ] },
+  } as unknown as Demand;
+  render(<PreviewDemandPanel demand={demand} today="2026-10-21" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
+  const table = await screen.findByRole("table", { name: "Packs asked for" });
+  expect(Array.from(table.querySelectorAll("th")).map((th) => th.textContent)).toEqual(["Pack", "Chemistry", "Capacity", "Collection", "Supply price", "Suggested price", "Named"]);
+  expect(screen.getByRole("link", { name: "Tesla Model 3 RWD 57kWh" })).toHaveAttribute("href", "https://www.rebattery.io/marketplace/tesla-model-3-rwd-57kwh-c204");
+  expect(screen.getByText("£1,895")).toBeInTheDocument();
+  expect(screen.getByText("£2,550")).toBeInTheDocument();
+  expect(screen.getByText("to confirm")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Second Tesla Model 3 RWD 57kWh" })).not.toBeInTheDocument();
+  expect(screen.getByText("Quantity")).toBeInTheDocument();
+  expect(screen.queryByText("Capacity per unit")).not.toBeInTheDocument();
+});

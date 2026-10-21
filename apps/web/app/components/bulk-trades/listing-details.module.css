@@ -35,3 +35,13 @@ button.cell:focus-visible { outline: 2px solid var(--bt-text-2); outline-offset:
 button.chip { cursor: pointer; }
 button.chip:hover { border-style: solid; background: var(--bt-row-hover); }
 @media (max-width: 520px) { .cell[data-wide="true"] { grid-column: auto; } }
+
+/* Several pack types asked for: one row each, hairlines like the grid. */
+.packs { width: 100%; border-collapse: collapse; border-top: 1px solid var(--bt-border); border-left: 1px solid var(--bt-border); background: var(--bt-surface); font-size: 13px; }
+.packs th, .packs td { padding: 8px 14px; text-align: left; vertical-align: top; border-right: 1px solid var(--bt-border); border-bottom: 1px solid var(--bt-border); }
+.packs th { font-size: 12px; font-weight: 400; color: var(--bt-muted); white-space: nowrap; }
+.packs td { color: var(--bt-text); }
+.packs td[data-num="true"] { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.packs a { color: var(--bt-link); text-decoration: underline; text-underline-offset: 2px; }
+.packs [data-tentative] { margin-left: 8px; padding: 0 6px; font-size: 11px; border: 1px solid var(--bt-border-strong); color: var(--bt-text-2); }
+.packsScroll { overflow-x: auto; }

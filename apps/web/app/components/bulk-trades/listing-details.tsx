@@ -2,6 +2,7 @@
 
 import { VISIBILITY_LABEL, shortDate } from "@/lib/bulk-trade-details";
 import { readiness, stillNeeded, visibleGroups, type Claim, type Fact } from "@/lib/listing-facts";
+import type { BuyerPack } from "@/lib/buyer-context";
 import { Sh } from "./bt-shimmer";
 import css from "./listing-details.module.css";
 
@@ -51,13 +52,48 @@ function Cell({ fact, onEdit, onResolve, loading = false }: { fact: Fact; loadin
     : <div {...props}>{body}</div>;
 }
 
+/** Several pack types asked for, one row each: pack (linked to its listing), chemistry, size, where it sits and when the buyer named it. */
+export function PackTable({ packs }: { packs: BuyerPack[] }) {
+  if (!packs.length) return null;
+  const quantities = packs.some((pack) => pack.quantity && pack.quantity !== 1);
+  const supply = packs.some((pack) => pack.supply_price != null);
+  const suggested = packs.some((pack) => pack.suggested_price != null);
+  const money = (value: number | undefined) => value == null ? "–" : `£${value.toLocaleString("en-GB")}`;
+  return (
+    <div className={css.packsScroll}>
+      <table className={css.packs} aria-label="Packs asked for">
+        <thead><tr><th>Pack</th>{quantities && <th>Qty</th>}<th>Chemistry</th><th>Capacity</th><th>Collection</th>{supply && <th>Supply price</th>}{suggested && <th>Suggested price</th>}<th>Named</th></tr></thead>
+        <tbody>
+          {packs.map((pack, i) => (
+            <tr key={`${pack.title}-${i}`}>
+              <td>
+                {pack.url ? <a href={pack.url} target="_blank" rel="noreferrer">{pack.title}</a> : pack.title}
+                {pack.status === "possible" && <span data-tentative>to confirm</span>}
+              </td>
+              {quantities && <td data-num="true">{pack.quantity ?? 1}</td>}
+              <td>{pack.chemistry ?? "–"}</td>
+              <td data-num="true">{pack.kwh ? `${pack.kwh} kWh` : "–"}</td>
+              <td>{pack.location ?? "–"}</td>
+              {supply && <td data-num="true">{money(pack.supply_price)}</td>}
+              {suggested && <td data-num="true">{money(pack.suggested_price)}</td>}
+              <td data-num="true">{pack.seen_on ? shortDate(pack.seen_on) : "–"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /**
  * The Details of any bulk listing: facts in a plain grid by section, readiness per step, and what is still missing.
  * Trade facts are editable (onEdit) and conflicts can be settled (onResolve); a demand's are read only.
  * Renders nothing when the listing has no recorded facts.
  */
-export function ListingDetails({ facts, onEdit, onResolve, loading = false }: {
+export function ListingDetails({ facts, packs = [], onEdit, onResolve, loading = false }: {
   facts: Fact[];
+  /** Pack types asked for; when present they are shown as a table under Product. */
+  packs?: BuyerPack[];
   /** All values, or only specific async fact keys. */
   loading?: boolean | string[];
   onEdit?: (fact: Fact) => void;
@@ -67,7 +103,7 @@ export function ListingDetails({ facts, onEdit, onResolve, loading = false }: {
   const needed = stillNeeded(facts);
   const loadingFact = (key: string) => Array.isArray(loading) ? loading.includes(key) : loading;
   const sections = visibleGroups(facts.map((fact) => loadingFact(fact.key) ? { ...fact, critical: true } : fact));
-  if (!facts.some((fact) => fact.value || fact.status === "conflict" || loadingFact(fact.key)) && !needed.length) return null;
+  if (!facts.some((fact) => fact.value || fact.status === "conflict" || loadingFact(fact.key)) && !needed.length && !packs.length) return null;
   return (
     <div className={css.root} data-listing-details>
       {steps.length > 0 && (
@@ -83,6 +119,7 @@ export function ListingDetails({ facts, onEdit, onResolve, loading = false }: {
           <div className={css.grid}>
             {section.facts.map((fact) => <Cell key={fact.key} fact={fact} loading={loadingFact(fact.key)} onEdit={onEdit} onResolve={onResolve} />)}
           </div>
+          {section.group === "Product" && <PackTable packs={packs} />}
         </section>
       ))}
       {needed.length > 0 && (
