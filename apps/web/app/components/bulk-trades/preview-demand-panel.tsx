@@ -18,14 +18,15 @@ import { SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
-import { OffersTab } from "./offers-tab";
+import { MessageItem, OffersTab } from "./offers-tab";
+import type { ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
 import { DocumentsTab } from "./documents-tab";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
-type BuyerMail = { id: string; direction: "inbound" | "outbound"; subject: string | null; preview: string | null; from_email: string | null; at: string };
+type BuyerMail = { id: string; thread_id: string | null; direction: "inbound" | "outbound"; subject: string | null; preview: string | null; body?: string | null; from_email: string | null; at: string };
 type BuyerContext = {
   buyer: { profile: BuyerProfile | undefined; engagement: BuyerEngagement | null; demand: Demand[] } | null;
   mail: BuyerMail[];
@@ -76,20 +77,18 @@ function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: 
   );
 }
 
-function MailList({ mail, loading = false }: { mail: BuyerMail[]; loading?: boolean }) {
+/** The whole email thread with the buyer, kept under their card so the context stays with the details. Each message opens in place and links to the exact email. */
+function BuyerThread({ mail, loading, name }: { mail: BuyerMail[]; loading: boolean; name: string }) {
+  const entries: ThreadEntry[] = loading
+    ? Array.from({ length: 3 }, (_, i) => ({ id: `loading-${i}`, channel: "mail", direction: null, title: "", body: " ", at: "", ref: null, href: null }))
+    : mail.map((m) => ({
+      id: m.id, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body ?? m.preview, at: m.at, ref: m.thread_id,
+      href: m.thread_id ? `/?crm=inbox&view=conversations&thread=${encodeURIComponent(m.thread_id)}&crmOnly=false` : null,
+    }));
   return (
-    <section className="flex flex-col gap-1">
-      <h3 className={css.label}>Email with the buyer</h3>
-      {mail.map((m) => (
-        <div key={m.id} className={css.mail}>
-          <span className={css.dir}>{m.direction === "inbound" ? "In" : "Out"}</span>
-          <div className="min-w-0 flex-1">
-            <div className="flex justify-between gap-2"><strong className="truncate">{m.subject ?? "(no subject)"}</strong><span className={`${css.note} shrink-0`}>{ago(m.at)}</span></div>
-            {m.preview && <p className={`${css.note} truncate`}>{m.preview}</p>}
-          </div>
-        </div>
-      ))}
-      {loading && <div className={css.mail}><span className={css.dir}><Sh on chars={3} /></span><div className="min-w-0 flex-1"><strong><Sh on chars={28} /></strong><p className={css.note}><Sh on chars={36} /></p></div></div>}
+    <section aria-label="Email with the buyer" className="flex flex-col gap-1">
+      <h3 className={css.label}>Email with {loading ? "the buyer" : name.split(/\s+/)[0]}</h3>
+      <ul>{entries.map((e) => <MessageItem key={e.id} entry={e} loading={loading} />)}</ul>
       {!loading && !mail.length && <p className={css.note}>No email with this buyer in your mailbox.</p>}
     </section>
   );
@@ -162,6 +161,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "Details" && (
         <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
+          <BuyerThread mail={context?.mail ?? []} loading={context === null} name={demand.contact ?? demand.buyer} />
           <TheAsk demand={demand} supply={supply} loading={supplyLoading} />
         </div>
       )}
@@ -170,15 +170,6 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}
-          {context === null && <MailList mail={[]} loading />}
-          {(context?.mail ?? []).length > 0 && (
-            <details>
-              <summary className="cursor-pointer text-[13px]" style={{ color: "var(--bt-muted)" }}>
-                Recent email with this buyer ({context!.mail.length}). Not matched to this request.
-              </summary>
-              <div className="mt-3"><MailList mail={context!.mail} /></div>
-            </details>
-          )}
         </div>
       )}
       </BusyRegion>

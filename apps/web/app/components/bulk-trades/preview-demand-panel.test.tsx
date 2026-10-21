@@ -32,3 +32,22 @@ it("shimmers header and buyer values in their real shell until async reads finis
   expect(screen.getByText("Alex")).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByText("Loading demand details")).not.toBeInTheDocument());
 });
+
+it("keeps the buyer's email thread under their card, each message opening in place and linking to the exact email", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const body = url.endsWith("/context")
+      ? { buyer: null, person: null, mail: [{ id: "m1", thread_id: "gmail_thread_9", direction: "inbound", subject: "Re: pilot", preview: "Still reviewing", body: "Still reviewing internally, LFP alternatives welcome.", from_email: "buyer@example.test", at: "2026-10-06T09:00:00Z" }] }
+      : url.endsWith("/supply") ? { groups: [], shortlisted: [], requirement: { pinned: [] } } : {};
+    return new Response(JSON.stringify(body));
+  }));
+  const demand = {
+    id: "d2", buyer: "Example company", contact: "Markus Nolden", wants: "24 packs", kind: "request", spec: {}, context: {}, context_notes: [],
+    status: "open", company_id: null, person_id: null, email: null, tier: null, score: null,
+    activity_count: 0, fits: [], trades: [], missing: [], inventory_matches: [],
+  } as unknown as Demand;
+  render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
+  expect(await screen.findByRole("heading", { name: "Email with Markus" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: /Open email/ })).toHaveAttribute("href", "/?crm=inbox&view=conversations&thread=gmail_thread_9&crmOnly=false");
+  const row = screen.getByRole("button", { name: /Re: pilot/ });
+  expect(row).toHaveAttribute("aria-expanded", "false");
+});

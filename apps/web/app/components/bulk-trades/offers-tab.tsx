@@ -194,7 +194,7 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
 }
 
 /** One message in a thread. Collapsed it is a line (channel, title, date); open it shows the whole message. */
-function MessageItem({ entry: e, loading }: { entry: ThreadEntry; loading: boolean }) {
+export function MessageItem({ entry: e, loading }: { entry: ThreadEntry; loading: boolean }) {
   const [open, setOpen] = useState(false);
   const Icon = CHANNEL_ICON[e.channel];
   const Dir = e.direction === "inbound" ? ArrowDownLeft : e.direction === "outbound" ? ArrowUpRight : null;
