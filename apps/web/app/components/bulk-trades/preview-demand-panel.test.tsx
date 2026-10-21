@@ -47,13 +47,16 @@ it("keeps the buyer's email thread under their card, each message opening in pla
     activity_count: 0, fits: [], trades: [], missing: [], inventory_matches: [],
   } as unknown as Demand;
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
-  expect(await screen.findByRole("heading", { name: "Email with Markus" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /WhatsApp/ })).not.toBeInTheDocument();
   const accordion = await screen.findByRole("button", { name: /Email.*1 message/ });
+  expect(screen.queryByRole("heading", { name: /Email with/ })).not.toBeInTheDocument();
+  // The accordion sits inside the buyer card and links to the thread itself.
+  expect(screen.getByRole("region", { name: "Buyer card" })).toContainElement(accordion);
+  expect(screen.getByRole("link", { name: "Open email thread" })).toHaveAttribute("href", "/?crm=inbox&view=conversations&thread=gmail_thread_9&crmOnly=false");
   expect(accordion).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByText("Re: pilot")).not.toBeInTheDocument();
   fireEvent.click(accordion);
-  expect(await screen.findByRole("link", { name: /Open email/ })).toHaveAttribute("href", "/?crm=inbox&view=conversations&thread=gmail_thread_9&crmOnly=false");
+  expect(await screen.findByRole("link", { name: "Open email" })).toHaveAttribute("href", "/?crm=inbox&view=conversations&thread=gmail_thread_9&crmOnly=false");
   const row = screen.getByRole("button", { name: /Re: pilot/ });
   expect(row).toHaveAttribute("aria-expanded", "false");
 });
@@ -63,16 +66,18 @@ it("shows the labelled conversation, email and WhatsApp, when threads are labell
     const body = url.endsWith("/context") ? { buyer: null, person: null, mail: [{ id: "m1", thread_id: "t_other", direction: "inbound", subject: "Unrelated mail", preview: "x", from_email: "b@e.test", at: "2026-10-06T09:00:00Z" }] }
       : url.endsWith("/supply") ? { groups: [], shortlisted: [], requirement: { pinned: [] } }
       : url.endsWith("/conversation") ? { conversation: [
-        { id: "wa1", channel: "whatsapp", direction: "inbound", title: "Prince", body: "Can you do the Tesla modules?", at: "2026-10-08T10:00:00Z", ref: null, href: null },
+        { id: "wa1", channel: "whatsapp", direction: "inbound", title: "Prince", body: "Can you do the Tesla modules?", at: "2026-10-08T10:00:00Z", ref: "wa_t1", href: "/?crm=inbox&view=whatsapp&thread=wa_t1" },
         { id: "m2", channel: "mail", direction: "outbound", subject: null, title: "Re: shortlist", body: "Sent the eight packs", at: "2026-10-07T10:00:00Z", ref: "t1", href: "/?crm=inbox&view=conversations&thread=t1&crmOnly=false" }] } : {};
     return new Response(JSON.stringify(body));
   }));
   const demand = { id: "d3", buyer: "Prince", contact: "Prince", wants: "8 packs", kind: "request", spec: {}, context: {}, context_notes: [], status: "open", company_id: null, person_id: null, email: null, tier: null, score: null,
     activity_count: 0, fits: [], trades: [], missing: [], inventory_matches: [] } as unknown as Demand;
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
-  expect(await screen.findByRole("heading", { name: "Conversation with Prince" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: /Conversation with/ })).not.toBeInTheDocument();
   const whatsapp = await screen.findByRole("button", { name: /WhatsApp.*1 message/ });
   const email = screen.getByRole("button", { name: /Email.*1 message/ });
+  expect(screen.getByRole("link", { name: "Open WhatsApp chat" })).toHaveAttribute("href", "/?crm=inbox&view=whatsapp&thread=wa_t1");
+  expect(screen.getByRole("region", { name: "Buyer card" })).toContainElement(whatsapp);
   // Each channel is one accordion, closed until opened.
   expect(screen.queryByText("Can you do the Tesla modules?")).not.toBeInTheDocument();
   expect(screen.queryByText("Re: shortlist")).not.toBeInTheDocument();

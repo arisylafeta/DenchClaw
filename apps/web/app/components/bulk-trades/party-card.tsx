@@ -31,10 +31,12 @@ export type PartyCardProps = {
   glance?: { label: string; value: string }[];
   notes?: { label: string; value: React.ReactNode; bad?: boolean }[];
   related?: { label: string; items: { id: string; label: string; onOpen?: () => void }[] };
+  /** Extra sections that belong to the person, shown at the foot of the card (their email and WhatsApp conversations). */
+  children?: React.ReactNode;
 };
 
 /** A compact CRM person header: avatar, name, email, role and company, actions, then what matters at a glance. */
-export function PartyCard({ role, name, companyId, personId, person, contact, email, glance = [], notes = [], related, loading }: PartyCardProps) {
+export function PartyCard({ role, name, companyId, personId, person, contact, email, glance = [], notes = [], related, loading, children }: PartyCardProps) {
   if (loading !== undefined) glance = ["Stage", "Owner", "Last heard"].map((label) => glance.find((item) => item.label === label) ?? { label, value: "Not recorded" });
   if (loading !== undefined) notes = [
     ...["Usually buys", "Notes"].map((label) => notes.find((note) => note.label === label) ?? { label, value: "Not recorded" }),
@@ -106,6 +108,7 @@ export function PartyCard({ role, name, companyId, personId, person, contact, em
           )}
         </div>
       )}
+      {children && <div className="mx-4 mb-4 flex flex-col gap-2">{children}</div>}
       {!companyId && <p className="border-t px-4 py-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>Not linked to a CRM company yet.</p>}
     </section>
     </BusyRegion>

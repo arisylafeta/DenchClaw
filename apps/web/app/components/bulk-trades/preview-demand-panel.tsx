@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, ChevronDown, ChevronRight, ClipboardList, FileText, History, Mail, MessageCircle } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, ChevronRight, ClipboardList, ExternalLink, FileText, History, Mail, MessageCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { BusyRegion, Sh } from "./bt-shimmer";
@@ -55,7 +55,7 @@ function TheAsk({ demand, supply, loading }: { demand: Demand; supply: DemandSup
 }
 
 /** The buyer as a compact person card, like the CRM person page: who they are and where they stand. */
-function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: BuyerContext | null; onOpenDemand?: (id: string) => void }) {
+function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; context: BuyerContext | null; onOpenDemand?: (id: string) => void; thread?: React.ReactNode }) {
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
@@ -73,53 +73,54 @@ function TheBuyer({ demand, context, onOpenDemand }: { demand: Demand; context: 
   return (
     <PartyCard loading={context === null} role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id} person={context?.person ?? null}
       contact={demand.contact} email={demand.email} glance={glance} notes={notes}
-      related={{ label: "Also asking for", items: others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined })) }} />
+      related={{ label: "Also asking for", items: others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined })) }}>
+      {thread}
+    </PartyCard>
   );
 }
 
-/** One channel's messages with the buyer as a single accordion: a summary line (count, last message) that opens to every message. */
-function ChannelAccordion({ label, icon: Icon, entries, empty }: { label: string; icon: typeof Mail; entries: ThreadEntry[]; empty: string }) {
+/** One channel's messages with the buyer as a single white accordion: a summary line that opens to every message, plus a link to the thread itself. */
+function ChannelAccordion({ label, icon: Icon, entries, empty, linkLabel }: { label: string; icon: typeof Mail; entries: ThreadEntry[]; empty: string; linkLabel: string }) {
   const [open, setOpen] = useState(false);
-  const last = entries.reduce<string | null>((latest, e) => (!latest || Date.parse(e.at) > Date.parse(latest) ? e.at : latest), null);
-  const summary = entries.length ? `${entries.length} message${entries.length === 1 ? "" : "s"}${last ? ` · last ${shortDate(last.slice(0, 10))}` : ""}` : empty;
+  const newest = entries.reduce<ThreadEntry | null>((latest, e) => (!latest || Date.parse(e.at) > Date.parse(latest.at) ? e : latest), null);
+  const threadHref = entries.filter((e) => e.href).sort((x, y) => Date.parse(y.at) - Date.parse(x.at))[0]?.href ?? null;
+  const summary = entries.length ? `${entries.length} message${entries.length === 1 ? "" : "s"}${newest ? ` · last ${shortDate(newest.at.slice(0, 10))}` : ""}` : empty;
   const bodyId = `channel-${label.toLowerCase()}`;
   return (
-    <div className="rounded-lg border" style={{ borderColor: "var(--bt-divider)" }}>
-      <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)} className={`${rowFocus} flex w-full items-center gap-3 px-3 py-3 text-left`}>
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--bt-segment)", color: "var(--bt-muted)" }}><Icon size={13} aria-hidden /></span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-semibold">{label}</span>
-          <span className="block text-[12px]" style={{ color: "var(--bt-muted)" }}>{summary}</span>
-        </span>
-        {open ? <ChevronDown size={14} aria-hidden style={{ color: "var(--bt-muted)" }} /> : <ChevronRight size={14} aria-hidden style={{ color: "var(--bt-muted)" }} />}
-      </button>
-      {open && <ul id={bodyId} className="px-3 pb-1">{entries.map((e) => <MessageItem key={e.id} entry={e} loading={false} />)}</ul>}
+    <div className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+      <div className="flex items-center gap-2 pr-3">
+        <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)} className={`${rowFocus} flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left`}>
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--bt-segment)", color: "var(--bt-muted)" }}><Icon size={13} aria-hidden /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-semibold">{label}</span>
+            <span className="block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{summary}</span>
+          </span>
+          {open ? <ChevronDown size={14} aria-hidden style={{ color: "var(--bt-muted)" }} /> : <ChevronRight size={14} aria-hidden style={{ color: "var(--bt-muted)" }} />}
+        </button>
+        {threadHref && (
+          <a href={threadHref} aria-label={linkLabel} title={linkLabel} className={`${rowFocus} inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-[11px]`} style={{ background: "var(--bt-segment)", color: "var(--bt-text-2)" }}>
+            <ExternalLink size={11} aria-hidden /> Open
+          </a>
+        )}
+      </div>
+      {open && <ul id={bodyId} className="border-t px-3" style={{ borderColor: "var(--bt-divider)" }}>{entries.map((e) => <MessageItem key={e.id} entry={e} loading={false} />)}</ul>}
     </div>
   );
 }
 
-/** The conversation with the buyer, kept under their card: one accordion for WhatsApp and one for email, so a long chat is one row until opened. */
-function BuyerThread({ mail, conversation, loading, name }: { mail: BuyerMail[]; conversation: ThreadEntry[] | null; loading: boolean; name: string }) {
+/** The buyer's conversations, shown inside their card: one accordion for WhatsApp and one for email, each linking to the thread. */
+function BuyerThread({ mail, conversation, loading }: { mail: BuyerMail[]; conversation: ThreadEntry[] | null; loading: boolean }) {
   // Labelled threads (email and WhatsApp about this exact demand) win; until a thread is labelled we show all mail with the buyer.
   const entries: ThreadEntry[] = conversation ?? mail.map((m) => ({
     id: m.id, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body ?? m.preview, at: m.at, ref: m.thread_id,
     href: m.thread_id ? `/?crm=inbox&view=conversations&thread=${encodeURIComponent(m.thread_id)}&crmOnly=false` : null,
   }));
-  const label = conversation ? "Conversation with" : "Email with";
-  if (loading) {
-    return (
-      <section aria-label="Conversation with the buyer" className="flex flex-col gap-1">
-        <h3 className={css.label}>Conversation with the buyer</h3>
-        <ul>{Array.from({ length: 3 }, (_, i) => <MessageItem key={i} loading entry={{ id: `loading-${i}`, channel: "mail", direction: null, title: "", body: " ", at: "", ref: null, href: null }} />)}</ul>
-      </section>
-    );
-  }
+  if (loading) return null;
   return (
-    <section aria-label={conversation ? "Conversation with the buyer" : "Email with the buyer"} className="flex flex-col gap-2">
-      <h3 className={css.label}>{label} {name.split(/\s+/)[0]}</h3>
-      {conversation && <ChannelAccordion label="WhatsApp" icon={MessageCircle} entries={entries.filter((e) => e.channel === "whatsapp")} empty="No WhatsApp messages linked to this demand" />}
-      <ChannelAccordion label="Email" icon={Mail} entries={entries.filter((e) => e.channel === "mail")} empty="No email linked to this demand" />
-    </section>
+    <>
+      {conversation && <ChannelAccordion label="WhatsApp" icon={MessageCircle} linkLabel="Open WhatsApp chat" entries={entries.filter((e) => e.channel === "whatsapp")} empty="No WhatsApp messages linked to this demand" />}
+      <ChannelAccordion label="Email" icon={Mail} linkLabel="Open email thread" entries={entries.filter((e) => e.channel === "mail")} empty="No email linked to this demand" />
+    </>
   );
 }
 
@@ -192,8 +193,8 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       </div>
       {tab === "Details" && (
         <div data-preview-details className="flex w-full flex-col gap-6">
-          <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
-          <BuyerThread mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} name={demand.contact ?? demand.buyer} />
+          <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand}
+            thread={<BuyerThread mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} />} />
           <TheAsk demand={demand} supply={supply} loading={supplyLoading} />
         </div>
       )}
