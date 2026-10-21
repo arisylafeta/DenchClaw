@@ -166,7 +166,8 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
         queued.current.add(clientMessageId)
         update(previous => {
           const waiting = previous.messages.find(message => message.id === clientMessageId)
-          return waiting ? { ...previous, messages: [...previous.messages.filter(message => message.id !== clientMessageId), { ...waiting, source: 'queued' as const }] } : previous
+          // Only requeue a message that has not started its own turn yet.
+          return waiting && (waiting.source === 'queued' || waiting.pending) ? { ...previous, messages: [...previous.messages.filter(message => message.id !== clientMessageId), { ...waiting, source: 'queued' as const }] } : previous
         })
       } else if (result.status === 'redirected') {
         queued.current.delete(clientMessageId)

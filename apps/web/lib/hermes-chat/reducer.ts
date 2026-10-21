@@ -43,6 +43,8 @@ export interface ChatMessage {
   steerBoundary?: boolean
   /** Accepted steer the agent has not read yet: Hermes delivers it after the current tool batch. */
   steerPending?: boolean
+  /** Waiting message whose blocking turn has ended; the next turn start belongs to it. */
+  queuedReady?: boolean
   id: string; role: 'user' | 'assistant'; segments: Segment[]; startedAt: number
   completedAt?: number; pending: boolean; interim?: boolean; interrupted?: boolean
   error?: string; error_surface?: ErrorSurface | null; status?: 'complete' | 'error' | 'interrupted'

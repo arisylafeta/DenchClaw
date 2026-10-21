@@ -89,22 +89,27 @@ function settleWaiting(state: ReconcileState, event: GatewayEvent, wasBusy: bool
   const waiting = state.messages.filter(message => message.source === 'queued')
   if (!waiting.length) return state
   if (event.type === 'tool.complete') {
+    // Hermes reads steers after the whole tool batch, not after the first parallel tool.
+    if (state.messages.some(message => message.segments.some(segment => segment.type === 'tool' && segment.status === 'running'))) return state
     let next = state
     for (const message of waiting.filter(item => item.steerPending)) {
       next = placeSteer({ ...next, messages: next.messages.map(item => item.id === message.id ? { ...item, steerPending: false } : item) }, message.id)
     }
     return next
   }
-  if (event.type === 'message.complete') return { ...state, messages: state.messages.map(message => message.steerPending ? { ...message, steerPending: false } : message) }
+  if (event.type === 'message.complete') return { ...state, messages: state.messages.map(message => message.source === 'queued' ? { ...message, steerPending: false, queuedReady: true } : message) }
+  // Only messages that were already waiting when the previous turn ended start with this one; a
+  // resumed (auto-continue) turn starts while the new prompt is still not ready.
   if (event.type === 'message.start' && !wasBusy) {
-    return { ...state, messages: state.messages.map(message => message.source === 'queued'
-      ? { ...message, source: message.rowId !== undefined ? 'durable' as const : 'optimistic' as const, pending: false } : message) }
+    return { ...state, messages: state.messages.map(message => message.source === 'queued' && message.queuedReady
+      ? { ...message, source: message.rowId !== undefined ? 'durable' as const : 'optimistic' as const, pending: false, queuedReady: false } : message) }
   }
   return state
 }
 /** The gateway accepted a steer; it stays in the queue until the agent reads it. */
 export function markSteerPending(state: ReconcileState, clientId: string): ReconcileState {
-  return { ...state, messages: state.messages.map(message => message.id === clientId ? { ...message, source: 'queued' as const, steerPending: true } : message) }
+  // A late acknowledgement must not requeue a message whose turn already started or that history resolved.
+  return { ...state, messages: state.messages.map(message => message.id === clientId && message.source === 'queued' && !message.queuedReady ? { ...message, steerPending: true } : message) }
 }
 /** clientId is stable CRM identity; no gateway user_row_id is needed. */
 export function submitOptimistic(state: ReconcileState, submission: OptimisticSubmission): ReconcileState {

@@ -52,3 +52,36 @@ it("places an accepted steer inline when the agent reads it after a tool batch",
   expect(displayTurns(state.messages).map(message => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
   expect(messageText(state.messages.at(-1)!)).toBe("Checked logs too.");
 });
+
+it("holds a steer until the whole parallel tool batch finishes", () => {
+  let state: ReconcileState = { ...initialReconcileState("s", "k"), hydrating: false };
+  state = submitOptimistic(state, { clientId: "a", text: "Do work" });
+  state = applyLive(state, [{ type: "message.start" }, { type: "tool.start", payload: { tool_id: "t1", name: "terminal", args: { command: "pwd" } } }, { type: "tool.start", payload: { tool_id: "t2", name: "terminal", args: { command: "ls" } } }], ctx);
+  state = markSteerPending(submitOptimistic(state, { clientId: "b", text: "Also check logs" }), "b");
+  state = applyLive(state, [{ type: "tool.complete", payload: { tool_id: "t1", name: "terminal", result: "ok" } }], ctx);
+  expect(state.messages.find(message => message.id === "b")?.source).toBe("queued");
+  state = applyLive(state, [{ type: "tool.complete", payload: { tool_id: "t2", name: "terminal", result: "ok" } }], ctx);
+  expect(state.messages.find(message => message.id === "b")?.source).toBe("optimistic");
+});
+
+it("does not requeue a message whose turn started before the steer acknowledgement arrived", () => {
+  let state: ReconcileState = { ...initialReconcileState("s", "k"), hydrating: false };
+  state = submitOptimistic(state, { clientId: "a", text: "First" });
+  state = applyLive(state, [{ type: "message.start" }, { type: "message.delta", payload: { text: "Working" } }], ctx);
+  state = submitOptimistic(state, { clientId: "b", text: "Second" });
+  state = applyLive(state, [{ type: "message.complete", payload: { text: "Working", status: "complete" } }, { type: "message.start" }], ctx);
+  expect(state.messages.find(message => message.id === "b")?.source).toBe("optimistic");
+  state = markSteerPending(state, "b");
+  expect(state.messages.find(message => message.id === "b")?.source).toBe("optimistic");
+});
+
+it("keeps a prompt queued while a resumed turn runs, and starts it after that turn ends", () => {
+  let state: ReconcileState = { ...initialReconcileState("s", "k"), hydrating: false };
+  // Sent while idle; the server resumes the interrupted turn first and answers "queued".
+  state = submitOptimistic(state, { clientId: "b", text: "New prompt" });
+  state = { ...state, messages: state.messages.map(message => message.id === "b" ? { ...message, source: "queued" as const } : message) };
+  state = applyLive(state, [{ type: "message.start" }, { type: "message.delta", payload: { text: "Resumed" } }], ctx);
+  expect(state.messages.find(message => message.id === "b")?.source).toBe("queued");
+  state = applyLive(state, [{ type: "message.complete", payload: { text: "Resumed", status: "complete" } }, { type: "message.start" }], ctx);
+  expect(state.messages.find(message => message.id === "b")?.source).toBe("optimistic");
+});
