@@ -19,7 +19,17 @@ const STAGES: [OfferStage, string][] = [
   ["loi", "LOI"], ["won", "Won"], ["declined", "Declined"], ["lost", "Lost"],
 ];
 const STAGE_LABEL = Object.fromEntries(STAGES) as Record<OfferStage, string>;
-const STAGE_TONE: Partial<Record<OfferStage, string>> = { bid_in: "var(--bt-amber)", loi: "var(--bt-green)", won: "var(--bt-green)", declined: "var(--bt-red)", lost: "var(--bt-red)" };
+/** Stage badge colours: a dot and a tinted pill per stage, so the pipeline reads at a glance. */
+const STAGE_TONE: Record<OfferStage, { fg: string; bg: string; border: string }> = {
+  to_contact: { fg: "var(--bt-muted)", bg: "var(--bt-segment)", border: "var(--bt-border)" },
+  teaser_sent: { fg: "var(--bt-blue)", bg: "var(--bt-blue-bg)", border: "var(--bt-blue-border)" },
+  specs_nda: { fg: "var(--bt-purple)", bg: "var(--bt-purple-bg)", border: "var(--bt-purple-border)" },
+  bid_in: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
+  loi: { fg: "var(--bt-green)", bg: "var(--bt-green-bg)", border: "var(--bt-green-border)" },
+  won: { fg: "var(--bt-green)", bg: "var(--bt-green-bg)", border: "var(--bt-green-border)" },
+  declined: { fg: "var(--bt-red)", bg: "var(--bt-red-bg)", border: "var(--bt-red-border)" },
+  lost: { fg: "var(--bt-red)", bg: "var(--bt-red-bg)", border: "var(--bt-red-border)" },
+};
 const CHANNEL_ICON = { mail: Mail, whatsapp: MessageCircle, call: Phone, note: StickyNote, quote: Tag, status: Tag, document: Tag, other: StickyNote } as const;
 
 const initials = (name: string | null) => (name ?? "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || "?";
@@ -32,8 +42,10 @@ const termsLine = (o: Offer) => {
 
 function StagePill({ stage, loading = false }: { stage: OfferStage | null; loading?: boolean }) {
   if (!stage) return null;
+  const tone = STAGE_TONE[stage];
   return (
-    <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "var(--bt-segment)", color: STAGE_TONE[stage] ?? "var(--bt-muted)" }}>
+    <span data-stage={stage} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ background: tone.bg, color: tone.fg, borderColor: tone.border }}>
+      {!loading && <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: tone.fg }} />}
       <Sh on={loading} chars={7}>{STAGE_LABEL[stage]}</Sh>
     </span>
   );
@@ -63,6 +75,7 @@ function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
   offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onUpdated: () => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [view, setView] = useState<"threads" | "suggested">("threads");
   const loading = offers === null && !error;
   const suggestionsLoading = supply === null && supplyLoading;
   const [adding, setAdding] = useState(false);
@@ -84,16 +97,21 @@ function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
   }, [offers, supply]);
   async function create(input: { name: string; contact?: string; wants?: string }) {
     setBusy(true); setFormError(null);
-    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer; onUpdated(); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
+    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer; onUpdated(); setView("threads"); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
     catch (err) { setFormError(err instanceof Error ? err.message : "Could not add."); }
     finally { setBusy(false); }
   }
   return (
     <BusyRegion busy={loading || suggestionsLoading} label="Loading offers" className="flex w-full flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-          <Sh on={loading} chars={9}>{offers ? (offers.length ? `${offers.length} ${offers.length === 1 ? "thread" : "threads"}` : "Nobody offered yet") : null}</Sh>
-        </p>
+        <div role="group" aria-label="Offers view" className="inline-flex gap-1 p-[3px]" style={{ background: "var(--bt-segment)" }}>
+          {([["threads", "Threads", offers?.length], ["suggested", "Suggested", suggestionsLoading ? undefined : suggestions.length]] as const).map(([value, label, n]) => (
+            <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)} className={`${rowFocus} px-3 py-1 text-[12px]`}
+              style={{ background: view === value ? "var(--bt-badge)" : "transparent", color: view === value ? "var(--bt-on-badge)" : "var(--bt-muted)" }}>
+              {label} · <Sh on={n === undefined} chars={1}>{n}</Sh>
+            </button>
+          ))}
+        </div>
         <button type="button" className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle} onClick={() => setAdding(!adding)}>
           <Plus size={14} aria-hidden /> New offer
         </button>
@@ -106,7 +124,7 @@ function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
         </form>
       )}
       <ErrorText error={error ?? formError} />
-      {(loading || (offers && offers.length > 0)) && (
+      {view === "threads" && (loading || (offers && offers.length > 0)) && (
         <ul className="flex flex-col">
           {(loading ? PLACEHOLDER_OFFERS : offers ?? []).map((o) => {
             const terms = termsLine(o);
@@ -132,12 +150,12 @@ function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
           })}
         </ul>
       )}
-      {offers && !offers.length && !adding && (
+      {view === "threads" && offers && !offers.length && !adding && (
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Start a thread for each person you offer this to. Their emails and WhatsApp messages, bids and next steps collect there.</p>
       )}
-      {(suggestionsLoading || suggestions.length > 0) && (
+      {view === "suggested" && (
         <section aria-label="Suggested" className="flex flex-col gap-1">
-          <h3 className="text-[12px] font-semibold" style={{ color: "var(--bt-muted)" }}>Suggested from our inventory</h3>
+          <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>Sellers in our inventory that fit this ask. Nobody has been contacted: starting a thread moves them to Threads.</p>
           <ul>
             {(suggestionsLoading ? Array.from({ length: 3 }, (_, i) => ({ name: `loading-${i}`, note: "" })) : suggestions).map((s) => (
               <li key={s.name} className="flex items-center gap-3 border-t py-2 first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
@@ -147,6 +165,7 @@ function OfferList({ offers, error, supply, supplyLoading, base, onUpdated }: {
               </li>
             ))}
           </ul>
+          {!suggestionsLoading && !suggestions.length && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No new sellers to suggest.</p>}
         </section>
       )}
     </BusyRegion>

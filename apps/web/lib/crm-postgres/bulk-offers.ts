@@ -25,6 +25,8 @@ export type Offer = {
   updated_at: string;
   last_message_at: string | null;
   messages: number;
+  /** Inbox threads picked for this offer by hand. When set, only these threads are its email. */
+  threads: string[];
 };
 
 /** One line in a thread: an email, WhatsApp message, call, bid, note or stage change. */
@@ -43,15 +45,20 @@ export type ThreadEntry = {
 const SELECT = `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id, o.name, o.contact, o.stage,
   o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms, o.data->>'next_step' as next_step,
   o.data->>'next_due' as next_due, o.updated_at::text,
-  (select max(a.occurred_at)::text from crm_bulk_listing_activity a where a.offer_id = o.id) as last_message_at,
-  (select count(*)::int from crm_bulk_listing_activity a where a.offer_id = o.id) as messages
+  nullif(greatest(
+    (select max(a.occurred_at) from crm_bulk_listing_activity a where a.offer_id = o.id),
+    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and m.thread_id = any (select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb))))
+  ), '-infinity'::timestamptz)::text as last_message_at,
+  ((select count(*) from crm_bulk_listing_activity a where a.offer_id = o.id)
+   + (select count(*) from mail_message m where m.crm_visible and m.thread_id = any (select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)))))::int as messages,
+  array(select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb))) as threads
   from crm_bulk_offers o`;
 
 /** Threads on a listing: the people we have offered it to (or asked), newest touch first. Contacts on the owner's side are not threads. */
 export async function listOffers(listingId: string): Promise<Offer[]> {
   return queryPg<Offer>(
     `${SELECT} where o.bulk_listing_id = $1 and o.role = 'counterparty'
-     order by coalesce((select max(a.occurred_at) from crm_bulk_listing_activity a where a.offer_id = o.id), o.updated_at) desc`, [listingId]);
+     order by o.updated_at desc`, [listingId]);
 }
 
 export async function getOffer(listingId: string, offerId: string): Promise<Offer | null> {
@@ -108,13 +115,13 @@ export async function offerThread(offer: Offer, userId: string | null): Promise<
   const email = offer.contact?.match(EMAIL)?.[0]?.toLowerCase() ?? null;
   const activity = await queryPg<{ id: string; kind: string; title: string; body: string | null; at: string; ref_id: string | null }>(
     `select id::text, kind, title, body, occurred_at::text as at, ref_id from crm_bulk_listing_activity where offer_id = $1 order by occurred_at desc limit 100`, [offer.id]);
-  const mail = offer.person_id || email ? await queryPg<{ id: string; direction: "inbound" | "outbound"; subject: string | null; body: string | null; at: string; thread_id: string | null }>(
+  const mail = offer.threads.length || offer.person_id || email ? await queryPg<{ id: string; direction: "inbound" | "outbound"; subject: string | null; body: string | null; at: string; thread_id: string | null }>(
     `select m.id, m.direction, m.subject, coalesce(m.body_preview, left(m.body_text, 600)) as body,
        coalesce(m.sent_at, m.created_at)::text as at, m.thread_id
      from mail_message m
      where m.crm_visible and ($3::uuid is null or m.mailbox_owner_id = $3::uuid)
-       and ((m.person_id is not null and m.person_id = $1) or ($2::text is not null and (lower(m.from_email) = $2 or lower(m.recipient_email) = $2 or $2 = any (select lower(x) from unnest(m.to_emails) x))))
-     order by coalesce(m.sent_at, m.created_at) desc limit 40`, [offer.person_id, email, userId]) : [];
+       and (case when cardinality($4::text[]) > 0 then m.thread_id = any ($4::text[]) else ((m.person_id is not null and m.person_id = $1) or ($2::text is not null and (lower(m.from_email) = $2 or lower(m.recipient_email) = $2 or $2 = any (select lower(x) from unnest(m.to_emails) x)))) end)
+     order by coalesce(m.sent_at, m.created_at) desc limit 60`, [offer.person_id, email, userId, offer.threads]) : [];
   const chat = offer.person_id ? await queryPg<{ id: string; direction: "inbound" | "outbound" | null; body: string | null; at: string }>(
     `select wm.id, wm.direction, wm.body, wm.occurred_at::text as at
      from whatsapp_message wm

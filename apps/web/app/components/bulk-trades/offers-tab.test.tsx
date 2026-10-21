@@ -11,7 +11,7 @@ const offer: Offer = {
   id: "bof_1", listing_id: "d1", role: "counterparty", person_id: null, company_id: null, name: "Attero Recycling", contact: "a@attero.example",
   stage: "bid_in", declined_reason: null, wants: null, last_touch_on: "2026-10-12", last_touch_via: "mail",
   terms: { amount: 380, currency: "EUR", unit: "pack", firmness: "firm" }, next_step: "Send specs", next_due: null,
-  updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2,
+  updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2, threads: [],
 };
 const thread: ThreadEntry[] = [
   { id: "m1", channel: "mail", direction: "inbound", title: "Re: packs", body: "We can bid 380 per pack", at: "2026-10-12T10:00:00Z", ref: "t1", href: "/?crm=inbox&view=conversations&thread=t1&crmOnly=false" },
@@ -38,15 +38,19 @@ describe("Offers tab", () => {
     const view = render(<OffersTab demandId="d1" supply={null} supplyLoading onChanged={() => {}} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
     expect(screen.getByRole("button", { name: "New offer" })).toBeEnabled();
-    expect(screen.getAllByRole("listitem")).toHaveLength(7);
-    expect(screen.getByText("Suggested from our inventory")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    // Suggestions never mix with threads: they live behind their own toggle and are inert while loading.
+    await userEvent.click(screen.getByRole("button", { name: /Suggested/ }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
     for (const button of screen.getAllByRole("button", { name: "Start thread" })) expect(button).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: /Threads/ }));
     expect(screen.queryByText("Attero Recycling")).not.toBeInTheDocument();
     await act(async () => resolve(new Response(JSON.stringify({ offers: [offer] }))));
     view.rerender(<OffersTab demandId="d1" supply={null} onChanged={() => {}} />);
     expect(await screen.findByText("Attero Recycling")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.queryByText("Suggested from our inventory")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Threads/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Bid in").closest("[data-stage]")).toHaveAttribute("data-stage", "bid_in");
   });
 
   it("keeps the thread controls and timeline visible but disabled during hydration", async () => {
