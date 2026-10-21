@@ -20,8 +20,10 @@ create table if not exists crm_bulk_thread_links (
   confirmed_by text,
   confirmed_at timestamptz,
   check ((state = 'confirmed') = (confirmed_by is not null)),
-  unique (channel, thread_id, bulk_listing_id)
+  check (channel in ('mail', 'whatsapp'))
 );
+-- One thread can belong to the listing's own party and to several offers (a group email), but only once to each.
+create unique index if not exists crm_bulk_thread_links_unique_idx on crm_bulk_thread_links (channel, thread_id, bulk_listing_id, coalesce(offer_id, ''));
 create index if not exists crm_bulk_thread_links_listing_idx on crm_bulk_thread_links (bulk_listing_id, state);
 create index if not exists crm_bulk_thread_links_offer_idx on crm_bulk_thread_links (offer_id) where offer_id is not null;
 create index if not exists crm_bulk_thread_links_thread_idx on crm_bulk_thread_links (channel, thread_id);
