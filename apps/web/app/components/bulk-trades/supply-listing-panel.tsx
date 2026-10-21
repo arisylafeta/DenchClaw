@@ -30,6 +30,8 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
   const [tab, setTab] = useState("Details");
   const [context, setContext] = useState<Context | null>(null);
   const [conversation, setConversation] = useState<ThreadEntry[] | null | undefined>();
+  // A failed read of the labelled threads must not fall back to unrelated seller mail: say so instead.
+  const [conversationFailed, setConversationFailed] = useState(false);
   const [fields, setFields] = useState<TradeField[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const registry = useRegistry();
@@ -39,10 +41,10 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 12_000);
     const options = { signal: abort.signal };
-    setContext(null); setConversation(undefined); setFields(null); setError(null);
+    setContext(null); setConversation(undefined); setConversationFailed(false); setFields(null); setError(null);
     void Promise.allSettled([
       request<Context>(`${endpoint}/context`, options).then((r) => { if (live) setContext({ person: r.person ?? null, mail: Array.isArray(r.mail) ? r.mail : [] }); }).catch(() => { if (live) setContext({ mail: [] }); }),
-      request<{ conversation: ThreadEntry[] | null }>(`${endpoint}/conversation`, options).then((r) => { if (live) setConversation(r.conversation ?? null); }).catch(() => { if (live) setConversation(null); }),
+      request<{ conversation: ThreadEntry[] | null }>(`${endpoint}/conversation`, options).then((r) => { if (live) setConversation(r.conversation ?? null); }).catch(() => { if (live) { setConversation([]); setConversationFailed(true); } }),
       request<{ fields: TradeField[] }>(`${endpoint}/fields`, options).then((r) => { if (live) setFields(r.fields); }).catch((err) => { if (live) { setFields([]); setError(err instanceof Error ? err.message : "Could not load details."); } }),
     ]).finally(() => clearTimeout(timer));
     return () => { live = false; abort.abort(); clearTimeout(timer); };
@@ -61,6 +63,7 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
     {tab === "Details" && <BusyRegion busy={busy} label="Loading supply details" className="flex w-full min-w-0 flex-col gap-6">
       <PartyCard loading={context === null} role="Seller" name={listing.party} companyId={listing.company_id} personId={listing.person_id} person={context?.person ?? null} contact={listing.contact} email={listing.email}>
         <section aria-label={`Conversation with ${listing.party}`}><h3 className="mb-3 text-[13px] font-semibold">Conversation with {listing.party}</h3>
+          {conversationFailed && <ErrorText error="Could not load the conversation. Reload to try again." />}
           <ListingConversation subject="listing" mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} />
         </section>
       </PartyCard>

@@ -25,6 +25,8 @@ export type Offer = {
   updated_at: string;
   last_message_at: string | null;
   messages: number;
+  /** True when the offer sits on another listing and points back at this one (counterpart_id); `name` is then that listing's party. */
+  incoming: boolean;
   /** Inbox threads picked for this offer by hand. When set, only these threads are its email. */
   threads: string[];
 };
@@ -42,27 +44,29 @@ export type ThreadEntry = {
   href: string | null;
 };
 
-const SELECT = `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id, o.name, o.contact, o.stage,
+const selectOffers = (user: string) => `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id,
+  case when o.bulk_listing_id <> $1 then coalesce((select b.party from crm_bulk_listings b where b.id = o.bulk_listing_id), o.name) else o.name end as name, o.contact, o.stage,
   o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms, o.data->>'next_step' as next_step,
   o.data->>'next_due' as next_due, o.updated_at::text,
   nullif(greatest(
     (select max(a.occurred_at) from crm_bulk_listing_activity a where a.offer_id = o.id),
-    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')))
+    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')))
   ), '-infinity'::timestamptz)::text as last_message_at,
   ((select count(*) from crm_bulk_listing_activity a where a.offer_id = o.id)
-   + (select count(*) from mail_message m where m.crm_visible and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed'))))::int as messages,
+   + (select count(*) from mail_message m where m.crm_visible and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed'))))::int as messages,
   array((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')) as threads
+  , (o.bulk_listing_id <> $1) as incoming
   from crm_bulk_offers o`;
 
 /** Threads on a listing: the people we have offered it to (or asked), newest touch first. Contacts on the owner's side are not threads. */
-export async function listOffers(listingId: string): Promise<Offer[]> {
+export async function listOffers(listingId: string, userId: string | null): Promise<Offer[]> {
   return queryPg<Offer>(
-    `${SELECT} where o.bulk_listing_id = $1 and o.role = 'counterparty'
-     order by o.updated_at desc`, [listingId]);
+    `${selectOffers("$2")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.role = 'counterparty'
+     order by o.updated_at desc`, [listingId, userId]);
 }
 
-export async function getOffer(listingId: string, offerId: string): Promise<Offer | null> {
-  return (await queryPg<Offer>(`${SELECT} where o.bulk_listing_id = $1 and o.id = $2`, [listingId, offerId]))[0] ?? null;
+export async function getOffer(listingId: string, offerId: string, userId: string | null): Promise<Offer | null> {
+  return (await queryPg<Offer>(`${selectOffers("$3")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.id = $2`, [listingId, offerId, userId]))[0] ?? null;
 }
 
 export type OfferInput = { name: string; contact?: string | null; personId?: string | null; companyId?: string | null; wants?: string | null; stage?: OfferStage };
@@ -73,13 +77,13 @@ export async function addOffer(listingId: string, input: OfferInput): Promise<Of
     `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage)
      values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8)`,
     [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null, input.stage ?? "to_contact"]);
-  return (await getOffer(listingId, id))!;
+  return (await getOffer(listingId, id, null))!;
 }
 
 export type OfferPatch = { stage?: OfferStage; nextStep?: string | null; nextDue?: string | null; wants?: string | null; terms?: OfferTerms; declinedReason?: string | null };
 
 export async function updateOffer(listingId: string, offerId: string, patch: OfferPatch, actorUserId: string | null): Promise<Offer | null> {
-  const current = await getOffer(listingId, offerId);
+  const current = await getOffer(listingId, offerId, actorUserId);
   if (!current) return null;
   const data: Record<string, unknown> = {};
   if ("nextStep" in patch) data.next_step = patch.nextStep?.trim() || null;
@@ -92,16 +96,16 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
        declined_reason = case when $9::boolean then $10 else declined_reason end,
        data = (data || $11::jsonb) - coalesce((select array_agg(k) from jsonb_each_text($11::jsonb) e(k, v) where v is null), '{}'::text[]),
        updated_at = now()
-     where bulk_listing_id = $1 and id = $2`,
-    [listingId, offerId, "stage" in patch, patch.stage ?? null, "wants" in patch, patch.wants ?? null,
+     where id = $2 and bulk_listing_id = $1`,
+    [current.listing_id, offerId, "stage" in patch, patch.stage ?? null, "wants" in patch, patch.wants ?? null,
       "terms" in patch, JSON.stringify(patch.terms ?? {}), "declinedReason" in patch, patch.declinedReason ?? null, JSON.stringify(data)]);
   if (patch.stage && patch.stage !== current.stage) {
     await queryPg(
       `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
        values ($1, $2, $3, 'status', $4, $5::jsonb, $6)`,
-      [listingId, offerId, current.person_id, `${current.name ?? "Offer"} · ${STAGE_LABEL[patch.stage]}`, JSON.stringify({ from: current.stage, stage: patch.stage }), actorUserId]);
+      [current.listing_id, offerId, current.person_id, `${current.name ?? "Offer"} · ${STAGE_LABEL[patch.stage]}`, JSON.stringify({ from: current.stage, stage: patch.stage }), actorUserId]);
   }
-  return getOffer(listingId, offerId);
+  return getOffer(listingId, offerId, actorUserId);
 }
 
 export const STAGE_LABEL: Record<OfferStage, string> = {
@@ -146,6 +150,6 @@ export async function offerThread(offer: Offer, userId: string | null): Promise<
 export async function addThreadEntry(listingId: string, offer: Offer, input: { kind: "note" | "call" | "quote" | "mail" | "whatsapp"; title: string; body?: string | null }, actorUserId: string | null) {
   await queryPg(
     `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, body, actor_user_id)
-     values ($1, $2, $3, $4, $5, $6, $7)`, [listingId, offer.id, offer.person_id, input.kind, input.title.trim(), input.body ?? null, actorUserId]);
+     values ($1, $2, $3, $4, $5, $6, $7)`, [offer.listing_id, offer.id, offer.person_id, input.kind, input.title.trim(), input.body ?? null, actorUserId]);
   await queryPg(`update crm_bulk_offers set last_touch_on = current_date, last_touch_via = $2, updated_at = now() where id = $1`, [offer.id, input.kind]);
 }

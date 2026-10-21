@@ -79,4 +79,8 @@ describe("sheet filters in the URL", () => {
     expect(filtersFromRoute({ ...route, side: "bogus" }).side).toBe("all");
     expect(filtersFromRoute({ ...route, side: "both" }).side).toBe("all"); // retired value in an old shared link
   });
+
+  it("titles a supply listing from its stored listing_title (migrated lots keep it in context), as the detail does", () => {
+    expect(supply({ context: { listing_title: "41 FPT eBS69 packs" }, summary: "raw summary" }).title).toBe("41 FPT eBS69 packs");
+  });
 });

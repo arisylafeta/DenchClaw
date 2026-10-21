@@ -12,7 +12,7 @@ export async function GET(_req: Request, { params }: Context) {
   if ("response" in guard) return guard.response;
   const { id, offerId } = await params;
   if (!await getListing(id)) return notFound("Listing");
-  const offer = await getOffer(id, offerId);
+  const offer = await getOffer(id, offerId, guard.userId);
   if (!offer) return notFound("Offer");
   return Response.json({ offer, thread: await offerThread(offer, guard.userId) });
 }
@@ -45,8 +45,8 @@ export async function POST(req: Request, { params }: Context) {
   if (!body || !(KINDS as readonly unknown[]).includes(body.kind)) return badRequest("Invalid entry kind.");
   if (typeof body.title !== "string" || !body.title.trim()) return badRequest("Write something first.");
   if (body.body != null && typeof body.body !== "string") return badRequest("Body must be text.");
-  const offer = await getOffer(id, offerId);
+  const offer = await getOffer(id, offerId, guard.userId);
   if (!offer) return notFound("Offer");
   await addThreadEntry(id, offer, { kind: body.kind as typeof KINDS[number], title: body.title, body: body.body as string | undefined }, guard.userId);
-  return Response.json({ offer: await getOffer(id, offerId), thread: await offerThread((await getOffer(id, offerId))!, guard.userId) }, { status: 201 });
+  return Response.json({ offer: await getOffer(id, offerId, guard.userId), thread: await offerThread((await getOffer(id, offerId, guard.userId))!, guard.userId) }, { status: 201 });
 }

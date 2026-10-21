@@ -82,6 +82,7 @@ const OFFER_PROGRESS: Record<string, { progress: string; tone: SheetTone }> = {
 
 export function listingRow(input: ListingSheetInput): SheetRow {
   const specText = (key: string) => typeof input.spec[key] === "string" ? input.spec[key] as string : null;
+  const ctxText = (key: string) => { const value = (input.context as Record<string, unknown> | null)?.[key]; return typeof value === "string" ? value : null; };
   const category = specText("product_family") ?? specText("trade_kind");
   const fallback = input.kind === "demand"
     ? input.activity_count > 0 ? "Being worked" : "New"
@@ -93,7 +94,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     side: input.kind === "demand" ? "buyer" : "seller",
     title: input.kind === "demand"
       ? demandTitle({ wants: input.summary, product_family: category, buyer: input.party, context: input.context })
-      : text(specText("listing_title")) ?? text(specText("title")) ?? input.summary,
+      : text(ctxText("listing_title")) ?? text(specText("listing_title")) ?? text(specText("title")) ?? input.summary,
     company: text(input.party), company_id: input.company_id, category,
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
     progress: hold ? "On hold" : progress?.progress ?? fallback,

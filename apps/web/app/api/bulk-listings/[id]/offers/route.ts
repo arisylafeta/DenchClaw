@@ -11,7 +11,7 @@ export async function GET(_req: Request, { params }: Context) {
   if ("response" in guard) return guard.response;
   const { id } = await params;
   if (!await getListing(id)) return notFound("Listing");
-  return Response.json({ offers: await listOffers(id) });
+  return Response.json({ offers: await listOffers(id, guard.userId) });
 }
 
 export async function POST(req: Request, { params }: Context) {

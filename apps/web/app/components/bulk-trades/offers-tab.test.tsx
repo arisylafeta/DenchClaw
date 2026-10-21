@@ -11,7 +11,7 @@ const offer: Offer = {
   id: "bof_1", listing_id: "d1", role: "counterparty", person_id: null, company_id: null, name: "Attero Recycling", contact: "a@attero.example",
   stage: "bid_in", declined_reason: null, wants: null, last_touch_on: "2026-10-12", last_touch_via: "mail",
   terms: { amount: 380, currency: "EUR", unit: "pack", firmness: "firm" }, next_step: "Send specs", next_due: null,
-  updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2, threads: [],
+  updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2, threads: [], incoming: false,
 };
 const thread: ThreadEntry[] = [
   { id: "m1", channel: "mail", direction: "inbound", title: "Re: packs", body: "We can bid 380 per pack", at: "2026-10-12T10:00:00Z", ref: "t1", href: "/?crm=inbox&view=conversations&thread=t1&crmOnly=false" },
