@@ -73,8 +73,8 @@ function Bubble({ m, outbound, first, group, sender, threadId, editable }: { m: 
   </div>;
 }
 
-/** WhatsApp Web look for captured history. Read only. `embedded` fills a panel; otherwise it is a full page. */
-export function WhatsappConversation({ id, embedded = false, onClose, onOpenPerson }: { id: string; embedded?: boolean; onClose?: () => void; onOpenPerson?: (personId: string) => void }) {
+/** WhatsApp Web look for captured history. Read only. Always a side panel in the Inbox, never a full page. */
+export function WhatsappConversation({ id, onClose, onOpenPerson }: { id: string; onClose?: () => void; onOpenPerson?: (personId: string) => void }) {
   const [data, setData] = useState<WhatsappConversationData | null>(null);
   const [offset, setOffset] = useState<number | "tail">("tail");
   const [error, setError] = useState("");
@@ -106,9 +106,9 @@ export function WhatsappConversation({ id, embedded = false, onClose, onOpenPers
   const go = (next: number, end: boolean) => { toEnd.current = end; setOffset(Math.max(0, next)); };
   const group = thread?.kind === "group";
   const imported = id.startsWith(ARCHIVE_PREFIX);
-  return <div className={`${styles.wa} ${styles.pane} ${embedded ? "" : "mx-auto min-h-screen max-w-[920px]"}`}>
+  return <div className={`${styles.wa} ${styles.pane}`}>
     <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3" style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }}>
-      {(onClose || !embedded) && <button type="button" aria-label="Back to Inbox" onClick={onClose ?? (() => { window.location.href = "/?crm=inbox&view=whatsapp"; })} className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }}><ArrowLeft size={16} aria-hidden /></button>}
+      {onClose && <button type="button" aria-label="Back to Inbox" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }}><ArrowLeft size={16} aria-hidden /></button>}
       <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold" style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}>{!data ? null : group ? <Users size={17} /> : initialsOf(label.text)}</span>
       <div className="min-w-0 flex-1">
         <h1 className="flex items-baseline gap-1.5 truncate text-[15px] font-semibold leading-5" title={label.hint}>{!data ? <ShimmerBar w={140} h={14} style={{ marginTop: 3 }} /> : label.text}{data && label.inferred && <span className="text-[12px] font-normal" style={{ color: "var(--color-text-muted)" }}>~ inferred</span>}</h1>

@@ -74,7 +74,7 @@ export function WhatsappContext({
           {threads.map((t) => (
             <li key={t.id} className={styles.logRow}>
               <a
-                href={`/whatsapp/threads/${encodeURIComponent(t.id)}`}
+                href={`/?crm=inbox&view=whatsapp&thread=${encodeURIComponent(t.id)}`}
                 className="flex items-center gap-3"
               >
                 <strong>
@@ -203,7 +203,7 @@ export function WhatsappIdentityList() {
                 <a
                   key={t.id}
                   className="underline"
-                  href={`/whatsapp/threads/${encodeURIComponent(t.id)}`}
+                  href={`/?crm=inbox&view=whatsapp&thread=${encodeURIComponent(t.id)}`}
                 >
                   {t.subject || (t.kind === "group" ? "Group chat" : "Direct chat")}
                 </a>

@@ -63,5 +63,5 @@ export function WhatsappView({ query, selectedId, onSelect, onOpenPerson }: { qu
   // Nothing open: the chat list is the whole screen, with no empty pane beside it.
   if (!selected) {return list;}
   return <InboxLayout {...PANEL_LAYOUT} hasSelection list={list}
-    conversation={<WhatsappConversation key={selected} id={selected} embedded onClose={() => select(null)} onOpenPerson={onOpenPerson} />} />;
+    conversation={<WhatsappConversation key={selected} id={selected} onClose={() => select(null)} onOpenPerson={onOpenPerson} />} />;
 }

@@ -41,7 +41,7 @@ def screen(db, apply=False, limit=25, model=None):
         sources = []
         for row in rows:
             sources.append({'kind': 'whatsapp', 'id': row['id'], 'thread': row['thread_id'],
-                'key': 'whatsapp:' + row['thread_id'], 'url': '/whatsapp/threads/' + quote(row['thread_id'], safe='') + '#message-' + quote(row['id'], safe=''),
+                'key': 'whatsapp:' + row['thread_id'], 'url': '/?crm=inbox&view=whatsapp&thread=' + quote(row['thread_id'], safe='') + '#message-' + quote(row['id'], safe=''),
                 'label': 'WhatsApp captured message', 'at': row['occurred_at'], 'text': row['body'],
                 'inbound': True, 'from': None, 'participants': set(), 'version': row['version'],
                 'trusted_name': row['trusted_name'], 'trusted_contact': row['trusted_contact'], 'trusted_identity': {'person_id': row['person_id'],

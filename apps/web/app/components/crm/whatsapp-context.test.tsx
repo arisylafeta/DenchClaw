@@ -24,7 +24,7 @@ describe("WhatsApp read-only context", () => {
     expect(screen.getByText("Group · shared context")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Group fixture/ })).toHaveAttribute(
       "href",
-      "/whatsapp/threads/group",
+      "/?crm=inbox&view=whatsapp&thread=group",
     );
     expect(fetch.mock.calls[0][0]).toContain("personId=person");
   });

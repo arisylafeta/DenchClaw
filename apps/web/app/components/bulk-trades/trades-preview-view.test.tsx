@@ -247,7 +247,7 @@ describe("Trades Preview sheet", () => {
 
   it("keeps accepted no-trade demand source-linked and shows conflict-checked undo", async () => {
     const proposal = { id: "accepted-demand", kind: "possible_demand", summary: "Synthetic accepted demand",
-      source_url: "/whatsapp/threads/synthetic#message-synthetic", source_kind: "whatsapp" };
+      source_url: "/?crm=inbox&view=whatsapp&thread=synthetic#message-synthetic", source_kind: "whatsapp" };
     let undone = false, conflict = true;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/bulk-trades/proposals/accepted-demand" && init?.method === "POST") {
