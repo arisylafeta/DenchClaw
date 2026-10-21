@@ -122,8 +122,11 @@ export async function offerThread(offer: Offer, userId: string | null): Promise<
      order by wm.occurred_at desc limit 40`, [offer.person_id]) : [];
   const channelOf = (kind: string): ThreadEntry["channel"] =>
     kind === "mail" || kind === "whatsapp" || kind === "call" || kind === "quote" || kind === "note" || kind === "status" || kind === "document" ? kind : "other";
+  // A logged mail summary points at an inbox thread. When the real messages of that thread are shown, the summary is History's job, not the thread's.
+  const shownThreads = new Set(mail.map((m) => m.thread_id).filter((t): t is string => !!t));
+  const covered = (a: { kind: string; ref_id: string | null }) => a.kind === "mail" && !!a.ref_id && [...shownThreads].some((t) => a.ref_id!.includes(t));
   const entries: ThreadEntry[] = [
-    ...activity.map((a) => ({ id: `a${a.id}`, channel: channelOf(a.kind), direction: null, title: a.title, body: a.body, at: a.at, ref: a.ref_id })),
+    ...activity.filter((a) => !covered(a)).map((a) => ({ id: `a${a.id}`, channel: channelOf(a.kind), direction: null, title: a.title, body: a.body, at: a.at, ref: a.ref_id })),
     ...mail.map((m) => ({ id: `m${m.id}`, channel: "mail" as const, direction: m.direction, title: m.subject ?? "(no subject)", body: m.body, at: m.at, ref: m.thread_id })),
     ...chat.map((c) => ({ id: `w${c.id}`, channel: "whatsapp" as const, direction: c.direction, title: c.direction === "outbound" ? "You" : offer.name ?? "Them", body: c.body, at: c.at, ref: null })),
   ];
