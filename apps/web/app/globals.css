@@ -2594,7 +2594,9 @@ td:has(> div > :empty) {
    (light and dark), with rounded corners. Applies only while the preview page is mounted, and `:has` also
    reaches its side sheets and dialogs, which render outside the page. Bulk Trades itself is unchanged.
    Status colours are not overridden: they keep the values above. */
-body:has(.bt-preview) .bulk-trades {
+body:has(.bt-preview) .bulk-trades,
+/* The Inbox (Mail, WhatsApp, Campaigns) shares one palette: campaigns used the darker Bulk Trades one. */
+body:has(.inbox-surface) .bulk-trades {
   --bt-bg: var(--color-bg);
   --bt-surface: var(--color-surface);
   --bt-row-hover: var(--color-surface-hover);

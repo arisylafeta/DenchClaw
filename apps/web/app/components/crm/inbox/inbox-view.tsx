@@ -65,7 +65,7 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   }, [query, campaignId, router]);
   const update = (key: string, value: string | boolean) => setFilters((current) => ({ ...current, [key]: value }));
   const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly", "showInternal"].includes(key) && value !== "" && value !== undefined);
-  return <div className={`${styles.page} flex h-full min-h-0 flex-col`}>
+  return <div className={`${styles.page} inbox-surface flex h-full min-h-0 flex-col`}>
     <header className={styles.header}>
       <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Inbox</h1>
       <nav role="tablist" aria-label="Inbox sections" className={styles.tabs}>
