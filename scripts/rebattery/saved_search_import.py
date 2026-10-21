@@ -159,6 +159,19 @@ REQUEST_SOURCES = {
 PRICE_UNITS = {"pack": "pack", "cell": "cell"}
 
 
+def request_quantity(request):
+    if request.get("quantity_text"):
+        return request["quantity_text"]
+    if request.get("quantity_value") is not None and request.get("quantity_unit"):
+        return f"{request['quantity_value']} {request['quantity_unit']}"
+    return QUANTITIES.get(request.get("quantity"), request.get("quantity"))
+
+
+def request_timing(request):
+    return (request.get("timing_text") or request.get("needed_by")
+            or TIMINGS.get(request.get("timing"), request.get("timing")))
+
+
 def map_sourcing_request(request):
     """One platform sourcing request as a request buy-box, or None when it should not be imported."""
     email = (request.get("email") or "").strip().lower()
@@ -171,29 +184,52 @@ def map_sourcing_request(request):
         notes.insert(0, f"Searched for: {filters['q']}")
     if (request.get("details") or "").strip():
         notes.insert(0, f"In their words: {request['details'].strip()}")
-    notes.append(f"When: {TIMINGS.get(request.get('timing'), request.get('timing'))}")
+    timing = request_timing(request)
+    if timing:
+        notes.append(f"When: {timing}")
+    if request.get("needed_by"):
+        notes.append(f"Needed by: {request['needed_by']}")
+    for key, label, choices, spec_key in (
+            ("chemistry", "Chemistry", CHEMISTRIES, "chemistries"),
+            ("format", "Format", {**FORMATS, "system": "Systems"}, "formats")):
+        value = request.get(key)
+        if value:
+            mapped = choices.get(value.lower().replace("-", "_"))
+            if mapped and mapped in LISTS[spec_key]:
+                survey.add(spec, spec_key, mapped)
+            else:
+                notes.append(f"{label}: {value}")
+    if request.get("capacity_text"):
+        notes.append(f"Capacity: {request['capacity_text']}")
 
-    # A per-unit price fits the buy-box when the unit is clear (one format: packs or cells); else it goes in the note.
+    # Explicit units take precedence: a module/total price must never become a pack price.
     price, currency = request.get("target_price"), request.get("target_currency")
-    formats = as_list(filters.get("format"))
-    unit = PRICE_UNITS.get(formats[0]) if len(formats) == 1 else None
+    formats = as_list(request.get("format") or filters.get("format"))
+    unit = request.get("price_unit") or (PRICE_UNITS.get(formats[0].lower()) if len(formats) == 1 else None)
     structured = {}
-    if price is not None and currency in survey.BUY_BOX["currencies"]:
-        if unit:
-            structured = {"max_price": float(price), "price_currency": currency, "price_unit": unit}
+    if request.get("needed_by"):
+        structured["needed_by"] = request["needed_by"]
+    if price is not None:
+        if float(price) > 0 and currency in ("EUR", "USD", "GBP") and unit in ("kWh", "pack", "cell"):
+            structured.update(max_price=float(price), price_currency=currency, price_unit=unit)
         else:
-            notes.append(f"Target price: {currency} {float(price):,.2f} per unit")
+            notes.append(f"Target price: {currency or 'unspecified currency'} {float(price):,.2f} per {unit or 'unit'}")
+    jules = request.get("source") == "jules"
     asked_from = REQUEST_SOURCES.get(request.get("source"), "the marketplace")
-    notes.append(f"Asked us to source it from {asked_from} on rebattery.io.")
+    notes.append("Asked us to source it through Jules on rebattery.io." if jules else
+                 f"Asked us to source it from {asked_from} on rebattery.io.")
 
     return {
         "kind": "request", "basis": None, "status": "qualifying", "email": email, "contact": None,
         "wants": (request.get("wants") or "Battery").strip(),
-        "quantity": QUANTITIES.get(request.get("quantity"), request.get("quantity")),
+        "quantity": request_quantity(request),
         "location": request.get("country"), "spec": spec, **structured,
         "note": "\n".join(notes), "observed_on": str(request["created_at"])[:10],
-        "source_kind": "import", "source_id": f"sourcing_request:{request['id']}", "source_label": "Sourcing request",
-        "source_url": f"{SITE}{request.get('catalog_path') or '/marketplace/listings'}",
+        "source_kind": "jules" if jules else "import", "source_id": f"sourcing_request:{request['id']}",
+        "source_label": "Jules" if jules else "Sourcing request",
+        "source_url": (f"{SITE}/operations/jules/{request['conversation_id']}"
+                       if jules and request.get("conversation_id") else
+                       f"{SITE}{request.get('catalog_path') or '/marketplace/listings'}"),
     }
 
 
@@ -209,16 +245,16 @@ def quiet_mentions(text):
 
 def announcement(request, row):
     """A short Discord note for one new sourcing request, written for the team."""
-    heading = " · ".join(x for x in (QUANTITIES.get(request.get("quantity")), TIMINGS.get(request.get("timing")),
+    heading = " · ".join(x for x in (request_quantity(request), request_timing(request),
                                      country_name(request["country"]) if request.get("country") else None) if x)
-    lines = [f"**New sourcing request** · {heading}", f"**{quiet_mentions(row['wants'])}**"]
+    lines = [f"**New sourcing request** · {quiet_mentions(heading)}", f"**{quiet_mentions(row['wants'])}**"]
     details = (request.get("details") or "").strip()
     if details:
         if len(details) > DETAILS_MAX:
             details = details[:DETAILS_MAX].rstrip() + "…"
         lines += [f"> {quiet_mentions(line)}" if line else ">" for line in details.splitlines()]
     if request.get("target_price") is not None and request.get("target_currency"):
-        unit = row.get("price_unit") or "unit"
+        unit = request.get("price_unit") or row.get("price_unit") or "unit"
         lines.append(f"Target: {request['target_currency']} {float(request['target_price']):,.0f} per {unit}")
     company = row.get("buyer") if row.get("company_id") else None
     lines.append(f"Buyer: {row['email']}" + (f" · {company} (in CRM)" if company else " · not in CRM yet"))
@@ -280,7 +316,8 @@ def fetch_sourcing_requests(env_path=PLATFORM_ENV):
     """Every sourcing request from the platform."""
     return fetch_platform(
         "sourcing_requests",
-        "id,email,wants,details,filters,catalog_path,quantity,timing,target_price,target_currency,country,source,status,created_at",
+        # '*' includes Jules fields after migration and works before those columns exist.
+        "*",
         {}, env_path)
 
 

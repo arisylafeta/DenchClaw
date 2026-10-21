@@ -147,7 +147,73 @@ class AnnouncementTest(unittest.TestCase):
         self.assertFalse(saved.is_recent(request(created_at="2026-10-06T00:00:00+00:00"), now))
 
 
+class JulesRequestImportTest(unittest.TestCase):
+    def jules(self, **overrides):
+        return request(**{**dict(source="jules", conversation_id="conversation-1", catalog_path=None,
+                                quantity=None, timing=None, filters={}, chemistry="LFP", format="Module",
+                                capacity_text="280 Ah", quantity_text="First batch of 40 modules",
+                                quantity_value=40, quantity_unit="modules", timing_text="Next month",
+                                needed_by="2026-12-01", price_unit="kWh", target_price=55,
+                                sourcing_consent=True, wants="B" * 2000), **overrides})
+
+    def test_maps_jules_without_catalogue_enums(self):
+        row = saved.map_sourcing_request(self.jules())
+        self.assertEqual((row["kind"], row["basis"], row["status"]), ("request", None, "qualifying"))
+        self.assertEqual(row["source_kind"], "jules")
+        self.assertEqual(row["source_label"], "Jules")
+        self.assertEqual(row["source_url"], "https://www.rebattery.io/operations/jules/conversation-1")
+        self.assertEqual(row["quantity"], "First batch of 40 modules")
+        self.assertEqual(row["needed_by"], "2026-12-01")
+        self.assertEqual(row["spec"], {"chemistries": ["LFP"], "formats": ["Modules"]})
+        self.assertEqual((row["max_price"], row["price_currency"], row["price_unit"]), (55.0, "EUR", "kWh"))
+        self.assertEqual(row["wants"], "B" * 2000)
+        self.assertIn("Capacity: 280 Ah", row["note"])
+        self.assertIn("When: Next month", row["note"])
+        self.assertNotIn("None", row["note"])
+
+    def test_quantity_and_timing_fallbacks(self):
+        row = saved.map_sourcing_request(self.jules(quantity_text=None, timing_text=None))
+        self.assertEqual(row["quantity"], "40 modules")
+        self.assertIn("When: 2026-12-01", row["note"])
+        row = saved.map_sourcing_request(self.jules(quantity_text=None, quantity_value=None,
+                                                   quantity_unit=None, timing_text=None, needed_by=None))
+        self.assertIsNone(row["quantity"])
+        self.assertNotIn("When:", row["note"])
+        self.assertNotIn("None", row["note"])
+
+    def test_unsupported_prices_stay_in_notes_even_with_pack_filter(self):
+        for unit, currency, price in (("module", "EUR", 55), ("total", "USD", 55),
+                                      ("tonne", "GBP", 55), ("pack", "CHF", 55), ("cell", "EUR", 0)):
+            with self.subTest(unit=unit, currency=currency, price=price):
+                row = saved.map_sourcing_request(self.jules(price_unit=unit, target_currency=currency,
+                                                           target_price=price, filters={"format": "pack"}))
+                self.assertNotIn("max_price", row)
+                self.assertNotIn("price_currency", row)
+                self.assertNotIn("price_unit", row)
+                self.assertIn(f"per {unit}", row["note"])
+
+    def test_unknown_chemistry_and_system_format_are_preserved(self):
+        row = saved.map_sourcing_request(self.jules(chemistry="unlisted chemistry", format="System"))
+        self.assertIn("Chemistry: unlisted chemistry", row["note"])
+        self.assertTrue("Systems" in row["spec"].get("formats", []) or "Format: System" in row["note"])
+
+    def test_announcement_uses_jules_fields_and_price_unit(self):
+        req = self.jules(price_unit="module")
+        row = saved.map_sourcing_request(req)
+        note = saved.announcement(req, row)
+        self.assertIn("First batch of 40 modules · Next month", note)
+        self.assertIn("per module", note)
+        self.assertNotIn("None", note)
+
+
 class FetchTest(unittest.TestCase):
+    def test_sourcing_select_works_before_and_after_migration(self):
+        for rows in ([request()], [JulesRequestImportTest().jules()]):
+            with self.subTest(source=rows[0]["source"]), mock.patch.object(saved, "fetch_platform", return_value=rows) as fetch:
+                result = saved.fetch_sourcing_requests()
+                fetch.assert_called_once_with("sourcing_requests", "*", {}, saved.PLATFORM_ENV)
+                self.assertIsNotNone(saved.map_sourcing_request(result[0]))
+
     def test_reads_every_page(self):
         pages = [[{"id": i} for i in range(1000)], [{"id": 1000}, {"id": 1001}]]
         offsets = []
