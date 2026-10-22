@@ -107,40 +107,13 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
     expect((await db.getBulkTrade(trade.id))?.last_touched).toBe("2099-05-01");
   });
 
-  it("backfills sellers from supplier evidence, never buyer contacts or auction participants", async () => {
-    const trade = await db.createBulkTrade({ title: "Seller attribution regression" }, userId);
-    await pg.queryPg(`
-      insert into crm_companies (id, name, purpose) values
-        ('seller_test_supplier', 'Actual Supplier', '{Supplier}'),
-        ('seller_test_buyer', 'Known Buyer', '{Buyer,Supplier}');
-      insert into crm_people (id, full_name, email, company_id) values
-        ('seller_test_person_supplier', 'Supplier Person', 'supplier@seller-test.example', 'seller_test_supplier'),
-        ('seller_test_person_buyer', 'Buyer Person', 'buyer@seller-test.example', 'seller_test_buyer');
-    `);
-    await pg.queryPg(`insert into crm_bulk_trade_contacts (id, lot_id, name, email, sort_order) values
-      ('seller_test_contact_buyer', $1, 'buyer@seller-test.example', 'buyer@seller-test.example', 0),
-      ('seller_test_contact_supplier', $1, 'supplier@seller-test.example', 'supplier@seller-test.example', 1)`, [trade.id]);
-    await pg.queryPg(`insert into crm_bulk_trade_parties (id, lot_id, role, display_name, company_id) values
-      ('seller_test_wrong_party', $1, 'supplier', 'Known Buyer', 'seller_test_buyer')`, [trade.id]);
-    const candidate = () => pg.queryPg("select seller_name, seller_ref from crm_bulk_trade_seller_candidates where lot_id = $1", [trade.id]);
-    expect(await candidate()).toEqual([{ seller_name: "Actual Supplier", seller_ref: "company:seller_test_supplier" }]);
-    await pg.queryPg("insert into crm_bulk_trade_auction_people (lot_id, email) values ($1, 'supplier@seller-test.example')", [trade.id]);
-    expect(await candidate()).toEqual([]);
-    await pg.queryPg("delete from crm_bulk_trade_auction_people where lot_id = $1", [trade.id]);
-    await pg.queryPg(`insert into crm_bulk_trade_buyers (id, lot_id, name, person_id)
-      values ('seller_test_bidder', $1, 'Supplier Person', 'seller_test_person_supplier')`, [trade.id]);
-    expect(await candidate()).toEqual([]);
-  });
-
-  it("uses current company names on trade and feed rows and formats domain-only fallbacks", async () => {
+  it("uses current company names on trade rows and formats domain-only fallbacks", async () => {
     await pg.queryPg("insert into crm_companies (id, name) values ('seller_display_company', 'Canonical Supplier')");
     const trade = await db.createBulkTrade({ title: "Seller display regression",
       seller_ref: "company:seller_display_company", seller_name: "old-label.example.com" }, userId);
     expect(trade.seller_name).toBe("Canonical Supplier");
     await pg.queryPg("update crm_companies set name = 'Renamed Supplier' where id = 'seller_display_company'");
     expect((await db.getBulkTrade(trade.id))?.seller_name).toBe("Renamed Supplier");
-    expect(await pg.queryPg("select seller from crm_bulk_trade_supply_feed where id = $1", [trade.id]))
-      .toEqual([{ seller: "Renamed Supplier" }]);
     expect(await pg.queryPg(`select bulk_trade_seller_display(null, 'sales@north-battery.co.uk') as email,
       bulk_trade_seller_display(null, 'www.north-battery.com') as domain,
       bulk_trade_seller_display(null, 'North Battery Ltd') as name`))

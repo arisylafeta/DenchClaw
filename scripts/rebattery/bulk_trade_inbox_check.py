@@ -2127,12 +2127,12 @@ def summary(conn):
         matches = cur.fetchall()
         cur.execute(
             """select w.full_name, w.email, c.name as company, c.buyer_tier as tier, w.waiting_since, w.last_in_subject
-               from crm_bulk_trade_buyer_waiting w left join crm_companies c on c.id = w.company_id
+               from crm_bulk_buyer_waiting w left join crm_companies c on c.id = w.company_id
                where w.waiting_since > now() - interval '%s days'
                order by case c.buyer_tier when 'A' then 0 when 'B' then 1 when 'C' then 2 else 3 end, w.waiting_since
                limit 10""" % WAITING_DAYS)
         waiting = cur.fetchall()
-        cur.execute("select count(*) as n from crm_bulk_trade_buyer_waiting where waiting_since <= now() - interval '%s days'"
+        cur.execute("select count(*) as n from crm_bulk_buyer_waiting where waiting_since <= now() - interval '%s days'"
                     % WAITING_DAYS)
         older_waiting = cur.fetchone()["n"]
         cur.execute(
