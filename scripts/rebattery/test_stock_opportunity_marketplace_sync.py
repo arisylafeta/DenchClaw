@@ -1,6 +1,6 @@
 import unittest
 
-from stock_opportunity_marketplace_sync import plan
+from stock_opportunity_marketplace_sync import new_listings, plan, stock_row
 
 
 class Plan(unittest.TestCase):
@@ -17,6 +17,21 @@ class Plan(unittest.TestCase):
             ("c", "listed", "published", "opportunity", "draft"),
             ("d", "opportunity", "missing", "listed", "published"),
         ])
+
+
+    def test_new_listings_skip_linked_bundles_drafts_and_our_own_accounts(self):
+        mk = lambda i, **kw: {"id": i, "listing_status": "published", "listing_kind": "individual", "reference": "1",
+                              "accounts": {"name": "Seller"}, "listing_specs": [{"metadata_json": {}}], **kw}
+        listings = [mk("a"), mk("b"), mk("c", listing_status="draft"), mk("d", accounts={"name": "ReBattery Sales"}),
+                    mk("e", reference="bulk:x"), mk("f", listing_specs=[{"metadata_json": {"sourceUnits": [{}]}}])]
+        self.assertEqual([l["id"] for l in new_listings(listings, {"b"})], ["a"])
+
+    def test_stock_row_maps_specs(self):
+        row = stock_row({"id": "x", "title": "Leaf 40kWh", "reference": "0012", "buy_now_price": 900, "currency": "GBP",
+                         "published_at": "2026-10-01T10:00:00Z", "listing_specs": [{"format": "Pack", "quantity_available": 2,
+                         "location_address": {"city": "Leeds", "country": "GB"}, "metadata_json": {"vin": "V1"}}]})
+        self.assertEqual((row["quantity"], row["quantity_unit"], row["location"], row["supplier_ref"], row["observed_on"]),
+                         (2, "pack", "Leeds, GB", "marketplace:0012", "2026-10-01"))
 
 
 if __name__ == "__main__":
