@@ -1042,7 +1042,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 		() => getCopyableMessageText(message.role, segments),
 		[message.role, segments],
 	);
-	const showCopyAction = copyable && !!copyText;
+	const showCopyAction = copyable && !isUser && !!copyText;
 	const markdownComponents = useMemo(
 		() => createMarkdownComponents(onFilePathClick),
 		[onFilePathClick],

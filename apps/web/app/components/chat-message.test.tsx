@@ -76,29 +76,15 @@ describe("ChatMessage", () => {
     expect(writeTextSpy).toHaveBeenCalledWith("Hello from Dench.");
   });
 
-  it("copies user turns with attachment metadata", async () => {
-    const user = userEvent.setup();
-    const writeTextSpy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-
+  it("does not show a copy action on user messages", () => {
     render(
       <ChatMessage
-        message={{
-          id: "user-copy",
-          role: "user",
-          parts: [{
-            type: "text",
-            text: "[Attached files: /tmp/alpha.ts, /tmp/beta.ts] Please compare these files.",
-          }],
-        }}
+        message={{ id: "user-copy", role: "user", parts: [{ type: "text", text: "Hi there" }] }}
         copyable
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Copy message" }));
-
-    expect(writeTextSpy).toHaveBeenCalledWith(
-      "Please compare these files.\n\nAttached files:\n/tmp/alpha.ts\n/tmp/beta.ts",
-    );
+    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
   });
 
   it("hides the speaker action while the assistant message is still streaming", () => {
