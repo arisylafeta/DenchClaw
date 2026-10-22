@@ -24,7 +24,7 @@ export async function readCampaignActivityLedger(id: string): Promise<CampaignAc
   const [tables] = await queryPg<{ sends: boolean; links: boolean; listings: boolean }>(`
     select to_regclass('mail_message') is not null as sends,
            to_regclass('mail_message_link') is not null as links,
-           to_regclass('crm_bulk_trade_lots') is not null as listings
+           to_regclass('crm_bulk_listings') is not null as listings
   `);
   if (!tables?.sends) { return { campaign_id: id, sent_at: campaign.launched_at, links: [] }; }
   const [send] = await queryPg<{ sent_at: string | Date | null }>(`
@@ -33,8 +33,8 @@ export async function readCampaignActivityLedger(id: string): Promise<CampaignAc
   `, [id]);
   const links = tables.links ? await queryPg<CampaignActivityLedgerLink>(`
     select s.person_id, s.recipient_email, l.cta_key, l.listing_id,
-           ${tables.listings ? `(select lot.title from crm_bulk_trade_lots lot
-               where lot.listing_id = l.listing_id
+           ${tables.listings ? `(select coalesce(nullif(lot.spec->>'listing_title', ''), nullif(lot.context->>'listing_title', ''), lot.summary) from crm_bulk_listings lot
+               where lot.marketplace_listing_id = l.listing_id
                order by lot.updated_at desc nulls last, lot.id limit 1)` : "null::text"} as label,
            l.first_clicked_at
       from mail_message s

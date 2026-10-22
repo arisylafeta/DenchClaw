@@ -282,7 +282,7 @@ export async function getPostgresPersonProfile(
   const campaignTable = await queryPg<{ available: boolean; links_available: boolean; listings_available: boolean }>(
     `select to_regclass('mail_message') is not null as available,
             to_regclass('mail_message_link') is not null as links_available,
-            to_regclass('crm_bulk_trade_lots') is not null as listings_available`,
+            to_regclass('crm_bulk_listings') is not null as listings_available`,
   );
   const campaignRows = campaignTable[0]?.available ? await queryPg<CampaignSendRow>(`
     select s.id as send_id, s.campaign_id, c.campaign_name, s.listing_id, s.auction_url, s.recipient_email,
@@ -307,10 +307,10 @@ export async function getPostgresPersonProfile(
   for (const row of linkRows) { if (row.listing_id) { listingIds.add(row.listing_id); } }
   const cachedListings = campaignTable[0]?.listings_available && listingIds.size
     ? await queryPg<{ listing_id: string; title: string | null; auction_slug: string | null }>(`
-      select distinct on (lot.listing_id) lot.listing_id, lot.title, lot.auction_slug
-        from crm_bulk_trade_lots lot
-       where lot.listing_id = any($1::text[])
-       order by lot.listing_id, (nullif(lot.auction_slug, '') is not null) desc,
+      select distinct on (lot.marketplace_listing_id) lot.marketplace_listing_id as listing_id, coalesce(nullif(lot.spec->>'listing_title', ''), nullif(lot.context->>'listing_title', ''), lot.summary) as title, lot.auction_slug
+        from crm_bulk_listings lot
+       where lot.marketplace_listing_id = any($1::text[])
+       order by lot.marketplace_listing_id, (nullif(lot.auction_slug, '') is not null) desc,
                 lot.updated_at desc nulls last, lot.id
     `, [[...listingIds]])
     : [];

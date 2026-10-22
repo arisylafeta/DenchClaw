@@ -131,7 +131,7 @@ describe("getPostgresPersonProfile", () => {
         created_at: null, updated_at: null,
       }]; }
       if (sql.includes("to_regclass")) { return [{ available: true, links_available: true, listings_available: true }]; }
-      if (sql.includes("from crm_bulk_trade_lots")) { return [
+      if (sql.includes("from crm_bulk_listings")) { return [
         { listing_id: "cached", title: "  FPT battery modules  ", auction_slug: "fpt-battery-modules" },
         { listing_id: "bad-slug", title: "Battery lot", auction_slug: "../t/private-token" },
       ]; }
@@ -161,7 +161,7 @@ describe("getPostgresPersonProfile", () => {
       listing_url: "https://rebattery.io/marketplace/auctions/fpt-battery-modules",
     });
     expect(JSON.stringify(profile)).not.toContain("private-token");
-    const cacheReads = queryPgMock.mock.calls.filter(([sql]) => sql.includes("from crm_bulk_trade_lots"));
+    const cacheReads = queryPgMock.mock.calls.filter(([sql]) => sql.includes("from crm_bulk_listings"));
     expect(cacheReads).toHaveLength(1);
     expect(cacheReads[0][1]).toEqual([listingIds]);
   });

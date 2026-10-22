@@ -60,9 +60,8 @@ export async function whatsappThreads(
     `select t.*, (t.kind='group') as shared_context,
     (select count(*) from whatsapp_message m where m.thread_id=t.id) as message_count
     from whatsapp_thread t where
-    ($3::text is not null and exists(select 1 from crm_bulk_trade_evidence_links e
-      left join whatsapp_message m on e.evidence_kind='whatsapp_live_message' and m.id=e.evidence_id
-      where e.lot_id=$3 and ((e.evidence_kind='whatsapp_live_thread' and e.evidence_id=t.id) or m.thread_id=t.id)))
+    ($3::text is not null and exists(select 1 from crm_bulk_thread_links e
+      where e.bulk_listing_id=$3 and e.channel='whatsapp' and e.thread_id=t.id and e.state<>'rejected'))
     or (($1::text is not null or $2::text is not null) and exists (
       select 1 from whatsapp_identity_link l left join crm_people p on p.id=l.person_id
       where l.account_id=t.account_id and l.valid_to is null
@@ -132,8 +131,8 @@ export async function whatsappConversation(id: string, limit = 50, offset = 0, t
     case when not i.shared and (select count(*) from whatsapp_identity_link l where l.identity_id=i.id and l.valid_to is null)=1
       then (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.identity_id=i.id and l.valid_to is null limit 1) end as sender_person_name,
     ${visibleBody("r")} as reply_body,
-    coalesce((select jsonb_agg(jsonb_build_object('lot_id',e.lot_id,'title',l.title) order by l.title) from crm_bulk_trade_evidence_links e join crm_bulk_trade_lots l on l.id=e.lot_id
-      where e.evidence_id=m.id and e.evidence_kind='whatsapp_live_message'),'[]'::jsonb) as trade_links
+    coalesce((select jsonb_agg(jsonb_build_object('lot_id',e.bulk_listing_id,'title',coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) order by coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) from crm_bulk_thread_links e join crm_bulk_listings l on l.id=e.bulk_listing_id
+      where e.channel='whatsapp' and e.thread_id=m.thread_id and e.reason='message:'||m.id and e.state<>'rejected'),'[]'::jsonb) as trade_links
     from whatsapp_message m left join whatsapp_identity i on i.id=m.sender_identity_id
     left join whatsapp_message r on r.thread_id=m.thread_id and r.provider_message_id=m.reply_to_provider_id
     where m.thread_id=$1 order by m.occurred_at,m.id limit $2 offset $3`,
@@ -255,7 +254,7 @@ export async function whatsappArchiveChats() {
     `select m.conversation as conversation,m.conversation as name,count(*)::int as message_count,max(m.occurred_at) as last_at,
       (array_agg(m.body order by m.occurred_at desc,m.message_index desc))[1] as last_body,
       (array_agg(case when m.sender=$1 then 'outbound' else 'inbound' end order by m.occurred_at desc,m.message_index desc))[1] as last_direction,
-      (select count(*)::int from crm_bulk_trade_evidence_links e join crm_trade_evidence_messages x on x.id=e.evidence_id where e.evidence_kind='whatsapp_message' and x.conversation=m.conversation) as linked_trades
+      (select count(*)::int from crm_bulk_listing_activity a join crm_trade_evidence_messages x on a.data->>'legacy_ref'='evidence:whatsapp_message:'||x.id where x.conversation=m.conversation) as linked_trades
     from crm_trade_evidence_messages m group by m.conversation order by max(m.occurred_at) desc`, [OWN_SENDER]);
   return { chats: rows.map(({ conversation, ...row }) => ({ ...row, id: `${ARCHIVE_PREFIX}${conversation}`, kind: "direct" as const })) };
 }
@@ -267,7 +266,7 @@ export async function whatsappArchiveConversation(conversation: string, limit = 
   if (tail) { offset = Math.max(0, total - limit); }
   const rows = await queryPg<{ id: string; sender: string; body: string; occurred_at: string; trade_links: Array<{ lot_id: string; title: string }> }>(
     `select m.id,m.sender,m.body,m.occurred_at,
-      coalesce((select jsonb_agg(jsonb_build_object('lot_id',e.lot_id,'title',l.title) order by l.title) from crm_bulk_trade_evidence_links e join crm_bulk_trade_lots l on l.id=e.lot_id where e.evidence_id=m.id and e.evidence_kind='whatsapp_message'),'[]'::jsonb) as trade_links
+      coalesce((select jsonb_agg(jsonb_build_object('lot_id',a.bulk_listing_id,'title',coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) order by coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) from crm_bulk_listing_activity a join crm_bulk_listings l on l.id=a.bulk_listing_id where a.data->>'legacy_ref'='evidence:whatsapp_message:'||m.id),'[]'::jsonb) as trade_links
     from crm_trade_evidence_messages m where m.conversation=$1 order by m.occurred_at,m.message_index limit $2 offset $3`, [conversation, limit, offset]);
   const messages: WhatsappMessage[] = rows.map((row) => ({
     id: row.id, direction: row.sender === OWN_SENDER ? "outbound" : "inbound", body: row.body, sender_name: row.sender === OWN_SENDER ? null : row.sender, sender_person_name: null,

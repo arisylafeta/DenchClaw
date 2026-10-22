@@ -44,8 +44,10 @@ describe("WhatsApp local context", () => {
     query.mockResolvedValue([]);
     await whatsappThreads({ tradeId: "trade" });
     expect(query.mock.calls[0][1]).toEqual([null, null, "trade", 50, 0]);
-    expect(query.mock.calls[0][0]).toContain("e.evidence_kind='whatsapp_live_thread'");
-    expect(query.mock.calls[0][0]).toContain("e.evidence_kind='whatsapp_live_message'");
+    // Trade context comes from WhatsApp thread links on the Trades Preview listing, never rejected ones.
+    expect(query.mock.calls[0][0]).toContain("from crm_bulk_thread_links e");
+    expect(query.mock.calls[0][0]).toContain("e.channel='whatsapp'");
+    expect(query.mock.calls[0][0]).toContain("e.state<>'rejected'");
   });
   it("preserves tombstones/replies and masks deleted, expired and view-once reply bodies", async () => {
     query
