@@ -30,6 +30,8 @@ case "${1:-}" in
       docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$NAME" psql -U postgres -d denchclaw -v ON_ERROR_STOP=1 -q < "$file" >/dev/null \
         || { echo "Failed loading $(basename "$file")" >&2; exit 1; }
     done
+    # Tests of the retired Bulk Trades paths still seed the frozen crm_bulk_trade_* tables (migration 077).
+    docker exec "$NAME" psql -U postgres -d denchclaw -q -c "alter database denchclaw set bulk.allow_frozen_write = 'on'" >/dev/null
     echo "$URL"
     ;;
   down)
