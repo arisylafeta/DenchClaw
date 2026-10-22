@@ -2,6 +2,8 @@ export type ChatPanelRuntimeState = {
   sessionId: string | null;
   sessionKey: string | null;
   isStreaming: boolean;
+  /** Streaming only because background subagents work; the sidebar shows a muted dot, not running. */
+  background?: boolean;
   awaiting?: boolean;
   status: string;
   isReconnecting: boolean;
@@ -28,6 +30,7 @@ export function mergeChatRuntimeSnapshot(
     current.sessionKey === snapshot.sessionKey &&
     current.isStreaming === snapshot.isStreaming &&
     current.awaiting === snapshot.awaiting &&
+    current.background === snapshot.background &&
     current.status === snapshot.status &&
     current.isReconnecting === snapshot.isReconnecting &&
     current.loadingSession === snapshot.loadingSession

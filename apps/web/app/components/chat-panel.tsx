@@ -1419,6 +1419,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				sessionKey: subagentSessionKey ?? null,
 				isStreaming,
 				awaiting: nativeGateway ? nativeChat.state.pendingRequests.length > 0 : undefined,
+				background: nativeGateway ? nativeChat.background : undefined,
 				status: runtimeStatus,
 				isReconnecting: nativeGateway ? nativeChat.connection !== "connected" : isReconnecting,
 				loadingSession,
@@ -1433,6 +1434,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			nativeGateway,
 			nativeConversationKey,
 			nativeChat.state.pendingRequests.length,
+			nativeChat.background,
 			runtimeStatus,
 			nativeChat.connection,
 		]);

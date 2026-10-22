@@ -7,7 +7,7 @@ import { discoverWorkspaces } from "./workspace";
 import { conversationKey, messagingConversation, parseConversationKey, type HermesConversation, type HermesMessage } from "./hermes-conversations";
 import { sessionDisplayNames } from "./hermes-session-names";
 import { sessionProjectLabels } from "./hermes-session-projects";
-import { recentlyActiveSessionIds } from "./hermes-session-activity";
+import { recentSessionActivity } from "./hermes-session-activity";
 import { hermesChatTransport } from "./hermes-gateway/transport-flag";
 import { getHermesGatewayManager, type HermesGatewayManager } from "./hermes-gateway/manager";
 
@@ -134,19 +134,26 @@ export function roomConversation(room: Room, working: boolean | null = null): He
     title: room.name, updatedAt: room.updated_at * 1000, working,
     participants: room.members.map((m) => ({ profile: m.profile, memberId: m.member_id, name: m.display_name || m.handle || m.profile, handle: m.handle })) };
 }
-const gatewayListCache = new WeakMap<HermesGatewayManager, { expires: number; pending: Promise<Record<string, { working: boolean | null; blocked: boolean | null }>> }>();
+type ListStatus = { working: boolean | null; blocked: boolean | null; background: boolean | null; live: boolean };
+const gatewayListCache = new WeakMap<HermesGatewayManager, { expires: number; pending: Promise<Record<string, ListStatus>> }>();
+const RUNNING_LIVE_STATUSES = ["working", "starting"];
 function gatewayListStatus(rows: HermesConversation[]) {
   const manager = getHermesGatewayManager();
   const cached = gatewayListCache.get(manager);
   if (cached && cached.expires > Date.now()) return cached.pending;
   const pending = (async () => {
-    const result: Record<string, { working: boolean | null; blocked: boolean | null }> = {};
+    const result: Record<string, ListStatus> = {};
     const active = await manager.call("session.active_list", {});
-    for (const row of rows) result[row.key] = { working: false, blocked: false };
+    for (const row of rows) result[row.key] = { working: false, blocked: false, background: false, live: false };
     const candidates = rows.flatMap(row => active.sessions.filter(live => live.session_key === row.id).map(live => ({ row, live })));
-    // A list poll must not attach the entire runtime pool. Four workers, eight
-    // warm activations maximum, with excess candidates explicitly unknown.
-    for (const { row } of candidates) result[row.key] = { working: null, blocked: null };
+    // active_list status is free for every live runtime; attaching is not. Seed every candidate from
+    // it, then refine at most eight (four workers) with pending requests and the child roster.
+    // active_list spans profiles: an id stored in two profiles proves nothing until attach verifies ownership.
+    const owners = new Map<string, number>();
+    for (const { row } of candidates) owners.set(row.id, (owners.get(row.id) ?? 0) + 1);
+    for (const { row, live } of candidates) result[row.key] = owners.get(row.id) === 1
+      ? { working: RUNNING_LIVE_STATUSES.includes(live.status), blocked: live.status === "waiting", background: null, live: true }
+      : { working: null, blocked: null, background: null, live: false };
     const selected = candidates.slice(0, 8);
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(4, selected.length) }, async () => {
@@ -154,8 +161,13 @@ function gatewayListStatus(rows: HermesConversation[]) {
         const { row, live } = selected[next++];
         const retained = manager.retainSession(row.participants[0].profile, row.id);
         const snapshot = await manager.attachLive(retained, live.id);
-        if (snapshot) result[row.key] = { working: Boolean(snapshot.running || live.status !== "idle" || snapshot.subagents?.some(child => !child.status || ["queued", "running"].includes(child.status))), blocked: Boolean(manager.pendingRequests(retained).length || snapshot.pending_approval) };
-        else if (result[row.key].working === null) result[row.key] = { working: false, blocked: false };
+        // Refused ownership: this row's id is another profile's runtime.
+        if (!snapshot) { if (!result[row.key].live) result[row.key] = { working: false, blocked: false, background: false, live: false }; continue; }
+        // Running means this chat's own turn. Children still working after the turn ended are background.
+        const working = Boolean(snapshot.running || RUNNING_LIVE_STATUSES.includes(live.status));
+        const children = Boolean(snapshot.subagents?.some(child => !child.status || ["queued", "running"].includes(child.status)));
+        result[row.key] = { working, background: !working && children, live: true,
+          blocked: Boolean(live.status === "waiting" || manager.pendingRequests(retained).length || snapshot.pending_approval) };
       }
     }));
     return result;
@@ -188,25 +200,35 @@ export async function listConversations() {
       return rows;
     } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
+  // Rows the dashboard gateway hosts get its authoritative status; the state.db heartbeat lags a
+  // finished turn by up to its window and is restamped by background children, so it must not override it.
+  const gatewayHosted = new Set<string>();
   if (hermesChatTransport() === "gateway") {
     const rows = soloLists.flat();
-    for (const row of rows) { row.working = null; row.blocked = null; }
+    for (const row of rows) { row.working = null; row.blocked = null; row.background = null; }
     try {
       const statuses = await gatewayListStatus(rows);
       for (const row of rows) {
         const status = statuses[row.key];
-        if (status) { row.working = status.working; row.blocked = status.blocked; }
+        if (!status) continue;
+        row.working = status.working; row.blocked = status.blocked; row.background = status.background;
+        if (status.live) gatewayHosted.add(row.key);
       }
     } catch { /* Unknown status is not idle. */ }
   }
   // Sessions run by a CLI agent live in their own process, so neither the stream map nor the
   // dashboard gateway sees them. A fresh state.db heartbeat proves work either way.
   await Promise.all(soloLists.map(async (rows) => {
-    const idle = rows.filter((row) => row.working !== true);
-    for (let offset = 0; offset < idle.length; offset += 200) {
-      const batch = idle.slice(offset, offset + 200);
-      const active = await recentlyActiveSessionIds(batch[0].profile!, batch.map((row) => row.id));
-      for (const row of batch) if (active.has(row.id)) row.working = true;
+    // Hosted rows past the attach cap have an unknown child roster: they may take a background hint only.
+    const unknown = rows.filter((row) => row.working !== true && (!gatewayHosted.has(row.key) || row.background === null));
+    for (let offset = 0; offset < unknown.length; offset += 200) {
+      const batch = unknown.slice(offset, offset + 200);
+      const activity = await recentSessionActivity(batch[0].profile!, batch.map((row) => row.id));
+      for (const row of batch) {
+        const seen = activity.get(row.id);
+        if (seen === "working" && !gatewayHosted.has(row.key)) { row.working = true; row.background = false; }
+        else if (seen === "background") row.background = true;
+      }
     }
   }));
   const rooms = new Map<string, HermesConversation>();

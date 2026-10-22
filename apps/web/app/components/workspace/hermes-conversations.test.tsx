@@ -134,6 +134,10 @@ describe("Hermes unified chat UI", () => {
     expect(chatStatus({ ...solo, updatedAt: 500 }, { ...base, seen: { [solo.key]: 100 } })).toBe("done");
     expect(chatStatus({ ...solo, updatedAt: 500 }, { ...base, selected: solo, seen: { [solo.key]: 100 } })).toBe("idle");
     expect(chatStatus({ ...solo, working: null }, { ...base, seen: {} })).toBe("idle");
+    expect(chatStatus({ ...solo, working: false, background: true }, { ...base, seen: {} })).toBe("background");
+    expect(chatStatus({ ...solo, working: false }, { ...base, seen: {} }, false, false, true)).toBe("background");
+    expect(chatStatus({ ...solo, working: true, background: true }, { ...base, seen: {} })).toBe("running");
+    expect(chatStatus({ ...solo, background: true, blocked: true }, { ...base, seen: {} })).toBe("awaiting");
     const user = userEvent.setup(); render(<Harness />);
     const list = await screen.findByLabelText("Hermes conversations");
     await waitFor(() => expect(within(list).getByText("Alpha solo")).toBeInTheDocument());
@@ -195,11 +199,12 @@ describe("Hermes unified chat UI", () => {
       { ...solo, key: "unknown", title: "Unknown chat", working: null },
       { ...solo, key: "idle", title: "Idle chat", working: false },
       { ...solo, key: "unread", title: "Unread chat", working: false, updatedAt: 500 },
+      { ...solo, key: "background", title: "Background chat", working: false, background: true },
     ];
     localStorage.setItem("hermes-chats-seen", JSON.stringify({ unread: 100 }));
     render(<Harness />);
     await screen.findByRole("button", { name: "Open Running chat" });
-    for (const [name, status] of [["Running", "running"], ["Blocked", "awaiting"], ["Unknown", "idle"], ["Idle", "idle"], ["Unread", "done"]]) {
+    for (const [name, status] of [["Running", "running"], ["Blocked", "awaiting"], ["Unknown", "idle"], ["Idle", "idle"], ["Unread", "done"], ["Background", "background"]]) {
       const row = screen.getByRole("button", { name: `Open ${name} chat` }).closest("[data-conversation-key]")!;
       expect(row).toHaveAttribute("data-status", status);
       expect(row.className.includes("running")).toBe(status === "running");

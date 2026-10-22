@@ -18,6 +18,8 @@ const context = { now: () => Date.now(), id: () => crypto.randomUUID() }
 export interface NativeHermesChat {
   state: ReconcileState
   active: boolean
+  /** Only background subagents are working; this chat's own turn has ended. */
+  background: boolean
   subagents: ReconcileState['subagents']
   todos: ReconcileState['todos']
   tails: Record<string, string>
@@ -250,6 +252,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   }, [state, conversationKey])
   return {
     active: state.busy || visibleSubagents.items.some(child => !isTerminalSubagent(child.status)),
+    background: !state.busy && visibleSubagents.items.some(child => !isTerminalSubagent(child.status)),
     state, subagents: visibleSubagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
     completeSlash: async (text, signal) => {
       if (!conversationKey || !enabled) { throw new Error('No active gateway conversation') }

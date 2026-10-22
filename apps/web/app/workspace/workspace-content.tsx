@@ -160,7 +160,8 @@ export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId
 }) {
   const visible = Object.values(snapshots).filter(snapshot => snapshot.tabId === visibleTabId && snapshot.sessionId);
   return <HermesConversationList chats={chats} onOpen={onOpen}
-    workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming).map(snapshot => snapshot.sessionId!))}
+    workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming && !snapshot.background).map(snapshot => snapshot.sessionId!))}
+    backgroundKeys={new Set(visible.filter(snapshot => snapshot.background).map(snapshot => snapshot.sessionId!))}
     awaitingKeys={new Set(visible.filter(snapshot => snapshot.awaiting).map(snapshot => snapshot.sessionId!))} />;
 }
 

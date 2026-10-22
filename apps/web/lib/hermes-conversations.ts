@@ -11,6 +11,8 @@ export type HermesConversation = {
   updatedAt: number;
   participants: HermesParticipant[];
   working: boolean | null;
+  /** The chat's own turn is done but its background subagents are still working. */
+  background?: boolean | null;
   /** Hermes session source for solo chats (cron, webhook, discord, desktop, …). */
   source?: string;
   /** Group needs attention in Hermes (approval, retry or cancellation). */

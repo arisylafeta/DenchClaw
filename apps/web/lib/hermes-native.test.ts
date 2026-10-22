@@ -7,8 +7,8 @@ vi.mock("./hermes-session-names", () => ({ sessionDisplayNames: vi.fn(async () =
 import { sessionDisplayNames } from "./hermes-session-names";
 vi.mock("./hermes-session-projects", () => ({ sessionProjectLabels: vi.fn(async () => ({})) }));
 import { sessionProjectLabels } from "./hermes-session-projects";
-vi.mock("./hermes-session-activity", () => ({ recentlyActiveSessionIds: vi.fn(async () => new Set<string>()) }));
-import { recentlyActiveSessionIds } from "./hermes-session-activity";
+vi.mock("./hermes-session-activity", () => ({ recentSessionActivity: vi.fn(async () => new Map()) }));
+import { recentSessionActivity } from "./hermes-session-activity";
 import { createConversation, groupRpc, inviteHandoff, inviteToConversation, listConversations, nativeFetch, readConversation, roomMembers } from "./hermes-native";
 import { getHermesGatewayManager } from "./hermes-gateway/manager";
 const room = { room_id: "room-1", name: "Alpha and Sol", updated_at: 100, members: [{ member_id: "m1", profile: "default", display_name: "Sol" }, { member_id: "m2", profile: "alpha", display_name: "Alpha" }] };
@@ -63,7 +63,7 @@ it("enriches only requested messaging IDs and uses the same name on deep-link re
     expect(detail.conversation.title).toBe("Harbour / #stock");
   } finally { lookup.mockImplementation(async () => ({})); }
 });
-it.each(['queued', 'running', 'completed', 'failed', 'interrupted'])("counts %s children in hidden solo chat working status", async status => {
+it.each(['queued', 'running', 'completed', 'failed', 'interrupted'])("reports %s children of an idle parent as background, never running", async status => {
   vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2020, 0, 1, 0, 0, ['queued', 'running', 'completed', 'failed', 'interrupted'].indexOf(status) * 10));
@@ -74,7 +74,7 @@ it.each(['queued', 'running', 'completed', 'failed', 'interrupted'])("counts %s 
   const requests = vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
   try {
     const result = await listConversations();
-    expect(result.sessions.find(row => row.profile === "alpha")?.working).toBe(['queued', 'running'].includes(status));
+    expect(result.sessions.find(row => row.profile === "alpha")).toMatchObject({ working: false, background: ['queued', 'running'].includes(status) });
   } finally { call.mockRestore(); attach.mockRestore(); requests.mockRestore(); }
 });
 it("uses gateway status for hidden solo chats with profile-colliding stored ids", async () => {
@@ -130,7 +130,7 @@ it("shows a CLI-agent session as working when the dashboard gateway has no live 
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "oneshot-live", title: "Spawned", source: "oneshot" }, { id: "idle", title: "Idle" }] })));
   const manager = getHermesGatewayManager();
   const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [] } as never);
-  vi.mocked(recentlyActiveSessionIds).mockImplementation(async (profile, ids) => new Set(profile === "alpha" ? ids.filter(id => id === "oneshot-live") : []));
+  vi.mocked(recentSessionActivity).mockImplementation(async (profile, ids) => new Map(profile === "alpha" ? ids.filter(id => id === "oneshot-live").map(id => [id, "working" as const]) : []));
   try {
     const result = await listConversations();
     expect(result.sessions.find(row => row.profile === "alpha" && row.id === "oneshot-live")?.working).toBe(true);
@@ -142,7 +142,41 @@ it("shows a CLI-agent session as working when the dashboard gateway has no live 
     const offline = await listConversations();
     expect(offline.sessions.find(row => row.profile === "alpha" && row.id === "oneshot-live")?.working).toBe(true);
     expect(offline.sessions.find(row => row.profile === "alpha" && row.id === "idle")?.working).toBeNull();
-  } finally { call.mockRestore(); vi.mocked(recentlyActiveSessionIds).mockImplementation(async () => new Set<string>()); }
+  } finally { call.mockRestore(); vi.mocked(recentSessionActivity).mockImplementation(async () => new Map()); }
+});
+it("trusts gateway idle over a fresh heartbeat, and maps waiting past the attach cap to blocked", async () => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.advanceTimersByTime(120_000);
+  // Only alpha stores these ids, so each runtime has exactly one owning row.
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json({ data: url.includes("/p/alpha/") ? Array.from({ length: 10 }, (_, i) => ({ id: `s-${i}`, title: "Solo" })) : [] })));
+  const manager = getHermesGatewayManager();
+  // s-0 just finished its turn; s-9 sits past the eight-attach cap waiting on a clarify.
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: Array.from({ length: 10 }, (_, i) => ({ id: `r-${i}`, session_key: `s-${i}`, status: i === 9 ? "waiting" : "idle" })) } as never);
+  const attach = vi.spyOn(manager, "attachLive").mockImplementation(async (_key, id) => ({ session_id: id, running: false, subagents: [] }) as never);
+  vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
+  vi.mocked(recentSessionActivity).mockImplementation(async (_profile, ids) => new Map(ids.map(id => [id, "working" as const])));
+  try {
+    const rows = (await listConversations()).sessions;
+    expect(rows).toHaveLength(10);
+    expect(rows.find(row => row.id === "s-0")).toMatchObject({ working: false, blocked: false, background: false });
+    expect(rows.filter(row => row.id !== "s-9").every(row => row.working === false && row.background !== true)).toBe(true);
+    expect(rows.find(row => row.id === "s-9")).toMatchObject({ working: false, blocked: true, background: null });
+    expect(attach).toHaveBeenCalledTimes(8);
+  } finally { call.mockRestore(); attach.mockRestore(); vi.mocked(recentSessionActivity).mockImplementation(async () => new Map()); }
+});
+it("shows a CLI session stamped only by its subagents as background", async () => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.advanceTimersByTime(180_000);
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "cli-parent", title: "Spawned" }] })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [] } as never);
+  vi.mocked(recentSessionActivity).mockImplementation(async (profile, ids) => new Map(profile === "alpha" ? ids.map(id => [id, "background" as const]) : []));
+  try {
+    const row = (await listConversations()).sessions.find(row => row.profile === "alpha" && row.id === "cli-parent");
+    expect(row).toMatchObject({ working: false, background: true });
+  } finally { call.mockRestore(); vi.mocked(recentSessionActivity).mockImplementation(async () => new Map()); }
 });
 describe("native Hermes conversations", () => {
   it("keeps profile-scoped identities stable and filtering never rewrites them", () => {

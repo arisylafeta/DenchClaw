@@ -22,23 +22,28 @@ db = sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True, timeout=0.2)
 try:
     db.execute("PRAGMA query_only=ON")
     columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
-    active = []
+    active = {}
     if {"ended_at", "last_activity_at"} <= columns:
         slots = ",".join("?" for _ in ids)
-        rows = db.execute("SELECT id FROM sessions WHERE ended_at IS NULL AND last_activity_at >= ? AND id IN (" + slots + ") LIMIT 200", [time.time() - float(window), *ids])
-        active = [row[0] for row in rows]
+        described = "last_activity_description" in columns
+        rows = db.execute("SELECT id, " + ("last_activity_description" if described else "NULL") + " FROM sessions WHERE ended_at IS NULL AND last_activity_at >= ? AND id IN (" + slots + ") LIMIT 200", [time.time() - float(window), *ids])
+        # A background child restamps its parent's row; that is the child's work, not the parent's turn.
+        active = {row[0]: "background" if str(row[1] or "").startswith("delegate_task: subagent") else "working" for row in rows}
     print(json.dumps(active))
 finally:
     db.close()
 `;
 
-export async function recentlyActiveSessionIds(profile: string, ids: string[]): Promise<Set<string>> {
+export type SessionActivity = "working" | "background";
+/** Fresh heartbeats by session id: `working` = the session's own turn, `background` = only its subagents stamped it. */
+export async function recentSessionActivity(profile: string, ids: string[]): Promise<Map<string, SessionActivity>> {
   const workspace = discoverWorkspaces().find((item) => item.name === profile);
-  if (!workspace?.stateDir || !ids.length || ids.length > 200 || ids.some((id) => typeof id !== "string" || id.length > 2000)) return new Set();
+  if (!workspace?.stateDir || !ids.length || ids.length > 200 || ids.some((id) => typeof id !== "string" || id.length > 2000)) return new Map();
   try {
     const { stdout } = await run("python3", ["-c", READ_ACTIVE, join(workspace.stateDir, "state.db"), JSON.stringify(ids), String(ACTIVE_WINDOW_SECONDS)], { timeout: 2000, maxBuffer: 256 * 1024 });
     const result: unknown = JSON.parse(stdout);
     const allowed = new Set(ids);
-    return new Set(Array.isArray(result) ? result.filter((id): id is string => typeof id === "string" && allowed.has(id)) : []);
-  } catch { return new Set(); }
+    if (!result || typeof result !== "object" || Array.isArray(result)) return new Map();
+    return new Map(Object.entries(result).filter((entry): entry is [string, SessionActivity] => allowed.has(entry[0]) && (entry[1] === "working" || entry[1] === "background")));
+  } catch { return new Map(); }
 }

@@ -11,7 +11,7 @@ import styles from "./hermes-conversations.module.css";
 
 type Listing = { backend: string; transport?: "gateway" | "sse"; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
 export type NewChatMode = "solo" | "group";
-export type ChatStatus = "running" | "awaiting" | "done" | "idle";
+export type ChatStatus = "running" | "awaiting" | "background" | "done" | "idle";
 const SEEN_KEY = "hermes-chats-seen";
 const VIEW_KEY = "hermes-chats-view";
 const ALIAS_KEY = "hermes-chats-aliases";
@@ -175,16 +175,18 @@ export function useHermesConversations() {
     seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
-/** Awaiting human input outranks running; done means unseen output. */
-export function chatStatus(row: HermesConversation, chats: Pick<HermesChatsController, "seen" | "selected">, streaming = false, awaiting = false): ChatStatus {
+/** Awaiting human input outranks running; background = only subagents work; done means unseen output. */
+export function chatStatus(row: HermesConversation, chats: Pick<HermesChatsController, "seen" | "selected">, streaming = false, awaiting = false, background = false): ChatStatus {
   if (awaiting || row.blocked) return "awaiting";
   if (streaming || row.working === true) return "running";
+  if (background || row.background === true) return "background";
   if (chats.selected?.key !== row.key && row.updatedAt > (chats.seen[row.key] ?? row.updatedAt)) return "done";
   return "idle";
 }
 const DOT: Record<Exclude<ChatStatus, "idle">, { className: string; label: string }> = {
   running: { className: "bg-green-500 motion-safe:animate-pulse", label: "Running" },
   awaiting: { className: "bg-amber-500", label: "Needs your attention" },
+  background: { className: "bg-[var(--color-chat-sidebar-muted)] opacity-60", label: "Subagents working" },
   done: { className: "bg-blue-500", label: "New activity" },
 };
 export function StatusDot({ status }: { status: ChatStatus }) {
@@ -209,7 +211,7 @@ function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmi
     onKeyDown={(e) => { if (e.key === "Enter") void submit(); else if (e.key === "Escape") { done.current = true; onCancel(); } }}
     className="w-full rounded border border-[var(--color-border)] bg-transparent px-1 text-xs font-medium" />;
 }
-export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpen }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string>; onOpen?: () => void }) {
+export function HermesConversationList({ chats, workingKeys, awaitingKeys, backgroundKeys, onOpen }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string>; backgroundKeys?: Set<string>; onOpen?: () => void }) {
   const rows = filterConversations(chats.listing?.sessions ?? [], chats.filter);
   const [renaming, setRenaming] = useState<string | null>(null);
   const renamingNext = useRef(false);
@@ -269,7 +271,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, onOpe
         <SourceIcon source={section.key} /><span className="min-w-0 flex-1 truncate text-left">{section.label}</span><span className="tabular-nums">{section.rows.length}</span>
       </button></h3>
       {!view.collapsed?.includes(section.key) && section.rows.map((row) => {
-        const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key));
+        const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key), backgroundKeys?.has(row.key));
         const pinned = serverPins.includes(row.key);
         const PinIcon = pinned ? PinOff : Pin;
         return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
