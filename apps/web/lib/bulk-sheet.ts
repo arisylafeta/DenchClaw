@@ -30,7 +30,7 @@ export type SheetRow = {
   progress: string;
   is_trade?: boolean;
   tone: SheetTone;
-  /** Demand score 0-100; null when not scored or not a demand row. */
+  /** Score 0-100: demand by expected fee, supply by value of all stock; null when not scored. */
   score: number | null;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
   latest: { label: string; at: string | null; kind?: string } | null;
@@ -99,7 +99,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
     progress: hold ? "On hold" : progress?.progress ?? fallback,
     tone: hold ? "hold" : progress?.tone ?? (input.activity_count > 0 ? "active" : "new"),
-    score: input.kind === "demand" ? input.score : null,
+    score: input.score,
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), next_due: input.next_due, owner: null,
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
@@ -111,15 +111,22 @@ export function sortSheet(rows: SheetRow[]): SheetRow[] {
   return [...rows].sort((a, b) => (b.touched ?? "").localeCompare(a.touched ?? "") || a.title.localeCompare(b.title));
 }
 
+/** Within one side the sheet is a ranking: best score first, unscored last, then newest. Demand and supply
+ * scores measure different things, so a mixed view keeps the newest-first order. */
+function rankSide(rows: SheetRow[], side: SheetFilters["side"]): SheetRow[] {
+  if (side === "all") return rows;
+  return [...rows].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+}
+
 export function filterSheet(rows: SheetRow[], filters: SheetFilters): SheetRow[] {
   const needle = filters.query.trim().toLowerCase();
-  return rows.filter((row) =>
+  return rankSide(rows.filter((row) =>
     (filters.side === "all" || row.side === filters.side) &&
     (filters.progress === "all" || row.progress === filters.progress) &&
     (filters.company === "all" || row.company === filters.company) &&
     (filters.category === "all" || row.category === filters.category) &&
     (!needle || [row.title, row.company, row.category, row.progress, row.latest?.label, row.next_action, row.owner]
-      .some((value) => value?.toLowerCase().includes(needle))));
+      .some((value) => value?.toLowerCase().includes(needle)))), filters.side);
 }
 
 /** Distinct values present in the rows, for the filter menus. */

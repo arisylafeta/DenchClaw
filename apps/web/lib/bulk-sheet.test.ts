@@ -84,3 +84,12 @@ describe("sheet filters in the URL", () => {
     expect(supply({ context: { listing_title: "41 FPT eBS69 packs" }, summary: "raw summary" }).title).toBe("41 FPT eBS69 packs");
   });
 });
+
+describe("ranking", () => {
+  it("ranks one side by score, unscored last, and keeps newest-first in a mixed view", () => {
+    const rows = [supply({ id: "a", score: null, updated_at: "2026-10-20" }), supply({ id: "b", score: 71, updated_at: "2026-10-01" }),
+      supply({ id: "c", score: 93, updated_at: "2026-10-02" }), demand({ id: "d", score: 99 })];
+    expect(filterSheet(rows, { ...NO_FILTERS, side: "seller" }).map((row) => row.id)).toEqual(["c", "b", "a"]);
+    expect(filterSheet(rows, NO_FILTERS).map((row) => row.id)).toEqual(["a", "b", "c", "d"]);
+  });
+});

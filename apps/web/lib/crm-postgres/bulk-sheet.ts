@@ -9,7 +9,8 @@ export const SHEET_QUERY = `
     listing.next_action, to_char(listing.next_due, 'YYYY-MM-DD') as next_due,
     case when listing.kind = 'demand' then bulk_demand_score(
       (listing.spec->>'fee_eur')::numeric, listing.spec->>'price_basis', listing.spec->>'reputation',
-      greatest(listing.observed_on, (listing.spec->>'confirmed_on')::date)) end as score,
+      greatest(listing.observed_on, (listing.spec->>'confirmed_on')::date))
+      else bulk_supply_score((listing.spec->>'value_eur')::numeric) end as score,
     (select count(*)::int from crm_bulk_listing_activity a
       where a.bulk_listing_id = listing.id and a.kind <> 'status') as activity_count,
     latest.kind as latest_kind, latest.title as latest_title, latest.occurred_at::text as latest_at,
