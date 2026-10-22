@@ -144,8 +144,6 @@ describe.skipIf(!TEST_URL)("bulk trade writes", () => {
 
     expect(trade).toMatchObject({ title: "Synthetic eBS37", trade_stage: "With buyers", next_step_due: "2026-09-28" });
     expect(await events(trade.id)).toMatchObject([{ kind: "trade_created", actor_user_id: userId }]);
-    const [overview] = await pg.queryPg("select stage, trade_stage from crm_bulk_trade_overview where id = $1", [trade.id]);
-    expect(overview).toEqual({ stage: "Sourced", trade_stage: "With buyers" });
   });
 
   it("logs only the fields that changed, with before and after", async () => {

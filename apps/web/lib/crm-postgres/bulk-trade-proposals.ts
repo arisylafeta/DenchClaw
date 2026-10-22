@@ -4,8 +4,8 @@ import type { AppliedChange, CheckStatus, FileType, HistoryStatus, Proposal } fr
 import { startHistoryPass } from "../history-pass";
 import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
-import { updateBulkTrade } from "./bulk-trades";
-import { addBuyer, addContact, recordFile, setField, updateBuyer } from "./bulk-trade-details";
+import { addOffer, type OfferStage } from "./bulk-offers";
+import { addDocument } from "./bulk-documents";
 import { acceptDemand, reverseDemand } from "./demand-proposal";
 
 const PROPOSAL_SELECT = `
@@ -136,36 +136,52 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
   const proposed = p.proposed;
   const lotId = p.lot_id;
   switch (p.kind) {
+    // Bulk Trades lots are frozen (migration 077): every change below lands on the Trades Preview listing,
+    // which has the same id as the lot, and is logged in its Story.
     case "field": {
-      const status = proposed.status === "confirmed" ? "confirmed" : "unverified";
-      const result = await setField(lotId!, p.target!, {
-        value: text(proposed.value) ?? undefined, status,
+      const key = text(p.target);
+      if (!key) throw new Error("The proposed fact has no field.");
+      await setListingField(lotId!, key, {
+        value: text(proposed.value), status: proposed.status === "confirmed" ? "confirmed" : "unverified",
         source_label: p.source_label, source_url: p.source_url, source_date: p.source_date,
       }, user.id);
-      if (!result || result === "unknown_field") throw new Error("That field no longer applies to this trade.");
       return lotId;
     }
     case "buyer_update": {
-      const input: Record<string, string> = {};
-      if (text(proposed.status)) input.status = proposed.status as string;
-      if (date(proposed.last_touch_on)) input.last_touch_on = proposed.last_touch_on as string;
-      if (text(proposed.last_touch_via)) input.last_touch_via = proposed.last_touch_via as string;
-      if (date(proposed.chase_on)) input.chase_on = proposed.chase_on as string;
-      if (!(await updateBuyer(lotId!, p.target!, input, user.id))) throw new Error("That buyer is no longer on this trade.");
+      const status = text(proposed.status);
+      const stage = status ? buyerStage(status) : null;
+      const updated = await queryPg(
+        `update crm_bulk_offers set
+           stage = coalesce($3, stage),
+           declined_reason = case when $3 = 'declined' then $4 else declined_reason end,
+           last_touch_on = coalesce($5::date, last_touch_on), last_touch_via = coalesce($6, last_touch_via),
+           data = case when $7::date is null then data else data || jsonb_build_object('next_due', $7::text) end,
+           updated_at = now()
+         where id = $2 and bulk_listing_id = $1
+         returning name`,
+        [lotId, p.target, stage, status?.startsWith("Declined: ") ? status.slice(10) : null,
+          date(proposed.last_touch_on), text(proposed.last_touch_via), date(proposed.chase_on)]);
+      if (!updated.length) throw new Error("That buyer is no longer on this trade.");
+      await queryPg(
+        `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, kind, title, data, actor_user_id) values ($1, $2, 'status', $3, $4::jsonb, $5)`,
+        [lotId, p.target, `${(updated[0] as { name: string | null }).name ?? "Buyer"} · ${p.summary}`.slice(0, 300),
+          JSON.stringify({ proposal_id: p.id, kind: p.kind, proposed }), user.id]);
       return lotId;
     }
     case "next_step": {
-      await updateBulkTrade(lotId!, {
-        next_step: text(proposed.next_step),
-        next_step_due: date(proposed.next_step_due),
-        waiting_on: proposed.waiting_on === "them" ? "them" : "us",
-      }, user.id);
+      const rows = await queryPg(
+        `update crm_bulk_listings set next_action = $2, next_due = $3::date,
+           waiting_on = $4, waiting_since = case when $4 = 'them' then coalesce(waiting_since, now()) else null end,
+           updated_at = now()
+         where id = $1 returning id`,
+        [lotId, text(proposed.next_step), date(proposed.next_step_due), proposed.waiting_on === "them" ? "them" : "us"]);
+      if (!rows.length) throw new Error("This trade is no longer in Trades Preview.");
       return lotId;
     }
     case "new_buyer": {
       const name = text(proposed.name);
       if (!name) throw new Error("The proposed buyer has no name.");
-      await addBuyer(lotId!, { name, contact: text(proposed.contact), wants: text(proposed.wants) }, user.id);
+      await addOffer(lotId!, { name, contact: text(proposed.contact), wants: text(proposed.wants) });
       return lotId;
     }
     case "file": {
@@ -173,9 +189,10 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       const messageId = text(proposed.gmail_message_id);
       if (!fileName || !messageId) throw new Error("The attachment reference is incomplete.");
       const content = await fetchGmailAttachment(user.email, messageId, fileName, text(proposed.attachment_id));
-      const fileType = (FILE_TYPES as readonly string[]).includes(String(proposed.file_type)) ? proposed.file_type as FileType : "Other";
-      await recordFile(lotId!, { file_name: fileName, file_type: fileType, content_type: null, content },
-        { file_type: fileType, visibility: "never", source_label: p.source_label, source_date: p.source_date }, user.id);
+      const fileType = (FILE_TYPES as readonly string[]).includes(String(proposed.file_type)) ? String(proposed.file_type) : "Other";
+      const doc = await addDocument(lotId!, { title: fileName, doc_type: fileType, visibility: "never",
+        source_label: p.source_label, source_date: p.source_date }, { name: fileName, type: null, content }, user.id);
+      if (!doc) throw new Error("This trade is no longer in Trades Preview.");
       return lotId;
     }
     case "possible_trade": {
@@ -187,16 +204,26 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       return createSupplyListing(p, title, external, user.id);
     }
     case "link_contact": {
-      const email = text(proposed.email);
+      const email = text(proposed.email)?.toLowerCase();
       if (!email) throw new Error("The proposed contact has no email.");
-      await addContact(lotId!, { name: text(proposed.name) ?? email, email }, user.id);
+      await queryPg(
+        `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact)
+         select $1, $2, 'contact', p.id, p.company_id, $3, $4
+         from (select 1) one left join lateral (select id, company_id from crm_people where lower(email) = $4 order by id limit 1) p on true
+         where not exists (select 1 from crm_bulk_offers o where o.bulk_listing_id = $2 and o.role = 'contact' and lower(o.contact) = $4)`,
+        [`btc_${randomUUID()}`, lotId, text(proposed.name) ?? email, email]);
       await requestHistoryPass(lotId!); // read this person's past emails for the trade
       return lotId;
     }
     case "trade_kind": {
       const kind = String(proposed.trade_kind);
       if (!["packs", "cells", "systems", "recycling"].includes(kind)) throw new Error("Unknown trade kind.");
-      await updateBulkTrade(lotId!, { trade_kind: kind as "packs" }, user.id);
+      await queryPg(
+        `update crm_bulk_listings set
+           spec = case when $2 = 'recycling' then spec else spec || jsonb_build_object('trade_kind', $2) end,
+           context = case when $2 = 'recycling' then context || '{"recycling": true}'::jsonb else context end,
+           updated_at = now()
+         where id = $1`, [lotId, kind]);
       return lotId;
     }
     case "needs_triage":
@@ -208,21 +235,15 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
     case "possible_supply":
       throw new Error("Supply batches from email are added automatically.");
     case "link_auction": {
-      // The auction sync fills in its people on its next run.
       const linked = await queryPg(
-        `update crm_bulk_trade_lots set auction_id = $2, auction_slug = $3, auction_closes_at = $4, auction_status = 'published',
-           listing_id = coalesce(listing_id, $5), updated_at = now()
+        `update crm_bulk_listings set auction_id = $2, auction_slug = $3, auction_closes_at = $4, auction_status = 'published',
+           marketplace_listing_id = coalesce(marketplace_listing_id, $5), updated_at = now()
          where id = $1 and auction_id is null
-           and not exists (select 1 from crm_bulk_trade_lots other where other.auction_id = $2)
+           and not exists (select 1 from crm_bulk_listings other where other.auction_id = $2)
          returning id`,
         [lotId, text(proposed.auction_id), text(proposed.slug), text(proposed.closes_at), text(proposed.listing_id)],
       );
       if (!linked.length) throw new Error("That auction or this trade is already linked.");
-      await queryPg(
-        `update crm_bulk_listings set auction_id = $2, auction_slug = $3, auction_closes_at = $4, auction_status = 'published',
-           marketplace_listing_id = coalesce(marketplace_listing_id, $5), updated_at = now() where id = $1`,
-        [lotId, text(proposed.auction_id), text(proposed.slug), text(proposed.closes_at), text(proposed.listing_id)],
-      );
       return lotId;
     }
   }
@@ -436,5 +457,42 @@ async function createSupplyListing(p: Proposal & { source_date: string | null },
         userId, p.source_date],
     );
     return id;
+  });
+}
+
+
+const BUYER_STAGE: Record<string, OfferStage> = {
+  "To contact": "to_contact", "Teaser sent": "teaser_sent", "No reply": "teaser_sent", "NDA, specs sent": "specs_nda",
+  "Bid in": "bid_in", "LOI or deposit": "loi", "Won": "won",
+};
+
+/** The Trades Preview offer stage for an old Bulk Trades buyer status ("Declined: price" is declined). */
+export function buyerStage(status: string): OfferStage | null {
+  return BUYER_STAGE[status] ?? (status.startsWith("Declined") ? "declined" : null);
+}
+
+/** Writes one fact on a listing; a different earlier value is kept in alternatives. */
+async function setListingField(listingId: string, key: string,
+  input: { value: string | null; status: "confirmed" | "unverified"; source_label: string | null; source_url: string | null; source_date: string | null },
+  userId: string): Promise<void> {
+  await withPgTransaction(async (client) => {
+    const { rows } = await client.query("select id from crm_bulk_listings where id = $1 for update", [listingId]);
+    if (!rows.length) throw new Error("This trade is no longer in Trades Preview.");
+    const before = (await client.query("select value from crm_bulk_listing_fields where bulk_listing_id = $1 and field_key = $2", [listingId, key])).rows[0] as { value: string | null } | undefined;
+    await client.query(
+      `insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility, source_label, source_url, source_date)
+       values ($1, $2, $3, $4, 'never', $5, $6, $7::date)
+       on conflict (bulk_listing_id, field_key) do update set
+         alternatives = case when crm_bulk_listing_fields.value is distinct from excluded.value and crm_bulk_listing_fields.value is not null
+           then coalesce(crm_bulk_listing_fields.alternatives, '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+             'value', crm_bulk_listing_fields.value, 'status', crm_bulk_listing_fields.status, 'source_label', crm_bulk_listing_fields.source_label,
+             'source_url', crm_bulk_listing_fields.source_url, 'source_date', crm_bulk_listing_fields.source_date))
+           else crm_bulk_listing_fields.alternatives end,
+         value = excluded.value, status = excluded.status, source_label = excluded.source_label,
+         source_url = excluded.source_url, source_date = excluded.source_date, updated_at = now()`,
+      [listingId, key, input.value, input.status, input.source_label, input.source_url, input.source_date]);
+    await client.query(
+      `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, data, actor_user_id) values ($1, 'status', $2, $3::jsonb, $4)`,
+      [listingId, `Fact updated: ${key}`, JSON.stringify({ field: key, from: before?.value ?? null, to: input.value }), userId]);
   });
 }

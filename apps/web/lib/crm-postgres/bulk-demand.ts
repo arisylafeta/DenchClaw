@@ -7,10 +7,11 @@ import { addBuyer } from "./bulk-trade-details";
 import { addDemandActivity } from "./bulk-demand-activity";
 import { companyContextSql } from "./company-context";
 
-// Both qualification gaps and visible inventory use exactly the feed's availability rules.
+// Both qualification gaps and visible inventory use exactly the feed's availability rules. Lots matched by the
+// demand matcher are open supply listings; since migration 079 the feed calls them 'trade' only once a buyer is at LOI or won.
 const ELIGIBLE_INVENTORY = `
   select feed.*, matched.strength, matched.reason from crm_bulk_trade_demand_matches matched
-  join crm_bulk_listing_supply_feed feed on feed.id = matched.lot_id and feed.kind in ('trade', 'auction')
+  join crm_bulk_listing_supply_feed feed on feed.id = matched.lot_id and feed.kind in ('trade', 'auction', 'supply')
   where matched.demand_id = demand.id and not matched.hidden
   union all
   select feed.*, matched.strength, matched.reason from crm_bulk_trade_supply_matches matched
@@ -46,13 +47,13 @@ const DEMAND_SELECT = `
     case when demand.status <> 'closed' then bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on))::float8 end as expected_fee,
     (demand.status <> 'closed' and demand.product_family is not null and (
-      exists(select 1 from crm_bulk_listing_supply_feed stock where stock.kind in ('trade', 'auction')
+      exists(select 1 from crm_bulk_listing_supply_feed stock where stock.kind in ('trade', 'auction', 'supply')
         and stock.title ilike '%' || demand.product_family || '%')
     )) as has_stock,
     coalesce((
       select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'strength', m.strength, 'reason', m.reason,
         'buyer_id', m.buyer_id) order by m.strength desc, lot.title)
-      from crm_bulk_trade_demand_matches m join crm_bulk_listing_supply_feed lot on lot.id = m.lot_id and lot.kind in ('trade', 'auction')
+      from crm_bulk_trade_demand_matches m join crm_bulk_listing_supply_feed lot on lot.id = m.lot_id and lot.kind in ('trade', 'auction', 'supply')
       where m.demand_id = demand.id and demand.status = 'open' and not m.hidden
     ), '[]'::json) as fits,
     coalesce((

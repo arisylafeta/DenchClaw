@@ -120,7 +120,7 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     const complete = await demand.updateDemand(pinned.id, { kind: "request", basis: null, quantity: "10 packs", max_price: 1000,
       price_currency: "EUR", price_unit: "pack", needed_by: "2027-01-01", qualify_asked_on: "2026-10-16" });
     expect(complete?.missing).toEqual([]);
-    expect(complete?.inventory_matches).toMatchObject([{ id: qualificationLot.id, kind: "trade", strength: "strong" }]);
+    expect(complete?.inventory_matches).toMatchObject([{ id: qualificationLot.id, kind: "supply", strength: "strong" }]);
     await pg.queryPg("update crm_bulk_trade_demand_matches set hidden = true where demand_id = $1", [pinned.id]);
     expect((await demand.getDemand(pinned.id))?.missing).toEqual(["no supply match"]);
   });

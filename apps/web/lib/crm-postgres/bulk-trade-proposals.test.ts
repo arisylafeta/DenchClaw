@@ -28,7 +28,9 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     );
     user = row;
     lotId = (await trades.createBulkTrade({ title: "Proposal trade", trade_kind: "packs", trade_stage: "With buyers" }, user.id)).id;
-    buyerId = (await details.addBuyer(lotId, { name: "Synthetic Buyer" }, user.id))!.id;
+    buyerId = `btb_${crypto.randomUUID()}`;
+    await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, name, stage) values ($1, $2, 'counterparty', 'Synthetic Buyer', 'to_contact')`,
+      [buyerId, lotId]);
   });
 
   afterAll(async () => {
@@ -53,14 +55,17 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     await proposals.decideProposal(await propose("file", null, { file_name: "spec.pdf", gmail_message_id: "g1", file_type: "Datasheet" }), "accept", user);
     await proposals.decideProposal(await propose("link_contact", null, { name: "sam@supplier.test", email: "sam@supplier.test" }), "accept", user);
 
-    const detail = (await details.getTradeDetail(lotId))!;
-    expect(detail.fields.find((field) => field.field_key === "manufacture_date")).toMatchObject({
-      value: "2021 to 2025", source_label: "Gmail · sam@supplier.test", source_date: "2026-09-29",
-    });
-    expect(detail.buyers.map((buyer) => [buyer.name, buyer.status])).toEqual([["Synthetic Buyer", "Teaser sent"], ["New Buyer Co", "To contact"]]);
-    expect(detail.trade).toMatchObject({ next_step: "Ask for the address", next_step_due: "2026-10-01" });
-    expect(detail.files).toMatchObject([{ file_name: "spec.pdf", file_type: "Datasheet", visibility: "never" }]);
-    expect(detail.contacts).toMatchObject([{ email: "sam@supplier.test" }]);
+    // Lots are frozen: accepted proposals land on the Trades Preview listing with the same id.
+    const [fact] = await pg.queryPg("select value, source_label, source_date::text from crm_bulk_listing_fields where bulk_listing_id = $1 and field_key = 'manufacture_date'", [lotId]);
+    expect(fact).toMatchObject({ value: "2021 to 2025", source_label: "Gmail · sam@supplier.test", source_date: "2026-09-29" });
+    expect(await pg.queryPg("select name, stage from crm_bulk_offers where bulk_listing_id = $1 and role = 'counterparty' order by created_at", [lotId]))
+      .toEqual([{ name: "Synthetic Buyer", stage: "teaser_sent" }, { name: "New Buyer Co", stage: "to_contact" }]);
+    expect((await pg.queryPg("select next_action, next_due::text from crm_bulk_listings where id = $1", [lotId]))[0])
+      .toEqual({ next_action: "Ask for the address", next_due: "2026-10-01" });
+    expect(await pg.queryPg("select file_name, doc_type, visibility from crm_bulk_listing_documents where bulk_listing_id = $1", [lotId]))
+      .toEqual([{ file_name: "spec.pdf", doc_type: "Datasheet", visibility: "never" }]);
+    expect(await pg.queryPg("select contact from crm_bulk_offers where bulk_listing_id = $1 and role = 'contact'", [lotId]))
+      .toEqual([{ contact: "sam@supplier.test" }]);
     expect(await proposals.tradeProposals(lotId)).toEqual([]);
     // Decisions are logged on the Trades Preview listing's History, not the old Bulk Trades events.
     const logged = await pg.queryPg<{ title: string }>(
@@ -77,7 +82,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
 
     const ignored = await propose("field", "location", { value: "Turin" });
     await proposals.decideProposal(ignored, "ignore", user);
-    expect((await details.getTradeDetail(lotId))!.fields.find((field) => field.field_key === "location")).toBeUndefined();
+    expect(await pg.queryPg("select 1 from crm_bulk_listing_fields where bulk_listing_id = $1 and field_key = 'location'", [lotId])).toEqual([]);
   });
 
   it("approves incomplete asks as qualifying and reconfirms the same entity/family instead of inserting", async () => {
@@ -196,7 +201,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
 
     const kindless = (await trades.createBulkTrade({ title: "Kindless" }, user.id)).id;
     await proposals.decideProposal(await propose("trade_kind", null, { trade_kind: "cells" }, kindless), "accept", user);
-    expect(await trades.getBulkTrade(kindless)).toMatchObject({ trade_kind: "cells" });
+    expect((await pg.queryPg("select spec->>'trade_kind' as kind from crm_bulk_listings where id = $1", [kindless]))[0]).toEqual({ kind: "cells" });
   });
 
   it("does not start a second history pass while one is running", async () => {

@@ -51,7 +51,7 @@ describe.skipIf(!TEST_URL)("supply list", () => {
         ('bulk_feed_expired', 'supply', 'Seller', 'Feed expired auction', 'open', '{"is_trade": true}', gen_random_uuid(), 'published', '2000-01-01');
     `);
     const rows = await supply.listSupplyFeed();
-    expect(rows.find((row) => row.id === "bulk_feed_sell")).toMatchObject({ kind: "trade", title: "Feed sell-side lot", size: null });
+    expect(rows.find((row) => row.id === "bulk_feed_sell")).toMatchObject({ kind: "supply", title: "Feed sell-side lot", size: null });
     expect(rows.find((row) => row.id === "bulk_feed_auction")).toMatchObject({ kind: "auction" });
     expect(rows.some((row) => row.id === "bulk_feed_demand" || row.id === "bulk_feed_expired")).toBe(false);
     expect(rows.some((row) => row.id.startsWith("stock:"))).toBe(false);
