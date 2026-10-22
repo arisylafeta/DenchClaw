@@ -211,14 +211,14 @@ export function DemandActions({
     if (refKind !== "lot" && refKind !== "supply") return;
     let cancelled = false;
     void request<{
-      trades?: { id: string; title: string }[];
       supply?: { id: string; seller: string; offers: string }[];
-    }>(refKind === "lot" ? "/api/bulk-trades" : "/api/bulk-trades/supply")
+      feed?: { id: string; kind: string; title: string }[];
+    }>("/api/bulk-trades/supply")
       .then((result) => {
         if (!cancelled)
           setChoices(
             refKind === "lot"
-              ? (result.trades ?? []).map((item) => ({
+              ? (result.feed ?? []).filter((item) => item.kind !== "supply").map((item) => ({
                   id: item.id,
                   label: item.title,
                   kind: "lot",

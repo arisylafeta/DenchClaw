@@ -44,11 +44,11 @@ describe.skipIf(!TEST_URL)("supply list", () => {
 
   it("unifies sell-side lots, live auctions and supply batches", async () => {
     await pg.queryPg(`
-      insert into crm_bulk_trade_lots (id, title, lot_kind, origin, summary, observed_outcome, confidence, auction_id, auction_status, auction_closes_at) values
-        ('bulk_feed_sell', 'Feed sell-side lot', 'supply', 'supply', '', '', 'confirmed', null, null, null),
-        ('bulk_feed_demand', 'Feed demand-origin lot', 'demand', 'demand', '', '', 'confirmed', null, null, null),
-        ('bulk_feed_auction', 'Feed auction lot', 'supply', 'supply', '', '', 'confirmed', gen_random_uuid(), 'published', '2099-01-01'),
-        ('bulk_feed_expired', 'Feed expired auction', 'supply', 'supply', '', '', 'confirmed', gen_random_uuid(), 'published', '2000-01-01');
+      insert into crm_bulk_listings (id, kind, party, summary, status, spec, auction_id, auction_status, auction_closes_at) values
+        ('bulk_feed_sell', 'supply', 'Seller', 'Feed sell-side lot', 'open', '{"is_trade": true, "origin": "supply"}', null, null, null),
+        ('bulk_feed_demand', 'supply', 'Seller', 'Feed demand-origin lot', 'open', '{"is_trade": true, "origin": "demand"}', null, null, null),
+        ('bulk_feed_auction', 'supply', 'Seller', 'Feed auction lot', 'open', '{"is_trade": true}', gen_random_uuid(), 'published', '2099-01-01'),
+        ('bulk_feed_expired', 'supply', 'Seller', 'Feed expired auction', 'open', '{"is_trade": true}', gen_random_uuid(), 'published', '2000-01-01');
     `);
     const rows = await supply.listSupplyFeed();
     expect(rows.find((row) => row.id === "bulk_feed_sell")).toMatchObject({ kind: "trade", title: "Feed sell-side lot", size: null });

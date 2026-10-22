@@ -10,11 +10,11 @@ import { companyContextSql } from "./company-context";
 // Both qualification gaps and visible inventory use exactly the feed's availability rules.
 const ELIGIBLE_INVENTORY = `
   select feed.*, matched.strength, matched.reason from crm_bulk_trade_demand_matches matched
-  join crm_bulk_trade_supply_feed feed on feed.id = matched.lot_id and feed.kind in ('trade', 'auction')
+  join crm_bulk_listing_supply_feed feed on feed.id = matched.lot_id and feed.kind in ('trade', 'auction')
   where matched.demand_id = demand.id and not matched.hidden
   union all
   select feed.*, matched.strength, matched.reason from crm_bulk_trade_supply_matches matched
-  join crm_bulk_trade_supply_feed feed on feed.id = matched.supply_id and feed.kind = 'supply'
+  join crm_bulk_listing_supply_feed feed on feed.id = matched.supply_id and feed.kind = 'supply'
   where matched.demand_id = demand.id and not matched.hidden`;
 
 const DEMAND_SELECT = `
@@ -46,21 +46,22 @@ const DEMAND_SELECT = `
     case when demand.status <> 'closed' then bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on))::float8 end as expected_fee,
     (demand.status <> 'closed' and demand.product_family is not null and (
-      exists(select 1 from crm_bulk_trade_lots stock where stock.origin = 'supply'
-        and stock.trade_stage in ('Needs info', 'With buyers', 'Closing')
+      exists(select 1 from crm_bulk_listing_supply_feed stock where stock.kind in ('trade', 'auction')
         and stock.title ilike '%' || demand.product_family || '%')
     )) as has_stock,
     coalesce((
       select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'strength', m.strength, 'reason', m.reason,
         'buyer_id', m.buyer_id) order by m.strength desc, lot.title)
-      from crm_bulk_trade_demand_matches m join crm_bulk_trade_lots lot on lot.id = m.lot_id
+      from crm_bulk_trade_demand_matches m join crm_bulk_listing_supply_feed lot on lot.id = m.lot_id and lot.kind in ('trade', 'auction')
       where m.demand_id = demand.id and demand.status = 'open' and not m.hidden
-        and lot.trade_stage in ('Needs info', 'With buyers', 'Closing')
     ), '[]'::json) as fits,
     coalesce((
-      select json_agg(json_build_object('lot_id', lot.id, 'title', lot.title, 'status', buyer.status) order by buyer.created_at)
-      from crm_bulk_trade_buyers buyer join crm_bulk_trade_lots lot on lot.id = buyer.lot_id
-      where buyer.demand_id = demand.id
+      select json_agg(json_build_object('lot_id', listing.id, 'title', coalesce(nullif(listing.spec->>'listing_title', ''), nullif(listing.context->>'listing_title', ''), listing.summary), 'status', case offer.stage
+          when 'to_contact' then 'To contact' when 'teaser_sent' then 'Teaser sent' when 'specs_nda' then 'NDA, specs sent'
+          when 'bid_in' then 'Bid in' when 'loi' then 'LOI or deposit' when 'won' then 'Won' when 'declined' then 'Declined'
+          when 'lost' then 'Lost' else 'To contact' end) order by offer.created_at)
+      from crm_bulk_offers offer join crm_bulk_listings listing on listing.id = offer.bulk_listing_id
+      where offer.counterpart_id = demand.id and offer.role = 'counterparty' and listing.id <> demand.id
     ), '[]'::json) as trades,
     (select company.buyer_tier from crm_companies company where company.id = demand.company_id) as tier
   from crm_bulk_demand demand`;
@@ -106,7 +107,7 @@ type WaitingRow = { person_id: string; company_id: string | null; full_name: str
 async function withWaiting(rows: Demand[]): Promise<Demand[]> {
   const open = rows.filter((row) => row.status === "open" && (row.person_id || row.company_id));
   const waiting = open.length ? await queryPg<WaitingRow>(
-    `select person_id, company_id, full_name, waiting_since, last_in_subject from crm_bulk_trade_buyer_waiting
+    `select person_id, company_id, full_name, waiting_since, last_in_subject from crm_bulk_buyer_waiting
      where waiting_since > now() - interval '${WAITING_DAYS} days' and (person_id = any($1::text[]) or company_id = any($2::text[]))
      order by waiting_since`,
     [open.map((row) => row.person_id).filter(Boolean), open.map((row) => row.company_id).filter(Boolean)],

@@ -107,7 +107,7 @@ export async function feedCandidates(demandId: string): Promise<Candidate[]> {
   const rows = await queryPg<FeedRow>(
     `select feed.id, feed.kind, feed.title, feed.seller, feed.size, feed.location, feed.seen, feed.href,
        coalesce(dm.strength, sm.strength) as strength, coalesce(dm.reason, sm.reason) as reason
-     from crm_bulk_trade_supply_feed feed
+     from crm_bulk_listing_supply_feed feed
      left join crm_bulk_trade_demand_matches dm on dm.lot_id = feed.id and dm.demand_id = $1 and not dm.hidden and feed.kind <> 'supply'
      left join crm_bulk_trade_supply_matches sm on sm.supply_id = feed.id and sm.demand_id = $1 and not sm.hidden and feed.kind = 'supply'
      where feed.kind in ('trade', 'auction', 'supply')`,

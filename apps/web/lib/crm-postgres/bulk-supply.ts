@@ -25,7 +25,7 @@ export async function listSupply(): Promise<Supply[]> {
 
 /** Unified sell-side availability; matching remains separate from this read model. */
 export async function listSupplyFeed(): Promise<SupplyFeedRow[]> {
-  return queryPg<SupplyFeedRow>("select * from crm_bulk_trade_supply_feed order by seen desc nulls last, kind, title, id");
+  return queryPg<SupplyFeedRow>("select * from crm_bulk_listing_supply_feed order by seen desc nulls last, kind, title, id");
 }
 
 export async function getSupply(id: string): Promise<Supply | null> {
