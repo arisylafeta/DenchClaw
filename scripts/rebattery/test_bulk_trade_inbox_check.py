@@ -600,6 +600,21 @@ class DemandRun(unittest.TestCase):
         finally:
             self.conn.rollback()
 
+    def test_known_freemail_person_without_company_gets_one_company_not_one_per_call(self):
+        try:
+            with self.conn.cursor(cursor_factory=check.psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("insert into crm_people (id, full_name, email) values ('p_free_lead', 'Free Buyer', 'free.buyer@gmail.com')")
+                first = check.ensure_lead(cur, 'free.buyer@gmail.com', 'Free Buyer', None, 'Buyer', 'Buyer intake: form')
+                second = check.ensure_lead(cur, 'free.buyer@gmail.com', 'Free Buyer', None, 'Buyer', 'Buyer intake: form')
+                self.assertEqual(first, ('p_free_lead', first[1]))
+                self.assertEqual(second, first)
+                cur.execute("select company_id from crm_people where id = 'p_free_lead'")
+                self.assertEqual(cur.fetchone()['company_id'], first[1])
+                cur.execute("select count(*) as n from crm_companies where buyer_main_contact_id = 'p_free_lead'")
+                self.assertEqual(cur.fetchone()['n'], 1)
+        finally:
+            self.conn.rollback()
+
     def test_lifecycle_merges_old_standing_asks_and_dedupes_by_family(self):
         from demand_lifecycle import expire_demand, existing_demand, reputation_for
         today = dt.date(2026, 10, 16)

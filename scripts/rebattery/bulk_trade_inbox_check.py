@@ -912,6 +912,13 @@ def ensure_lead(cur, email, contact, company_name, purpose, detail):
         cur.execute("select id from crm_companies where lower(domain) = %s order by created_at limit 1", (domain,))
         row = cur.fetchone()
         company_id = row["id"] if row else None
+    if not company_id and person_id:
+        # A known person without a company: reuse the lead company made for them before (they are its main contact
+        # or it carries their email as its name) instead of creating a new one on every message or form.
+        cur.execute("""select id from crm_companies where buyer_main_contact_id = %s or lower(name) = %s
+                       order by created_at limit 1""", (person_id, email))
+        row = cur.fetchone()
+        company_id = row["id"] if row else None
     if not company_id:
         company_id = "lead_" + str(uuid.uuid4())
         name = company_name or contact or (domain.split(".", 1)[0].capitalize() if business else email)
@@ -928,6 +935,12 @@ def ensure_lead(cur, email, contact, company_name, purpose, detail):
                          relationship_stage = case when coalesce(relationship_stage, 'New') in ('New', 'Contacted')
                                                    then 'Engaged' else relationship_stage end
                        where id = %s""", (purpose, purpose, company_id))
+    if person_id:
+        cur.execute("update crm_people set company_id = %s, updated_at = now() where id = %s and company_id is null"
+                    " returning id", (company_id, person_id))
+        if cur.fetchone():
+            cur.execute("update crm_companies set buyer_main_contact_id = coalesce(buyer_main_contact_id, %s) where id = %s",
+                        (person_id, company_id))
     if not person_id:
         person_id = "lead_person_" + str(uuid.uuid4())
         parts = (contact or "").split(None, 1)
