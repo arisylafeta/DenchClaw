@@ -476,7 +476,7 @@ export function WorkspaceSidebar({
 		},
 	];
 
-	const objectGroups = categorizeSidebarObjects(customCrmObjects?.filter((object) => object.name !== "campaign"));
+	const objectGroups = categorizeSidebarObjects(customCrmObjects?.filter((object) => object.name !== "campaign" && object.name !== "bulk_trade"));
 
 	const renderCompactObject = (object: CustomCrmObject) => {
 		const active = activeCrmObjectName === object.name;

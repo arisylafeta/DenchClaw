@@ -41,7 +41,6 @@ import { PersonProfile } from "../components/crm/person-profile";
 import { CompanyProfile } from "../components/crm/company-profile";
 import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../components/chat-panel";
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
-import { BulkTradesView } from "../components/bulk-trades/bulk-trades-view";
 import { TradesPreviewView } from "../components/bulk-trades/trades-preview-view";
 import { MailDraftView } from "../components/crm/inbox/mail-draft-view";
 import { mailDraftPath, parseMailDraftPath } from "@/lib/mail-artifacts";
@@ -2191,19 +2190,23 @@ function WorkspacePageInner() {
    * filters); without one, opens the Bulk Trades home. The destination goes into the URL first,
    * so the shell's own projection keeps it instead of rewriting it to a bare path.
    */
-  const openBulkTrades = useCallback((href?: string) => {
-    const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
-    // null state: see use-bulk-trades-route.ts (Next ignores a push that carries its own `__NA` state).
-    window.history.pushState(null, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search)));
-    handleNavigateToObject(BULK_TRADES_PATH);
-  }, [handleNavigateToObject]);
-
-  /** Opens Trades Preview the same way: the named record or filter, or its home when no href is given. */
+  /** Opens Trades Preview: the named record or filter, or its home when no href is given. */
   const openTradesPreview = useCallback((href?: string) => {
     const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
+    // null state: see use-bulk-trades-route.ts (Next ignores a push that carries its own `__NA` state).
     window.history.pushState(null, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search), TRADES_PREVIEW_PATH));
     handleNavigate("trades-preview");
   }, [handleNavigate]);
+  /** Bulk Trades was retired (22 Oct 2026): its links (trade, demand, supply, filters) open the same record in Trades Preview. */
+  const openBulkTrades = openTradesPreview;
+  useEffect(() => {
+    const redirect = () => {
+      if (new URLSearchParams(window.location.search).get("path") === BULK_TRADES_PATH) openTradesPreview(window.location.href);
+    };
+    redirect();
+    window.addEventListener("popstate", redirect);
+    return () => window.removeEventListener("popstate", redirect);
+  }, [openTradesPreview]);
 
   /**
    * Unified navigate handler for links in the editor and read mode.
@@ -3056,7 +3059,8 @@ function ContentRenderer({
 
     case "object":
       if (content.data.object.name === "bulk_trade") {
-        return <BulkTradesView onOpenEntry={onOpenEntry} />;
+        // Retired: the shell redirects to Trades Preview; this only shows for a moment.
+        return <TradesPreviewView onOpenEntry={onOpenEntry} />;
       }
       if (content.data.object.name === "dismantler") {
         return <DismantlersView />;

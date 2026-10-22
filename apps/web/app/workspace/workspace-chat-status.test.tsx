@@ -22,7 +22,7 @@ for (const path of [
   '../components/charts/report-viewer', '../components/crm/inbox-view',
   '../components/crm/calendar-view', '../components/crm/person-profile',
   '../components/crm/company-profile', '../components/chat-panel',
-  '../components/workspace/entry-detail-panel', '../components/bulk-trades/bulk-trades-view',
+  '../components/workspace/entry-detail-panel',
   '../components/dismantlers/dismantlers-view', '../components/marketplace-pulse/marketplace-pulse-view',
   '../components/campaigns/campaigns-view', '../components/leaderboard/leaderboard-view',
   '../components/cron/cron-dashboard', '../components/skill-store/skill-store-panel',

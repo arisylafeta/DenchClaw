@@ -1,6 +1,5 @@
 import { currentUser } from "@/lib/auth";
-import { parseTradePatch } from "@/lib/bulk-trades";
-import { createBulkTrade, listBulkTrades, listTradeOwners } from "@/lib/crm-postgres/bulk-trades";
+import { listBulkTrades, listTradeOwners } from "@/lib/crm-postgres/bulk-trades";
 import { checkStatus, possibleTrades } from "@/lib/crm-postgres/bulk-trade-proposals";
 
 export const dynamic = "force-dynamic";
@@ -21,19 +20,4 @@ export async function GET(req: Request) {
   const [list, check, possible] = await Promise.all([
     inboxOnly ? listTradeOwners().then((owners) => ({ owners })) : listBulkTrades(), checkStatus(), possibleTrades()]);
   return Response.json({ ...list, check, possible });
-}
-
-export async function POST(req: Request) {
-  const unavailable = postgresOnly();
-  if (unavailable) return unavailable;
-  const user = await currentUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-  const parsed = parseTradePatch(await req.json().catch(() => null));
-  if ("error" in parsed) return Response.json({ error: parsed.error }, { status: 400 });
-  const { title } = parsed.patch;
-  if (!title) return Response.json({ error: "title is required." }, { status: 400 });
-
-  const trade = await createBulkTrade({ ...parsed.patch, title }, user.id);
-  return Response.json({ trade }, { status: 201 });
 }

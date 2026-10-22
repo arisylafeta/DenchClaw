@@ -38,28 +38,8 @@ describe("bulk trades routes", () => {
     expect((await GET(new Request("http://localhost/api/bulk-trades"))).status).toBe(401);
   });
 
-  it("creates a trade as the signed-in user and rejects a missing title", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
-    currentUser.mockResolvedValue(USER);
-    const { POST } = await import("./route");
-
-    expect((await POST(jsonRequest("POST", { next_step: "Call" }))).status).toBe(400);
-    const response = await POST(jsonRequest("POST", { title: "Oklahoma", trade_stage: "Closing" }));
-    expect(response.status).toBe(201);
-    expect(createBulkTrade).toHaveBeenCalledWith({ title: "Oklahoma", trade_stage: "Closing" }, USER.id);
-  });
-
-  it("validates updates and returns 404 for an unknown trade", async () => {
-    process.env.CRM_DB_BACKEND = "postgres";
-    currentUser.mockResolvedValue(USER);
-    const { PATCH } = await import("./[id]/route");
-    const params = { params: Promise.resolve({ id: "bt_missing" }) };
-
-    expect((await PATCH(jsonRequest("PATCH", { stage: "Completed" }), params)).status).toBe(400);
-    expect(updateBulkTrade).not.toHaveBeenCalled();
-
-    updateBulkTrade.mockResolvedValueOnce(null);
-    expect((await PATCH(jsonRequest("PATCH", { trade_stage: "Lost" }), params)).status).toBe(404);
-    expect(updateBulkTrade).toHaveBeenCalledWith("bt_missing", { trade_stage: "Lost" }, USER.id);
+  it("no longer creates Bulk Trades lots", async () => {
+    const route = await import("./route");
+    expect("POST" in route).toBe(false);
   });
 });
