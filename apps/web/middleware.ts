@@ -8,6 +8,7 @@ const PUBLIC_ASSETS = new Set([
   "/rebattery-workspace-icon.svg",
   // Public installation resources contain branding only, never workspace data.
   "/manifest.webmanifest",
+  "/sw.js",
   "/rebattery-app-192.png",
   "/rebattery-app-512.png",
   "/rebattery-app-maskable-512.png",

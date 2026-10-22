@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ThemeProvider } from "next-themes";
 import { getOrCreateAnonymousId, readPersonInfo, readPrivacyMode } from "@/lib/telemetry";
 import { PostHogProvider } from "./components/posthog-provider";
+import { PwaRegister } from "./components/pwa-register";
 import { Toaster } from "./components/platform-admin/ui/sonner";
 import "./globals.css";
 
@@ -86,6 +87,7 @@ export default function RootLayout({
             <PostHogProvider anonymousId={anonymousId} personInfo={personInfo ?? undefined} privacyMode={privacyMode}>
               {children}
               <Toaster />
+              <PwaRegister />
             </PostHogProvider>
           </Suspense>
         </ThemeProvider>

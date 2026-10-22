@@ -45,6 +45,7 @@ import type {
 	WebSession,
 } from "./workspace/chat-sessions-sidebar";
 import { ChatTranscriptSkeleton } from "./chat-loading-skeleton";
+import { useAgentNotifications } from "@/lib/hermes-chat/use-agent-notifications";
 import { ProfileAvatar } from "./workspace/profile-avatar";
 import { UnicodeSpinner } from "./unicode-spinner";
 import composerStyles from "./chat-composer.module.css";
@@ -1384,6 +1385,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			groupSending;
 		const runtimeStatus = nativeGateway ? (nativeChat.active ? "streaming" : "ready") : status;
 		useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
+		useAgentNotifications({ active: nativeGateway && nativeChat.active, messages: nativeChat.state.messages, conversationKey: nativeConversationKey, title: sessionTitle, profile: agentProfile });
 
 		// Keep cloud catalog + primary model in sync (hero, session switches, and after
 		// completed turns — agent tools may change agents.defaults.model.primary).
