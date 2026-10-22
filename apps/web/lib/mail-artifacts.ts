@@ -1,10 +1,11 @@
 /**
  * Chat artifacts: a fenced ```artifact block names a durable object that the
  * workspace opens in a content tab. Mail drafts live in `mail_message`
- * (state 'draft'); the block only carries the reference, never the copy.
+ * (state 'draft'); mail messages (`mail_message`) are any logged email, either
+ * direction. The block only carries the reference, never the copy.
  */
 
-export type ArtifactRef = { kind: "mail_draft"; id: string; title?: string };
+export type ArtifactRef = { kind: "mail_draft"; id: string; title?: string } | { kind: "mail_message"; id: string; title?: string };
 
 export type ArtifactSegment =
   | { type: "text"; text: string }
@@ -13,6 +14,7 @@ export type ArtifactSegment =
 const FENCE = /```artifact\s*\n([\s\S]*?)```/g;
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 export const MAIL_DRAFT_PATH_PREFIX = "~mail/draft/";
+export const MAIL_MESSAGE_PATH_PREFIX = "~mail/message/";
 
 export function hasArtifactBlocks(text: string): boolean {
   return text.includes("```artifact");
@@ -21,9 +23,9 @@ export function hasArtifactBlocks(text: string): boolean {
 export function parseArtifactRef(raw: string): ArtifactRef | null {
   try {
     const value = JSON.parse(raw) as { kind?: unknown; id?: unknown; title?: unknown };
-    if (value.kind !== "mail_draft" || typeof value.id !== "string" || !ID.test(value.id)) {return null;}
+    if ((value.kind !== "mail_draft" && value.kind !== "mail_message") || typeof value.id !== "string" || !ID.test(value.id)) {return null;}
     const title = typeof value.title === "string" ? value.title.trim().slice(0, 120) : "";
-    return { kind: "mail_draft", id: value.id, ...(title ? { title } : {}) };
+    return { kind: value.kind, id: value.id, ...(title ? { title } : {}) };
   } catch {
     return null;
   }
@@ -52,5 +54,15 @@ export function mailDraftPath(id: string): string {
 export function parseMailDraftPath(path: string): string | null {
   if (!path.startsWith(MAIL_DRAFT_PATH_PREFIX)) {return null;}
   const id = path.slice(MAIL_DRAFT_PATH_PREFIX.length);
+  return ID.test(id) ? id : null;
+}
+
+export function mailMessagePath(id: string): string {
+  return `${MAIL_MESSAGE_PATH_PREFIX}${id}`;
+}
+
+export function parseMailMessagePath(path: string): string | null {
+  if (!path.startsWith(MAIL_MESSAGE_PATH_PREFIX)) {return null;}
+  const id = path.slice(MAIL_MESSAGE_PATH_PREFIX.length);
   return ID.test(id) ? id : null;
 }

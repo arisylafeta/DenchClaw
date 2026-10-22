@@ -1,5 +1,5 @@
 import { queryPg } from '../postgres';
-import type { MailDraft, MailDraftListRow, MailApproval, MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
+import type { MailMessageSummary, MailDraft, MailDraftListRow, MailApproval, MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
 import { listCampaigns, getCampaignDetail } from './campaigns';
 
 // Match the complete domain, not lookalikes such as rebattery.io.evil.com.
@@ -178,6 +178,15 @@ export async function readMailDraft(id: string, userId: string): Promise<MailDra
   const { personalization, ...message } = row;
   const warnings = (personalization?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === 'string');
   return { ...message, links, warnings, approval: approval ?? null };
+}
+
+/** One logged email by id. Same visibility as drafts: shared (no owner) or the signed-in user's own mailbox. Not filtered by crm_visible, so threads the CRM inbox hides still open. */
+export async function readMailMessage(id: string, userId: string): Promise<MailMessageSummary | null> {
+  const [row] = await queryPg<MailMessageSummary>(
+    `select m.id,m.thread_id,m.direction,m.state,m.subject,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
+       m.body_preview,left(m.body_text,4000) as body_text,m.sent_at,m.created_at,m.updated_at,coalesce(m.has_attachments,false) as has_attachments
+     from mail_message m where m.id = $1 and (m.mailbox_owner_id is null or m.mailbox_owner_id = $2::uuid)`, [id, userId]);
+  return row ?? null;
 }
 
 export type MailDraftFilters = Pick<MailFilters, 'q' | 'identity' | 'to' | 'from' | 'purpose' | 'transport' | 'state' | 'since' | 'until'>;

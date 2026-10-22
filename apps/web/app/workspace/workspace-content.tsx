@@ -43,7 +43,8 @@ import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../comp
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { TradesPreviewView } from "../components/bulk-trades/trades-preview-view";
 import { MailDraftView } from "../components/crm/inbox/mail-draft-view";
-import { mailDraftPath, parseMailDraftPath } from "@/lib/mail-artifacts";
+import { MailMessageView } from "../components/crm/inbox/mail-message-view";
+import { mailDraftPath, parseMailDraftPath, parseMailMessagePath } from "@/lib/mail-artifacts";
 import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute } from "@/lib/bulk-trades-url";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
@@ -426,6 +427,7 @@ export function nodeToContentTabKind(nodeType: string, path: string): ContentTab
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === TRADES_PREVIEW_PATH) return "trades-preview";
   if (parseMailDraftPath(path)) return "mail-draft";
+  if (parseMailMessagePath(path)) return "mail-message";
   switch (nodeType) {
     case "object": return "object";
     case "document": return "document";
@@ -1670,6 +1672,12 @@ function WorkspacePageInner() {
       // Mail draft artifacts open as their own content tab, not as a file.
       if (parseMailDraftPath(inputPath)) {
         openTabForNode({ path: inputPath, name: options?.title || "Email draft", type: "folder" }, { preview: false });
+        ensureRightPanelOpenWide({ width: MAIL_DRAFT_PANEL_WIDTH });
+        return true;
+      }
+
+      if (parseMailMessagePath(inputPath)) {
+        openTabForNode({ path: inputPath, name: options?.title || "Email", type: "folder" }, { preview: false });
         ensureRightPanelOpenWide({ width: MAIL_DRAFT_PANEL_WIDTH });
         return true;
       }
@@ -3285,6 +3293,9 @@ function ContentRenderer({
 
     case "mail-draft":
       return <MailDraftView key={content.draftId} draftId={content.draftId} />;
+
+    case "mail-message":
+      return <MailMessageView key={content.messageId} messageId={content.messageId} />;
 
     case "crm-calendar":
       return (

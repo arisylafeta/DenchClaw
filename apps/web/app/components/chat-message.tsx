@@ -16,7 +16,7 @@ import { splitReportBlocks, hasReportBlocks } from "@/lib/report-blocks";
 import { splitDiffBlocks, hasDiffBlocks } from "@/lib/diff-blocks";
 import { splitQuestionBlocks, type QuestionBlock } from "@/lib/question-blocks";
 import { hasArtifactBlocks, splitArtifactBlocks, type ArtifactRef } from "@/lib/mail-artifacts";
-import { MailDraftCard } from "./mail-draft-card";
+import { ArtifactCard } from "./mail-message-card";
 import type { ReportConfig } from "./charts/types";
 import { DiffCard } from "./diff-viewer";
 import { MessageVoiceButton } from "./message-voice-button";
@@ -1217,7 +1217,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 		}
 		if (segment.type === "artifact") {
 			return (
-				<MailDraftCard key={`artifact-${index}`} artifact={segment.artifact} autoOpen={Boolean(isStreaming)} onOpen={onFilePathClick} />
+				<ArtifactCard key={`artifact-${index}`} artifact={segment.artifact} autoOpen={Boolean(isStreaming)} onOpen={onFilePathClick} />
 			);
 		}
 		if (segment.type === "diff-artifact") {

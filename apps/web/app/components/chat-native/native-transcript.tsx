@@ -11,7 +11,7 @@ import { NoticeLine } from "./notice-line";
 import { AttachmentChips } from "./attachment-chips";
 import { parseUserAttachments } from "./attachments";
 import { hasArtifactBlocks, splitArtifactBlocks } from "@/lib/mail-artifacts";
-import { MailDraftCard } from "../mail-draft-card";
+import { ArtifactCard } from "../mail-message-card";
 import { splitVisualBlocks } from "@/lib/visual-blocks";
 import { VisualBlock } from "./visual-block";
 
@@ -35,7 +35,7 @@ function UserContent({ html, text }: { html?: string; text: string }) {
 function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }: { text: string; live: boolean; renderMarkdown?: (text: string) => ReactNode; onOpenArtifact?: NativeTranscriptProps["onOpenArtifact"]; onSendPrompt?: NativeTranscriptProps["onSendPrompt"] }) {
   const markdown = (value: string) => renderMarkdown ? renderMarkdown(value) : <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>;
   const withArtifacts = (value: string, keyPrefix: string) => !hasArtifactBlocks(value) ? markdown(value) : <>{splitArtifactBlocks(value).map((piece, index) => piece.type === "artifact"
-    ? <MailDraftCard key={`${keyPrefix}-artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />
+    ? <ArtifactCard key={`${keyPrefix}-artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />
     : <Fragment key={`${keyPrefix}-text-${index}`}>{markdown(piece.text)}</Fragment>)}</>;
   return <>{splitVisualBlocks(text).map((piece, index) => piece.type === "visual"
     ? <VisualBlock key={`visual-${index}`} code={piece.code} closed={piece.closed} onSendPrompt={onSendPrompt} />

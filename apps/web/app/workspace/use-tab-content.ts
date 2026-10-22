@@ -348,6 +348,7 @@ function kindIsDerived(kind: ContentTab["kind"]): boolean {
     case "crm-calendar":
     case "trades-preview":
     case "mail-draft":
+    case "mail-message":
     case "crm-person":
     case "crm-company":
       return true;
@@ -417,6 +418,8 @@ function resolveDerivedContent(
       return { kind: "trades-preview" };
     case "mail-draft":
       return { kind: "mail-draft", draftId: tab.path.replace(/^~mail\/draft\//, "") };
+    case "mail-message":
+      return { kind: "mail-message", messageId: tab.path.replace(/^~mail\/message\//, "") };
     case "crm-person":
       return {
         kind: "crm-person",

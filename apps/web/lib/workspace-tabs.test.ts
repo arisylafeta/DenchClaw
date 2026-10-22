@@ -53,6 +53,7 @@ describe("platform operations tabs", () => {
   it("hydrates marketplace operation paths as named platform tabs", () => {
     expect(inferContentTabKindFromPath("~platform-admin/proposals")).toBe("platform-admin");
     expect(inferContentTabKindFromPath("~mail/draft/abc123")).toBe("mail-draft");
+    expect(inferContentTabKindFromPath("~mail/message/abc123")).toBe("mail-message");
     expect(inferContentTabTitle("~platform-admin/proposals")).toBe("Recycler selection");
     expect(inferContentTabTitle("~platform-admin/listings")).toBe("Listings");
     expect(inferContentTabTitle("~platform-admin/accounts")).toBe("Accounts");

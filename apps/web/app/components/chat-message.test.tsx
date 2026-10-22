@@ -349,6 +349,16 @@ describe("artifact blocks", () => {
     fireEvent.click(card);
     expect(onFilePathClick).toHaveBeenCalledWith("~mail/draft/d1", { title: "Ioniq 5 enquiry" });
   });
+  it("renders an email artifact as a card that opens the email tab", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ id: "gmail_msg_1", thread_id: "t1", direction: "inbound", state: "received", subject: "Re: Kona packs", from_email: "info@example.test", to_emails: ["supply@rebattery.io"], cc_emails: [], body_preview: null, body_text: "Everything is in the Netherlands.", sent_at: "2026-10-22T11:49:34Z", created_at: "2026-10-22T11:53:46Z", updated_at: "2026-10-22T11:53:46Z", has_attachments: true }))) as typeof fetch;
+    const onFilePathClick = vi.fn();
+    const text = 'Here it is.\n```artifact\n{"kind":"mail_message","id":"gmail_msg_1"}\n```';
+    render(<ChatMessage message={{ id: "mail-artifact", role: "assistant", parts: [{ type: "text", text }] }} onFilePathClick={onFilePathClick} />);
+    const card = await screen.findByRole("button", { name: "Open email: Re: Kona packs" });
+    expect(onFilePathClick).not.toHaveBeenCalled();
+    fireEvent.click(card);
+    expect(onFilePathClick).toHaveBeenCalledWith("~mail/message/gmail_msg_1", { title: "Re: Kona packs" });
+  });
   it("auto-opens once, only while the message is streaming", async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ id: "live1", subject: "Live", to_emails: [], approval: null, state: "draft" }))) as typeof fetch;
     const onFilePathClick = vi.fn();

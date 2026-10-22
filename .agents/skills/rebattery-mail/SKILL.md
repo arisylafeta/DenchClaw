@@ -99,9 +99,12 @@ copy. Marketing footers are automatically inserted: the Postmark Broadcast
 token in both formats, or Gmail's `Unsubscribe: mailto:<sender>?subject=unsubscribe`
 and matching HTML link. Shared shell/signature links are not campaign CTAs.
 
-### Show a draft in the DenchClaw panel
+### Email cards in DenchClaw chat (drafts and logged emails)
 
-After `draft ... --apply` succeeds, end the reply with an artifact block naming the saved message id. DenchClaw shows a card in chat, opens the draft in the content panel while the reply streams in, and lists it under Mail > Drafts. The panel reads `mail_message`, so only a persisted draft can be shown; never paste copy into the block.
+Never give a Gmail URL or a hand-built CRM link for an email. In a DenchClaw chat, end the reply with an artifact block holding only the message id. DenchClaw renders a card and opens the email in the side panel. The card reads `mail_message`, so never paste copy into the block or emit one for an unsaved dry run.
+
+- **Draft you prepared** (`draft ... --apply`, unsent; also listed under Mail > Drafts): `kind` `mail_draft`, id from `draft --apply`.
+- **Any logged email, either direction** (a link request, "show me the email"): `kind` `mail_message`, id from `search`/`message` (`gmail_msg_...`). It opens the whole thread read-only, even when the CRM inbox hides it ("no-match"), and only for the signed-in owner of that mailbox.
 
 ````
 ```artifact
@@ -109,7 +112,7 @@ After `draft ... --apply` succeeds, end the reply with an artifact block naming 
 ```
 ````
 
-Preparing a revision creates a new draft id; emit a new block for it. The panel is read-only: approval and sending stay in this CLI. The card already shows subject, recipients, an excerpt and approval status, so do not repeat From, To, Subject or the body in the reply. Write one or two lines (ask count, holds, what needs approval), then the block.
+A revision is a new draft id with its own block. The panel is read-only: approval and sending stay in this CLI. The card already shows subject, sender or recipients and an excerpt (drafts also show approval status), so do not repeat From, To, Subject or the body. Write one or two lines (ask count, holds, what needs approval), then the block. Outside DenchClaw, no card exists: give the message id and say so.
 
 ### Dynamic one-offs without HTML
 
