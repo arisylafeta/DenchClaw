@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, ChevronDown, ChevronRight, ClipboardList, ExternalLink, FileText, History, Mail, MessageCircle } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Combine, ChevronRight, ClipboardList, ExternalLink, FileText, History, Mail, MessageCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { BusyRegion, Sh } from "./bt-shimmer";
@@ -24,6 +24,8 @@ import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
 import { ListingConversation } from "./listing-conversation";
 import { DocumentsTab } from "./documents-tab";
+import { SupplyTab } from "./demand-supply-tab";
+import type { SupplyUnitView } from "@/lib/demand-supply-types";
 import css from "./demand-panel.module.css";
 import headerCss from "./demand-header.module.css";
 
@@ -84,8 +86,8 @@ function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; c
   );
 }
 
-const TABS = ["Details", "Offers", "Documents", "History"];
-const TAB_ICONS = { Details: ClipboardList, Documents: FileText, Offers: ArrowLeftRight, History: History };
+const TABS = ["Details", "Matches", "Offers", "Documents", "History"];
+const TAB_ICONS = { Details: ClipboardList, Matches: Combine, Documents: FileText, Offers: ArrowLeftRight, History: History };
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand, isTrade = false }: {
   isTrade?: boolean;
@@ -133,6 +135,25 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
     void request<BuyerContext>(`${endpoint}/context`, { signal: abort.signal }).finally(() => clearTimeout(timer)).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [], person: c?.person ?? null }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
     return () => { cancelled = true; };
   }, [endpoint]);
+  const [matchBusy, setMatchBusy] = useState(false);
+  const [matchError, setMatchError] = useState<string | null>(null);
+  // Same verdicts as the Bulk Trades supply matching tab: shortlist, not a fit, or clear.
+  async function verdict(unit: SupplyUnitView, value: "shortlist" | "not_a_fit" | "clear") {
+    setMatchBusy(true);
+    setMatchError(null);
+    try {
+      await request(`/api/bulk-trades/demand/${encodeURIComponent(demand.id)}/supply`, { method: "POST", body: JSON.stringify({
+        key: unit.key, verdict: value, title: [unit.make, unit.model].filter(Boolean).join(" ") || unit.title, seller: unit.seller,
+        eurPerKwh: unit.eurPerKwh, href: unit.href,
+      }) });
+      await loadSupply();
+      onChanged();
+    } catch (err) {
+      setMatchError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setMatchBusy(false);
+    }
+  }
   const top = useRef<HTMLDivElement>(null);
   useEffect(() => { top.current?.scrollIntoView?.({ block: "start" }); }, [demand.id]);
   const actions = (section: string) => (
@@ -148,6 +169,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           tabs={TABS}
           icons={TAB_ICONS}
           centered
+          labels={supply?.totalGroups ? { Matches: `Matches · ${supply.totalGroups}` } : undefined}
           value={tab}
           onChange={setTab}
         />
@@ -159,6 +181,11 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           <TheAsk demand={demand} supply={supply} loading={supplyLoading} />
         </div>
       )}
+      {tab === "Matches" && (
+        <SupplyTab supply={supply} loading={supplyLoading} error={supply || supplyLoading ? null : "Could not check inventory."}
+          onVerdict={verdict} busy={matchBusy} leads={[]} />
+      )}
+      {tab === "Matches" && matchError && <p className="text-[13px]" style={{ color: "var(--bt-red)" }}>{matchError}</p>}
       {tab === "Documents" && <DocumentsTab listingId={demand.id} wantsRequired={false} />}
       {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} supply={supply} supplyLoading={supplyLoading} onChanged={onChanged} />}
       {tab === "History" && (
