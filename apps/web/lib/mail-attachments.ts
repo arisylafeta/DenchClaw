@@ -16,7 +16,7 @@ export type AttachmentList = { attachments: MailAttachment[] } | { unavailable: 
 export function validMessageId(id: string) { return ID.test(id); }
 
 async function owns(messageId: string, userId: string) {
-  const rows = await queryPg<{ id: string }>("select id from mail_message where id = $1 and mailbox_owner_id = $2::uuid", [messageId, userId]);
+  const rows = await queryPg<{ id: string }>("select id from mail_message where id = $1 and (mailbox_owner_id = $2::uuid or (mailbox_owner_id is null and 'shared' = any(labels)))", [messageId, userId]);
   return rows.length > 0;
 }
 

@@ -169,4 +169,18 @@ describe.skipIf(!enabled)('unified mail log', () => {
   await expect(searchMail({cursor:'not-json'})).rejects.toThrow('invalid_cursor');
   await queryPg(`update mail_message set thread_id=$1 where id=$1||'_b'`,[prefix]);
  });
+
+  it('shows ownerless mail labelled shared to every user under All, and no other ownerless mail', async () => {
+    const id = `${prefix}_shared`;
+    const [user] = await queryPg<{ id: string }>(`insert into crm_users(email,display_name,password_hash) values ($1,'Shared reader','x') returning id`, [`${id}@example.test`]);
+    await queryPg(`insert into mail_thread(id,subject,mailbox_owner_id,crm_visible) values ($1,'Legacy alias mail',null,true)`, [id]);
+    await queryPg(`insert into mail_message(id,direction,transport,purpose,state,thread_id,mailbox_owner_id,crm_visible,subject,from_email,to_emails,body_text,sent_at,labels) values
+      ($1||'_in','inbound','gmail',null,'received',$1,null,true,'Legacy alias mail','seller@example.test',array['sales@rebattery.io'],'Packs for sale','2024-07-01T10:00:00Z',array['shared']),
+      ($1||'_other','inbound','gmail',null,'received',$1,null,true,'Ownerless, not shared','other@example.test',array['x@rebattery.io'],'Hidden','2024-07-02T10:00:00Z','{}')`, [id]);
+    const found = (await searchMail({ mailboxOwnerId: user.id, thread: id })).items.map((m) => m.id);
+    expect(found).toEqual([`${id}_in`]);
+    expect((await readMailThread(id, user.id))?.messages.map((m) => m.id)).toEqual([`${id}_in`]);
+    await queryPg('delete from mail_message where id like $1', [`${id}%`]); await queryPg('delete from mail_thread where id = $1', [id]);
+    await queryPg('delete from crm_users where id = $1', [user.id]);
+  });
 });

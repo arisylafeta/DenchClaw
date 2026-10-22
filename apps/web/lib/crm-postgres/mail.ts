@@ -27,6 +27,15 @@ const LIST_COLUMNS = `m.id,m.thread_id,m.campaign_id,m.identity_key,m.direction,
 // Filter value for mail with no identity_key (shown as "Other" in the account rail).
 export const NO_IDENTITY = 'none';
 
+/** Label on ownerless mail that every user sees under All (the legacy import sent to admin@, sales@ and other
+ * addresses that are not one person's mailbox). */
+export const SHARED_MAIL_LABEL = 'shared';
+
+/** A user's mailbox plus shared mail. */
+export function mailboxScopeSql(alias: string, owner: string) {
+  return `(${alias}.mailbox_owner_id = ${owner}::uuid or (${alias}.mailbox_owner_id is null and '${SHARED_MAIL_LABEL}' = any(${alias}.labels)))`;
+}
+
 function mailWhere(filters: MailFilters = {}) {
   const values: unknown[] = [];
   const where: string[] = [];
@@ -34,6 +43,7 @@ function mailWhere(filters: MailFilters = {}) {
   for (const [key, column] of Object.entries({ identity: 'identity_key', campaign: 'campaign_id', thread: 'thread_id', direction: 'direction', transport: 'transport', purpose: 'purpose', state: 'state', mailboxOwnerId: 'mailbox_owner_id' })) {
     const value = filters[key as keyof MailFilters];
     if (key === 'identity' && value === NO_IDENTITY) where.push('m.identity_key is null');
+    else if (key === 'mailboxOwnerId' && value) where.push(mailboxScopeSql('m', bind(value)));
     else if (value) where.push(`m.${column} = ${bind(value)}`);
   }
   if (filters.crmOnly && filters.view !== 'campaigns') where.push(filters.view === 'sent' ? '(m.crm_visible or m.campaign_id is not null)' : 'm.crm_visible');
@@ -66,7 +76,7 @@ export async function searchMail(filters: MailFilters = {}): Promise<MailPage<Ma
   const presentation = `${LIST_COLUMNS}, ${selfAddressSql('m.from_email')} as is_self, ${counterpartySql()}, coalesce(m.sent_at,m.created_at)::text as cursor_timestamp`;
   let sql: string;
   if (conversations) {
-    const scope = [filters.mailboxOwnerId ? `m.mailbox_owner_id = ${bind(filters.mailboxOwnerId)}` : '', filters.crmOnly ? 'm.crm_visible' : ''].filter(Boolean);
+    const scope = [filters.mailboxOwnerId ? mailboxScopeSql('m', bind(filters.mailboxOwnerId)) : '', filters.crmOnly ? 'm.crm_visible' : ''].filter(Boolean);
     sql = `with scoped as materialized (select m.* from mail_message m ${scope.length ? `where ${scope.join(' and ')}` : ''}),
       matching as (select distinct m.thread_id from scoped m ${where.length ? `where ${where.join(' and ')}` : ''}),
       ranked as (select m.*,count(*) over (partition by m.thread_id)::int as message_count,
@@ -100,13 +110,13 @@ export async function mailIdentityCounts(filters: MailFilters = {}): Promise<{ i
 
 export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnly = false) {
   const values = mailboxOwnerId ? [id, mailboxOwnerId] : [id];
-  const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? 'and mailbox_owner_id = $2::uuid' : ''}`, values);
+  const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? `and (mailbox_owner_id = $2::uuid or (mailbox_owner_id is null and exists (select 1 from mail_message shared where shared.thread_id = mail_thread.id and ${mailboxScopeSql('shared', '$2')})))` : ''}`, values);
   if (!thread) return null;
   const messages = await queryPg<MailMessageRow>(`select m.*, ${selfAddressSql('m.from_email')} as is_self, ${counterpartySql()}, coalesce(nullif(m.body_text,''),m.body_html) as body, m.body_preview as preview,
     coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events,
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'to'),'{}') as to_person_ids,
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'cc'),'{}') as cc_person_ids
-    from mail_message m where m.thread_id = $1 ${mailboxOwnerId ? 'and m.mailbox_owner_id = $2::uuid' : ''} ${crmOnly ? 'and m.crm_visible' : ''} order by m.sent_at asc nulls last,m.id`, values);
+    from mail_message m where m.thread_id = $1 ${mailboxOwnerId ? `and ${mailboxScopeSql('m', '$2')}` : ''} ${crmOnly ? 'and m.crm_visible' : ''} order by m.sent_at asc nulls last,m.id`, values);
   if (!messages.length) return null;
   const people = await queryPg<MailParticipant>(`select id,full_name as name,email,null as avatar_url,${selfAddressSql('crm_people.email')} as is_self from crm_people where id in (select from_person_id from mail_message where thread_id = $1 union select r.person_id from mail_message_recipient r join mail_message m on m.id = r.message_id where m.thread_id = $1)`, [id]);
   return { ...thread, thread_id: id, messages, people };
