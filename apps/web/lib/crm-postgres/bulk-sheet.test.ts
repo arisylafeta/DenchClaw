@@ -14,7 +14,7 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     await pg.queryPg(`
       delete from crm_bulk_demand where id like 'btd_sheet_%';
       delete from crm_bulk_supply where id like 'bts_sheet_%';
-      delete from crm_bulk_trade_lots where id like 'btl_sheet_%';
+      delete from crm_bulk_listings where id like 'btl_sheet_%';
       insert into crm_bulk_demand (id, buyer, wants, kind, basis, product_family) values
         ('btd_sheet_new', 'New Buyer', '12 Ioniq packs', 'request', null, 'Ioniq'),
         ('btd_sheet_worked', 'Worked Buyer', 'LFP systems', 'standing', 'stated', null),
@@ -27,9 +27,9 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
         ('btd_sheet_worked', 'outreach', 'Asked supplier A', '2026-10-05');
       insert into crm_bulk_supply (id, seller, offers, observed_on) values ('bts_sheet_open', 'Seller Ltd', '3 hybrid packs', '2026-10-07');
       insert into crm_bulk_supply (id, seller, offers, status, closed_reason) values ('bts_sheet_shut', 'Gone Ltd', 'Old cells', 'closed', 'gone');
-      insert into crm_bulk_trade_lots (id, title, trade_stage, origin, lot_kind, summary, observed_outcome, confidence) values
-        ('btl_sheet_live', 'Live lot', 'With buyers', 'supply', 'supply', 'x', 'x', 'probable'),
-        ('btl_sheet_done', 'Done lot', 'Done', 'supply', 'supply', 'x', 'x', 'probable');
+      insert into crm_bulk_listings (id, kind, party, summary, status, closed_reason, context) values
+        ('btl_sheet_live', 'supply', 'Lot Seller', 'Live lot', 'open', null, '{"from_bulk_trade_lot": true}'),
+        ('btl_sheet_done', 'supply', 'Lot Seller', 'Done lot', 'closed', 'other', '{"from_bulk_trade_lot": true}');
       insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values
         ('bof_sheet_contact', 'bts_sheet_open', null, 'counterparty', 'to_contact'),
         ('bof_sheet_bid', 'bts_sheet_open', null, 'counterparty', 'bid_in'),
