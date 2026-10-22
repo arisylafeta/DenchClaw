@@ -59,6 +59,18 @@ function ScoreCircle({ score, size = 28 }: { score: number | null; size?: number
   );
 }
 
+/** Which way the work runs: a buyer's need or a seller's stock. */
+function SideChip({ side }: { side: "buyer" | "seller" }) {
+  const buying = side === "buyer";
+  return (
+    <span className="mt-px shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium leading-4"
+      style={{ background: buying ? "var(--bt-amber-bg)" : "var(--bt-green-bg)", color: buying ? "var(--bt-amber)" : "var(--bt-green)" }}
+      title={buying ? "Demand: a buyer's need" : "Supply: a seller's stock"}>
+      {buying ? "Demand" : "Supply"}
+    </span>
+  );
+}
+
 /** Compact: just the icon for what happened and the date, full text on hover. */
 function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: string | null; title: string; tone?: string }) {
   if (!date) return <span title="Nothing recorded" style={{ color: "var(--bt-muted)" }}>—</span>;
@@ -80,6 +92,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
         <span className="flex items-start gap-1">
           <button type="button" disabled={loading} title={row.title}
             className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
+          {!loading && <SideChip side={row.side} />}
           {!loading && row.is_trade && row.progress !== "Trade" && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
           {!loading && <CopyIdButton id={row.id} />}
         </span>
