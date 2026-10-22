@@ -44,7 +44,7 @@ export function HomeChart({ overview, funnel }: { overview: HomeData["overview"]
   const [view, setView] = useState<View>("overview");
   const [boxRef, width] = useWidth<HTMLDivElement>();
   const [tip, setTip] = useState<Tip>(null);
-  const hatch = `hatch-${useId().replace(/:/g, "")}`;
+  const hatch = `hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const step = funnel?.steps.find((s) => s.key === view) ?? null;
 
   const VW = width;
