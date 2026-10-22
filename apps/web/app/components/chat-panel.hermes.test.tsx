@@ -197,9 +197,39 @@ describe("native Hermes group queue", () => {
     await new Promise((resolve) => setTimeout(resolve, 3500));
     expect(posts).toEqual([]);
     working = false;
-    await waitFor(() => expect(posts).toEqual(["Continue native"]), { timeout: 9000 });
+    await waitFor(() => expect(posts).toEqual(["Continue native"]), { timeout: 12000 });
     await waitFor(() => expect(screen.queryByRole("list", { name: "Waiting messages" })).toBeNull());
-  }, 20000);
+  }, 25000);
+  it("keeps a new send behind queued messages and puts a failed release back at the head", async () => {
+    let working = true; let fail = true;
+    const posts: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
+      if (url.startsWith(groupEndpoint) && init?.method === "POST") {
+        const { message } = JSON.parse(init.body as string);
+        posts.push(message);
+        if (fail) return Response.json({ error: "Room unavailable" }, { status: 500 });
+        return Response.json({ conversation: { working: false }, cursor: 3, messages: [{ id: `user:${posts.length}`, role: "user", text: message, content: message }] });
+      }
+      if (url.startsWith(groupEndpoint)) return Response.json({ conversation: { working }, cursor: 2, messages: url.includes("since_seq") ? [] : [{ id: "e1", role: "user", text: "hello", content: "hello" }] });
+      return new Response(null, { status: 404 });
+    });
+    render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} />);
+    await waitFor(() => expect(screen.getAllByTestId("rich-message").some((m) => m.textContent?.includes("hello"))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    await screen.findByRole("list", { name: "Waiting messages" });
+    working = false;
+    // The release fails: the message returns to the queue and is not re-posted on its own.
+    await waitFor(() => expect(posts).toEqual(["Continue native"]), { timeout: 12000 });
+    await waitFor(() => expect(within(screen.getByRole("list", { name: "Waiting messages" })).getByText("Continue native")).toBeInTheDocument());
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+    expect(posts).toEqual(["Continue native"]);
+    // A new send while one is waiting joins the back of the queue instead of overtaking it; it also resumes release.
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    await waitFor(() => expect(posts).toEqual(["Continue native", "Continue native", "Continue native"]), { timeout: 20000 });
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Waiting messages" })).toBeNull());
+  }, 45000);
 });
 
 describe("gateway ChatPanel solo transport", () => {

@@ -813,8 +813,8 @@ export type FileContext = {
 };
 
 /** A message waiting to be sent after the current agent run finishes. */
-/** A room reports idle through 3s polls; wait past one before releasing a queued group message. */
-const GROUP_QUEUE_IDLE_MS = 4000;
+/** Consecutive idle room polls (3s apart) required before releasing a queued group message. */
+const GROUP_QUEUE_IDLE_POLLS = 2;
 const NO_SUBAGENTS = initialSubagents();
 const noop = () => {};
 const NO_DOCK_CALLBACKS = { onApproval: noop, onClarify: noop, onSubagentTail: noop, onSubagentSteer: noop, onSubagentInterrupt: noop, onRetry: noop };
@@ -1316,12 +1316,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const optimisticGroupIds = useRef(new Set<string>());
 		const [groupWorking, setGroupWorking] = useState(false);
 		const [groupSending, setGroupSending] = useState(false);
+		/** Consecutive successful room polls reporting idle; a hung or failed poll never advances it. */
+		const [groupIdlePolls, setGroupIdlePolls] = useState(0);
+		/** The queued message being released now; it must not re-queue behind the rest, and returns to the head on failure. */
+		const groupReleaseRef = useRef<QueuedMessage | null>(null);
+		/** Set after a failed release so a broken room is not re-posted every few seconds; the next own send clears it. */
+		const groupReleasePausedRef = useRef(false);
         const [groupWork, setGroupWork] = useState<{ roster: HermesParticipant[]; driver?: RoomDriver; settled: GroupSettlement[]; lastUser?: string }>({ roster: [], settled: [] });
         const updateGroupWork = useCallback((data: GroupDetail) => {
             setGroupWork(previous => ({ roster: data.conversation?.participants ?? previous.roster, driver: data.driver, lastUser: data.messages?.filter(m => m.role === 'user').at(-1)?.id ?? previous.lastUser,
                 settled: [...new Map([...previous.settled, ...(data.settled ?? []), ...(data.messages ?? []).filter(m => m.role === "assistant" && m.memberId).map(m => ({ memberId: m.memberId, createdAt: m.createdAt }))].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)).map(s => [s.memberId, s])).values()] }));
         }, []);
-        useEffect(() => { setGroupWork({ roster: [], settled: [] }); setGroupWorking(false); }, [groupKey]);
+        useEffect(() => { setGroupWork({ roster: [], settled: [] }); setGroupWorking(false); setGroupIdlePolls(0); groupReleasePausedRef.current = false; }, [groupKey]);
 		const [groupAgents, setGroupAgents] = useState<{ handle: string; name: string; profile: string }[]>([]);
 		useEffect(() => setGroupAgents([]), [groupKey]);
 		const applyGroupDetail = useCallback((data: GroupDetail) => {
@@ -1330,6 +1336,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			if (roster.length) setGroupAgents((prev) => prev.length === roster.length && prev.every((a, i) => a.handle === roster[i].handle && a.name === roster[i].name) ? prev : roster);
 			if (typeof data.cursor === "number") groupCursorRef.current = Math.max(groupCursorRef.current, data.cursor);
 			setGroupWorking(data.conversation?.working === true);
+			setGroupIdlePolls((count) => data.conversation?.working === true ? 0 : count + 1);
 			const incoming = data.messages ?? [];
 			if (!incoming.length) return;
 			setMessages((prev) => {
@@ -2084,6 +2091,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		/** Submit from the Tiptap editor (called on Enter or send button).
 		 *  `overrideAttachments` is used by the queue system to pass saved attachments directly. */
+		/** A released group message whose post failed goes back to the head of the queue, and auto-release pauses. */
+		const restoreGroupRelease = useCallback((item: QueuedMessage | null, eventId: string) => {
+			if (!item) return;
+			optimisticGroupIds.current.delete(eventId);
+			setMessages((prev) => prev.filter((m) => m.id !== eventId));
+			groupReleasePausedRef.current = true;
+			setQueuedMessages((prev) => [item, ...prev]);
+		}, [setMessages]);
+
 		const handleEditorSubmit = useCallback(
 			async (
 				text: string,
@@ -2109,6 +2125,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					if (!nativeGateway && isStreaming && queuedMessagesRef.current.length > 0) {
 						const [nextQueued, ...rest] = queuedMessagesRef.current;
 						setQueuedMessages(rest);
+						if (groupKey) groupReleaseRef.current = nextQueued;
 						void (async () => {
 							await handleStopRef.current?.();
 							// Wait for the useChat status to actually settle back
@@ -2118,12 +2135,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							while (Date.now() < deadline && isStreamingRef.current) {
 								await new Promise((r) => setTimeout(r, 30));
 							}
-							await handleEditorSubmitRef.current?.(
-								nextQueued.text,
-								nextQueued.mentionedFiles,
-								nextQueued.html,
-								nextQueued.attachedFiles,
-							);
+							try {
+								await handleEditorSubmitRef.current?.(
+									nextQueued.text,
+									nextQueued.mentionedFiles,
+									nextQueued.html,
+									nextQueued.attachedFiles,
+								);
+							} finally {
+								if (groupReleaseRef.current === nextQueued) groupReleaseRef.current = null;
+							}
 						})();
 					}
 					return;
@@ -2147,7 +2168,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				// Queue the message if the agent is still running. To release
 				// a queued message early (interrupt the current turn), submit
 				// an empty Enter — handled above.
-				if (isStreaming && !nativeGateway) {
+				const releasingGroup = groupKey ? groupReleaseRef.current : null;
+				if (groupKey && !releasingGroup) groupReleasePausedRef.current = false;
+				// A group send never overtakes messages already waiting for the room to go idle.
+				if (!nativeGateway && (isStreaming || (groupKey && !releasingGroup && queuedMessagesRef.current.length > 0))) {
 					if (!overrideAttachments) {
 						setAttachedFiles([]);
 					}
@@ -2315,10 +2339,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							body: JSON.stringify({ message: messageText, eventId }),
 						});
 						if (res.ok) { setStreamError(null); applyGroupDetail(await res.json()); }
-						else setStreamError((await res.json().catch(() => ({ error: "" }))).error || "Failed to send message.");
+						else { setStreamError((await res.json().catch(() => ({ error: "" }))).error || "Failed to send message."); restoreGroupRelease(releasingGroup, eventId); }
 					} catch {
 						setStreamError("Failed to send message.");
+						restoreGroupRelease(releasingGroup, eventId);
 					} finally {
+						if (releasingGroup && groupReleaseRef.current === releasingGroup) groupReleaseRef.current = null;
 						setGroupSending(false);
 					}
 				} else {
@@ -2357,6 +2383,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				nativeConversationKey,
 				groupKey,
 				applyGroupDetail,
+				restoreGroupRelease,
 				nativeGateway,
 				nativeChat.send,
 				nativeChat.readOnly,
@@ -2379,19 +2406,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		// ── Group queue flush ──
 		// A room has no stream status to flip; it reports idle through polls. A user message posted while members
-		// work cancels their in-flight turns, so hold queued messages until the room has stayed idle across a poll
-		// (3s cadence), which also covers the gap between a send returning and the driver reporting work.
+		// work cancels their in-flight turns, so release one queued message only after two consecutive successful
+		// polls report idle (a hung or failed poll never counts), never while a send is in flight.
 		useEffect(() => {
-			if (!groupKey || isStreaming || queuedMessages.length === 0) return;
-			const timer = setTimeout(() => {
-				if (isStreamingRef.current) return;
-				const [next, ...rest] = queuedMessagesRef.current;
-				if (!next) return;
-				setQueuedMessages(rest);
-				void handleEditorSubmitRef.current?.(next.text, next.mentionedFiles, next.html, next.attachedFiles);
-			}, GROUP_QUEUE_IDLE_MS);
-			return () => clearTimeout(timer);
-		}, [groupKey, isStreaming, queuedMessages.length]);
+			if (!groupKey || isStreaming || groupSending || groupIdlePolls < GROUP_QUEUE_IDLE_POLLS || queuedMessages.length === 0) return;
+			if (groupReleaseRef.current || groupReleasePausedRef.current) return;
+			const [next, ...rest] = queuedMessages;
+			groupReleaseRef.current = next;
+			setQueuedMessages(rest);
+			setGroupIdlePolls(0);
+			void Promise.resolve(handleEditorSubmitRef.current?.(next.text, next.mentionedFiles, next.html, next.attachedFiles))
+				.finally(() => { if (groupReleaseRef.current === next) groupReleaseRef.current = null; });
+		}, [groupKey, isStreaming, groupSending, groupIdlePolls, queuedMessages]);
 
 		// ── Queue flush: send the next queued message once the stream finishes ──
 		const prevFlushStatusRef = useRef(status);
@@ -2502,7 +2528,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					);
 
 					setMessages(uiMessages);
-					if (groupKey) { groupCursorRef.current = typeof data.cursor === "number" ? data.cursor : 0; setGroupWorking(data.conversation?.working === true); updateGroupWork(data); }
+					if (groupKey) { groupCursorRef.current = typeof data.cursor === "number" ? data.cursor : 0; setGroupWorking(data.conversation?.working === true); setGroupIdlePolls(0); updateGroupWork(data); }
 
 					// Clear loading state *before* reconnecting — the
 					// persisted messages are now visible.  attemptReconnect
