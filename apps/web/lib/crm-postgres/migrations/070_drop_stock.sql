@@ -1,6 +1,6 @@
 -- Supplier stock lives on the marketplace only. Drop the CRM stock list: its table, enrichment queue and trigger,
--- and the stock families in the supply feed. The Stock page and the stock-list source in demand matching are removed
--- in the same release. Back up crm_stock_items and crm_stock_enrich_queue to S3 before applying.
+-- the generic `stock` CRM object (reb_stock_object and its fields), and the stock families in the supply feed. The Stock page and the stock-list source in demand matching are removed
+-- in the same release. Back up crm_stock_items, crm_stock_enrich_queue, crm_objects and crm_fields to S3 before applying.
 begin;
 create or replace view crm_bulk_trade_supply_feed as
  SELECT supply.id,
@@ -39,6 +39,7 @@ UNION ALL
     NULL::integer AS count
    FROM crm_bulk_trade_lots lot
   WHERE ((lot.origin = 'supply'::text) AND (lot.trade_stage = ANY (ARRAY['Needs info'::text, 'With buyers'::text, 'Closing'::text])) AND ((lot.auction_id IS NULL) OR ((lot.auction_status = 'published'::text) AND ((lot.auction_closes_at IS NULL) OR (lot.auction_closes_at > now())))));
+delete from crm_objects where id = 'reb_stock_object';  -- its crm_fields rows cascade
 drop table crm_stock_enrich_queue;
 drop table crm_stock_items;
 drop function crm_stock_items_queue_enrichment();
