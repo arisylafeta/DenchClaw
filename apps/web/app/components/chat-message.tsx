@@ -1080,7 +1080,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 						</div>
 					)}
 					{showCopyAction && (
-						<div className="flex items-center gap-1 self-end md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+						<div className="flex items-center gap-1 self-end opacity-50 hover:opacity-100 group-hover:opacity-100 transition-opacity">
 							<CopyMessageButton text={copyText} />
 						</div>
 					)}
@@ -1100,7 +1100,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 					{bubbleContent}
 				</div>
 				{showCopyAction && (
-					<div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+					<div className="flex items-center gap-1 opacity-50 hover:opacity-100 group-hover:opacity-100 transition-opacity">
 						<CopyMessageButton text={copyText} />
 					</div>
 				)}
@@ -1296,7 +1296,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onS
 			})}
 			</AnimatePresence>
 			{!isStreaming && (showCopyAction || POSTHOG_KEY || (voicePlaybackEnabled && speechText)) && (
-				<div className="flex items-center gap-1 mt-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+				<div className="flex items-center gap-1 mt-1 opacity-50 hover:opacity-100 group-hover:opacity-100 transition-opacity">
 					{showCopyAction && <CopyMessageButton text={copyText} />}
 					{voicePlaybackEnabled && speechText && <MessageVoiceButton text={speechText} />}
 					{POSTHOG_KEY && <FeedbackButtons messageId={message.id} sessionId={sessionId} />}
