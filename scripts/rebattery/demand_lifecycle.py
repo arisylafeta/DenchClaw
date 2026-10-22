@@ -30,14 +30,14 @@ def reputation_for(cur, company_id=None, person_id=None, email=None, two_way=Fal
     cur.execute("""select
       exists(select 1 from crm_bulk_demand where company_id = %(company)s
         and status = 'closed' and closed_reason = 'bought_from_us')
-      or exists(select 1 from crm_bulk_trade_buyers b join crm_people p on p.id = b.person_id
-        join crm_bulk_trade_lots l on l.id = b.lot_id
-        where p.company_id = %(company)s and b.status = 'Won' and l.trade_stage = 'Done') as paid,
-      exists(select 1 from crm_bulk_trade_buyers b left join crm_people p on p.id = b.person_id
-        where (p.company_id = %(company)s or b.person_id = %(person)s)
-          and (exists(select 1 from crm_bulk_trade_bids bid where bid.buyer_id = b.id
-                        and bid.created_at >= now() - interval '60 days')
-               or (b.last_touch_via = 'Call' and b.last_touch_on >= current_date - 60)))
+      or exists(select 1 from crm_bulk_offers o left join crm_people p on p.id = o.person_id
+        join crm_bulk_listings l on l.id = o.bulk_listing_id
+        where coalesce(o.company_id, p.company_id) = %(company)s and o.stage = 'won' and l.status = 'closed') as paid,
+      exists(select 1 from crm_bulk_offers o left join crm_people p on p.id = o.person_id
+        where (coalesce(o.company_id, p.company_id) = %(company)s or o.person_id = %(person)s)
+          and (exists(select 1 from crm_bulk_listing_activity a where a.offer_id = o.id and a.kind = 'quote'
+                        and a.occurred_at >= now() - interval '60 days')
+               or (o.last_touch_via = 'Call' and o.last_touch_on >= current_date - 60)))
       or exists(select 1 from crm_bulk_trade_proposals q where q.created_at >= now() - interval '60 days'
         and (q.proposed->>'company_id' = %(company)s or q.proposed->>'person_id' = %(person)s)
         and q.status in ('accepted', 'applied')) as active""", {'company': company_id, 'person': person_id})
