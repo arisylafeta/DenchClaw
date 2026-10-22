@@ -177,20 +177,6 @@ describe("Unified supply", () => {
                       verified: null,
                       count: null,
                     },
-                    {
-                      id: "stock:1",
-                      kind: "stock",
-                      title: "Stock summary",
-                      seller: null,
-                      size: null,
-                      location: null,
-                      seen: null,
-                      status: "open",
-                      href: "/?path=stock",
-                      suppliers: [],
-                      verified: null,
-                      count: null,
-                    },
                   ],
                 },
           ),
@@ -199,7 +185,6 @@ describe("Unified supply", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<SupplyPage />);
     expect(await screen.findByText("Offer")).toBeInTheDocument();
-    expect(screen.getByText("Stock")).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole("button", { name: /Jacksons Car Dismantlers/ }),
     );

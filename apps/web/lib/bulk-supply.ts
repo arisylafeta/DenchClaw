@@ -3,7 +3,7 @@ import type { CompanyContextNote } from "./crm-postgres/company-context";
 
 export type SupplyFeedRow = {
   id: string;
-  kind: "supply" | "trade" | "auction" | "stock";
+  kind: "supply" | "trade" | "auction";
   title: string;
   seller: string | null;
   size: string | null;

@@ -111,7 +111,7 @@ describe("matchDemand", () => {
   it("groups the same pack across sellers so a bulk ask sees total units", () => {
     const result = matchDemand(demand({ product_family: "Hyundai Kona 64kWh pack", wants: "Kona packs", quantity: "10 packs" }), [
       ...Array.from({ length: 6 }, () => kona({ price: 3000 })),
-      ...Array.from({ length: 5 }, () => kona({ source: "stock", price: null, model: "Kona" })),
+      ...Array.from({ length: 5 }, () => kona({ source: "marketplace", price: null, model: "Kona" })),
       unit({ make: "Renault", model: "Zoe", title: "Renault Zoe", kwh: 52 }),
     ]);
     expect(result.groups).toHaveLength(1);
@@ -141,7 +141,7 @@ describe("matchDemand", () => {
   it("ranks Exact before Check even when the unclear unit is cheaper", () => {
     const req = { product_family: "Hyundai Kona 64kWh pack", wants: "Kona packs", quantity: "2 packs", max_price: 50, price_currency: "EUR", price_unit: "kWh" };
     const confirmed = kona({ chemistry: "NMC", soh: 90, price: 2900, model: "Kona" });
-    const cheapButUnclear = unit({ make: "Hyundai", model: "Kona", title: "Hyundai Kona", kwh: null, price: 900, source: "stock" });
+    const cheapButUnclear = unit({ make: "Hyundai", model: "Kona", title: "Hyundai Kona", kwh: null, price: 900, source: "marketplace" });
     const result = matchDemand(demand({ ...req, spec: { chemistries: ["NMC"] } }), [cheapButUnclear, confirmed]);
     expect(result.groups[0].verdict).toBe("exact");
     expect(result.groups[0].matches[0].candidate.key).toBe(confirmed.key);
@@ -160,12 +160,12 @@ describe("matchDemand", () => {
     expect(result.groups.find((g) => g.key === "trade:trade:t9")?.verdict).toBe("check");
   });
 
-  it("splits a group by seller, merging one company across marketplace and stock list, and finds the fewest sellers", () => {
+  it("splits a group by seller, merging one company across sources, and finds the fewest sellers", () => {
     expect(sellerKey("LKQ SYNETIQ")).toBe(sellerKey("Synetiq"));
     expect(sellerKey("Autohandel DIDIER NV")).toBe(sellerKey("Didier"));
     const result = matchDemand(demand({ wants: "Hyundai Kona 64 kWh", quantity: "10 packs" }), [
       ...Array.from({ length: 6 }, () => kona({ seller: "LKQ SYNETIQ", price: 2000 })),
-      ...Array.from({ length: 2 }, () => kona({ seller: "Synetiq", source: "stock", price: null })),
+      ...Array.from({ length: 2 }, () => kona({ seller: "Synetiq", source: "marketplace", price: null })),
       ...Array.from({ length: 3 }, () => kona({ seller: "Autohandel DIDIER NV", country: "BE", price: 1800 })),
       kona({ seller: "Small Breaker", price: 1500 }),
     ]);

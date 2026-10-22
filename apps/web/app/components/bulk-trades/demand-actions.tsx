@@ -432,11 +432,10 @@ export function DemandActions({
                 <option value="url">URL</option>
                 <option value="lot">Lot</option>
                 <option value="supply">Supply</option>
-                <option value="stock">Stock item</option>
               </select>
               <input
                 aria-label="Activity link"
-                type={refKind === "url" || refKind === "stock" ? "url" : "text"}
+                type={refKind === "url" ? "url" : "text"}
                 role={
                   refKind === "lot" || refKind === "supply"
                     ? "combobox"
@@ -456,7 +455,7 @@ export function DemandActions({
                     : undefined
                 }
                 placeholder={
-                  refKind === "url" || refKind === "stock"
+                  refKind === "url"
                     ? "https://"
                     : "Choose an item"
                 }

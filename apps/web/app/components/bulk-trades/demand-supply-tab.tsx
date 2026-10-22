@@ -8,7 +8,7 @@ import { rowFocus } from "./demand-page";
 import { buttonClass, buttonStyle } from "./trade-ui";
 import css from "./demand-panel.module.css";
 
-export const SOURCE_LABEL: Record<SourceKind, string> = { marketplace: "Marketplace", stock: "Stock list", trade: "Trade", supply: "Supply" };
+export const SOURCE_LABEL: Record<SourceKind, string> = { marketplace: "Marketplace", trade: "Trade", supply: "Supply" };
 
 export const eur = (n: number | null | undefined, digits = 0) =>
   n == null ? "—" : `€${n >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : n.toLocaleString("en-GB", { maximumFractionDigits: digits })}`;
@@ -258,7 +258,7 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
   );
 }
 
-type SourceFilter = "all" | "marketplace" | "stock" | "trades" | "starred";
+type SourceFilter = "all" | "marketplace" | "trades" | "starred";
 type Sort = "match" | "price" | "units";
 
 export function buyerOffer(units: SupplyUnitView[]): string {
@@ -297,12 +297,12 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
     if (sort === "units") list.sort((a, b) => b.units - a.units);
     return list;
   }, [supply, source, sort, showSmall]);
-  if (loading && !supply) return <p className={css.empty}>Checking marketplace listings, stock lists and trades…</p>;
+  if (loading && !supply) return <p className={css.empty}>Checking marketplace listings and trades…</p>;
   if (error && !supply) return <p role="alert" className={css.empty} style={{ color: "var(--bt-red)" }}>{error}</p>;
   if (!supply) return null;
   const r = supply.requirement;
   const firstOpen = open ?? groups[0]?.key ?? null;
-  const checked = supply.considered.marketplace + supply.considered.stock + supply.considered.trades;
+  const checked = supply.considered.marketplace + supply.considered.trades;
   const matchingOn = [...r.pinned, r.unitsNeeded ? `${r.unitsNeeded.toLocaleString("en-GB")} units` : null,
     r.buyerEurPerKwh != null ? `≤ ${perKwh(r.buyerEurPerKwh)}` : null, r.country ? `to ${r.country}` : null].filter(Boolean).join(" · ");
   return (
@@ -317,7 +317,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
         <>
           <div className={css.toolbar}>
             <div role="group" aria-label="Source" className={css.segment}>
-              {([["all", "All"], ["marketplace", "Marketplace"], ["stock", "Stock lists"], ["trades", "Trades"],
+              {([["all", "All"], ["marketplace", "Marketplace"], ["trades", "Trades"],
                 ...(supply.shortlisted.length ? [["starred", `Shortlisted · ${supply.shortlisted.length}`]] : [])] as [SourceFilter, string][]).map(([value, label]) => (
                 <button key={value} type="button" aria-pressed={source === value} onClick={() => setSource(value)}>{label}</button>
               ))}

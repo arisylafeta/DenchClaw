@@ -1,9 +1,9 @@
-// Scores our own inventory (marketplace listings, supplier stock lists, live trades and supply) against one demand
+// Scores our own inventory (marketplace listings, live trades and supply) against one demand
 // row, so the Suitable supply tab can answer "do we have it, at a price that leaves a deal?" at a glance.
 // Pure and deterministic: no model calls. The inbox check's AI matches for trades and supply feed in as evidence.
 import type { Demand } from "./bulk-demand";
 
-export type SourceKind = "marketplace" | "stock" | "trade" | "supply";
+export type SourceKind = "marketplace" | "trade" | "supply";
 export type Format = "Packs" | "Modules" | "Cells" | "Systems";
 
 /** One unit of supply in a shape every source can fill. Price is per unit, in `currency`. */
@@ -37,7 +37,7 @@ export type Candidate = {
   href: string;
   /** For trades and supply: the inbox check's judgement of this pair, when it made one. */
   ai: { strength: "strong" | "partial"; reason: string } | null;
-  /** Other sources that hold the same unit (a stock-list row that is also listed on the marketplace). */
+  /** Other sources that hold the same unit. */
   alsoIn: SourceKind[];
 };
 

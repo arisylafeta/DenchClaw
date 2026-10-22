@@ -71,7 +71,7 @@ function row(overrides: Partial<Demand>): Demand {
 
 const check = (key: Check["key"], label: string, state: Check["state"], detail: string): Check => ({ key, label, state, detail });
 const unit: SupplyUnitView = {
-  key: "listing:l1", source: "marketplace", alsoIn: ["stock"], title: "Volkswagen ID.3 58 kWh", seller: "Example Breakers",
+  key: "listing:l1", source: "marketplace", alsoIn: [], title: "Volkswagen ID.3 58 kWh", seller: "Example Breakers",
   make: "Volkswagen", model: "ID.3", format: "Packs", chemistry: "NMC", location: "Yorkshire, United Kingdom", country: "GB",
   kwh: 58, kwhEstimated: false, units: 1, price: 2400, currency: "GBP", currencyAssumed: false, eurPerKwh: 48, eurPerUnit: 2784,
   marginPct: null, spreadEur: null, cheapestRank: 0, peers: 3, verdict: "exact",
@@ -82,13 +82,13 @@ const unit: SupplyUnitView = {
 const sampleSupply: DemandSupply = {
   requirement: { pinned: ["MEB", "Packs"], unitsNeeded: 10, kwhNeeded: null, buyerEurPerKwh: null, buyerEurPerUnit: null, country: "GB" },
   groups: [{ key: "vw|id.3|58|Packs", label: "Volkswagen ID.3 · 58 kWh", verdict: "exact", units: 3,
-    sellers: ["Example Breakers"], sources: ["marketplace", "stock"], eurPerKwh: { min: 48, max: 52 }, bestMarginPct: null,
+    sellers: ["Example Breakers"], sources: ["marketplace"], eurPerKwh: { min: 48, max: 52 }, bestMarginPct: null,
     covers: { have: 3, need: 10 }, small: false, checks: unit.checks, items: [unit], more: 0,
-    bySeller: [{ key: "example", name: "Example Breakers", country: "GB", location: "Yorkshire, United Kingdom", sources: ["marketplace", "stock"],
+    bySeller: [{ key: "example", name: "Example Breakers", country: "GB", location: "Yorkshire, United Kingdom", sources: ["marketplace"],
       units: 3, kwh: { min: 58, max: 58 }, eurPerKwh: { min: 48, max: 52 }, totalEur: 8350, pricedUnits: 3, verdict: "exact", withPhotos: 1,
       items: [unit], more: 0 }],
     fill: { sellers: [{ name: "Example Breakers", units: 3 }], units: 3, need: 10, eurPerKwh: 48 } }],
-  totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, stock: 2000, trades: 20 }, hiddenCount: 0,
+  totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, trades: 20 }, hiddenCount: 0,
   shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, blocked: null, errors: [], fxNote: "Approximate FX",
 };
 

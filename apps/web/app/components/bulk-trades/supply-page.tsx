@@ -22,7 +22,6 @@ const KIND = {
   supply: "Offer",
   trade: "Lot",
   auction: "Auction",
-  stock: "Stock",
 } as const;
 const SUPPLY_URL = "/api/bulk-trades/supply";
 const DEMAND_URL = "/api/bulk-trades/demand";
@@ -101,7 +100,6 @@ export function SupplyPage({
     }));
   const shown = (filter === "closed" ? closedSupply : feed).filter(
     (row) =>
-      (initialSupplyId !== "stock" || row.kind === "stock") &&
       (filter === "closed"
         ? row.status === "closed"
         : row.status !== "closed") &&

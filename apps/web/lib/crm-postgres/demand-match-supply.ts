@@ -1,11 +1,11 @@
 import "server-only";
 
-// Loads our own inventory as demand-matching candidates: published marketplace sale listings, supplier stock-list
-// rows, and live trades, auctions and supply batches. Read only. Marketplace reads are cached for five minutes.
+// Loads our own inventory as demand-matching candidates: published marketplace sale listings and live trades,
+// auctions and supply batches. Read only. Marketplace reads are cached for five minutes.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "../platform-admin/supabase";
 import { queryPg } from "../postgres";
-import { countryFromText, kwhFromText, sellerKey, type Candidate, type Format, type SourceKind } from "../demand-match";
+import { countryFromText, kwhFromText, type Candidate, type Format, type SourceKind } from "../demand-match";
 
 const CACHE_MS = 5 * 60_000;
 const SITE = "https://www.rebattery.io/marketplace/";
@@ -99,83 +99,6 @@ function listingCandidate(row: ListingRow): Candidate {
   };
 }
 
-// Where a stock-list supplier is, from its location text, then its company suffix, then known UK suppliers.
-const UK_SUPPLIERS = /synetiq|silverlake|asm|kore|scb|charles trent|aceon/i;
-function supplierCountry(supplier: string, location: string | null, stated: string | null): string | null {
-  if (stated && /^[A-Z]{2}$/.test(stated)) return stated;
-  const fromText = countryFromText(location) ?? countryFromText(stated);
-  if (fromText) return fromText;
-  if (/didier/i.test(supplier)) return "BE";
-  if (/\bAS\b/.test(supplier)) return "NO";
-  if (/\bAB\b/.test(supplier)) return "SE";
-  if (/B\.V\.|\bBV\b/.test(supplier)) return "NL";
-  if (/\bUAB\b/.test(supplier)) return "LT";
-  if (UK_SUPPLIERS.test(supplier)) return "GB";
-  if (/norway|trøndelag|østfold|innlandet|romsdal/i.test(location ?? "")) return "NO";
-  return null;
-}
-const COUNTRY_CURRENCY: Record<string, string> = { GB: "GBP", NO: "NOK", SE: "SEK", DK: "DKK", PL: "PLN", CH: "CHF", US: "USD", CN: "USD" };
-
-type StockRow = {
-  id: string; supplier: string; make: string | null; model: string | null; model_detail: string | null; year: string | null;
-  part_number: string | null; description: string | null; quantity: number; price: number | null; location: string | null;
-  chemistry: string | null; capacity_kwh: number | null; scope: string | null; soh_percent: number | null; tested: boolean | null;
-  photo_urls: string[]; supplier_confirmed: boolean; updated_at: string; stock_status: string; attributes: Record<string, unknown>;
-};
-
-const SKIP_SCOPES = new Set(["obvious_nonpack", "spares", "inverter"]);
-
-export async function stockCandidates(): Promise<Candidate[]> {
-  const rows = await queryPg<StockRow>(
-    `select id, supplier, make, model, model_detail, year, part_number, description, quantity::float8 as quantity,
-       price::float8 as price, location, chemistry, capacity_kwh::float8 as capacity_kwh, scope, soh_percent::float8 as soh_percent,
-       tested, photo_urls, supplier_confirmed, updated_at::text, stock_status, attributes
-     from crm_stock_items where stock_status not in ('sold', 'unavailable')`,
-  );
-  return rows.filter((row) => !SKIP_SCOPES.has(row.scope ?? "")).map((row) => {
-    const a = row.attributes ?? {};
-    const str = (key: string) => (typeof a[key] === "string" && a[key] ? String(a[key]) : null);
-    const country = supplierCountry(row.supplier, row.location, str("supplier_country"));
-    const statedCurrency = str("price_currency") ?? str("currency");
-    const kwhText = kwhFromText(`${row.model_detail ?? ""} ${row.description ?? ""}`);
-    const kwh = row.capacity_kwh ?? (typeof a.energy_kwh === "number" ? a.energy_kwh : null)
-      ?? (kwhText && "options" in kwhText && kwhText.options.length === 1 ? kwhText.options[0] : null);
-    const scope = row.scope ?? "";
-    const format: Format | null = /module/.test(scope) || str("category") === "modules" ? "Modules"
-      : /cell/.test(scope) || str("category") === "cells" ? "Cells"
-      : /bess|container/.test(scope) ? "Systems" : "Packs";
-    return {
-      key: `stock:${row.id}`,
-      source: "stock" as SourceKind,
-      title: [row.make, row.model, row.model_detail].filter(Boolean).join(" ") || row.description || row.part_number || "Stock row",
-      seller: row.supplier,
-      make: row.make,
-      model: row.model,
-      format,
-      chemistry: oneChemistry(row.chemistry),
-      cellFormat: str("cell_format"),
-      kwh,
-      kwhEstimated: false,
-      units: row.quantity || 1,
-      price: row.price,
-      currency: statedCurrency ?? (country ? COUNTRY_CURRENCY[country] ?? "EUR" : null),
-      currencyAssumed: !statedCurrency,
-      country,
-      location: row.location,
-      soh: row.soh_percent,
-      year: row.year && /^\d{4}/.test(row.year) ? Number(row.year.slice(0, 4)) : null,
-      partNumber: row.part_number,
-      photos: row.photo_urls?.length ?? 0,
-      tested: !!row.tested,
-      verified: row.supplier_confirmed,
-      seen: row.updated_at,
-      href: "/?path=stock",
-      ai: null,
-      alsoIn: [],
-    };
-  });
-}
-
 type FeedRow = { id: string; kind: "trade" | "auction" | "supply"; title: string; seller: string | null; size: string | null;
   location: string | null; seen: string | null; href: string; strength: "strong" | "partial" | null; reason: string | null };
 
@@ -230,48 +153,6 @@ export async function feedCandidates(demandId: string): Promise<Candidate[]> {
   });
 }
 
-const supplierKey = sellerKey;
-const pnKey = (pn: string | null) => (pn ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-/**
- * Joins the sources: a stock-list row that is also listed on the marketplace (same supplier and part number) is
- * shown once, as the listing; stock rows without kWh borrow it from listings of the same make and model when every
- * such listing agrees.
- */
-export function mergeSources(listings: Candidate[], stock: Candidate[]): Candidate[] {
-  const listed = new Map<string, Candidate[]>();
-  for (const l of listings) {
-    const pn = pnKey(l.partNumber);
-    if (pn.length >= 6) listed.set(`${supplierKey(l.seller)}|${pn}`, [...(listed.get(`${supplierKey(l.seller)}|${pn}`) ?? []), l]);
-  }
-  const typical = new Map<string, Set<number>>();
-  for (const l of listings) {
-    if (!l.make || !l.model || !l.kwh) continue;
-    const key = `${l.make.toLowerCase()}|${l.model.toLowerCase().split(/\s+/)[0]}`;
-    typical.set(key, (typical.get(key) ?? new Set()).add(Math.round(l.kwh)));
-  }
-  const kept: Candidate[] = [];
-  for (const s of stock) {
-    const pn = pnKey(s.partNumber);
-    const twins = pn.length >= 6 ? listed.get(`${supplierKey(s.seller)}|${pn}`) : undefined;
-    const twin = twins?.find((t) => !t.alsoIn.includes("stock"));
-    if (twin) {
-      twin.alsoIn.push("stock");
-      continue;
-    }
-    if (s.kwh == null && s.make && s.model) {
-      const model = s.model.toLowerCase().replace(new RegExp(`^${s.make.toLowerCase()}\\s+`), "").split(/\s+/)[0];
-      const sizes = typical.get(`${s.make.toLowerCase()}|${model}`);
-      if (sizes?.size === 1) {
-        s.kwh = [...sizes][0];
-        s.kwhEstimated = true;
-      }
-    }
-    kept.push(s);
-  }
-  return [...listings, ...kept];
-}
-
 /** Every candidate for one demand row, plus the units hidden as "Not a fit" for it. */
 export type MatchVerdict = { verdict: "shortlist" | "not_a_fit"; at: string; note: string | null };
 
@@ -291,14 +172,13 @@ export async function matchVerdicts(demandId: string): Promise<Map<string, Match
 
 export async function inventoryFor(demandId: string): Promise<{ candidates: Candidate[]; hidden: Set<string>; verdicts: Map<string, MatchVerdict>; errors: string[] }> {
   const errors: string[] = [];
-  const [listings, stock, feed, hidden] = await Promise.all([
+  const [listings, feed, hidden] = await Promise.all([
     marketplaceCandidates().catch((err) => { errors.push(`Marketplace: ${err instanceof Error ? err.message : err}`); return [] as Candidate[]; }),
-    stockCandidates(),
     feedCandidates(demandId),
     matchVerdicts(demandId),
   ]);
   // Listings are cached and shared, so merge into copies.
   const copies = listings.map((l) => ({ ...l, alsoIn: [] as SourceKind[] }));
   const notFit = new Set([...hidden].filter(([, v]) => v.verdict === "not_a_fit").map(([key]) => key));
-  return { candidates: [...feed, ...mergeSources(copies, stock)], hidden: notFit, verdicts: hidden, errors };
+  return { candidates: [...feed, ...copies], hidden: notFit, verdicts: hidden, errors };
 }

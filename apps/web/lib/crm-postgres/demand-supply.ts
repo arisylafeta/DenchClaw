@@ -4,7 +4,7 @@ import "server-only";
 import type { Demand } from "../bulk-demand";
 import { matchDemand, bestLine, bySeller, fewestSellers, type Match, type MatchGroup } from "../demand-match";
 import type { DemandSupply, SupplyGroupView, SupplyUnitView, BestMatchLine } from "../demand-supply-types";
-import { feedCandidates, inventoryFor, marketplaceCandidates, mergeSources, stockCandidates, matchVerdicts, type MatchVerdict } from "./demand-match-supply";
+import { feedCandidates, inventoryFor, marketplaceCandidates, matchVerdicts, type MatchVerdict } from "./demand-match-supply";
 import { addDemandActivity } from "./bulk-demand-activity";
 import { listDemand } from "./bulk-demand";
 
@@ -59,7 +59,6 @@ export async function demandSupply(demand: Demand): Promise<DemandSupply> {
     totalUnits: result.groups.filter((g) => !g.small).reduce((s, g) => s + g.units, 0),
     considered: {
       marketplace: candidates.filter((c) => c.source === "marketplace").length,
-      stock: candidates.filter((c) => c.source === "stock").length,
       trades: candidates.filter((c) => c.source === "trade" || c.source === "supply").length,
     },
     hiddenCount: hidden.size,
@@ -78,8 +77,8 @@ export async function recordMatchVerdict(demandId: string, input: { key: string;
   const verb = input.verdict === "shortlist" ? "Shortlisted" : input.verdict === "not_a_fit" ? "Not a fit" : "Cleared";
   return addDemandActivity({
     demandId, kind: "supply", title: `${verb}: ${input.title}${input.seller ? ` (${input.seller})` : ""}`,
-    body: input.note ?? null, refKind: input.href?.startsWith("http") ? "url" : input.key.startsWith("stock:") ? "stock" : null,
-    refId: input.href?.startsWith("http") ? input.href : input.key.startsWith("stock:") ? input.key.slice(6) : null,
+    body: input.note ?? null, refKind: input.href?.startsWith("http") ? "url" : null,
+    refId: input.href?.startsWith("http") ? input.href : null,
     data: { match: { key: input.key, verdict: input.verdict, eur_per_kwh: input.eurPerKwh ?? null } }, actorUserId: userId,
   });
 }
@@ -90,8 +89,8 @@ let bestCache: { at: number; lines: Promise<Record<string, BestMatchLine>> } | n
 export function bestMatchLines(fresh = false): Promise<Record<string, BestMatchLine>> {
   if (fresh || !bestCache || Date.now() - bestCache.at > 120_000) {
     const lines = (async () => {
-      const [demand, listings, stock] = await Promise.all([listDemand(), marketplaceCandidates().catch(() => []), stockCandidates()]);
-      const base = mergeSources(listings.map((l) => ({ ...l, alsoIn: [] })), stock.map((s) => ({ ...s })));
+      const [demand, listings] = await Promise.all([listDemand(), marketplaceCandidates().catch(() => [])]);
+      const base = listings.map((l) => ({ ...l, alsoIn: [] }));
       const out: Record<string, BestMatchLine> = {};
       for (const row of demand.filter((d) => d.status !== "closed")) {
         const [feed, verdicts] = await Promise.all([feedCandidates(row.id), matchVerdicts(row.id)]);

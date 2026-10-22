@@ -46,9 +46,7 @@ const DEMAND_SELECT = `
     case when demand.status <> 'closed' then bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on))::float8 end as expected_fee,
     (demand.status <> 'closed' and demand.product_family is not null and (
-      exists(select 1 from crm_stock_items stock where stock.stock_status not in ('sold', 'unavailable')
-        and concat_ws(' ', stock.make, stock.model, stock.description) ilike '%' || demand.product_family || '%')
-      or exists(select 1 from crm_bulk_trade_lots stock where stock.origin = 'supply'
+      exists(select 1 from crm_bulk_trade_lots stock where stock.origin = 'supply'
         and stock.trade_stage in ('Needs info', 'With buyers', 'Closing')
         and stock.title ilike '%' || demand.product_family || '%')
     )) as has_stock,

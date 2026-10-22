@@ -42,25 +42,19 @@ describe.skipIf(!TEST_URL)("supply list", () => {
     expect(rows[0].fits.map((fit) => [fit.buyer, fit.strength])).toEqual([["Other Buyer", "strong"], ["Lab Buyer", "partial"]]);
   });
 
-  it("unifies sell-side lots, live auctions and stock families without treating unknown stock as verified", async () => {
+  it("unifies sell-side lots, live auctions and supply batches", async () => {
     await pg.queryPg(`
       insert into crm_bulk_trade_lots (id, title, lot_kind, origin, summary, observed_outcome, confidence, auction_id, auction_status, auction_closes_at) values
         ('bulk_feed_sell', 'Feed sell-side lot', 'supply', 'supply', '', '', 'confirmed', null, null, null),
         ('bulk_feed_demand', 'Feed demand-origin lot', 'demand', 'demand', '', '', 'confirmed', null, null, null),
         ('bulk_feed_auction', 'Feed auction lot', 'supply', 'supply', '', '', 'confirmed', gen_random_uuid(), 'published', '2099-01-01'),
         ('bulk_feed_expired', 'Feed expired auction', 'supply', 'supply', '', '', 'confirmed', gen_random_uuid(), 'published', '2000-01-01');
-      insert into crm_stock_items (id, supplier, stock_id, make, model, supplier_confirmed, stock_status) values
-        ('stock_feed_one', 'Supplier One', 'feed_one', 'FeedMake', 'FeedModel', true, 'available'),
-        ('stock_feed_two', 'Supplier Two', 'feed_two', 'FeedMake', 'FeedModel', false, 'unverified'),
-        ('stock_feed_sold', 'Supplier Three', 'feed_sold', 'FeedMake', 'FeedModel', true, 'sold');
     `);
     const rows = await supply.listSupplyFeed();
     expect(rows.find((row) => row.id === "bulk_feed_sell")).toMatchObject({ kind: "trade", title: "Feed sell-side lot", size: null });
     expect(rows.find((row) => row.id === "bulk_feed_auction")).toMatchObject({ kind: "auction" });
     expect(rows.some((row) => row.id === "bulk_feed_demand" || row.id === "bulk_feed_expired")).toBe(false);
-    expect(rows.find((row) => row.id === "stock:FeedMake FeedModel")).toMatchObject({
-      kind: "stock", count: 2, suppliers: ["Supplier One", "Supplier Two"], verified: false, status: "unverified",
-    });
+    expect(rows.some((row) => row.id.startsWith("stock:"))).toBe(false);
     expect(rows.find((row) => row.id === "bts_sup_1")).toMatchObject({ kind: "supply" });
   });
 
