@@ -68,6 +68,7 @@ export type ContentTabKind =
   | "cloud"
   | "platform-admin"
   | "crm-inbox"
+  | "crm-home"
   | "crm-leaderboard"
   | "crm-calendar"
   | "trades-preview"
@@ -353,6 +354,7 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
   if (path === "~cloud") return "cloud";
   if (path.startsWith("~platform-admin/")) return "platform-admin";
   if (path === "~crm/inbox") return "crm-inbox";
+  if (path === "~crm/home") return "crm-home";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === "~trades-preview") return "trades-preview";
@@ -381,6 +383,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~platform-admin/messages") return "Message monitoring";
   if (path === "~platform-admin/payout-reviews") return "Payout reviews";
   if (path === "~crm/inbox") return "Mail";
+  if (path === "~crm/home") return "Home";
   if (path === "~crm/leaderboard") return "Leaderboard";
   if (path === "~crm/calendar") return "Calendar";
   if (path === "~trades-preview") return "Bulk Trades";
