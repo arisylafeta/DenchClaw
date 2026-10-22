@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
@@ -167,6 +167,39 @@ describe("native Hermes group sends", () => {
     await new Promise((resolve) => setTimeout(resolve, 3400));
     expect(screen.getAllByTestId("rich-message").filter((m) => m.textContent?.includes("Continue native"))).toHaveLength(1);
   }, 10000);
+});
+
+describe("native Hermes group queue", () => {
+  const groupKey = conversationKey("group", "room-queue");
+  const groupEndpoint = `/api/hermes/conversations/${encodeURIComponent(groupKey)}`;
+  it("docks a message sent while members work in the same queue list as solo, then sends it once the room is idle", async () => {
+    let working = true;
+    const posts: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
+      if (url.startsWith(groupEndpoint) && init?.method === "POST") {
+        const { message } = JSON.parse(init.body as string);
+        posts.push(message);
+        return Response.json({ conversation: { working: true }, cursor: 3, messages: [{ id: "user:q1", role: "user", text: message, content: message }] });
+      }
+      if (url.startsWith(groupEndpoint)) return Response.json({ conversation: { working }, cursor: 2, messages: url.includes("since_seq") ? [] : [{ id: "e1", role: "user", text: "hello", content: "hello" }] });
+      return new Response(null, { status: 404 });
+    });
+    const { container } = render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} />);
+    await waitFor(() => expect(screen.getAllByTestId("rich-message").some((m) => m.textContent?.includes("hello"))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    const queue = await screen.findByRole("list", { name: "Waiting messages" });
+    expect(within(queue).getByText("Queued")).toBeInTheDocument();
+    expect(within(queue).getByText("Continue native")).toBeInTheDocument();
+    expect(container.querySelector("[data-prompt-dock]")).not.toBeNull();
+    expect(screen.queryByText(/^Queue \(/)).toBeNull();
+    // Still working across a poll: nothing is posted, because a room send would cancel the members' turns.
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    expect(posts).toEqual([]);
+    working = false;
+    await waitFor(() => expect(posts).toEqual(["Continue native"]), { timeout: 9000 });
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Waiting messages" })).toBeNull());
+  }, 20000);
 });
 
 describe("gateway ChatPanel solo transport", () => {

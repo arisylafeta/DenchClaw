@@ -5,6 +5,7 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { parseConversationKey } from "@/lib/hermes-conversations";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
+import { initialSubagents } from "@/lib/hermes-chat/subagents";
 import { slashNotice } from "@/lib/hermes-chat/event-notices";
 import { noticeForRow } from "@/lib/hermes-chat/notice";
 import { NoticeLine } from "./chat-native/notice-line";
@@ -812,6 +813,12 @@ export type FileContext = {
 };
 
 /** A message waiting to be sent after the current agent run finishes. */
+/** A room reports idle through 3s polls; wait past one before releasing a queued group message. */
+const GROUP_QUEUE_IDLE_MS = 4000;
+const NO_SUBAGENTS = initialSubagents();
+const noop = () => {};
+const NO_DOCK_CALLBACKS = { onApproval: noop, onClarify: noop, onSubagentTail: noop, onSubagentSteer: noop, onSubagentInterrupt: noop, onRetry: noop };
+
 type QueuedMessage = {
 	id: string;
 	text: string;
@@ -2370,10 +2377,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			[handleEditorSubmit],
 		);
 
+		// ── Group queue flush ──
+		// A room has no stream status to flip; it reports idle through polls. A user message posted while members
+		// work cancels their in-flight turns, so hold queued messages until the room has stayed idle across a poll
+		// (3s cadence), which also covers the gap between a send returning and the driver reporting work.
+		useEffect(() => {
+			if (!groupKey || isStreaming || queuedMessages.length === 0) return;
+			const timer = setTimeout(() => {
+				if (isStreamingRef.current) return;
+				const [next, ...rest] = queuedMessagesRef.current;
+				if (!next) return;
+				setQueuedMessages(rest);
+				void handleEditorSubmitRef.current?.(next.text, next.mentionedFiles, next.html, next.attachedFiles);
+			}, GROUP_QUEUE_IDLE_MS);
+			return () => clearTimeout(timer);
+		}, [groupKey, isStreaming, queuedMessages.length]);
+
 		// ── Queue flush: send the next queued message once the stream finishes ──
 		const prevFlushStatusRef = useRef(status);
 		useEffect(() => {
-			if (nativeGateway) return;
+			if (nativeGateway || groupKey) return;
 			const wasStreaming =
 				prevFlushStatusRef.current === "streaming" ||
 				prevFlushStatusRef.current === "submitted";
@@ -2392,7 +2415,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					void handleEditorSubmit(next.text, next.mentionedFiles, next.html, next.attachedFiles);
 				});
 			}
-		}, [status, queuedMessages, handleEditorSubmit, nativeGateway]);
+		}, [status, queuedMessages, handleEditorSubmit, nativeGateway, groupKey]);
 
 		const handleSessionSelect = useCallback(
 			async (sessionId: string) => {
@@ -2764,6 +2787,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
 					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
 				}} />}
+				{groupKey && <PromptDock key={groupKey} state={{ pendingRequests: [], sessionId: groupKey }} subagents={NO_SUBAGENTS} callbacks={NO_DOCK_CALLBACKS}
+					queued={queuedMessages.map(message => ({ id: message.id, text: message.text, steer: false }))} />}
 				<div ref={setClarifyComposerTarget} hidden={!clarificationOpen} />
 				{clarificationOpen && <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">
 					{attachedFiles.length > 0 && <p>Attachments are saved for your next message. Answers are text only.</p>}
@@ -2771,7 +2796,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				</div>}
 				{/* Keep the ordinary editor and attachment draft mounted, never reuse them as an answer. */}
 				<div hidden={clarificationOpen}>
-				{!nativeGateway && queuedMessages.length > 0 && (
+				{!nativeGateway && !groupKey && queuedMessages.length > 0 && (
 					<div className={compact ? "px-2 pt-2" : "px-3 pt-3"}>
 						<div
 							className="rounded-xl border overflow-hidden"
@@ -2910,10 +2935,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		const inputBarContainer = (onDragOverHandler: React.DragEventHandler, onDragLeaveHandler: React.DragEventHandler, onDropHandler: React.DragEventHandler) => (
 			<div
 				data-chat-drop-target=""
-				data-composer-pill={nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0 || Boolean(nativeChat.goal)) ? "gradient" : "glass"}
+				data-composer-pill={(groupKey && queuedMessages.length > 0) || nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0 || Boolean(nativeChat.goal)) ? "gradient" : "glass"}
 				className={`${compact ? "rounded-2xl" : "rounded-3xl"} overflow-hidden border shadow-[0_0_32px_rgba(0,0,0,0.07)] transition-[outline,box-shadow,border-color] motion-reduce:transition-none duration-150 ease-out focus-within:border-[var(--color-border-strong)]! data-drag-hover:outline-2 data-drag-hover:outline-dashed data-drag-hover:outline-(--color-accent) data-drag-hover:-outline-offset-2 data-drag-hover:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-accent)_15%,transparent),0_0_32px_rgba(0,0,0,0.07)]!`}
 				style={{
-					background: nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0 || Boolean(nativeChat.goal))
+					background: (groupKey && queuedMessages.length > 0) || nativeGateway && (nativeChat.state.pendingRequests.length > 0 || nativeChat.subagents.items.length > 0 || nativeChat.todos.visible.length > 0 || nativeChat.todos.retained.length > 0 || nativeChat.queuedMessages.length > 0 || Boolean(nativeChat.goal))
 						? "linear-gradient(to bottom, var(--color-surface-hover) 0%, var(--color-bg) min(300px, 70%), var(--color-bg) 100%)"
 						: "color-mix(in srgb, var(--color-surface) 75%, transparent)",
 					backdropFilter: "blur(16px) saturate(180%)",
