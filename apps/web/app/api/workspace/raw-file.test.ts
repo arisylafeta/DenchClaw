@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Readable } from "node:stream";
 
 vi.mock("node:fs", () => ({
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(() => Buffer.from("")),
+  statSync: vi.fn(() => ({ size: 3 })),
+  createReadStream: vi.fn(() => Readable.from([Buffer.from("abc")])),
   writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
 }));
@@ -19,6 +22,8 @@ describe("POST /api/workspace/raw-file", () => {
     vi.mock("node:fs", () => ({
       existsSync: vi.fn(() => false),
       readFileSync: vi.fn(() => Buffer.from("")),
+  statSync: vi.fn(() => ({ size: 3 })),
+  createReadStream: vi.fn(() => Readable.from([Buffer.from("abc")])),
       writeFileSync: vi.fn(),
       mkdirSync: vi.fn(),
     }));
@@ -190,6 +195,8 @@ describe("GET /api/workspace/raw-file", () => {
     vi.mock("node:fs", () => ({
       existsSync: vi.fn(() => false),
       readFileSync: vi.fn(() => Buffer.from("")),
+  statSync: vi.fn(() => ({ size: 3 })),
+  createReadStream: vi.fn(() => Readable.from([Buffer.from("abc")])),
       writeFileSync: vi.fn(),
       mkdirSync: vi.fn(),
     }));

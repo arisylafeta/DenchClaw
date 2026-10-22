@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createReadStream, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { Readable } from "node:stream";
 import { resolve, dirname } from "node:path";
 import {
   resolveFilesystemPath,
@@ -110,16 +111,54 @@ export async function GET(req: Request) {
 	const contentType = MIME_MAP[ext] ?? "application/octet-stream";
 
 	try {
-		const buffer = readFileSync(absolute);
-		return new Response(buffer, {
-			headers: {
-				"Content-Type": contentType,
-				"Cache-Control": "public, max-age=3600",
-			},
+		const size = statSync(absolute).size;
+		const baseHeaders = {
+			"Content-Type": contentType,
+			"Cache-Control": "public, max-age=3600",
+			"Accept-Ranges": "bytes",
+			"Content-Disposition": "inline",
+		};
+		const range = parseRange(req.headers.get("range"), size);
+		if (range === "unsatisfiable") {
+			return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+		}
+		const body = (start: number, end: number) =>
+			size === 0 ? null : (Readable.toWeb(createReadStream(absolute, { start, end })) as ReadableStream);
+		if (range) {
+			return new Response(body(range.start, range.end), {
+				status: 206,
+				headers: {
+					...baseHeaders,
+					"Content-Range": `bytes ${range.start}-${range.end}/${size}`,
+					"Content-Length": String(range.end - range.start + 1),
+				},
+			});
+		}
+		return new Response(body(0, Math.max(size - 1, 0)), {
+			headers: { ...baseHeaders, "Content-Length": String(size) },
 		});
 	} catch {
 		return new Response("Read error", { status: 500 });
 	}
+}
+
+/** A single `bytes=a-b` range; anything else is ignored so the whole file is served. */
+function parseRange(header: string | null, size: number): { start: number; end: number } | "unsatisfiable" | null {
+	const match = header ? /^bytes=(\d*)-(\d*)$/.exec(header.trim()) : null;
+	if (!match || (match[1] === "" && match[2] === "")) {return null;}
+	let start: number;
+	let end: number;
+	if (match[1] === "") {
+		const suffix = Number(match[2]);
+		if (suffix === 0 || size === 0) {return "unsatisfiable";}
+		start = Math.max(size - suffix, 0);
+		end = size - 1;
+	} else {
+		start = Number(match[1]);
+		end = match[2] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
+	}
+	if (start >= size || start > end) {return "unsatisfiable";}
+	return { start, end };
 }
 
 /**
