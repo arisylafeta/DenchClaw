@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 // --- Types ---
 
@@ -277,20 +277,81 @@ function ImageViewer({ url, filename }: { url: string; filename: string }) {
 
 // --- Video Viewer ---
 
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const SEEK_SECONDS = 5;
+const positionKey = (url: string) => `media-position:${url}`;
+
 function VideoViewer({ url }: { url: string }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [speed, setSpeed] = useState(1);
+
+  const remember = useCallback(() => {
+    const el = video.current;
+    if (!el || !Number.isFinite(el.currentTime) || el.currentTime < 1) {return;}
+    try { sessionStorage.setItem(positionKey(url), String(Math.floor(el.currentTime))); } catch { /* private mode */ }
+  }, [url]);
+  useEffect(() => remember, [remember]);
+
+  const restore = useCallback(() => {
+    const el = video.current;
+    if (!el) {return;}
+    try {
+      const saved = Number(sessionStorage.getItem(positionKey(url)));
+      if (saved > 0) {el.currentTime = saved;}
+    } catch { /* private mode */ }
+  }, [url]);
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    const el = video.current;
+    if (!el) {return;}
+    if (event.key === " " || event.key === "k") {
+      event.preventDefault();
+      if (el.paused) {void el.play();} else {el.pause();}
+    } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const delta = event.key === "ArrowRight" ? SEEK_SECONDS : -SEEK_SECONDS;
+      const limit = Number.isFinite(el.duration) ? el.duration : Infinity;
+      el.currentTime = Math.min(Math.max(el.currentTime + delta, 0), limit);
+    }
+  };
+
   return (
-    <div className="w-full max-w-4xl">
+    <div className="w-full max-w-4xl" data-testid="video-surface" tabIndex={0} onKeyDown={onKeyDown} style={{ outline: "none" }}>
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
+        ref={video}
         src={url}
         controls
+        preload="metadata"
+        onLoadedMetadata={restore}
+        onPause={remember}
+        onEnded={() => { try { sessionStorage.removeItem(positionKey(url)); } catch { /* private mode */ } }}
         className="w-full rounded-xl border"
         style={{
           borderColor: "var(--color-border)",
-          maxHeight: "calc(100vh - 220px)",
+          maxHeight: "calc(100vh - 260px)",
           background: "#000",
         }}
       />
+      <div className="mt-2 flex items-center justify-between text-xs" style={{ color: "var(--color-text-muted)" }}>
+        <span>Space play/pause · ← → skip {SEEK_SECONDS}s</span>
+        <label className="flex items-center gap-1.5">
+          Speed
+          <select
+            aria-label="Playback speed"
+            value={speed}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              setSpeed(next);
+              if (video.current) {video.current.playbackRate = next;}
+            }}
+            className="rounded-md border bg-transparent px-1.5 py-0.5"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+          >
+            {SPEEDS.map((value) => <option key={value} value={value}>{value}x</option>)}
+          </select>
+        </label>
+      </div>
     </div>
   );
 }

@@ -35,6 +35,20 @@ afterEach(() => {
 });
 
 describe("ChatMessage", () => {
+  it("opens this app's own raw-file video links in the preview panel instead of a new browser tab", async () => {
+    const onFilePathClick = vi.fn();
+    const href = `${window.location.origin}/api/workspace/raw-file?path=/root/.hermes/workspace/qa-evidence/run/a.webm`;
+    render(<ChatMessage message={{ id: "raw-video", role: "assistant", parts: [{ type: "text", text: `[Seller A video](${href})` }] }} onFilePathClick={onFilePathClick} />);
+    const link = screen.getByRole("link", { name: "Seller A video" });
+    expect(link).not.toHaveAttribute("target", "_blank");
+    await userEvent.click(link);
+    expect(onFilePathClick).toHaveBeenCalledWith("/root/.hermes/workspace/qa-evidence/run/a.webm");
+  });
+  it("leaves a raw-file link on another host as a normal external link", async () => {
+    const onFilePathClick = vi.fn();
+    render(<ChatMessage message={{ id: "raw-foreign", role: "assistant", parts: [{ type: "text", text: "[Other](https://foreign.test/api/workspace/raw-file?path=a.webm)" }] }} onFilePathClick={onFilePathClick} />);
+    expect(screen.getByRole("link", { name: "Other" })).toHaveAttribute("target", "_blank");
+  });
   it.each(["https://foreign.test/?path=report.md", "//foreign.test/?path=report.md"])("does not treat a foreign app-looking link as a local file: %s", href => {
     const onFilePathClick = vi.fn();
     render(<ChatMessage message={{ id: "synthetic-link", role: "assistant", parts: [{ type: "text", text: `[Foreign document](${href})` }] }} onFilePathClick={onFilePathClick} />);

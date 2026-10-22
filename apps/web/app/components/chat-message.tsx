@@ -1,5 +1,6 @@
 "use client";
 
+import { rawFileLinkPath } from "@/lib/raw-file-link";
 import dynamic from "next/dynamic";
 import type { UIMessage } from "ai";
 import posthog from "posthog-js";
@@ -783,8 +784,9 @@ function createMarkdownComponents(
 		a: ({ href, children, ...props }) => {
 			const rawHref = typeof href === "string" ? href : "";
 			const normalizedHref = normalizePathReference(rawHref);
+			const ownRawFilePath = typeof window === "undefined" ? null : rawFileLinkPath(rawHref, window.location.host);
 			const isExternal =
-				rawHref && (rawHref.startsWith("http://") || rawHref.startsWith("https://") || rawHref.startsWith("//"));
+				!ownRawFilePath && rawHref && (rawHref.startsWith("http://") || rawHref.startsWith("https://") || rawHref.startsWith("//"));
 			const isWorkspaceAppLink = rawHref.startsWith("/workspace") || rawHref.startsWith("/?");
 			const isLocalPathLink =
 				!isExternal && !isWorkspaceAppLink &&
@@ -798,6 +800,11 @@ function createMarkdownComponents(
 						: {})}
 					{...props}
 					onClick={(e) => {
+						if (ownRawFilePath && onFilePathClick) {
+							e.preventDefault();
+							void onFilePathClick(ownRawFilePath);
+							return;
+						}
 						if (!isLocalPathLink || !onFilePathClick) {return;}
 						e.preventDefault();
 						void onFilePathClick(normalizedHref);
