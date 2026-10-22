@@ -40,7 +40,7 @@ export type FollowUpRows = {
 
 type Signal = FollowUpSignal & { buyer: string; listing_id: string | null };
 
-const staffEmail = (email: string) => STAFF.test(email) || TEST_EMAILS.has(email.toLowerCase());
+export const staffEmail = (email: string) => STAFF.test(email) || TEST_EMAILS.has(email.toLowerCase());
 const money = (amount: number | null, currency: string | null) =>
   amount === null ? "" : ` ${(currency ?? "").toUpperCase()} ${Number(amount).toLocaleString("en-GB")}`;
 const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();

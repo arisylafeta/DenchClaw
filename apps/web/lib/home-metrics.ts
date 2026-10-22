@@ -1,109 +1,64 @@
-// Home: the CRM landing page. One registry of the marketplace targets and watch numbers, and the pure
-// calculations the page, the bottleneck line, the freshness alert and the tests all share.
+// Home: the CRM landing page. The target registry, the shared week, month and money helpers, and the
+// weekly funnel read from Marketplace Pulse's snapshots (crm_metric_snapshots, dimension '').
 //
-// The numbers are Marketplace Pulse's weekly snapshots (crm_metric_snapshots, dimension ''), written by
-// scripts/rebattery/marketplace_pulse_collect.py. Weeks start on Monday, UTC. There are no daily values,
-// so monthly figures add up whole weeks: a week counts towards the month its Monday falls in.
-import { mondayOf, type FollowUp, type MetricKey, type PulseWeek, type WaitingItem } from "./marketplace-pulse";
+// Weeks start on Monday, UTC. Months are calendar months in UTC. Nothing here invents a 0: a number
+// that could not be read is null, and the page shows "No data yet".
+import { mondayOf, type MetricKey, type PulseWeek } from "./marketplace-pulse";
 
-export type Aggregate = "sum" | "ratio" | "last";
-export type Unit = "count" | "percent" | "gbp";
-export type Owner = "Ari" | "Alex";
+// ---------------------------------------------------------------------------
+// Targets and configuration
+// ---------------------------------------------------------------------------
 
-type MetricBase = {
-  label: string;
-  unit: Unit;
-  /** Where the number comes from, shown on the card. */
-  source: string;
-  /** Older data than this is Stale. */
-  staleAfterHours: number;
-};
+export type TargetKey = "marketplace_paid" | "bulk_closed" | "fees_long_term" | "seller_reply";
 
-/**
- * How a weekly value is read. `sum`: the week's stored value (minus another metric when `minus` is set);
- * over several weeks the values add up. `ratio`: numerator over denominator, no data when the denominator
- * is 0 or missing. `last`: a count at collection time, so only the latest observation matters.
- */
-export type MetricSource =
-  | { aggregate: "sum" | "last"; metric: MetricKey; minus?: MetricKey }
-  | { aggregate: "ratio"; numerator: MetricKey; denominator: MetricKey };
-
-export type HomeMetric = MetricBase & MetricSource;
-
-export type TargetKey = "viewed" | "sent" | "reply" | "deals_created" | "deals_paid";
-export type WatchKey = "started_not_sent" | "send_errors" | "search_no_exact" | "listings_live";
-
-export type TargetDef = HomeMetric & {
+export type TargetDef = {
   key: TargetKey;
-  /** Weekly target; for a ratio, the share (1 = all). */
-  target: number;
-  owner: Owner;
-  /** What is counted, shown under the chart. */
-  definition: string;
-  /** One plain step towards the target, shown in the bottleneck line. */
-  nextStep: string;
+  value: number;
+  /** How the target reads on the page: "4 paid a month". */
+  label: string;
+  /** Where the target was agreed, shown next to it. */
+  source: string;
+  /** Shown in the header's target line. */
+  header: boolean;
 };
 
-export type WatchDef = HomeMetric & { key: WatchKey };
+/** The only targets on Home. Add one here, with its source, before showing it anywhere. */
+export const TARGETS: Record<TargetKey, TargetDef> = {
+  marketplace_paid: { key: "marketplace_paid", value: 4, label: "4 paid a month", source: "Pulse", header: true },
+  bulk_closed: { key: "bulk_closed", value: 2, label: "2 bulk a month", source: "19 Oct call", header: true },
+  fees_long_term: { key: "fees_long_term", value: 10_000, label: "£10k a month", source: "7 Sep call", header: false },
+  // A share: every buyer gets a seller reply within 24 hours.
+  seller_reply: { key: "seller_reply", value: 1, label: "all", source: "Pulse", header: false },
+};
 
+/** One fixed rate for euro fees. Amounts converted with it are labelled "about". */
+export const EUR_GBP = 0.86;
+/** Smallest initial payment that counts as a paid deal; smaller ones are card tests. */
+export const MIN_PAID_AMOUNT = 50;
+/** Seller replies are measured on buyer conversations opened from this day. */
+export const REPLY_SINCE = "2026-08-01";
+/** A seller has a day to answer before a question counts as never answered. */
+export const REPLY_WINDOW_HOURS = 24;
+/** Weekly snapshots older than this are stale. */
 export const STALE_AFTER_HOURS = 36;
-export const MONTHLY_PAID_TARGET = 4;
-
-const POSTHOG = "PostHog";
-const DEALS = "Platform deals";
-const MESSAGES = "Platform messages";
-const LISTINGS = "Platform listings";
-
-/** The five weekly targets, in card order. */
-export const TARGETS: TargetDef[] = [
-  {
-    key: "viewed", definition: "People on a listing page, test accounts left out.",
-    label: "Viewed a listing", aggregate: "sum", metric: "viewed_listing", unit: "count",
-    target: 100, owner: "Ari", source: POSTHOG, staleAfterHours: STALE_AFTER_HOURS,
-    nextStep: "Bring more buyers to listing pages.",
-  },
-  {
-    key: "sent", definition: "People whose message, offer or buy went through.",
-    label: "Messages, offers or buys sent", aggregate: "sum", metric: "sent_contact", unit: "count",
-    target: 5, owner: "Ari", source: POSTHOG, staleAfterHours: STALE_AFTER_HOURS,
-    nextStep: "See where buyers stop between starting and sending in Marketplace Pulse.",
-  },
-  {
-    key: "reply", definition: "Buyer questions and offers at least a day old, answered by us or the seller within 24 hours. Gaps are weeks with no questions.",
-    label: "Buyers answered within 24 hours", aggregate: "ratio", numerator: "reply_24h", denominator: "reply_intents",
-    unit: "percent", target: 1, owner: "Alex", source: MESSAGES, staleAfterHours: STALE_AFTER_HOURS,
-    nextStep: "Answer open buyer questions and offers the same day.",
-  },
-  {
-    key: "deals_created", definition: "Deals created, test buyers left out.",
-    label: "Deals created", aggregate: "sum", metric: "deals_created", unit: "count",
-    target: 2, owner: "Alex", source: DEALS, staleAfterHours: STALE_AFTER_HOURS,
-    nextStep: "Follow up buyers who showed intent in Marketplace Pulse.",
-  },
-  {
-    key: "deals_paid", definition: "Deals whose first payment was captured.",
-    label: "Deals paid", aggregate: "sum", metric: "deals_paid", unit: "count",
-    target: 1, owner: "Alex", source: DEALS, staleAfterHours: STALE_AFTER_HOURS,
-    nextStep: "Chase accepted deals that are not paid yet.",
-  },
-];
-
-/** When two targets are equally far behind, the earlier one here is named. */
-export const BOTTLENECK_PRECEDENCE: TargetKey[] = ["reply", "sent", "viewed", "deals_created", "deals_paid"];
-
-/** Numbers to keep an eye on, without targets. */
-export const WATCH: WatchDef[] = [
-  { key: "started_not_sent", label: "Started but not sent", aggregate: "sum", metric: "started_contact", minus: "sent_contact", unit: "count", source: POSTHOG, staleAfterHours: STALE_AFTER_HOURS },
-  { key: "send_errors", label: "Send errors", aggregate: "sum", metric: "drop_contact_error", unit: "count", source: POSTHOG, staleAfterHours: STALE_AFTER_HOURS },
-  { key: "search_no_exact", label: "Search found no exact match", aggregate: "sum", metric: "drop_search_no_exact", unit: "count", source: POSTHOG, staleAfterHours: STALE_AFTER_HOURS },
-  { key: "listings_live", label: "Live listings", aggregate: "last", metric: "listings_live", unit: "count", source: LISTINGS, staleAfterHours: STALE_AFTER_HOURS },
-];
+/** Weeks on the overview chart, the current one included. */
+export const OVERVIEW_WEEKS = 13;
+/** Most weeks on a funnel step chart. */
+export const FUNNEL_WEEKS = 13;
+/** A funnel step needs this many people entering it in the last four weeks to be called the biggest drop. */
+export const MIN_STEP_DENOMINATOR = 5;
+/** Bulk lots with no touch for this many days are quiet. */
+export const QUIET_DAYS = 7;
+/** PostHog has seen about half of public visitors since the consent banner changed on this day. */
+export const POSTHOG_UNDERCOUNT_SINCE = "2026-08-27";
 
 // ---------------------------------------------------------------------------
-// Weeks
+// Days, weeks and months
 // ---------------------------------------------------------------------------
 
-const DAY_MS = 86_400_000;
+export const DAY_MS = 86_400_000;
+
+export { mondayOf };
 
 export function shiftWeek(weekStart: string, by: number): string {
   return new Date(Date.parse(`${weekStart}T00:00:00Z`) + by * 7 * DAY_MS).toISOString().slice(0, 10);
@@ -124,121 +79,58 @@ export function weekRange(end: string, count: number): string[] {
   return Array.from({ length: count }, (_, i) => shiftWeek(end, i - count + 1));
 }
 
-// ---------------------------------------------------------------------------
-// Values
-// ---------------------------------------------------------------------------
-
-/** A metric's value for one week. `numerator`/`denominator` are set for ratios ("x of y"). */
-export type MetricValue = { value: number; numerator?: number; denominator?: number };
-
-/** One week's value, or null when there is no data. Never invents a 0. */
-export function weekValue(def: MetricSource, week: PulseWeek | undefined): MetricValue | null {
-  if (!week) return null;
-  const v = week.values;
-  if (def.aggregate === "ratio") {
-    const numerator = v[def.numerator];
-    const denominator = v[def.denominator];
-    if (denominator === undefined || denominator <= 0) return null;
-    const answered = numerator ?? 0;
-    return { value: answered / denominator, numerator: answered, denominator };
-  }
-  const value = v[def.metric];
-  if (value === undefined) return null;
-  if (!def.minus) return { value };
-  // "11 of 14": what is left of the base metric.
-  const left = Math.max(0, value - (v[def.minus] ?? 0));
-  return { value: left, numerator: left, denominator: value };
+/** The Monday-start UTC week a timestamp falls in. */
+export function weekOf(iso: string): string {
+  return mondayOf(new Date(iso));
 }
 
-/** The latest week with a value for `def`, for `last` metrics like live listings. */
-export function latestValue(def: MetricSource, weeks: PulseWeek[]): { week_start: string; value: MetricValue } | null {
-  for (const week of weeks.toSorted((a, b) => b.week_start.localeCompare(a.week_start))) {
-    const value = weekValue(def, week);
-    if (value) return { week_start: week.week_start, value };
-  }
+/** "YYYY-MM" in UTC. */
+export function monthOf(iso: string | Date): string {
+  return (typeof iso === "string" ? new Date(iso) : iso).toISOString().slice(0, 7);
+}
+
+/** Whole days from `iso` to `now`, rounded down. */
+export function daysBetween(iso: string, now: Date): number {
+  return Math.floor((now.getTime() - Date.parse(iso)) / DAY_MS);
+}
+
+export type MonthPosition = { month: string; day: number; days_in_month: number; share: number };
+
+/** Today's place in the month (UTC): day 22 of 31 is 0.71 of the way through. */
+export function monthPosition(now: Date): MonthPosition {
+  const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  return { month: monthOf(now), day: now.getUTCDate(), days_in_month: days, share: now.getUTCDate() / days };
+}
+
+export type Pace = { target: number; pace: number; to_go: number; share_of_month: number };
+
+/** Where a monthly count should be by today if it ran evenly: 4 a month on day 22 of 31 is 2.8. */
+export function pace(count: number, target: number, now: Date): Pace {
+  const position = monthPosition(now);
+  return {
+    target,
+    pace: Math.round(target * position.share * 10) / 10,
+    to_go: Math.max(0, target - count),
+    share_of_month: position.share,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Money and labels
+// ---------------------------------------------------------------------------
+
+/** Pounds for a platform amount, or null for a currency without a configured rate. */
+export function toGbp(amount: number, currency: string | null | undefined): number | null {
+  const code = (currency ?? "gbp").toLowerCase();
+  if (code === "gbp") {return amount;}
+  if (code === "eur") {return amount * EUR_GBP;}
   return null;
 }
 
-export type SeriesPoint = { week_start: string; value: MetricValue | null };
-
-/** A value per calendar week in the range, with null gaps for weeks without data. */
-export function series(def: MetricSource, weeks: PulseWeek[], end: string, count: number): SeriesPoint[] {
-  const byWeek = new Map(weeks.map((w) => [w.week_start, w]));
-  return weekRange(end, count).map((week_start) => ({ week_start, value: weekValue(def, byWeek.get(week_start)) }));
-}
-
-/** Weeks whose Monday falls in a month ("YYYY-MM"). */
-export function weeksInMonth(weeks: PulseWeek[], month: string): PulseWeek[] {
-  return weeks.filter((w) => w.week_start.slice(0, 7) === month);
-}
-
-/** Adds up a metric over the weeks attributed to a month, or null when none of them has it. */
-export function monthTotal(weeks: PulseWeek[], metric: MetricKey, month: string): number | null {
-  const values = weeksInMonth(weeks, month).map((w) => w.values[metric]).filter((v): v is number => v !== undefined);
-  return values.length ? values.reduce((a, b) => a + b, 0) : null;
-}
-
-// ---------------------------------------------------------------------------
-// Freshness and status
-// ---------------------------------------------------------------------------
-
-export type Freshness = { collected_at: string | null; hours_old: number | null; stale: boolean };
-
-/** Stale when nothing was ever collected, or the last collection is older than the limit. */
-export function freshness(collectedAt: string | null, now: Date, staleAfterHours = STALE_AFTER_HOURS): Freshness {
-  if (!collectedAt) return { collected_at: null, hours_old: null, stale: true };
-  const hours = (now.getTime() - Date.parse(collectedAt)) / 3_600_000;
-  return { collected_at: collectedAt, hours_old: Math.round(hours * 10) / 10, stale: hours > staleAfterHours };
-}
-
-export type Status = "on-target" | "close" | "behind" | "stale" | "no-data";
-
-export const STATUS_LABELS: Record<Status, string> = {
-  "on-target": "On target",
-  close: "Close",
-  behind: "Behind",
-  stale: "Stale",
-  "no-data": "No data",
-};
-
-/** Share of target reached (1 = on target), or null without a value. */
-export function progress(def: TargetDef, value: MetricValue | null): number | null {
-  if (!value || def.target <= 0) return null;
-  return value.value / def.target;
-}
-
-/** Stale data wins over everything; then no data; then 100% on target, 75% close, below that behind. */
-export function statusFor(ratio: number | null, stale: boolean): Status {
-  if (stale) return "stale";
-  if (ratio === null) return "no-data";
-  if (ratio >= 1) return "on-target";
-  if (ratio >= 0.75) return "close";
-  return "behind";
-}
-
-// ---------------------------------------------------------------------------
-// Formatting
-// ---------------------------------------------------------------------------
-
-export function formatValue(def: HomeMetric, value: MetricValue | null): string {
-  if (!value) return "No data yet";
-  if (value.numerator !== undefined && value.denominator !== undefined) return `${value.numerator} of ${value.denominator}`;
-  if (def.unit === "percent") return `${Math.round(value.value * 100)}%`;
-  if (def.unit === "gbp") return `£${Math.round(value.value).toLocaleString("en-GB")}`;
-  return Math.round(value.value).toLocaleString("en-GB");
-}
-
-/** "all" for a full-share ratio, otherwise the weekly number. */
-export function formatTarget(def: TargetDef): string {
-  if (def.unit === "percent") return def.target >= 1 ? "all" : `${Math.round(def.target * 100)}%`;
-  return def.target.toLocaleString("en-GB");
-}
-
-/** "about £0", "about £4.5k": the paid values are estimates (METRICS.paid_value_gbp). */
-export function aboutPounds(value: number | null): string {
-  if (value === null) return "No data yet";
-  if (Math.abs(value) >= 1000) return `about £${Math.round(value / 100) / 10}k`;
-  return `about £${Math.round(value).toLocaleString("en-GB")}`;
+/** "£24.6k", "£155": short pounds for cards. */
+export function shortPounds(value: number): string {
+  if (Math.abs(value) >= 1000) {return `£${(Math.round(value / 100) / 10).toLocaleString("en-GB")}k`;}
+  return `£${Math.round(value).toLocaleString("en-GB")}`;
 }
 
 /** "12 Oct" */
@@ -246,271 +138,137 @@ export function dayLabel(iso: string): string {
   return new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
+/** "Thursday 22 October" */
+export function longDayLabel(now: Date): string {
+  return now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+}
+
+/** "October" */
+export function monthName(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
+}
+
+export const percent = (share: number | null): string => (share === null ? "No data yet" : `${Math.round(share * 100)}%`);
+
 // ---------------------------------------------------------------------------
-// Page sections
+// Freshness
 // ---------------------------------------------------------------------------
 
-export type TargetCard = {
-  key: TargetKey;
+export type Freshness = { collected_at: string | null; hours_old: number | null; stale: boolean };
+
+/** Stale when nothing was ever collected, or the last collection is older than the limit. */
+export function freshness(collectedAt: string | null, now: Date, staleAfterHours = STALE_AFTER_HOURS): Freshness {
+  if (!collectedAt) {return { collected_at: null, hours_old: null, stale: true };}
+  const hours = (now.getTime() - Date.parse(collectedAt)) / 3_600_000;
+  return { collected_at: collectedAt, hours_old: Math.round(hours * 10) / 10, stale: hours > staleAfterHours };
+}
+
+// ---------------------------------------------------------------------------
+// Weekly funnel (snapshots)
+// ---------------------------------------------------------------------------
+
+export type FunnelStepKey = "visit_view" | "view_start" | "start_send" | "send_paid";
+
+export type FunnelStepDef = {
+  key: FunnelStepKey;
   label: string;
-  definition: string;
-  unit: Unit;
-  owner: Owner;
-  source: string;
-  target: number;
-  target_label: string;
-  week_start: string;
-  value: MetricValue | null;
-  value_label: string;
-  ratio: number | null;
-  status: Status;
-  /** Twelve weeks ending with the last complete week; the sparkline shows the last ten. */
-  history: SeriesPoint[];
+  den: MetricKey;
+  num: MetricKey;
+  den_label: string;
+  num_label: string;
 };
 
-export function targetCards(weeks: PulseWeek[], now: Date, collectedAt: string | null): TargetCard[] {
-  const end = lastCompleteWeek(now);
-  const week = weeks.find((w) => w.week_start === end);
-  return TARGETS.map((def) => {
-    const value = weekValue(def, week);
-    const ratio = progress(def, value);
-    return {
-      key: def.key, label: def.label, definition: def.definition, unit: def.unit, owner: def.owner, source: def.source,
-      target: def.target, target_label: formatTarget(def), week_start: end,
-      value, value_label: formatValue(def, value), ratio,
-      status: statusFor(ratio, freshness(collectedAt, now, def.staleAfterHours).stale),
-      history: series(def, weeks, end, 12),
-    };
-  });
+export const FUNNEL_STEPS: FunnelStepDef[] = [
+  { key: "visit_view", label: "Visit to listing view", den: "visitors", num: "viewed_listing", den_label: "Visitors", num_label: "Viewed a listing" },
+  { key: "view_start", label: "View to start", den: "viewed_listing", num: "started_contact", den_label: "Viewed a listing", num_label: "Started a message, offer or buy" },
+  { key: "start_send", label: "Start to send", den: "started_contact", num: "sent_contact", den_label: "Started", num_label: "Sent" },
+  { key: "send_paid", label: "Send to paid", den: "sent_contact", num: "deals_paid", den_label: "Sent", num_label: "Paid deals" },
+];
+
+const FUNNEL_METRICS = new Set<MetricKey>(FUNNEL_STEPS.flatMap((s) => [s.den, s.num]));
+const hasFunnelData = (week: PulseWeek | undefined) =>
+  !!week && Object.keys(week.values).some((k) => FUNNEL_METRICS.has(k as MetricKey));
+
+/** The latest complete week with funnel numbers, or null before the first collection. */
+export function funnelEnd(weeks: PulseWeek[], now: Date): string | null {
+  const last = lastCompleteWeek(now);
+  const ends = weeks.filter((w) => w.week_start <= last && hasFunnelData(w)).map((w) => w.week_start).toSorted();
+  return ends.at(-1) ?? null;
 }
 
-export type Bottleneck =
-  | { kind: "behind"; key: TargetKey; sentence: string; reason: string; next_step: string }
-  | { kind: "on-target"; sentence: string }
-  | { kind: "no-data"; sentence: string };
-
-const WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
-
-/**
- * The target furthest behind last week (lowest share of target), ties broken by BOTTLENECK_PRECEDENCE.
- * `week` is last complete week's row, for the reply reason ("3 of 4 never answered").
- */
-export function bottleneck(cards: TargetCard[], week?: PulseWeek): Bottleneck {
-  const rank = (key: TargetKey) => BOTTLENECK_PRECEDENCE.indexOf(key);
-  const measured = cards.filter((c) => c.ratio !== null);
-  if (!measured.length) return { kind: "no-data", sentence: "No numbers for last week yet, so there is nothing to compare with the targets." };
-  const worst = measured.toSorted((a, b) => a.ratio! - b.ratio! || rank(a.key) - rank(b.key))[0];
-  if (worst.ratio! >= 1) return { kind: "on-target", sentence: "Every target with numbers was met last week." };
-  const def = TARGETS.find((t) => t.key === worst.key)!;
-  const unanswered = week?.values.reply_none;
-  const reason = worst.key === "reply" && unanswered !== undefined && worst.value?.denominator
-    ? `${unanswered} of last week's ${worst.value.denominator} buyer questions and offers ${unanswered === 1 ? "has" : "have"} had no reply at all.`
-    : `Furthest behind of the ${WORDS[cards.length] ?? cards.length} targets, at ${Math.round(worst.ratio! * 100)}% of target.`;
-  return {
-    kind: "behind",
-    key: worst.key,
-    sentence: `${worst.label}: ${worst.value_label} last week (target: ${worst.target_label})`,
-    reason,
-    next_step: def.nextStep,
-  };
-}
-
-export type Goal = {
-  /** "YYYY-MM" */
-  month: string;
-  month_label: string;
-  paid: number | null;
-  target: number;
-  /** Today's place in the month, 0 to 1, for the pace marker. */
-  pace: number;
-  paid_value_gbp: number | null;
-  deals_created: number | null;
-  last_month_label: string;
-  last_month_paid: number | null;
-  last_month_paid_value_gbp: number | null;
-};
-
-const monthKey = (date: Date) => date.toISOString().slice(0, 7);
-const monthName = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
-
-/** Month to date (UTC), counting each week in the month its Monday falls in. */
-export function goal(weeks: PulseWeek[], now: Date): Goal {
-  const month = monthKey(now);
-  const lastMonth = monthKey(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)));
-  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
-  return {
-    month,
-    month_label: monthName(month),
-    paid: monthTotal(weeks, "deals_paid", month),
-    target: MONTHLY_PAID_TARGET,
-    pace: now.getUTCDate() / daysInMonth,
-    paid_value_gbp: monthTotal(weeks, "paid_value_gbp", month),
-    deals_created: monthTotal(weeks, "deals_created", month),
-    last_month_label: monthName(lastMonth),
-    last_month_paid: monthTotal(weeks, "deals_paid", lastMonth),
-    last_month_paid_value_gbp: monthTotal(weeks, "paid_value_gbp", lastMonth),
-  };
-}
-
-export type WatchItem = {
-  key: WatchKey;
-  label: string;
-  week_start: string | null;
-  value: MetricValue | null;
-  value_label: string;
-  /** "Up from 542", "Down from 2 of 6 the week before"; null with nothing to compare. */
-  comparison: string | null;
-  trend: SeriesPoint[];
-};
-
-function compare(def: HomeMetric, value: MetricValue | null, previous: MetricValue | null, suffix: string): string | null {
-  if (!value || !previous) return null;
-  if (value.value === previous.value) return `Same as ${suffix ? suffix.replace(/^ /, "") : "before"}`;
-  return `${value.value > previous.value ? "Up" : "Down"} from ${formatValue(def, previous)}${suffix}`;
-}
-
-/** Last complete week for weekly numbers; the latest observation for `last` numbers. */
-export function watchItems(weeks: PulseWeek[], now: Date): WatchItem[] {
-  const end = lastCompleteWeek(now);
+/** Up to `max` calendar weeks ending with `end`, starting at the first week with funnel numbers. */
+export function funnelWeeks(weeks: PulseWeek[], end: string, max = FUNNEL_WEEKS): string[] {
   const byWeek = new Map(weeks.map((w) => [w.week_start, w]));
-  return WATCH.map((def) => {
-    if (def.aggregate === "last") {
-      const latest = latestValue(def, weeks);
-      const before = latest ? latestValue(def, weeks.filter((w) => w.week_start < latest.week_start)) : null;
-      return {
-        key: def.key, label: def.label, week_start: latest?.week_start ?? null,
-        value: latest?.value ?? null, value_label: formatValue(def, latest?.value ?? null),
-        comparison: compare(def, latest?.value ?? null, before?.value ?? null, ""),
-        trend: series(def, weeks, latest?.week_start ?? end, 8),
-      };
-    }
-    const value = weekValue(def, byWeek.get(end));
+  const range = weekRange(end, max);
+  const first = range.findIndex((w) => hasFunnelData(byWeek.get(w)));
+  return first < 0 ? [] : range.slice(first);
+}
+
+export type WindowRate = { num: number; den: number; rate: number | null };
+
+/** Adds a step's numerator and denominator over calendar weeks. A missing week adds nothing. */
+export function windowRate(step: FunnelStepDef, weeks: PulseWeek[], weekStarts: string[]): WindowRate {
+  const byWeek = new Map(weeks.map((w) => [w.week_start, w]));
+  let num = 0;
+  let den = 0;
+  for (const start of weekStarts) {
+    const values = byWeek.get(start)?.values;
+    num += values?.[step.num] ?? 0;
+    den += values?.[step.den] ?? 0;
+  }
+  return { num, den, rate: den > 0 ? num / den : null };
+}
+
+export type FunnelStepStat = FunnelStepDef & {
+  current: WindowRate;
+  previous: WindowRate;
+  /** Percentage points, current minus previous; null when either side has no rate. */
+  delta_pts: number | null;
+  /** Weekly entered and passed, for the step chart; null for a week without numbers. */
+  weekly: { week_start: string; den: number | null; num: number | null }[];
+};
+
+/** Each step's last four weeks against the four before, ending with `end`. */
+export function funnelSteps(weeks: PulseWeek[], end: string, chartWeeks: string[]): FunnelStepStat[] {
+  const current = weekRange(end, 4);
+  const previous = weekRange(shiftWeek(end, -4), 4);
+  const byWeek = new Map(weeks.map((w) => [w.week_start, w]));
+  return FUNNEL_STEPS.map((step) => {
+    const cur = windowRate(step, weeks, current);
+    const prev = windowRate(step, weeks, previous);
     return {
-      key: def.key, label: def.label, week_start: end,
-      value, value_label: formatValue(def, value),
-      comparison: compare(def, value, weekValue(def, byWeek.get(shiftWeek(end, -1))), " the week before"),
-      trend: series(def, weeks, end, 8),
+      ...step,
+      current: cur,
+      previous: prev,
+      delta_pts: cur.rate === null || prev.rate === null ? null : (cur.rate - prev.rate) * 100,
+      weekly: chartWeeks.map((week_start) => {
+        const values = byWeek.get(week_start)?.values;
+        return { week_start, den: values?.[step.den] ?? null, num: values?.[step.num] ?? null };
+      }),
     };
   });
 }
 
-export type NeedsYouItem = {
-  id: string;
-  kind: "alert" | "waiting" | "follow-up";
-  /** Short tag shown on the row. */
-  tag: "DATA" | "ERROR" | "REPLY";
-  severity: "high" | "normal";
-  title: string;
-  detail: string | null;
-  owner: Owner;
-  /** When it started waiting, for oldest-first order and the age. */
-  at: string;
-  person_id: string | null;
-  url: string | null;
-};
-
-export const NEEDS_YOU_LIMIT = 7;
-/** Owns the Marketplace Pulse collector, so stale numbers go to them. */
-export const DATA_OWNER: Owner = "Ari";
-const ownerOf = (key: TargetKey) => TARGETS.find((t) => t.key === key)!.owner;
-
 /**
- * What needs someone today, from data only: system alerts (stale numbers, send errors last week),
- * offers and deals waiting on us, and buyers not contacted since they last showed intent.
- * High severity first, then oldest first.
+ * The step whose conversion fell most against the four weeks before. Only steps that fell, and that at
+ * least MIN_STEP_DENOMINATOR people entered in the last four weeks, can be named.
  */
-export function needsYou(input: {
-  now: Date;
-  collectedAt: string | null;
-  weeks: PulseWeek[];
-  waiting: WaitingItem[];
-  followUps: FollowUp[];
-}): { items: NeedsYouItem[]; total: number } {
-  const items: NeedsYouItem[] = [];
-  const fresh = freshness(input.collectedAt, input.now);
-  if (fresh.stale && fresh.collected_at) {
-    items.push({
-      id: "alert:stale", kind: "alert", tag: "DATA", severity: "high",
-      title: `Marketplace numbers are stale since ${dayLabel(fresh.collected_at)}`,
-      detail: "The Marketplace Pulse collector has not run since then",
-      owner: DATA_OWNER, at: fresh.collected_at, person_id: null, url: null,
-    });
+export function biggestDrop(steps: FunnelStepStat[], minDen = MIN_STEP_DENOMINATOR): FunnelStepKey | null {
+  let worst: FunnelStepStat | null = null;
+  for (const step of steps) {
+    if (step.delta_pts === null || step.delta_pts >= 0 || step.current.den < minDen) {continue;}
+    if (!worst || step.delta_pts < worst.delta_pts!) {worst = step;}
   }
-  const end = lastCompleteWeek(input.now);
-  const errors = input.weeks.find((w) => w.week_start === end)?.values.drop_contact_error;
-  if (errors !== undefined && errors > 0) {
-    items.push({
-      id: "alert:contact-error", kind: "alert", tag: "ERROR", severity: "normal",
-      title: `${errors} buyer${errors === 1 ? "" : "s"} hit an error sending a message, offer or buy`,
-      detail: `Week of ${dayLabel(end)}`,
-      owner: ownerOf("sent"), at: `${end}T00:00:00Z`, person_id: null, url: null,
-    });
-  }
-  input.waiting.forEach((w, i) => {
-    items.push({
-      id: `waiting:${i}`, kind: "waiting", tag: "REPLY", severity: "normal",
-      title: `${w.buyer}: ${w.kind === "offer" ? "offer not answered" : "deal not paid"}`,
-      detail: [w.text, w.listing_title].filter(Boolean).join(" · ") || null,
-      owner: ownerOf("reply"), at: w.at, person_id: null, url: w.listing_url,
-    });
-  });
-  for (const f of input.followUps) {
-    if (f.contacted_since) continue;
-    items.push({
-      id: `follow-up:${f.key}`, kind: "follow-up", tag: "REPLY", severity: "normal",
-      title: `${f.name} is waiting to hear from us`,
-      detail: [f.latest.text, f.latest.listing_title].filter(Boolean).join(" · ") || null,
-      owner: ownerOf("reply"), at: f.latest.at, person_id: f.person_id, url: f.person_id ? null : f.latest.listing_url,
-    });
-  }
-  items.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "high" ? -1 : 1) || a.at.localeCompare(b.at));
-  return { items: items.slice(0, NEEDS_YOU_LIMIT), total: items.length };
+  return worst?.key ?? null;
 }
 
-/** "4d", "5h", "now": how long an item has waited. */
-export function ageLabel(at: string, now: Date): string {
-  const hours = (now.getTime() - Date.parse(at)) / 3_600_000;
-  if (hours < 1) return "now";
-  return hours < 24 ? `${Math.floor(hours)}h` : `${Math.floor(hours / 24)}d`;
+/** Paid deals over sent intents across the chart weeks: "3 paid of 26 sent". */
+export function fillRate(weeks: PulseWeek[], weekStarts: string[]): WindowRate {
+  return windowRate(FUNNEL_STEPS[3], weeks, weekStarts);
 }
 
-// ---------------------------------------------------------------------------
-// Payload
-// ---------------------------------------------------------------------------
-
-export type HomeData = {
-  now: string;
-  freshness: Freshness;
-  last_week: string;
-  goal: Goal;
-  bottleneck: Bottleneck;
-  needs_you: NeedsYouItem[];
-  needs_you_total: number;
-  cards: TargetCard[];
-  watch: WatchItem[];
-  follow_up_error: string | null;
-};
-
-export function buildHome(input: {
-  now: Date;
-  weeks: PulseWeek[];
-  collectedAt: string | null;
-  waiting: WaitingItem[];
-  followUps: FollowUp[];
-  followUpError: string | null;
-}): HomeData {
-  const cards = targetCards(input.weeks, input.now, input.collectedAt);
-  const needs = needsYou(input);
-  return {
-    now: input.now.toISOString(),
-    freshness: freshness(input.collectedAt, input.now),
-    last_week: lastCompleteWeek(input.now),
-    goal: goal(input.weeks, input.now),
-    bottleneck: bottleneck(cards, input.weeks.find((w) => w.week_start === lastCompleteWeek(input.now))),
-    needs_you: needs.items,
-    needs_you_total: needs.total,
-    cards,
-    watch: watchItems(input.weeks, input.now),
-    follow_up_error: input.followUpError,
-  };
+/** Sum of a snapshot metric over the weeks from `fromWeek`, or null when no week has it. */
+export function snapshotSum(weeks: PulseWeek[], metric: MetricKey, fromWeek: string): number | null {
+  const values = weeks.filter((w) => w.week_start >= fromWeek).map((w) => w.values[metric]).filter((v): v is number => v !== undefined);
+  return values.length ? values.reduce((a, b) => a + b, 0) : null;
 }
