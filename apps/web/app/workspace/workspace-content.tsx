@@ -49,6 +49,7 @@ import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTra
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
+import { HomeView } from "../components/home/home-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
   parseWorkspaceLink,
@@ -423,6 +424,7 @@ export function nodeToContentTabKind(nodeType: string, path: string): ContentTab
   if (path === "~cloud") return "cloud";
   if (path.startsWith("~platform-admin/")) return "platform-admin";
   if (path === "~crm/inbox") return "crm-inbox";
+  if (path === "~crm/home") return "crm-home";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === TRADES_PREVIEW_PATH) return "trades-preview";
@@ -1445,6 +1447,7 @@ function WorkspacePageInner() {
         | "crm-people"
         | "crm-companies"
         | "crm-campaigns"
+        | "crm-home"
         | "crm-leaderboard"
         | "crm-inbox"
         | "crm-calendar"
@@ -1482,6 +1485,7 @@ function WorkspacePageInner() {
         skills: { path: "~skills", name: "Skills" },
         cron: { path: "~cron", name: "Cron" },
         "crm-inbox": { path: "~crm/inbox", name: "Mail" },
+        "crm-home": { path: "~crm/home", name: "Home" },
         "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "trades-preview": { path: TRADES_PREVIEW_PATH, name: "Trades Preview" },
@@ -2503,6 +2507,8 @@ function WorkspacePageInner() {
           ? "companies" as const
           : activeContentTab?.kind === "campaigns"
             ? "campaigns" as const
+          : activeContentTab?.kind === "crm-home"
+            ? "home" as const
           : activeContentTab?.kind === "crm-leaderboard"
             ? "leaderboard" as const
           : activeContentTab?.kind === "crm-inbox"
@@ -3282,6 +3288,9 @@ function ContentRenderer({
         />
       );
 
+    case "crm-home":
+      return <HomeView />;
+
     case "crm-leaderboard":
       return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
@@ -3334,7 +3343,8 @@ function ContentRenderer({
       if (tree.length === 0) {
         return <EmptyState workspaceExists={workspaceExists} expectedPath={expectedPath} />;
       }
-      return <WelcomeView tree={tree} onNodeSelect={onNodeSelect} />;
+      // Home is the CRM landing page whenever nothing is open.
+      return <HomeView />;
   }
 }
 
@@ -4412,151 +4422,6 @@ function DirectoryListing({
               </div>
             </button>
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// --- Welcome View (no selection) ---
-
-function WelcomeView({
-  tree,
-  onNodeSelect,
-}: {
-  tree: TreeNode[];
-  onNodeSelect: (node: TreeNode) => void;
-}) {
-  const objects: TreeNode[] = [];
-  const documents: TreeNode[] = [];
-
-  function collect(nodes: TreeNode[]) {
-    for (const n of nodes) {
-      if (n.type === "object") {objects.push(n);}
-      else if (n.type === "document") {documents.push(n);}
-      if (n.children) {collect(n.children);}
-    }
-  }
-  collect(tree);
-
-  return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h1
-        className="font-instrument text-3xl tracking-tight mb-2"
-        style={{ color: "var(--color-text)" }}
-      >
-        Workspace
-      </h1>
-      <p className="text-sm mb-8" style={{ color: "var(--color-text-muted)" }}>
-        Select an item from the sidebar, or browse the sections below.
-      </p>
-
-      {objects.length > 0 && (
-        <div className="mb-8">
-          <h2
-            className="text-sm font-medium uppercase tracking-wider mb-3"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Objects
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {objects.map((obj) => (
-              <button
-                type="button"
-                key={obj.path}
-                onClick={() => onNodeSelect(obj)}
-                className="flex items-center gap-3 p-4 rounded-2xl text-left transition-all duration-100 cursor-pointer"
-                style={{
-                  background: "var(--color-surface)",
-                  border: "1px solid var(--color-border)",
-                  boxShadow: "var(--shadow-sm)",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "var(--color-accent)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "var(--color-border)";
-                }}
-              >
-                <span
-                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{
-                    background: "var(--color-chip-object)",
-                    color: "var(--color-chip-object-text)",
-                  }}
-                >
-                  <NodeTypeIcon type="object" />
-                </span>
-                <div className="min-w-0">
-                  <div
-                    className="text-sm font-medium truncate"
-                    style={{ color: "var(--color-text)" }}
-                  >
-                    {displayObjectName(obj.name)}
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                    {obj.defaultView === "kanban" ? "Kanban board" : "Table view"}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {documents.length > 0 && (
-        <div>
-          <h2
-            className="text-sm font-medium uppercase tracking-wider mb-3"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Documents
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {documents.map((doc) => (
-              <button
-                type="button"
-                key={doc.path}
-                onClick={() => onNodeSelect(doc)}
-                className="flex items-center gap-3 p-4 rounded-2xl text-left transition-all duration-100 cursor-pointer"
-                style={{
-                  background: "var(--color-surface)",
-                  border: "1px solid var(--color-border)",
-                  boxShadow: "var(--shadow-sm)",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = "var(--color-chip-document-text)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "var(--color-border)";
-                }}
-              >
-                <span
-                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{
-                    background: "var(--color-chip-document)",
-                    color: "var(--color-chip-document-text)",
-                  }}
-                >
-                  <NodeTypeIcon type="document" />
-                </span>
-                <div className="min-w-0">
-                  <div
-                    className="text-sm font-medium truncate"
-                    style={{ color: "var(--color-text)" }}
-                  >
-                    {doc.name.replace(/\.md$/, "")}
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                    Document
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
         </div>
       )}
     </div>

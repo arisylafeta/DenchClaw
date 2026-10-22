@@ -63,6 +63,16 @@ describe("workspace sidebar navigation", () => {
     expect(localStorage.getItem("dench-sidebar-view")).toBe("home");
     expect(screen.queryByText("Refreshed chats")).not.toBeInTheDocument();
   });
+  it("opens the CRM Home page first in the CRM navigation and marks it active", () => {
+    const onNavigate = vi.fn();
+    render(<WorkspaceSidebar onNavigate={onNavigate} customCrmObjects={[]} activeCrmTarget="home" />);
+    const home = screen.getByRole("button", { name: "CRM Home" });
+    expect(home).toHaveTextContent("Home");
+    expect(home).toHaveStyle({ background: "var(--color-surface-hover)" });
+    fireEvent.click(home);
+    expect(onNavigate).toHaveBeenCalledWith("crm-home");
+  });
+
   it("opens People from the fixed CRM navigation even when hidden objects are absent", () => {
     const onNavigate = vi.fn();
     render(<WorkspaceSidebar onNavigate={onNavigate} customCrmObjects={[]} />);

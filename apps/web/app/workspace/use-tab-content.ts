@@ -344,6 +344,7 @@ function kindIsDerived(kind: ContentTab["kind"]): boolean {
     case "cloud":
     case "platform-admin":
     case "crm-inbox":
+    case "crm-home":
     case "crm-leaderboard":
     case "crm-calendar":
     case "trades-preview":
@@ -410,6 +411,8 @@ function resolveDerivedContent(
     }
     case "crm-inbox":
       return { kind: "crm-inbox" };
+    case "crm-home":
+      return { kind: "crm-home" };
     case "crm-leaderboard":
       return { kind: "crm-leaderboard" };
     case "crm-calendar":

@@ -124,6 +124,7 @@ type WorkspaceSidebarProps = {
       | "crm-people"
       | "crm-companies"
       | "crm-campaigns"
+      | "crm-home"
       | "crm-leaderboard"
       | "crm-inbox"
       | "crm-calendar"
@@ -137,7 +138,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | "trades-preview" | null;
+  activeCrmTarget?: "home" | "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | "trades-preview" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -379,6 +380,14 @@ export function WorkspaceSidebar({
 
 	const crmNavItems = [
 		{
+			id: "crm-home" as const,
+			label: "Home",
+			// The sidebar's Home/Chats switch is also called Home.
+			name: "CRM Home",
+			target: "home" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M10 21v-6h4v6" /></svg>,
+		},
+		{
 			id: "crm-people" as const,
 			label: "People",
 			target: "people" as const,
@@ -615,7 +624,7 @@ export function WorkspaceSidebar({
 									(e.currentTarget as HTMLElement).style.background = "transparent";
 								}}
 								title={item.label}
-								aria-label={item.label}
+								aria-label={"name" in item ? item.name : item.label}
 							>
 								{item.icon}
 							</button>
@@ -805,6 +814,7 @@ export function WorkspaceSidebar({
 									key={item.id}
 									type="button"
 									onClick={() => onNavigate(item.id)}
+									aria-label={"name" in item ? item.name : undefined}
 									className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
 									style={{ color: "var(--color-text)", background: active ? "var(--color-surface-hover)" : "transparent" }}
 								>
