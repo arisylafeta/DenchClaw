@@ -62,8 +62,10 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(detail.files).toMatchObject([{ file_name: "spec.pdf", file_type: "Datasheet", visibility: "never" }]);
     expect(detail.contacts).toMatchObject([{ email: "sam@supplier.test" }]);
     expect(await proposals.tradeProposals(lotId)).toEqual([]);
-    const events = await pg.queryPg<{ kind: string }>("select kind from crm_bulk_trade_events where lot_id = $1", [lotId]);
-    expect(events.filter((event) => event.kind === "proposal_accepted")).toHaveLength(6);
+    // Decisions are logged on the Trades Preview listing's History, not the old Bulk Trades events.
+    const logged = await pg.queryPg<{ title: string }>(
+      "select title from crm_bulk_listing_activity where bulk_listing_id = $1 and kind = 'status' and data ? 'proposal_id'", [lotId]);
+    expect(logged.filter((row) => row.title.startsWith("Proposal accepted"))).toHaveLength(6);
   });
 
   it("applies a proposal once however often it is clicked, and ignores without changing anything", async () => {
@@ -173,8 +175,12 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     const id = await propose("possible_trade", null, { title: "Leaf packs, Leeds", trade_kind: "packs" }, null);
     const result = await proposals.decideProposal(id, "accept", user);
     expect(result.ok && result.lot_id).toBeTruthy();
-    const created = await trades.getBulkTrade((result as { lot_id: string }).lot_id);
-    expect(created).toMatchObject({ title: "Leaf packs, Leeds", trade_kind: "packs", next_step: "Qualify this lead" });
+    // A possible trade becomes an open supply listing in Trades Preview.
+    const [created] = await pg.queryPg<Record<string, unknown>>(
+      "select kind, status, summary, next_action, spec, context->>'listing_title' as title from crm_bulk_listings where id = $1",
+      [(result as { lot_id: string }).lot_id]);
+    expect(created).toMatchObject({ kind: "supply", status: "open", summary: "Leaf packs, Leeds", title: "Leaf packs, Leeds",
+      next_action: "Qualify this lead", spec: { trade_kind: "packs" } });
   });
 
   it("reads a new contact's history, and fills a trade created from a possible new trade", async () => {
@@ -184,9 +190,9 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
 
     const id = await propose("possible_trade", null, { title: "Kona packs, Wales", trade_kind: "packs", email: "seller@kona.test" }, null);
     const result = await proposals.decideProposal(id, "accept", user) as { ok: true; lot_id: string };
-    const created = (await details.getTradeDetail(result.lot_id))!;
-    expect(created.contacts).toMatchObject([{ email: "seller@kona.test" }]);
-    expect(startHistoryPass).toHaveBeenLastCalledWith(result.lot_id);
+    const contacts = await pg.queryPg<{ role: string; contact: string }>(
+      "select role, contact from crm_bulk_offers where bulk_listing_id = $1", [result.lot_id]);
+    expect(contacts).toEqual([{ role: "contact", contact: "seller@kona.test" }]);
 
     const kindless = (await trades.createBulkTrade({ title: "Kindless" }, user.id)).id;
     await proposals.decideProposal(await propose("trade_kind", null, { trade_kind: "cells" }, kindless), "accept", user);
@@ -232,9 +238,10 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
       expect(await field("quantity")).toBeUndefined();
       expect((await proposals.appliedChanges(undoLot)).map((change) => change.id)).not.toContain(id);
       expect(await proposals.undoChange(id, user.id)).toMatchObject({ ok: false, status: 404 });
-      const [event] = await pg.queryPg<{ kind: string; actor_user_id: string }>(
-        "select kind, actor_user_id from crm_bulk_trade_events where lot_id = $1 order by id desc limit 1", [undoLot]);
-      expect(event).toEqual({ kind: "auto_undone", actor_user_id: user.id });
+      const [event] = await pg.queryPg<{ title: string; actor_user_id: string }>(
+        "select title, actor_user_id from crm_bulk_listing_activity where bulk_listing_id = $1 order by id desc limit 1", [undoLot]);
+      expect(event).toMatchObject({ actor_user_id: user.id });
+      expect(event.title).toMatch(/^Inbox change undone/);
     });
 
     it("refuses to undo a detail changed since, and restores the old value otherwise", async () => {

@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { queryPg, withPgTransaction, type PgTransaction } from "../postgres";
 import type { AppliedChange, CheckStatus, FileType, HistoryStatus, Proposal } from "../bulk-trade-details";
 import { startHistoryPass } from "../history-pass";
 import { FILE_TYPES } from "../bulk-trade-details";
 import { fetchGmailAttachment } from "../gmail-drafts";
-import { createBulkTrade, updateBulkTrade } from "./bulk-trades";
+import { updateBulkTrade } from "./bulk-trades";
 import { addBuyer, addContact, recordFile, setField, updateBuyer } from "./bulk-trade-details";
 import { acceptDemand, reverseDemand } from "./demand-proposal";
 
@@ -106,16 +107,13 @@ export async function decideProposal(
       `update crm_bulk_trade_proposals set status = $2, decided_at = now(), decided_by = $3
        where id = $1 and status = 'new'
        returning id::text as id, lot_id, kind, target, proposed, summary, quote, source_kind, source_url,
-         source_label, to_char(source_at, 'YYYY-MM-DD') as source_date`,
+         source_label, source_thread, to_char(source_at, 'YYYY-MM-DD') as source_date`,
       [id, action === "accept" ? "accepted" : "ignored", user.id],
     );
     const proposal = rows[0] as (Proposal & { source_date: string | null }) | undefined;
     if (proposal?.lot_id) {
-      await client.query(
-        `insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, $2, $3, $4)`,
-        [proposal.lot_id, action === "accept" ? "proposal_accepted" : "proposal_ignored",
-          JSON.stringify({ proposal_id: proposal.id, kind: proposal.kind, summary: proposal.summary }), user.id],
-      );
+      await logListingActivity(client, proposal.lot_id, action === "accept" ? "Proposal accepted" : "Proposal ignored",
+        { proposal_id: proposal.id, kind: proposal.kind, summary: proposal.summary }, user.id);
     }
     return proposal ?? null;
   });
@@ -181,21 +179,12 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
       return lotId;
     }
     case "possible_trade": {
+      // Becomes an open supply listing in Trades Preview; the sender is its contact.
       const title = text(proposed.title);
       if (!title) throw new Error("The proposed trade has no title.");
-      const trade = await createBulkTrade({
-        title,
-        trade_kind: ["packs", "cells", "systems", "recycling"].includes(String(proposed.trade_kind))
-          ? proposed.trade_kind as "packs" : null,
-        next_step: "Qualify this lead",
-      }, user.id);
-      // The sender becomes a contact, then a history pass reads everything they sent about it.
       const sender = text(proposed.email) ?? p.source_label.match(/[^\s·]+@[^\s·]+/)?.[0] ?? null;
-      if (sender && !sender.endsWith("@rebattery.io")) {
-        await addContact(trade.id, { name: sender, email: sender }, user.id);
-        await requestHistoryPass(trade.id);
-      }
-      return trade.id;
+      const external = sender && !sender.endsWith("@rebattery.io") ? sender.toLowerCase() : null;
+      return createSupplyListing(p, title, external, user.id);
     }
     case "link_contact": {
       const email = text(proposed.email);
@@ -277,10 +266,8 @@ export async function undoChange(id: string, userId: string): Promise<Decision> 
         "update crm_bulk_trade_proposals set status = 'undone', decided_at = now(), decided_by = $2 where id = $1",
         [id, userId],
       );
-      if (change.lot_id) await client.query(
-        "insert into crm_bulk_trade_events (lot_id, kind, changes, actor_user_id) values ($1, 'auto_undone', $2, $3)",
-        [change.lot_id, JSON.stringify({ proposal_id: change.id, kind: change.kind, summary: change.summary }), userId],
-      );
+      if (change.lot_id) await logListingActivity(client, change.lot_id, "Inbox change undone",
+        { proposal_id: change.id, kind: change.kind, summary: change.summary }, userId);
       return change.lot_id;
     });
     return lotId !== undefined ? { ok: true, lot_id: lotId } : { ok: false, status: 404, error: "Already undone or not found." };
@@ -397,4 +384,52 @@ async function reverse(client: PgTransaction, lotId: string, change: AppliedRow,
     default:
       throw new Changed("This change cannot be undone.");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Trades Preview writes (bulk listing tables)
+// ---------------------------------------------------------------------------
+
+/** A hidden status row on the listing's History; skipped when the id is not a listing. */
+async function logListingActivity(client: PgTransaction, listingId: string, title: string, data: Record<string, unknown>, userId: string) {
+  await client.query(
+    `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, data, actor_user_id)
+     select id, 'status', $2, $3, $4, $5 from crm_bulk_listings where id = $1`,
+    [listingId, `${title}: ${String(data.summary ?? data.kind ?? "").slice(0, 200)}`.slice(0, 300), null, JSON.stringify(data), userId],
+  );
+}
+
+/** An accepted "possible trade" as an open supply listing, its sender as the contact offer, and a Story entry. */
+async function createSupplyListing(p: Proposal & { source_date: string | null }, title: string, email: string | null, userId: string): Promise<string> {
+  return withPgTransaction(async (client) => {
+    const id = `bt_${randomUUID()}`;
+    const kind = String(p.proposed.trade_kind);
+    const spec = ["packs", "cells", "systems"].includes(kind) ? { trade_kind: kind } : {};
+    const { rows: [person] } = email
+      ? await client.query(`select id, company_id, coalesce(nullif(full_name, ''), email) as name from crm_people
+          where lower(email) = $1 order by id limit 1`, [email])
+      : { rows: [] as { id: string; company_id: string | null; name: string }[] };
+    await client.query(
+      `insert into crm_bulk_listings (id, kind, party, company_id, person_id, email, summary, status, source_kind, source_id, source_thread,
+         source_label, source_url, source_quote, observed_on, spec, context, next_action)
+       values ($1, 'supply', $2, $3, $4, $5, $6, 'open', 'email', $7, $8, $9, $10, $11, $12, $13, $14, 'Qualify this lead')`,
+      [id, person?.name ?? email ?? "Unknown seller", person?.company_id ?? null, person?.id ?? null, email, title, `proposal:${p.id}`,
+        (p as Proposal & { source_thread?: string | null }).source_thread ?? null, p.source_label, p.source_url, p.quote || null,
+        p.source_date, JSON.stringify(spec), JSON.stringify({ listing_title: title, proposal_id: p.id })],
+    );
+    if (email) {
+      await client.query(
+        `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, data)
+         values ($1, $2, 'contact', $3, $4, $5, $6, '{"source": "inbox proposal"}')`,
+        [`btc_${randomUUID()}`, id, person?.id ?? null, person?.company_id ?? null, person?.name ?? email, email],
+      );
+    }
+    await client.query(
+      `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, ref_kind, ref_id, data, actor_user_id, occurred_at)
+       values ($1, 'mail', $2, $3, 'email', $4, $5, $6, coalesce($7::timestamptz, now()))`,
+      [id, `Lead from inbox: ${title}`.slice(0, 300), p.summary, p.source_url, JSON.stringify({ proposal_id: p.id, source: p.source_label }),
+        userId, p.source_date],
+    );
+    return id;
+  });
 }

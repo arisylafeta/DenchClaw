@@ -91,7 +91,7 @@ export async function reverseDemand(client: PgTransaction, undo: Record<string,a
   const equal = (await client.query('select $1::jsonb=$2::jsonb as same', [JSON.stringify(rows[0]?.snapshot),JSON.stringify(undo.after)])).rows[0].same;
   if (!equal) throw new Error('That demand has changed since; edit it by hand.');
   if (!undo.before) {
-    const used = (await client.query(`select exists(select 1 from crm_bulk_trade_buyers where demand_id=$1) as used`, [undo.demand_id])).rows[0].used;
+    const used = (await client.query(`select exists(select 1 from crm_bulk_offers where counterpart_id=$1) as used`, [undo.demand_id])).rows[0].used;
     if (used) throw new Error('That demand is linked to a buyer; edit it by hand.');
     await client.query('delete from crm_bulk_demand where id=$1', [undo.demand_id]);
   } else {
