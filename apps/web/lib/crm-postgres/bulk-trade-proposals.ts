@@ -218,6 +218,11 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
         [lotId, text(proposed.auction_id), text(proposed.slug), text(proposed.closes_at), text(proposed.listing_id)],
       );
       if (!linked.length) throw new Error("That auction or this trade is already linked.");
+      await queryPg(
+        `update crm_bulk_listings set auction_id = $2, auction_slug = $3, auction_closes_at = $4, auction_status = 'published',
+           marketplace_listing_id = coalesce(marketplace_listing_id, $5), updated_at = now() where id = $1`,
+        [lotId, text(proposed.auction_id), text(proposed.slug), text(proposed.closes_at), text(proposed.listing_id)],
+      );
       return lotId;
     }
   }
