@@ -36,8 +36,9 @@ import psycopg2.extras
 
 PLATFORM_ENV = Path("/root/.hermes/workspace/secrets/dench-platform-admin.env")
 PAGE = 1000
-# Our own selling accounts (their listings are Trades Preview deals) and test accounts.
-SKIP_ACCOUNTS = {"ReBattery", "ReBattery Sales", "Acme", "Electric EV", "Circular Energy Storage"}
+# Our own selling accounts (their listings are Trades Preview deals) and test accounts (Power Solutions is
+# owned by an internal test login, agjpolglase@gmail.com, with Ari and enterprise@ as members).
+SKIP_ACCOUNTS = {"ReBattery", "ReBattery Sales", "Acme", "Electric EV", "Circular Energy Storage", "Power Solutions"}
 FREEMAIL = re.compile(r"@(gmail|googlemail|hotmail|outlook|yahoo|icloud|live|msn|aol|proton|pm|gmx|mail)\.", re.I)
 UNIT = {"pack": "pack", "module": "module", "cell": "cell", "system": "system"}
 LISTING_SELECT = ("id,title,reference,listing_status,listing_kind,group_id,supplier_account_id,buy_now_price,currency,"
