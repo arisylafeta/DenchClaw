@@ -25,12 +25,14 @@ export async function GET(request: Request) {
   }
   return Response.json({
     links: await queryPg(
-      `select e.bulk_listing_id as lot_id,
-        case when e.reason like 'message:%' then 'whatsapp_live_message' else 'whatsapp_live_thread' end as evidence_kind,
-        case when e.reason like 'message:%' then substr(e.reason, 9) else e.thread_id end as evidence_id,
-        coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary) as title
-      from crm_bulk_thread_links e join crm_bulk_listings l on l.id=e.bulk_listing_id
-      where e.channel='whatsapp' and e.thread_id=$1 and e.state<>'rejected' order by 4,2,3`,
+      `select lot_id, evidence_kind, evidence_id, title from (
+        select e.bulk_listing_id as lot_id, 'whatsapp_live_thread' as evidence_kind, e.thread_id as evidence_id, coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary) as title
+          from crm_bulk_thread_links e join crm_bulk_listings l on l.id=e.bulk_listing_id
+         where e.channel='whatsapp' and e.thread_id=$1 and e.state<>'rejected'
+        union all
+        select a.bulk_listing_id, 'whatsapp_live_message', a.data->>'whatsapp_message_id', coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)
+          from crm_bulk_listing_activity a join crm_bulk_listings l on l.id=a.bulk_listing_id
+         where a.data->>'whatsapp_thread_id'=$1 and a.data ? 'whatsapp_message_id') x order by title, evidence_kind, evidence_id`,
       [p.get("threadId")],
     ),
   });
@@ -60,11 +62,12 @@ async function mutate(request: Request, remove: boolean) {
   const sourceTable =
     value.evidenceKind === "whatsapp_live_thread" ? "whatsapp_thread" : "whatsapp_message";
   const result = await withPgTransaction(async (client) => {
-    // A thread link, or a message link kept as a thread link whose reason names the message.
+    // A thread is a thread link on the listing; each linked message is its own WhatsApp entry on the listing's Story,
+    // so several messages and the whole thread can be linked independently.
     const source = await client.query(
       sourceTable === "whatsapp_thread"
-        ? `select id as thread_id, null::text as body from whatsapp_thread where id=$1 for share`
-        : `select thread_id, body from whatsapp_message where id=$1 for share`,
+        ? `select id as thread_id, null::text as body, null::timestamptz as occurred_at from whatsapp_thread where id=$1 for share`
+        : `select thread_id, body, occurred_at from whatsapp_message where id=$1 for share`,
       [value.evidenceId],
     );
     const listing = await client.query(`select id from crm_bulk_listings where id=$1 for share`, [value.lotId]);
@@ -72,21 +75,34 @@ async function mutate(request: Request, remove: boolean) {
       return false;
     }
     const threadId = source.rows[0].thread_id as string;
-    const reason = value.evidenceKind === "whatsapp_live_message" ? `message:${value.evidenceId}` : "thread";
-    if (remove) {
+    if (value.evidenceKind === "whatsapp_live_thread") {
+      if (remove) {
+        await client.query(
+          `delete from crm_bulk_thread_links where channel='whatsapp' and thread_id=$1 and bulk_listing_id=$2 and offer_id is null`,
+          [threadId, value.lotId],
+        );
+      } else {
+        await client.query(
+          `insert into crm_bulk_thread_links(channel,thread_id,bulk_listing_id,confidence,state,reason,labelled_by,confirmed_by,confirmed_at)
+           values('whatsapp',$1,$2,'high','confirmed','Linked from WhatsApp',$3,$3,now())
+           on conflict (channel, thread_id, bulk_listing_id, (coalesce(offer_id, ''))) do update
+             set state='confirmed', confirmed_by=excluded.confirmed_by, confirmed_at=now()`,
+          [threadId, value.lotId, user.email],
+        );
+      }
+    } else if (remove) {
       await client.query(
-        `delete from crm_bulk_thread_links where channel='whatsapp' and thread_id=$1 and bulk_listing_id=$2 and offer_id is null
-           and coalesce(reason, 'thread')=$3`,
-        [threadId, value.lotId, reason],
+        `delete from crm_bulk_listing_activity where bulk_listing_id=$1 and kind='whatsapp' and data->>'whatsapp_message_id'=$2`,
+        [value.lotId, value.evidenceId],
       );
     } else {
       await client.query(
-        `insert into crm_bulk_thread_links(channel,thread_id,bulk_listing_id,confidence,state,reason,quote,labelled_by,confirmed_by,confirmed_at)
-         values('whatsapp',$1,$2,'high','confirmed',$3,$4,$5,$5,now())
-         on conflict (channel, thread_id, bulk_listing_id, (coalesce(offer_id, ''))) do update
-           set state='confirmed', reason=excluded.reason, quote=coalesce(excluded.quote, crm_bulk_thread_links.quote),
-               confirmed_by=excluded.confirmed_by, confirmed_at=now()`,
-        [threadId, value.lotId, reason, (source.rows[0].body as string | null)?.slice(0, 500) ?? null, user.email],
+        `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, data, occurred_at)
+         select $1, 'whatsapp', 'WhatsApp message', $2, $3, coalesce($4::timestamptz, now())
+         where not exists (select 1 from crm_bulk_listing_activity where bulk_listing_id=$1 and data->>'whatsapp_message_id'=$5)`,
+        [value.lotId, source.rows[0].body ?? null,
+          JSON.stringify({ whatsapp_message_id: value.evidenceId, whatsapp_thread_id: threadId, linked_by: user.email }),
+          source.rows[0].occurred_at ?? null, value.evidenceId],
       );
     }
     return true;

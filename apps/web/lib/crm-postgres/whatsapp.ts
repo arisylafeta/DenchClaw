@@ -60,8 +60,9 @@ export async function whatsappThreads(
     `select t.*, (t.kind='group') as shared_context,
     (select count(*) from whatsapp_message m where m.thread_id=t.id) as message_count
     from whatsapp_thread t where
-    ($3::text is not null and exists(select 1 from crm_bulk_thread_links e
-      where e.bulk_listing_id=$3 and e.channel='whatsapp' and e.thread_id=t.id and e.state<>'rejected'))
+    ($3::text is not null and (exists(select 1 from crm_bulk_thread_links e
+      where e.bulk_listing_id=$3 and e.channel='whatsapp' and e.thread_id=t.id and e.state<>'rejected')
+      or exists(select 1 from crm_bulk_listing_activity a where a.bulk_listing_id=$3 and a.data->>'whatsapp_thread_id'=t.id)))
     or (($1::text is not null or $2::text is not null) and exists (
       select 1 from whatsapp_identity_link l left join crm_people p on p.id=l.person_id
       where l.account_id=t.account_id and l.valid_to is null
@@ -131,8 +132,8 @@ export async function whatsappConversation(id: string, limit = 50, offset = 0, t
     case when not i.shared and (select count(*) from whatsapp_identity_link l where l.identity_id=i.id and l.valid_to is null)=1
       then (select p.full_name from whatsapp_identity_link l join crm_people p on p.id=l.person_id where l.identity_id=i.id and l.valid_to is null limit 1) end as sender_person_name,
     ${visibleBody("r")} as reply_body,
-    coalesce((select jsonb_agg(jsonb_build_object('lot_id',e.bulk_listing_id,'title',coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) order by coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) from crm_bulk_thread_links e join crm_bulk_listings l on l.id=e.bulk_listing_id
-      where e.channel='whatsapp' and e.thread_id=m.thread_id and e.reason='message:'||m.id and e.state<>'rejected'),'[]'::jsonb) as trade_links
+    coalesce((select jsonb_agg(jsonb_build_object('lot_id',a.bulk_listing_id,'title',coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) order by coalesce(nullif(l.spec->>'listing_title', ''), nullif(l.context->>'listing_title', ''), l.summary)) from crm_bulk_listing_activity a join crm_bulk_listings l on l.id=a.bulk_listing_id
+      where a.data->>'whatsapp_message_id'=m.id),'[]'::jsonb) as trade_links
     from whatsapp_message m left join whatsapp_identity i on i.id=m.sender_identity_id
     left join whatsapp_message r on r.thread_id=m.thread_id and r.provider_message_id=m.reply_to_provider_id
     where m.thread_id=$1 order by m.occurred_at,m.id limit $2 offset $3`,

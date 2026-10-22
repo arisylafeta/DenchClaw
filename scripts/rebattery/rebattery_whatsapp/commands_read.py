@@ -98,8 +98,10 @@ def dispatch_read_command(args, db):
     if args.command == 'message':
         return message_rows(db, args, 'm.id=%s', (args.id,))
     if args.command == 'trade':
-        return message_rows(db, args, '''exists(select 1 from crm_bulk_thread_links e
-          where e.bulk_listing_id=%s and e.channel='whatsapp' and e.thread_id=m.thread_id and e.state<>'rejected')''', (args.id,))
+        return message_rows(db, args, '''(exists(select 1 from crm_bulk_thread_links e
+          where e.bulk_listing_id=%s and e.channel='whatsapp' and e.thread_id=m.thread_id and e.state<>'rejected')
+          or exists(select 1 from crm_bulk_listing_activity a where a.bulk_listing_id=%s
+          and a.data->>'whatsapp_message_id'=m.id))''', (args.id, args.id))
     # Search only retained readable text, never deleted/expired/view-once copies.
     return message_rows(db, args, '''m.body ilike %s and m.deleted_at is null
       and coalesce(m.metadata->>'content_redacted','false')<>'true'
