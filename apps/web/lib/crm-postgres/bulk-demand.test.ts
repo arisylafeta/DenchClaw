@@ -289,10 +289,7 @@ describe.skipIf(!TEST_URL)("buyer demand", () => {
     const buyer = await demand.addSuggestedBuyer(lot, agreed.id, user.id);
     const [{ demand_id }] = await pg.queryPg<{ demand_id: string }>("select demand_id from crm_bulk_trade_buyers where id = $1", [buyer!.id]);
     expect(demand_id).toBe(agreed.id);
-    // A demand's trades are the Trades Preview buyer offers that name it as their counterpart.
-    expect((await demand.getDemand(agreed.id))?.trades).toEqual([]);
-    await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, name, counterpart_id, stage)
-      values ('btb_rank_offer', $1, 'counterparty', 'Agreed Co', $2, 'to_contact')`, [lot, agreed.id]);
+    // The suggested buyer is also a Trades Preview offer naming the demand, which is what a demand's trades read.
     expect((await demand.getDemand(agreed.id))?.trades).toEqual([{ lot_id: lot, title: "Ranking trade LFP packs", status: "To contact" }]);
   });
 

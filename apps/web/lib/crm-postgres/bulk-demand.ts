@@ -350,6 +350,14 @@ export async function addSuggestedBuyer(lotId: string, demandId: string, userId:
   const buyer = await addBuyer(lotId, { name: demand.buyer, contact, wants: demand.wants, person_id: demand.person_id }, userId);
   if (!buyer) return null;
   await queryPg("update crm_bulk_trade_buyers set demand_id = $2 where id = $1", [buyer.id, demandId]);
+  // Trades Preview reads buyers as offers; the offer shares the buyer's id, as the Bulk Trades reconcile does.
+  await queryPg(
+    `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, counterpart_id, stage, data)
+     select $1, l.id, 'counterparty', $3, $4, $5, $6, $7, $2, 'to_contact', '{"source": "suggested buyer"}'
+     from crm_bulk_listings l where l.id = $8
+     on conflict (id) do update set counterpart_id = excluded.counterpart_id`,
+    [buyer.id, demandId, demand.person_id, demand.company_id, demand.buyer, contact, demand.wants, lotId],
+  );
   await queryPg(
     `insert into crm_bulk_trade_demand_matches (demand_id, lot_id, strength, reason, buyer_id)
      values ($1, $2, 'partial', 'Added by hand', $3)
