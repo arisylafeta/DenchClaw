@@ -1,6 +1,6 @@
 import unittest
 
-from stock_opportunity_marketplace_sync import new_listings, plan, stock_row
+from stock_opportunity_marketplace_sync import bundle_links, new_listings, plan, stock_row
 
 
 class Plan(unittest.TestCase):
@@ -32,6 +32,12 @@ class Plan(unittest.TestCase):
                          "location_address": {"city": "Leeds", "country": "GB"}, "metadata_json": {"vin": "V1"}}]})
         self.assertEqual((row["quantity"], row["quantity_unit"], row["location"], row["supplier_ref"], row["observed_on"]),
                          (2, "pack", "Leeds, GB", "marketplace:0012", "2026-10-01"))
+
+
+    def test_bundle_units_link_stock_rows_by_supplier_tag(self):
+        listings = [{"id": "m1", "listing_specs": [{"metadata_json": {"sourceUnits": [{"sourceReference": "0012090971"}, {"sourceReference": "999"}]}}]},
+                    {"id": "m2", "listing_specs": [{"metadata_json": {"sourceUnits": [{"sourceReference": "12090971"}]}}]}]
+        self.assertEqual(bundle_links(listings, {"12090971": ["s1"]}, {"m1": "deal1"}), [("s1", "deal1")])
 
 
 if __name__ == "__main__":

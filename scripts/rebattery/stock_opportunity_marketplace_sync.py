@@ -11,6 +11,10 @@
    platform account is linked to them. Our own and test accounts are skipped (SKIP_ACCOUNTS), as are bundle
    listings, which are Trades Preview deals.
 
+3. Deals: a marketplace bundle listing that is a Trades Preview deal (crm_bulk_listings.marketplace_listing_id)
+   lists the supplier's stock tags in metadata sourceUnits; the stock rows with those tags get bulk_listing_id
+   set to the deal, so the deal and its items are not counted twice.
+
 Read-only on the platform; writes crm_stock_opportunities, and crm_people/crm_companies/crm_platform_accounts
 only to link a new seller.
 
@@ -159,6 +163,28 @@ def seller(cur, account_id, account_name, apply):
     return person_id, company_id
 
 
+def bundle_links(listings, stock_refs, deals):
+    """(stock row id, deal id) for stock rows named by a deal's bundle listing (sourceUnits.sourceReference).
+    stock_refs maps a normalised supplier tag to stock row ids; deals maps a marketplace listing id to a deal id."""
+    links = []
+    for listing in listings:
+        deal = deals.get(listing["id"])
+        units = (specs(listing).get("metadata_json") or {}).get("sourceUnits") or []
+        if not deal:
+            continue
+        for unit in units:
+            ref = tag(unit.get("sourceReference"))
+            if len(ref) < 5:  # too short to identify one supplier's item
+                continue
+            for row_id in stock_refs.get(ref, []):
+                links.append((row_id, deal))
+    return links
+
+
+def tag(value):
+    return re.sub(r"[^0-9A-Z]", "", str(value or "").split(":")[-1].upper()).lstrip("0")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true")
@@ -199,9 +225,26 @@ def main(argv=None):
                     (f"sto_mp_{listing['id']}", person_id, company_id, row["title"], row["description"], row["quantity"],
                      row["quantity_unit"], row["price"], row["currency"], row["price_unit"], row["location"],
                      row["supplier_ref"], listing["id"], row["observed_on"], json.dumps(row["details"])))
+        cur.execute("select id, supplier_ref, bulk_listing_id from crm_stock_opportunities where supplier_ref is not null")
+        stock = cur.fetchall()
+        stock_refs = {}
+        for row in stock:
+            stock_refs.setdefault(tag(row["supplier_ref"]), []).append(row["id"])
+        current = {row["id"]: row["bulk_listing_id"] for row in stock}
+        cur.execute("select marketplace_listing_id, id from crm_bulk_listings where marketplace_listing_id is not null")
+        deals = {row["marketplace_listing_id"]: row["id"] for row in cur.fetchall()}
+        linked = 0
+        for row_id, deal in bundle_links(listings, stock_refs, deals):
+            if current.get(row_id) == deal:
+                continue
+            linked += 1
+            print(f"{row_id}: part of deal {deal}")
+            if args.apply:
+                cur.execute("update crm_stock_opportunities set bulk_listing_id = %s, updated_at = now() where id = %s",
+                            (deal, row_id))
         for name, n in sorted(unmapped.items()):
             print(f"no CRM contact for marketplace account {name!r}: {n} listing(s) skipped")
-        print(f"{len(rows)} linked rows, {len(changes)} changed, {added} new listed rows"
+        print(f"{len(rows)} linked rows, {len(changes)} changed, {added} new listed rows, {linked} items linked to deals"
               f"{'' if args.apply else ' (dry run)'}")
     return 0
 
