@@ -160,9 +160,11 @@ function gatewayListStatus(rows: HermesConversation[]) {
       while (next < selected.length) {
         const { row, live } = selected[next++];
         const retained = manager.retainSession(row.participants[0].profile, row.id);
-        const snapshot = await manager.attachLive(retained, live.id);
-        // Refused ownership: this row's id is another profile's runtime.
-        if (!snapshot) { if (!result[row.key].live) result[row.key] = { working: false, blocked: false, background: false, live: false }; continue; }
+        let snapshot: Awaited<ReturnType<typeof manager.attachLive>>;
+        // One failed attach keeps that row's active_list seed instead of discarding the whole poll.
+        try { snapshot = await manager.attachLive(retained, live.id); } catch { continue; }
+        // Refused ownership: this row's id is another profile's runtime, so its status is not ours.
+        if (!snapshot) { result[row.key] = { working: false, blocked: false, background: false, live: false }; continue; }
         // Running means this chat's own turn. Children still working after the turn ended are background.
         const working = Boolean(snapshot.running || RUNNING_LIVE_STATUSES.includes(live.status));
         const children = Boolean(snapshot.subagents?.some(child => !child.status || ["queued", "running"].includes(child.status)));

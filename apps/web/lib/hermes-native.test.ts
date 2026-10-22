@@ -165,6 +165,28 @@ it("trusts gateway idle over a fresh heartbeat, and maps waiting past the attach
     expect(attach).toHaveBeenCalledTimes(8);
   } finally { call.mockRestore(); attach.mockRestore(); vi.mocked(recentSessionActivity).mockImplementation(async () => new Map()); }
 });
+it("drops a refused runtime's status and keeps other rows when one attach throws", async () => {
+  vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.advanceTimersByTime(150_000);
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json({ data: url.includes("/p/alpha/") ? [{ id: "foreign", title: "A" }, { id: "broken", title: "B" }, { id: "mine", title: "C" }] : [] })));
+  const manager = getHermesGatewayManager();
+  const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [
+    { id: "r-foreign", session_key: "foreign", status: "working" }, { id: "r-broken", session_key: "broken", status: "waiting" }, { id: "r-mine", session_key: "mine", status: "idle" },
+  ] } as never);
+  const attach = vi.spyOn(manager, "attachLive").mockImplementation(async (_key, id) => {
+    if (id === "r-foreign") return undefined;
+    if (id === "r-broken") throw new Error("socket closed");
+    return { session_id: id, running: false, subagents: [{ subagent_id: "child", status: "running" }] } as never;
+  });
+  vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
+  try {
+    const rows = (await listConversations()).sessions;
+    expect(rows.find(row => row.id === "foreign")).toMatchObject({ working: false, blocked: false });
+    expect(rows.find(row => row.id === "broken")).toMatchObject({ working: false, blocked: true });
+    expect(rows.find(row => row.id === "mine")).toMatchObject({ working: false, background: true });
+  } finally { call.mockRestore(); attach.mockRestore(); }
+});
 it("shows a CLI session stamped only by its subagents as background", async () => {
   vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
   vi.useFakeTimers({ toFake: ["Date"] });
