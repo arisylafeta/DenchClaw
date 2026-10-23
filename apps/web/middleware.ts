@@ -18,6 +18,7 @@ const PUBLIC_ASSETS = new Set([
 const PUBLIC_ROUTES = new Set([
   "/login",
   "/api/auth/login",
+  "/api/webhooks/postmark-mail",
   "/api/settings/mcp/connect/callback",
 ]);
 // /t/ serves tracked links from trade emails; tokens are random and only forward.

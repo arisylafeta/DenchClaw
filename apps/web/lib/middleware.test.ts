@@ -44,6 +44,7 @@ describe("CRM auth middleware", () => {
   it.each([
     "/login",
     "/api/auth/login",
+    "/api/webhooks/postmark-mail",
     "/api/settings/mcp/connect/callback",
     "/api/apps/webhooks/example",
     "/rebattery-favicon.svg",
@@ -59,6 +60,8 @@ describe("CRM auth middleware", () => {
     const webhook = await middleware(request("/api/apps/webhooks-evil"));
     const login = await middleware(request("/login-copy"));
     expect(webhook.status).toBe(401);
+    expect((await middleware(request("/api/webhooks/postmark-mail-copy"))).status).toBe(401);
+    expect((await middleware(request("/api/webhooks/postmark-mail", { method: "POST" }))).status).toBe(200);
     expect(login.status).toBe(307);
   });
 
