@@ -125,6 +125,7 @@ export async function listMailFollowups(mailboxOwnerId?: string, dueOnly = false
   const { values, where, bind } = mailWhere(messageFilters);
   const conditions: string[] = [];
   const owner = mailboxOwnerId ? bind(mailboxOwnerId) : null;
+  if (owner) conditions.push(`(coalesce(f.identity_key not in ('alex','ari'),true) or exists (select 1 from crm_users followup_user where followup_user.id = ${owner}::uuid and lower(followup_user.email) = f.identity_key || '@rebattery.io'))`);
   if (owner) conditions.push(`exists (select 1 from mail_message scoped where (scoped.id = f.message_id or (f.message_id is null and scoped.thread_id = f.thread_id)) and ${mailboxScopeSql('scoped', owner)})`);
   if (crmOnly) conditions.push('coalesce(anchor.crm_visible,t.crm_visible,false)');
   if (identity) {

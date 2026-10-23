@@ -17,8 +17,9 @@ describe.skipIf(!enabled)('shared aliases and personal mailbox privacy', () => {
   await queryPg(`insert into mail_message(id,identity_key,mailbox_owner_id,thread_id,direction,transport,purpose,state,from_email,to_emails,labels,crm_visible,body_text,sent_at) values($1,'alex',$2,$3,'outbound','gmail','personal','draft','alex@rebattery.io',array['buyer@example.test'],array['shared'],true,'private draft','2026-01-03'),($1||'_team','supply',$4,$5,'outbound','gmail','personal','draft','supply@rebattery.io',array['buyer@example.test'],'{}',true,'shared draft','2026-01-03')`,[`${prefix}_draft`,ari,`${prefix}_private`,alex,prefix]);
   await queryPg(`insert into mail_message(id,thread_id,direction,transport,state,from_email,to_emails,labels,crm_visible,sent_at) values($1,$2,'inbound','gmail','received','buyer@example.test',array['alex@rebattery.io'],array['shared'],true,'2026-01-01')`,[`${prefix}_unclassified`,`${prefix}_private`]);
   await queryPg(`insert into mail_followup(id,message_id,identity_key,due_at,origin) values($1,$2,'supply',now(),'commitment')`,[`${prefix}_followup`,`${prefix}_supply`]);
+  await queryPg(`insert into mail_followup(id,thread_id,identity_key,due_at,origin,note) values($1,$2,'alex',now(),'commitment','Private Alex followup')`,[`${prefix}_personal_followup`,`${prefix}_private`]);
  });
- afterAll(async () => { await queryPg(`delete from mail_message where id like $1`,[`${prefix}%`]);await queryPg(`delete from mail_thread where id like $1`,[`${prefix}%`]);await pgPool.end(); });
+ afterAll(async () => { await queryPg(`delete from mail_followup where id like $1`,[`${prefix}%`]);await queryPg(`delete from mail_message where id like $1`,[`${prefix}%`]);await queryPg(`delete from mail_thread where id like $1`,[`${prefix}%`]);await pgPool.end(); });
  it('shares every team alias across owners in lists, counts and message details',async () => {
   for(const key of ['supply','support','hello','enterprise']) {
    expect((await searchMail({mailboxOwnerId:ari,identity:key})).items.map(m=>m.id)).toContain(`${prefix}_${key}`);
@@ -44,5 +45,9 @@ describe.skipIf(!enabled)('shared aliases and personal mailbox privacy', () => {
  });
  it('includes shared alias followups for both users',async () => {
   expect((await listMailFollowups(ari,false,{identity:'supply'})).map(m=>m.id)).toContain(`${prefix}_followup`);
+ });
+ it('never exposes a personal thread followup through a visible sibling',async () => {
+  for (const filters of [{}, {identity:'alex'}]) expect((await listMailFollowups(ari,false,filters)).map(m=>m.id)).not.toContain(`${prefix}_personal_followup`);
+  expect((await listMailFollowups(alex,false,{identity:'alex'})).map(m=>m.id)).toContain(`${prefix}_personal_followup`);
  });
 });
