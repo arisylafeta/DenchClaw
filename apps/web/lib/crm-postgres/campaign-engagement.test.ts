@@ -126,6 +126,6 @@ describe("campaign engagement observations", () => {
   it("reads only the requested outbound campaign through a parameterised ledger query", async () => {
     queryPg.mockResolvedValueOnce([message([event("opened", 0)])]);
     expect(await readCampaignEngagement("campaign-1")).toHaveLength(1);
-    expect(queryPg).toHaveBeenLastCalledWith(expect.stringContaining("m.campaign_id = $1 and m.direction = 'outbound'"), ["campaign-1"]);
+    expect(queryPg).toHaveBeenLastCalledWith(expect.stringContaining("m.campaign_id = $1 and m.direction = $2"), ["campaign-1", "outbound"]);
   });
 });

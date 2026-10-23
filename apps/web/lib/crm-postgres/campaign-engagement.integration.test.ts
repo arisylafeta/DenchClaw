@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readCampaignEngagement } from "./campaign-engagement";
 import { getCampaignDetail } from "./campaigns";
-import { mailCampaignCounts } from "./mail";
+import { mailCampaignCounts, readMailCampaign } from "./mail";
 
 const queryPg = vi.hoisted(() => vi.fn());
 vi.mock("../postgres", () => ({ queryPg }));
@@ -20,6 +20,7 @@ describe.skipIf(!testUrl)("campaign engagement against disposable Postgres", () 
     await pool.query(`
       create table campaigns (id text primary key, campaign_name text, status text, source_system text,
         identity_key text, purpose text, mail_state text, created_at timestamptz, launched_at timestamptz);
+      create table mail_identity (address text);
       create table crm_companies (id text primary key, name text);
       create table crm_people (id text primary key, full_name text, company_id text, email text);
       create table crm_dismantlers (id text, company_id text, stage text);
@@ -51,7 +52,12 @@ describe.skipIf(!testUrl)("campaign engagement against disposable Postgres", () 
         ('m2','opened','postmark-webhook','other-open','2026-10-08 11:00Z','{}');
     `);
   });
-  afterAll(async () => { await pool?.end(); });
+  afterAll(async () => {
+    if (pool) {
+      await pool.query("drop table mail_event, mail_message_link, mail_message, crm_dismantlers, crm_people, crm_companies, mail_identity, campaigns");
+      await pool.end();
+    }
+  });
 
   it("projects repeat opens once and infers a company reply without a timestamp or reply event", async () => {
     const rows = await readCampaignEngagement("campaign");
@@ -62,5 +68,33 @@ describe.skipIf(!testUrl)("campaign engagement against disposable Postgres", () 
     expect(detail?.recipients.find((row) => row.person_id === "reader")?.replied_at).toBe("2026-10-08T13:00:00.000Z");
     expect(detail?.campaign.metrics.replied).toBe(1);
     expect((await mailCampaignCounts("campaign"))[0].replied).toBe(1);
+  });
+
+  it("infers direct email replies but excludes earlier and internal mail", async () => {
+    try {
+      await pool.query("update mail_message set from_person_id = null, from_email = 'reader@example.test' where id = 'reply'");
+      expect((await readCampaignEngagement("campaign")).find((row) => row.person_id === "reader")?.replied).toBe(true);
+      await pool.query("update mail_message set sent_at = '2026-10-08 09:00Z' where id = 'reply'");
+      expect((await readCampaignEngagement("campaign")).some((row) => row.replied)).toBe(false);
+      await pool.query("update mail_message set sent_at = '2026-10-08 13:00Z', from_person_id = 'colleague', from_email = 'internal@rebattery.io' where id = 'reply'");
+      expect((await readCampaignEngagement("campaign")).some((row) => row.replied)).toBe(false);
+    } finally {
+      await pool.query("update mail_message set from_person_id = 'colleague', from_email = 'colleague@example.test', sent_at = '2026-10-08 13:00Z' where id = 'reply'");
+    }
+  });
+
+  it("uses the recipient predicate for a mixed-identity filtered cohort", async () => {
+    const filters = { identity: "supply", event: "opened", to: "reader@example.test" };
+    const rows = await readCampaignEngagement("campaign", filters);
+    const detail = await readMailCampaign("campaign", filters);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ person_id: "reader", total_opens: 2, return_sessions: 1, replied: true });
+    expect(rows.map((row) => row.person_id)).toEqual(detail?.recipients.map((row) => row.person_id));
+    expect(detail?.counts.total).toBe(1);
+    expect(detail?.counts.replied).toBe(1);
+    expect(await readCampaignEngagement("campaign", { ...filters, identity: "sales" })).toEqual([]);
+    const other = await readCampaignEngagement("campaign", { identity: "sales" });
+    expect(other.map((row) => row.person_id)).toEqual(["other"]);
+    expect(other[0].return_sessions).toBe(0);
   });
 });

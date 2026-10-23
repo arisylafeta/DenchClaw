@@ -12,7 +12,13 @@ describe("campaign activity engagement payload", () => {
     engagement.mockResolvedValue([{ recipient_key: "p1", return_sessions: 2 }]);
     const response = await GET(new Request("https://example.com"), context);
     expect(await response.json()).toEqual({ campaign_id: "campaign-one", status: "unavailable", destinations: [], engagement: [{ recipient_key: "p1", return_sessions: 2 }] });
-    expect(engagement).toHaveBeenCalledWith("campaign-one");
+    expect(engagement).toHaveBeenCalledWith("campaign-one", { showInternal: false, crmOnly: false });
+  });
+  it("passes recipient filters to engagement", async () => {
+    activity.mockResolvedValue({ campaign_id: "campaign-one", status: "unavailable", destinations: [] });
+    engagement.mockResolvedValue([]);
+    await GET(new Request("https://example.com?identity=supply&event=opened&to=reader%40example.test&since=2026-10-01"), context);
+    expect(engagement).toHaveBeenCalledWith("campaign-one", { identity: "supply", event: "opened", to: "reader@example.test", since: "2026-10-01", showInternal: false, crmOnly: false });
   });
   it("does not read observations without permission", async () => {
     guard.mockResolvedValue({ response: Response.json({ error: "Unauthorised" }, { status: 401 }) });

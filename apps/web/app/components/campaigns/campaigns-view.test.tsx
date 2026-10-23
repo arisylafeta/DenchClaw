@@ -91,6 +91,37 @@ describe("CampaignsView", () => {
     expect(within(ranking).getByText("Late opener")).toBeInTheDocument();
     expect(within(ranking).getByText(/Opens and clicks are observations/)).toBeInTheDocument();
   });
+  it("reloads engagement and returning readers for the selected identity without retaining the old cohort", async () => {
+    const pending = new Map<string, { signal: AbortSignal; resolve: (response: Response) => void }>();
+    vi.stubGlobal("fetch", vi.fn((url: string, init: RequestInit) => {
+      if (url.includes("/activity?")) {
+        return new Promise<Response>((resolve) => pending.set(url, { signal: init.signal as AbortSignal, resolve }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ...detail, ...counts })));
+    }));
+    const supply = "/api/mail/campaigns/historical/activity?identity=supply&event=opened";
+    const sales = "/api/mail/campaigns/historical/activity?identity=sales&event=opened";
+    const view = render(<CampaignsView {...props} query="identity=supply&event=opened" />);
+    await waitFor(() => expect(pending.has(supply)).toBe(true));
+    view.rerender(<CampaignsView {...props} query="identity=sales&event=opened" />);
+    await waitFor(() => expect(pending.has(sales)).toBe(true));
+    expect(pending.get(supply)!.signal.aborted).toBe(true);
+    await act(async () => pending.get(supply)!.resolve(new Response(JSON.stringify({ ...unavailable, engagement: [{ recipient_key: "stale", return_sessions: 9 }] }))));
+    expect(screen.getByText(/Returning readers:/)).toHaveTextContent("Loading…");
+    await act(async () => pending.get(sales)!.resolve(new Response(JSON.stringify({ ...unavailable, engagement: [{
+      recipient_key: "person:b", person_id: "person:b", person_name: "Ben", company_name: "South Parts", recipient_email: "ben@example.test",
+      total_opens: 1, flagged_opens: 0, return_sessions: 0, first_opened: AT, last_opened: AT,
+      days_to_first_open: 0, late_opener: false, human_links_clicked: 0, flagged_clicks: 0, replied: true, likely_bot: false,
+    }] }))));
+    expect(screen.getByText(/Returning readers:/)).toHaveTextContent("Returning readers: 0");
+    await userEvent.setup().click(screen.getByRole("tab", { name: "Engagement" }));
+    const ranking = screen.getByRole("region", { name: "Engagement ranking" });
+    expect(within(ranking).getByRole("link", { name: "Ben" })).toBeInTheDocument();
+    expect(within(ranking).queryByRole("link", { name: "Ada" })).not.toBeInTheDocument();
+    fireEvent.click(within(ranking).getByLabelText("Not replied"));
+    expect(within(ranking).getByText("No recipients match this ranking.")).toBeInTheDocument();
+  });
+
   it("uses the Mail header when embedded and forwards filters unchanged to list and detail", async () => {
     const query = "view=campaigns&identity=ari&event=clicked&crmOnly=true";
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/historical") ? { ...detail, ...counts } : { items: [{ ...summary, ...counts }] }))));

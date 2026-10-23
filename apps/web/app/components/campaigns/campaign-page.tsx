@@ -16,8 +16,8 @@ import { ShimmerBar } from "../ui/shimmer";
 import stackStyles from "./stack-table.module.css";
 import { CampaignDate, CampaignPin, MetricRow, StatusTag, cellStyle, followInApp, humanize, mutedStyle } from "./campaign-ui";
 
-type Props = { detail: MailCampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
-type ActivityState = { campaignId: string; activity: CampaignActivity | null; failed: boolean };
+type Props = { query?: string; detail: MailCampaignDetail; onBack: () => void; onNavigatePerson: (id: string) => void };
+type ActivityState = { campaignId: string; query: string; activity: CampaignActivity | null; failed: boolean };
 
 /** The campaign page with its real header, metric strip, tabs and recipient table, holding placeholders where data goes. */
 export function CampaignPageSkeleton() {
@@ -56,29 +56,29 @@ export function CampaignPageSkeleton() {
   );
 }
 
-export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
+export function CampaignPage({ detail, onBack, onNavigatePerson, query = "" }: Props) {
   const [tab, setTab] = useState("recipients");
   const campaign = detail.campaign;
-  const [evidence, setEvidence] = useState<ActivityState>({ campaignId: campaign.id, activity: null, failed: false });
+  const [evidence, setEvidence] = useState<ActivityState>({ campaignId: campaign.id, query, activity: null, failed: false });
   useEffect(() => {
     const controller = new AbortController();
-    setEvidence({ campaignId: campaign.id, activity: null, failed: false });
+    setEvidence({ campaignId: campaign.id, query, activity: null, failed: false });
     async function load() {
       try {
-        const activity = await request<CampaignActivity>(`/api/mail/campaigns/${encodeURIComponent(campaign.id)}/activity`, { signal: controller.signal });
+        const activity = await request<CampaignActivity>(`/api/mail/campaigns/${encodeURIComponent(campaign.id)}/activity${query ? `?${query}` : ""}`, { signal: controller.signal });
         if (!controller.signal.aborted && activity.campaign_id === campaign.id) {
-          setEvidence({ campaignId: campaign.id, activity, failed: false });
+          setEvidence({ campaignId: campaign.id, query, activity, failed: false });
         } else if (!controller.signal.aborted) {
-          setEvidence({ campaignId: campaign.id, activity: null, failed: true });
+          setEvidence({ campaignId: campaign.id, query, activity: null, failed: true });
         }
       } catch {
-        if (!controller.signal.aborted) { setEvidence({ campaignId: campaign.id, activity: null, failed: true }); }
+        if (!controller.signal.aborted) { setEvidence({ campaignId: campaign.id, query, activity: null, failed: true }); }
       }
     }
     void load();
     return () => controller.abort();
-  }, [campaign.id]);
-  const currentEvidence = evidence.campaignId === campaign.id ? evidence : null;
+  }, [campaign.id, query]);
+  const currentEvidence = evidence.campaignId === campaign.id && evidence.query === query ? evidence : null;
   const activity = currentEvidence?.activity ?? null;
   const activityLoading = !currentEvidence || (!currentEvidence.failed && !activity);
   return (

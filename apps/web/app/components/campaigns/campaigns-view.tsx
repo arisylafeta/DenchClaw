@@ -52,7 +52,7 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
   const current = resource.key === key ? resource : null;
   return (
     <div className="bulk-trades flex h-full min-h-0 min-w-0 flex-col overflow-auto">
-      {current?.payload?.kind === "detail" ? <CampaignPage key={campaignId} detail={current.payload.detail} onBack={onBack} onNavigatePerson={onNavigatePerson} /> : (
+      {current?.payload?.kind === "detail" ? <CampaignPage key={campaignId} query={query} detail={current.payload.detail} onBack={onBack} onNavigatePerson={onNavigatePerson} /> : (
         <>
           {!embedded && <header className="flex flex-col gap-2.5 border-b px-4 pb-5 pt-5 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             {campaignId != null && <a href={buildFileLink("campaign")} onClick={(event) => followInApp(event, onBack)} className="inline-flex self-start items-center gap-1.5 text-[13px] hover:underline" style={mutedStyle}><ArrowLeft size={14} aria-hidden="true" />Back to Campaigns</a>}
@@ -109,7 +109,7 @@ function CampaignsList({ campaigns, onOpenCampaign, search, status, compact = fa
             <a href={buildEntryLink("campaign", campaign.id)} onClick={(event) => followInApp(event, () => onOpenCampaign(campaign.id))} className="min-w-0 flex-1 truncate text-[14px] font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]">{campaign.name}</a>
             <dl className={`flex shrink-0 items-center text-[12px] ${compact ? "gap-3" : "gap-4"}`}>
               {(selectedId ? LIST_METRICS.slice(0, 1) : LIST_METRICS).map((key) => <div key={key} className="flex items-baseline gap-1" title={metricRate(campaign, key) ? `${humanize(key)} ${metricRate(campaign, key)}` : humanize(key)}>
-                <dd className="bt-mono font-semibold tabular-nums">{campaign[key] == null ? "—" : campaign[key]!.toLocaleString("en-GB")}</dd>
+                <dd className="bt-mono font-semibold tabular-nums">{campaign[key] == null ? "—" : campaign[key].toLocaleString("en-GB")}</dd>
                 {!compact && <dt style={mutedStyle}>{humanize(key)}</dt>}
               </div>)}
             </dl>

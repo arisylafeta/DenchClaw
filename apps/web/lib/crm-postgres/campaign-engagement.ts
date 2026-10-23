@@ -1,5 +1,7 @@
 import { queryPg } from "../postgres";
 import { campaignReplyAtSql } from "./mail-replies";
+import { mailWhere } from "./mail";
+import type { MailFilters } from "../mail-types";
 
 export const OPEN_SESSION_GAP_MS = 10 * 60 * 1000;
 export const SCANNER_WINDOW_MS = 5 * 1000;
@@ -184,9 +186,9 @@ export const CAMPAIGN_ENGAGEMENT_SQL = `
     from mail_message m
     left join crm_people p on p.id = m.person_id
     left join crm_companies c on c.id = coalesce(m.company_id, p.company_id)
-   where m.campaign_id = $1 and m.direction = 'outbound'
 `;
 
-export async function readCampaignEngagement(campaignId: string): Promise<CampaignEngagement[]> {
-  return rankCampaignEngagement(await queryPg<EngagementMessage>(CAMPAIGN_ENGAGEMENT_SQL, [campaignId]));
+export async function readCampaignEngagement(campaignId: string, filters: MailFilters = {}): Promise<CampaignEngagement[]> {
+  const { values, where } = mailWhere({ ...filters, view: "campaigns", crmOnly: false, campaign: campaignId, direction: "outbound" });
+  return rankCampaignEngagement(await queryPg<EngagementMessage>(`${CAMPAIGN_ENGAGEMENT_SQL} where ${where.join(" and ")}`, values));
 }
