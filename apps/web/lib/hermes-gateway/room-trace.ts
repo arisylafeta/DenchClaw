@@ -45,7 +45,7 @@ export async function readRoomTrace(key: string, memberId: string, turnId: strin
   const identity = parseConversationKey(key);
   if (identity.kind !== 'group') {throw Error('Group required');}
   const cacheKey = JSON.stringify([key, memberId, turnId]);
-  return probes.read(cacheKey, async () => {
+  const trace = await probes.read(cacheKey, async () => {
     // At most two probes per room. Excess mounted replies omit their chip, not queue
     // unbounded history reads. Both room log and member history have a 200-row cap.
     const slot = roomLimits.get(key) ?? { active: 0 };
@@ -63,4 +63,6 @@ export async function readRoomTrace(key: string, memberId: string, turnId: strin
     } catch { return null; }
     finally { if (--slot.active === 0) {roomLimits.delete(key);} }
   });
+  await authorizeNativeConversation(actor,key);
+  return trace;
 }

@@ -210,10 +210,13 @@ export class HermesChatService {
       ? await this.manager.callSession(retained, "session.control.read", { session_id: "" }).then(result => goalFromControl(result.control)).catch(() => undefined)
       : undefined;
     const goal = liveGoal !== undefined ? liveGoal : await persistedSessionGoal(profile, storedId);
+    const html = await lookupMessageHtml(profile, storedId);
+    const current = await this.authorize(actor,key);
+    Object.assign(history.conversation,{ access: current.access });
     return { ...history, ...page, usage, gateway, goal, generation: replay.generation, seq: replay.seq,
       running: Boolean(resume?.running), inflight, ...(inflightBeforeWindow ? { inflightBeforeWindow } : {}), queued, subagents: resume?.subagents,
       pendingRequests: gateway === "connected" ? this.manager.pendingRequests(retained) : [], todo_state: resume?.todo_state,
-      html: await lookupMessageHtml(profile, storedId) };
+      html };
   }
   private pageMessages(messages: GatewayChatSnapshot["messages"], before = messages.length, limit = 200) {
     const start = Math.max(0, before - limit);

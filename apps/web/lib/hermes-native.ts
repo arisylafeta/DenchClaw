@@ -306,7 +306,11 @@ export async function createConversation(profiles: string[], title?: string, act
 }
 export async function readConversation(key: string, sinceSeq = 0, probeCap?: number, actor?: ConversationActor) {
   const { access } = await authorizeNativeConversation(actor,key);
-  return readAuthorizedConversation(key,sinceSeq,probeCap,access);
+  const result = await readAuthorizedConversation(key,sinceSeq,probeCap,access);
+  // A slow upstream read must not release history after the owner makes it private.
+  const current = await authorizeNativeConversation(actor,key);
+  Object.assign(result.conversation,{ access: current.access });
+  return result;
 }
 /** A hidden bot-room transcript is readable only through its authorized parent and verified native membership. */
 export async function readRoomMemberConversation(parentKey: string, profile: string, actor?: ConversationActor) {
@@ -318,8 +322,10 @@ export async function readRoomMemberConversation(parentKey: string, profile: str
   const page = await (await nativeFetch(profile,`/api/sessions?title=${encodeURIComponent(`Group: ${parent.id}`)}&include_hidden=true&limit=100`)).json();
   const sessions = (page.data ?? []).filter((row: NativeSession) => row.title === `Group: ${parent.id}` && row.source === "bot_room");
   if (page.has_more || (page.data?.length ?? 0) >= 100 || sessions.length !== 1) {return null;}
-  await authorizeNativeConversation(actor,parentKey);
-  return readAuthorizedConversation(conversationKey("solo",sessions[0].id,profile),0,200,access);
+  const result = await readAuthorizedConversation(conversationKey("solo",sessions[0].id,profile),0,200,access);
+  const current = await authorizeNativeConversation(actor,parentKey);
+  Object.assign(result.conversation,{ access: current.access });
+  return result;
 }
 async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap: number | undefined,access: ConversationAccess) {
   const identity = parseConversationKey(key);

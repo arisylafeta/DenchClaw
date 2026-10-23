@@ -35,6 +35,15 @@ describe("native conversation authorization",()=>{
   await expect(readConversation(conversationKey("solo","legacy","agent"),0,undefined,{...actor,email:"admin@example.test"})).rejects.toMatchObject({status:404});
   expect(fetch).toHaveBeenCalledTimes(1);expect(queryPg).toHaveBeenCalledTimes(1);
  });
+ it("withholds a transcript when access is revoked during its upstream read",async()=>{
+  let visibility="team";
+  vi.mocked(queryPg).mockImplementation(async()=>[{...row,visibility}]);
+  vi.stubGlobal("fetch",vi.fn(async(url:string)=>Response.json(url.includes("/messages?")
+    ? {data:[{id:1,role:"assistant",content:"private transcript"}]}
+    : {session:{id:"shared",source:"crm",title:"Shared chat"}})));
+  vi.mocked(sessionProjectLabels).mockImplementationOnce(async()=>{visibility="private";return {};});
+  await expect(readConversation(conversationKey("solo","shared","agent"),0,undefined,{...actor,id:"recipient"})).rejects.toMatchObject({status:404});
+ });
  it("rejects group aliases without discovering any native state",async()=>{
   const fetch=vi.fn();vi.stubGlobal("fetch",fetch);
   await expect(readConversation(conversationKey("group","room","alias"),0,undefined,actor)).rejects.toMatchObject({status:404});expect(fetch).not.toHaveBeenCalled();expect(queryPg).not.toHaveBeenCalled();
