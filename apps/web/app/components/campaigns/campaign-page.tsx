@@ -8,6 +8,7 @@ import { JOURNEY } from "@/lib/dismantlers";
 import { buildFileLink } from "@/lib/workspace-links";
 import { request } from "../bulk-trades/trade-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../platform-admin/ui/tabs";
+import { CampaignEngagementRanking } from "./campaign-engagement-ranking";
 import { CampaignRecipients } from "./campaign-recipients";
 import { CampaignListings, CampaignWebsiteActivity } from "./campaign-activity-panel";
 import tableStyles from "../ui/data-table.module.css";
@@ -93,6 +94,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
         <p className="text-[13px]" style={mutedStyle}><CampaignDate value={campaign.launched_at || campaign.last_invite_at} />{campaign.audience ? ` · ${humanize(campaign.audience)}` : ""}{campaign.audience_size != null ? ` (${campaign.audience_size.toLocaleString("en-GB")})` : ""}{campaign.channel ? ` · ${humanize(campaign.channel)}` : ""}</p>
         <section aria-label="Campaign metrics" className="flex flex-col gap-3 rounded-lg border px-4 py-3" style={{ borderColor: "var(--bt-border)", background: "var(--bt-bg)" }}>
           <MetricRow size="lg" counts={detail} notTracked={campaign.channel === "email-gmail" ? ["delivered", "opened", "clicked"] : []} />
+          <p className="text-[13px]" style={mutedStyle}>Returning readers: <span className="bt-mono font-semibold">{activity?.engagement ? activity.engagement.filter((row) => row.return_sessions > 0).length : activityLoading ? "Loading…" : "Unavailable"}</span></p>
           {detail.sent && detail.delivered != null && <div role="img" aria-label={`${detail.delivered} of ${detail.sent} delivered`} className="h-1 w-full overflow-hidden rounded-full" style={{ background: "var(--bt-divider)" }}><div className="h-full rounded-full" style={{ width: `${Math.min(100, (100 * detail.delivered) / detail.sent)}%`, background: "var(--color-accent-fill)" }} /></div>}
         </section>
         {detail.dismantler_funnel && <DismantlerFunnel funnel={detail.dismantler_funnel} />}
@@ -111,11 +113,14 @@ export function CampaignPage({ detail, onBack, onNavigatePerson }: Props) {
       <main className="min-w-0 px-4 pb-8 pt-4 sm:px-8">
         <Tabs value={tab} onValueChange={setTab} className="gap-4">
           <TabsList variant="line" aria-label="Campaign sections" className="group-data-[orientation=horizontal]/tabs:h-auto max-w-full justify-start rounded-none border-b p-0" style={{ borderColor: "var(--bt-border)", color: "var(--bt-muted)" }}>
-            {[["recipients", "Recipients"], ["listings", "Listings"], ["details", "Details"]].map(([value, label]) => <TabsTrigger key={value} value={value} className="h-auto flex-none rounded-none border-0 px-3.5 py-3 text-[13px] shadow-none hover:text-[var(--bt-text)] focus-visible:ring-[var(--bt-text)] data-[state=active]:bg-transparent data-[state=active]:text-[var(--bt-text)] data-[state=active]:font-semibold after:bg-[var(--bt-text)] group-data-[orientation=horizontal]/tabs:after:bottom-0" style={{ color: tab === value ? "var(--bt-text)" : "var(--bt-muted)" }}>{label}</TabsTrigger>)}
+            {[["recipients", "Recipients"], ["engagement", "Engagement"], ["listings", "Listings"], ["details", "Details"]].map(([value, label]) => <TabsTrigger key={value} value={value} className="h-auto flex-none rounded-none border-0 px-3.5 py-3 text-[13px] shadow-none hover:text-[var(--bt-text)] focus-visible:ring-[var(--bt-text)] data-[state=active]:bg-transparent data-[state=active]:text-[var(--bt-text)] data-[state=active]:font-semibold after:bg-[var(--bt-text)] group-data-[orientation=horizontal]/tabs:after:bottom-0" style={{ color: tab === value ? "var(--bt-text)" : "var(--bt-muted)" }}>{label}</TabsTrigger>)}
           </TabsList>
           <TabsContent value="recipients" forceMount hidden={tab !== "recipients"} className="data-[state=inactive]:hidden">
             <CampaignRecipients recipients={detail.recipients} deliveryRows={detail.delivery_rows} onNavigatePerson={onNavigatePerson} outreach={!!detail.dismantler_funnel} />
             <section aria-label="Tracked links" className="mt-4"><h2 className="font-semibold">Tracked links</h2><ul>{detail.links?.map((link) => <li key={link.id} className="py-1 text-sm"><a href={link.destination_url} target="_blank" rel="noreferrer" className="underline">{link.cta_key}</a> · {link.destination_url} · First click: <CampaignDate value={link.first_clicked_at} withTime /></li>)}</ul>{!detail.links?.length && <p>No tracked links recorded.</p>}</section>
+          </TabsContent>
+          <TabsContent value="engagement">
+            {activityLoading ? <p role="status" style={mutedStyle}>Loading engagement…</p> : activity?.engagement ? <CampaignEngagementRanking rows={activity.engagement} onNavigateEntry={(_object, id) => onNavigatePerson(id)} /> : <p role="alert" style={mutedStyle}>Engagement is unavailable. Reload the campaign to try again.</p>}
           </TabsContent>
           <TabsContent value="listings">
             <CampaignListings detail={detail} activity={activity} loading={activityLoading} onNavigatePerson={onNavigatePerson} />

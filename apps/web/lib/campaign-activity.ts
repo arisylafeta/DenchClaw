@@ -36,6 +36,7 @@ export type CampaignActivityDestination = CampaignActivityTotals & {
 };
 
 export type CampaignActivity = {
+  engagement?: import("./crm-postgres/campaign-engagement").CampaignEngagement[];
   campaign_id: string;
   status: "available" | "unmapped" | "unavailable";
   unavailable_reason: "credentials_missing" | "manifest_missing" | "manifest_invalid" | "provider_unavailable" | "provider_incomplete" | "campaign_not_tracked" | null;

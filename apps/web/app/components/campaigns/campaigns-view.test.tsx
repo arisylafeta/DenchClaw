@@ -75,6 +75,22 @@ function visiblePeople() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CampaignsView", () => {
+  it("loads engagement into the redesigned campaign and shows returning readers independently of website availability", async () => {
+    mockDetail(detail, { ...unavailable, engagement: [{
+      recipient_key: "person:a", person_id: "person:a", person_name: "Ada", company_name: "North Batteries", recipient_email: "ada@example.test",
+      total_opens: 3, flagged_opens: 0, return_sessions: 2, first_opened: AT, last_opened: AT,
+      days_to_first_open: 1.5, late_opener: true, human_links_clicked: 2, flagged_clicks: 0, replied: false, likely_bot: false,
+    }] });
+    const user = userEvent.setup();
+    render(<CampaignsView {...props} />);
+    await screen.findByRole("table", { name: "Recipients" });
+    await waitFor(() => expect(screen.getByText(/Returning readers:/)).toHaveTextContent("Returning readers: 1"));
+    await user.click(screen.getByRole("tab", { name: "Engagement" }));
+    const ranking = screen.getByRole("region", { name: "Engagement ranking" });
+    expect(within(ranking).getByRole("link", { name: "Ada" })).toHaveAttribute("href", buildEntryLink("people", "person:a"));
+    expect(within(ranking).getByText("Late opener")).toBeInTheDocument();
+    expect(within(ranking).getByText(/Opens and clicks are observations/)).toBeInTheDocument();
+  });
   it("uses the Mail header when embedded and forwards filters unchanged to list and detail", async () => {
     const query = "view=campaigns&identity=ari&event=clicked&crmOnly=true";
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/historical") ? { ...detail, ...counts } : { items: [{ ...summary, ...counts }] }))));
