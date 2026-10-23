@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceContext } from '../agent-message'
-import type { HermesConversation } from '../hermes-conversations'
+import { parseConversationAccess, type ConversationAccess, type HermesConversation } from '../hermes-conversations'
 import { getHermesEventsClient, type ConnectionState } from './events-client'
 import { applyLive, applySnapshot, beginHydration, initialReconcileState, markSteerPending, placeSteer, submitOptimistic, type ReconcileState } from './reconcile'
 import { messageText, reduce, withNotice, type PendingRequest } from './reducer'
@@ -13,7 +13,9 @@ import type { SlashCompletion } from './slash-commands'
 import { initialSubagents, isTerminalSubagent } from './subagents'
 
 export interface NativePrompt { text: string; context?: WorkspaceContext; html?: string }
-export interface NativeChatOptions { conversationKey?: string; enabled: boolean }
+export interface NativeChatOptions { conversationKey?: string; enabled: boolean; /** Called once when the server withdraws access, after local state is purged. */ onRevoked?: (key: string) => void }
+type Capability = 'read' | 'write' | 'approve' | 'derive'
+const DENIED = 'You do not have permission to do that in this chat'
 const context = { now: () => Date.now(), id: () => crypto.randomUUID() }
 export interface NativeHermesChat {
   state: ReconcileState
@@ -25,6 +27,10 @@ export interface NativeHermesChat {
   tails: Record<string, string>
   connection: ConnectionState
   readOnly: { source: string } | null
+  /** Server-issued permissions from the latest verified snapshot; null grants nothing. */
+  access: ConversationAccess | null
+  /** Access was withdrawn. Nothing from the conversation is retained. */
+  revoked: boolean
   html: Map<string, string>
   queuedMessageIds: string[]
   /** Messages waiting for the running turn: queued prompts and steers Hermes has not read yet. */
@@ -52,7 +58,7 @@ export interface NativeHermesChat {
   retry(): Promise<void>
   branch(): Promise<HermesConversation | null>
 }
-export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOptions): NativeHermesChat {
+export function useNativeHermesChat({ conversationKey, enabled, onRevoked }: NativeChatOptions): NativeHermesChat {
   const [state, setState] = useState(() => initialReconcileState(null, conversationKey))
   const current = useRef(state)
   const [connection, setConnection] = useState<ConnectionState>('reconnecting')
@@ -69,27 +75,55 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   const earlierRows = useRef<GatewayChatSnapshot['messages']>([])
   const lastSnapshot = useRef<GatewayChatSnapshot | null>(null)
   activeKey.current = conversationKey
+  const epoch = useRef(0)
+  /** Captures this view and grant; the returned check is false once the key changes or access is purged. */
+  const guard = useCallback(() => { const key = activeKey.current, at = epoch.current; return () => activeKey.current === key && epoch.current === at }, [])
+  const [access, setAccess] = useState<ConversationAccess | null>(null)
+  const accessRef = useRef<ConversationAccess | null>(null)
+  const [revoked, setRevoked] = useState(false)
+  const notifyRevoked = useRef(onRevoked)
+  notifyRevoked.current = onRevoked
   const update = useCallback((fn: (previous: ReconcileState) => ReconcileState) => {
     current.current = fn(current.current)
     setState(current.current)
   }, [])
   const surface = useCallback((message: string) => update(previous => ({ ...previous, ...reduce(previous, { type: 'client.error', payload: { message } }, context) })), [update])
+  /** Drops everything held for a conversation and invalidates its in-flight async work. */
+  const clearConversation = useCallback((key: string | null) => {
+    epoch.current++
+    accessRef.current = null; setAccess(null)
+    setReadOnly(null); setTails({}); setHtmlRows([]); optimisticHtml.current.clear(); queued.current.clear()
+    setOlderCursor(null); earlierRows.current = []; lastSnapshot.current = null
+    historyLoading.current = false; setLoadingEarlier(false)
+    update(previous => ({ ...initialReconcileState(key, key), loadToken: previous.loadToken + 1 }))
+    hydrationToken.current = current.current.loadToken
+  }, [update])
+  const revoke = useCallback(() => {
+    const key = activeKey.current
+    if (!key) return
+    clearConversation(key); setRevoked(true)
+    notifyRevoked.current?.(key)
+  }, [clearConversation])
   const resync = useCallback(() => {
     if (!conversationKey || !enabled) return
     getHermesEventsClient().resubscribe(conversationKey)
   }, [conversationKey, enabled, update])
   useEffect(() => {
     if (current.current.key !== (conversationKey ?? null)) {
-      setReadOnly(null); setTails({}); setHtmlRows([]); optimisticHtml.current.clear(); queued.current.clear()
-      setOlderCursor(null); earlierRows.current = []; lastSnapshot.current = null
-      update(previous => beginHydration(previous, conversationKey ?? null, conversationKey ?? null))
+      clearConversation(conversationKey ?? null); setRevoked(false)
     }
     if (!enabled || !conversationKey) return
     update(previous => beginHydration(previous))
     hydrationToken.current = current.current.loadToken
+    // Access withdrawal ends this subscription for good; a later view subscribes afresh.
+    let withdrawn = false
     return getHermesEventsClient().subscribe(conversationKey, {
       snapshot(snapshot) {
-        if (activeKey.current !== conversationKey) return
+        if (withdrawn || activeKey.current !== conversationKey) return
+        const granted = parseConversationAccess(snapshot.conversation?.access)
+        // Without verified permissions nothing is shown or enabled.
+        if (!granted) { surface('Chat access could not be verified'); return }
+        accessRef.current = granted; setAccess(granted); setRevoked(false)
         update(previous => applySnapshot(previous, snapshot, hydrationToken.current, context))
         lastSnapshot.current = snapshot
         if (!earlierRows.current.length) setOlderCursor(snapshot.olderCursor ?? null)
@@ -105,7 +139,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
         if (!snapshot.running) queued.current.clear()
       },
       event(event) {
-        if (activeKey.current !== conversationKey) return
+        if (withdrawn || activeKey.current !== conversationKey) return
         update(previous => applyLive(previous, [event], context))
         if (current.current.resyncRequired) resync()
         if (!current.current.busy) queued.current.clear()
@@ -114,8 +148,12 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
         if (event.type === 'message.complete' || (event.type === 'error' && !current.current.busy)) resync()
       },
       request(request) {
-        if (activeKey.current !== conversationKey) return
+        if (withdrawn || activeKey.current !== conversationKey) return
         update(previous => applyLive(previous, [{ type: request.method === 'approval' ? 'approval.request' : 'clarify.request', requestId: request.id, payload: request.params }], context))
+      },
+      revoked() {
+        if (withdrawn || activeKey.current !== conversationKey) return
+        withdrawn = true; revoke()
       },
       error: surface,
       resync() {
@@ -129,18 +167,24 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
         })
       },
     })
-  }, [conversationKey, enabled, resync, surface, update])
-  const post = useCallback(async (action: string, body: unknown): Promise<Record<string, unknown>> => {
+  }, [conversationKey, enabled, resync, surface, update, clearConversation, revoke])
+  const post = useCallback(async (action: string, body: unknown, need: Capability = 'write'): Promise<Record<string, unknown>> => {
     const key = conversationKey
     if (!key || !enabled) throw new Error('No active gateway conversation')
     if (connection === 'lost') throw new Error('Gateway disconnected')
+    const live = guard()
+    // Fail closed: a missing or stale grant never reaches the network. The server re-checks every call.
+    const granted = accessRef.current
+    const allowed = need === 'read' ? !!granted : need === 'write' ? granted?.canWrite : need === 'approve' ? granted?.canApprove : granted?.canShare
     try {
+      if (!allowed) throw new Error(need === 'approve' ? 'Only an approver can respond to this request' : DENIED)
       const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       // Proxy errors (413, 502) arrive as HTML; report the status instead of a JSON parse error.
       const result = await response.json().catch(() => ({}))
       if (!response.ok) {
-        if (result.error === 'automation_read_only' && activeKey.current === key) setReadOnly({ source: 'automation' })
-        if (response.status === 503 && result.error === 'gateway_unavailable' && activeKey.current === key) setConnection('lost')
+        if (result.error === 'automation_read_only' && live()) setReadOnly({ source: 'automation' })
+        if (response.status === 503 && result.error === 'gateway_unavailable' && live()) setConnection('lost')
+        if (response.status === 404 && result.error === 'not_found') { if (live()) revoke(); throw new Error('This chat is no longer available') }
         if (result.error === 'gateway_unavailable') throw new Error('Gateway disconnected. Reconnect before sending another message.')
         if (response.status === 409 && result.error === 'sse_transport') throw new Error('This conversation uses the SSE transport and cannot accept gateway commands.')
         throw new Error(result.error || `Gateway ${action} failed (${response.status})`)
@@ -151,14 +195,15 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       return result
     } catch (error) {
       // Slash errors have their own command-labelled transcript notice.
-      if (activeKey.current === key && action !== 'slash-execute') surface(error instanceof Error ? error.message : String(error))
+      if (live() && action !== 'slash-execute') surface(error instanceof Error ? error.message : String(error))
       throw error
     }
-  }, [conversationKey, enabled, surface, connection])
+  }, [conversationKey, enabled, surface, connection, guard, revoke])
   const send = useCallback(async (prompt: NativePrompt) => {
     if (connection === 'lost') { surface('Gateway disconnected'); return }
     if (readOnly) { surface('automation_read_only'); return }
-    const key = conversationKey
+    if (!accessRef.current?.canWrite) { surface(DENIED); return }
+    const live = guard()
     const clientMessageId = crypto.randomUUID()
     const wasBusy = current.current.busy
     const submittedAt = Date.now()
@@ -167,7 +212,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     update(previous => submitOptimistic(wasBusy ? previous : { ...previous, interrupted: false, optimisticSentAt: submittedAt, streamId: null, heartbeatSettledStreamId: null, sawAssistantPayload: false, interimBoundaryPending: false }, { clientId: clientMessageId, text: prompt.text }))
     try {
       const result = await post('prompt', { ...prompt, clientMessageId })
-      if (activeKey.current !== key) return
+      if (!live()) return
       if (result.status === 'queued') {
         queued.current.add(clientMessageId)
         update(previous => {
@@ -192,7 +237,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       if (result.autoContinue) update(previous => ({ ...previous, status: 'Hermes is continuing an interrupted turn; your message is queued' }))
     } catch {
       // Failed/ambiguous submissions remain visible, but are never submitted automatically again.
-      if (activeKey.current !== key) return
+      if (!live()) return
       queued.current.delete(clientMessageId)
       update(previous => {
         const ownsTurn = !wasBusy && previous.busy && !previous.live
@@ -202,13 +247,13 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
           messages: previous.messages.map(message => message.id === clientMessageId ? { ...message, pending: false, steerPending: false, ...(message.source === 'queued' ? { source: 'optimistic' as const } : {}) } : message) }
       })
     }
-  }, [post, readOnly, surface, update, conversationKey, connection])
+  }, [post, readOnly, surface, update, connection, guard])
   const resolveRequest = useCallback(async (request: PendingRequest, action: string, body: unknown) => {
-    const key = conversationKey
-    await post(action, body)
-    if (activeKey.current !== key) return
+    const live = guard()
+    await post(action, body, action === 'approval' ? 'approve' : 'write')
+    if (!live()) return
     update(previous => ({ ...previous, ...reduce(previous, { type: 'client.request.resolve', payload: { id: String(request.id) } }, context) }))
-  }, [post, update, conversationKey])
+  }, [post, update, guard])
   const html = mapMessageHtml(state.messages, htmlRows)
   for (const message of state.messages) {
     const ids = message.clientIds ?? (message.source === 'optimistic' ? [message.id] : [])
@@ -216,16 +261,22 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   }
   const loadEarlier = async () => {
     const key = conversationKey
+    const live = guard()
     const snapshot = lastSnapshot.current
     if (!key || !olderCursor || !snapshot || historyLoading.current) return
     historyLoading.current = true; setLoadingEarlier(true)
     try {
       const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}/history?before=${encodeURIComponent(olderCursor)}&limit=200`)
-      if (activeKey.current !== key) return
-      if (response.status === 404) return
+      if (!live()) return
+      if (response.status === 404) {
+        // Only the access error means the grant is gone; a missing endpoint (older server) is tolerated.
+        const body = await response.json().catch(() => ({}))
+        if (live() && body?.error === 'not_found') revoke()
+        return
+      }
       if (!response.ok) throw new Error(`History failed (${response.status})`)
       const page = await response.json() as { messages: GatewayChatSnapshot['messages']; olderCursor?: string | null }
-      if (activeKey.current !== key) return
+      if (!live()) return
       const known = new Set(earlierRows.current.map(row => row.id))
       earlierRows.current = [...page.messages.filter(row => !known.has(row.id)), ...earlierRows.current]
       const messages = stateFromSnapshot({ ...snapshot, messages: page.messages, running: false, inflight: null, queued: null }, context).messages
@@ -235,7 +286,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       })
       setOlderCursor(page.olderCursor ?? null)
     } catch (error) {
-      if (activeKey.current === key) surface(error instanceof Error ? error.message : String(error))
+      if (live()) surface(error instanceof Error ? error.message : String(error))
     } finally { historyLoading.current = false; setLoadingEarlier(false) }
   }
   const addNotice = useCallback((notice: Notice) => update(previous => withNotice(previous, notice, context)), [update])
@@ -253,7 +304,7 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
   return {
     active: state.busy || visibleSubagents.items.some(child => !isTerminalSubagent(child.status)),
     background: !state.busy && visibleSubagents.items.some(child => !isTerminalSubagent(child.status)),
-    state, subagents: visibleSubagents, todos: state.todos, tails, connection, send, readOnly, html, olderCursor, loadingEarlier, loadEarlier,
+    state, subagents: visibleSubagents, todos: state.todos, tails, connection, send, readOnly, access, revoked, html, olderCursor, loadingEarlier, loadEarlier,
     completeSlash: async (text, signal) => {
       if (!conversationKey || !enabled) { throw new Error('No active gateway conversation') }
       const response = await fetch(`/api/hermes/conversations/${encodeURIComponent(conversationKey)}/slash-complete`, {
@@ -265,9 +316,9 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     },
     addNotice,
     executeSlash: async (command) => {
-      const key = conversationKey
+      const live = guard()
       const result = await post('slash-execute', { command })
-      if (activeKey.current === key && /^\/(?:compress|compact|undo|retry)(?:\s|$)/i.test(command)) {
+      if (live() && /^\/(?:compress|compact|undo|retry)(?:\s|$)/i.test(command)) {
         earlierRows.current = []
         lastSnapshot.current = null
         setOlderCursor(null)
@@ -276,9 +327,9 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       return result
     },
     setModel: async (model, provider, confirm) => {
-      const key = conversationKey
+      const live = guard()
       const result = await post('model', { model, provider, confirm })
-      if (activeKey.current === key && !result.confirm_required) {
+      if (live() && !result.confirm_required) {
         update(previous => ({
           ...previous, model: typeof result.value === 'string' ? result.value : model, provider: provider ?? previous.provider,
         }))
@@ -287,9 +338,9 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       return result
     },
     setReasoning: async (effort) => {
-      const key = conversationKey
+      const live = guard()
       const result = await post('reasoning', { effort })
-      if (activeKey.current === key) {
+      if (live()) {
         update(previous => ({
           ...previous, reasoningEffort: typeof result.value === 'string' ? result.value : effort, reasoningEffortWire: null,
         }))
@@ -297,9 +348,9 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
       return result
     },
     setFast: async (enabled) => {
-      const key = conversationKey
+      const live = guard()
       const result = await post('fast', { enabled })
-      if (activeKey.current === key) { update(previous => ({ ...previous, fast: result.value === 'fast' || result.value === 'ultrafast' })) }
+      if (live()) { update(previous => ({ ...previous, fast: result.value === 'fast' || result.value === 'ultrafast' })) }
       return result
     },
     retry: async () => {
@@ -310,10 +361,10 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     queuedMessageIds: state.messages.filter(message => message.source === 'queued').map(message => message.id),
     queuedMessages: state.messages.filter(message => message.source === 'queued').map(message => ({ id: message.id, text: steerOwnText(messageText(message)), steer: Boolean(message.steerPending) })),
     interrupt: async () => {
-      const key = conversationKey
+      const live = guard()
       try {
         await post('interrupt', {})
-        if (activeKey.current !== key) return
+        if (!live()) return
         const removed = new Set(queued.current)
         queued.current.clear()
         update(previous => ({ ...previous,
@@ -325,21 +376,22 @@ export function useNativeHermesChat({ conversationKey, enabled }: NativeChatOpti
     goal: state.goal,
     /** Pause, resume, clear or edit the standing goal; the returned snapshot updates the card at once. */
     goalControl: async (action: GoalAction, args?: { text?: string; index?: number }) => {
-      const key = conversationKey
+      const live = guard()
       const result = await post('control', { action, ...(args ? { args } : {}) })
-      if (activeKey.current === key && 'control' in result) update(previous => ({ ...previous, goal: goalFromControl(result.control) }))
+      if (live() && 'control' in result) update(previous => ({ ...previous, goal: goalFromControl(result.control) }))
       return result
     },
     approve: (request: PendingRequest, choice: 'once' | 'session' | 'always' | 'deny') => resolveRequest(request, 'approval', { request_id: request.requestId ?? request.payload.request_id ?? request.id, choice }),
     answerClarify: (request: PendingRequest, answers: Record<string, string | null>) => resolveRequest(request, 'clarify', { request_id: request.id, answers }),
     subagentTail: async (id: string) => {
-      const key = conversationKey
-      const result = await post('subagent', { action: 'tail', subagent_id: id })
-      if (activeKey.current === key) setTails(previous => ({ ...previous, [id]: result.available === false
+      const live = guard()
+      const result = await post('subagent', { action: 'tail', subagent_id: id }, 'read')
+      if (live()) setTails(previous => ({ ...previous, [id]: result.available === false
         ? 'Transcript unavailable' : [typeof result.text === 'string' ? result.text : '', result.truncated ? '[Transcript truncated]' : ''].filter(Boolean).join('\n\n') }))
     },
     subagentSteer: async (id: string, text: string) => { await post('subagent', { action: 'steer', subagent_id: id, text }) },
     subagentInterrupt: async (id: string) => { await post('subagent', { action: 'interrupt', subagent_id: id }) },
-    branch: async (): Promise<HermesConversation | null> => { try { return (await post('branch', {})).conversation as HermesConversation } catch { return null } },
+    // Deriving a conversation is owner-only, like sharing; the server decides again.
+    branch: async (): Promise<HermesConversation | null> => { try { return (await post('branch', {}, 'derive')).conversation as HermesConversation } catch { return null } },
   }
 }

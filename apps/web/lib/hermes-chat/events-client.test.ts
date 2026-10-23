@@ -87,3 +87,65 @@ it('coalesces resubscriptions and rejects a snapshot from the preceding subscrip
   expect(listener.snapshot).toHaveBeenCalledTimes(2)
   client.close()
 })
+
+describe('access revocation', () => {
+  const body = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string)
+  it('notifies the view, drops every later frame and never re-adds the key on sync or reconnect', async () => {
+    const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response('{}'))
+    const client = new HermesEventsClient(FakeSource, fetch)
+    const revoked = { ...callbacks(), revoked: vi.fn() }, other = callbacks()
+    client.subscribe('a', revoked); client.subscribe('b', other)
+    const source = FakeSource.instances.at(-1)!
+    source.emit('connection', { connectionId: 'one' }); await settle()
+    source.emit('access-revoked', { key: 'a' })
+    expect(revoked.revoked).toHaveBeenCalledOnce()
+    expect(other.revoked).toBeUndefined()
+    for (const [type, payload] of [['snapshot', { key: 'a' }], ['gw', { key: 'a', type: 'message.delta' }], ['request', { key: 'a', id: 'r', method: 'approval', params: {} }], ['resync', { key: 'a' }]] as const) source.emit(type, payload)
+    expect(revoked.snapshot).not.toHaveBeenCalled(); expect(revoked.event).not.toHaveBeenCalled(); expect(revoked.request).not.toHaveBeenCalled()
+    source.emit('snapshot', { key: 'b' })
+    expect(other.snapshot).toHaveBeenCalledOnce()
+    // A resubscribe, a new view on another key and a reconnect must not resurrect the grant.
+    client.resubscribe('a'); client.subscribe('c', callbacks()); await settle()
+    expect(fetch.mock.calls.flatMap(call => body(call).add ?? [])).not.toContain('a')
+    source.emit('error'); source.readyState = 2
+    client.resubscribe('c')
+    const reopened = FakeSource.instances.at(-1)!
+    expect(new URL(reopened.url, 'http://local').searchParams.get('keys')!.split(',')).not.toContain('a')
+    // Opening the chat again is a fresh request that the server decides.
+    client.subscribe('a', revoked); reopened.emit('connection', { connectionId: 'two' }); await settle()
+    expect(body(fetch.mock.calls.at(-1)!).add).toContain('a')
+    client.close()
+  })
+  it('finds the inaccessible key when the server rejects a batch with 404', async () => {
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => JSON.parse(init!.body as string).add.includes('gone') ? new Response('{}', { status: 404 }) : new Response('{}'))
+    const client = new HermesEventsClient(FakeSource, fetch)
+    const kept = callbacks(), gone = { ...callbacks(), revoked: vi.fn() }, first = callbacks()
+    client.subscribe('first', first)
+    FakeSource.instances.at(-1)!.emit('connection', { connectionId: 'one' }); await settle()
+    client.subscribe('kept', kept); client.subscribe('gone', gone); await settle()
+    expect(gone.revoked).toHaveBeenCalledOnce()
+    expect(kept.error).not.toHaveBeenCalled()
+    const adds = fetch.mock.calls.map(call => body(call).add).filter((add: string[]) => add.length === 1)
+    expect(adds).toContainEqual(['kept'])
+    FakeSource.instances.at(-1)!.emit('snapshot', { key: 'kept' })
+    expect(kept.snapshot).toHaveBeenCalledOnce()
+    client.close()
+  })
+  it('reconnects without the key list when the server closes the stream with not_found', async () => {
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => JSON.parse(init!.body as string).add.includes('gone') ? new Response('{}', { status: 404 }) : new Response('{}'))
+    const client = new HermesEventsClient(FakeSource, fetch)
+    const gone = { ...callbacks(), revoked: vi.fn() }, kept = callbacks()
+    client.subscribe('kept', kept); client.subscribe('gone', gone)
+    const first = FakeSource.instances.at(-1)!
+    first.emit('connection', { connectionId: 'one' })
+    first.emit('error', { error: 'not_found' })
+    expect(first.readyState).toBe(2)
+    const second = FakeSource.instances.at(-1)!
+    expect(second).not.toBe(first)
+    expect(new URL(second.url, 'http://local').searchParams.get('keys')).toBe('')
+    second.emit('connection', { connectionId: 'two' }); await settle()
+    expect(gone.revoked).toHaveBeenCalledOnce()
+    expect(kept.error).not.toHaveBeenCalled()
+    client.close()
+  })
+})

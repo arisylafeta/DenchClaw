@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
+import { ownerAccess } from "@/lib/hermes-chat/access-fixture";
 vi.mock("./tiptap/chat-editor", async () => {
   const { forwardRef, useState, useImperativeHandle } = await import("react");
   return { ChatEditor: forwardRef(function EditorFixture({ onSubmit, onNativeFileDrop }: { onSubmit: (text: string, files: unknown[], html: string) => void; onNativeFileDrop?: (files: FileList) => void }, ref) {
@@ -34,7 +35,7 @@ class FakeEventSource {
   close() { this.readyState = 2; }
   emit(type: string, data: unknown) { act(() => { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) } as MessageEvent); }); }
 }
-const gatewaySnapshot = (overrides: Record<string, unknown> = {}) => ({ key, gateway: "connected", conversation: { id: "native-existing", profile: "alpha", title: "Native", working: false, source: "crm" }, messages: [{ id: "history", role: "assistant", parts: [{ type: "tool-invocation", toolCallId: "saved", toolName: "terminal", args: { command: "old command" }, result: "saved gateway result" }] }], running: false, generation: 1, seq: 0, pendingRequests: [], ...overrides });
+const gatewaySnapshot = (overrides: Record<string, unknown> = {}) => ({ key, gateway: "connected", conversation: { id: "native-existing", profile: "alpha", title: "Native", working: false, source: "crm", access: ownerAccess }, messages: [{ id: "history", role: "assistant", parts: [{ type: "tool-invocation", toolCallId: "saved", toolName: "terminal", args: { command: "old command" }, result: "saved gateway result" }] }], running: false, generation: 1, seq: 0, pendingRequests: [], ...overrides });
 function openGateway(overrides: Record<string, unknown> = {}) {
   FakeEventSource.instance.emit("connection", { connectionId: "tab-connection" });
   FakeEventSource.instance.emit("snapshot", gatewaySnapshot(overrides));
@@ -374,7 +375,7 @@ describe("gateway ChatPanel solo transport", () => {
     const branch = { key: "branch", kind: "solo", title: "Branch" };
     fetchMock.mockImplementation(async (url: string) => Response.json(url.endsWith("/branch") ? { conversation: branch } : {}));
     render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onBranched={branched} />);
-    openGateway({ conversation: { id: "native-existing", profile: "alpha", title: "Cron", working: false, source: "cron" } });
+    openGateway({ conversation: { id: "native-existing", profile: "alpha", title: "Cron", working: false, source: "cron", access: { ...ownerAccess, canWrite: false } } });
     expect(screen.getByLabelText("Read-only conversation")).toBeInTheDocument();
     // Read-only chats show no composer at all, so nothing can be sent.
     expect(screen.queryByRole("button", { name: "Submit fixture" })).not.toBeInTheDocument();

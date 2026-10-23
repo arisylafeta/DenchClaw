@@ -32,6 +32,14 @@ export function parseConversationKey(key: string): { kind: "solo" | "group"; pro
   }
   return { kind: value[0] as "solo" | "group", profile: value[1], id: value[2] };
 }
+/** Strictly validated server access metadata. Anything missing or malformed grants nothing. */
+export function parseConversationAccess(value: unknown): ConversationAccess | null {
+  if (!value || typeof value !== "object") { return null; }
+  const v = value as Record<string, unknown>;
+  if ((v.visibility !== "private" && v.visibility !== "team") || (v.ownerId !== null && typeof v.ownerId !== "string")) { return null; }
+  if (![v.canShare, v.canDelete, v.canWrite, v.canApprove].every((flag) => typeof flag === "boolean")) { return null; }
+  return { visibility: v.visibility, ownerId: v.ownerId, canShare: v.canShare as boolean, canDelete: v.canDelete as boolean, canWrite: v.canWrite as boolean, canApprove: v.canApprove as boolean };
+}
 export function canViewConversation(row: HermesConversation, userId?: string | null): boolean {
   return !!row.access && (row.access.visibility === "team" || (!!userId && row.access.visibility === "private" && row.access.ownerId === userId));
 }

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { useNativeHermesChat } from './use-native-chat'
 import { getHermesEventsClient } from './events-client'
+import { ownerAccess } from './access-fixture'
 import { messageText, selectTools } from './reducer'
 import { ClarifyCard } from '../../app/components/chat-native/requests'
 import { buildAgentMessage, stripAgentMessageContext } from '../agent-message'
@@ -16,7 +17,7 @@ class Source {
   addEventListener(type: string, listener: (event: MessageEvent) => void) { (this.listeners[type] ??= []).push(listener) }
   emit(type: string, value: unknown) { act(() => this.listeners[type]?.forEach(listener => listener({ data: JSON.stringify(value) } as MessageEvent))) }
 }
-const snap = (extra: Record<string, unknown> = {}) => ({ key: 'key', conversation: { id: 'stored', profile: 'p', title: 'Chat', working: false }, generation: 1, seq: 0, messages: [], running: false, pendingRequests: [], ...extra })
+const snap = (extra: Record<string, unknown> = {}) => ({ key: 'key', conversation: { id: 'stored', profile: 'p', title: 'Chat', working: false, access: ownerAccess }, generation: 1, seq: 0, messages: [], running: false, pendingRequests: [], ...extra })
 const gw = (type: string, payload: unknown, seq: number) => Source.current.emit('gw', { key: 'key', session_id: 'stored', generation: 1, type, payload, seq })
 const mount = () => renderHook(({ enabled }) => useNativeHermesChat({ conversationKey: 'key', enabled }), { initialProps: { enabled: true } })
 beforeEach(() => { vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', vi.fn(async () => Response.json({}))) })
@@ -118,12 +119,14 @@ it('hydrates on compaction resync and replaces removed durable history', () => {
 it('consumes the real subagent.tail response', async () => {
   vi.mocked(fetch).mockResolvedValue(Response.json({ available: true, text: 'first\nsecond', truncated: true }))
   const { result } = mount()
+  Source.current.emit('snapshot', snap())
   await act(() => result.current.subagentTail('child'))
   expect(result.current.tails.child).toBe('first\nsecond\n\n[Transcript truncated]')
 })
 it('renders an unavailable subagent transcript explicitly', async () => {
   vi.mocked(fetch).mockResolvedValue(Response.json({ available: false, text: '', truncated: false }))
   const { result } = mount()
+  Source.current.emit('snapshot', snap())
   await act(() => result.current.subagentTail('child'))
   expect(result.current.tails.child).toBe('Transcript unavailable')
 })

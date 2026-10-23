@@ -28,7 +28,8 @@ export interface GatewayChatSnapshot {
   olderCursor?: string | null
   /** The live turn's user row exists but is older than this page of messages. */
   inflightBeforeWindow?: boolean
-  conversation: { id: string; profile: string; title: string; source?: string; working: boolean }
+  /** `access` is server-issued; validate with parseConversationAccess before granting anything. */
+  conversation: { id: string; profile: string; title: string; source?: string; working: boolean; access?: unknown }
   messages: SnapshotRow[]; running: boolean; inflight?: SnapshotInflight | null
   queued?: { user: string; count?: number } | null
   pendingRequests: { id: string | number; requestId?: string; method: string; params: Record<string, unknown> }[]

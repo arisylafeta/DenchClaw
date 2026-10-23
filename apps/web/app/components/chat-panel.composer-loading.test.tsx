@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
+import { ownerAccess } from "@/lib/hermes-chat/access-fixture";
 
 
 // Keep the actual TipTap editor, transport hook, reconciliation and slash wrapper.
@@ -25,7 +26,7 @@ class FakeEventSource {
   emit(type: string, data: unknown) { act(() => { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) } as MessageEvent); }); }
 }
 function snapshot(target = key, messages: unknown[] = []) {
-  FakeEventSource.instance.emit("snapshot", { key: target, conversation: { id: "phone-fixture", profile: "alpha", title: "Synthetic", working: false, source: "crm" }, messages, running: false, generation: 1, seq: 0, pendingRequests: [], gateway: "connected" });
+  FakeEventSource.instance.emit("snapshot", { key: target, conversation: { id: "phone-fixture", profile: "alpha", title: "Synthetic", working: false, source: "crm", access: ownerAccess }, messages, running: false, generation: 1, seq: 0, pendingRequests: [], gateway: "connected" });
 }
 async function typeDraft(text: string) {
   const editor = await screen.findByRole("textbox", { name: "Message" });

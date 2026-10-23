@@ -4,6 +4,7 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { useNativeHermesChat } from './use-native-chat'
 import { getHermesEventsClient } from './events-client'
+import { ownerAccess } from './access-fixture'
 import { PromptDock } from '../../app/components/chat-native/prompt-dock'
 import { conversationKey } from '../hermes-conversations'
 
@@ -17,7 +18,7 @@ class Source {
   emit(type: string, data: unknown) { act(() => { for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) } as MessageEvent) }) }
 }
 const key = conversationKey('solo', 'session', 'alpha')
-const snapshot = (extra = {}) => ({ key, conversation: { id: 'session', profile: 'alpha', title: 'Synthetic', working: true }, messages: [], running: true, generation: 1, seq: 0, pendingRequests: [], ...extra })
+const snapshot = (extra = {}) => ({ key, conversation: { id: 'session', profile: 'alpha', title: 'Synthetic', working: true, access: ownerAccess }, messages: [], running: true, generation: 1, seq: 0, pendingRequests: [], ...extra })
 function Dock({ selected = key }: { selected?: string }) {
   const chat = useNativeHermesChat({ conversationKey: selected, enabled: true })
   return <><span>{chat.state.hydrating ? 'Loading history' : 'History ready'}</span><PromptDock state={chat.state} subagents={chat.subagents} callbacks={{ onApproval() {}, onClarify() {}, onSubagentTail() {}, onSubagentSteer() {}, onSubagentInterrupt() {}, onRetry() {} }} disabled={chat.state.hydrating} /></>
