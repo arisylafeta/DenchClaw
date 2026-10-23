@@ -653,11 +653,12 @@ export function WorkspaceSidebar({
 	const sidebar = (
 		<aside
 			id="workspace-sidebar"
-			className={`flex flex-col h-screen shrink-0 ${mobile ? "drawer-left" : "border-r"}`}
+			className={`flex flex-col shrink-0 ${mobile ? "drawer-left h-full" : "h-screen border-r"}`}
 			style={{
 				width: typeof width === "number" ? `${width}px` : width,
 				minWidth: typeof width === "number" ? `${width}px` : width,
 				background: "var(--color-bg)",
+				paddingBottom: mobile ? "env(safe-area-inset-bottom, 0px)" : undefined,
 				borderColor: "var(--color-border)",
 			}}
 		>
