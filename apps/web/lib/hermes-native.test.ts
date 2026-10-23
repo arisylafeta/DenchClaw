@@ -20,7 +20,7 @@ async function startGateway() {
   server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("No test port");
+  if (!address || typeof address === "string") {throw new Error("No test port");}
   vi.stubEnv("HERMES_GATEWAY_WS_URL", `ws://127.0.0.1:${address.port}/api/ws`);
   vi.stubEnv("HERMES_GATEWAY_TOKEN", "synthetic-dashboard-token");
   server.on("connection", (socket, req) => {
@@ -39,7 +39,7 @@ beforeEach(() => {
   vi.stubEnv("HERMES_GATEWAY_WS_URL", ""); vi.stubEnv("HERMES_GATEWAY_TOKEN", "");
 });
 afterEach(async () => {
-  if (server) { for (const client of server.clients) client.terminate(); await new Promise<void>((resolve) => server!.close(() => resolve())); server = undefined; }
+  if (server) { for (const client of server.clients) {client.terminate();} await new Promise<void>((resolve) => server!.close(() => resolve())); server = undefined; }
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
   vi.useRealTimers(); vi.restoreAllMocks();
 });
@@ -177,8 +177,8 @@ it("drops a refused runtime's status and keeps other rows when one attach throws
     { id: "r-foreign", session_key: "foreign", status: "working" }, { id: "r-broken", session_key: "broken", status: "waiting" }, { id: "r-mine", session_key: "mine", status: "idle" },
   ] } as never);
   const attach = vi.spyOn(manager, "attachLive").mockImplementation(async (_key, id) => {
-    if (id === "r-foreign") return undefined;
-    if (id === "r-broken") throw new Error("socket closed");
+    if (id === "r-foreign") {return undefined;}
+    if (id === "r-broken") {throw new Error("socket closed");}
     return { session_id: id, running: false, subagents: [{ subagent_id: "child", status: "running" }] } as never;
   });
   vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
@@ -212,7 +212,7 @@ describe("native Hermes conversations", () => {
   it("lists the newest page per profile, hides execution sessions, and uses actual working not worker presence", async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = new URL(input); const alpha = url.pathname.includes("/alpha/");
-      if (alpha) return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2, source: "webhook" }], has_more: false });
+      if (alpha) {return Response.json({ data: [{ id: "shared-id", title: "Alpha chat", started_at: 2, source: "webhook" }], has_more: false });}
       return Response.json({ data: [{ id: "shared-id", title: "Sol chat", last_active: 3, source: "cron" }, { id: "execution", source: "bot_room" }, { id: "hidden", hidden: true }, { id: "child", is_internal_child: true }], has_more: true });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -261,7 +261,7 @@ describe("native Hermes conversations", () => {
   it("replays byte-limited native log pages using has_more on one gateway socket", async () => {
     const cursors: unknown[] = [];
     handler = (method, params) => {
-      if (method === "groups.state") return { room, driver_status: { running: true, working: false } };
+      if (method === "groups.state") {return { room, driver_status: { running: true, working: false } };}
       cursors.push(params.since_seq);
       const seq = params.since_seq === 0 ? 1 : 2;
       return { events: [{ seq, event_id: `event-${seq}`, kind: "message.user", actor: { id: "user" }, payload: { text: `message ${seq}` } }], has_more: seq === 1 };
@@ -288,7 +288,7 @@ describe("native Hermes conversations", () => {
     const requests: { url: string; init: RequestInit }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
       requests.push({ url, init });
-      if (init.method === "POST") return Response.json({});
+      if (init.method === "POST") {return Response.json({});}
       return Response.json({ session: { id: url.split("/").at(-1), title: "New alpha", started_at: 10 } });
     }));
     const result = await createConversation(["alpha"], undefined, actor);
@@ -302,8 +302,8 @@ describe("native Hermes conversations", () => {
     const calls: { method: string; params: Record<string, unknown> }[] = [];
     handler = (method, params) => {
       calls.push({ method, params });
-      if (method === "groups.create") return { room };
-      if (method === "groups.state") return { room, driver_status: { working: true } };
+      if (method === "groups.create") {return { room };}
+      if (method === "groups.state") {return { room, driver_status: { working: true } };}
       return { events: [{ event_id: "user:1", seq: 1, kind: "message.user", actor: { id: "user" }, payload: { text: "hello" } }, { event_id: "answer:1", seq: 2, kind: "message.member", created_at: 42, actor: { id: "m2" }, payload: { text: "Alpha reply", member_id: "m2", task_id: "task1", turn_id: "turn1" } }, { event_id: "settle:1", seq: 3, kind: "turn.settled", created_at: 43, actor: { id: "gateway" }, payload: { member_id: "m2", task_id: "task1", turn_id: "turn1", passed: false } }] };
     };
     await startGateway();
@@ -320,7 +320,7 @@ describe("native Hermes conversations", () => {
   it("reads all pages of native solo history without copying or rewriting it", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = new URL(input);
-      if (!url.pathname.endsWith("/messages")) return Response.json({ session: { id: "history", title: "History" } });
+      if (!url.pathname.endsWith("/messages")) {return Response.json({ session: { id: "history", title: "History" } });}
       return Response.json({ data: url.searchParams.get("offset") === "0" ? Array.from({ length: 500 }, (_, i) => ({ id: i, role: "user", content: `line ${i}` })) : [{ id: 501, role: "assistant", content: [{ type: "text", text: "continued" }] }] });
     }));
     const detail = await readConversation(conversationKey("solo", "history", "alpha"), undefined, undefined, actor);
@@ -370,9 +370,9 @@ describe("inviting an agent into a chat", () => {
     let failSend = false;
     handler = (method, params) => {
       calls.push({ method, params });
-      if (method === "groups.send" && failSend) return { __rpcError: 5112 };
-      if (method === "groups.create") return { room: created };
-      if (method === "groups.state") return { room: { ...created, room_id: params.room_id, name: "x", members: [{ member_id: "alpha", profile: "alpha" }, { member_id: "default", profile: "default" }] }, driver_status: { working: false } };
+      if (method === "groups.send" && failSend) {return { __rpcError: 5112 };}
+      if (method === "groups.create") {return { room: created };}
+      if (method === "groups.state") {return { room: { ...created, room_id: params.room_id, name: "x", members: [{ member_id: "alpha", profile: "alpha" }, { member_id: "default", profile: "default" }] }, driver_status: { working: false } };}
       return {};
     };
     await startGateway();

@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 	}
 
   // Unscoped legacy streams cannot enforce conversation ACLs or revocation.
-  if (resolveAgentBackend() === "hermes") return Response.json({error:"gateway_transport_required"},{status:409});
+  if (resolveAgentBackend() === "hermes") {return Response.json({error:"gateway_transport_required"},{status:409});}
 
 	const { sessionKey, message }: { sessionKey: string; message: string } = await req.json();
 
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       const response = await nativeFetch(profile, `/api/sessions/${encodeURIComponent(sessionKey)}`, {}, [404]);
       return response.status !== 404;
     }));
-    if (existing.some(Boolean)) return Response.json({ error: "gateway_transport" }, { status: 409 });
+    if (existing.some(Boolean)) {return Response.json({ error: "gateway_transport" }, { status: 409 });}
   }
 	const imageHydration = hydrateMessageImageAttachments(message);
 	const imageHydrationError = buildChatImageHydrationErrorMessage(
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
 	const stream = new ReadableStream({
 		start(controller) {
 			keepalive = setInterval(() => {
-				if (closed) return;
+				if (closed) {return;}
 				try {
 					controller.enqueue(encoder.encode(": keepalive\n\n"));
 				} catch { /* ignore */ }
@@ -103,7 +103,7 @@ export async function POST(req: Request) {
 			unsubscribe = subscribeToRun(
 				sessionKey,
 				(event: SseEvent | null) => {
-					if (closed) return;
+					if (closed) {return;}
 					if (event === null) {
 						closed = true;
 						if (keepalive) { clearInterval(keepalive); keepalive = null; }

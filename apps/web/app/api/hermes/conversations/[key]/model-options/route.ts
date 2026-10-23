@@ -16,7 +16,7 @@ export async function GET(_req: Request, context: GatewayRouteContext) {
     if (hermesChatTransport() !== "gateway") { return Response.json({ error: "sse_transport" }, { status: 409 }); }
     return Response.json(await getHermesChatService().modelOptions(key,actor));
   } catch (error) {
-    if (error instanceof ConversationAccessError) return accessErrorResponse(error);
+    if (error instanceof ConversationAccessError) {return accessErrorResponse(error);}
     return Response.json({ error: error instanceof Error ? error.message : "model_options_failed" }, { status: error instanceof ChatServiceError ? error.status : 502 });
   }
 }

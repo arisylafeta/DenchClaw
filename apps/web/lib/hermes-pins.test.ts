@@ -9,7 +9,7 @@ vi.mock("@/lib/postgres", () => ({ queryPg: vi.fn(async (sql: string, params: st
   return [...(rows.get(user) ?? [])].map((conversation_key) => ({ conversation_key }));
 }) }));
 const nativeFetch = vi.fn(); const groupRpc = vi.fn();
-vi.mock("@/lib/hermes-native", () => ({ authorizeNativeConversation:async(actor:unknown,key:string)=>{ const {canonicalIdentity,requireActor}=await import("./conversation-access");requireActor(actor as never);canonicalIdentity(key);return {access:{visibility:"team"},version:1}; }, assertProfile: (p: string) => { if (p !== "alpha") throw new Error("Unknown Hermes profile"); }, nativeFetch: (...a: unknown[]) => nativeFetch(...a), groupRpc: (...a: unknown[]) => groupRpc(...a) }));
+vi.mock("@/lib/hermes-native", () => ({ authorizeNativeConversation:async(actor:unknown,key:string)=>{ const {canonicalIdentity,requireActor}=await import("./conversation-access");requireActor(actor as never);canonicalIdentity(key);return {access:{visibility:"team"},version:1}; }, assertProfile: (p: string) => { if (p !== "alpha") {throw new Error("Unknown Hermes profile");} }, nativeFetch: (...a: unknown[]) => nativeFetch(...a), groupRpc: (...a: unknown[]) => groupRpc(...a) }));
 import { conversationKey } from "@/lib/hermes-conversations";
 import { PinError, setPin, listPins } from "./hermes-pins";
 const solo = conversationKey("solo", "s1", "alpha");

@@ -59,7 +59,7 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/hermes-native", () => ({
   assertProfile: vi.fn((profile: string) => {
-    if (profile !== "alpha") throw new Error("Unknown Hermes profile");
+    if (profile !== "alpha") {throw new Error("Unknown Hermes profile");}
     return { name: profile, workspaceDir: "/fixtures/alpha/workspace" };
   }),
 }));

@@ -51,7 +51,7 @@ export async function verifyPassword(
 ): Promise<boolean> {
   const [scheme, salt, hex] = encoded.split("$");
   if (scheme !== "scrypt" || !salt || !hex || !/^[0-9a-f]{128}$/i.test(hex))
-    return false;
+    {return false;}
   const key = (await scrypt(password, salt, 64)) as Buffer;
   const expected = Buffer.from(hex, "hex");
   return timingSafeEqual(key, expected);
@@ -124,7 +124,7 @@ export async function createSession(userId: string): Promise<string> {
 export async function validateSessionToken(
   token: string,
 ): Promise<AuthenticatedUser | null> {
-  if (!token || token.length < 40 || token.length > 128) return null;
+  if (!token || token.length < 40 || token.length > 128) {return null;}
   const rows = await queryPg<{
     id: string;
     email: string;
@@ -148,7 +148,7 @@ export async function validateSessionToken(
 export async function refreshSessionToken(
   token: string,
 ): Promise<AuthenticatedUser | null> {
-  if (!token || token.length < 40 || token.length > 128) return null;
+  if (!token || token.length < 40 || token.length > 128) {return null;}
   const rows = await queryPg<{
     id: string;
     email: string;
@@ -174,9 +174,9 @@ export async function refreshSessionToken(
 
 export async function currentUser(): Promise<AuthenticatedUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+  if (!token) {return null;}
   const user = await validateSessionToken(token);
-  if (!user) return null;
+  if (!user) {return null;}
   await queryPg(
     `update crm_sessions set last_seen_at = now() where token_hash = $1`,
     [hashToken(token)],
@@ -192,7 +192,7 @@ export async function sessionRevalidator(): Promise<() => Promise<AuthenticatedU
 
 export async function revokeSession(): Promise<void> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) return;
+  if (!token) {return;}
   await queryPg(
     `update crm_sessions set revoked_at = now() where token_hash = $1`,
     [hashToken(token)],

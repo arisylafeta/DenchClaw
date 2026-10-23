@@ -5,7 +5,7 @@ import type { GatewaySessionEvent } from "@/lib/hermes-gateway/manager";
 import { MAX_SUBSCRIPTIONS } from "./subscription-limits";
 
 type Delivery = { event: string; payload: unknown; id?: string };
-type Subscription = { subscriptionId?: string; pending: Set<Delivery>; stop: () => void; alive: boolean; version: number; held: GatewaySessionEvent[] };
+type Subscription = { resyncing: boolean; subscriptionId?: string; pending: Set<Delivery>; stop: () => void; alive: boolean; version: number; held: GatewaySessionEvent[] };
 /** Each content emission rechecks the login and durable ACL. The idle sweep bounds revocation to 5s. */
 export class EventConnection {
   readonly id = randomUUID();
@@ -24,14 +24,19 @@ export class EventConnection {
       for (const key of this.subscriptions.keys()) {
         if (service.retainedKey(key) !== notice.key) {continue;}
         const sub=this.subscriptions.get(key)!;
-        this.queue(key,"resync",{key,reason:notice.reason,subscriptionId:sub.subscriptionId});
-        void this.delivery.then(() => {
-          if (sub.alive && this.subscriptions.get(key) === sub) {return this.update([key],[],undefined,sub.subscriptionId?{[key]:sub.subscriptionId}:{});}
-        }).catch(() => {});
+        this.resync(key,sub,notice.reason);
       }
     });
     this.timer = setInterval(() => { for (const [key, sub] of this.subscriptions) {void this.check(key,sub);} },5000);
     this.timer.unref?.();
+  }
+  private resync(key: string, sub: Subscription, reason: string) {
+    if (sub.resyncing || !sub.alive) {return;}
+    sub.resyncing=true;
+    this.queue(key,"resync",{key,reason,subscriptionId:sub.subscriptionId});
+    void this.delivery.then(() => {
+      if (sub.alive && this.subscriptions.get(key) === sub) {return this.update([key],[],undefined,sub.subscriptionId?{[key]:sub.subscriptionId}:{});}
+    }).catch(() => {});
   }
   private revoke(key: string, sub: Subscription) {
     if (this.subscriptions.get(key) !== sub) {return;}
@@ -80,20 +85,22 @@ export class EventConnection {
       for (const key of add) {
         const identity = canonicalIdentity(key); const retained = this.service.retainedKey(key); const subscriptionId = subscriptionIds[key];
         let ready=false; let generation=0; let seq=0;
-        const sub: Subscription = {subscriptionId,pending:new Set(),stop:() => {},alive:true,version:grants.get(key)!,held:[]};
+        const sub: Subscription = {resyncing:false,subscriptionId,pending:new Set(),stop:() => {},alive:true,version:grants.get(key)!,held:[]};
         this.subscriptions.set(key,sub);
         const publish = (event: GatewaySessionEvent) => {
-          if (!sub.alive || this.closed) {return;}
+          if (!sub.alive || sub.resyncing || this.closed) {return;}
           if (event.generation === generation && event.seq <= seq) {return;}
-          if (generation && event.generation !== generation) { this.queue(key,"resync",{key,reason:"generation_change",subscriptionId}); return; }
+          if (generation && event.generation !== generation) { this.resync(key,sub,"generation_change"); return; }
           generation=event.generation; seq=event.seq;
           this.queue(key,"gw",{key,type:event.type,seq,generation,payload:event.payload},`${generation}:${seq}`);
         };
         const unsubscribe = this.service.manager.subscribe(retained,event => {
+          if (!sub.alive || this.closed) {return;}
           if (ready) {publish(event);} else if (sub.held.length < 4096) {sub.held.push(event);} else {this.revoke(key,sub);}
         });
         const stopRequests = this.service.subscribeRequests(key,request => this.queue(key,"request",{key,...request}),actor);
         sub.stop=() => {unsubscribe();stopRequests();};
+        if (!sub.alive) {sub.stop();continue;}
         try {
           const replay = this.service.manager.eventsSince(retained,cursor?.generation,cursor?.seq);
           const snapshot = await this.service.openForView(identity.profile,identity.id,undefined,actor);

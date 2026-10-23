@@ -4,7 +4,7 @@ const actor = {id:"user",email:"ari@rebattery.io",displayName:"Synthetic owner"}
 const access = {visibility:"team" as const,ownerId:"user",canShare:true,canDelete:true,canWrite:true,canApprove:true};
 vi.mock("../hermes-native", () => ({
   dashboardToken: vi.fn(), invalidateDashboardToken: vi.fn(),
-  assertProfile: vi.fn((profile: string) => { if (profile !== "ari") throw new Error("unknown"); return { workspaceDir: "/workspace" }; }),
+  assertProfile: vi.fn((profile: string) => { if (profile !== "ari") {throw new Error("unknown");} return { workspaceDir: "/workspace" }; }),
   nativeFetch: vi.fn(async () => Response.json({ source: "crm" })),
   hermesProfiles: vi.fn(() => ["ari", "matcha"]),
   inviteToConversation: vi.fn(async () => ({ key: "group-key", kind: "group" })),
@@ -43,12 +43,12 @@ class FakeSocket implements GatewaySocket {
   children: Record<string, unknown>[] = [];
   replayEvents: unknown[] = [];
   onChildren?: () => void;
-  emit(type: string, event: unknown = {}) { for (const handler of this.listeners[type] ?? []) handler(event); }
+  emit(type: string, event: unknown = {}) { for (const handler of this.listeners[type] ?? []) {handler(event);} }
   receive(frame: Frame) { this.emit("message", { data: JSON.stringify({ jsonrpc: "2.0", ...frame }) }); }
   send(text: string) {
     const frame = JSON.parse(text) as Frame; this.frames.push(frame);
-    if (!frame.method || frame.method === "event") return;
-    if (frame.method === "subagent.list") this.onChildren?.();
+    if (!frame.method || frame.method === "event") {return;}
+    if (frame.method === "subagent.list") {this.onChildren?.();}
     if (frame.method === "prompt.submit" && this.failPrompt) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
     if (frame.method === "session.steer" && this.steerUnsupported) { this.receive({ id: frame.id, error: { code: 4010, message: "agent does not support steer" } }); return; }
     if (frame.method === "config.set" && this.failConfig) { this.receive({ id: frame.id, error: { code: 4001, message: "stale" } }); return; }
@@ -69,7 +69,7 @@ class FakeSocket implements GatewaySocket {
       : frame.method === "command.dispatch" ? { type: "skill", message: frame.params?.arg, display: "Skill loaded" }
       : frame.method === "session.events.since" ? { events: this.replayEvents, latest_seq: 100, epoch: "e" } : {};
     this.receive({ id: frame.id, result });
-    if (frame.method === "prompt.submit" && !this.busy && !this.deferConsumption) this.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: this.frames.length, payload: {} } });
+    if (frame.method === "prompt.submit" && !this.busy && !this.deferConsumption) {this.receive({ method: "event", params: { type: "message.start", session_id: "runtime-one", seq: this.frames.length, payload: {} } });}
   }
   close() {}
 }
@@ -77,7 +77,7 @@ let manager: HermesGatewayManager;
 let socket: FakeSocket;
 let service: HermesChatService;
 const key = conversationKey("solo", "one", "ari");
-async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
+async function flush() { for (let i = 0; i < 30; i++) {await Promise.resolve();} }
 const image = { content: "aGVsbG8=", mimeType: "image/png", fileName: "a.png" };
 /** The next send's `[Attached files: …]` prefix resolves to these images on disk. */
 function attachOnNextSend(...images: typeof image[]) {
@@ -127,8 +127,8 @@ describe("gateway chat service", () => {
     const emitted: string[] = [];
     const connection = new EventConnection(actor, (type, payload) => {
       emitted.push(type);
-      if (type === "snapshot") state = applySnapshot(state, payload as ClientSnapshot, state.loadToken, ctx);
-      if (type === "gw") state = applyLive(state, [payload as Parameters<typeof applyLive>[1][number]], ctx);
+      if (type === "snapshot") {state = applySnapshot(state, payload as ClientSnapshot, state.loadToken, ctx);}
+      if (type === "gw") {state = applyLive(state, [payload as Parameters<typeof applyLive>[1][number]], ctx);}
     }, service,async () => actor);
     try {
       const pending = connection.update([key], []);

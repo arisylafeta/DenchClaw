@@ -8,13 +8,13 @@ import { queryPg } from "@/lib/postgres";
 export class PinError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 
 export async function listPins(userId: string, actor?: ConversationActor): Promise<string[]> {
-  if (requireActor(actor).id !== userId) throw new ConversationAccessError(404,"not_found");
+  if (requireActor(actor).id !== userId) {throw new ConversationAccessError(404,"not_found");}
   const rows = await queryPg<{ conversation_key: string }>(
     "select conversation_key from crm_user_chat_pins where user_id = $1 order by pinned_at, conversation_key", [userId]);
   const keys: string[] = [];
   for (const row of rows) {
     try { await authorizeNativeConversation(actor,row.conversation_key); keys.push(row.conversation_key); }
-    catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) throw error; }
+    catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) {throw error;} }
   }
   return keys;
 }
@@ -28,7 +28,7 @@ export async function assertPinnable(key: string): Promise<void> {
     let response;
     try { response = await nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, {}, [404]); }
     catch { throw new PinError(502, "target_lookup_failed"); }
-    if (response.status === 404) throw new PinError(404, "chat_not_found");
+    if (response.status === 404) {throw new PinError(404, "chat_not_found");}
     return;
   }
   try { await groupRpc("groups.state", { room_id: identity.id }); }
@@ -37,7 +37,7 @@ export async function assertPinnable(key: string): Promise<void> {
 
 /** Idempotent. Returns the caller's pins re-read from the database, and fails if the write is not visible there. */
 export async function setPin(userId: string, key: string, pinned: boolean, actor?: ConversationActor): Promise<string[]> {
-  if (requireActor(actor).id !== userId) throw new ConversationAccessError(404,"not_found");
+  if (requireActor(actor).id !== userId) {throw new ConversationAccessError(404,"not_found");}
   if (pinned) {
     await authorizeNativeConversation(actor,key);
     await assertPinnable(key);
@@ -46,6 +46,6 @@ export async function setPin(userId: string, key: string, pinned: boolean, actor
     await queryPg("delete from crm_user_chat_pins where user_id = $1 and conversation_key = $2", [userId, key]);
   }
   const pins = await listPins(userId,actor);
-  if (pins.includes(key) !== pinned) throw new PinError(500, "pin_not_persisted");
+  if (pins.includes(key) !== pinned) {throw new PinError(500, "pin_not_persisted");}
   return pins;
 }

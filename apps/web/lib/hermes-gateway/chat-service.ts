@@ -57,10 +57,10 @@ const promptSchema = z.object({
 });
 /** Validate the browser boundary before touching the gateway or workspace files. */
 export function parseGatewayPrompt(value: unknown): GatewayPrompt {
-  if (value && typeof value === "object" && "html" in value && typeof value.html === "string" && Buffer.byteLength(value.html) > 262_144) throw new ChatServiceError(413, "message_html_too_large");
-  if (value && typeof value === "object" && "clientMessageId" in value && typeof value.clientMessageId === "string" && Buffer.byteLength(value.clientMessageId) > 256) throw new ChatServiceError(400, "invalid_client_message_id");
+  if (value && typeof value === "object" && "html" in value && typeof value.html === "string" && Buffer.byteLength(value.html) > 262_144) {throw new ChatServiceError(413, "message_html_too_large");}
+  if (value && typeof value === "object" && "clientMessageId" in value && typeof value.clientMessageId === "string" && Buffer.byteLength(value.clientMessageId) > 256) {throw new ChatServiceError(400, "invalid_client_message_id");}
   const parsed = promptSchema.safeParse(value);
-  if (!parsed.success) throw new ChatServiceError(400, "invalid_prompt");
+  if (!parsed.success) {throw new ChatServiceError(400, "invalid_prompt");}
   return parsed.data;
 }
 const SKILL_COLLISION = /slash command \/\S+ unavailable[^\n]*name taken by built-in; use \/skill (\S+)/i;
@@ -87,7 +87,7 @@ export function inviteCompletion<T extends { items: { text: string; display?: st
 export function authorizeConversation(key: string) {
   let identity;
   try { identity = canonicalIdentity(key); } catch { throw new ChatServiceError(400, "invalid_conversation_key"); }
-  if (identity.kind !== "solo") throw new ChatServiceError(400, "solo_conversation_required");
+  if (identity.kind !== "solo") {throw new ChatServiceError(400, "solo_conversation_required");}
   try { assertProfile(identity.profile); } catch { throw new ChatServiceError(404, "unknown_profile"); }
   return identity;
 }
@@ -122,12 +122,12 @@ export class HermesChatService {
   private readonly mediaWaits = new Map<string, (error: Error) => void>();
   private readonly requestListeners = new Map<string, Set<(request: PendingServerRequest) => void>>();
   constructor(readonly manager: HermesGatewayManager = getHermesGatewayManager()) {
-    for (const method of ["approval", "clarify"] as const) manager.onServerRequest(method, request => {
+    for (const method of ["approval", "clarify"] as const) {manager.onServerRequest(method, request => {
       for (const [key, listeners] of this.requestListeners) {
-        if (manager.session(key)?.runtimeId !== request.params.session_id) continue;
-        for (const listener of listeners) listener(request);
+        if (manager.session(key)?.runtimeId !== request.params.session_id) {continue;}
+        for (const listener of listeners) {listener(request);}
       }
-    });
+    });}
   }
   subscribeRequests(key: string, listener: (request: PendingServerRequest) => void, actor?: ConversationActor): () => void {
     requireActor(actor);
@@ -138,7 +138,7 @@ export class HermesChatService {
     listeners.add(guarded);
     return () => {
       listeners.delete(guarded);
-      if (!listeners.size) this.requestListeners.delete(retained);
+      if (!listeners.size) {this.requestListeners.delete(retained);}
     };
   }
   retainedKey(key: string): string {
@@ -151,14 +151,14 @@ export class HermesChatService {
   private async source(key: string): Promise<string | undefined> {
     const identity = authorizeConversation(key);
     const response = await nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, {}, this.newConversations.has(key) ? [404] : []);
-    if (response.status === 404 && this.newConversations.has(key)) return "crm";
+    if (response.status === 404 && this.newConversations.has(key)) {return "crm";}
     this.newConversations.delete(key);
     const row = await response.json();
     return (row.session ?? row).source;
   }
   private async writable(key: string): Promise<void> {
     const source = await this.source(key);
-    if (source === "cron" || source === "webhook") throw new ChatServiceError(409, "automation_read_only");
+    if (source === "cron" || source === "webhook") {throw new ChatServiceError(409, "automation_read_only");}
   }
   async openForView(profile: string, storedId: string, pageOptions?: { before: number; limit: number }, actor?: ConversationActor): Promise<GatewayChatSnapshot> {
     const key = conversationKey("solo", storedId, profile);
@@ -173,7 +173,7 @@ export class HermesChatService {
         const active = await this.manager.call("session.active_list", { profile });
         for (const row of active.sessions.filter(row => row.session_key === storedId)) {
           resume = await this.manager.attachLive(retained, row.id);
-          if (resume) break;
+          if (resume) {break;}
         }
       }
     } catch { gateway = "unavailable"; }
@@ -191,13 +191,13 @@ export class HermesChatService {
       ...(row.content ? { content: stripAgentMessageContext(row.content) } : {}),
       ...(row.parts ? { parts: row.parts.map(part => part.type === "text" && typeof part.text === "string" ? { ...part, text: stripAgentMessageContext(part.text) } : part) } : {}),
     } : row);
-    const queueHead = queued?.user && [...messages].reverse().find(row => row.role === "user" && row.text === queued.user);
+    const queueHead = queued?.user && [...messages].toReversed().find(row => row.role === "user" && row.text === queued.user);
     const queueIndex = queueHead ? messages.indexOf(queueHead) : -1;
     if (queueIndex >= 0) {
-      for (const row of messages.slice(queueIndex)) if (row.role === "user") row.pending = "queued";
+      for (const row of messages.slice(queueIndex)) {if (row.role === "user") {row.pending = "queued";}}
     }
-    const inflightRow = inflight?.user && [...messages].reverse().find(row => row.role === "user" && !row.pending && row.text === inflight.user);
-    if (inflightRow) inflightRow.pending = "inflight";
+    const inflightRow = inflight?.user && [...messages].toReversed().find(row => row.role === "user" && !row.pending && row.text === inflight.user);
+    if (inflightRow) {inflightRow.pending = "inflight";}
     const page = this.pageMessages(messages, pageOptions ? Math.min(pageOptions.before, messages.length) : messages.length, pageOptions?.limit);
     const inflightBeforeWindow = Boolean(inflightRow && page.messages[0] && messages.indexOf(inflightRow) < messages.indexOf(page.messages[0]));
     // Usage is a read of an existing runtime, never a reason to resume an idle chat.
@@ -222,7 +222,7 @@ export class HermesChatService {
   async historyPage(key: string, before: string, limit = 200, actor?: ConversationActor) {
     await this.authorize(actor,key);
     const identity = authorizeConversation(key);
-    if (!/^\d+$/.test(before) || !Number.isSafeInteger(Number(before)) || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new ChatServiceError(400, "invalid_history_cursor");
+    if (!/^\d+$/.test(before) || !Number.isSafeInteger(Number(before)) || !Number.isInteger(limit) || limit < 1 || limit > 200) {throw new ChatServiceError(400, "invalid_history_cursor");}
     // Reuse exactly the snapshot mapper and pending classification, without paging twice.
     const snapshot = await this.openForView(identity.profile, identity.id, { before: Number(before), limit },actor);
     return { messages: snapshot.messages, olderCursor: snapshot.olderCursor };
@@ -230,9 +230,9 @@ export class HermesChatService {
   async sendPrompt(key: string, prompt: GatewayPrompt, actor?: ConversationActor) {
     await this.authorize(actor,key,"write");
     assertSafePrompt(actor,prompt);
-    if (/^\s*\/[^\s/]+(?:\s|$)/.test(prompt.text)) throw new ChatServiceError(400,"use_slash_endpoint");
+    if (/^\s*\/[^\s/]+(?:\s|$)/.test(prompt.text)) {throw new ChatServiceError(400,"use_slash_endpoint");}
     const identity = authorizeConversation(key);
-    if (typeof prompt.text !== "string" || !prompt.text.trim() || Buffer.byteLength(prompt.text) > 65_536) throw new ChatServiceError(400, "invalid_prompt");
+    if (typeof prompt.text !== "string" || !prompt.text.trim() || Buffer.byteLength(prompt.text) > 65_536) {throw new ChatServiceError(400, "invalid_prompt");}
     await this.writable(key);
     try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
     const retained = this.retainedKey(key);
@@ -241,13 +241,13 @@ export class HermesChatService {
       // Re-check inside the critical section: never stage an image into another send.
       await this.writable(key);
       let resume: SessionResumeResult | undefined;
-      if (!this.manager.session(retained)?.runtimeId) resume = await this.manager.resumeSession(retained);
+      if (!this.manager.session(retained)?.runtimeId) {resume = await this.manager.resumeSession(retained);}
       const runtime = this.manager.session(retained)?.runtimeId;
       const workspace = resolveAgentWorkspacePrefix();
       const text = buildAgentMessage({ userText: prompt.text, workspaceContext: prompt.context, workspacePrefix: workspace });
       const hydrated = hydrateMessageImageAttachments(text, workspace);
       const hydrationError = buildChatImageHydrationErrorMessage(hydrated.skipped);
-      if (hydrationError) throw new ChatServiceError(400, hydrationError);
+      if (hydrationError) {throw new ChatServiceError(400, hydrationError);}
       const images = hydrated.attachments;
       const attached: string[] = [];
       const imageHashes = new Set<string>();
@@ -255,15 +255,15 @@ export class HermesChatService {
         for (const image of images) {
           // The same file may be attached twice; stage each byte payload once.
           const hash = createHash("sha256").update(Buffer.from(image.content, "base64")).digest("hex");
-          if (imageHashes.has(hash)) continue;
+          if (imageHashes.has(hash)) {continue;}
           imageHashes.add(hash);
           await this.authorize(actor,key,"write");
           const result = await this.manager.callSession(retained, "image.attach_bytes", { session_id: "", content_base64: image.content, filename: image.fileName, ext: extname(image.fileName ?? "") });
-          if (!result.attached || !result.path) throw new ChatServiceError(502, "image_attach_failed");
+          if (!result.attached || !result.path) {throw new ChatServiceError(502, "image_attach_failed");}
           attached.push(result.path);
         }
         // Persist before submit: a lost acknowledgement must not lose reconciliation markup.
-        if (prompt.html && prompt.clientMessageId) await saveMessageHtml(identity.profile, identity.id, prompt.clientMessageId, prompt.text, prompt.html);
+        if (prompt.html && prompt.clientMessageId) {await saveMessageHtml(identity.profile, identity.id, prompt.clientMessageId, prompt.text, prompt.html);}
         // Register before submit: message.start can arrive before its acknowledgement.
         let claimed = false;
         let settle = () => {};
@@ -272,22 +272,22 @@ export class HermesChatService {
         const disconnected = new Promise<never>((_resolve, reject) => { rejectDisconnected = reject; });
         // Install the rejection handler even for queued/no-image submissions.
         void disconnected.catch(() => {});
-        if (attached.length) this.mediaWaits.set(retained, rejectDisconnected);
+        if (attached.length) {this.mediaWaits.set(retained, rejectDisconnected);}
         const stopNotices = this.manager.subscribeNotices(notice => {
           // Transport loss does not cancel an accepted turn. Manager restore activates
           // the same runtime and replays events.since before releasing held frames.
           if (notice.type === "resync" && notice.key === retained && notice.reason === "connection_restored") {
             void this.manager.attachLive(retained, runtime!).then(snapshot => {
-              if (snapshot?.inflight?.status === "error" || snapshot?.inflight?.error) rejectDisconnected(new ChatServiceError(502, "prompt_failed"));
+              if (snapshot?.inflight?.status === "error" || snapshot?.inflight?.error) {rejectDisconnected(new ChatServiceError(502, "prompt_failed"));}
               else if (snapshot?.inflight?.assistant) { claimed = true; settle(); }
             }).catch(() => { /* A further disconnect is not a turn failure either. */ });
           }
-          if (notice.type === "resync" && notice.key === retained && notice.reason === "session_reclaimed") rejectDisconnected(new ChatServiceError(409, "session_not_live"));
+          if (notice.type === "resync" && notice.key === retained && notice.reason === "session_reclaimed") {rejectDisconnected(new ChatServiceError(409, "session_not_live"));}
         });
         const unsubscribe = this.manager.subscribe(retained, event => {
           const payload = event.payload as { status?: string; error?: unknown } | undefined;
-          if (!claimed && (event.type === "error" || (event.type === "message.complete" && (payload?.status === "error" || payload?.error)))) rejectDisconnected(new ChatServiceError(502, "prompt_failed"));
-          else if (!claimed && event.type === "message.complete" && payload?.status === "interrupted") rejectDisconnected(new ChatServiceError(409, "prompt_cancelled"));
+          if (!claimed && (event.type === "error" || (event.type === "message.complete" && (payload?.status === "error" || payload?.error)))) {rejectDisconnected(new ChatServiceError(502, "prompt_failed"));}
+          else if (!claimed && event.type === "message.complete" && payload?.status === "interrupted") {rejectDisconnected(new ChatServiceError(409, "prompt_cancelled"));}
           else if (["message.start", "message.delta", "message.interim", "reasoning.delta", "reasoning.available", "tool.start", "tool.complete", "message.complete"].includes(event.type)) { claimed = true; settle(); }
         });
         try {
@@ -302,7 +302,7 @@ export class HermesChatService {
               if (error instanceof JsonRpcGatewayError && error.code === 4010) {return { status: "rejected" as const };}
               throw error;
             });
-            if (steer.status !== "rejected") return { status: "steered" as const, autoContinue: Boolean(resume?.auto_continue) };
+            if (steer.status !== "rejected") {return { status: "steered" as const, autoContinue: Boolean(resume?.auto_continue) };}
           }
           await this.authorize(actor,key,"write");
           const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text });
@@ -322,7 +322,7 @@ export class HermesChatService {
   }
   async createGatewayConversation(profiles: string[], actor?: ConversationActor) {
     requireActor(actor);
-    if (!Array.isArray(profiles) || profiles.length !== 1) throw new ChatServiceError(400, "one_profile_required");
+    if (!Array.isArray(profiles) || profiles.length !== 1) {throw new ChatServiceError(400, "one_profile_required");}
     const profile = profiles[0];
     assertProfile(profile);
     const result = await this.manager.call("session.create", { profile, source: "crm", cols: 120 });
@@ -399,7 +399,7 @@ export class HermesChatService {
     const parts = /^\/(\S+)([\s\S]*)$/u.exec(command)!;
     const name = parts[1].toLowerCase();
     const arg = parts[2].trim();
-    if (!["invite", "new", "branch", "help", "status", "usage"].includes(name) || /(?:--global|--profile|--session|\n|\r)/i.test(arg)) throw new ChatServiceError(400,"slash_not_allowed");
+    if (!["invite", "new", "branch", "help", "status", "usage"].includes(name) || /(?:--global|--profile|--session|\n|\r)/i.test(arg)) {throw new ChatServiceError(400,"slash_not_allowed");}
     // Not a Hermes command: it replaces this chat with a group that includes the invited agent.
     if (name === "invite") {
       const [invitee, ...task] = arg.split(/\s+/);
@@ -465,34 +465,34 @@ export class HermesChatService {
     }
     if (action === "interrupt") {
       const result = await this.manager.callSession(retained, "session.interrupt", { session_id: "" });
-      if (result.status === "interrupted") this.mediaWaits.get(retained)?.(new ChatServiceError(409, "prompt_cancelled"));
+      if (result.status === "interrupted") {this.mediaWaits.get(retained)?.(new ChatServiceError(409, "prompt_cancelled"));}
       return result;
     }
     if (action === "steer") {
-      if (typeof body.text !== "string" || !body.text.trim() || Buffer.byteLength(body.text) > 65_536) throw new ChatServiceError(400, "invalid_text");
+      if (typeof body.text !== "string" || !body.text.trim() || Buffer.byteLength(body.text) > 65_536) {throw new ChatServiceError(400, "invalid_text");}
       return this.manager.callSession(retained, body.mode === "redirect" ? "session.redirect" : "session.steer", { session_id: "", text: body.text });
     }
     if (action === "approval" || action === "clarify") {
       const request = this.manager.pendingRequests(retained).find(request => request.method === action && (action === "approval" ? request.params.request_id === body.request_id : request.id === body.request_id));
-      if (!request) throw new ChatServiceError(403, "request_not_owned");
+      if (!request) {throw new ChatServiceError(403, "request_not_owned");}
       if (action === "approval") {
-        if (!["once", "session", "always", "deny"].includes(String(body.choice))) throw new ChatServiceError(400, "invalid_choice");
+        if (!["once", "session", "always", "deny"].includes(String(body.choice))) {throw new ChatServiceError(400, "invalid_choice");}
         await this.manager.callSession(retained, "approval.received", { session_id: "", request_id: String(body.request_id) });
         this.manager.respondToRequest(retained, request.id, { choice: body.choice as "once" | "session" | "always" | "deny" });
       } else {
         const answers = z.record(z.string(), z.string().nullable()).safeParse(body.answers);
-        if (!answers.success) throw new ChatServiceError(400, "invalid_answers");
+        if (!answers.success) {throw new ChatServiceError(400, "invalid_answers");}
         this.manager.respondToRequest<"clarify">(retained, request.id, { answers: answers.data });
       }
       return { accepted: true };
     }
     if (action === "subagent") {
-      if (body.action === "list") return this.manager.callSession(retained, "subagent.list", { session_id: "" });
-      if (typeof body.subagent_id !== "string" || !body.subagent_id) throw new ChatServiceError(400, "invalid_subagent_id");
+      if (body.action === "list") {return this.manager.callSession(retained, "subagent.list", { session_id: "" });}
+      if (typeof body.subagent_id !== "string" || !body.subagent_id) {throw new ChatServiceError(400, "invalid_subagent_id");}
       const params = { session_id: "", subagent_id: body.subagent_id };
-      if (body.action === "tail") return this.manager.callSession(retained, "subagent.tail", params);
-      if (body.action === "interrupt") return this.manager.callSession(retained, "subagent.interrupt", params);
-      if (body.action === "steer" && typeof body.text === "string" && body.text.trim()) return this.manager.callSession(retained, "subagent.steer", { ...params, text: body.text });
+      if (body.action === "tail") {return this.manager.callSession(retained, "subagent.tail", params);}
+      if (body.action === "interrupt") {return this.manager.callSession(retained, "subagent.interrupt", params);}
+      if (body.action === "steer" && typeof body.text === "string" && body.text.trim()) {return this.manager.callSession(retained, "subagent.steer", { ...params, text: body.text });}
     }
     throw new ChatServiceError(400, "invalid_action");
   }

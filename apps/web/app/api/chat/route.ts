@@ -97,7 +97,7 @@ export async function POST(req: Request) {
 	}
 
   // Legacy streams have no revocation-aware replay boundary. Hermes must use the ACL-aware conversation API.
-  if (resolveAgentBackend() === "hermes") return Response.json({error:"gateway_transport_required"},{status:409});
+  if (resolveAgentBackend() === "hermes") {return Response.json({error:"gateway_transport_required"},{status:409});}
 
 	const {
 		messages,
@@ -151,7 +151,7 @@ export async function POST(req: Request) {
   const nativeHermesSession = backend === "hermes" && typeof hermesProfile === "string";
   if (nativeHermesSession) {
     try { assertProfile(hermesProfile); } catch { return new Response("Unknown Hermes profile", { status: 400 }); }
-    if (hermesChatTransport() === "gateway") return Response.json({ error: "gateway_transport" }, { status: 409 });
+    if (hermesChatTransport() === "gateway") {return Response.json({ error: "gateway_transport" }, { status: 409 });}
   }
 	const normalizedModelOverride =
 		typeof modelOverride === "string" && modelOverride.trim()
@@ -254,7 +254,7 @@ export async function POST(req: Request) {
       imageAttachments,
       ...(nativeHermesSession ? { profile: hermesProfile, existingSession: true, signal: req.signal } : {}),
 		});
-    if (nativeHermesSession) return new Response(hermesStream, { headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1", "Cache-Control": "no-cache" } });
+    if (nativeHermesSession) {return new Response(hermesStream, { headers: { "Content-Type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1", "Cache-Control": "no-cache" } });}
 
 		// Accumulate assistant text + parts for persistence.  The raw stream
 		// emits AI-SDK UI chunks (text-delta, reasoning-delta, etc.)

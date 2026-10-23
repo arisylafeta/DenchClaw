@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("@/lib/auth", () => ({ currentUser: vi.fn(async () => ({ id: "user" })) }));
 vi.mock("@/lib/agent-backend", () => ({ resolveAgentBackend: () => "hermes" }));
-vi.mock("@/lib/hermes-native", () => ({ assertProfile: vi.fn((profile: string) => { if (profile !== "ari") throw new Error("unknown"); }) }));
+vi.mock("@/lib/hermes-native", () => ({ assertProfile: vi.fn((profile: string) => { if (profile !== "ari") {throw new Error("unknown");} }) }));
 vi.mock("@/lib/hermes-gateway/manager", () => ({ getHermesGatewayManager: () => ({ onServerRequest: vi.fn() }) }));
 import { currentUser } from "@/lib/auth";
 import { getHermesChatService } from "@/lib/hermes-gateway/chat-service";

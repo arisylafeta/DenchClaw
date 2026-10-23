@@ -36,7 +36,7 @@ function fixture(truncated = false) {
   return { connection, emitted, manager, snapshot, listeners, unsubscribed };
 }
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(currentUser).mockResolvedValue({ id: "user", email: "user@example.com", displayName: "User" } satisfies AuthenticatedUser); });
-afterEach(() => { for (const connection of eventConnections.values()) connection.close(); eventConnections.clear(); vi.useRealTimers(); delete process.env.HERMES_CHAT_TRANSPORT; });
+afterEach(() => { for (const connection of eventConnections.values()) {connection.close();} eventConnections.clear(); vi.useRealTimers(); delete process.env.HERMES_CHAT_TRANSPORT; });
 describe("multiplexed gateway endpoints", () => {
   it("rejects anonymous route calls before reading commands or opening streams", async () => {
     vi.mocked(currentUser).mockResolvedValue(null);
@@ -51,7 +51,7 @@ describe("multiplexed gateway endpoints", () => {
     { subscriptionIds: JSON.stringify({ ["k".repeat(2049)]: "s" }) },
   ])("caps SSE subscription input %j", async query => {
     const params = new URLSearchParams();
-    for (const [name, value] of Object.entries(query)) if (typeof value === "string") params.set(name, value);
+    for (const [name, value] of Object.entries(query)) {if (typeof value === "string") {params.set(name, value);}}
     const response = await GET(new Request(`http://local/api/hermes/events?${params}`));
     expect(response.status).toBe(400);
     expect(eventConnections.size).toBe(0);
@@ -131,11 +131,11 @@ describe("multiplexed gateway endpoints", () => {
     const connection = [...eventConnections.values()][0];
     // Inspect the in-process emitter seam while exercising the actual route stream.
     const emitter = connection as unknown as { emit(event: string, payload: unknown, id?:string,version?:number): void };
-    for (let i = 0; i < 100; i++) emitter.emit("gw", { text: "x".repeat(65_536) });
+    for (let i = 0; i < 100; i++) {emitter.emit("gw", { text: "x".repeat(65_536) });}
     expect(eventConnections.size).toBe(0);
     const reader = response.body!.getReader();
     let bytes = 0;
-    for (;;) { const result = await reader.read(); if (result.done) break; bytes += result.value.byteLength; }
+    for (;;) { const result = await reader.read(); if (result.done) {break;} bytes += result.value.byteLength; }
     expect(bytes).toBeLessThanOrEqual(4_194_304);
   });
   it("forwards lost/restored gateway state and refreshes stale request snapshots on resync", async () => {

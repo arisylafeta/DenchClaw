@@ -1,3 +1,4 @@
+import { resolveAgentBackend } from "@/lib/agent-backend";
 import { currentUser } from "@/lib/auth";
 import { accessErrorResponse, changeSharing } from "@/lib/conversation-access";
 import { authorizeNativeConversation } from "@/lib/hermes-native";
@@ -6,11 +7,13 @@ export const runtime = "nodejs";
 type Context = { params: Promise<{key:string}> };
 export async function GET(_req: Request, context: Context) {
  const actor = await currentUser(); if (!actor) {return Response.json({error:"Unauthorized"},{status:401});}
+ if (resolveAgentBackend() !== "hermes") {return Response.json({error:"Hermes is not enabled"},{status:404});}
  try { return Response.json({access:(await authorizeNativeConversation(actor,(await context.params).key)).access}); }
  catch(error) { return accessErrorResponse(error); }
 }
 export async function PATCH(req: Request, context: Context) {
  const actor = await currentUser(); if (!actor) {return Response.json({error:"Unauthorized"},{status:401});}
+ if (resolveAgentBackend() !== "hermes") {return Response.json({error:"Hermes is not enabled"},{status:404});}
  try {
   const body = await req.json();
   if (!body || Object.keys(body).length !== 1 || !["private","team"].includes(body.visibility)) {return Response.json({error:"invalid_visibility"},{status:400});}

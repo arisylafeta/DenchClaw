@@ -7,15 +7,15 @@ import { groupRpc, type RoomState } from '@/lib/hermes-native';
 import { readRoomActivity } from '@/lib/hermes-gateway/room-activity';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-// Authentication is enforced by middleware, exactly like the sibling conversation route.
+// Revalidate the CRM actor and conversation access before room discovery.
 export async function GET(req: Request, context: { params: Promise<{ key: string }> }) {
-  const actor = await currentUser(); if (!actor) return Response.json({error:"Unauthorized"},{status:401});
-  if (resolveAgentBackend() !== 'hermes') return Response.json({ error: 'Hermes is not enabled' }, { status: 404 });
+  const actor = await currentUser(); if (!actor) {return Response.json({error:"Unauthorized"},{status:401});}
+  if (resolveAgentBackend() !== 'hermes') {return Response.json({ error: 'Hermes is not enabled' }, { status: 404 });}
   try {
     const key = (await context.params).key;
     await authorizeNativeConversation(actor,key);
     const identity = parseConversationKey(key);
-    if (identity.kind !== 'group') return Response.json({ error: 'Group required' }, { status: 400 });
+    if (identity.kind !== 'group') {return Response.json({ error: 'Group required' }, { status: 400 });}
     const state = await groupRpc<RoomState>('groups.state', { room_id: identity.id });
     const activity = await readRoomActivity(state.room);
     return Response.json({ members: activity.members.map(({ memberId, running, approval }) => ({ memberId, running, ...(approval === undefined ? {} : { approval }) })), degraded: activity.degraded }, { headers: { 'Cache-Control': 'no-store' } });

@@ -17,7 +17,7 @@ function setup() {
   manager:{subscribeNotices:vi.fn((fn:typeof notice) => {notice=fn;return vi.fn();}),subscribe:vi.fn((_key:string,fn:typeof event) => {event=fn;return vi.fn();}),eventsSince:vi.fn(() => ({generation:1,seq:0,events:[],truncated:false})),connectionState:()=>"connected"},
  };
  const connection = new EventConnection(actor,(event,payload)=>emitted.push({event,payload}),service as unknown as HermesChatService,async () => signedIn?actor:null);connections.push(connection);
- return {connection,service,emitted,event:(payload:unknown)=>event({generation:1,seq:1,type:"message.delta",payload}),request:(payload:unknown)=>request(payload),revoke:()=>{allowed=false;},bump:()=>{version++;},logout:()=>{signedIn=false;}};
+ return {connection,service,emitted,event:(payload:unknown,generation=1)=>event({generation,seq:1,type:"message.delta",payload}),request:(payload:unknown)=>request(payload),revoke:()=>{allowed=false;},bump:()=>{version++;},logout:()=>{signedIn=false;}};
 }
 const flush=async () => { for(let n=0;n<30;n++) {await Promise.resolve();} };
 describe("revocation-aware event delivery",() => {
@@ -43,6 +43,18 @@ describe("revocation-aware event delivery",() => {
   const f=setup();let release!:()=>void;
   f.service.openForView.mockImplementationOnce(async () => {await new Promise<void>(r=>{release=r;});return {generation:1,seq:0,messages:[{text:"private transcript"}]};});
   const adding=f.connection.update([key],[]);await flush();f.connection.close();release();await adding;expect(f.emitted).toEqual([]);
+ });
+ it("rechecks authorization when a generation change resnapshots the session",async()=>{
+  const f=setup();await f.connection.update([key],[]);f.emitted.length=0;
+  f.service.openForView.mockResolvedValueOnce({generation:2,seq:0,messages:[{text:"new snapshot"}]});
+  f.event({text:"new generation"},2);await flush();await f.connection.update([],[]);await flush();
+  expect(f.service.openForView).toHaveBeenCalledTimes(2);
+  expect(f.emitted.map(row=>row.event)).toEqual(["resync","snapshot"]);
+ });
+ it("expires an idle logged-out connection within the five-second sweep",async()=>{
+  vi.useFakeTimers();
+  try {const f=setup();await f.connection.update([key],[]);f.emitted.length=0;f.logout();await vi.advanceTimersByTimeAsync(5000);expect(f.emitted).toEqual([{event:"access-revoked",payload:{key}}]);}
+  finally {vi.useRealTimers();}
  });
  it("fails reconnect closed after revocation",async () => {
   const f=setup();await f.connection.update([key],[]);f.revoke();await expect(f.connection.update([key],[])).rejects.toThrow();
