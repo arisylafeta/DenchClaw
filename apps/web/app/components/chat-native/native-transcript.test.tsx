@@ -22,6 +22,15 @@ function clarify(questions: NonNullable<NonNullable<GatewayEvent["payload"]>["qu
 }
 
 describe("native transcript", () => {
+  it("opens own raw-file links through onOpenArtifact instead of navigating, and leaves other links alone", () => {
+    const onOpenArtifact = vi.fn();
+    const state = events([["message.start", {}], ["message.delta", { text: `[Clip](${window.location.origin}/api/workspace/raw-file?path=/ws/a.webm) and [Ext](https://foreign.test/x)` }], ["message.complete", {}]]);
+    render(<NativeTranscript state={state} callbacks={callbacks()} onOpenArtifact={onOpenArtifact} />);
+    const clip = screen.getByRole("link", { name: "Clip" });
+    expect(fireEvent.click(clip)).toBe(false);
+    expect(onOpenArtifact).toHaveBeenCalledWith("/ws/a.webm");
+    expect(screen.getByRole("link", { name: "Ext" })).toHaveAttribute("target", "_blank");
+  });
   it("streams exposed reasoning as muted plain text, separate from tools and the final answer", async () => {
     const cb = callbacks();
     let state = events([["message.start", {}], ["thinking.delta", { text: "Status only" }]]);
