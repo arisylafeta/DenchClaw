@@ -38,8 +38,8 @@ afterEach(cleanup)
 it('ignores stale hidden-panel runtime flags and follows server running/awaiting state through workspace-content', async () => {
   // Module-loading boundary: the runtime vi.doMock registrations above must precede this import.
   const { WorkspaceHermesConversationList } = await import('./workspace-content')
-  const row = { key: 'solo:p:stored', id: 'stored', profile: 'p', kind: 'solo', title: 'Hidden chat', source: 'crm', working: false, blocked: false, updatedAt: 100, participants: [{ profile: 'p', name: 'P' }] }
-  const chats = { listing: { sessions: [row], profiles: ['p'], backend: 'hermes', warnings: [], groupsAvailable: false }, filter: null, selected: null, seen: { [row.key]: 100 }, select: vi.fn() } as unknown as HermesChatsController
+  const row = { access: { visibility: 'private', ownerId: 'user', canShare: true, canDelete: true, canWrite: true, canApprove: false }, key: 'solo:p:stored', id: 'stored', profile: 'p', kind: 'solo', title: 'Hidden chat', source: 'crm', working: false, blocked: false, updatedAt: 100, participants: [{ profile: 'p', name: 'P' }] }
+  const chats = { userId: 'user', accountId: 'user', listing: { userId: 'user', sessions: [row], profiles: ['p'], backend: 'hermes', warnings: [], groupsAvailable: false }, filter: null, selected: null, seen: { [row.key]: 100 }, select: vi.fn() } as unknown as HermesChatsController
   const snapshots = { hidden: { tabId: 'hidden', sessionId: row.key, isStreaming: true, awaiting: true } } as unknown as Record<string, ChatTabRuntimeSnapshot>
   const view = render(<WorkspaceHermesConversationList chats={chats} snapshots={snapshots} visibleTabId="other" />)
   expect(screen.queryByRole('img', { name: 'Running' })).toBeNull()
