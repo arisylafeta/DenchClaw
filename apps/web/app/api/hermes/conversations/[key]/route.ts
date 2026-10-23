@@ -14,10 +14,12 @@ export async function PATCH(req: Request, context: Context) {
   if (resolveAgentBackend() !== "hermes") {return Response.json({ error: "Hermes is not enabled" }, { status: 404 });}
   try {
     const key = (await context.params).key;
-    await authorizeNativeConversation(actor,key,req.method === "GET" ? "read" : "write");
+    await authorizeNativeConversation(actor,key,"write");
     const identity = parseConversationKey(key);
     const { title } = await req.json();
     if (typeof title !== "string" || !title.trim() || title.length > 200) {return Response.json({ error: "A title of at most 200 characters is required" }, { status: 400 });}
+    // Body parsing can outlive a revocation. Recheck after validation, before mutation.
+    await authorizeNativeConversation(actor,key,"write");
     if (identity.kind === "group") {await groupRpc("groups.rename", { room_id: identity.id, event_id: crypto.randomUUID(), name: title.trim() });}
     else {await nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, { method: "PATCH", body: JSON.stringify({ title: title.trim() }) });}
     return Response.json(await readConversation(key,0,undefined,actor));
@@ -62,16 +64,18 @@ export async function POST(req: Request, context: Context) {
   if (resolveAgentBackend() !== "hermes") {return Response.json({ error: "Hermes is not enabled" }, { status: 404 });}
   try {
     const { key } = await context.params;
-    await authorizeNativeConversation(actor,key,req.method === "GET" ? "read" : "write");
+    await authorizeNativeConversation(actor,key,"write");
     const identity = parseConversationKey(key);
     const body = await req.json();
     if (identity.kind === "solo") {
       assertProfile(identity.profile);
       if (hermesChatTransport() === "gateway" && body.action !== "stop") {return Response.json({ error: "gateway_transport" }, { status: 409 });}
       if (body.action !== "stop") {return Response.json({ error: "Solo chats use /api/chat" }, { status: 405 });}
+      await authorizeNativeConversation(actor,key,"write");
       return Response.json({ aborted: stopNativeHermesStream(identity.profile, identity.id) });
     }
     if (identity.kind === "group" && body.action === "stop") {
+      await authorizeNativeConversation(actor,key,"write");
       await groupRpc("groups.stop", { room_id: identity.id, cancel_id: body.eventId || "denchclaw-stop" });
       return Response.json(await readConversation(key,0,undefined,actor));
     }
@@ -81,6 +85,7 @@ export async function POST(req: Request, context: Context) {
     if (identity.kind === "group") {
       assertSafePrompt(actor,{text:body.message});
       if (typeof body.eventId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.eventId)) {return Response.json({ error: "A stable event ID is required" }, { status: 400 });}
+      await authorizeNativeConversation(actor,key,"write");
       await groupRpc("groups.send", { room_id: identity.id, event_id: body.eventId, payload: { text: body.message, thread_id: identity.id } });
       // Read the native log back before acknowledging persistence to the UI.
       return Response.json(await readConversation(key,0,undefined,actor));
