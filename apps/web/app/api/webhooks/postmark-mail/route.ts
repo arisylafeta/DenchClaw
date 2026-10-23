@@ -1,6 +1,18 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { queryPg } from "@/lib/postgres";
-import { canonicalPostmarkTime, postmarkOpenEventId } from "@/lib/postmark-mail-webhook";
+import { boundedPostmarkMetadata, canonicalPostmarkTime, PostmarkBodyTooLarge, postmarkOpenEventId, readPostmarkBody } from "@/lib/postmark-mail-webhook";
+
+// Fill webhook-only metadata, retaining existing values and richer nested objects.
+// Reuse the expression in WHERE so identical redeliveries do not write a row.
+const enrichedDetail = `coalesce(existing.detail, '{}'::jsonb) || (
+  select jsonb_object_agg(key, case
+    when jsonb_typeof(existing.detail -> key) = 'object' and jsonb_typeof(value) = 'object'
+      then value || (existing.detail -> key)
+    else coalesce(nullif(nullif(existing.detail -> key, 'null'::jsonb), '""'::jsonb), value)
+    end)
+  from jsonb_each(excluded.detail)
+  where key in ('FirstOpen', 'Client', 'OS', 'Platform', 'Geo', 'UserAgent', 'RecordType')
+)`;
 
 export const runtime = "nodejs";
 
@@ -23,10 +35,11 @@ export async function POST(request: Request): Promise<Response> {
   }
   let payload: Record<string, unknown>;
   try {
-    const body: unknown = await request.json();
+    const body = await readPostmarkBody(request);
     if (!body || typeof body !== "object" || Array.isArray(body)) {throw new Error("invalid");}
     payload = body as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    if (error instanceof PostmarkBodyTooLarge) {return Response.json({ error: "Body too large" }, { status: 413 });}
     return Response.json({ error: "Invalid JSON object" }, { status: 400 });
   }
   if (payload.RecordType !== "Open") {return Response.json({ status: "ignored", reason: "record_type" });}
@@ -36,34 +49,37 @@ export async function POST(request: Request): Promise<Response> {
   }
   const detail: Record<string, unknown> = {
     RecordType: "Open", Type: "Opened", Details: { Summary: "Email opened" },
-    MessageID: payload.MessageID, ReceivedAt: payload.ReceivedAt,
+    MessageID: payload.MessageID.slice(0, 256), ReceivedAt: payload.ReceivedAt,
   };
   for (const key of ["Recipient", "FirstOpen", "Client", "OS", "Platform", "Geo", "UserAgent"]) {
-    if (payload[key] !== undefined) {detail[key] = payload[key];}
+    if (payload[key] !== undefined) {detail[key] = boundedPostmarkMetadata(payload[key], key === "UserAgent" ? 512 : 256);}
   }
   try {
     const messages = await queryPg<{ id: string }>(
       "select id from mail_message where provider_message_id = $1", [payload.MessageID],
     );
     if (!messages.length) {
-      console.info("Postmark mail webhook ignored unknown messages", { count: 1 });
-      return Response.json({ status: "ignored", reason: "unknown_message" });
+      console.info("Postmark mail webhook awaiting messages", { count: 1 });
+      return Response.json({ error: "Message not yet available" }, { status: 503 });
     }
     let inserted = 0;
     for (const message of messages) {
       // Source must match ingest.py: the unique key is (source, provider_event_id).
       // Keep event insertion and the earliest-open summary atomic.
-      const rows = await queryPg<{ id: string }>(`
+      const rows = await queryPg<{ id: string; inserted: boolean }>(`
         with fresh as (
-          insert into mail_event(message_id, type, source, provider_event_id, occurred_at, detail)
+          insert into mail_event as existing(message_id, type, source, provider_event_id, occurred_at, detail)
           values ($1, 'opened', 'postmark', $2, $3::timestamptz, $4::jsonb)
-          on conflict do nothing returning id
+          on conflict (source, provider_event_id) where provider_event_id is not null
+          do update set detail = ${enrichedDetail}
+          where existing.detail is distinct from ${enrichedDetail}
+          returning id, (xmax = 0) as inserted
         ), updated as (
           update mail_message set opened_at = least(opened_at, $3::timestamptz), updated_at = now()
-          where id = $1 and exists (select 1 from fresh)
-        ) select id from fresh`,
+          where id = $1 and exists (select 1 from fresh where inserted)
+        ) select id, inserted from fresh`,
       [message.id, postmarkOpenEventId(message.id, at), at, JSON.stringify(detail)]);
-      inserted += rows.length;
+      inserted += rows.filter((row) => row.inserted).length;
     }
     return Response.json({ status: inserted ? "recorded" : "duplicate", inserted });
   } catch {
