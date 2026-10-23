@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import styles from "./campaign-surface.module.css";
 import { TableCell } from "../ui/table-cell";
 import { useMemo } from "react";
 import { ExternalLink } from "lucide-react";
@@ -64,7 +65,7 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
     <div className="flex flex-col gap-4">
       {loading && <CampaignLoading label="Loading activity…" />}
       <CampaignCard label="Pitched listings">
-        <div className={`bulk-trades max-w-full overflow-x-auto`}>
+        <div className={styles.tableFrame}><div className={`bulk-trades max-w-full overflow-x-auto`}>
           <table aria-label="Listings" className={`${tableStyles.table} ${stack.stack} min-w-[720px]`}>
             <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Listing", "Pitched", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
             <tbody>
@@ -81,10 +82,10 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
               {!detail.listings.length && <tr><td colSpan={5} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No listings.</td></tr>}
             </tbody>
           </table>
-        </div>
+        </div></div>
       </CampaignCard>
       {!!detail.other_destinations.length && <CampaignCard label="Other destinations">
-        <div className={`bulk-trades max-w-full overflow-x-auto`}><table aria-label="Other destinations" className={`${tableStyles.table} ${stack.stack} min-w-[640px]`}>
+        <div className={styles.tableFrame}><div className={`bulk-trades max-w-full overflow-x-auto`}><table aria-label="Other destinations" className={`${tableStyles.table} ${stack.stack} min-w-[640px]`}>
           <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Destination", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>{detail.other_destinations.map((other) => {
             const destination = available ? activity.destinations.find((value) => value.listing_id == null && value.cta_key === other.cta_key) : undefined;
@@ -95,7 +96,7 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
               <WebsiteCells label={other.label} destination={destination} recipientsById={recipientsById} onNavigatePerson={onNavigatePerson} />
             </tr>;
           })}</tbody>
-        </table></div>
+        </table></div></div>
       </CampaignCard>}
     </div>
   );

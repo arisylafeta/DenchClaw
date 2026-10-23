@@ -13,6 +13,13 @@
   background: var(--bt-surface);
 }
 
+.tableFrame {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--bt-border);
+  border-radius: 12px;
+}
+
 .surface table {
   table-layout: auto;
 }

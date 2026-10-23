@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import styles from "./campaign-surface.module.css";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -355,6 +356,24 @@ describe("CampaignsView", () => {
 });
 
 describe("Campaign destination evidence sheets", () => {
+  it("frames every campaign table without removing its scroll container", async () => {
+    mockDetail({ ...detail, other_destinations: [{ cta_key: "grid", label: "General stock grid" }] });
+    const user = userEvent.setup();
+    render(<CampaignsView {...props} />);
+    const recipients = await screen.findByRole("table", { name: "Recipients" });
+    expect(recipients.parentElement?.parentElement).toHaveClass(styles.tableFrame);
+    expect(recipients.parentElement).toHaveClass("overflow-x-auto");
+    await openListings(user);
+    for (const name of ["Listings", "Other destinations"]) {
+      const table = screen.getByRole("table", { name });
+      expect(table.parentElement?.parentElement).toHaveClass(styles.tableFrame);
+      expect(table.parentElement).toHaveClass("overflow-x-auto");
+    }
+    await user.click(screen.getByRole("button", { name: "Nissan Leaf 40 kWh: Email clicks, 1" }));
+    const people = within(screen.getByRole("dialog")).getByRole("table", { name: "Destination people" });
+    expect(people.parentElement?.parentElement).toHaveClass(styles.tableFrame);
+    expect(people.parentElement).toHaveClass("overflow-auto");
+  });
   it("isolates accepted destination clicks from provider-wide and other-listing observations", async () => {
     const earlier = "2026-09-25T10:00:00.000Z";
     mockDetail({ ...detail, recipients: [

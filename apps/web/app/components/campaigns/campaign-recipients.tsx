@@ -1,6 +1,7 @@
 "use client";
 
 import tableStyles from "../ui/data-table.module.css";
+import styles from "./campaign-surface.module.css";
 import { TableCell } from "../ui/table-cell";
 import { useMemo, useRef, useState } from "react";
 import type { CampaignRecipient } from "@/lib/campaigns";
@@ -45,7 +46,7 @@ export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePe
           {FILTERS.map((value) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setPage(0); }} className="min-h-11 rounded-md px-3 text-[13px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]" style={filter === value ? { background: "var(--bt-surface)", color: "var(--bt-text)", boxShadow: "0 1px 2px var(--bt-border)" } : { color: "var(--bt-text)" }}>{value}</button>)}
         </div>
       </div>
-      <div className={`bulk-trades max-w-full overflow-x-auto`}>
+      <div className={styles.tableFrame}><div className={`bulk-trades max-w-full overflow-x-auto`}>
         <table ref={table} tabIndex={-1} aria-label="Recipients" className={`${tableStyles.table} ${stack.stack} min-w-[720px] focus:outline-none`}>
           <thead style={{ background: "var(--bt-table-head)" }}>
             <tr>{["Recipient", "Delivery", "Reply", "First open", "First click", outreach ? "Dismantler" : "Clicked listings", "Unsubscribed"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr>
@@ -72,7 +73,7 @@ export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePe
             {!visible.length && <tr><td colSpan={7} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>{recipients.length ? "No recipients match these filters." : "No retained recipients for this campaign."}</td></tr>}
           </tbody>
         </table>
-      </div>
+      </div></div>
       <div data-table-part="footer"><Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} /></div>
     </CampaignCard></div>
   );

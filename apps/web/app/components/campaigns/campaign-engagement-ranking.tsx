@@ -49,7 +49,7 @@ export function CampaignEngagementRanking({ rows, onNavigateEntry }: {
       <span style={{ color: "var(--bt-muted)" }}>{visible.length} recipients</span>
     </div>
     {visible.length === 0 ? <p className="text-sm" style={{ color: "var(--bt-muted)" }}>No recipients match this ranking.</p> :
-      <div className={`bulk-trades overflow-x-auto rounded-xl`} style={{ borderColor: "var(--bt-border)" }}><table className={`${tableStyles.table} ${stackStyles.stack} w-full text-left text-xs`}>
+      <div className={styles.tableFrame}><div className="bulk-trades overflow-x-auto"><table className={`${tableStyles.table} ${stackStyles.stack} w-full text-left text-xs`}>
         <thead style={{ color: "var(--bt-muted)" }}><tr>{["Person", "Company", "Opens", "Flagged opens", "Returns", "Days to open", "Last open (UTC)", "Unflagged links", "Flagged clicks", "Replied"].map((heading) => <th key={heading} title={heading === "Returns" ? "Open sessions after the first, more than 10 minutes apart, including flagged observations" : heading === "Unflagged links" ? "Distinct unflagged links, not verified humans" : heading === "Days to open" ? "Days from sending the first-opened message to its first open" : undefined} scope="col" className="whitespace-nowrap px-3 py-3 font-medium" style={{ borderColor: "var(--bt-border)" }}>{heading}</th>)}</tr></thead>
         <tbody>{visible.map((row) => <tr key={row.recipient_key}>
           <td className="min-w-40 px-3 py-3">{row.person_id ? <a className="font-medium underline underline-offset-2" href={buildEntryLink("people", row.person_id)} onClick={onNavigateEntry ? (event) => followInApp(event, () => onNavigateEntry("people", row.person_id!)) : undefined}>{row.person_name || row.recipient_email}</a> : <span>{row.person_name || row.recipient_email}</span>}
@@ -65,6 +65,6 @@ export function CampaignEngagementRanking({ rows, onNavigateEntry }: {
           <td data-label="Last open (UTC)" className="whitespace-nowrap px-3 py-3">{row.last_opened ? <time dateTime={row.last_opened}>{new Date(row.last_opened).toISOString().replace("T", " ").slice(0, 16)}</time> : "Not observed"}</td>
           <td data-label="Human links" className="px-3 py-3 tabular-nums">{row.human_links_clicked}</td><td data-label="Flagged clicks" className="px-3 py-3 tabular-nums">{row.flagged_clicks}</td><td data-label="Replied" className="px-3 py-3">{row.replied ? "Yes" : "No"}</td>
         </tr>)}</tbody>
-      </table></div>}
+      </table></div></div>}
   </section>;
 }

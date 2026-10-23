@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import styles from "./campaign-surface.module.css";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CampaignEngagement } from "@/lib/crm-postgres/campaign-engagement";
@@ -21,6 +22,8 @@ describe("campaign engagement ranking", () => {
       row({}),
     ]} />);
     const names = () => screen.getAllByRole("row").slice(1).map((tr) => within(tr).getByRole("link").textContent);
+    expect(screen.getByRole("table").parentElement?.parentElement).toHaveClass(styles.tableFrame);
+    expect(screen.getByRole("table").parentElement).toHaveClass("overflow-x-auto");
     expect(names()).toEqual(["Returning reader", "Click reader"]);
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "human_links_clicked" } });
     expect(names()).toEqual(["Click reader", "Returning reader"]);

@@ -72,7 +72,7 @@ function PeopleTable({ rows, source, navigate }: { rows: CampaignPersonRow[]; so
       <div data-table-part="toolbar" className="px-4 py-3" style={{ borderColor: "var(--bt-divider)", background: "var(--bt-bg)" }}>
         <Input data-table-part="search" type="search" aria-label="Search sheet people" placeholder="Search name, company or email" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={`${styles.tableFrame} flex min-h-0 flex-1 flex-col`}><div className="min-h-0 flex-1 overflow-auto">
         <table ref={table} tabIndex={-1} aria-label="Destination people" className={`${tableStyles.table} ${stack.stack} min-w-[560px] focus:outline-none`}>
           <thead style={{ background: "var(--bt-table-head)" }}><tr>{headers.map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>
@@ -96,7 +96,7 @@ function PeopleTable({ rows, source, navigate }: { rows: CampaignPersonRow[]; so
             {!filtered.length && <tr><td colSpan={headers.length} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>{rows.length ? "No recipient records match this search." : "No recipient records with this activity were observed."}</td></tr>}
           </tbody>
         </table>
-      </div>
+      </div></div>
       <div data-table-part="footer"><Pagination page={currentPage} count={filtered.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} /></div>
     </div>
   );
