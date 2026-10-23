@@ -1,5 +1,6 @@
 import type { CampaignDetail, CampaignListing, CampaignMetrics, CampaignRecipient, CampaignSummary } from "../campaigns";
 import { queryPg } from "../postgres";
+import { campaignReplyAtSql } from "./mail-replies";
 
 type Timestamp = string | Date | null;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -170,14 +171,7 @@ async function readSends(ids: string[], ledger: Ledger, withRecipients = false, 
     select s.id as send_id, s.campaign_id, s.provider_message_id, s.state, s.accepted_at, s.delivered_at,
            s.bounced_at, s.opened_at as provider_opened_at, s.clicked_at as provider_link_clicked_at, s.last_synced_at,
            ${ledger.links_available ? `(select min(l.first_clicked_at) from mail_message_link l where l.message_id = s.id)` : "null::timestamptz"} as link_clicked_at,
-           -- A reply is any inbound synced email from the recipient, or their company, after the send.
-           (select min(m.sent_at) from mail_message m
-             where m.direction = 'inbound' and s.accepted_at is not null and m.sent_at > s.accepted_at
-               and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
-               and (lower(m.from_email) = s.recipient_email or m.from_person_id = s.person_id
-                 or exists (select 1 from crm_people fp where fp.id = m.from_person_id
-                             and fp.company_id = coalesce(s.company_id, (select sp.company_id from crm_people sp where sp.id = s.person_id))))
-           ) as replied_at
+           ${campaignReplyAtSql("s")} as replied_at
            ${withRecipients ? `, s.person_id, p.full_name as person_name, coalesce(s.company_id, p.company_id) as company_id,
              company.name as company_name, s.recipient_email, s.listing_id, s.auction_url, s.subject as rendered_subject,
              d.id as dismantler_id, d.stage as dismantler_stage` : ""}

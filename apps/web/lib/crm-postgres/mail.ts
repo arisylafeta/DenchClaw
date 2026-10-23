@@ -1,4 +1,5 @@
 import { queryPg } from '../postgres';
+import { campaignReplyAtSql } from './mail-replies';
 import type { MailMessageSummary, MailDraft, MailDraftListRow, MailApproval, MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
 import { listCampaigns, getCampaignDetail } from './campaigns';
 
@@ -145,12 +146,7 @@ export async function mailCampaignCounts(id?: string, filters: MailFilters = {})
     count(m.delivered_at)::int as delivered,count(m.bounced_at)::int as bounced,count(m.opened_at)::int as opened,
     count(m.id) filter (where m.clicked_at is not null or exists (select 1 from mail_message_link l where l.message_id = m.id and l.first_clicked_at is not null))::int as clicked,
     count(m.id) filter (where exists (select 1 from mail_event e where e.message_id = m.id and e.type = 'unsubscribed'))::int as unsubscribed,
-    count(m.id) filter (where m.replied_at is not null or exists (select 1 from mail_event e where e.message_id = m.id and e.type = 'replied')
-      or exists (select 1 from mail_message reply where reply.direction = 'inbound' and reply.sent_at > m.accepted_at
-        and lower(coalesce(reply.from_email,'')) not like '%@rebattery.io'
-        and (lower(reply.from_email) = m.recipient_email or reply.from_person_id = m.person_id
-          or exists (select 1 from crm_people fp where fp.id = reply.from_person_id
-            and fp.company_id = coalesce(m.company_id,(select sp.company_id from crm_people sp where sp.id=m.person_id))))))::int as replied
+    count(m.id) filter (where ${campaignReplyAtSql("m")} is not null)::int as replied
     from campaigns c left join mail_message m on m.campaign_id = c.id and m.direction = 'outbound' where ${campaignWhere} ${where.length ? `and ${where.join(' and ')}` : ''} group by c.id order by c.id`, values);
 }
 export async function listMailCampaigns(filters: MailFilters = {}) {

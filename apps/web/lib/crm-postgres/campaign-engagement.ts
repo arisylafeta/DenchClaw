@@ -1,4 +1,5 @@
 import { queryPg } from "../postgres";
+import { campaignReplyAtSql } from "./mail-replies";
 
 export const OPEN_SESSION_GAP_MS = 10 * 60 * 1000;
 export const SCANNER_WINDOW_MS = 5 * 1000;
@@ -173,7 +174,7 @@ export function compareCampaignEngagement(a: CampaignEngagement, b: CampaignEnga
 export const CAMPAIGN_ENGAGEMENT_SQL = `
   select m.id, m.person_id, p.full_name as person_name, c.name as company_name,
          coalesce(m.recipient_email, m.to_emails[1], '') as recipient_email,
-         m.sent_at, m.delivered_at, (m.replied_at is not null) as replied,
+         m.sent_at, m.delivered_at, (${campaignReplyAtSql("m")} is not null) as replied,
          coalesce((select jsonb_agg(distinct l.destination_url) from mail_message_link l
                    where l.message_id = m.id), '[]'::jsonb) as links,
          coalesce((select jsonb_agg(jsonb_build_object('type', e.type,
