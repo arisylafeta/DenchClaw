@@ -48,7 +48,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson, query = "" }: P
   const activity = currentEvidence?.activity ?? null;
   const activityLoading = !currentEvidence || (!currentEvidence.failed && !activity);
   return (
-    <div className={`bulk-trades bt-preview ${styles.surface} flex min-h-0 min-w-0 flex-1 flex-col overflow-auto`}>
+    <div className={`bulk-trades ${styles.surface} flex min-h-0 min-w-0 flex-1 flex-col overflow-auto`}>
       <header className="flex flex-col gap-4 px-4 pb-3 pt-6 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <a href={buildFileLink("campaign")} onClick={(event) => followInApp(event, onBack)} aria-label="Back to Campaigns" className="inline-flex h-11 w-11 items-center justify-center rounded-full hover:bg-[var(--bt-row-hover)]" style={mutedStyle}><ArrowLeft size={15} aria-hidden="true" /></a>

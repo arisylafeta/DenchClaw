@@ -1,9 +1,33 @@
-/* Campaign-only shape contract. Palette and typography come from Trades Preview.
-   Specific selectors override the shared table primitive's intentionally square controls. */
+/* Campaign-only palette, including nested shared primitives and portalled sheets.
+   Specificity keeps the light/dark Bulk Trades defaults from resetting these tokens. */
+.surface.surface:global(.bulk-trades),
+.surface.surface :global(.bulk-trades) {
+  --bt-bg: var(--color-bg);
+  --bt-surface: var(--color-surface);
+  --bt-row-hover: var(--color-surface-hover);
+  --bt-border: var(--color-border);
+  --bt-border-strong: color-mix(in srgb, var(--color-text) 30%, transparent);
+  --bt-divider: var(--color-border);
+  --bt-segment: color-mix(in srgb, var(--color-text) 7%, transparent);
+  --bt-column: var(--color-surface-hover);
+  --bt-column-over: var(--color-surface-hover);
+  --bt-table-head: color-mix(in srgb, var(--color-text) 3%, transparent);
+  --bt-dashed: color-mix(in srgb, var(--color-text) 20%, transparent);
+  --bt-text: var(--color-text);
+  --bt-text-2: color-mix(in srgb, var(--color-text) 78%, var(--color-bg));
+  --bt-muted: var(--bt-text-2);
+  --bt-badge: var(--color-text);
+  --bt-on-badge: var(--color-bg);
+  font-family: inherit;
+}
+
 .surface {
   color: var(--bt-text);
   background: var(--bt-bg);
-  --bt-muted: var(--bt-text-2);
+}
+
+.surface :global(.rounded-none) {
+  border-radius: 8px;
 }
 
 .card {

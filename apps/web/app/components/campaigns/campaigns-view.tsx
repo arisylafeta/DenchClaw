@@ -51,7 +51,7 @@ export function CampaignsView({ campaignId, onOpenCampaign, onBack, onNavigatePe
 
   const current = resource.key === key ? resource : null;
   return (
-    <div className={`bulk-trades bt-preview ${styles.surface} flex h-full min-h-0 min-w-0 flex-col overflow-auto`}>
+    <div className={`bulk-trades ${styles.surface} flex h-full min-h-0 min-w-0 flex-col overflow-auto`}>
       {current?.payload?.kind === "detail" ? <CampaignPage key={campaignId} query={query} detail={current.payload.detail} onBack={onBack} onNavigatePerson={onNavigatePerson} /> : (
         <>
           {!embedded && <header className="flex flex-col gap-2.5 px-4 pb-5 pt-5 sm:px-8" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -138,19 +138,19 @@ export function CampaignsPanel({ campaignId, onOpenCampaign, onBack, onNavigateP
   const retry = <button type="button" onClick={() => setAttempt((value) => value + 1)} className={buttonClass} style={buttonStyle}>Retry</button>;
   // Nothing open: the list takes the whole screen, with no empty detail pane beside it.
   if (campaignId == null) {
-    return <div className={`bulk-trades bt-preview ${styles.surface} h-full min-h-0 overflow-y-auto pt-3`} style={{ background: "var(--color-bg)" }}>
+    return <div className={`bulk-trades ${styles.surface} h-full min-h-0 overflow-y-auto pt-3`} style={{ background: "var(--color-bg)" }}>
       {list.error ? <div className="flex flex-col items-start gap-3 px-4"><ErrorText error={list.error} />{retry}</div>
         : list.campaigns ? <CampaignsList campaigns={list.campaigns} onOpenCampaign={onOpenCampaign} search={search} status={status} />
         : <CampaignListSkeleton />}
     </div>;
   }
   return <InboxLayout {...PANEL_LAYOUT} defaultWidth={520} minWidth={360} storageKey="denchclaw.crm-inbox.campaigns-width" hasSelection={campaignId != null}
-    list={<div className={`bulk-trades bt-preview ${styles.surface} h-full min-h-0 overflow-y-auto pt-3`} style={{ background: "var(--color-bg)" }}>
+    list={<div className={`bulk-trades ${styles.surface} h-full min-h-0 overflow-y-auto pt-3`} style={{ background: "var(--color-bg)" }}>
       {list.error ? <div className="flex flex-col items-start gap-3 px-4"><ErrorText error={list.error} />{retry}</div>
         : list.campaigns ? <CampaignsList compact campaigns={list.campaigns} selectedId={campaignId} onOpenCampaign={onOpenCampaign} search={search} status={status} />
         : <CampaignListSkeleton compact single={campaignId != null} />}
     </div>}
     conversation={detail?.error ? <div className="flex flex-col items-start gap-3 p-6"><ErrorText error={detail.error} />{retry}</div>
-      : detail?.value && detail.id === campaignId ? <div className={`bulk-trades bt-preview ${styles.surface} flex h-full min-h-0 min-w-0 flex-col`}><CampaignPage key={campaignId} detail={detail.value} onBack={onBack} onNavigatePerson={onNavigatePerson} /></div>
+      : detail?.value && detail.id === campaignId ? <div className={`bulk-trades ${styles.surface} flex h-full min-h-0 min-w-0 flex-col`}><CampaignPage key={campaignId} detail={detail.value} onBack={onBack} onNavigatePerson={onNavigatePerson} /></div>
       : <CampaignPageSkeleton />} />;
 }

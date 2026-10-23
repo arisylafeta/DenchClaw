@@ -10,6 +10,7 @@ import type { CampaignActivity, CampaignActivityDestination, CampaignActivityPer
 import type { MailCounts } from "@/lib/mail-types";
 import { buildEntryLink } from "@/lib/workspace-links";
 import { CampaignsView, type CampaignsViewProps } from "./campaigns-view";
+import { CampaignPeopleSheet, type PeopleSource } from "./campaign-people-sheet";
 
 const AT = "2026-09-29T10:30:00.000Z";
 const summary: CampaignSummary = {
@@ -356,11 +357,35 @@ describe("CampaignsView", () => {
 });
 
 describe("Campaign destination evidence sheets", () => {
+  it.each<PeopleSource>(["email", "click", "browser", "offer", "message", "buy_now"])("offers a collapsed source-specific evidence note for %s", async (source) => {
+    const user = userEvent.setup();
+    render(<CampaignPeopleSheet destination="Battery listing" source={source} count={0} rows={[]} onNavigatePerson={vi.fn()} />);
+    await user.click(screen.getByRole("button"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveClass(styles.surface);
+    expect(document.querySelector(".bt-preview")).toBeNull();
+    const summary = within(dialog).getByText("About these numbers");
+    const disclosure = summary.closest("details")!;
+    expect(disclosure.open).toBe(false);
+    await user.click(summary);
+    expect(disclosure.open).toBe(true);
+    const note = within(disclosure).getByText(/Unknown means website evidence/);
+    expect(note).toBeVisible();
+    expect(note).not.toHaveClass("sr-only");
+    expect(note).toHaveTextContent(source === "email" ? "Counts and latest times are separate PostHog observations, not Postmark totals." : "PostHog observations for assigned destination links.");
+    expect(note).toHaveTextContent("Unknown means website evidence is unavailable or unmapped.");
+    expect(note).toHaveTextContent("forwarded links do not verify the recipient");
+    expect(note).toHaveTextContent("missing consented views do not prove inactivity");
+  });
+
   it("frames every campaign table without removing its scroll container", async () => {
     mockDetail({ ...detail, other_destinations: [{ cta_key: "grid", label: "General stock grid" }] });
     const user = userEvent.setup();
-    render(<CampaignsView {...props} />);
+    const view = render(<CampaignsView {...props} />);
     const recipients = await screen.findByRole("table", { name: "Recipients" });
+    expect(view.container.firstElementChild).toHaveClass(styles.surface);
+    expect(screen.getByRole("heading", { name: "Battery offer" }).closest(`.${styles.surface}`)).toHaveClass(styles.surface);
+    expect(document.querySelector(".bt-preview")).toBeNull();
     expect(recipients.parentElement?.parentElement).toHaveClass(styles.tableFrame);
     expect(recipients.parentElement).toHaveClass("overflow-x-auto");
     await openListings(user);

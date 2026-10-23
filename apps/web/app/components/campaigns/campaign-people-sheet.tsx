@@ -45,11 +45,14 @@ export function CampaignPeopleSheet({ destination, source, count, rows, onNaviga
       <SheetTrigger asChild>
         <button type="button" aria-label={`${destination}: ${SOURCE_LABELS[source]}, ${count}`} className="bt-mono inline-flex items-center gap-1 rounded-none text-[13px] underline decoration-transparent underline-offset-4 hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{count.toLocaleString("en-GB")} {source === "click" ? count === 1 ? "click" : "clicks" : source === "browser" || source === "email" ? count === 1 ? "recipient" : "recipients" : count === 1 ? "event" : "events"}<ChevronRight size={14} aria-hidden="true" /></button>
       </SheetTrigger>
-      <SheetContent side="right" showCloseButton={false} className={`bulk-trades bt-preview ${styles.surface} gap-0 rounded-xl p-0 sm:max-w-none`} style={{ width: "min(960px, 100vw)", maxWidth: "100vw", background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" }} onCloseAutoFocus={(event) => { if (navigating.current) { event.preventDefault(); } }}>
+      <SheetContent side="right" showCloseButton={false} className={`bulk-trades ${styles.surface} gap-0 rounded-xl p-0 sm:max-w-none`} style={{ width: "min(960px, 100vw)", maxWidth: "100vw", background: "var(--bt-surface)", color: "var(--bt-text)", borderColor: "var(--bt-border)" }} onCloseAutoFocus={(event) => { if (navigating.current) { event.preventDefault(); } }}>
         <header className="flex items-start justify-between gap-4 px-5 py-5" style={{ borderColor: "var(--bt-border)" }}>
           <div className="min-w-0">
             <SheetTitle className="text-base font-semibold" style={{ color: "var(--bt-text)" }}>{destination} · {SOURCE_LABELS[source]}</SheetTitle>
-            <SheetDescription className="sr-only">{SOURCE_LABELS[source]} for {destination}. Observations do not verify a person or visit.</SheetDescription>
+            <details className="mt-1 text-xs" style={mutedStyle}>
+              <summary className="cursor-pointer">About these numbers</summary>
+              <SheetDescription className="mt-1 text-xs" style={mutedStyle}>{source === "email" ? "Email-clicked recipients come from the retained ledger. Counts and latest times are separate PostHog observations, not Postmark totals. " : "PostHog observations for assigned destination links. "}Unknown means website evidence is unavailable or unmapped. Redirect clicks may be automated; forwarded links do not verify the recipient, and missing consented views do not prove inactivity.</SheetDescription>
+            </details>
           </div>
           <SheetClose asChild><button type="button" aria-label="Close people sheet" className={`${buttonClass} min-h-11 w-11 shrink-0 rounded-lg p-0`} style={{ ...buttonStyle, height: 44, width: 44, padding: 0 }}><X size={14} aria-hidden="true" /></button></SheetClose>
         </header>
