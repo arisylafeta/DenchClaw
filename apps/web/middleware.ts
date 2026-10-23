@@ -10,6 +10,7 @@ const PUBLIC_ASSETS = new Set([
 const PUBLIC_ROUTES = new Set([
   "/login",
   "/api/auth/login",
+  "/api/webhooks/postmark-mail",
   "/api/settings/mcp/connect/callback",
 ]);
 // /t/ serves tracked links from trade emails; tokens are random and only forward.
@@ -26,7 +27,7 @@ function isPublicPath(pathname: string): boolean {
 
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
-  if (isPublicPath(pathname)) return NextResponse.next();
+  if (isPublicPath(pathname)) {return NextResponse.next();}
 
   if (!SAFE_METHODS.has(req.method) && !hasSameOrigin(req)) {
     return NextResponse.json({ error: "CSRF check failed" }, { status: 403 });
