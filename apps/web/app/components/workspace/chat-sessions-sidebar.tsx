@@ -22,6 +22,8 @@ export type WebSession = {
 	updatedAt: number;
 	messageCount: number;
 	filePath?: string;
+	/** Native Hermes rows: false hides Delete. Absent for sessions without server permissions. */
+	canDelete?: boolean;
 };
 
 export type SidebarSubagentInfo = {

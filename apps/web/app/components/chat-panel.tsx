@@ -2,8 +2,8 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { parseConversationKey } from "@/lib/hermes-conversations";
-import type { HermesConversation } from "@/lib/hermes-conversations";
+import { parseConversationAccess, parseConversationKey } from "@/lib/hermes-conversations";
+import type { ConversationAccess, HermesConversation } from "@/lib/hermes-conversations";
 import { useNativeHermesChat } from "@/lib/hermes-chat/use-native-chat";
 import { initialSubagents } from "@/lib/hermes-chat/subagents";
 import { slashNotice } from "@/lib/hermes-chat/event-notices";
@@ -17,7 +17,7 @@ import { GroupAuthor } from "./workspace/group-chat";
 import { GroupActivity, GroupWorkTrace, type GroupSettlement } from "./chat-native/group-activity";
 import type { RoomDriver } from "@/lib/hermes-native";
 import type { HermesParticipant } from "@/lib/hermes-conversations";
-type GroupDetail = { conversation?: { working?: boolean | null; participants?: HermesParticipant[] }; driver?: RoomDriver; settled?: GroupSettlement[]; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string; memberId?: string; turnId?: string; createdAt?: number }>; cursor?: number };
+type GroupDetail = { conversation?: { working?: boolean | null; participants?: HermesParticipant[]; access?: unknown }; driver?: RoomDriver; settled?: GroupSettlement[]; messages?: Array<{ id: string; role: "user" | "assistant"; text?: string; content?: string; profile?: string; name?: string; memberId?: string; turnId?: string; createdAt?: number }>; cursor?: number };
 import { Fragment } from "react";
 import {
 	forwardRef,
@@ -879,6 +879,10 @@ type ChatPanelProps = {
   nativeConversationKey?: string;
   nativeTransport?: "gateway" | "sse";
   onBranched?: (conversation: HermesConversation) => void;
+  /** Permissions from the conversation list, used until the chat's own detail or snapshot arrives. Missing grants nothing. */
+  nativeAccess?: ConversationAccess;
+  /** The server withdrew access to this conversation; its transcript and caches here are already purged. */
+  onAccessRevoked?: (key: string) => void;
 	/** When set, scopes sessions to this file and prepends content as context. */
 	fileContext?: FileContext;
 	/** Compact mode for workspace sidebar (smaller UI, built-in session tabs). */
@@ -987,6 +991,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			nativeConversationKey,
 			nativeTransport,
 			onBranched,
+			nativeAccess,
+			onAccessRevoked,
 			onFileChanged,
 			onActiveSessionChange,
 			onSessionsChange,
@@ -1221,7 +1227,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			try { return parseConversationKey(nativeConversationKey).kind === "group" ? nativeConversationKey : undefined; } catch { return undefined; }
 		}, [nativeConversationKey]);
 		const nativeGateway = nativeTransport === "gateway" && !!nativeConversationKey && !groupKey;
-		const nativeChat = useNativeHermesChat({ conversationKey: nativeConversationKey, enabled: nativeGateway && visible !== false });
+		const revokedHandler = useRef<(key: string) => void>(() => {});
+		const nativeChat = useNativeHermesChat({ conversationKey: nativeConversationKey, enabled: nativeGateway && visible !== false, onRevoked: (key) => revokedHandler.current(key) });
+		/** Group and solo-SSE chats learn their permissions from the conversation detail; gateway chats from the snapshot. */
+		const [detailAccess, setDetailAccess] = useState<{ key: string; access: ConversationAccess | null } | null>(null);
+		const [revokedKey, setRevokedKey] = useState<string | null>(null);
+		const revokedKeyRef = useRef<string | null>(null);
+		const accessRevoked = !!nativeConversationKey && revokedKey === nativeConversationKey;
+		const conversationAccess = !nativeConversationKey || accessRevoked ? null
+			: nativeGateway ? nativeChat.access
+			: detailAccess?.key === nativeConversationKey ? detailAccess.access
+			: parseConversationAccess(nativeAccess);
+		// Drafts and legacy sessions have no server permissions; every native chat needs a verified grant for each action.
+		const canWrite = !nativeConversationKey || conversationAccess?.canWrite === true;
+		const canApprove = !nativeConversationKey || conversationAccess?.canApprove === true;
+		const canDelete = !nativeConversationKey || conversationAccess?.canDelete === true;
+		const canDerive = conversationAccess?.canShare === true;
+		const viewOnly = !!nativeConversationKey && !accessRevoked && !!conversationAccess && !conversationAccess.canWrite;
 		const pendingNativeRequest = nativeGateway && nativeChat.state.pendingRequests.length > 0;
 		const clarificationOpen = nativeGateway && nativeChat.state.pendingRequests.some(request => request.kind === "clarify");
 		const [composerText, setComposerText] = useState("");
@@ -1236,7 +1258,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			return () => clearTimeout(timer);
 		}, [commandStatus]);
 		// Cover the render before identity/hydration effects and all imperative callers.
-		const submissionUnavailable = initializing || conversationUnselected || loadingSession || slashBusy || pendingNativeRequest ||
+		const submissionUnavailable = initializing || conversationUnselected || loadingSession || slashBusy || pendingNativeRequest || accessRevoked || !canWrite ||
 			attachedFiles.some(file => file.uploading) ||
 			(nativeGateway && (nativeChat.state.hydrating || nativeChat.state.key !== nativeConversationKey ||
 				nativeChat.connection !== "connected" || !!nativeChat.readOnly)) ||
@@ -1331,7 +1353,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         useEffect(() => { setGroupWork({ roster: [], settled: [] }); setGroupWorking(false); setGroupIdlePolls(0); groupReleasePausedRef.current = false; }, [groupKey]);
 		const [groupAgents, setGroupAgents] = useState<{ handle: string; name: string; profile: string }[]>([]);
 		useEffect(() => setGroupAgents([]), [groupKey]);
+		/** Drops everything this panel holds for a conversation whose access was withdrawn, and blocks late responses from restoring it. */
+		const purgeConversation = useCallback((key: string) => {
+			revokedKeyRef.current = key;
+			setRevokedKey(key); setDetailAccess(null);
+			setMessages([]); setQueuedMessages([]); setStreamError(null);
+			userHtmlMapRef.current.clear(); optimisticGroupIds.current.clear(); savedMessageIdsRef.current.clear();
+			groupCursorRef.current = 0; groupReleaseRef.current = null; groupReleasePausedRef.current = false;
+			setGroupWork({ roster: [], settled: [] }); setGroupAgents([]); setGroupWorking(false); setGroupIdlePolls(0);
+			onAccessRevoked?.(key);
+		}, [setMessages, onAccessRevoked]);
+		revokedHandler.current = purgeConversation;
 		const applyGroupDetail = useCallback((data: GroupDetail) => {
+			if (!groupKey || revokedKeyRef.current === groupKey) return;
+			const access = parseConversationAccess(data.conversation?.access);
+			setDetailAccess((prev) => prev?.key === groupKey && JSON.stringify(prev.access) === JSON.stringify(access) ? prev : { key: groupKey, access });
             updateGroupWork(data);
 			const roster = (data.conversation?.participants ?? []).filter((p) => p.handle).map((p) => ({ handle: p.handle!, name: p.name || p.handle!, profile: p.profile }));
 			if (roster.length) setGroupAgents((prev) => prev.length === roster.length && prev.every((a, i) => a.handle === roster[i].handle && a.name === roster[i].name) ? prev : roster);
@@ -1363,19 +1399,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				}));
 				return added.length ? [...rows, ...added] : rows.some((row, i) => row !== prev[i]) ? rows : prev;
 			});
-		}, [setMessages, updateGroupWork]);
+		}, [setMessages, updateGroupWork, groupKey]);
 		useEffect(() => {
-			if (!groupKey || loadingSession || !currentSessionId) return;
+			if (!groupKey || accessRevoked || loadingSession || !currentSessionId) return;
 			let alive = true;
 			const poll = async () => {
 				try {
 					const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(groupKey)}?since_seq=${groupCursorRef.current}`);
-					if (alive && res.ok) applyGroupDetail(await res.json());
+					if (!alive) return;
+					if (res.status === 404) {
+						if ((await res.json().catch(() => ({}))).error === "not_found" && alive) purgeConversation(groupKey);
+						return;
+					}
+					if (!res.ok) return;
+					const data = await res.json();
+					if (alive) applyGroupDetail(data);
 				} catch { /* The next tick retries. */ }
 			};
 			const timer = setInterval(() => void poll(), 3000);
 			return () => { alive = false; clearInterval(timer); };
-		}, [groupKey, loadingSession, currentSessionId, applyGroupDetail]);
+		}, [groupKey, accessRevoked, loadingSession, currentSessionId, applyGroupDetail, purgeConversation]);
 
 		const isStreaming = nativeGateway ? nativeChat.active :
 			status === "streaming" ||
@@ -2341,7 +2384,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							body: JSON.stringify({ message: messageText, eventId }),
 						});
 						if (res.ok) { setStreamError(null); applyGroupDetail(await res.json()); }
-						else { setStreamError((await res.json().catch(() => ({ error: "" }))).error || "Failed to send message."); restoreGroupRelease(releasingGroup, eventId); }
+						else {
+							const failure = await res.json().catch(() => ({ error: "" }));
+							if (res.status === 404 && failure.error === "not_found") { purgeConversation(groupKey); }
+							else { setStreamError(failure.error || "Failed to send message."); restoreGroupRelease(releasingGroup, eventId); }
+						}
 					} catch {
 						setStreamError("Failed to send message.");
 						restoreGroupRelease(releasingGroup, eventId);
@@ -2386,6 +2433,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 				groupKey,
 				applyGroupDetail,
 				restoreGroupRelease,
+				purgeConversation,
 				nativeGateway,
 				nativeChat.send,
 				nativeChat.readOnly,
@@ -2475,6 +2523,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					const response = await fetch(
 						nativeConversationKey ? `/api/hermes/conversations/${encodeURIComponent(nativeConversationKey)}` : `/api/web-sessions/${sessionId}`,
 					);
+					if (nativeConversationKey && response.status === 404 && (await response.clone().json().catch(() => ({}))).error === "not_found") {
+						purgeConversation(nativeConversationKey);
+						setLoadingSession(false);
+						return;
+					}
 					if (!response.ok) {
 						console.warn(`Session ${sessionId} not found (${response.status}), starting fresh.`);
 						setMessages([]);
@@ -2483,6 +2536,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					}
 
 					const data = await response.json();
+					if (nativeConversationKey) {
+						// A response that settles after revocation must not restore the transcript.
+						if (revokedKeyRef.current === nativeConversationKey) { setLoadingSession(false); return; }
+						if (!nativeGateway) setDetailAccess({ key: nativeConversationKey, access: parseConversationAccess(data.conversation?.access) });
+					}
 					const sessionMessages: Array<{
 						id: string;
 						role: "user" | "assistant";
@@ -2557,6 +2615,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         nativeConversationKey,
 				groupKey,
 				nativeGateway,
+				purgeConversation,
 			],
 		);
 
@@ -2614,6 +2673,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 		// ── Stop handler (aborts server-side run + client-side stream) ──
 		const handleStop = useCallback(async () => {
 			if (nativeGateway) { await nativeChat.interrupt(); return; }
+			if (nativeConversationKey && !canWrite) { return; }
 			// Abort reconnection stream if active (immediate visual feedback).
 			reconnectAbortRef.current?.abort();
 			setIsReconnecting(false);
@@ -2642,7 +2702,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 			// Stop the useChat transport stream (transitions status → "ready").
 			void stop();
-		}, [stop, nativeConversationKey, nativeGateway, nativeChat.interrupt]);
+		}, [stop, nativeConversationKey, nativeGateway, nativeChat.interrupt, canWrite]);
 
 		// Keep the ref in sync so handleEditorSubmit can call stop without
 		// depending on handleStop (would create a dependency cycle).
@@ -2805,19 +2865,22 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
 		// ── Input bar content (shared between hero and bottom positions) ──
 
-		const inputBarContent = nativeGateway && nativeChat.readOnly ? (
+		const inputBarContent = accessRevoked ? (
+			<aside role="status" aria-label="Access removed" className="mx-3 mb-3 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[13px] text-[var(--color-text-muted)]">You no longer have access to this chat.</aside>
+		) : nativeGateway && nativeChat.readOnly ? (
 			// Read-only (cron/webhook) chats show no composer, attachments or voice input at all.
-			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); }} />
+			<ReadOnlyNotice source={nativeChat.readOnly.source} onBranch={canDerive ? async () => { const conversation = await nativeChat.branch(); if (conversation) onBranched?.(conversation); } : undefined} />
 		) : (
 			<>
 				{nativeGateway && <PromptDock key={nativeConversationKey} composerTarget={clarifyComposerTarget} disabled={transcriptLoading || nativeChat.connection === "lost"} state={nativeChat.state} subagents={nativeChat.subagents} todos={nativeChat.todos} profile={agentProfile} tails={nativeChat.tails} queued={nativeChat.queuedMessages} goal={nativeChat.goal} busy={nativeChat.state.busy} onGoalControl={nativeChat.goalControl} callbacks={{
 					onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 					onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
-					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
-				}} />}
+					onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: canWrite ? nativeChat.retry : undefined,
+				}} canWrite={canWrite} canApprove={canApprove} />}
 				{groupKey && <PromptDock key={groupKey} state={{ pendingRequests: [], sessionId: groupKey }} subagents={NO_SUBAGENTS} callbacks={NO_DOCK_CALLBACKS}
 					queued={queuedMessages.map(message => ({ id: message.id, text: message.text, steer: false }))} />}
 				<div ref={setClarifyComposerTarget} hidden={!clarificationOpen} />
+				{viewOnly && <p role="status" className="px-3 pb-1 text-[11px] text-[var(--color-text-muted)]">You can read this chat but not send messages.</p>}
 				{clarificationOpen && <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">
 					{attachedFiles.length > 0 && <p>Attachments are saved for your next message. Answers are text only.</p>}
 					{isStreaming && <button type="button" onClick={() => handleStop()} className="min-h-9 rounded-md px-2 focus-visible:outline-2">Stop generating</button>}
@@ -3094,7 +3157,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 								</svg>
 							</button>
 						)}
-						{currentSessionId && onDeleteSession && (
+						{currentSessionId && onDeleteSession && canDelete && (
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									className="p-1.5 rounded-lg cursor-pointer transition-colors"
@@ -3179,11 +3242,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									if (container) container.scrollTop = top + container.scrollHeight - height;
 								});
 							}}>{nativeChat.loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}</button>}
-							<NativeTranscript state={nativeChat.state} onOpenArtifact={onFilePathClick} onSendPrompt={text => nativeChat.send({ text })} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
+							<NativeTranscript state={nativeChat.state} onOpenArtifact={onFilePathClick} onSendPrompt={canWrite ? (text => nativeChat.send({ text })) : undefined} userHtml={(id) => nativeChat.html.get(id)} queuedMessageIds={nativeChat.queuedMessageIds} callbacks={{
                                 onCancelNotice: () => { setDeferredSlash(null); setCommandStatus(null); },
 								onApproval: nativeChat.approve, onClarify: nativeChat.answerClarify,
 								onSubagentTail: nativeChat.subagentTail, onSubagentSteer: nativeChat.subagentSteer,
-								onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: nativeChat.retry,
+								onSubagentInterrupt: nativeChat.subagentInterrupt, onRetry: canWrite ? nativeChat.retry : undefined,
 							}} />
 						</div>
 					) : optimisticUserText !== null && messages.length === 0 ? (
@@ -3265,12 +3328,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 											userHtmlMap={userHtmlMapRef.current}
 											copyable
 										/>
-										{groupKey && author?.memberId && author.turnId && <GroupWorkTrace conversationKey={groupKey} memberId={author.memberId} turnId={author.turnId} />}
+										{groupKey && !accessRevoked && author?.memberId && author.turnId && <GroupWorkTrace conversationKey={groupKey} memberId={author.memberId} turnId={author.turnId} />}
 									</Fragment>
 								);
 							});
 						})()}
-						{groupKey && <GroupActivity key={groupKey} conversationKey={groupKey} working={groupWorking} visible={visible !== false} roster={groupWork.roster} driver={groupWork.driver} settled={groupWork.settled} lastUser={groupWork.lastUser} />}
+						{groupKey && !accessRevoked && <GroupActivity key={groupKey} conversationKey={groupKey} working={groupWorking} visible={visible !== false} roster={groupWork.roster} driver={groupWork.driver} settled={groupWork.settled} lastUser={groupWork.lastUser} />}
                         {showStreamActivity && (
 							<div className="py-3 min-w-0">
 								<div

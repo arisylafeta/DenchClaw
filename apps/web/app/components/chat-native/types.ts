@@ -10,7 +10,8 @@ export interface NativeTranscriptCallbacks {
   onSubagentSteer(id: string, text: string): void | Promise<void>;
   onSubagentInterrupt(id: string): void | Promise<void>;
   onCancelNotice?(): void;
-  onRetry(): void | Promise<void>;
+  /** Absent when the viewer cannot write; the failed-turn card then offers no retry. */
+  onRetry?(): void | Promise<void>;
 }
 export interface NativeTranscriptProps {
   state: ChatState;

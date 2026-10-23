@@ -17,11 +17,13 @@ export interface SubagentCardProps {
   tails?: Readonly<Record<string, string>>;
   /** The parent chat's profile; subagents without their own profile inherit it. */
   profile?: string | null;
+  /** Steer and Stop need write access; viewing output does not. */
+  canWrite?: boolean;
 }
 const compact = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value);
 const actionClass = "rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-2 disabled:opacity-40";
 /** One subagent: a single line (goal, status, time) that opens into stats, latest activity and controls. No per-agent trace. */
-export function SubagentCard({ agent, callbacks, tailText, tails, profile }: SubagentCardProps) {
+export function SubagentCard({ agent, callbacks, tailText, tails, profile, canWrite = true }: SubagentCardProps) {
   const [text, setText] = useState("");
   const [feedback, setFeedback] = useState("");
   const [steering, setSteering] = useState(false);
@@ -51,10 +53,10 @@ export function SubagentCard({ agent, callbacks, tailText, tails, profile }: Sub
         {latest && <p className="line-clamp-3 break-words">{!terminal ? "Now: " : ""}{latest}</p>}
         <div className="flex flex-wrap items-center gap-1">
           <button type="button" className={actionClass} disabled={sending} onClick={() => void act(() => callbacks.onSubagentTail(agent.id), "")}>View output</button>
-          {!terminal && <button type="button" className={actionClass} disabled={sending} aria-expanded={steering} onClick={() => setSteering(!steering)}>Steer</button>}
-          {!terminal && <button type="button" className={actionClass} disabled={sending} onClick={() => void act(() => callbacks.onSubagentInterrupt(agent.id), "Stop requested")}>Stop</button>}
+          {!terminal && canWrite && <button type="button" className={actionClass} disabled={sending} aria-expanded={steering} onClick={() => setSteering(!steering)}>Steer</button>}
+          {!terminal && canWrite && <button type="button" className={actionClass} disabled={sending} onClick={() => void act(() => callbacks.onSubagentInterrupt(agent.id), "Stop requested")}>Stop</button>}
         </div>
-        {steering && !terminal && <form className="flex items-center gap-1" onSubmit={event => { event.preventDefault(); if (text.trim()) void act(async () => { await callbacks.onSubagentSteer(agent.id, text.trim()); setText(""); setSteering(false); }, "Steer queued, not yet delivered"); }}>
+        {steering && !terminal && canWrite && <form className="flex items-center gap-1" onSubmit={event => { event.preventDefault(); if (text.trim()) void act(async () => { await callbacks.onSubagentSteer(agent.id, text.trim()); setText(""); setSteering(false); }, "Steer queued, not yet delivered"); }}>
           <input aria-label="Steer subagent" autoFocus className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px] text-[var(--color-text)]" disabled={sending} value={text} onChange={event => setText(event.target.value)} placeholder="Tell it what to do differently" />
           <button className={actionClass} type="submit" disabled={sending || !text.trim()}>Send</button>
         </form>}
@@ -62,7 +64,7 @@ export function SubagentCard({ agent, callbacks, tailText, tails, profile }: Sub
         <p role="status">{feedback}</p>
       </div>
     </details>
-    {agent.children.length > 0 && <div className="ml-5" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} profile={profile} />)}</div>}
+    {agent.children.length > 0 && <div className="ml-5" aria-label="Child subagents">{agent.children.map(child => <SubagentCard key={child.id} agent={child} callbacks={callbacks} tails={tails} profile={profile} canWrite={canWrite} />)}</div>}
   </section>;
 }
 export interface ErrorCardProps { error?: ErrorSurface | null; message?: string; partial?: boolean; onRetry?: NativeTranscriptCallbacks["onRetry"] }
@@ -88,9 +90,9 @@ export function ErrorCard({ error, message, partial, onRetry }: ErrorCardProps) 
     </div>
   </section>;
 }
-export interface ReadOnlyNoticeProps { source: string; onBranch(): void | Promise<void> }
+export interface ReadOnlyNoticeProps { source: string; /** Absent when the viewer may not derive a new chat from this one. */ onBranch?: () => void | Promise<void> }
 export function ReadOnlyNotice({ source, onBranch }: ReadOnlyNoticeProps) {
   const [branching, setBranching] = useState(false);
   const [error, setError] = useState("");
-  return <aside className={cardClass} aria-label="Read-only conversation"><p>This {source} conversation is read-only. Continue in a new chat to send messages. The branch copies visible messages, not the tool transcript.</p><button type="button" className={buttonClass} disabled={branching} onClick={async () => { setBranching(true); try { await onBranch(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create chat"); } finally { setBranching(false); } }}>Continue as new chat</button>{error && <p role="alert">{error}</p>}</aside>;
+  return <aside className={cardClass} aria-label="Read-only conversation"><p>This {source} conversation is read-only.{onBranch && " Continue in a new chat to send messages. The branch copies visible messages, not the tool transcript."}</p>{onBranch && <button type="button" className={buttonClass} disabled={branching} onClick={async () => { setBranching(true); try { await onBranch(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create chat"); } finally { setBranching(false); } }}>Continue as new chat</button>}{error && <p role="alert">{error}</p>}</aside>;
 }

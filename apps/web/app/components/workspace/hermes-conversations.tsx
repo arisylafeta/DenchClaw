@@ -183,12 +183,33 @@ export function useHermesConversations() {
     } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not update sharing"); return false; }
     finally { if (token === generation.current) { sharingPending.current = false; setSharingKey(null); } }
   };
+  /** The server withdrew access: forget the row, selection, pin, unread marker and rename, and discard listings already in flight. */
+  const revoke = useCallback((key: string) => {
+    const owner = account.current;
+    setListing(current => current ? { ...current, sessions: current.sessions.filter(row => row.key !== key) } : current);
+    setSelected(current => current?.key === key ? null : current);
+    setPins(current => current.filter(id => id !== key));
+    const without = (record: Record<string, unknown>) => Object.fromEntries(Object.entries(record).filter(([id]) => id !== key));
+    setSeen(current => {
+      if (!Object.hasOwn(current, key)) { return current; }
+      const next = without(current) as Record<string, number>;
+      if (owner) { try { localStorage.setItem(`${SEEN_KEY}:${owner}`, JSON.stringify(next)); } catch { /* Storage unavailable. */ } }
+      return next;
+    });
+    setAliases(current => {
+      if (!Object.hasOwn(current, key)) { return current; }
+      const next = without(current) as Record<string, string>;
+      if (owner) { try { localStorage.setItem(`${ALIAS_KEY}:${owner}`, JSON.stringify(next)); } catch { /* Storage unavailable. */ } }
+      return next;
+    });
+    void reload();
+  }, [reload]);
   const display = useCallback((row: HermesConversation) => messagingConversation(row) && Object.hasOwn(aliases, row.key) ? { ...row, title: aliases[row.key] } : row, [aliases]);
   const displayListing = useMemo(() => listing ? { ...listing, sessions: listing.sessions.map(display) } : null, [listing, display]);
   const displaySelected = useMemo(() => selected ? display(selected) : null, [selected, display]);
   return { enabled: listing?.backend === "hermes", ready, listing: displayListing, filter, setFilter: updateFilter, selected: displaySelected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
+    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload, revoke, userId: listing?.userId ?? null };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; background = only subagents work; done means unseen output. */

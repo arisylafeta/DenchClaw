@@ -1302,9 +1302,19 @@ function WorkspacePageInner() {
     });
   }, [reconnectWorkspaceWatcher, refreshContext, refreshSessions, router, setBrowseDir, refreshCrmNavigation]);
 
+  // The server withdrew access to a conversation: close every tab for it (pinned too) and forget its list state.
+  const handleAccessRevoked = useCallback((key: string) => {
+    dispatch({ type: "closeChatsForSession", sessionId: key, includePinned: true });
+    setActiveSessionId((current) => current === key ? null : current);
+    hermesChats.revoke(key);
+  }, [hermesChats.revoke]);
+
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       if (hermesChats.enabled) {
+        // The server decides again; the control is just not offered, or run, without a verified delete grant.
+        const target = hermesChats.listing?.sessions.find((row) => row.key === sessionId) ?? (hermesChats.selected?.key === sessionId ? hermesChats.selected : undefined);
+        if (target?.access?.canDelete !== true) return;
         const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
         if (!res.ok) return;
         dispatch({ type: "closeChatsForSession", sessionId });
@@ -1344,6 +1354,11 @@ function WorkspacePageInner() {
 
   const handleRenameSession = useCallback(
     async (sessionId: string, newTitle: string) => {
+      if (hermesChats.enabled) {
+        const row = hermesChats.listing?.sessions.find((entry) => entry.key === sessionId);
+        if (row) await hermesChats.rename(row, newTitle);
+        return;
+      }
       await fetch(`/api/web-sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2553,7 +2568,7 @@ function WorkspacePageInner() {
   // Shared props for the chat-panel header history dropdown.
   // Defined here so all open ChatPanel tabs see the same up-to-date data.
   const chatHistoryPanelProps = {
-    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).filter((row) => !automation(row)).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0 })) : sessions,
+    historySessions: hermesChats.enabled ? (hermesChats.listing?.sessions ?? []).filter((row) => !automation(row)).map((row) => ({ id: row.key, title: row.title, createdAt: row.updatedAt, updatedAt: row.updatedAt, messageCount: 0, canDelete: row.access?.canDelete === true })) : sessions,
     historyStreamingSessionIds: streamingSessionIds,
     historySubagents: subagents,
     historyActiveSubagentKey: activeSubagentKey,
@@ -2753,6 +2768,7 @@ function WorkspacePageInner() {
               // Preserve the draft editor while native identity is unresolved.
             }
             const groupRow = nativeKey ? hermesChats.listing?.sessions.find((row) => row.key === nativeKey && row.kind === "group") : undefined;
+            const nativeRow = nativeKey ? hermesChats.listing?.sessions.find((row) => row.key === nativeKey) ?? (hermesChats.selected?.key === nativeKey ? hermesChats.selected : undefined) : undefined;
             const isGateway = tab.variant === "gateway";
             const subagent = !isGateway && tab.sessionKey
               ? subagents.find((entry) => entry.childSessionKey === tab.sessionKey)
@@ -2878,6 +2894,8 @@ function WorkspacePageInner() {
                   gatewayChannel={isGateway ? tab.channel : undefined}
                   visible={isVisible}
                   nativeTransport={hermesChats.listing?.transport}
+                  nativeAccess={nativeRow?.access}
+                  onAccessRevoked={handleAccessRevoked}
                   onBranched={(conversation) => { hermesChats.select(conversation); void hermesChats.reload(); }}
                   searchFn={searchIndex}
                   fileContext={isVisible ? fileContext : undefined}

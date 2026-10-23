@@ -41,13 +41,13 @@ export function goalStatus(goal: GoalSnapshot, now = Date.now()): { label: strin
 
 const VERDICT_ICON = { continue: RotateCw, done: Check, blocked: CircleAlert, wait: Hourglass } as const;
 
-export interface GoalCardProps { goal: GoalSnapshot; busy?: boolean; onControl: GoalControl }
+export interface GoalCardProps { goal: GoalSnapshot; busy?: boolean; onControl: GoalControl; /** Shows the goal without any control that changes it. */ readOnly?: boolean }
 
 /**
  * The chat's standing goal, docked above the input like the task card: one line with status and turn budget,
  * opening into the contract, extra criteria, gates and the judge's latest verdict. Flat: no borders or shadows.
  */
-export function GoalCard({ goal, busy = false, onControl }: GoalCardProps) {
+export function GoalCard({ goal, busy = false, onControl, readOnly = false }: GoalCardProps) {
   const finished = goal.status === "done";
   const [open, setOpen] = useState<boolean | null>(null);
   const [draft, setDraft] = useState("");
@@ -88,10 +88,10 @@ export function GoalCard({ goal, busy = false, onControl }: GoalCardProps) {
       {!finished && <div role="progressbar" aria-label="Goal turn budget" aria-valuemin={0} aria-valuemax={goal.max_turns} aria-valuenow={goal.turns_used} className="h-1 w-14 shrink-0 overflow-hidden rounded-full bg-[var(--color-border)]">
         <span className={`block h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300 ${live ? "todo-seg-active" : ""}`} style={{ width: `${Math.min(100, (goal.turns_used / Math.max(1, goal.max_turns)) * 100)}%` }} />
       </div>}
-      {goal.status === "active" && goal.wait_barrier && <button type="button" className={iconButton} aria-label="Stop waiting" title="Continue now" disabled={pending !== null} onClick={() => void run("goal.unwait")}><FastForward className="size-3.5" /></button>}
-      {goal.status === "active" && <button type="button" className={iconButton} aria-label="Pause goal" title="Pause" disabled={pending !== null} onClick={() => void run("goal.pause")}><Pause className="size-3.5" /></button>}
-      {goal.status === "paused" && <button type="button" className={iconButton} aria-label="Resume goal" title="Resume" disabled={pending !== null} onClick={() => void run("goal.resume")}><Play className="size-3.5" /></button>}
-      <button type="button" className={iconButton} aria-label={finished ? "Dismiss goal" : "Clear goal"} title={finished ? "Dismiss" : "Clear"} disabled={pending !== null} onClick={() => void run("goal.clear")}><X className="size-3.5" /></button>
+      {!readOnly && goal.status === "active" && goal.wait_barrier && <button type="button" className={iconButton} aria-label="Stop waiting" title="Continue now" disabled={pending !== null} onClick={() => void run("goal.unwait")}><FastForward className="size-3.5" /></button>}
+      {!readOnly && goal.status === "active" && <button type="button" className={iconButton} aria-label="Pause goal" title="Pause" disabled={pending !== null} onClick={() => void run("goal.pause")}><Pause className="size-3.5" /></button>}
+      {!readOnly && goal.status === "paused" && <button type="button" className={iconButton} aria-label="Resume goal" title="Resume" disabled={pending !== null} onClick={() => void run("goal.resume")}><Play className="size-3.5" /></button>}
+      {!readOnly && <button type="button" className={iconButton} aria-label={finished ? "Dismiss goal" : "Clear goal"} title={finished ? "Dismiss" : "Clear"} disabled={pending !== null} onClick={() => void run("goal.clear")}><X className="size-3.5" /></button>}
     </header>
     {error && <p role="alert" className="mt-1 pl-5 text-[11px] text-[var(--color-error)]">{error}</p>}
     <Collapse open={expanded}>
@@ -106,16 +106,16 @@ export function GoalCard({ goal, busy = false, onControl }: GoalCardProps) {
         {contract.length > 0 && <dl className="grid grid-cols-[4.5rem_1fr] gap-x-3 gap-y-1 text-[12px]">
           {contract.map(([key, label]) => <div key={key} className="contents"><dt className="text-[var(--color-text-muted)]">{label}</dt><dd className="min-w-0 break-words">{goal.contract[key]}</dd></div>)}
         </dl>}
-        {(goal.subgoals.length > 0 || !finished) && <div>
+        {(goal.subgoals.length > 0 || (!finished && !readOnly)) && <div>
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">Also required</p>
           <ul className="space-y-0.5">
             {goal.subgoals.map((text, index) => <li key={`${index}-${text}`} className="group/sub flex min-h-6 items-start gap-2 text-[12px]">
               <span aria-hidden="true" className="mt-[7px] size-1.5 shrink-0 rounded-full bg-[var(--color-border)]" />
               <span className="min-w-0 flex-1 break-words">{text}</span>
-              {!finished && <button type="button" className={`${iconButton} opacity-0 group-hover/sub:opacity-100 focus-visible:opacity-100`} aria-label={`Remove: ${text}`} disabled={pending !== null} onClick={() => void run("subgoal.remove", { index: index + 1 })}><X className="size-3" /></button>}
+              {!finished && !readOnly && <button type="button" className={`${iconButton} opacity-0 group-hover/sub:opacity-100 focus-visible:opacity-100`} aria-label={`Remove: ${text}`} disabled={pending !== null} onClick={() => void run("subgoal.remove", { index: index + 1 })}><X className="size-3" /></button>}
             </li>)}
           </ul>
-          {!finished && (adding
+          {!finished && !readOnly && (adding
             ? <form onSubmit={add} className="mt-1 flex items-center gap-2">
               <input autoFocus aria-label="New requirement" value={draft} maxLength={2000} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Escape") { setAdding(false); setDraft(""); } }}
                 placeholder="Another thing that must be true" className="min-w-0 flex-1 rounded-md bg-[var(--color-surface-hover)] px-2 py-1 text-[12px] outline-none placeholder:text-[var(--color-text-muted)] focus-visible:outline-2" />

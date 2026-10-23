@@ -778,7 +778,7 @@ export function ChatHistoryPopover({
 														onCommitRename={handleCommitRename}
 														onCancelRename={handleCancelRename}
 														onRenameChange={setRenameValue}
-														onDelete={onDeleteSession}
+														onDelete={session.canDelete === false ? undefined : onDeleteSession}
 														onStop={onStopSession}
 														onSelectSubagent={handleSelectSubagentItem}
 														onStopSubagent={onStopSubagent}

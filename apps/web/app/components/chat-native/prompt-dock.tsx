@@ -17,7 +17,7 @@ import type { NativeTranscriptCallbacks } from "./types";
  * Everything the agent needs from you, or is running on the side, docks on top of the input box instead of
  * scrolling away in the transcript: questions, approvals, and subagents with their own activity.
  */
-export function PromptDock({ state, subagents, todos, profile, tails, callbacks, composerTarget, disabled, queued = [], goal = null, busy = false, onGoalControl }: {
+export function PromptDock({ state, subagents, todos, profile, tails, callbacks, composerTarget, disabled, queued = [], goal = null, busy = false, onGoalControl, canWrite = true, canApprove = true }: {
   state: Pick<ChatState, "pendingRequests" | "sessionId">;
   subagents: SubagentState;
   todos?: TodoState;
@@ -33,6 +33,10 @@ export function PromptDock({ state, subagents, todos, profile, tails, callbacks,
   goal?: GoalSnapshot | null;
   busy?: boolean;
   onGoalControl?: GoalControl;
+  /** Answers, goal changes and subagent steering need write access. The controller still enforces it. */
+  canWrite?: boolean;
+  /** Approvals are limited to approvers. */
+  canApprove?: boolean;
 }) {
   const requests = state.pendingRequests;
   const activeKey = useRef<string | null>(null);
@@ -46,11 +50,11 @@ export function PromptDock({ state, subagents, todos, profile, tails, callbacks,
   return <div className="w-full" data-prompt-dock>
     {queued.length > 0 && <QueueList items={queued} />}
     {requests.map(request => request.kind === "approval"
-      ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} />
-      : request === front || composerTarget === undefined ? <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} composerTarget={composerTarget} disabled={disabled} /> : <p key={request.id} className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">Another question is waiting</p>)}
-    {goal && onGoalControl && <div className="px-1"><GoalCard goal={goal} busy={busy} onControl={onGoalControl} /></div>}
+      ? <ApprovalCard key={`${state.sessionId}-${request.id}`} request={request} onApproval={callbacks.onApproval} canApprove={canApprove} />
+      : request === front || composerTarget === undefined ? <ClarifyCard key={`${state.sessionId}-${request.id}`} request={request} onClarify={callbacks.onClarify} composerTarget={composerTarget} disabled={disabled || !canWrite} /> : <p key={request.id} className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">Another question is waiting</p>)}
+    {goal && onGoalControl && <div className="px-1"><GoalCard goal={goal} busy={busy} onControl={onGoalControl} readOnly={!canWrite} /></div>}
     {todos && hasTodos && <div className="px-1 pb-1"><TodoPanel todos={todos} /></div>}
-    {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} profile={profile} />}
+    {roots.length > 0 && <SubagentGroup roots={roots} callbacks={callbacks} tails={tails} profile={profile} canWrite={canWrite} />}
   </div>;
 }
 
@@ -72,7 +76,7 @@ function QueueList({ items }: { items: readonly QueuedItem[] }) {
 
 const flatten = (nodes: readonly SubagentNode[]): Subagent[] => nodes.flatMap(node => [node, ...flatten(node.children)]);
 /** All subagents behind one line: "2 subagents running · 1 done". Open it for one accordion per subagent. */
-function SubagentGroup({ roots, callbacks, tails, profile }: { roots: readonly SubagentNode[]; callbacks: NativeTranscriptCallbacks; tails?: Readonly<Record<string, string>>; profile?: string | null }) {
+function SubagentGroup({ roots, callbacks, tails, profile, canWrite }: { roots: readonly SubagentNode[]; callbacks: NativeTranscriptCallbacks; tails?: Readonly<Record<string, string>>; profile?: string | null; canWrite: boolean }) {
   const all = flatten(roots);
   const running = all.filter(agent => !isTerminalSubagent(agent.status)).length;
   const finished = all.length - running;
@@ -89,6 +93,6 @@ function SubagentGroup({ roots, callbacks, tails, profile }: { roots: readonly S
       </span>
       <span role={running ? "status" : undefined} className={`font-medium ${running ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)]"}`}>{label}</span>
     </summary>
-    <div className="max-h-[40dvh] overflow-y-auto pb-1">{roots.map(agent => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={tails} profile={profile} />)}</div>
+    <div className="max-h-[40dvh] overflow-y-auto pb-1">{roots.map(agent => <SubagentCard key={agent.id} agent={agent} callbacks={callbacks} tails={tails} profile={profile} canWrite={canWrite} />)}</div>
   </details>;
 }

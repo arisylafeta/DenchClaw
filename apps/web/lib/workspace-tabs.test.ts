@@ -287,6 +287,15 @@ describe("chat tab lifecycle", () => {
     expect(state.activeChatId).toBe("p2");
   });
 
+  it("withdrawn access closes even a pinned tab, while an ordinary session close keeps it", () => {
+    let state: WorkspaceTabsState = openChat(EMPTY_TABS_STATE, createSessionChatTab({ sessionId: "p1" }));
+    state = workspaceTabsReducer(state, { type: "togglePinChat", id: "p1" });
+    state = openChat(state, createSessionChatTab({ sessionId: "p2" }));
+    expect(workspaceTabsReducer(state, { type: "closeChatsForSession", sessionId: "p1" }).chatTabs.map((t) => t.id)).toContain("p1");
+    const revoked = workspaceTabsReducer(state, { type: "closeChatsForSession", sessionId: "p1", includePinned: true });
+    expect(revoked.chatTabs.map((t) => t.id)).toEqual(["p2"]);
+  });
+
   it("syncChatTitles updates titles from sessions and subagents", () => {
     let state: WorkspaceTabsState = EMPTY_TABS_STATE;
     state = openChat(state, createSessionChatTab({ sessionId: "s1", title: "Old" }));

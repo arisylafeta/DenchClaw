@@ -196,7 +196,7 @@ export type WorkspaceTabsAction =
   | { type: "renameContent"; id: string; title: string }
   | { type: "openChat"; tab: ChatTabInput }
   | { type: "closeChat"; id: string }
-  | { type: "closeChatsForSession"; sessionId: string }
+  | { type: "closeChatsForSession"; sessionId: string; /** Withdrawn access also closes pinned tabs. */ includePinned?: boolean }
   | { type: "activateChat"; id: string | null }
   | { type: "promoteChat"; id: string }
   | { type: "togglePinChat"; id: string }
@@ -715,9 +715,10 @@ export function closeChat(
 export function closeChatsForSession(
   state: WorkspaceTabsState,
   sessionId: string,
+  includePinned = false,
 ): WorkspaceTabsState {
   const nextTabs = state.chatTabs.filter((t) => {
-    if (t.pinned) return true;
+    if (t.pinned && !includePinned) return true;
     return t.sessionId !== sessionId && t.parentSessionId !== sessionId;
   });
   if (nextTabs.length === state.chatTabs.length) return state;
@@ -1258,7 +1259,7 @@ export function workspaceTabsReducer(
     case "closeChat":
       return closeChat(state, action.id);
     case "closeChatsForSession":
-      return closeChatsForSession(state, action.sessionId);
+      return closeChatsForSession(state, action.sessionId, action.includePinned);
     case "activateChat":
       return activateChat(state, action.id);
     case "promoteChat":

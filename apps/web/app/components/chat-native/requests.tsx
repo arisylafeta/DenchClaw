@@ -15,9 +15,11 @@ export interface ApprovalCardProps {
   request: PendingRequest;
   onApproval: NativeTranscriptCallbacks["onApproval"];
   active?: boolean;
+  /** Only approvers may answer; everyone else sees that the request is waiting. */
+  canApprove?: boolean;
 }
 const dockButton = "h-8 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-[12px] font-medium shadow-[0_1px_1px_rgba(0,0,0,0.04)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-2";
-export function ApprovalCard({ request, onApproval, active = true }: ApprovalCardProps) {
+export function ApprovalCard({ request, onApproval, active = true, canApprove = true }: ApprovalCardProps) {
   const ref = useRef<HTMLElement>(null);
   const [confirm, setConfirm] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -35,7 +37,7 @@ export function ApprovalCard({ request, onApproval, active = true }: ApprovalCar
     <span aria-hidden="true" className="block h-[2px] w-5 rounded-full bg-[var(--color-text)]" />
     {p.tool_name || p.name ? <p className="text-[12px] text-[var(--color-text-muted)]">Tool: {p.tool_name || p.name}</p> : null}
     {p.description && <p>{p.description}</p>}{p.command && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-[11px]">{p.command}</pre>}
-    {!active ? <p role="status">Resolved or withdrawn</p> : submitted ? <p role="status">Response submitted</p> : <div className="flex flex-wrap gap-2">
+    {!active ? <p role="status">Resolved or withdrawn</p> : !canApprove ? <p role="status">Waiting for an approver</p> : submitted ? <p role="status">Response submitted</p> : <div className="flex flex-wrap gap-2">
       {once && <button type="button" className={dockButton} onClick={() => void choose("once")}>Run once</button>}
       {p.allow_session && (!offered?.length || offered.includes("session")) && <button type="button" className={dockButton} onClick={() => void choose("session")}>Allow for session</button>}
       {p.allow_permanent && (!offered?.length || offered.includes("always")) && <button type="button" className={dockButton} onClick={() => setConfirm(true)}>Always allow</button>}

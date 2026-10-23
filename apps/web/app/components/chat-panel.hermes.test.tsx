@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 import { conversationKey } from "@/lib/hermes-conversations";
 import { getHermesEventsClient } from "@/lib/hermes-chat/events-client";
-import { ownerAccess } from "@/lib/hermes-chat/access-fixture";
+import { ownerAccess, readerAccess, viewerAccess } from "@/lib/hermes-chat/access-fixture";
 vi.mock("./tiptap/chat-editor", async () => {
   const { forwardRef, useState, useImperativeHandle } = await import("react");
   return { ChatEditor: forwardRef(function EditorFixture({ onSubmit, onNativeFileDrop }: { onSubmit: (text: string, files: unknown[], html: string) => void; onNativeFileDrop?: (files: FileList) => void }, ref) {
@@ -51,7 +51,7 @@ beforeEach(() => {
     if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
     if (url === endpoint && init?.method === "POST") return Response.json({ aborted: true });
     if (url === "/api/hermes/events/subscriptions" || url.startsWith(`${endpoint}/`)) return Response.json({});
-    if (url === endpoint) return Response.json({ messages: [{ id: "native-history", role: "assistant", content: "Native history", parts: [{ type: "reasoning", text: "Saved reasoning" }, { type: "tool-invocation", toolCallId: "tool1", toolName: "terminal", args: { command: "fixture" }, result: "saved output" }, { type: "text", text: "Native history" }] }] });
+    if (url === endpoint) return Response.json({ conversation: { access: ownerAccess }, messages: [{ id: "native-history", role: "assistant", content: "Native history", parts: [{ type: "reasoning", text: "Saved reasoning" }, { type: "tool-invocation", toolCallId: "tool1", toolName: "terminal", args: { command: "fixture" }, result: "saved output" }, { type: "text", text: "Native history" }] }] });
     if (url === "/api/chat") {
       const bytes = new TextEncoder();
       return new Response(new ReadableStream({ start(controller) {
@@ -68,7 +68,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); if (FakeEventSource.instance) getHermesEventsClient().close(); try { upstream?.close(); } catch { /* Already finished. */ } vi.unstubAllGlobals(); });
 describe("existing ChatPanel with native Hermes identity", () => {
   it("loads native rich history and submits via the existing transport with immutable profile, HTML and file context", async () => {
-    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} fileContext={{ path: "fixture.md", filename: "fixture.md" }} />);
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeAccess={ownerAccess} fileContext={{ path: "fixture.md", filename: "fixture.md" }} />);
     await waitFor(() => expect(screen.getByTestId("rich-message").textContent).toContain("Saved reasoning"));
     expect(screen.getByTestId("rich-message").textContent).toContain("saved output");
     fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
@@ -81,7 +81,7 @@ describe("existing ChatPanel with native Hermes identity", () => {
   it("retains stop behavior and actual runtime callbacks for the pinned native solo", async () => {
     hold = true;
     const runtime = vi.fn();
-    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} onRuntimeStateChange={runtime} />);
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeAccess={ownerAccess} onRuntimeStateChange={runtime} />);
     await screen.findByTestId("rich-message");
     fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
     await waitFor(() => expect(runtime.mock.calls.some(([state]) => state.sessionId === key && state.isStreaming)).toBe(true));
@@ -100,7 +100,7 @@ describe("existing ChatPanel with a native Hermes group", () => {
       if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
       if (url.startsWith(`${endpoint}/activity`)) return Response.json({ degraded: false, members: [{ memberId: "a", running: true }] });
       if (url.startsWith(`${endpoint}/trace`)) return Response.json({ trace: { startedAt: 1000, completedAt: 43000, steps: 12 } });
-      if (url.startsWith(endpoint)) return Response.json({ conversation: { working: !settled, participants }, cursor: settled ? 2 : 1,
+      if (url.startsWith(endpoint)) return Response.json({ conversation: { access: ownerAccess, working: !settled, participants }, cursor: settled ? 2 : 1,
         messages: settled ? [{ id: "reply", role: "assistant", text: "Synthetic room reply", content: "Synthetic room reply", profile: "alpha", name: "Alpha", memberId: "a", turnId: "turn1", createdAt: 43000 }] : [{ id: "user", role: "user", text: "Synthetic question", content: "Synthetic question" }],
         settled: settled ? [{ memberId: "a", createdAt: 43000, passed: false }] : [] });
       return new Response(null, { status: 404 });
@@ -120,10 +120,10 @@ describe("existing ChatPanel with a native Hermes group", () => {
     let replied = false;
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === "/api/settings/cloud") return Response.json({ status: "no_key" });
-      if (url.startsWith(groupEndpoint) && init?.method === "POST") { const { eventId, message } = JSON.parse(init.body as string); return Response.json({ conversation: { working: true }, cursor: 3, messages: [{ id: eventId, role: "user", text: message, content: message }] }); }
+      if (url.startsWith(groupEndpoint) && init?.method === "POST") { const { eventId, message } = JSON.parse(init.body as string); return Response.json({ conversation: { access: ownerAccess, working: true }, cursor: 3, messages: [{ id: eventId, role: "user", text: message, content: message }] }); }
       if (url.startsWith(groupEndpoint)) {
         const messages = url.includes("since_seq=0") && !replied ? [] : replied ? [{ id: "e3", role: "assistant", text: "Mailvin reply", content: "Mailvin reply", profile: "mailvin", name: "Mailvin" }] : [];
-        return Response.json(url.includes("since_seq") ? { conversation: { working: false }, cursor: 3, messages } : { conversation: { working: false }, cursor: 2, messages: [{ id: "e1", role: "user", text: "hello", content: "hello" }, { id: "e2", role: "assistant", text: "Hi from the group", content: "Hi from the group", profile: "investigator", name: "InvestiGator" }] });
+        return Response.json(url.includes("since_seq") ? { conversation: { access: ownerAccess, working: false }, cursor: 3, messages } : { conversation: { access: ownerAccess, working: false }, cursor: 2, messages: [{ id: "e1", role: "user", text: "hello", content: "hello" }, { id: "e2", role: "assistant", text: "Hi from the group", content: "Hi from the group", profile: "investigator", name: "InvestiGator" }] });
       }
       return new Response(null, { status: 404 });
     });
@@ -152,11 +152,11 @@ describe("native Hermes group sends", () => {
       if (url.startsWith(groupEndpoint) && init?.method === "POST") {
         const { message } = JSON.parse(init.body as string);
         serverRow = { id: "user:6f1c0d", role: "user", text: message, content: message };
-        return Response.json({ conversation: { working: true }, cursor: 1, messages: [serverRow] });
+        return Response.json({ conversation: { access: ownerAccess, working: true }, cursor: 1, messages: [serverRow] });
       }
       if (url.startsWith(groupEndpoint)) {
         const history = [{ id: "e1", role: "assistant", text: "Earlier reply", content: "Earlier reply", profile: "investigator", name: "InvestiGator" }];
-        return Response.json({ conversation: { working: Boolean(serverRow) }, cursor: serverRow ? 3 : 2, messages: url.includes("since_seq") ? (serverRow ? [serverRow] : []) : history });
+        return Response.json({ conversation: { access: ownerAccess, working: Boolean(serverRow) }, cursor: serverRow ? 3 : 2, messages: url.includes("since_seq") ? (serverRow ? [serverRow] : []) : history });
       }
       return new Response(null, { status: 404 });
     });
@@ -181,9 +181,9 @@ describe("native Hermes group queue", () => {
       if (url.startsWith(groupEndpoint) && init?.method === "POST") {
         const { message } = JSON.parse(init.body as string);
         posts.push(message);
-        return Response.json({ conversation: { working: true }, cursor: 3, messages: [{ id: "user:q1", role: "user", text: message, content: message }] });
+        return Response.json({ conversation: { access: ownerAccess, working: true }, cursor: 3, messages: [{ id: "user:q1", role: "user", text: message, content: message }] });
       }
-      if (url.startsWith(groupEndpoint)) return Response.json({ conversation: { working }, cursor: 2, messages: url.includes("since_seq") ? [] : [{ id: "e1", role: "user", text: "hello", content: "hello" }] });
+      if (url.startsWith(groupEndpoint)) return Response.json({ conversation: { access: ownerAccess, working }, cursor: 2, messages: url.includes("since_seq") ? [] : [{ id: "e1", role: "user", text: "hello", content: "hello" }] });
       return new Response(null, { status: 404 });
     });
     const { container } = render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} />);
@@ -210,9 +210,9 @@ describe("native Hermes group queue", () => {
         const { message } = JSON.parse(init.body as string);
         posts.push(message);
         if (fail) return Response.json({ error: "Room unavailable" }, { status: 500 });
-        return Response.json({ conversation: { working: false }, cursor: 3, messages: [{ id: `user:${posts.length}`, role: "user", text: message, content: message }] });
+        return Response.json({ conversation: { access: ownerAccess, working: false }, cursor: 3, messages: [{ id: `user:${posts.length}`, role: "user", text: message, content: message }] });
       }
-      if (url.startsWith(groupEndpoint)) return Response.json({ conversation: { working }, cursor: 2, messages: url.includes("since_seq") ? [] : [{ id: "e1", role: "user", text: "hello", content: "hello" }] });
+      if (url.startsWith(groupEndpoint)) return Response.json({ conversation: { access: ownerAccess, working }, cursor: 2, messages: url.includes("since_seq") ? [] : [{ id: "e1", role: "user", text: "hello", content: "hello" }] });
       return new Response(null, { status: 404 });
     });
     render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} />);
@@ -411,4 +411,92 @@ it("pages earlier gateway rows through the visible control without replacing rec
   expect(fetchMock).toHaveBeenCalledWith(`${endpoint}/history?before=200&limit=200`);
   expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
   await waitFor(() => expect(scroll.scrollTop).toBe(625));
+});
+
+describe("conversation access in ChatPanel", () => {
+  const withAccess = (access: unknown, extra: Record<string, unknown> = {}) => ({ conversation: { id: "native-existing", profile: "alpha", title: "Native", working: false, source: "crm", access }, ...extra });
+  it("tells a non-approver an approval is waiting and offers no decision", async () => {
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    openGateway(withAccess(viewerAccess, { running: true, messages: [] }));
+    FakeEventSource.instance.emit("request", { key, id: "srq-approval", method: "approval", params: { request_id: "a1", command: "pwd", choices: ["once", "deny"] } });
+    expect(await screen.findByText("Waiting for an approver")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run once" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+  });
+  it("keeps the editor for a read-only viewer but sends nothing and offers no delete", async () => {
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onDeleteSession={vi.fn()} />);
+    openGateway(withAccess(readerAccess));
+    expect(await screen.findByText("You can read this chat but not send messages.")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Ordinary draft fixture" }), { target: { value: "still typeable" } });
+    expect(screen.getByRole("textbox", { name: "Ordinary draft fixture" })).toHaveValue("still typeable");
+    fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/prompt"))).toBe(false);
+    expect(screen.queryByRole("button", { name: "More options" })).toBeNull();
+  });
+  it("offers delete only with a delete grant", async () => {
+    const { unmount } = render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onDeleteSession={vi.fn()} />);
+    openGateway(withAccess(viewerAccess));
+    await screen.findByRole("button", { name: "Submit fixture" });
+    expect(screen.queryByRole("button", { name: "More options" })).toBeNull();
+    unmount();
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onDeleteSession={vi.fn()} />);
+    openGateway(withAccess(ownerAccess));
+    expect(await screen.findByRole("button", { name: "More options" })).toBeInTheDocument();
+  });
+  it("purges the transcript on access-revoked, tells the parent once and ignores later snapshots", async () => {
+    const revoked = vi.fn();
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" onAccessRevoked={revoked} />);
+    openGateway();
+    expect(document.querySelectorAll("[data-tool-id]").length).toBeGreaterThan(0);
+    FakeEventSource.instance.emit("access-revoked", { key });
+    expect(revoked).toHaveBeenCalledExactlyOnceWith(key);
+    expect(document.querySelectorAll("[data-tool-id]")).toHaveLength(0);
+    expect(screen.getByRole("status", { name: "Access removed" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit fixture" })).toBeNull();
+    FakeEventSource.instance.emit("snapshot", gatewaySnapshot());
+    expect(document.querySelectorAll("[data-tool-id]")).toHaveLength(0);
+  });
+  it("hides Continue as new chat on a read-only conversation the viewer does not own", async () => {
+    render(<ChatPanel nativeConversationKey={key} initialSessionId={key} nativeTransport="gateway" />);
+    openGateway(withAccess({ ...readerAccess }, { conversation: { id: "native-existing", profile: "alpha", title: "Cron", working: false, source: "cron", access: readerAccess } }));
+    expect(await screen.findByLabelText("Read-only conversation")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue as new chat" })).toBeNull();
+  });
+  describe("group rooms", () => {
+    const groupKey = conversationKey("group", "room-access");
+    const groupEndpoint = `/api/hermes/conversations/${encodeURIComponent(groupKey)}`;
+    const room = (access: unknown) => Response.json({ conversation: { access, working: false }, cursor: 2, messages: [{ id: "e1", role: "assistant", text: "Room secret", content: "Room secret", profile: "investigator", name: "InvestiGator" }] });
+    it("does not post to a room the viewer cannot write to", async () => {
+      fetchMock.mockImplementation(async (url: string) => url.startsWith(groupEndpoint) ? room(readerAccess) : Response.json({}));
+      render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} nativeAccess={ownerAccess} />);
+      await waitFor(() => expect(screen.getAllByTestId("rich-message").some((m) => m.textContent?.includes("Room secret"))).toBe(true));
+      fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    });
+    it("fails closed when the room detail carries no permissions", async () => {
+      fetchMock.mockImplementation(async (url: string) => url.startsWith(groupEndpoint) ? room(undefined) : Response.json({}));
+      render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} nativeAccess={ownerAccess} />);
+      await waitFor(() => expect(screen.getAllByTestId("rich-message").length).toBeGreaterThan(0));
+      fireEvent.click(screen.getByRole("button", { name: "Submit fixture" }));
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    });
+    it("purges the room and tells the parent when a poll reports not_found, then stops polling", async () => {
+      let revoked = false;
+      const onRevoked = vi.fn();
+      fetchMock.mockImplementation(async (url: string) => {
+        if (!url.startsWith(groupEndpoint)) return Response.json({});
+        return revoked ? Response.json({ error: "not_found" }, { status: 404 }) : room(ownerAccess);
+      });
+      render(<ChatPanel nativeConversationKey={groupKey} initialSessionId={groupKey} onAccessRevoked={onRevoked} />);
+      await waitFor(() => expect(screen.getAllByTestId("rich-message").some((m) => m.textContent?.includes("Room secret"))).toBe(true));
+      revoked = true;
+      await waitFor(() => expect(onRevoked).toHaveBeenCalledExactlyOnceWith(groupKey), { timeout: 6000 });
+      expect(screen.queryAllByTestId("rich-message")).toHaveLength(0);
+      expect(screen.getByRole("status", { name: "Access removed" })).toBeInTheDocument();
+      const polls = fetchMock.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 3500));
+      expect(fetchMock.mock.calls.length).toBe(polls);
+      expect(onRevoked).toHaveBeenCalledTimes(1);
+    }, 15000);
+  });
 });

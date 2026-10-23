@@ -125,7 +125,7 @@ describe('native controller', () => {
     await act(() => result.current.send({ text: 'denied' }))
     await act(() => result.current.steer('denied'))
     await act(() => result.current.interrupt())
-    await act(() => expect(result.current.goalControl('pause')).rejects.toThrow('permission'))
+    await act(() => expect(result.current.goalControl('goal.pause')).rejects.toThrow('permission'))
     await act(() => expect(result.current.setModel('m')).rejects.toThrow('permission'))
     await act(() => expect(result.current.answerClarify({ id: 'q' } as never, {})).rejects.toThrow('permission'))
     expect(called('/prompt')).toHaveLength(1)
