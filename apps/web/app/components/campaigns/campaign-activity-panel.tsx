@@ -6,25 +6,24 @@ import { useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 import type { CampaignActivity, CampaignActivityDestination } from "@/lib/campaign-activity";
 import type { CampaignDetail, CampaignRecipient } from "@/lib/campaigns";
-import { Card } from "../bulk-trades/trade-ui";
 import stack from "./stack-table.module.css";
 import { CampaignPeopleSheet, SUBMISSION_FIELDS } from "./campaign-people-sheet";
 import type { CampaignPersonRow, PeopleSource } from "./campaign-people-sheet";
-import { CampaignDate, cellStyle, mutedStyle } from "./campaign-ui";
+import { CampaignCard, CampaignLoading, cellStyle, mutedStyle } from "./campaign-ui";
 
 type Props = { detail: CampaignDetail; activity: CampaignActivity | null; loading: boolean; onNavigatePerson: (id: string) => void };
 
 export function CampaignWebsiteActivity({ activity, loading }: Pick<Props, "activity" | "loading">) {
   const totals = activity?.status === "available" ? activity.totals : null;
-  const message = loading ? "Loading website evidence…" : activity?.status === "unmapped" ? "No website attribution mapped." : !totals ? "Website evidence unavailable." : null;
+  const message = loading ? "Loading activity…" : activity?.status === "unmapped" ? "Website attribution not mapped." : !totals ? "Website activity unavailable." : null;
   return (
-    <section aria-label="PostHog website evidence" className="flex flex-col gap-2 border-t pt-3 text-[13px]" style={{ borderColor: "var(--bt-divider)" }}>
-      <h2 className="font-semibold">Website activity (PostHog)</h2>
+    <section aria-label="PostHog website evidence" className="flex flex-col gap-3 pt-3 text-[13px]" style={{ borderColor: "var(--bt-divider)" }}>
+      <h2 className="font-semibold">Website activity</h2>
       {message ? <p role="status" style={mutedStyle}>{message}</p> : totals && <>
         <dl className="flex flex-wrap gap-x-6 gap-y-2">
-          {([["Visited recipient records via assigned links", totals.visited_recipients], ["Distinct browser sessions", totals.sessions], ["Recorded submission events", totals.offer_events + totals.message_events + totals.buy_now_events]] as const).map(([label, count]) => <div key={label}><dt className="text-xs" style={mutedStyle}>{label}</dt><dd className="bt-mono mt-0.5 text-lg font-semibold">{count.toLocaleString("en-GB")}</dd></div>)}
+          {([["Recipients", totals.visited_recipients], ["Sessions", totals.sessions], ["Submissions", totals.offer_events + totals.message_events + totals.buy_now_events]] as const).map(([label, count]) => <div key={label}><dt className="text-xs" style={mutedStyle}>{label}</dt><dd className="bt-mono mt-0.5 text-lg font-semibold">{count.toLocaleString("en-GB")}</dd></div>)}
         </dl>
-        {totals.page_views === 0 && totals.offer_events + totals.message_events + totals.buy_now_events === 0 && <p role="status" style={mutedStyle}>No browser page or submission events were recorded in this period.</p>}
+        {totals.page_views === 0 && totals.offer_events + totals.message_events + totals.buy_now_events === 0 && <p role="status" style={mutedStyle}>No website activity recorded.</p>}
       </>}
       <p className="text-xs" style={mutedStyle}>Separate from email metrics. Not a conversion rate.</p>
     </section>
@@ -63,28 +62,29 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
   }, [detail.recipients]);
   return (
     <div className="flex flex-col gap-4">
-      <Card label="Pitched listings">
-        <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
+      {loading && <CampaignLoading label="Loading activity…" />}
+      <CampaignCard label="Pitched listings">
+        <div className={`bulk-trades max-w-full overflow-x-auto`}>
           <table aria-label="Listings" className={`${tableStyles.table} ${stack.stack} min-w-[720px]`}>
-            <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Listing", "Recipients pitched", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
+            <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Listing", "Pitched", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
             <tbody>
               {detail.listings.map((listing) => {
                 const destination = available ? activity.destinations.find((value) => value.listing_id === listing.listing_id) : undefined;
                 const clicked = emailRows(detail.recipients, listing.listing_id, "listing", destination);
                 return <tr key={listing.listing_id} className="hover:bg-[var(--bt-row-hover)]">
                   <TableCell data-label="Listing" className={`${tableStyles.cell} min-w-[180px]`} style={cellStyle}>{listing.url ? <a href={listing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1.5 font-medium hover:underline focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ color: "var(--bt-link)" }}>{listing.label}<ExternalLink size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span></a> : <span className="font-medium">{listing.label}</span>}</TableCell>
-                  <TableCell data-label="Recipients pitched" className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{listing.recipients}</TableCell>
+                  <TableCell data-label="Pitched" className={`${tableStyles.cell} bt-mono`} style={cellStyle}>{listing.recipients}</TableCell>
                   <TableCell data-label="Email clicks" className={tableStyles.cell} style={cellStyle}><CampaignPeopleSheet destination={listing.label} source="email" count={clicked.length} rows={clicked} onNavigatePerson={onNavigatePerson} />{detail.campaign.tracking_pending > 0 && <span className="block text-xs" style={mutedStyle}>observed · pending</span>}</TableCell>
                   <WebsiteCells label={listing.label} destination={destination} recipientsById={recipientsById} onNavigatePerson={onNavigatePerson} />
                 </tr>;
               })}
-              {!detail.listings.length && <tr><td colSpan={5} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No pitched listings are recorded in the retained ledger.</td></tr>}
+              {!detail.listings.length && <tr><td colSpan={5} className="px-3.5 py-8 text-center text-[13px]" style={mutedStyle}>No listings.</td></tr>}
             </tbody>
           </table>
         </div>
-      </Card>
-      {!!detail.other_destinations.length && <Card label="Other destinations">
-        <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}><table aria-label="Other destinations" className={`${tableStyles.table} ${stack.stack} min-w-[640px]`}>
+      </CampaignCard>
+      {!!detail.other_destinations.length && <CampaignCard label="Other destinations">
+        <div className={`bulk-trades max-w-full overflow-x-auto`}><table aria-label="Other destinations" className={`${tableStyles.table} ${stack.stack} min-w-[640px]`}>
           <thead style={{ background: "var(--bt-table-head)" }}><tr>{["Destination", "Email clicks", "Website activity", "Submissions"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr></thead>
           <tbody>{detail.other_destinations.map((other) => {
             const destination = available ? activity.destinations.find((value) => value.listing_id == null && value.cta_key === other.cta_key) : undefined;
@@ -96,7 +96,7 @@ export function CampaignListings({ detail, activity, loading, onNavigatePerson }
             </tr>;
           })}</tbody>
         </table></div>
-      </Card>}
+      </CampaignCard>}
     </div>
   );
 }

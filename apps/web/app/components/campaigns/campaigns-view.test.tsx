@@ -75,6 +75,17 @@ function visiblePeople() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CampaignsView", () => {
+  it("uses a quiet labelled loading state instead of placeholder rows", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    const view = render(<CampaignsView {...props} campaignId={null} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading campaigns…");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    view.rerender(<CampaignsView {...props} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading campaign…");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
   it("loads engagement into the redesigned campaign and shows returning readers independently of website availability", async () => {
     mockDetail(detail, { ...unavailable, engagement: [{
       recipient_key: "person:a", person_id: "person:a", person_name: "Ada", company_name: "North Batteries", recipient_email: "ada@example.test",
@@ -84,7 +95,7 @@ describe("CampaignsView", () => {
     const user = userEvent.setup();
     render(<CampaignsView {...props} />);
     await screen.findByRole("table", { name: "Recipients" });
-    await waitFor(() => expect(screen.getByText(/Returning readers:/)).toHaveTextContent("Returning readers: 1"));
+    await waitFor(() => expect(screen.getByLabelText("Returning readers")).toHaveTextContent("Returning readers1"));
     await user.click(screen.getByRole("tab", { name: "Engagement" }));
     const ranking = screen.getByRole("region", { name: "Engagement ranking" });
     expect(within(ranking).getByRole("link", { name: "Ada" })).toHaveAttribute("href", buildEntryLink("people", "person:a"));
@@ -107,13 +118,13 @@ describe("CampaignsView", () => {
     await waitFor(() => expect(pending.has(sales)).toBe(true));
     expect(pending.get(supply)!.signal.aborted).toBe(true);
     await act(async () => pending.get(supply)!.resolve(new Response(JSON.stringify({ ...unavailable, engagement: [{ recipient_key: "stale", return_sessions: 9 }] }))));
-    expect(screen.getByText(/Returning readers:/)).toHaveTextContent("Loading…");
+    expect(screen.getByLabelText("Returning readers")).toHaveTextContent("Loading…");
     await act(async () => pending.get(sales)!.resolve(new Response(JSON.stringify({ ...unavailable, engagement: [{
       recipient_key: "person:b", person_id: "person:b", person_name: "Ben", company_name: "South Parts", recipient_email: "ben@example.test",
       total_opens: 1, flagged_opens: 0, return_sessions: 0, first_opened: AT, last_opened: AT,
       days_to_first_open: 0, late_opener: false, human_links_clicked: 0, flagged_clicks: 0, replied: true, likely_bot: false,
     }] }))));
-    expect(screen.getByText(/Returning readers:/)).toHaveTextContent("Returning readers: 0");
+    expect(screen.getByLabelText("Returning readers")).toHaveTextContent("Returning readers0");
     await userEvent.setup().click(screen.getByRole("tab", { name: "Engagement" }));
     const ranking = screen.getByRole("region", { name: "Engagement ranking" });
     expect(within(ranking).getByRole("link", { name: "Ben" })).toBeInTheDocument();
@@ -164,6 +175,8 @@ describe("CampaignsView", () => {
     view.rerender(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
     for (const [key, value] of Object.entries(counts)) {expect(within(metrics).getByText(key[0].toUpperCase() + key.slice(1), { exact: true }).parentElement).toHaveTextContent(String(value));}
+    await userEvent.setup().click(screen.getByText("About the numbers"));
+    await userEvent.setup().click(screen.getByText("Tracked links"));
     expect(screen.getByRole("note")).toHaveTextContent("Scanner evidence: recorded · Proxy evidence: recorded");
     expect(within(screen.getByRole("region", { name: "Tracked links" })).getByRole("link", { name: "offer" })).toHaveAttribute("href", "https://example.test/offer");
   });
@@ -199,6 +212,7 @@ describe("CampaignsView", () => {
     render(<CampaignsView {...props} />);
     const metrics = await screen.findByRole("region", { name: "Campaign metrics" });
     for (const value of ["115", "113", "24", "13"]) { expect(within(metrics).getByText(value, { exact: true })).toBeInTheDocument(); }
+    await userEvent.setup().click(screen.getByText("About the numbers"));
     const provenance = screen.getByRole("region", { name: "Metrics provenance" });
     expect(provenance).toHaveTextContent(/Original sent:\s*115/);
     expect(provenance).toHaveTextContent(/Retained recipients:\s*113/);
@@ -297,9 +311,9 @@ describe("CampaignsView", () => {
     expect(within(listings).getByText("Renault Zoe 52 kWh").closest("a")).toBeNull();
     expect(within(listings).queryByText(/internal-listing/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Details" }));
-    const audit = screen.getByText("Technical and audit details").closest("details")!;
+    const audit = screen.getByText("Audit").closest("details")!;
     expect(audit.open).toBe(false);
-    await user.click(within(audit).getByText("Technical and audit details"));
+    await user.click(within(audit).getByText("Audit"));
     expect(audit.open).toBe(true);
     expect(within(audit).getByText("offer-v2")).toBeVisible();
     expect(screen.getByText("Notes").closest("details")!.open).toBe(false);
@@ -490,6 +504,7 @@ describe("Campaign destination evidence sheets", () => {
     render(<CampaignsView {...props} />);
     await screen.findByRole("table", { name: "Recipients" });
     expect(visiblePeople()).toEqual(["Ada", "Ben", "Cora", "Dev"]);
+    await user.click(screen.getByText("About the numbers"));
     await waitFor(() => expect(within(screen.getByRole("region", { name: "PostHog website evidence" })).getByRole("status")).not.toHaveTextContent(/Loading/));
     await openListings(user);
     const row = within(screen.getByRole("table", { name: "Listings" })).getByText("Nissan Leaf 40 kWh").closest("tr")!;

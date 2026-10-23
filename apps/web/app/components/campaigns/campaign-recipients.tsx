@@ -5,12 +5,12 @@ import { TableCell } from "../ui/table-cell";
 import { useMemo, useRef, useState } from "react";
 import type { CampaignRecipient } from "@/lib/campaigns";
 import type { MailMessageListRow } from "@/lib/mail-types";
-import { Card, inputClass, inputStyle } from "../bulk-trades/trade-ui";
+import { inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import { Input } from "../ui/input";
 import stack from "./stack-table.module.css";
 import { StageTag } from "../dismantlers/dismantler-ui";
 import type { Stage } from "@/lib/dismantlers";
-import { CampaignDate, Observation, PAGE_SIZE, Pagination, PersonLink, cellStyle, firstClick, humanize, mutedStyle } from "./campaign-ui";
+import { CampaignCard, CampaignDate, Observation, PAGE_SIZE, Pagination, PersonLink, cellStyle, firstClick, humanize, mutedStyle } from "./campaign-ui";
 
 const FILTERS = ["All", "Replied", "Opened", "Clicked", "Bounced", "Tracking pending"] as const;
 type RecipientFilter = typeof FILTERS[number];
@@ -38,17 +38,17 @@ export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePe
   const visible = rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   return (
-    <div className={`bulk-trades ${tableStyles.surface}`}><Card label="Recipient ledger">
-      <div data-table-part="toolbar" className="flex flex-wrap items-center gap-2.5 border-b px-3.5 py-3" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}>
-        <Input data-table-part="search" type="search" aria-label="Search recipients" placeholder="Search name, company, email or listing" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
-        <div role="group" aria-label="Recipient activity" className="flex max-w-full overflow-x-auto whitespace-nowrap rounded-none border" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
-          {FILTERS.map((value) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setPage(0); }} className="h-8 rounded-none px-3 text-[13px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]" style={filter === value ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)" } : { color: "var(--bt-text)" }}>{value}</button>)}
+    <div className="bulk-trades"><CampaignCard label="Recipient ledger">
+      <div data-table-part="toolbar" className="flex flex-wrap items-center gap-3 px-4 py-4" style={{ background: "var(--bt-bg)", borderColor: "var(--bt-divider)" }}>
+        <Input data-table-part="search" type="search" aria-label="Search recipients" placeholder="Search recipients" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} className={`${inputClass} h-8 max-w-sm text-[13px] shadow-none focus-visible:ring-0`} style={inputStyle} />
+        <div role="group" aria-label="Recipient activity" className="flex max-w-full flex-wrap gap-1 rounded-lg p-1" style={{ borderColor: "var(--bt-border)", background: "var(--bt-segment)" }}>
+          {FILTERS.map((value) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setPage(0); }} className="min-h-11 rounded-md px-3 text-[13px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]" style={filter === value ? { background: "var(--bt-surface)", color: "var(--bt-text)", boxShadow: "0 1px 2px var(--bt-border)" } : { color: "var(--bt-text)" }}>{value}</button>)}
         </div>
       </div>
-      <div className={`bulk-trades ${tableStyles.surface} max-w-full overflow-x-auto`}>
+      <div className={`bulk-trades max-w-full overflow-x-auto`}>
         <table ref={table} tabIndex={-1} aria-label="Recipients" className={`${tableStyles.table} ${stack.stack} min-w-[720px] focus:outline-none`}>
           <thead style={{ background: "var(--bt-table-head)" }}>
-            <tr>{["Recipient", "Delivery", "Reply", "First tracked open", "First tracked click", outreach ? "Dismantler" : "Clicked listings", "Unsubscribed"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr>
+            <tr>{["Recipient", "Delivery", "Reply", "First open", "First click", outreach ? "Dismantler" : "Clicked listings", "Unsubscribed"].map((label) => <th key={label} scope="col" className={tableStyles.headerCell} style={cellStyle}>{label}</th>)}</tr>
           </thead>
           <tbody>
             {visible.map((recipient) => (
@@ -74,6 +74,6 @@ export function CampaignRecipients({ recipients, deliveryRows = [], onNavigatePe
         </table>
       </div>
       <div data-table-part="footer"><Pagination page={currentPage} count={rows.length} onPage={(next) => { setPage(next); table.current?.focus({ preventScroll: true }); }} /></div>
-    </Card></div>
+    </CampaignCard></div>
   );
 }

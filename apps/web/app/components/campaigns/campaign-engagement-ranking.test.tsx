@@ -47,7 +47,7 @@ describe("campaign engagement ranking", () => {
       row({ days_to_first_open: 1.5, late_opener: true }),
       row({ recipient_key: "p2", person_id: "p2", person_name: "Unknown delay" }),
     ]} />);
-    expect(screen.getByRole("columnheader", { name: "Days to first open" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Days to open" })).toBeInTheDocument();
     expect(screen.getByText("1.50")).toBeInTheDocument();
     expect(screen.getByText("Late opener")).toHaveAttribute("title", "First open more than 24 hours after this message was sent");
     expect(screen.getByText("Not observed")).toBeInTheDocument();

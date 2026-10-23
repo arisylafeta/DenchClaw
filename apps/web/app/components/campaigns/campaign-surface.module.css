@@ -1,0 +1,71 @@
+/* Campaign-only shape contract. Palette and typography come from Trades Preview.
+   Specific selectors override the shared table primitive's intentionally square controls. */
+.surface {
+  color: var(--bt-text);
+  background: var(--bt-bg);
+  --bt-muted: var(--bt-text-2);
+}
+
+.card {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--bt-surface);
+}
+
+.surface table {
+  table-layout: auto;
+}
+
+.surface table > thead > tr > th,
+.surface table > tbody > tr > td {
+  border-bottom: 0;
+  padding: 14px 16px;
+}
+
+.surface table > thead > tr > th {
+  background: var(--bt-surface) !important;
+  color: var(--bt-text-2);
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.surface table > tbody > tr:nth-child(even) {
+  background: color-mix(in srgb, var(--bt-bg) 45%, var(--bt-surface));
+}
+
+.surface table > tbody > tr:hover {
+  background: var(--bt-row-hover);
+}
+
+.surface [data-table-part="toolbar"] {
+  border: 0;
+  padding: 16px;
+}
+
+.surface [data-table-part="search"],
+.surface [data-table-part="toolbar"] input,
+.surface [data-table-part="toolbar"] button,
+.surface [data-table-part="footer"] button {
+  border-radius: 8px !important;
+  min-height: 36px;
+}
+
+.surface :is(button, a, select, input, summary):focus-visible {
+  outline: 2px solid var(--bt-text-2);
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  .surface [data-table-part="toolbar"] input,
+  .surface [data-table-part="toolbar"] button,
+  .surface [data-table-part="footer"] button {
+    min-height: 44px;
+  }
+  .card {
+    background: transparent;
+  }
+  .surface table > tbody > tr:nth-child(even) {
+    background: var(--bt-surface);
+  }
+}

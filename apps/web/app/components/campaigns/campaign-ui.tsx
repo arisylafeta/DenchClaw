@@ -1,10 +1,20 @@
 "use client";
 
 import type { MouseEvent, ReactNode } from "react";
-import type { CampaignRecipient, CampaignSummary } from "@/lib/campaigns";
+import type { CampaignRecipient } from "@/lib/campaigns";
 import { buildEntryLink } from "@/lib/workspace-links";
 import { buttonClass, buttonStyle } from "../bulk-trades/trade-ui";
-import { ShimmerBar } from "../ui/shimmer";
+import { LoaderCircle } from "lucide-react";
+import styles from "./campaign-surface.module.css";
+
+export function CampaignLoading({ label = "Loading…" }: { label?: string }) {
+  return <div role="status" aria-busy="true" className="flex min-h-32 items-center justify-center gap-2 py-8 text-[12px]" style={mutedStyle}><LoaderCircle size={16} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />{label}</div>;
+}
+
+/** Soft campaign surface using the Trades Preview palette. */
+export function CampaignCard({ children, label }: { children: ReactNode; label?: string }) {
+  return <section aria-label={label} className={styles.card}>{children}</section>;
+}
 
 export const PAGE_SIZE = 25;
 export const mutedStyle = { color: "var(--bt-muted)" };
@@ -44,7 +54,7 @@ const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
 };
 export function StatusTag({ status }: { status: string }) {
   const tone = STATUS_TONE[status.toLowerCase()];
-  return <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium" style={{ background: tone?.bg ?? "var(--bt-bg)", borderColor: "var(--bt-border)", color: tone?.fg ?? "var(--bt-text-2)" }}>{humanize(status)}</span>;
+  return <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: tone?.bg ?? "var(--bt-bg)", borderColor: "var(--bt-border)", color: tone?.fg ?? "var(--bt-text-2)" }}>{humanize(status)}</span>;
 }
 
 type Counts = { sent: number | null; delivered: number | null; bounced: number | null; opened: number | null; clicked: number | null; unsubscribed: number | null; replied: number | null };
@@ -57,20 +67,20 @@ export function metricRate(counts: Counts, key: typeof METRIC_KEYS[number]): str
   return `${new Intl.NumberFormat("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format((100 * value) / base)}%`;
 }
 
-/** One compact strip of the seven mail-log metrics with counts and rates. Columns reflow to the width, so it never scrolls sideways. `loading` keeps the exact structure with placeholder values. */
+/** One compact strip of the seven mail-log metrics with counts and rates. Columns reflow to the width, so it never scrolls sideways. `loading` shows one quiet status. */
 export function MetricRow({ counts, notTracked = [], size = "sm", compact = false, loading = false }: { counts?: Counts; notTracked?: readonly string[]; size?: "sm" | "lg"; compact?: boolean; loading?: boolean }) {
   const lg = size === "lg";
+  if (loading) { return <CampaignLoading />; }
   return <dl className="grid gap-x-4 gap-y-3" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${compact ? 64 : lg ? 84 : 72}px, 1fr))` }}>
     {METRIC_KEYS.map((key) => {
       const value = counts?.[key]; const rate = counts ? metricRate(counts, key) : null;
-      return <div key={key} className="min-w-0">
-        <dt className="h-4 text-[11px] uppercase leading-4 tracking-[0.04em]" style={mutedStyle}>{humanize(key)}</dt>
-        <dd className={`bt-mono font-semibold tabular-nums ${lg ? "h-8 text-[22px] leading-8" : "h-6 text-[15px] leading-6"}`}>
-          {loading ? <ShimmerBar w="55%" h={lg ? 22 : 14} style={{ marginTop: lg ? 5 : 5 }} />
-            : notTracked.includes(key) ? <span title="Not tracked" style={mutedStyle}>—<span className="sr-only">Not tracked</span></span>
+      return <div key={key} className="flex min-w-0 flex-col">
+        <dt className="order-2 text-[12px] leading-5" style={mutedStyle}>{humanize(key)}</dt>
+        <dd className={`font-semibold tabular-nums ${lg ? "h-8 text-[22px] leading-8" : "h-6 text-[15px] leading-6"}`}>
+          {notTracked.includes(key) ? <span title="Not tracked" style={mutedStyle}>—<span className="sr-only">Not tracked</span></span>
             : value == null ? (lg ? "Unknown" : "—") : value.toLocaleString("en-GB")}
         </dd>
-        <dd className="h-4 text-[11px] leading-4 tabular-nums" style={mutedStyle}>{loading ? <ShimmerBar w="40%" h={9} style={{ marginTop: 3 }} /> : rate ?? "\u00a0"}</dd>
+        <dd className="order-3 text-[11px] leading-4 tabular-nums" style={mutedStyle}>{rate ?? "\u00a0"}</dd>
       </div>;
     })}
   </dl>;
@@ -90,12 +100,12 @@ export function firstClick(recipient: CampaignRecipient): string | null {
 export function Pagination({ page, count, onPage }: { page: number; count: number; onPage: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
   return (
-    <nav aria-label="Pagination" className="flex flex-wrap items-center justify-between gap-2 border-t px-3.5 py-3 text-[13px]" style={borderStyle}>
+    <nav aria-label="Pagination" className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-3 text-[13px]" style={borderStyle}>
       <span aria-live="polite" style={mutedStyle}>{count ? `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, count)} of ${count}` : "0 results"}</span>
       <div className="flex items-center gap-2">
-        <button type="button" className={buttonClass} style={buttonStyle} disabled={page === 0} onClick={() => onPage(page - 1)}>Previous</button>
+        <button type="button" className={`${buttonClass} rounded-lg`} style={buttonStyle} disabled={page === 0} onClick={() => onPage(page - 1)}>Previous</button>
         <span style={mutedStyle}>Page {page + 1} of {pages}</span>
-        <button type="button" className={buttonClass} style={buttonStyle} disabled={page + 1 >= pages} onClick={() => onPage(page + 1)}>Next</button>
+        <button type="button" className={`${buttonClass} rounded-lg`} style={buttonStyle} disabled={page + 1 >= pages} onClick={() => onPage(page + 1)}>Next</button>
       </div>
     </nav>
   );
@@ -104,7 +114,7 @@ export function Pagination({ page, count, onPage }: { page: number; count: numbe
 const PIN_COLORS = ["#2f9e44", "#1c7ed6", "#e8590c", "#ae3ec9", "#0c8599", "#d6336c", "#5c7cfa", "#f08c00", "#099268"];
 /** A stable colour per campaign so it can be spotted at a glance in a list. */
 export function campaignColor(id: string) {
-  return PIN_COLORS[[...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % PIN_COLORS.length];
+  return PIN_COLORS[Array.from(id).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % PIN_COLORS.length];
 }
 export function CampaignPin({ id, size = 10 }: { id: string; size?: number }) {
   return <span aria-hidden className="inline-block shrink-0 rounded-full" style={{ width: size, height: size, background: campaignColor(id) }} />;
