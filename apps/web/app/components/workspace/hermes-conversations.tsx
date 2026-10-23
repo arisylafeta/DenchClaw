@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { closeHermesEventsClient } from "@/lib/hermes-chat/events-client";
 import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
 import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
@@ -47,6 +48,8 @@ export function useHermesConversations() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
   const account = useRef<string | null>(null);
+  /** undefined until the first listing settles; null when the server verified no account; afterwards the last verified user, kept through transient failures. */
+  const [accountId, setAccountId] = useState<string | null | undefined>(undefined);
   const generation = useRef(0);
   const reloadSequence = useRef(0);
   const [sharingKey, setSharingKey] = useState<string | null>(null);
@@ -71,11 +74,20 @@ export function useHermesConversations() {
   const reload = useCallback(async () => {
     const sequence = ++reloadSequence.current;
     try {
-      const data = await jsonResponse(await fetch("/api/hermes/conversations"));
+      const response = await fetch("/api/hermes/conversations");
+      if (sequence !== reloadSequence.current) return;
+      if (response.status === 401 || response.status === 403) {
+        closeHermesEventsClient(); account.current = null; generation.current++;
+        setAccountId(null); setListing(null); setSelected(null); setPins([]); setSeen({}); setAliases({}); setFilter(null);
+        setDialog(null); setLastCreatedKey(null); setCreating(false); setSharingKey(null); sharingPending.current = false;
+      }
+      const data = await jsonResponse(response);
       if (sequence !== reloadSequence.current) return;
       if (typeof data.userId !== "string" || !data.userId) throw new Error("Chat access could not be verified");
       if (account.current !== data.userId) {
-        account.current = data.userId; generation.current++;
+        // A stream opened for the previous account must not carry the new account's chats.
+        if (account.current !== null) closeHermesEventsClient();
+        account.current = data.userId; generation.current++; setAccountId(data.userId);
         setSelected(null); setPins([]); setSeen(loadSeen(data.userId)); setAliases({}); setFilter(null);
         setDialog(null); setLastCreatedKey(null); setCreating(false); setSharingKey(null); sharingPending.current = false;
         try {
@@ -95,7 +107,7 @@ export function useHermesConversations() {
         const saved = await (await fetch("/api/hermes/pins")).json();
         if (sequence === reloadSequence.current && Array.isArray(saved?.pins)) setPins(saved.pins.filter((id: unknown) => typeof id === "string"));
       } catch { /* Keep the previous pins. */ }
-    } catch (e) { if (sequence === reloadSequence.current) { generation.current++; setListing(null); setSelected(null); setPins([]); setError(e instanceof Error ? e.message : "Could not load chats"); } }
+    } catch (e) { if (sequence === reloadSequence.current) { generation.current++; setListing(null); setSelected(null); setPins([]); setAccountId(current => current === undefined ? null : current); setError(e instanceof Error ? e.message : "Could not load chats"); } }
     finally { setReady(true); }
   }, []);
   useEffect(() => { void reload(); const timer = setInterval(() => void reload(), 10_000); return () => clearInterval(timer); }, [reload]);
@@ -209,7 +221,7 @@ export function useHermesConversations() {
   const displaySelected = useMemo(() => selected ? display(selected) : null, [selected, display]);
   return { enabled: listing?.backend === "hermes", ready, listing: displayListing, filter, setFilter: updateFilter, selected: displaySelected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload, revoke, userId: listing?.userId ?? null };
+    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload, revoke, userId: listing?.userId ?? null, accountId };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; background = only subagents work; done means unseen output. */

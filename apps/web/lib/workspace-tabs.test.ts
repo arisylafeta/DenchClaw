@@ -22,6 +22,7 @@ import {
   openContent,
   promoteContent,
   projectUrlState,
+  mergeOpenTabs,
   saveTabsState,
   selectActiveContentTab,
   selectActivePath,
@@ -380,10 +381,10 @@ describe("URL roundtrip / popstate idempotency", () => {
 
   it("repairs a persisted campaign file tab on refresh and restores the page through history", () => {
     const stale = openContent(EMPTY_TABS_STATE, fileInput("campaign"));
-    saveTabsState(stale, "campaign-refresh");
+    saveTabsState(stale, "campaign-refresh", "user-a");
     const url = parseUrlState("path=campaign");
     const shell = { resolveKind: () => null };
-    let state = applyUrlToState(loadTabsState("campaign-refresh"), url, shell);
+    let state = applyUrlToState(loadTabsState("campaign-refresh", "user-a"), url, shell);
 
     expect(selectActiveContentTab(state)).toMatchObject({
       kind: "campaigns",
@@ -408,8 +409,8 @@ describe("URL roundtrip / popstate idempotency", () => {
       kind: "object", path: "campaign", title: "Campaigns", preview: true,
     });
     state = openContent(state, { ...fileInput("notes.md"), preview: false });
-    saveTabsState(state, "inactive-campaign");
-    state = applyUrlToState(loadTabsState("inactive-campaign"), parseUrlState("path=notes.md"), {});
+    saveTabsState(state, "inactive-campaign", "user-a");
+    state = applyUrlToState(loadTabsState("inactive-campaign", "user-a"), parseUrlState("path=notes.md"), {});
     state = workspaceTabsReducer(state, { type: "activateContent", id: "campaign" });
     expect(selectActiveContentTab(state)?.kind).toBe("campaigns");
     state = applyUrlToState(state, parseUrlState("entry=people:recipient"), {});
@@ -573,42 +574,93 @@ describe("URL roundtrip / popstate idempotency", () => {
 
 describe("storage", () => {
   it("persists and restores content tabs", () => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") { return; }
     let state: WorkspaceTabsState = EMPTY_TABS_STATE;
     state = openContent(state, { ...fileInput("a.md"), preview: false });
     state = openContent(state, { ...fileInput("b.md"), preview: true });
-    saveTabsState(state, "ws-1");
+    saveTabsState(state, "ws-1", "user-a");
 
-    const loaded = loadTabsState("ws-1");
+    const loaded = loadTabsState("ws-1", "user-a");
     expect(loaded.contentTabs.map((t) => t.id)).toEqual(["a.md", "b.md"]);
     expect(loaded.contentTabs[1].preview).toBe(true);
     expect(loaded.activeContentId).toBe("b.md");
   });
 
-  it("drops draft chat tabs on persist (they are recreated on load)", () => {
-    if (typeof window === "undefined") return;
+  it("keeps pinned drafts but drops unpinned draft chat tabs on persist (they are recreated on load)", () => {
+    if (typeof window === "undefined") { return; }
     let state: WorkspaceTabsState = EMPTY_TABS_STATE;
     state = openChat(state, createSessionChatTab({ sessionId: "s1", title: "Real" }));
     state = openChat(state, createDraftChatTab());
-    saveTabsState(state, "ws-2");
+    const pinned = createDraftChatTab();
+    state = openChat(state, pinned);
+    state = workspaceTabsReducer(state, { type: "togglePinChat", id: pinned.id });
+    saveTabsState(state, "ws-2", "user-a");
 
-    const loaded = loadTabsState("ws-2");
-    expect(loaded.chatTabs.map((t) => t.id)).toEqual(["s1"]);
+    const loaded = loadTabsState("ws-2", "user-a");
+    expect(loaded.chatTabs.map((t) => t.id)).toEqual(["s1", pinned.id]);
   });
 
   it("normalizes a stale activeContentId from storage to null", () => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      "dench:workspace-tabs:ws-3",
-      JSON.stringify({
-        contentTabs: [{ id: "a.md", kind: "file", path: "a.md", title: "A", preview: false, pinned: false }],
-        chatTabs: [],
-        activeContentId: "ghost",
-        activeChatId: null,
-      }),
-    );
-    const loaded = loadTabsState("ws-3");
+    saveTabsState(openContent(EMPTY_TABS_STATE, { ...fileInput("a.md"), preview: false }), "ws-3", "user-a");
+    const [key] = Object.keys(window.localStorage);
+    const stored = JSON.parse(window.localStorage.getItem(key)!);
+    window.localStorage.setItem(key, JSON.stringify({ ...stored, activeContentId: "ghost" }));
+    const loaded = loadTabsState("ws-3", "user-a");
     expect(loaded.activeContentId).toBe(null);
+  });
+
+  it("restores tabs only for the user who saved them, and never reads or writes without a user", () => {
+    if (typeof window === "undefined") { return; }
+    const pinned = createDraftChatTab();
+    let state: WorkspaceTabsState = openChat(EMPTY_TABS_STATE, createSessionChatTab({ sessionId: "private-a", title: "Private" }));
+    state = openChat(state, pinned);
+    state = workspaceTabsReducer(state, { type: "togglePinChat", id: pinned.id });
+    saveTabsState(state, "ws-4", "user-a");
+
+    expect(loadTabsState("ws-4", "user-a").chatTabs.map((t) => t.id)).toEqual(["private-a", pinned.id]);
+    expect(loadTabsState("ws-4", "user-b")).toBe(EMPTY_TABS_STATE);
+    expect(loadTabsState("ws-4", null)).toBe(EMPTY_TABS_STATE);
+
+    const before = window.localStorage.length;
+    saveTabsState(state, "ws-4", null);
+    expect(window.localStorage.length).toBe(before);
+  });
+
+  it("does not adopt tabs saved before they were scoped to a user", () => {
+    if (typeof window === "undefined") { return; }
+    const legacy = JSON.stringify({
+      contentTabs: [], chatTabs: [createSessionChatTab({ sessionId: "private-a", title: "Private" })],
+      activeContentId: null, activeChatId: "private-a",
+    });
+    window.localStorage.setItem("dench:workspace-tabs:ws-5", legacy);
+    window.localStorage.setItem("dench:workspace-tabs:default", legacy);
+    expect(loadTabsState("ws-5", "user-a")).toBe(EMPTY_TABS_STATE);
+    expect(loadTabsState(null, "user-a")).toBe(EMPTY_TABS_STATE);
+    expect(window.localStorage.getItem("dench:workspace-tabs:ws-5")).toBe(legacy);
+  });
+
+  it("keeps one user's workspaces apart even when ids contain separators", () => {
+    if (typeof window === "undefined") { return; }
+    const a = openContent(EMPTY_TABS_STATE, { ...fileInput("a.md"), preview: false });
+    const b = openContent(EMPTY_TABS_STATE, { ...fileInput("b.md"), preview: false });
+    saveTabsState(a, "x:y", "u");
+    saveTabsState(b, "y", "u:x");
+    expect(loadTabsState("x:y", "u").contentTabs.map((t) => t.id)).toEqual(["a.md"]);
+    expect(loadTabsState("y", "u:x").contentTabs.map((t) => t.id)).toEqual(["b.md"]);
+  });
+});
+
+describe("mergeOpenTabs", () => {
+  it("keeps what is open now beside restored tabs, with the open selection winning", () => {
+    const restored = openChat(openContent(EMPTY_TABS_STATE, { ...fileInput("saved.md"), preview: false }), createSessionChatTab({ sessionId: "saved-chat" }));
+    const draft = createDraftChatTab();
+    let open = openChat(openContent(EMPTY_TABS_STATE, { ...fileInput("saved.md"), preview: false }), draft);
+    open = openContent(open, { ...fileInput("fresh.md"), preview: false });
+    const merged = mergeOpenTabs(restored, open);
+    expect(merged.contentTabs.map((t) => t.id)).toEqual(["saved.md", "fresh.md"]);
+    expect(merged.chatTabs.map((t) => t.id)).toEqual(["saved-chat", draft.id]);
+    expect(merged.activeChatId).toBe(draft.id);
+    expect(merged.activeContentId).toBe("fresh.md");
   });
 });
 

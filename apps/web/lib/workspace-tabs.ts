@@ -1103,10 +1103,11 @@ export function applyUrlToState(
 // Persistence
 // ---------------------------------------------------------------------------
 
-const STORAGE_PREFIX = "dench:workspace-tabs";
+/** Tabs, and the pinned drafts among them, belong to one signed-in user. Unscoped keys written before accounts existed have no owner and are never read. */
+const STORAGE_PREFIX = "dench:user-workspace-tabs";
 
-function storageKey(workspaceId?: string | null): string {
-  return `${STORAGE_PREFIX}:${workspaceId || "default"}`;
+function storageKey(userId: string, workspaceId?: string | null): string {
+  return `${STORAGE_PREFIX}:${encodeURIComponent(userId)}:${encodeURIComponent(workspaceId || "default")}`;
 }
 
 type PersistedShape = {
@@ -1116,10 +1117,11 @@ type PersistedShape = {
   activeChatId: string | null;
 };
 
-export function loadTabsState(workspaceId: string | null): WorkspaceTabsState {
-  if (typeof window === "undefined") return EMPTY_TABS_STATE;
+/** Restores one user's tabs. Without a verified user nothing is read. */
+export function loadTabsState(workspaceId: string | null, userId: string | null): WorkspaceTabsState {
+  if (typeof window === "undefined" || !userId) return EMPTY_TABS_STATE;
   try {
-    const raw = window.localStorage.getItem(storageKey(workspaceId));
+    const raw = window.localStorage.getItem(storageKey(userId, workspaceId));
     if (!raw) return EMPTY_TABS_STATE;
     const parsed = JSON.parse(raw) as Partial<PersistedShape>;
     const contentTabs = Array.isArray(parsed.contentTabs)
@@ -1150,11 +1152,13 @@ export function loadTabsState(workspaceId: string | null): WorkspaceTabsState {
   }
 }
 
+/** Saves one user's tabs. Without a verified user nothing is written. */
 export function saveTabsState(
   state: WorkspaceTabsState,
   workspaceId: string | null,
+  userId: string | null,
 ): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !userId) return;
   try {
     const payload: PersistedShape = {
       contentTabs: state.contentTabs.map(stripContentTab),
@@ -1166,10 +1170,22 @@ export function saveTabsState(
       activeContentId: state.activeContentId,
       activeChatId: state.activeChatId,
     };
-    window.localStorage.setItem(storageKey(workspaceId), JSON.stringify(payload));
+    window.localStorage.setItem(storageKey(userId, workspaceId), JSON.stringify(payload));
   } catch {
     // localStorage full / unavailable — ignore.
   }
+}
+
+/** Adds tabs open now that `restored` lacks, for an account verified after the page was already in use. The open selection wins. */
+export function mergeOpenTabs(restored: WorkspaceTabsState, open: WorkspaceTabsState): WorkspaceTabsState {
+  const contentIds = new Set(restored.contentTabs.map((tab) => tab.id));
+  const chatIds = new Set(restored.chatTabs.map((tab) => tab.id));
+  return {
+    contentTabs: [...restored.contentTabs, ...open.contentTabs.filter((tab) => !contentIds.has(tab.id))],
+    chatTabs: [...restored.chatTabs, ...open.chatTabs.filter((tab) => !chatIds.has(tab.id))],
+    activeContentId: open.activeContentId ?? restored.activeContentId,
+    activeChatId: open.activeChatId ?? restored.activeChatId,
+  };
 }
 
 function isContentTab(value: unknown): value is ContentTab {

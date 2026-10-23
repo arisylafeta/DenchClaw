@@ -69,6 +69,7 @@ import {
   selectActivePath,
   ensureChatPresent,
   loadTabsState,
+  mergeOpenTabs,
   saveTabsState,
   inferContentTabKindFromPath,
   inferContentTabTitle,
@@ -515,14 +516,27 @@ export function WorkspaceShell() {
           <UnicodeSpinner name="braille" className="text-2xl" style={{ color: "var(--color-text-muted)" }} />
         </div>
       }>
-        <WorkspacePageInner />
+        <WorkspaceAccountBoundary />
       </Suspense>
     </ToastProvider>
   );
 }
 
+/**
+ * Chats, tabs and in-flight responses belong to one signed-in account. A different verified account remounts the page, which
+ * drops every mounted chat and its late responses. Verifying the first account keeps the page, so early typing survives.
+ */
+function WorkspaceAccountBoundary() {
+  const hermesChats = useHermesConversations();
+  const [session, setSession] = useState<{ account: string | null; epoch: number }>({ account: null, epoch: 0 });
+  const verified = hermesChats.accountId;
+  if (verified !== undefined && verified !== session.account) {
+    setSession({ account: verified, epoch: session.account === null ? session.epoch : session.epoch + 1 });
+  }
+  return <WorkspacePageInner key={session.epoch} hermesChats={hermesChats} />;
+}
 
-function WorkspacePageInner() {
+function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsController }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   // `hydrationPhase` gates the URL sync effect so it doesn't push a URL
@@ -560,7 +574,8 @@ function WorkspacePageInner() {
   const [context, setContext] = useState<WorkspaceContext | null>(null);
 
   // Chat session state
-  const hermesChats = useHermesConversations();
+  // undefined while the account is being verified; null when it could not be.
+  const accountId = hermesChats.accountId;
   // `?chat=KEY` with nothing else is a deep link. Until that chat is open the centre pane shows a
   // skeleton, not the draft tab's home screen or the "select a chat" placeholder.
   const [deepLinkPending, setDeepLinkPending] = useState(() => {
@@ -672,34 +687,37 @@ function WorkspacePageInner() {
     tabsStateRef.current = tabsState;
   }, [tabsState]);
 
-  // Track which workspace we loaded tabs for, so we reload if the workspace switches
-  // and don't save until we've loaded first.
-  const tabLoadedForWorkspace = useRef<string | null>(null);
+  // Tabs belong to one account and workspace: they restore once the account is known and are never read or written without it.
+  // The scope records what `tabsState` was last restored for, so hydration waits for it and a late account merges instead of replacing.
+  const tabScope = useRef<{ account: string | null; workspace: string | null }>({ account: null, workspace: null });
   const firstTabRestore = useRef(true);
 
-  // Load tabs from localStorage once workspace name is known
   useEffect(() => {
-    const key = workspaceName || null;
-    if (tabLoadedForWorkspace.current === key) return;
-    tabLoadedForWorkspace.current = key;
-    const loaded = loadTabsState(key);
+    if (accountId === undefined) { return; }
+    const workspace = workspaceName || null;
+    const previous = tabScope.current;
+    if (previous.account === accountId && previous.workspace === workspace) { return; }
+    tabScope.current = { account: accountId, workspace };
+    if (workspace === null) { return; }
+    const loaded = loadTabsState(workspace, accountId);
     // v3 invariant: at least one chat tab must exist so the center never goes
     // blank — even when localStorage only stored file/CRM tabs.
     // Keep the first editable scaffold mounted while workspace/backend identity loads.
     const scaffold = firstTabRestore.current ? tabsStateRef.current.chatTabs.find((tab) => tab.id === bootstrapChatId.current) : undefined;
+    const accountVerifiedLate = !firstTabRestore.current && previous.account === null && previous.workspace === workspace;
     firstTabRestore.current = false;
     const restored = scaffold && !loaded.chatTabs.some((tab) => tab.id === scaffold.id)
       ? { ...loaded, chatTabs: [...loaded.chatTabs, scaffold], activeChatId: parseUrlState(searchParams).chat || dirtyChatDrafts.current.has(scaffold.id) ? scaffold.id : loaded.activeChatId ?? scaffold.id }
-      : loaded;
+      : accountVerifiedLate ? mergeOpenTabs(loaded, tabsStateRef.current) : loaded;
     dispatch({ type: "replace", state: ensureChatPresent(restored) });
     setChatRuntimeSnapshots({});
-  }, [workspaceName]);
+  }, [accountId, workspaceName]);
 
   // Persist tabs to localStorage on change (only after hydration completes)
   useEffect(() => {
     if (hydrationPhase.current !== "hydrated") return;
-    saveTabsState(tabsState, workspaceName || null);
-  }, [tabsState, workspaceName]);
+    saveTabsState(tabsState, workspaceName || null, accountId ?? null);
+  }, [tabsState, workspaceName, accountId]);
 
   useEffect(() => {
     const validTabIds = new Set([
@@ -1991,7 +2009,7 @@ function WorkspacePageInner() {
   useEffect(() => {
     if (hydrationPhase.current !== "init") return;
     if (treeLoading) {return;}
-    if (tabLoadedForWorkspace.current !== (workspaceName || null)) return;
+    if (accountId === undefined || tabScope.current.account !== accountId || tabScope.current.workspace !== (workspaceName || null)) return;
 
     const urlState = parseUrlState(searchParams);
     // A chat-only link needs no tree to resolve, so an empty tree must not block it.
@@ -2031,7 +2049,7 @@ function WorkspacePageInner() {
     hydrationPhase.current = "hydrated";
     setHydrated(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs exactly once
-  }, [tree, treeLoading, searchParams, workspaceName]);
+  }, [tree, treeLoading, searchParams, workspaceName, accountId]);
 
   // popstate: same logic as hydration, but always runs.
   useEffect(() => {

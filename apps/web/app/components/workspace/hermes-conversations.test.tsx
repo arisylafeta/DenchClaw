@@ -404,6 +404,20 @@ describe("conversation privacy controls", () => {
     await act(async () => { expect(await result.current.selectKey(solo.key)).toBe(false); });
     expect(result.current.selected).toBeNull();
   });
+  it.each([401, 403])("forgets the account after authentication is denied (%s), but not a transient failure", async status => {
+    const { result } = renderHook(() => useHermesConversations());
+    await waitFor(() => expect(result.current.accountId).toBe("user-a"));
+    fetchMock.mockImplementationOnce(() => Response.json({ error: "Temporary" }, { status: 503 }));
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.accountId).toBe("user-a");
+    act(() => result.current.newChat());
+    fetchMock.mockImplementationOnce(() => Response.json({ error: "Denied" }, { status }));
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.accountId).toBeNull();
+    expect(result.current.listing).toBeNull();
+    expect(result.current.dialog).toBeNull();
+    expect(result.current.pins).toEqual([]);
+  });
   it("clears account state and rejects an old account's late detail response", async () => {
     localStorage.setItem("hermes-chats-profile-filter:user-a", JSON.stringify("alpha"));
     const { result } = renderHook(() => useHermesConversations());

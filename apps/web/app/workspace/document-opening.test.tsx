@@ -3,13 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState, type ComponentProps } from 'react'
 import type { RightPanelContent } from '../components/workspace/right-panel-content'
-import { createSessionChatTab, EMPTY_TABS_STATE, saveTabsState, workspaceTabsReducer } from '@/lib/workspace-tabs'
+import { createSessionChatTab, EMPTY_TABS_STATE, loadTabsState, saveTabsState, workspaceTabsReducer } from '@/lib/workspace-tabs'
 import { conversationKey } from '@/lib/hermes-conversations'
 
 const fixture = vi.hoisted(() => ({
   width: 1440,
   params: new URLSearchParams(),
-  ready: true, enabled: false,
+  ready: true, enabled: false, account: 'user-a' as string | null,
   selected: null as { key: string; title: string } | null,
   lastCreatedKey: null as string | null,
   router: { push: vi.fn(), replace: vi.fn() },
@@ -37,15 +37,15 @@ vi.mock('next/dynamic', () => ({ default: () => () => null }))
 vi.mock('../hooks/use-workspace-watcher', () => ({ useWorkspaceWatcher: () => watcher }))
 vi.mock('@/lib/search-index', () => ({ useSearchIndex: () => ({ search: noop }) }))
 vi.mock('../components/workspace/hermes-conversations', () => ({
-  useHermesConversations: () => ({ enabled: fixture.enabled, ready: fixture.ready, selected: fixture.selected, lastCreatedKey: fixture.lastCreatedKey, listing: fixture.enabled ? { sessions: [] } : null, newChat: () => {}, clear: () => {}, selectKey: async () => false }),
+  useHermesConversations: () => ({ enabled: fixture.enabled, ready: fixture.ready, accountId: fixture.ready ? fixture.account : undefined, selected: fixture.selected, lastCreatedKey: fixture.lastCreatedKey, listing: fixture.enabled ? { sessions: [] } : null, newChat: () => {}, clear: () => {}, selectKey: async () => false }),
   HermesConversationList: () => null, HermesConversationPanel: () => null,
   HermesNewChatDialog: () => null,
 }))
 vi.mock('../components/workspace/toast', () => ({ ToastProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../components/chat-panel', () => ({
-  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing, conversationUnselected, onDraftChange, onNewChatSession, onToggleTerminal }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean; conversationUnselected?: boolean; onDraftChange?: (dirty: boolean) => void; onNewChatSession?: () => void; onToggleTerminal?: () => void }) => {
+  ChatPanel: ({ headerLeftSlot, headerRightSlot, initializing, conversationUnselected, initialSessionId, onDraftChange, onNewChatSession, onToggleTerminal }: { headerLeftSlot?: React.ReactNode; headerRightSlot?: React.ReactNode; initializing?: boolean; conversationUnselected?: boolean; initialSessionId?: string; onDraftChange?: (dirty: boolean) => void; onNewChatSession?: () => void; onToggleTerminal?: () => void }) => {
     const [draft, setDraft] = useState('')
-    return <><header data-chat-chrome="panel">{headerLeftSlot}{onNewChatSession && <button title="New chat" onClick={onNewChatSession}>New chat</button>}{onToggleTerminal && <button title="Open terminal (Cmd/Ctrl+J)" aria-label="Open terminal" onClick={onToggleTerminal}>Terminal</button>}{headerRightSlot}</header><textarea aria-label="Draft" value={draft} onChange={e => { setDraft(e.target.value); onDraftChange?.(!!e.target.value) }} /><button disabled={initializing || conversationUnselected}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
+    return <><output data-testid="chat-session">{initialSessionId ?? 'draft'}</output><header data-chat-chrome="panel">{headerLeftSlot}{onNewChatSession && <button title="New chat" onClick={onNewChatSession}>New chat</button>}{onToggleTerminal && <button title="Open terminal (Cmd/Ctrl+J)" aria-label="Open terminal" onClick={onToggleTerminal}>Terminal</button>}{headerRightSlot}</header><textarea aria-label="Draft" value={draft} onChange={e => { setDraft(e.target.value); onDraftChange?.(!!e.target.value) }} /><button disabled={initializing || conversationUnselected}>Synthetic send</button><a href="/?path=reports%2Fsample.docx">Open generated document</a></>
   },
 }))
 // Keep the real shell, URL/link handlers, resolver, reducer and panel containers.
@@ -109,7 +109,7 @@ const { WorkspaceShell } = await import('./workspace-content')
 beforeEach(() => {
   fixture.width = 1440
   watcher.activeWorkspace = 'synthetic'
-  fixture.ready = true; fixture.enabled = false
+  fixture.ready = true; fixture.enabled = false; fixture.account = 'user-a'
   fixture.selected = null; fixture.lastCreatedKey = null
   mediaListeners.clear()
   fixture.params = new URLSearchParams()
@@ -210,16 +210,16 @@ describe('independent CRM navigation', () => {
 })
 
 describe('initial composer shell', () => {
-  it('does not hide an early typed draft when a different saved chat restores', async () => {
+  it('does not hide an early typed draft when a different saved chat restores for the same user', async () => {
     fixture.width = 390; fixture.ready = false; watcher.activeWorkspace = null
-    const saved = workspaceTabsReducer(EMPTY_TABS_STATE, { type: 'openChat', tab: createSessionChatTab({ sessionId: 'saved-session', title: 'Saved chat' }) })
-    saveTabsState(saved, 'synthetic')
+    saveTabsState(savedChat('saved-session'), 'synthetic', 'user-a')
     const view = render(<WorkspaceShell />)
     const draft = screen.getByRole('textbox', { name: 'Draft' })
     fireEvent.change(draft, { target: { value: 'Do not hide this draft' } })
-    watcher.activeWorkspace = 'synthetic'
+    watcher.activeWorkspace = 'synthetic'; fixture.ready = true
     view.rerender(<WorkspaceShell />)
     await act(async () => {})
+    expect(openChats()).toContain('saved-session')
     expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
     expect(draft).toHaveValue('Do not hide this draft')
   })
@@ -275,6 +275,71 @@ describe('initial composer shell', () => {
     // Native chat has not been chosen: no legacy send and no implicit route.
     expect(screen.getByRole('button', { name: 'Synthetic send' })).toBeDisabled()
     expect(fixture.router.push.mock.calls.some(([url]) => String(url).includes('chat='))).toBe(false)
+  })
+})
+
+function savedChat(sessionId: string) {
+  return workspaceTabsReducer(EMPTY_TABS_STATE, { type: 'openChat', tab: createSessionChatTab({ sessionId, title: 'Saved chat' }) })
+}
+const openChats = () => screen.getAllByTestId('chat-session').map(node => node.textContent)
+
+describe('account scoping', () => {
+  it('restores only the signed-in user\'s tabs, never another user\'s or unscoped ones', async () => {
+    fixture.account = 'user-b'
+    saveTabsState(savedChat('chat-of-a'), 'synthetic', 'user-a')
+    saveTabsState(savedChat('chat-of-b'), 'synthetic', 'user-b')
+    localStorage.setItem('dench:workspace-tabs:synthetic', JSON.stringify(savedChat('unscoped-chat')))
+    render(<WorkspaceShell />)
+    await waitFor(() => expect(openChats()).toContain('chat-of-b'))
+    expect(openChats()).not.toContain('chat-of-a')
+    expect(openChats()).not.toContain('unscoped-chat')
+  })
+  it('saves tabs under the verified user only', async () => {
+    render(<WorkspaceShell />)
+    await clickDocument()
+    await waitFor(() => expect(loadTabsState('synthetic', 'user-a').contentTabs.map(tab => tab.path)).toEqual(['reports/sample.docx']))
+    expect(loadTabsState('synthetic', 'user-b')).toBe(EMPTY_TABS_STATE)
+  })
+  it('adds restored tabs beside what is open when the account is verified late, keeping the typed draft', async () => {
+    fixture.account = null
+    saveTabsState(savedChat('saved-session'), 'synthetic', 'user-a')
+    const view = render(<WorkspaceShell />)
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Typed while the account was unknown' } })
+    await act(async () => {})
+    expect(openChats()).toEqual(['draft'])
+    fixture.account = 'user-a'
+    view.rerender(<WorkspaceShell />)
+    await waitFor(() => expect(openChats()).toContain('saved-session'))
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft)
+    expect(draft).toHaveValue('Typed while the account was unknown')
+  })
+  it('unmounts private drafts and restored chats when authentication is lost', async () => {
+    saveTabsState(savedChat('chat-of-a'), 'synthetic', 'user-a')
+    const view = render(<WorkspaceShell />)
+    await waitFor(() => expect(openChats()).toContain('chat-of-a'))
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Private before logout' } })
+    fixture.account = null
+    view.rerender(<WorkspaceShell />)
+    await waitFor(() => expect(draft).not.toBeInTheDocument())
+    expect(openChats()).not.toContain('chat-of-a')
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveValue('')
+  })
+  it('unmounts every chat and its draft when a different user is verified, and saves nothing of the old user under the new one', async () => {
+    saveTabsState(savedChat('chat-of-a'), 'synthetic', 'user-a')
+    const view = render(<WorkspaceShell />)
+    await waitFor(() => expect(openChats()).toContain('chat-of-a'))
+    const draft = screen.getByRole('textbox', { name: 'Draft' })
+    fireEvent.change(draft, { target: { value: 'Private to user a' } })
+    fixture.account = 'user-b'
+    view.rerender(<WorkspaceShell />)
+    await waitFor(() => expect(openChats()).not.toContain('chat-of-a'))
+    expect(draft).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveValue('')
+    await act(async () => {})
+    expect(loadTabsState('synthetic', 'user-b').chatTabs.map(tab => tab.sessionId)).not.toContain('chat-of-a')
+    expect(loadTabsState('synthetic', 'user-a').chatTabs.map(tab => tab.sessionId)).toContain('chat-of-a')
   })
 })
 

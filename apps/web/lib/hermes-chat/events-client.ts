@@ -198,3 +198,5 @@ export class HermesEventsClient {
 }
 let singleton: HermesEventsClient | undefined
 export function getHermesEventsClient(): HermesEventsClient { return singleton ??= new HermesEventsClient(EventSource as unknown as EventSourceConstructor) }
+/** Ends the shared stream and its subscriptions, if any were opened. Use when the signed-in account changes. */
+export function closeHermesEventsClient(): void { singleton?.close(); singleton = undefined }
