@@ -16,11 +16,11 @@ const renderers: Record<RegisteredEntryDetail["kind"], RegisteredDetailRenderer>
     ? <BulkTradeDetailPreview detail={detail} onNavigateEntry={onNavigateEntry} />
     : null,
   campaign: ({ detail, onNavigateEntry }) => detail?.kind === "campaign"
-    ? <CampaignDetailPreview recipients={detail.recipients} onNavigateEntry={onNavigateEntry} />
+    ? <CampaignDetailPreview recipients={detail.recipients} engagement={detail.engagement} onNavigateEntry={onNavigateEntry} />
     : null,
 };
 
 export function RegisteredEntryDetailPreview(props: Props) {
-  if (!props.detail) return null;
+  if (!props.detail) {return null;}
   return renderers[props.detail.kind](props);
 }

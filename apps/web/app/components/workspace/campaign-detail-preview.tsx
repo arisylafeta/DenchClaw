@@ -1,16 +1,22 @@
 "use client";
 
+import type { CampaignEngagement } from "@/lib/crm-postgres/campaign-engagement";
+import { CampaignEngagementRanking } from "./campaign-engagement-ranking";
 import type { CampaignRecipient } from "@/lib/crm-postgres/registered-entry-detail";
 import { buildEntryLink } from "@/lib/workspace-links";
 
 export function CampaignDetailPreview({
   recipients,
+  engagement,
   onNavigateEntry,
 }: {
   recipients: CampaignRecipient[];
+  engagement?: CampaignEngagement[];
   onNavigateEntry?: (objectName: string, entryId: string) => void;
 }) {
   return (
+    <>
+    {engagement && <CampaignEngagementRanking rows={engagement} onNavigateEntry={onNavigateEntry} />}
     <section aria-label="Invited people" className="border-t px-5 py-5" style={{ borderColor: "var(--color-border)" }}>
       <h3 className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
         Invited people ({recipients.length})
@@ -59,5 +65,6 @@ export function CampaignDetailPreview({
         </ul>
       )}
     </section>
+    </>
   );
 }

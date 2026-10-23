@@ -47,6 +47,29 @@ describe("registered entry details", () => {
     expect(String(gmailCall?.[0])).toContain("message.thread_id = thread.id and viewer.id is not null");
   });
 
+  it("uses the campaign entry ID for the mail ledger and preserves legacy recipients", async () => {
+    queryPg.mockImplementation(async (sql: string) => {
+      if (sql.includes("to_regclass")) { return [{ available: true }]; }
+      if (sql.includes("from mail_message m")) { return []; }
+      if (sql.includes("select s.person_id")) { return [{ person_id: "p1", person_name: "Legacy reader" }]; }
+      return [];
+    });
+    const { getRegisteredEntryDetail } = await import("./registered-entry-detail");
+    expect(await getRegisteredEntryDetail("campaigns", "campaign-1", "user-1")).toMatchObject({
+      kind: "campaign", recipients: [{ person_id: "p1" }], engagement: [],
+    });
+    const mailCall = queryPg.mock.calls.find(([sql]) => sql.includes("from mail_message m"));
+    expect(mailCall?.[1]).toEqual(["campaign-1"]);
+  });
+
+  it("loads mail engagement even when the legacy send table is absent", async () => {
+    const { getRegisteredEntryDetail } = await import("./registered-entry-detail");
+    expect(await getRegisteredEntryDetail("campaign", "campaign-1", "user-1")).toEqual({
+      kind: "campaign", recipients: [], engagement: [],
+    });
+    expect(queryPg.mock.calls.some(([sql]) => sql.includes("from mail_message m"))).toBe(true);
+  });
+
   it("does not attach a detail payload to unregistered objects", async () => {
     const { getRegisteredEntryDetail } = await import("./registered-entry-detail");
     await expect(getRegisteredEntryDetail("people", "p1", "user-1")).resolves.toBeUndefined();

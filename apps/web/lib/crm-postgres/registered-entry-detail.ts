@@ -1,4 +1,5 @@
 import { queryPg } from "../postgres";
+import { readCampaignEngagement, type CampaignEngagement } from "./campaign-engagement";
 
 export type BulkTradeParty = {
   id: string;
@@ -79,6 +80,7 @@ export type BulkTradeEntryDetail = {
 export type RegisteredEntryDetail = BulkTradeEntryDetail | {
   kind: "campaign";
   recipients: CampaignRecipient[];
+  engagement?: CampaignEngagement[];
 };
 
 type DetailReader = (entryId: string, userId: string) => Promise<RegisteredEntryDetail>;
@@ -151,10 +153,11 @@ async function readBulkTradeDetail(entryId: string, userId: string): Promise<Reg
 }
 
 async function readCampaignDetail(entryId: string): Promise<RegisteredEntryDetail> {
+  const engagement = await readCampaignEngagement(entryId);
   const [ledger] = await queryPg<{ available: boolean }>(
     "select to_regclass('crm_campaign_sends') is not null as available",
   );
-  if (!ledger?.available) return { kind: "campaign", recipients: [] };
+  if (!ledger?.available) {return { kind: "campaign", recipients: [], engagement };}
   const [links] = await queryPg<{ available: boolean }>(
     "select to_regclass('crm_campaign_send_links') is not null as available",
   );
@@ -185,17 +188,17 @@ async function readCampaignDetail(entryId: string): Promise<RegisteredEntryDetai
     const byPerson = new Map<string, CampaignRecipient["clicked_ctas"]>();
     for (const row of clicks) {
       const personId = personBySend.get(row.send_id);
-      if (!personId) continue;
+      if (!personId) {continue;}
       const list = byPerson.get(personId) ?? [];
       list.push({ cta_key: row.cta_key, destination_url: row.destination_url, first_clicked_at: row.first_clicked_at });
       byPerson.set(personId, list);
     }
     for (const recipient of recipients) {
       const list = byPerson.get(recipient.person_id);
-      if (list) recipient.clicked_ctas = list;
+      if (list) {recipient.clicked_ctas = list;}
     }
   }
-  return { kind: "campaign", recipients };
+  return { kind: "campaign", recipients, engagement };
 }
 
 const detailReaders: Record<string, DetailReader> = {
