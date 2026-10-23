@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { closeHermesEventsClient } from "@/lib/hermes-chat/events-client";
 import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
-import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical } from "lucide-react";
+import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical, Share2 } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
@@ -338,7 +338,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
             <DropdownMenuTrigger aria-label={`More options for ${row.title}`} title="More options" className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><MoreVertical size={14} aria-hidden="true" /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom" finalFocus={() => { if (!renamingNext.current) return true; renamingNext.current = false; return false; }}>
               {row.access?.canWrite && <DropdownMenuItem onSelect={() => { renamingNext.current = true; setRenaming(row.key); }}><Pencil size={14} aria-hidden="true" />{messagingConversation(row) ? "Rename in this browser" : "Rename"}</DropdownMenuItem>}
-              {row.access?.canShare && row.access.ownerId === chats.listing?.userId && <DropdownMenuItem disabled={!!chats.sharingKey} onSelect={() => { if (row.access?.visibility === "private" && !window.confirm("Share this chat with the team? This reveals its full history to the team.")) return; void chats.setVisibility(row, row.access?.visibility === "team" ? "private" : "team"); }}>{chats.sharingKey === row.key ? "Updating sharing…" : row.access.visibility === "team" ? "Make private" : "Share with team"}</DropdownMenuItem>}
+              {row.access?.canShare && row.access.ownerId === chats.listing?.userId && <DropdownMenuItem disabled={!!chats.sharingKey} onSelect={() => { if (row.access?.visibility === "private" && !window.confirm("Share this chat with the team? This reveals its full history to the team.")) return; void chats.setVisibility(row, row.access?.visibility === "team" ? "private" : "team"); }}><Share2 size={14} aria-hidden="true" />{chats.sharingKey === row.key ? "Updating sharing…" : row.access.visibility === "team" ? "Make private" : "Share"}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={() => { void navigator.clipboard?.writeText(row.id); }}><Copy size={14} aria-hidden="true" />Copy ID</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>}

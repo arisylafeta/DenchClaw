@@ -358,7 +358,7 @@ describe("conversation privacy controls", () => {
     expect(screen.queryByText("Unknown access")).not.toBeInTheDocument();
     expect(screen.queryByText("Foreign private")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "More options for Shared room" }));
-    expect(screen.queryByRole("menuitem", { name: /Share with team|Make private|Delete/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^(Share|Make private|Delete)$/ })).not.toBeInTheDocument();
   });
   it("confirms history disclosure, verifies sharing and unsharing before moving the row", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -373,7 +373,10 @@ describe("conversation privacy controls", () => {
     });
     const user = userEvent.setup(); render(<Harness2 />);
     await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Share with team" }));
+    const shareAction = await screen.findByRole("menuitem", { name: "Share", exact: true });
+    expect(shareAction.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(shareAction.querySelector("svg")).toHaveAttribute("width", "14");
+    await user.click(shareAction);
     await waitFor(() => expect(within(screen.getByRole("region", { name: "Shared" })).getByText(solo.title)).toBeInTheDocument());
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("full history"));
     await user.click(screen.getByRole("button", { name: "More options for Alpha solo" }));
