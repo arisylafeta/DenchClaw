@@ -46,11 +46,11 @@ export function CampaignEngagementRanking({ rows, onNavigateEntry }: {
       <span style={{ color: "var(--color-text-muted)" }}>{visible.length} recipients</span>
     </div>
     <p className="my-3 text-xs" style={{ color: "var(--color-text-muted)" }}>
-      Returns count open sessions after the first, separated by more than 10 minutes, including flagged observations. Human clicks means unflagged distinct links, not verified humans. Proxy/scanner flags are heuristic, including clicks within 5 seconds of delivery or rapid multi-link bursts. Flagged observations remain visible. Duplicate legacy snapshots are counted once when a matching provider event exists.
+      Returns count open sessions after the first, separated by more than 10 minutes, including flagged observations. Human clicks means unflagged distinct links, not verified humans. Proxy/scanner flags are heuristic, including clicks within 5 seconds of delivery or rapid multi-link bursts. Flagged observations remain visible. Matching API/webhook first opens and legacy snapshots within one second count once. Days to first open uses the send time of the first-opened message; late means more than 24 hours.
     </p>
     {visible.length === 0 ? <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>No recipients match this ranking.</p> :
       <div className="overflow-x-auto"><table className="w-full text-left text-xs">
-        <thead style={{ color: "var(--color-text-muted)" }}><tr>{["Person", "Company", "Total opens", "Flagged opens", "Return sessions", "Last opened (UTC)", "Distinct links clicked (human)", "Flagged clicks", "Replied"].map((heading) => <th key={heading} scope="col" className="whitespace-nowrap border-b px-3 py-2 font-medium" style={{ borderColor: "var(--color-border)" }}>{heading}</th>)}</tr></thead>
+        <thead style={{ color: "var(--color-text-muted)" }}><tr>{["Person", "Company", "Total opens", "Flagged opens", "Return sessions", "Days to first open", "Last opened (UTC)", "Distinct links clicked (human)", "Flagged clicks", "Replied"].map((heading) => <th key={heading} scope="col" className="whitespace-nowrap border-b px-3 py-2 font-medium" style={{ borderColor: "var(--color-border)" }}>{heading}</th>)}</tr></thead>
         <tbody>{visible.map((row) => <tr key={row.recipient_key}>
           <td className="min-w-40 px-3 py-3">{row.person_id ? <a className="font-medium underline underline-offset-2" href={buildEntryLink("people", row.person_id)} onClick={onNavigateEntry ? (event) => { event.preventDefault(); onNavigateEntry("people", row.person_id!); } : undefined}>{row.person_name || row.recipient_email}</a> : <span>{row.person_name || row.recipient_email}</span>}
             {row.person_name && <div className="mt-1 break-all" style={{ color: "var(--color-text-muted)" }}>{row.recipient_email}</div>}
@@ -59,6 +59,9 @@ export function CampaignEngagementRanking({ rows, onNavigateEntry }: {
           <td className="px-3 py-3">{row.company_name || "Not linked"}</td>
           <td className="px-3 py-3 tabular-nums">{row.total_opens}</td><td className="px-3 py-3 tabular-nums">{row.flagged_opens}</td>
           <td className="px-3 py-3 tabular-nums">{row.return_sessions}</td>
+          <td className="px-3 py-3 tabular-nums">{row.days_to_first_open === null ? "Not observed" : row.days_to_first_open.toFixed(2)}
+            {row.late_opener && <div className="mt-1 font-medium" title="First open more than 24 hours after this message was sent">Late opener</div>}
+          </td>
           <td className="whitespace-nowrap px-3 py-3">{row.last_opened ? <time dateTime={row.last_opened}>{new Date(row.last_opened).toISOString().replace("T", " ").slice(0, 16)}</time> : "Not observed"}</td>
           <td className="px-3 py-3 tabular-nums">{row.human_links_clicked}</td><td className="px-3 py-3 tabular-nums">{row.flagged_clicks}</td><td className="px-3 py-3">{row.replied ? "Yes" : "No"}</td>
         </tr>)}</tbody>

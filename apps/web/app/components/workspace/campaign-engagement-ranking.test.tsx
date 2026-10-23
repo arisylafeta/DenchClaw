@@ -7,6 +7,7 @@ import { CampaignEngagementRanking } from "./campaign-engagement-ranking";
 const row = (overrides: Partial<CampaignEngagement>): CampaignEngagement => ({
   recipient_key: "p1", person_id: "p1", person_name: "Returning reader", company_name: "Example Ltd",
   recipient_email: "reader@example.com", total_opens: 4, flagged_opens: 0, return_sessions: 2,
+  first_opened: null, days_to_first_open: null, late_opener: false,
   last_opened: "2026-10-08T12:00:00Z", human_links_clicked: 0, flagged_clicks: 0, replied: true, likely_bot: false,
   ...overrides,
 });
@@ -39,6 +40,17 @@ describe("campaign engagement ranking", () => {
     expect(screen.getByRole("columnheader", { name: "Flagged clicks" })).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Not replied"));
     expect(screen.getByText("No recipients match this ranking.")).toBeInTheDocument();
+  });
+
+  it("shows send-to-open delay, late openers and unknown delays", () => {
+    render(<CampaignEngagementRanking rows={[
+      row({ days_to_first_open: 1.5, late_opener: true }),
+      row({ recipient_key: "p2", person_id: "p2", person_name: "Unknown delay" }),
+    ]} />);
+    expect(screen.getByRole("columnheader", { name: "Days to first open" })).toBeInTheDocument();
+    expect(screen.getByText("1.50")).toBeInTheDocument();
+    expect(screen.getByText("Late opener")).toHaveAttribute("title", "First open more than 24 hours after this message was sent");
+    expect(screen.getByText("Not observed")).toBeInTheDocument();
   });
 
   it("renders the empty state", () => {

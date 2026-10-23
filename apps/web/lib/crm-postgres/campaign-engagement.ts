@@ -6,6 +6,7 @@ export const SCANNER_WINDOW_MS = 5 * 1000;
 export type EngagementEvent = {
   type: string;
   provider_event_id?: string | null;
+  source?: string;
   occurred_at: string;
   detail: Record<string, unknown>;
 };
@@ -15,6 +16,7 @@ export type EngagementMessage = {
   person_name: string | null;
   company_name: string | null;
   recipient_email: string;
+  sent_at: string | null;
   delivered_at: string | null;
   replied: boolean;
   links: string[];
@@ -30,6 +32,9 @@ export type CampaignEngagement = {
   flagged_opens: number;
   return_sessions: number;
   last_opened: string | null;
+  first_opened: string | null;
+  days_to_first_open: number | null;
+  late_opener: boolean;
   human_links_clicked: number;
   flagged_clicks: number;
   replied: boolean;
@@ -47,6 +52,27 @@ export function isProxyOrScanner(detail: Record<string, unknown>): boolean {
   return /apple\s*mail\s*privacy|mail privacy protection|\bMPP\b|GoogleImageProxy|google image proxy|ggpht\.com|proofpoint|mimecast|barracuda|safelinks|urlscan|scanner|headless|\bbot\b|spider|crawler/i.test(JSON.stringify(detail));
 }
 
+function dedupeMessageEvents(events: EngagementEvent[]): EngagementEvent[] {
+  const webhook = (event: EngagementEvent) => event.source === "postmark-webhook" || event.detail.RecordType === "Open";
+  const matched = new Set<EngagementEvent>();
+  // Pair API first opens with webhook first opens, never collapse webhook repeats.
+  const providerEvents = events.filter((event) => !event.provider_event_id?.startsWith("legacy:"));
+  for (const api of providerEvents) {
+    if (api.type !== "opened" || webhook(api)) {continue;}
+    const equivalent = providerEvents.find((candidate) => !matched.has(candidate) &&
+      candidate.type === "opened" && webhook(candidate) && candidate.detail.FirstOpen !== false &&
+      Math.abs(Date.parse(candidate.occurred_at) - Date.parse(api.occurred_at)) <= 1000);
+    if (equivalent) { matched.add(equivalent); matched.add(api); }
+  }
+  return events.filter((event) => {
+    if (event.provider_event_id?.startsWith("legacy:")) {
+      return !providerEvents.some((real) => real.type === event.type &&
+        Math.abs(Date.parse(real.occurred_at) - Date.parse(event.occurred_at)) <= 1000);
+    }
+    return !matched.has(event) || webhook(event);
+  });
+}
+
 function clickedLink(event: EngagementEvent): string | null {
   const details = event.detail.Details as Record<string, unknown> | undefined;
   const link = details?.Link ?? event.detail.OriginalLink ?? event.detail.Link;
@@ -59,12 +85,7 @@ export function rankCampaignEngagement(messages: EngagementMessage[]): CampaignE
     row: CampaignEngagement; opens: number[]; humanLinks: Set<string>; activity: number; flagged: number;
   }>();
   for (const source of messages) {
-    // Migration snapshots may duplicate a subsequently imported real provider event.
-    // Retain unmatched snapshots and genuine simultaneous provider observations.
-    const message = { ...source, events: source.events.filter((event) =>
-      !event.provider_event_id?.startsWith("legacy:") || !source.events.some((real) =>
-        !real.provider_event_id?.startsWith("legacy:") && real.type === event.type &&
-        Date.parse(real.occurred_at) === Date.parse(event.occurred_at))) };
+    const message = { ...source, events: dedupeMessageEvents(source.events) };
     const key = message.person_id || message.recipient_email.toLowerCase() || message.id;
     let recipient = recipients.get(key);
     if (!recipient) {
@@ -72,6 +93,7 @@ export function rankCampaignEngagement(messages: EngagementMessage[]): CampaignE
         recipient_key: key, person_id: message.person_id, person_name: message.person_name,
         company_name: message.company_name, recipient_email: message.recipient_email,
         total_opens: 0, flagged_opens: 0, return_sessions: 0, last_opened: null,
+        first_opened: null, days_to_first_open: null, late_opener: false,
         human_links_clicked: 0, flagged_clicks: 0, replied: false, likely_bot: false,
       }, opens: [], humanLinks: new Set(), activity: 0, flagged: 0 };
       recipients.set(key, recipient);
@@ -115,6 +137,12 @@ export function rankCampaignEngagement(messages: EngagementMessage[]): CampaignE
       row.total_opens++;
       recipient.activity++;
       const time = Date.parse(open.occurred_at);
+      if (!row.first_opened || time < Date.parse(row.first_opened)) {
+        row.first_opened = open.occurred_at;
+        const sent = message.sent_at ? Date.parse(message.sent_at) : NaN;
+        row.days_to_first_open = Number.isFinite(sent) && time >= sent ? (time - sent) / 86_400_000 : null;
+        row.late_opener = row.days_to_first_open !== null && row.days_to_first_open > 1;
+      }
       if (!row.last_opened || time > Date.parse(row.last_opened)) {row.last_opened = open.occurred_at;}
       // A lone open accompanying only a scanner burst is not independent human evidence.
       const flagged = isProxyOrScanner(open.detail) ||
@@ -137,11 +165,11 @@ export function compareCampaignEngagement(a: CampaignEngagement, b: CampaignEnga
 export const CAMPAIGN_ENGAGEMENT_SQL = `
   select m.id, m.person_id, p.full_name as person_name, c.name as company_name,
          coalesce(m.recipient_email, m.to_emails[1], '') as recipient_email,
-         m.delivered_at, (m.replied_at is not null) as replied,
+         m.sent_at, m.delivered_at, (m.replied_at is not null) as replied,
          coalesce((select jsonb_agg(distinct l.destination_url) from mail_message_link l
                    where l.message_id = m.id), '[]'::jsonb) as links,
          coalesce((select jsonb_agg(jsonb_build_object('type', e.type,
-                    'occurred_at', e.occurred_at, 'detail', e.detail, 'provider_event_id', e.provider_event_id) order by e.occurred_at, e.id)
+                    'occurred_at', e.occurred_at, 'detail', e.detail, 'provider_event_id', e.provider_event_id, 'source', e.source) order by e.occurred_at, e.id)
                    from mail_event e where e.message_id = m.id
                      and e.type in ('opened', 'clicked', 'delivered', 'replied')), '[]'::jsonb) as events
     from mail_message m
