@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EllipsisIcon, LogOutIcon, MoonIcon, SunIcon } from "lucide-react";
+import { BellIcon, EllipsisIcon, LogOutIcon, MoonIcon, SunIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { PersonAvatar } from "@/app/components/crm/person-avatar";
+import { NotificationSettingsDialog } from "./notification-settings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +29,7 @@ export function NavUser({
 }) {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -69,6 +71,10 @@ export function NavUser({
             </div>
           </div>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => setNotificationsOpen(true)}>
+            <BellIcon aria-hidden />
+            Notifications
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={switchTheme}>
             {isDark ? <SunIcon aria-hidden /> : <MoonIcon aria-hidden />}
             {isDark ? "Light mode" : "Dark mode"}
@@ -79,6 +85,7 @@ export function NavUser({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <NotificationSettingsDialog open={notificationsOpen} onOpenChange={setNotificationsOpen} />
     </div>
   );
 }

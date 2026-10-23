@@ -35,10 +35,11 @@ export function useAgentNotifications({ active, messages, conversationKey, title
     }
     return ''
   }
-  const notify = (body: string) => {
+  const notify = (kind: 'start' | 'done', body: string) => {
     const { conversationKey: key, title: t, profile: p } = latest.current
     const icon = (p && bundledProfileAvatar(p)) || (p ? `/api/workspace/avatar?name=${encodeURIComponent(p)}` : undefined)
     void showAgentNotification({
+      kind,
       title: t || (p ? p : 'ReBattery CRM'),
       body,
       icon,
@@ -50,7 +51,7 @@ export function useAgentNotifications({ active, messages, conversationKey, title
   useEffect(() => {
     if (active && !wasActive.current) announcedStart.current = false
     if (!active && wasActive.current) {
-      if (appIsBackgrounded()) notify(clip(lastAssistantText()) || 'Finished')
+      if (appIsBackgrounded()) notify('done', clip(lastAssistantText()) || 'Finished')
       announcedStart.current = false
     }
     wasActive.current = active
@@ -62,7 +63,7 @@ export function useAgentNotifications({ active, messages, conversationKey, title
     const text = lastAssistantText()
     if (!text) return
     announcedStart.current = true
-    if (appIsBackgrounded()) notify(`Started: ${clip(text, 110)}`)
+    if (appIsBackgrounded()) notify('start', `Started: ${clip(text, 110)}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, messages])
 }
