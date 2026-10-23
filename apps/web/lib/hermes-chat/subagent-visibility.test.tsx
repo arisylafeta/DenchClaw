@@ -27,6 +27,26 @@ const start = (seq = 1, extra = {}) => Source.instance.emit('gw', { key, generat
 beforeEach(() => { vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', vi.fn(async () => Response.json({}))) })
 afterEach(() => { cleanup(); getHermesEventsClient().close(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+it('clears the stale running dock and count after an authoritative empty resync', () => {
+  render(<Dock />)
+  Source.instance.emit('snapshot', snapshot())
+  start()
+  expect(screen.getByText('1 subagent running')).toBeInTheDocument()
+  Source.instance.emit('resync', { key })
+  Source.instance.emit('snapshot', snapshot({ seq: 1, subagents: [] }))
+  expect(screen.queryByText('1 subagent running')).toBeNull()
+  expect(screen.queryByLabelText('Subagents')).toBeNull()
+})
+
+it('preserves a buffered start when the asynchronous empty list predates it', () => {
+  render(<Dock />)
+  Source.instance.emit('snapshot', snapshot())
+  Source.instance.emit('resync', { key })
+  start(2)
+  Source.instance.emit('snapshot', snapshot({ seq: 1, subagents: [] }))
+  expect(screen.getByText('1 subagent running')).toBeInTheDocument()
+})
+
 it('shows live subagents immediately while history is loading, then retains them after hydration', () => {
   render(<Dock />)
   start()
@@ -97,7 +117,7 @@ it('keeps quiet running workers after the event dedupe TTL, and ignores older ge
   start(2, { generation: 0, payload: { subagent_id: 'old-child', goal: 'Old task' } })
   expect(screen.getByText('1 subagent running')).toBeInTheDocument()
   expect(screen.queryByRole('region', { name: 'Subagent: Old task' })).toBeNull()
-  Source.instance.emit('snapshot', snapshot({ seq: 1 }))
+  Source.instance.emit('snapshot', snapshot({ seq: 1, subagents: [{ subagent_id: 'child', status: 'running' }] }))
   expect(screen.getByText('1 subagent running')).toBeInTheDocument()
 })
 

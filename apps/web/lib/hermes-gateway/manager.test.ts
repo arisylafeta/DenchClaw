@@ -265,6 +265,25 @@ describe("process gateway manager", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(h.manager.session(key)).toBeDefined();
   });
+  it("captures the roster observation boundary before an asynchronous list response", async () => {
+    let respond: (() => void) | undefined;
+    const h = harness({ responder: (frame, socket) => {
+      if (frame.method !== "subagent.list") {return false;}
+      respond = () => socket.receive({ id: frame.id, result: { subagents: [] } });
+      return true;
+    } });
+    await start(h);
+    const key = h.manager.retainSession("ari", "one", "runtime-one");
+    h.sockets[0].event("runtime-one", 1, "subagent.start", { subagent_id: "old" });
+    const pending = h.manager.attachLive(key, "runtime-one");
+    await flush();
+    expect(respond).toBeDefined();
+    h.sockets[0].event("runtime-one", 2, "subagent.start", { subagent_id: "new" });
+    respond!();
+    const snapshot = await pending;
+    expect(snapshot).toMatchObject({ replayBoundary: { generation: 1, seq: 1 }, subagents: [] });
+    expect(h.manager.eventsSince(key, 1, snapshot!.replayBoundary.seq).events.map(event => event.payload)).toEqual([{ subagent_id: "new" }]);
+  });
   it("rejects an unfamiliar lazy runtime even when two profiles share its stored id", async () => {
     const h = harness(); await start(h);
     const ari = h.manager.retainSession("ari", "one");

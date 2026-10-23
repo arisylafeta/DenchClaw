@@ -2,18 +2,18 @@ import { asRecord, type GatewayEvent } from './events'
 import { initialState, messageText, reduce, type ChatState, type ReducerContext } from './reducer'
 import { normalizeMessageText, stateFromSnapshot, type GatewayChatSnapshot, type SnapshotChatState, type SourcedMessage } from './snapshot'
 import { steerOwnText } from './notice'
-import { reduceSubagents } from './subagents'
+import { isTerminalSubagent, reduceSubagents } from './subagents'
 
 export interface OptimisticSubmission { clientId: string; text: string }
 export interface PendingSubmission extends OptimisticSubmission { knownUserIds: string[]; resolvedMessageId?: string }
 export interface ReconcileState extends SnapshotChatState {
   key: string | null; loadToken: number; hydrating: boolean; buffered: GatewayEvent[]
   optimistic: PendingSubmission[]; clientToMessage: Record<string, string>; resyncRequired: boolean
-  overlay: GatewayEvent[]; snapshotVersion: string | null
+  overlay: GatewayEvent[]; snapshotVersion: string | null; snapshotWatermark: number
 }
 export interface ResyncEvent { generation?: string | number; truncated?: boolean; payload?: unknown; type?: string }
 export function initialReconcileState(sessionId: string | null = null, key: string | null = sessionId): ReconcileState {
-  return { ...initialState(sessionId), key, loadToken: 0, hydrating: true, buffered: [], optimistic: [], clientToMessage: {}, resyncRequired: false, overlay: [], snapshotVersion: null }
+  return { ...initialState(sessionId), key, loadToken: 0, hydrating: true, buffered: [], optimistic: [], clientToMessage: {}, resyncRequired: false, overlay: [], snapshotVersion: null, snapshotWatermark: -1 }
 }
 /** Capture the returned token with the fetch. Switching sessions never interrupts work. */
 export function beginHydration(state: ReconcileState, sessionId: string | null = state.sessionId, key: string | null = state.key): ReconcileState {
@@ -282,11 +282,32 @@ export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapsh
   base.usage = snapshot.usage === undefined ? state.usage : snapshot.usage
   base.goal = snapshot.goal === undefined ? state.goal : snapshot.goal
   base.subagents = state.subagents
+  // subagent.list is an authoritative live roster, not a history of completions.
+  // Its observation starts at snapshot.seq (before the asynchronous list read).
+  // Never retire a child touched after that boundary, including buffered starts:
+  // the list response may have been captured before those frames arrived.
+  const staleRoster = (typeof state.generation === 'number' && snapshot.generation < state.generation)
+    || (snapshot.generation === state.generation && snapshot.seq !== null && snapshot.seq < state.snapshotWatermark)
+  if (snapshot.subagents !== undefined && snapshot.seq !== null && !staleRoster) {
+    const present = new Set(snapshot.subagents.map(child => child.subagent_id))
+    const newer = new Set([...state.overlay, ...state.buffered]
+      .filter(event => event.type.startsWith('subagent.')
+        && (!event.session_id || event.session_id === state.sessionId)
+        && (event.generation === undefined || event.generation === snapshot.generation)
+        && (event.seq === undefined || event.seq > snapshot.seq!))
+      .map(event => asRecord(event.payload).subagent_id))
+    const absent = state.subagents.items.filter(child => !isTerminalSubagent(child.status) && !present.has(child.id) && !newer.has(child.id))
+    const retired = new Set(absent.map(child => child.id))
+    base.subagents = {
+      items: state.subagents.items.filter(child => !retired.has(child.id)),
+      retiredIds: [...new Set([...state.subagents.retiredIds, ...retired])],
+    }
+  }
 
   base.interrupted = !snapshot.running && state.interrupted
   if (!snapshot.todo_state) base.todos = state.todos
   const merged: ReconcileState = { ...state, ...base, ...reconcileOptimistic(state, base), key: snapshot.key,
-    hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion }
+    hydrating: false, buffered: [], resyncRequired: false, overlay: [], snapshotVersion, snapshotWatermark: snapshot.generation === state.generation ? Math.max(state.snapshotWatermark, base.watermark) : base.watermark }
   // User history alone does not resolve assistant prose ownership. Preserve the
   // split timeline until assistant rows own its boundaries, including prose-only
   // blocks. The snapshot aggregate can also be newer than the local continuation.
