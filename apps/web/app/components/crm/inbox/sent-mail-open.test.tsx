@@ -31,4 +31,23 @@ it('closes a selected email when filters change',async()=>{
  render(<InboxView initialView="sent"/>);fireEvent.click(await screen.findByRole('button',{name:'Open email: Your stock is live'}));await screen.findByTitle('Email body');
  fireEvent.change(screen.getByRole('searchbox',{name:'Search mail'}),{target:{value:'other'}});
  await waitFor(()=>expect(screen.queryByRole('button',{name:'Back to sent'})).not.toBeInTheDocument());
+ fireEvent.change(screen.getByRole('searchbox',{name:'Search mail'}),{target:{value:''}});
+ await screen.findByRole('button',{name:'Open email: Your stock is live'});
+ expect(screen.queryByRole('button',{name:'Back to sent'})).not.toBeInTheDocument();
+});
+it('expands the selected sent message even when a later message exists',async()=>{
+ const original=vi.mocked(fetch).getMockImplementation()!;
+ vi.mocked(fetch).mockImplementation(async(url,options)=>{
+  if(String(url).startsWith('/api/mail/threads/team-thread')) return new Response(JSON.stringify({thread_id:'team-thread',people:[],messages:[
+   {...row,body:'The selected email body',body_html:'<p>The selected email body</p>'},
+   {...row,id:'later-message',direction:'inbound',is_self:false,subject:'A later reply',body:'The later reply body',body_html:'<p>The later reply body</p>'}
+  ]}));
+  return original(url,options);
+ });
+ render(<InboxView initialView="sent"/>);fireEvent.click(await screen.findByRole('button',{name:'Open email: Your stock is live'}));
+ expect((await screen.findByTitle('Email body')).getAttribute('srcdoc')).toContain('The selected email body');
+ expect(screen.queryAllByTitle('Email body')).toHaveLength(1);
+ await waitFor(()=>expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+ const scrolled=vi.mocked(Element.prototype.scrollIntoView).mock.contexts.at(-1) as HTMLElement;
+ expect(scrolled.getAttribute('data-selected-message')).toBe('true');
 });

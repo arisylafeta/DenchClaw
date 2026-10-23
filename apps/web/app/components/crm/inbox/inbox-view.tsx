@@ -131,6 +131,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
   const latestQuery = useRef(query);
   useEffect(() => {
     latestQuery.current = query;
+    setSelection(null);
     const controller = new AbortController();
     setRows([]); setError(null); setLoading(true); setNextCursor(null);
     const endpoint = view === "followups" ? "followups" : "messages";

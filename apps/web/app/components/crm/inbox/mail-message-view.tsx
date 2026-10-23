@@ -25,7 +25,7 @@ export function MailMessageView({ messageId }: { messageId: string }) {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {m.thread_id
-          ? <ThreadMessages threadId={m.thread_id} crmOnly={false} showReply={false} />
+          ? <ThreadMessages key={m.id} threadId={m.thread_id} initialMessageId={m.id} crmOnly={false} showReply={false} />
           : <div className="p-6"><MessageBody body={m.body_text} html={m.body_html} preview={m.body_preview} /></div>}
       </div>
     </section>
