@@ -28,13 +28,20 @@ def identity(db, key, purpose, transport=None):
         raise Refused('identity_unavailable', identity=key)
     if purpose not in row['allowed_purposes']:
         raise Refused('purpose_not_allowed_for_identity')
+    row = dict(row)
+    # An identity can keep Gmail for personal mail yet send transactional mail through Postmark (REB-562).
+    tstream = row.get('transactional_postmark_stream')
+    if transport is None and purpose == 'transactional' and tstream:
+        transport = 'postmark-transactional'
+    if transport == 'postmark-transactional' and tstream and not row['postmark_stream']:
+        row['postmark_stream'] = tstream
     if transport is None:
         transport = ('postmark-broadcast' if purpose == 'marketing' else 'postmark-transactional') if row['postmark_stream'] else 'gmail'
     if (transport == 'gmail' and not row['gmail_account']) or (transport.startswith('postmark') and not row['postmark_stream']):
         raise Refused('identity_transport_unavailable')
     if purpose == 'marketing' and transport.startswith('postmark') and row['postmark_stream'] == 'outbound':
         raise Refused('postmark_broadcast_stream_required')
-    return dict(row), transport
+    return row, transport
 
 
 def content(message):

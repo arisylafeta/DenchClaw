@@ -213,6 +213,8 @@ class PostmarkSendDriver:
                    'To':','.join(message['to_emails']), 'Subject':message['subject'],'HtmlBody':message['body_html'],
                    'TextBody':message['body_text'],'MessageStream':identity['postmark_stream'],
                    'TrackOpens':True,'TrackLinks':'HtmlAndText','Metadata':{'recipient_id':message['id'],'campaign_id':message.get('campaign_id') or '', 'idempotency_key':message['idempotency_key']}}
+        if message.get('bcc_emails'):
+            payload['Bcc'] = ','.join(message['bcc_emails'])
         if message.get('campaign_id'):
             payload['Tag'] = message['campaign_id']
         headers = [{'Name':name,'Value':message[key]} for name,key in (('In-Reply-To','in_reply_to'),('References','rfc_references')) if message.get(key)]
