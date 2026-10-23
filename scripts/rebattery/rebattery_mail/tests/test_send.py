@@ -959,3 +959,10 @@ def test_reb562_postmark_payload_bcc_and_tracking(monkeypatch):
     message={'id':'m1','to_emails':['a@example.test'],'bcc_emails':['supply@rebattery.io'],'subject':'S','body_html':'<p>x</p>','body_text':'x','idempotency_key':'k'}
     PostmarkSendDriver(client).send(identity,message)
     assert sent[0]['Bcc']=='supply@rebattery.io' and sent[0]['TrackOpens'] is True and sent[0]['TrackLinks']=='HtmlAndText'
+
+
+def test_reb562_postmark_refuses_attachments():
+    identity={'postmark_stream':'outbound'}
+    message={'purpose':'transactional','transport':'postmark-transactional','personalization':{'attachments':['/tmp/x.pdf']}}
+    with pytest.raises(Refused,match='attachments_require_gmail_transport'):
+        PostmarkSendDriver(lambda *a,**k: pytest.fail('provider must not be called')).preflight(identity,message)

@@ -201,6 +201,8 @@ class PostmarkSendDriver:
         self.client = client or postmark
 
     def preflight(self, identity, message):
+        if message.get('personalization',{}).get('attachments'):
+            raise Refused('attachments_require_gmail_transport')
         stream = identity.get('postmark_stream')
         if message['purpose'] == 'marketing' and stream == 'outbound':
             raise Refused('postmark_broadcast_stream_required')
