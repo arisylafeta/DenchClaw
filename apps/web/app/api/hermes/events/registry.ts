@@ -24,7 +24,7 @@ export class EventConnection {
       for (const key of this.subscriptions.keys()) {
         if (service.retainedKey(key) !== notice.key) {continue;}
         const sub=this.subscriptions.get(key)!;
-        this.resync(key,sub,notice.reason);
+        this.resync(key,sub,notice.reason ?? "gateway_resync");
       }
     });
     this.timer = setInterval(() => { for (const [key, sub] of this.subscriptions) {void this.check(key,sub);} },5000);

@@ -183,6 +183,12 @@ describe("CRM auth middleware", () => {
     "/api/apps/proxy",
     "/api/skills/example/content",
     "/api/memories",
+    "/api/sessions",
+    "/api/web-sessions/private/messages",
+    "/api/gateway/sessions/private",
+    "/api/chat/stream?sessionId=private",
+    "/api/chat/runs",
+    "/api/chat/stop",
     "/platform-admin/messages",
   ])("denies non-admin access to the host capability %s", async path => {
     refreshSessionTokenMock.mockResolvedValue({ id: "staff", email: "sean@rebattery.io" });

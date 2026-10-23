@@ -14,6 +14,12 @@ const ADMIN_PREFIXES = [
   "/api/memories",
   "/api/cron",
   "/api/onboarding",
+  // Retired OpenClaw transports have no conversation ACL integration. Native
+  // Hermes clients use /api/hermes; only trusted host admins may inspect legacy data.
+  "/api/sessions",
+  "/api/web-sessions",
+  "/api/gateway",
+  "/api/chat",
   "/platform-admin",
 ];
 const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
