@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
-vi.hoisted(() => { if (process.env.BULK_TRADES_TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.BULK_TRADES_TEST_DATABASE_URL; });
+vi.hoisted(() => { if (process.env.BULK_TRADES_TEST_DATABASE_URL) {process.env.DATABASE_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;} });
 import { queryPg, pgPool } from '../postgres';
 import { searchMail, readMailThread, listMailFollowups, mailCampaignCounts, readMailCampaign, listMailCampaigns } from './mail';
 import { getPostgresObjectData } from './object-read';
@@ -30,12 +30,12 @@ describe.skipIf(!enabled)('unified mail log', () => {
  afterAll(async () => { await queryPg('delete from mail_followup where id=$1',[prefix]); await queryPg('delete from mail_message where id like $1',[`${prefix}%`]); await queryPg('delete from mail_thread where id like $1',[`${prefix}%`]); await queryPg('delete from campaigns where id=$1',[prefix]); await queryPg('delete from crm_users where id=$1',[owner]); await pgPool.end(); });
  it('excludes bulk deliveries but retains inbound campaign replies and filters the CRM subset',async () => {
   const all=await searchMail({mailboxOwnerId:owner,view:'conversations'}); expect(all.items.map(m=>m.id)).toEqual([`${prefix}_b`]); expect(all.items[0].message_count).toBe(2);
-  const crm=await searchMail({mailboxOwnerId:owner,crmOnly:true}); expect(crm.items.map(m=>m.id).sort()).toEqual([`${prefix}_a`,`${prefix}_c`]);
+  const crm=await searchMail({mailboxOwnerId:owner,crmOnly:true}); expect(crm.items.map(m=>m.id).toSorted()).toEqual([`${prefix}_a`,`${prefix}_c`]);
  });
  it('keeps campaigns visible in CRM-only lists and Sent without changing visibility flags',async () => {
   expect((await listMailCampaigns({crmOnly:true})).some(c=>c.id===prefix)).toBe(true);
   expect((await readMailCampaign(prefix,{crmOnly:true}))?.counts.total).toBe(2);
-  expect((await searchMail({mailboxOwnerId:owner,view:'sent',crmOnly:true})).items.map(m=>m.id).sort()).toEqual([`${prefix}_c`,`${prefix}_d`]);
+  expect((await searchMail({mailboxOwnerId:owner,view:'sent',crmOnly:true})).items.map(m=>m.id).toSorted()).toEqual([`${prefix}_c`,`${prefix}_d`]);
   expect((await queryPg<{crm_visible:boolean}>('select crm_visible from mail_message where id=$1',[`${prefix}_d`]))[0].crm_visible).toBe(false);
  });
  it('returns one latest row per inbound thread, real counts and participants, and no list bodies',async () => {
@@ -86,11 +86,12 @@ describe.skipIf(!enabled)('unified mail log', () => {
  });
  it('lists due pending follow-ups',async () => { expect((await listMailFollowups(owner,true)).map(f=>f.id)).toEqual([prefix]); });
  it('keeps CRM-visible thread-only follow-ups and applies identity and message filters without duplicates',async () => {
-  await queryPg(`insert into mail_followup(id,thread_id,identity_key,due_at,origin,state) values ($1||'_thread',$1,'ari',now()-interval '1 day','commitment','paused')`,[prefix]);
-  const scoped=await listMailFollowups(owner,false,{crmOnly:true,identity:'ari',q:'Battery'});
+  // The synthetic owner is not Ari, so use a shared identity rather than Ari's private follow-ups.
+  await queryPg(`insert into mail_followup(id,thread_id,identity_key,due_at,origin,state) values ($1||'_thread',$1,'supply',now()-interval '1 day','commitment','paused')`,[prefix]);
+  const scoped=await listMailFollowups(owner,false,{crmOnly:true,identity:'supply',q:'Battery'});
   expect(scoped.map(f=>f.id)).toEqual([`${prefix}_thread`]);
   expect((await listMailFollowups(owner,false,{crmOnly:true,identity:'alex'})).map(f=>f.id)).not.toContain(`${prefix}_thread`);
-  expect((await listMailFollowups('00000000-0000-0000-0000-000000000000',false,{crmOnly:true,identity:'ari'}))).toEqual([]);
+  expect((await listMailFollowups('00000000-0000-0000-0000-000000000000',false,{crmOnly:true,identity:'supply'}))).toEqual([]);
   await queryPg('delete from mail_followup where id=$1',[`${prefix}_thread`]);
  });
  it('isolates generic mail objects by backing table and CRM visibility',async () => {
