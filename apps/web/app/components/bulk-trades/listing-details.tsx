@@ -11,42 +11,49 @@ const claimText = (claim: Claim) => [claim.source, claim.date && shortDate(claim
 function Source({ claim }: { claim: Claim }) {
   const text = claimText(claim);
   if (!text) return null;
-  return claim.url ? <a href={claim.url} target="_blank" rel="noreferrer">{text}</a> : <span>{text}</span>;
+  return claim.url
+    ? <a className={css.src} href={claim.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{text}<span aria-hidden="true">↗</span></a>
+    : <span className={css.src}>{text}</span>;
 }
 
 function Cell({ fact, onEdit, onResolve, loading = false }: { fact: Fact; loading?: boolean; onEdit?: (fact: Fact) => void; onResolve?: (fact: Fact, choice: number) => void }) {
   const conflict = fact.status === "conflict" && fact.claims.length > 1;
   const gap = !fact.value && !conflict;
-  const wide = conflict || (fact.value?.length ?? 0) > 44;
   const meta = (fact.source || fact.status === "unverified" || fact.visibility) && !conflict && (
     <span className={css.meta}>
       {fact.status === "unverified" && <span className={css.flag}>Unverified</span>}
       {fact.source && <Source claim={fact.source} />}
-      {fact.visibility && fact.value && <span>Buyers see: {VISIBILITY_LABEL[fact.visibility]}</span>}
+      {fact.visibility && fact.value && <span className={css.vis}>Buyers see: {VISIBILITY_LABEL[fact.visibility]}</span>}
     </span>
   );
   const body = (
     <>
-      <span className={css.key}>{fact.label}</span>
-      {loading ? <span className={css.value}><Sh on chars={14} /></span> : conflict ? (
-        <span className={css.claims}>
-          <span className={css.meta}><span className={css.flag} data-status="conflict">Conflict</span></span>
-          {fact.claims.map((claim, index) => (
-            <span key={index} className={css.claim}>
-              <span className={css.value}>{claim.value}</span>
-              <span className={css.meta}><Source claim={claim} /></span>
-              {onResolve && (
-                <button type="button" className={css.use} aria-label={`${index === 0 ? "Keep" : "Use"} ${claim.value}`}
-                  onClick={() => onResolve(fact, index === 0 ? -1 : index - 1)}>{index === 0 ? "Keep this" : "Use this"}</button>
-              )}
-            </span>
-          ))}
-        </span>
-      ) : gap ? <span className={css.gap} data-critical={fact.critical}>{onEdit ? "Missing" : "Not stated"}</span> : <span className={css.value}>{fact.value}</span>}
-      {!loading && meta}
+      <span className={css.key}>
+        {fact.label}
+        {conflict && !loading && <span className={css.flag} data-status="conflict">Conflict</span>}
+      </span>
+      <span className={css.main}>
+        {loading ? <span className={css.value}><Sh on chars={14} /></span> : conflict ? (
+          <span className={css.claims}>
+            {fact.claims.map((claim, index) => (
+              <span key={index} className={css.claim}>
+                <span className={css.value}>{claim.value}</span>
+                <span className={css.meta}>
+                  <Source claim={claim} />
+                  {onResolve && (
+                    <button type="button" className={css.use} aria-label={`${index === 0 ? "Keep" : "Use"} ${claim.value}`}
+                      onClick={() => onResolve(fact, index === 0 ? -1 : index - 1)}>{index === 0 ? "Keep this" : "Use this"}</button>
+                  )}
+                </span>
+              </span>
+            ))}
+          </span>
+        ) : gap ? <span className={css.gap} data-critical={fact.critical}>{onEdit ? "Missing" : "Not stated"}</span> : <span className={css.value}>{fact.value}</span>}
+        {!loading && meta}
+      </span>
     </>
   );
-  const props = { className: css.cell, "data-wide": wide };
+  const props = { className: css.cell };
   return onEdit && !conflict
     ? <button type="button" aria-label={`Edit ${fact.label}`} onClick={() => onEdit(fact)} {...props}>{body}</button>
     : <div {...props}>{body}</div>;
