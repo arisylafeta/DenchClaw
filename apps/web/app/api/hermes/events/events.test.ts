@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-vi.mock("@/lib/auth", () => ({ currentUser: vi.fn(async () => ({ id: "user" })) }));
+vi.mock("@/lib/auth", () => ({ ALLOWED_EMAILS:new Set(["user@example.com"]), currentUser: vi.fn(async () => ({ id: "user",email:"user@example.com",displayName:"User" })), sessionRevalidator:async () => async () => ({id:"user",email:"user@example.com",displayName:"User"}) }));
+vi.mock("@/lib/postgres", () => ({queryPg:vi.fn(async () => [{owner_id:"user",creator_id:"user",origin:"crm",visibility:"team",version:1,deleted_at:null}])}));
+const actor={id:"user",email:"user@example.com",displayName:"User"};
 vi.mock("@/lib/agent-backend", () => ({ resolveAgentBackend: () => "hermes" }));
-vi.mock("@/lib/hermes-native", () => ({ assertProfile: vi.fn(), nativeFetch: vi.fn(), readConversation: vi.fn(), soloConversation: vi.fn() }));
+vi.mock("@/lib/hermes-native", () => ({ authorizeNativeConversation:vi.fn(async () => ({access:{visibility:"team"},version:1})), assertProfile: vi.fn(), nativeFetch: vi.fn(), readConversation: vi.fn(), soloConversation: vi.fn() }));
 vi.mock("@/lib/hermes-gateway/manager", () => ({ getHermesGatewayManager: vi.fn(() => ({ onServerRequest: vi.fn(), subscribeNotices: () => () => {}, connectionState: () => "connected" })) }));
 import { currentUser, type AuthenticatedUser } from "@/lib/auth";
 import { ChatServiceError, HermesChatService, type GatewayChatSnapshot } from "@/lib/hermes-gateway/chat-service";
@@ -11,7 +13,6 @@ import type { GatewayNotice } from "@/lib/hermes-gateway/manager";
 import { GET } from "./route";
 import { POST as subscribe } from "./subscriptions/route";
 import { POST as prompt } from "../conversations/[key]/prompt/route";
-import { POST as legacyPost } from "../conversations/[key]/route";
 vi.mock("@/lib/hermes-client", () => ({ stopNativeHermesStream: vi.fn() }));
 const key = conversationKey("solo", "one", "ari");
 const other = conversationKey("solo", "two", "ari");
@@ -31,7 +32,7 @@ function fixture(truncated = false) {
   const service = new HermesChatService(manager as unknown as HermesChatService["manager"]);
   const snapshot = vi.spyOn(service, "openForView").mockResolvedValue({ generation: 1, seq: 2, messages: [] } as unknown as GatewayChatSnapshot);
   const emitted: { event: string; payload: unknown; id?: string }[] = [];
-  const connection = new EventConnection("user", (event, payload, id) => emitted.push({ event, payload, id }), service);
+  const connection = new EventConnection(actor, (event, payload, id) => emitted.push({ event, payload, id }), service,async () => actor);
   return { connection, emitted, manager, snapshot, listeners, unsubscribed };
 }
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(currentUser).mockResolvedValue({ id: "user", email: "user@example.com", displayName: "User" } satisfies AuthenticatedUser); });
@@ -129,7 +130,7 @@ describe("multiplexed gateway endpoints", () => {
     const response = await GET(new Request("http://local/api/hermes/events"));
     const connection = [...eventConnections.values()][0];
     // Inspect the in-process emitter seam while exercising the actual route stream.
-    const emitter = connection as unknown as { emit(event: string, payload: unknown): void };
+    const emitter = connection as unknown as { emit(event: string, payload: unknown, id?:string,version?:number): void };
     for (let i = 0; i < 100; i++) emitter.emit("gw", { text: "x".repeat(65_536) });
     expect(eventConnections.size).toBe(0);
     const reader = response.body!.getReader();
@@ -164,8 +165,8 @@ describe("multiplexed gateway endpoints", () => {
     const abort = new AbortController();
     const response = await GET(new Request("http://local/api/hermes/events", { signal: abort.signal }));
     const connection = [...eventConnections.values()][0];
-    const emitter = connection as unknown as { emit(event: string, payload: unknown): void };
-    emitter.emit("snapshot", { key, messages: [{ id: "huge", role: "assistant", text: "x".repeat(4_300_000) }] });
+    const emitter = connection as unknown as { emit(event: string, payload: unknown, id?:string,version?:number): void };
+    emitter.emit("snapshot", { key, messages: [{ id: "huge", role: "assistant", text: "x".repeat(4_300_000) }] },undefined,1);
     const reader = response.body!.getReader();
     let text = "";
     while (!text.includes('"}]}\n\n')) {

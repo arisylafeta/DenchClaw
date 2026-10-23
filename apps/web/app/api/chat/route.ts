@@ -96,6 +96,9 @@ export async function POST(req: Request) {
 		return new Response("Unauthorized", { status: 401 });
 	}
 
+  // Legacy streams have no revocation-aware replay boundary. Hermes must use the ACL-aware conversation API.
+  if (resolveAgentBackend() === "hermes") return Response.json({error:"gateway_transport_required"},{status:409});
+
 	const {
 		messages,
 		sessionId,

@@ -18,7 +18,7 @@ describe("durable conversation policy", () => {
  it("separates participation, ownership and privileged approval",() => {
   const shared = {...row,visibility:"team" as const};
   expect(accessFor(shared,other)).toMatchObject({canWrite:true,canShare:false,canDelete:false,canApprove:false});
-  for(const action of ["derive","share","delete","approve"] as const) expect(() => accessFor(shared,other,action)).toThrow("not_found");
+  for(const action of ["derive","share","delete","approve"] as const) {expect(() => accessFor(shared,other,action)).toThrow("not_found");}
   expect(accessFor(shared,admin,"approve").canApprove).toBe(true);
   expect(accessFor(row,owner,"share").canShare).toBe(true);
  });

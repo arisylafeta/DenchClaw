@@ -184,6 +184,12 @@ export async function currentUser(): Promise<AuthenticatedUser | null> {
   return user;
 }
 
+/** Capture this request's login without retaining request-scoped cookies in long-lived streams. */
+export async function sessionRevalidator(): Promise<() => Promise<AuthenticatedUser | null>> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  return async () => token ? validateSessionToken(token) : null;
+}
+
 export async function revokeSession(): Promise<void> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return;

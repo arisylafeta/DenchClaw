@@ -6,7 +6,7 @@ import { extname } from "node:path";
 import { z } from "zod";
 import { buildAgentMessage, stripAgentMessageContext, type WorkspaceContext } from "../agent-message";
 import { hydrateMessageImageAttachments, buildChatImageHydrationErrorMessage } from "../chat-image-attachments";
-import { conversationKey, parseConversationKey, type HermesConversation, type HermesMessage } from "../hermes-conversations";
+import { conversationKey, type HermesConversation, type HermesMessage } from "../hermes-conversations";
 import { assertProfile, hermesProfiles, inviteToConversation, nativeFetch, readConversation, soloConversation } from "../hermes-native";
 import { getHermesGatewayManager, type HermesGatewayManager, type LiveSessionSnapshot, type PendingServerRequest } from "./manager";
 import { lookupMessageHtml, saveMessageHtml, type MessageHtmlRecord } from "./message-html-store";
@@ -129,13 +129,15 @@ export class HermesChatService {
       }
     });
   }
-  subscribeRequests(key: string, listener: (request: PendingServerRequest) => void): () => void {
+  subscribeRequests(key: string, listener: (request: PendingServerRequest) => void, actor?: ConversationActor): () => void {
+    requireActor(actor);
+    const guarded = (request: PendingServerRequest) => { void this.authorize(actor,key).then(() => listener(request)).catch(() => {}); };
     const retained = this.retainedKey(key);
     let listeners = this.requestListeners.get(retained);
     if (!listeners) { listeners = new Set(); this.requestListeners.set(retained, listeners); }
-    listeners.add(listener);
+    listeners.add(guarded);
     return () => {
-      listeners.delete(listener);
+      listeners.delete(guarded);
       if (!listeners.size) this.requestListeners.delete(retained);
     };
   }
@@ -228,6 +230,7 @@ export class HermesChatService {
   async sendPrompt(key: string, prompt: GatewayPrompt, actor?: ConversationActor) {
     await this.authorize(actor,key,"write");
     assertSafePrompt(actor,prompt);
+    if (/^\s*\/[^\s/]+(?:\s|$)/.test(prompt.text)) throw new ChatServiceError(400,"use_slash_endpoint");
     const identity = authorizeConversation(key);
     if (typeof prompt.text !== "string" || !prompt.text.trim() || Buffer.byteLength(prompt.text) > 65_536) throw new ChatServiceError(400, "invalid_prompt");
     await this.writable(key);
@@ -254,6 +257,7 @@ export class HermesChatService {
           const hash = createHash("sha256").update(Buffer.from(image.content, "base64")).digest("hex");
           if (imageHashes.has(hash)) continue;
           imageHashes.add(hash);
+          await this.authorize(actor,key,"write");
           const result = await this.manager.callSession(retained, "image.attach_bytes", { session_id: "", content_base64: image.content, filename: image.fileName, ext: extname(image.fileName ?? "") });
           if (!result.attached || !result.path) throw new ChatServiceError(502, "image_attach_failed");
           attached.push(result.path);
@@ -293,12 +297,14 @@ export class HermesChatService {
           if (!attached.length) {
             // A resumed session whose agent is not built yet answers 4010 instead of "rejected";
             // there is no turn to steer, so the text starts (or queues behind) a normal turn.
+            await this.authorize(actor,key,"write");
             const steer = await this.manager.callSession(retained, "session.steer", { session_id: "", text }).catch((error: unknown) => {
               if (error instanceof JsonRpcGatewayError && error.code === 4010) {return { status: "rejected" as const };}
               throw error;
             });
             if (steer.status !== "rejected") return { status: "steered" as const, autoContinue: Boolean(resume?.auto_continue) };
           }
+          await this.authorize(actor,key,"write");
           const result = await this.manager.callSession(retained, "prompt.submit", { session_id: "", text });
           if (attached.length && result.status === "streaming" && !claimed) {
             // Accepted prompts may wait 600s for agent construction. Ownership has no
@@ -333,7 +339,7 @@ export class HermesChatService {
     const result = await this.manager.call("session.branch_stored", { parent_session_id: identity.id, profile: identity.profile, source: "crm" });
     this.manager.retainSession(identity.profile, result.stored_session_id, result.session_id);
     const conversation = soloConversation(identity.profile, { id: result.stored_session_id, source: "crm", started_at: Date.now() / 1000 });
-    return Object.assign(conversation,{ access: await registerConversation(actor,conversation.key,access) });
+    return Object.assign(conversation,{ access: await registerConversation(actor,conversation.key,access,key) });
   }
   private async liveControls(key: string): Promise<string> {
     const retained = this.retainedKey(key);
@@ -427,11 +433,13 @@ export class HermesChatService {
     if (action === "model" || action === "reasoning" || action === "fast" || action === "control") {
       // A pick is an explicit intent to use this chat, so an idle chat resumes like a send would.
       await this.manager.serialize(retained, async () => {
+        await this.authorize(actor,key,"write");
         if (!this.manager.session(retained)?.runtimeId) {await this.manager.resumeSession(retained);}
       });
     } else if (!this.manager.session(retained)?.runtimeId) {
       throw new ChatServiceError(409, "session_not_live");
     }
+    await this.authorize(actor,key,action === "approval" ? "approve" : "write");
     if (action === "model") {
       const parsed = modelSelectionSchema.safeParse(body);
       if (!parsed.success) { throw new ChatServiceError(400, "invalid_model"); }

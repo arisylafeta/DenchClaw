@@ -18,9 +18,9 @@ describe("/api/hermes/pins", () => {
   });
   it("scopes reads and writes to the caller", async () => {
     expect(await (await GET()).json()).toEqual({ pins: ["k"] });
-    expect(listPins).toHaveBeenCalledWith("u1");
+    expect(listPins).toHaveBeenCalledWith("u1",expect.objectContaining({id:"u1"}));
     expect(await (await put({ key: "k", pinned: true })).json()).toEqual({ key: "k", pinned: true, pins: ["k"] });
-    expect(setPin).toHaveBeenCalledWith("u1", "k", true);
+    expect(setPin).toHaveBeenCalledWith("u1", "k", true,expect.objectContaining({id:"u1"}));
   });
   it("validates the body and maps target errors", async () => {
     expect((await put({ key: "k" })).status).toBe(400);

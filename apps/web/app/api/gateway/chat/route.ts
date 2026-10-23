@@ -23,6 +23,9 @@ export async function POST(req: Request) {
 		return new Response("Unauthorized", { status: 401 });
 	}
 
+  // Unscoped legacy streams cannot enforce conversation ACLs or revocation.
+  if (resolveAgentBackend() === "hermes") return Response.json({error:"gateway_transport_required"},{status:409});
+
 	const { sessionKey, message }: { sessionKey: string; message: string } = await req.json();
 
 	if (!sessionKey || !message?.trim()) {

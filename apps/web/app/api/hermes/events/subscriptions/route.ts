@@ -1,3 +1,4 @@
+import { ConversationAccessError, accessErrorResponse } from "@/lib/conversation-access";
 import { currentUser } from "@/lib/auth";
 import { authorizeConversation, ChatServiceError } from "@/lib/hermes-gateway/chat-service";
 import { eventConnections } from "../registry";
@@ -17,6 +18,7 @@ export async function POST(req: Request) {
     await connection.update(body.add, body.remove, undefined, body.subscriptionIds);
     return Response.json({ subscribed: true });
   } catch (error) {
+    if (error instanceof ConversationAccessError) return accessErrorResponse(error);
     return Response.json({ error: error instanceof Error ? error.message : "subscription_failed" }, { status: error instanceof ChatServiceError ? error.status : error instanceof SyntaxError ? 400 : 502 });
   }
 }

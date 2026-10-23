@@ -48,12 +48,12 @@ describe("composer control routes", () => {
     }
   });
   it("returns the inventory and live reasoning payload without dropping native fields", async () => {
-    const payload = { providers: [], model: "test", provider: "openai", reasoning: { value: "high", display: "hide" } };
+    const payload = { fast:false, providers: [], model: "test", provider: "openai", reasoning: { value: "high", display: "hide" } };
     const options = vi.spyOn(getHermesChatService(), "modelOptions").mockResolvedValueOnce(payload);
     const response = await GET(new Request("http://local"), context);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(payload);
-    expect(options).toHaveBeenCalledWith(key);
+    expect(options).toHaveBeenCalledWith(key,expect.objectContaining({id:"user"}));
   });
   it("forwards model confirmation and reasoning bodies and preserves native mutation results", async () => {
     const warning = { key: "model", value: "expensive", confirm_required: true, confirm_message: "Costs more", scope: "session" };
@@ -68,9 +68,9 @@ describe("composer control routes", () => {
       expect(await response.json()).toEqual(expected);
     }
     expect(command.mock.calls).toEqual([
-      [key, "model", { model: "expensive", provider: "openai" }],
-      [key, "model", { model: "expensive", provider: "openai", confirm: true }],
-      [key, "reasoning", { effort: "none" }],
+      [key, "model", { model: "expensive", provider: "openai" },expect.objectContaining({id:"user"})],
+      [key, "model", { model: "expensive", provider: "openai", confirm: true },expect.objectContaining({id:"user"})],
+      [key, "reasoning", { effort: "none" },expect.objectContaining({id:"user"})],
     ]);
   });
   it("maps read-only and non-live failures to 409", async () => {

@@ -17,7 +17,7 @@ it("checks profile ownership and forwards a bounded history cursor", async () =>
   const page = vi.spyOn(getHermesChatService(), "historyPage").mockResolvedValueOnce({ messages: [{ id: "1", role: "user", text: "earlier" }], olderCursor: "50" });
   const response = await GET(new Request("http://local?before=250&limit=200"), { params: Promise.resolve({ key }) });
   expect(response.status).toBe(200);
-  expect(page).toHaveBeenCalledWith(key, "250", 200);
+  expect(page).toHaveBeenCalledWith(key, "250", 200,expect.objectContaining({id:"user"}));
   expect(await response.json()).toEqual({ messages: [{ id: "1", role: "user", text: "earlier" }], olderCursor: "50" });
   expect((await GET(new Request("http://local?before=250"), { params: Promise.resolve({ key: conversationKey("solo", "one", "foreign") }) })).status).toBe(404);
   expect(page).toHaveBeenCalledTimes(1);

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/auth", () => ({currentUser:async () => ({id:"user",email:"ari@rebattery.io",displayName:"User"}),ALLOWED_EMAILS:new Set(["ari@rebattery.io"])}));
+vi.mock("@/lib/postgres", () => ({queryPg:vi.fn(async () => [{owner_id:"user",creator_id:"user",origin:"crm",visibility:"team",version:1,deleted_at:null}])}));
+import { queryPg } from "@/lib/postgres";
 import { conversationKey } from "@/lib/hermes-conversations";
-const native = vi.hoisted(() => ({ assertProfile: vi.fn(() => ({ workspaceDir: "/fixtures/alpha" })), createConversation: vi.fn(), listConversations: vi.fn(), readConversation: vi.fn(), nativeFetch: vi.fn(), groupRpc: vi.fn() }));
+const native = vi.hoisted(() => ({ authorizeNativeConversation:vi.fn(async () => ({access:{visibility:"team"},version:1})), assertProfile: vi.fn(() => ({ workspaceDir: "/fixtures/alpha" })), createConversation: vi.fn(), listConversations: vi.fn(), readConversation: vi.fn(), nativeFetch: vi.fn(), groupRpc: vi.fn() }));
 vi.mock("@/lib/hermes-native", () => native);
 import { GET, POST } from "./route";
 import { GET as detailGET, POST as detailPOST, PATCH, DELETE } from "./[key]/route";
@@ -52,12 +55,27 @@ describe("Hermes conversation routes", () => {
     native.nativeFetch.mockResolvedValue(Response.json({}));
     expect((await DELETE(new Request("http://localhost"), context)).status).toBe(502);
   });
+  it("tombstones owned groups before disband and verifies absence from the native room list",async()=>{
+    const key=conversationKey("group","owned-group");
+    native.groupRpc.mockResolvedValueOnce({}).mockResolvedValueOnce({rooms:[],next_offset:null});
+    const response=await DELETE(new Request("http://local"),{params:Promise.resolve({key})});
+    expect(response.status).toBe(200);expect(await response.json()).toEqual({deleted:"owned-group"});
+    const index=vi.mocked(queryPg).mock.calls.findIndex(([sql])=>sql.includes("set deleted_at=now()"));
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(vi.mocked(queryPg).mock.invocationCallOrder[index]).toBeLessThan(native.groupRpc.mock.invocationCallOrder[0]);
+    expect(native.groupRpc.mock.calls).toEqual([["groups.disband",{room_id:"owned-group"}],["groups.list",{limit:100,offset:0}]]);
+  });
+  it("does not claim group deletion when the native room still exists",async()=>{
+    const key=conversationKey("group","still-present");
+    native.groupRpc.mockResolvedValueOnce({}).mockResolvedValueOnce({rooms:[{room_id:"still-present"}],next_offset:null});
+    expect((await DELETE(new Request("http://local"),{params:Promise.resolve({key})})).status).toBe(502);
+  });
   it("stops via the native room service and exposes readback failures rather than claiming success", async () => {
     const key = conversationKey("group", "room");
     native.groupRpc.mockResolvedValue({ cancelled: 1 }); native.readConversation.mockRejectedValue(new Error("synthetic read failure"));
     const response = await detailPOST(request({ action: "stop", eventId: "stop-1" }), { params: Promise.resolve({ key }) });
     expect(native.groupRpc).toHaveBeenCalledWith("groups.stop", { room_id: "room", cancel_id: "stop-1" });
-    expect(response.status).toBe(502); expect((await response.json()).error).toContain("Refresh");
+    expect(response.status).toBe(502); expect((await response.json()).error).toBe("hermes_request_failed");
     expect((await detailGET(new Request("http://localhost"), { params: Promise.resolve({ key }) })).status).toBe(502);
   });
 });

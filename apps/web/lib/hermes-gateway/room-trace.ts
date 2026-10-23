@@ -1,7 +1,8 @@
+import { authorizeNativeConversation } from "../hermes-native";
+import type { ConversationActor } from "../conversation-access";
 import { BoundedReads } from './room-read-cache';
-import { conversationKey, parseConversationKey, type HermesMessage } from '../hermes-conversations';
-import { readConversation, type RoomEvent } from '../hermes-native';
-import { roomSessions } from './room-activity';
+import { parseConversationKey, type HermesMessage } from '../hermes-conversations';
+import { readConversation, readRoomMemberConversation, type RoomEvent } from '../hermes-native';
 import { stateFromSnapshot, type GatewayChatSnapshot } from '../hermes-chat/snapshot';
 import type { Segment } from '../hermes-chat/reducer';
 export interface RoomTrace { work: Segment[]; startedAt: number; completedAt: number; steps: number }
@@ -36,10 +37,11 @@ const traces = new BoundedReads<RoomTrace | null>(128, 60_000, 4 * 1024 * 1024);
 const histories = new BoundedReads<Awaited<ReturnType<typeof readConversation>>>(64, 5000, 8 * 1024 * 1024);
 const probes = new BoundedReads<RoomTrace | null>(128, 5000, 4 * 1024 * 1024);
 const roomLimits = new Map<string, { active: number }>();
-function sharedHistory(key: string) {
-  return histories.read(key, () => readConversation(key, 0, 200));
+function sharedHistory(key: string, actor?: ConversationActor) {
+  return histories.read(key, () => readConversation(key, 0, 200,actor));
 }
-export function readRoomTrace(key: string, memberId: string, turnId: string): Promise<RoomTrace | null> {
+export async function readRoomTrace(key: string, memberId: string, turnId: string, actor?: ConversationActor): Promise<RoomTrace | null> {
+  await authorizeNativeConversation(actor,key);
   const identity = parseConversationKey(key);
   if (identity.kind !== 'group') throw Error('Group required');
   const cacheKey = JSON.stringify([key, memberId, turnId]);
@@ -51,12 +53,11 @@ export function readRoomTrace(key: string, memberId: string, turnId: string): Pr
     slot.active++; roomLimits.set(key, slot);
     try {
       return await traces.read(cacheKey, async () => {
-        const detail = await sharedHistory(key);
+        const detail = await sharedHistory(key,actor);
         const member = detail.conversation.participants.find(m => m.memberId === memberId);
         if (!member || !('events' in detail)) return null;
-        const sessions = await roomSessions(member.profile, identity.id);
-        if (sessions.length !== 1) return null;
-        const history = await sharedHistory(conversationKey('solo', sessions[0].id, member.profile));
+        const history = await readRoomMemberConversation(key,member.profile,actor);
+        if (!history) return null;
         return sliceRoomTrace(detail.events ?? [], history.messages, memberId, turnId);
       });
     } catch { return null; }

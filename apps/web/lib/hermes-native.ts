@@ -194,12 +194,15 @@ export async function listConversations(actor?: ConversationActor) {
   const soloLists = await Promise.all(profiles.map(async (profile) => {
     // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
-      const page = await (await nativeFetch(profile, "/api/sessions?limit=200&offset=0")).json() as { data: NativeSession[] };
       const rows: HermesConversation[] = [];
+      for (let offset=0;offset<10000 && rows.length<200;offset+=200) {
+      const page = await (await nativeFetch(profile, `/api/sessions?limit=200&offset=${offset}`)).json() as { data: NativeSession[] };
       for (const session of page.data.filter(row => row.source !== "bot_room" && !row.hidden && !row.is_internal_child)) {
         const row = soloConversation(profile,session);
         try { const { access } = await authorizeAccess(actor,row.key,"read",async () => session.source); rows.push(Object.assign(row,{access})); }
         catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) throw error; }
+      }
+      if (page.data.length < 200) break;
       }
       // The API may append older pinned sessions beyond its 200-row recency window.
       // Preserve those rows and bound each metadata read, not the conversation list.
@@ -285,12 +288,12 @@ export function roomMembers(profiles: string[]) {
     return { member_id: handle, profile, handle, display_name: profile, target: { kind: "local", profile } };
   });
 }
-export async function createConversation(profiles: string[], title?: string, actor?: ConversationActor, inherited?: ConversationAccess) {
+export async function createConversation(profiles: string[], title?: string, actor?: ConversationActor, inherited?: ConversationAccess, parentKey?: string) {
   requireActor(actor);
   if (!Array.isArray(profiles) || profiles.length < 1 || profiles.length > 6 || new Set(profiles).size !== profiles.length) throw new Error("Choose one to six distinct bots");
   profiles.forEach(assertProfile);
   const id = randomUUID();
-  const access = await registerConversation(actor,conversationKey(profiles.length === 1 ? "solo" : "group",id,profiles.length === 1 ? profiles[0] : ""),inherited);
+  const access = await registerConversation(actor,conversationKey(profiles.length === 1 ? "solo" : "group",id,profiles.length === 1 ? profiles[0] : ""),inherited,parentKey);
   if (profiles.length === 1) {
     await nativeFetch(profiles[0], "/api/sessions", { method: "POST", body: JSON.stringify({ id, title: title || "New chat", source: "web" }) });
     const result = await (await nativeFetch(profiles[0], `/api/sessions/${encodeURIComponent(id)}`)).json();
@@ -303,6 +306,22 @@ export async function createConversation(profiles: string[], title?: string, act
 }
 export async function readConversation(key: string, sinceSeq = 0, probeCap?: number, actor?: ConversationActor) {
   const { access } = await authorizeNativeConversation(actor,key);
+  return readAuthorizedConversation(key,sinceSeq,probeCap,access);
+}
+/** A hidden bot-room transcript is readable only through its authorized parent and verified native membership. */
+export async function readRoomMemberConversation(parentKey: string, profile: string, actor?: ConversationActor) {
+  const { access } = await authorizeNativeConversation(actor,parentKey);
+  const parent = parseConversationKey(parentKey);
+  if (parent.kind !== "group") throw new ConversationAccessError(404,"not_found");
+  const state = await groupRpc<RoomState>("groups.state",{room_id:parent.id});
+  if (!state.room.members.some(member => member.profile === profile)) throw new ConversationAccessError(404,"not_found");
+  const page = await (await nativeFetch(profile,`/api/sessions?title=${encodeURIComponent(`Group: ${parent.id}`)}&include_hidden=true&limit=100`)).json();
+  const sessions = (page.data ?? []).filter((row: NativeSession) => row.title === `Group: ${parent.id}` && row.source === "bot_room");
+  if (page.has_more || (page.data?.length ?? 0) >= 100 || sessions.length !== 1) return null;
+  await authorizeNativeConversation(actor,parentKey);
+  return readAuthorizedConversation(conversationKey("solo",sessions[0].id,profile),0,200,access);
+}
+async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap: number | undefined,access: ConversationAccess) {
   const identity = parseConversationKey(key);
   if (identity.kind === "group") {
     const state = await groupRpc<RoomState>("groups.state", { room_id: identity.id });
@@ -416,7 +435,7 @@ export async function inviteToConversation(key: string, invitee: string, task = 
   if (invitee === identity.profile) throw new Error("Pick a different agent than the one in this chat");
   const source = await readConversation(key,0,undefined,actor);
   const title = source.conversation.title;
-  const room = await createConversation([identity.profile, invitee], title && title !== "Untitled chat" && title !== "New chat" ? `${title} · ${invitee}`.slice(0, 80) : undefined,actor,access);
+  const room = await createConversation([identity.profile, invitee], title && title !== "Untitled chat" && title !== "New chat" ? `${title} · ${invitee}`.slice(0, 80) : undefined,actor,access,key);
   try {
     await groupRpc("groups.send", { room_id: room.id, event_id: `invite-${randomUUID()}`, payload: { text: inviteHandoff(identity.profile, invitee, { id: identity.id, title }, source.messages, task), thread_id: room.id } });
   } catch (error) {

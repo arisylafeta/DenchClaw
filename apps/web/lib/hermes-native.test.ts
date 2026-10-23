@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./postgres", () => ({queryPg:vi.fn(async () => [{owner_id:"user",creator_id:"user",origin:"crm",visibility:"team",version:1,deleted_at:null}])}));
+const actor = {id:"user",email:"ari@rebattery.io",displayName:"Synthetic owner"};
 import { WebSocketServer } from "ws";
 import { once } from "node:events";
 import { conversationKey, filterConversations, parseConversationKey } from "./hermes-conversations";
@@ -44,7 +46,7 @@ afterEach(async () => {
 it('bounds trace member history to one newest page and rejects cap overflow', async () => {
   const fetch = vi.fn(async (url: string) => url.includes('/messages') ? Response.json({ data: Array.from({ length: 201 }, (_, id) => ({ id, role: 'user', content: 'synthetic', timestamp: 1 })) }) : Response.json({ id: 'synthetic', title: 'Test' }));
   vi.stubGlobal('fetch', fetch);
-  await expect(readConversation(conversationKey('solo', 'synthetic', 'alpha'), 0, 200)).rejects.toThrow('Trace probe cap exceeded');
+  await expect(readConversation(conversationKey('solo', 'synthetic', 'alpha'), 0, 200, actor)).rejects.toThrow('Trace probe cap exceeded');
   const pages = fetch.mock.calls.filter(([url]) => url.includes('/messages'));
   expect(pages).toHaveLength(1);
   expect(pages[0][0]).toContain('order=latest&limit=201&offset=0');
@@ -54,12 +56,12 @@ it("enriches only requested messaging IDs and uses the same name on deep-link re
   lookup.mockImplementation(async (profile, ids): Promise<Record<string, string>> => ids.includes("room") && profile === "alpha" ? { room: "Harbour / #stock" } : {});
   vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/messages") ? Response.json({ data: [] }) : url.includes("/api/sessions?") ? Response.json({ data: [{ id: "room", title: "Stored title", source: "discord", origin_json: "private", user_id: "private" }, { id: "plain", title: "Direct", source: "web" }] }) : Response.json({ session: { id: "room", title: "Stored title", source: "discord" } })));
   try {
-    const listing = await listConversations();
+    const listing = await listConversations(actor);
     expect(listing.sessions.find((row) => row.profile === "alpha" && row.id === "room")?.title).toBe("Harbour / #stock");
     expect(listing.sessions.find((row) => row.profile === "default" && row.id === "room")?.title).toBe("Stored title");
     expect(lookup).toHaveBeenCalledWith("alpha", ["room"]);
     expect(JSON.stringify(listing)).not.toContain("private");
-    const detail = await readConversation(conversationKey("solo", "room", "alpha"));
+    const detail = await readConversation(conversationKey("solo", "room", "alpha"), undefined, undefined, actor);
     expect(detail.conversation.title).toBe("Harbour / #stock");
   } finally { lookup.mockImplementation(async () => ({})); }
 });
@@ -73,7 +75,7 @@ it.each(['queued', 'running', 'completed', 'failed', 'interrupted'])("reports %s
   const attach = vi.spyOn(manager, "attachLive").mockResolvedValue({ running: false, subagents: [{ subagent_id: "child", status }] } as never);
   const requests = vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
   try {
-    const result = await listConversations();
+    const result = await listConversations(actor);
     expect(result.sessions.find(row => row.profile === "alpha")).toMatchObject({ working: false, background: ['queued', 'running'].includes(status) });
   } finally { call.mockRestore(); attach.mockRestore(); requests.mockRestore(); }
 });
@@ -86,13 +88,13 @@ it("uses gateway status for hidden solo chats with profile-colliding stored ids"
   const attach = vi.spyOn(manager, "attachLive").mockImplementation(async key => key.includes("alpha") ? { session_id: "runtime-alpha", session_key: "same", running: true, info: { lazy: true, cwd: "/workspace", branch: "", model: "test", skills: {}, tools: {} } } as never : undefined);
   const requests = vi.spyOn(manager, "pendingRequests").mockReturnValue([{ id: "srq", method: "clarify", params: {} }]);
   try {
-    const result = await listConversations();
+    const result = await listConversations(actor);
     expect(result.sessions.find(row => row.profile === "alpha")).toMatchObject({ working: true, blocked: true });
     expect(result.sessions.find(row => row.profile === "default")).toMatchObject({ working: false, blocked: false });
     expect(call).toHaveBeenCalledTimes(1);
     call.mockRejectedValue(new Error("offline"));
     vi.advanceTimersByTime(5_001);
-    const offline = await listConversations();
+    const offline = await listConversations(actor);
     expect(offline.sessions.every(row => row.working === null)).toBe(true);
   } finally { call.mockRestore(); attach.mockRestore(); requests.mockRestore(); }
 });
@@ -111,15 +113,15 @@ it("shares a short TTL status poll and caps parallel warm attachments", async ()
     return { session_id: id, session_key: id.replace("runtime-", "session-"), running: false, info: { lazy: true } } as never;
   });
   vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
-  await Promise.all([listConversations(), listConversations(), listConversations()]);
+  await Promise.all([listConversations(actor), listConversations(actor), listConversations(actor)]);
   expect(call).toHaveBeenCalledTimes(1);
   expect(attach).toHaveBeenCalledTimes(8);
   expect(peak).toBeGreaterThan(1);
   expect(peak).toBeLessThanOrEqual(4);
-  await listConversations();
+  await listConversations(actor);
   expect(call).toHaveBeenCalledTimes(1);
   vi.advanceTimersByTime(5_001);
-  await listConversations();
+  await listConversations(actor);
   expect(call).toHaveBeenCalledTimes(2);
   expect(attach).toHaveBeenCalledTimes(16);
 });
@@ -132,14 +134,14 @@ it("shows a CLI-agent session as working when the dashboard gateway has no live 
   const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [] } as never);
   vi.mocked(recentSessionActivity).mockImplementation(async (profile, ids) => new Map(profile === "alpha" ? ids.filter(id => id === "oneshot-live").map(id => [id, "working" as const]) : []));
   try {
-    const result = await listConversations();
+    const result = await listConversations(actor);
     expect(result.sessions.find(row => row.profile === "alpha" && row.id === "oneshot-live")?.working).toBe(true);
     expect(result.sessions.find(row => row.profile === "alpha" && row.id === "idle")?.working).toBe(false);
     expect(result.sessions.find(row => row.profile === "default" && row.id === "oneshot-live")?.working).toBe(false);
     // An unreachable gateway leaves status unknown, but a fresh state.db heartbeat is still proof of work.
     call.mockRejectedValue(new Error("offline"));
     vi.advanceTimersByTime(5_001);
-    const offline = await listConversations();
+    const offline = await listConversations(actor);
     expect(offline.sessions.find(row => row.profile === "alpha" && row.id === "oneshot-live")?.working).toBe(true);
     expect(offline.sessions.find(row => row.profile === "alpha" && row.id === "idle")?.working).toBeNull();
   } finally { call.mockRestore(); vi.mocked(recentSessionActivity).mockImplementation(async () => new Map()); }
@@ -157,7 +159,7 @@ it("trusts gateway idle over a fresh heartbeat, and maps waiting past the attach
   vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
   vi.mocked(recentSessionActivity).mockImplementation(async (_profile, ids) => new Map(ids.map(id => [id, "working" as const])));
   try {
-    const rows = (await listConversations()).sessions;
+    const rows = (await listConversations(actor)).sessions;
     expect(rows).toHaveLength(10);
     expect(rows.find(row => row.id === "s-0")).toMatchObject({ working: false, blocked: false, background: false });
     expect(rows.filter(row => row.id !== "s-9").every(row => row.working === false && row.background !== true)).toBe(true);
@@ -181,7 +183,7 @@ it("drops a refused runtime's status and keeps other rows when one attach throws
   });
   vi.spyOn(manager, "pendingRequests").mockReturnValue([]);
   try {
-    const rows = (await listConversations()).sessions;
+    const rows = (await listConversations(actor)).sessions;
     expect(rows.find(row => row.id === "foreign")).toMatchObject({ working: false, blocked: false });
     expect(rows.find(row => row.id === "broken")).toMatchObject({ working: false, blocked: true });
     expect(rows.find(row => row.id === "mine")).toMatchObject({ working: false, background: true });
@@ -196,7 +198,7 @@ it("shows a CLI session stamped only by its subagents as background", async () =
   const call = vi.spyOn(manager, "call").mockResolvedValue({ sessions: [] } as never);
   vi.mocked(recentSessionActivity).mockImplementation(async (profile, ids) => new Map(profile === "alpha" ? ids.map(id => [id, "background" as const]) : []));
   try {
-    const row = (await listConversations()).sessions.find(row => row.profile === "alpha" && row.id === "cli-parent");
+    const row = (await listConversations(actor)).sessions.find(row => row.profile === "alpha" && row.id === "cli-parent");
     expect(row).toMatchObject({ working: false, background: true });
   } finally { call.mockRestore(); vi.mocked(recentSessionActivity).mockImplementation(async () => new Map()); }
 });
@@ -216,7 +218,7 @@ describe("native Hermes conversations", () => {
     vi.stubGlobal("fetch", fetchMock);
     handler = (method, params) => method === "groups.list" ? { rooms: [room], next_offset: params.offset === 0 ? 100 : null } : { room, driver_status: { running: true, working: false, blocked: true } };
     await startGateway();
-    const data = await listConversations();
+    const data = await listConversations(actor);
     expect(data.sessions).toHaveLength(3);
     expect(data.sessions.filter((r) => r.id === "shared-id")).toHaveLength(2);
     expect(data.sessions.find((r) => r.kind === "group")).toMatchObject({ working: false, blocked: true });
@@ -235,7 +237,7 @@ describe("native Hermes conversations", () => {
     vi.mocked(sessionProjectLabels).mockClear();
     vi.mocked(sessionProjectLabels).mockImplementation(async (profile, ids): Promise<Record<string, string>> => profile === "default" && ids.includes(olderPin.id) ? { [olderPin.id]: "Harbour" } : {});
     vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({ data: input.includes("/alpha/") ? [] : [...recent, olderPin] })));
-    const result = await listConversations();
+    const result = await listConversations(actor);
     expect(result.sessions).toHaveLength(201);
     expect(result.sessions.find((row) => row.id === olderPin.id)).toMatchObject({ profile: "default", title: olderPin.title, project: "Harbour" });
     expect(vi.mocked(sessionProjectLabels).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids.length)).toEqual([200, 1]);
@@ -246,13 +248,13 @@ describe("native Hermes conversations", () => {
   });
   it("keeps other profiles' chats when one profile's sessions cannot be read", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => input.includes("/alpha/") ? new Response("{}", { status: 401 }) : Response.json({ data: [{ id: "sol", title: "Sol chat" }] })));
-    const result = await listConversations();
+    const result = await listConversations(actor);
     expect(result.sessions.map((r) => r.title)).toEqual(["Sol chat"]);
     expect(result.warnings).toContain("Could not load chats for alpha");
   });
   it("reports unavailable group transport without hiding solo chats", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "solo" }], has_more: false })));
-    const result = await listConversations();
+    const result = await listConversations(actor);
     expect(result.sessions).toHaveLength(2); expect(result.groupsAvailable).toBe(false);
     expect(result.warnings.join()).toContain("dashboard connection");
   });
@@ -265,7 +267,7 @@ describe("native Hermes conversations", () => {
       return { events: [{ seq, event_id: `event-${seq}`, kind: "message.user", actor: { id: "user" }, payload: { text: `message ${seq}` } }], has_more: seq === 1 };
     };
     await startGateway();
-    const detail = await readConversation(conversationKey("group", room.room_id));
+    const detail = await readConversation(conversationKey("group", room.room_id), undefined, undefined, actor);
     expect(detail.messages.map((m) => m.text)).toEqual(["message 1", "message 2"]);
     expect(cursors).toEqual([0, 1]); expect(server!.clients.size).toBe(1);
   });
@@ -277,7 +279,7 @@ describe("native Hermes conversations", () => {
       { id: "diagnostic", role: "user", display_kind: "hidden", content: "" },
       { id: "answer", role: "assistant", content: "Done" },
     ] }) : Response.json({ session: { id: "rich", title: "Rich fixture" } })));
-    const detail = await readConversation(conversationKey("solo", "rich", "alpha"));
+    const detail = await readConversation(conversationKey("solo", "rich", "alpha"), undefined, undefined, actor);
     expect(detail.messages).toHaveLength(2);
     expect(detail.messages[0]).toMatchObject({ content: "Looking", parts: [{ type: "reasoning", text: "Thinking" }, { type: "text", text: "Looking" }, { type: "tool-invocation", toolCallId: "call1", toolName: "terminal", args: { command: "fixture" }, result: "Tool result" }] });
     expect(detail.messages[0].parts?.[2]).not.toHaveProperty("state");
@@ -289,12 +291,12 @@ describe("native Hermes conversations", () => {
       if (init.method === "POST") return Response.json({});
       return Response.json({ session: { id: url.split("/").at(-1), title: "New alpha", started_at: 10 } });
     }));
-    const result = await createConversation(["alpha"]);
+    const result = await createConversation(["alpha"], undefined, actor);
     expect(result.profile).toBe("alpha"); expect(result.title).toBe("New alpha");
     expect(requests).toHaveLength(2); expect(requests.every((r) => r.url.includes("/p/alpha/api/sessions"))).toBe(true);
     expect(JSON.parse(requests[0].init.body as string)).toMatchObject({ source: "web" });
-    await expect(createConversation(["missing"])).rejects.toThrow("Unknown");
-    await expect(createConversation(["alpha", "alpha"])).rejects.toThrow("distinct");
+    await expect(createConversation(["missing"], undefined, actor)).rejects.toThrow("Unknown");
+    await expect(createConversation(["alpha", "alpha"], undefined, actor)).rejects.toThrow("distinct");
   });
   it("uses the native groups.create/state roster contract and reads the room log with member identities", async () => {
     const calls: { method: string; params: Record<string, unknown> }[] = [];
@@ -305,11 +307,11 @@ describe("native Hermes conversations", () => {
       return { events: [{ event_id: "user:1", seq: 1, kind: "message.user", actor: { id: "user" }, payload: { text: "hello" } }, { event_id: "answer:1", seq: 2, kind: "message.member", created_at: 42, actor: { id: "m2" }, payload: { text: "Alpha reply", member_id: "m2", task_id: "task1", turn_id: "turn1" } }, { event_id: "settle:1", seq: 3, kind: "turn.settled", created_at: 43, actor: { id: "gateway" }, payload: { member_id: "m2", task_id: "task1", turn_id: "turn1", passed: false } }] };
     };
     await startGateway();
-    const created = await createConversation(["default", "alpha"]);
+    const created = await createConversation(["default", "alpha"], undefined, actor);
     expect(created.kind).toBe("group"); expect(created.participants.map((p) => p.profile)).toEqual(["default", "alpha"]);
     expect(calls[0]).toMatchObject({ method: "groups.create", params: { members: [{ profile: "default", member_id: "default", handle: "default", target: { kind: "local", profile: "default" } }, { profile: "alpha", member_id: "alpha", handle: "alpha", target: { kind: "local", profile: "alpha" } }] } });
     expect(calls[1].method).toBe("groups.state");
-    const detail = await readConversation(conversationKey("group", room.room_id));
+    const detail = await readConversation(conversationKey("group", room.room_id), undefined, undefined, actor);
     expect(detail.messages).toMatchObject([{ id: "user:1", role: "user", text: "hello", content: "hello", profile: undefined, name: undefined }, { id: "answer:1", role: "assistant", text: "Alpha reply", content: "Alpha reply", profile: "alpha", name: "Alpha", memberId: "m2" }]);
     expect(detail).toMatchObject({ members: room.members, driver: { working: true }, settled: [{ memberId: "m2", taskId: "task1", turnId: "turn1", passed: false, createdAt: 43000 }], cursor: 3, sinceSeq: 0 });
     expect(detail.messages[1]).toMatchObject({ memberId: "m2", taskId: "task1", turnId: "turn1", createdAt: 42000 });
@@ -321,7 +323,7 @@ describe("native Hermes conversations", () => {
       if (!url.pathname.endsWith("/messages")) return Response.json({ session: { id: "history", title: "History" } });
       return Response.json({ data: url.searchParams.get("offset") === "0" ? Array.from({ length: 500 }, (_, i) => ({ id: i, role: "user", content: `line ${i}` })) : [{ id: 501, role: "assistant", content: [{ type: "text", text: "continued" }] }] });
     }));
-    const detail = await readConversation(conversationKey("solo", "history", "alpha"));
+    const detail = await readConversation(conversationKey("solo", "history", "alpha"), undefined, undefined, actor);
     expect(detail.messages).toHaveLength(501); expect(detail.messages.at(-1)?.text).toBe("continued");
   });
   it("reads a compacted session's summarized turns from the display history", async () => {
@@ -334,7 +336,7 @@ describe("native Hermes conversations", () => {
       if (!url.pathname.endsWith("/messages")) {return Response.json({ session: { id: "compacted", title: "Compacted" } });}
       return Response.json({ data: url.searchParams.get("include_compacted") === "true" ? display : active });
     }));
-    const detail = await readConversation(conversationKey("solo", "compacted", "alpha"));
+    const detail = await readConversation(conversationKey("solo", "compacted", "alpha"), undefined, undefined, actor);
     expect(detail.messages.map((m) => m.text)).toEqual(["first", "one", "middle", "two", "latest", "answer"]);
   });
   it("rejects unknown profiles before network access and protects gateway credentials", async () => {
@@ -375,16 +377,16 @@ describe("inviting an agent into a chat", () => {
     };
     await startGateway();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/messages") ? Response.json({ data: [{ id: 1, role: "user", content: "Is the Panasonic lot priced?" }, { id: 2, role: "assistant", content: "Not yet." }], has_more: false }) : Response.json({ session: { id: "s1", title: "Pricing" } })));
-    const room = await inviteToConversation(conversationKey("solo", "s1", "alpha"), "default", "take over pricing");
+    const room = await inviteToConversation(conversationKey("solo", "s1", "alpha"), "default", "take over pricing", actor);
     expect(room.kind).toBe("group");
     expect(calls.find(c => c.method === "groups.create")?.params).toMatchObject({ name: "Pricing · default", members: [{ handle: "alpha", profile: "alpha" }, { handle: "default", profile: "default" }] });
     const send = calls.find(c => c.method === "groups.send")!;
     expect(send.params).toMatchObject({ room_id: room.id, payload: { thread_id: room.id } });
-    expect(String((send.params.payload as { text: string }).text)).toMatch(/^\[ROOM INVITE host=alpha session=s1 invitee=default\]\n@default .*Is the Panasonic lot priced\?.*Not yet\..*session_search\(session_id=\"s1\", profile=\"alpha\"\).*take over pricing/s);
-    await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "alpha")).rejects.toThrow("different agent");
-    await expect(inviteToConversation(conversationKey("group", "room-1"), "default")).rejects.toThrow("one-to-one");
+    expect(String((send.params.payload as { text: string }).text)).toMatch(/^\[ROOM INVITE host=alpha session=s1 invitee=default\]\n@default .*Is the Panasonic lot priced\?.*Not yet\..*session_search\(session_id="s1", profile="alpha"\).*take over pricing/s);
+    await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "alpha", undefined, actor)).rejects.toThrow("different agent");
+    await expect(inviteToConversation(conversationKey("group", "room-1"), "default", undefined, actor)).rejects.toThrow("one-to-one");
     failSend = true; calls.length = 0;
-    await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "default")).rejects.toThrow();
+    await expect(inviteToConversation(conversationKey("solo", "s1", "alpha"), "default", undefined, actor)).rejects.toThrow();
     expect(calls.map(c => c.method)).toContain("groups.disband");
   });
 });

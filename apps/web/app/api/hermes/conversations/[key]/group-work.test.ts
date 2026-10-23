@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+vi.mock('@/lib/auth',()=>({currentUser:async()=>({id:'user',email:'user@example.test',displayName:'User'})}));
 import { conversationKey } from '@/lib/hermes-conversations';
 const mocks = vi.hoisted(() => ({ backend: vi.fn(() => 'hermes'), state: vi.fn(), activity: vi.fn(), trace: vi.fn() }));
 vi.mock('@/lib/agent-backend', () => ({ resolveAgentBackend: mocks.backend }));
-vi.mock('@/lib/hermes-native', () => ({ groupRpc: mocks.state }));
+vi.mock('@/lib/hermes-native', () => ({ authorizeNativeConversation:vi.fn(async()=>({access:{visibility:'team'},version:1})), groupRpc: mocks.state }));
 vi.mock('@/lib/hermes-gateway/room-activity', () => ({ readRoomActivity: mocks.activity }));
 vi.mock('@/lib/hermes-gateway/room-trace', () => ({ readRoomTrace: mocks.trace }));
 import { GET as activity } from './activity/route';

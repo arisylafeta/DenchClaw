@@ -100,19 +100,15 @@ describe("POST /api/gateway/chat", () => {
 		vi.restoreAllMocks();
 	});
 
-  it("blocks an existing native session but preserves non-native submissions in gateway mode", async () => {
-    vi.stubEnv("HERMES_CHAT_TRANSPORT", "gateway");
-    vi.mocked(backendForCutover).mockReturnValue("hermes");
-    try {
-      const request = () => new Request("http://local/api/gateway/chat", { method: "POST", body: JSON.stringify({ sessionKey: "native-existing", message: "old client" }) });
-      const response = await bridgeSubmit(request());
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({ error: "gateway_transport" });
-      vi.mocked(nativeFetch).mockResolvedValueOnce(new Response(null, { status: 404 }));
-      const allowed = await bridgeSubmit(request());
-      expect(allowed.status).toBe(200); await allowed.text();
-    } finally { vi.unstubAllEnvs(); }
+  it("blocks all legacy Hermes submissions without probing session existence",async()=>{
+    vi.mocked(backendForCutover).mockReturnValue("hermes");vi.mocked(nativeFetch).mockClear();
+    for(const sessionKey of ["native-existing","unknown","other-private-session"]){
+      const response=await bridgeSubmit(new Request("http://local/api/gateway/chat",{method:"POST",body:JSON.stringify({sessionKey,message:"[Attached files: /root/private.png]"})}));
+      expect(response.status).toBe(409);expect(await response.json()).toEqual({error:"gateway_transport_required"});
+    }
+    expect(nativeFetch).not.toHaveBeenCalled();
   });
+
 	it("hydrates attached images before reactivating the gateway run", async () => {
 		const { getActiveRun, reactivateSubscribeRun } = await import("@/lib/active-runs");
 		vi.mocked(getActiveRun).mockReturnValue({ status: "completed" } as never);
@@ -172,41 +168,12 @@ describe("POST /api/gateway/chat", () => {
 		expect(getActiveRun).toHaveBeenCalledWith("test-session");
 	});
 
-	it("uses Hermes path when DENCH_AGENT_BACKEND is hermes", async () => {
-		const { resolveAgentBackend } = await import("@/lib/agent-backend");
-		vi.mocked(resolveAgentBackend).mockReturnValue("hermes");
-
-		const { createHermesChatStream } = await import("@/lib/hermes-client");
-
-		const { POST } = await import("./route.js");
-		const req = new Request("http://localhost/api/gateway/chat", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				sessionKey: "hermes-session",
-				message: "Hello Hermes",
-			}),
-		});
-
-		const res = await POST(req);
-
-		expect(res.status).toBe(200);
-		expect(res.headers.get("X-Agent-Backend")).toBe("hermes");
-		expect(res.headers.get("Content-Type")).toBe("text/event-stream");
-		expect(createHermesChatStream).toHaveBeenCalledWith({
-			sessionKey: "hermes-session",
-			message: "Hello Hermes",
-			userId: "11111111-1111-4111-8111-111111111111",
-			config: expect.objectContaining({
-				baseUrl: "http://127.0.0.1:8642",
-				apiKey: "sk-test",
-				model: "hermes-agent",
-			}),
-		});
-
-		const text = await res.text();
-		expect(text).toContain("hermes-event");
-	});
+	it("requires login even when the legacy Hermes bridge is disabled",async()=>{
+      const {resolveAgentBackend}=await import("@/lib/agent-backend");const {currentUser}=await import("@/lib/auth");
+      const {createHermesChatStream}=await import("@/lib/hermes-client");vi.mocked(resolveAgentBackend).mockReturnValue("hermes");vi.mocked(currentUser).mockResolvedValueOnce(null);
+      const {POST}=await import("./route.js");const response=await POST(new Request("http://local",{method:"POST",body:"{}"}));
+      expect(response.status).toBe(401);expect(createHermesChatStream).not.toHaveBeenCalled();
+    });
 
 	it("rejects oversized gateway image attachments", async () => {
 		const { existsSync, readFileSync } = await import("node:fs");
