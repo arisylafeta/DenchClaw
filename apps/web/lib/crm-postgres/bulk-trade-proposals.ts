@@ -462,8 +462,8 @@ async function createSupplyListing(p: Proposal & { source_date: string | null },
 
 
 const BUYER_STAGE: Record<string, OfferStage> = {
-  "To contact": "to_contact", "Teaser sent": "teaser_sent", "No reply": "teaser_sent", "NDA, specs sent": "specs_nda",
-  "Bid in": "bid_in", "LOI or deposit": "loi", "Won": "won",
+  "To contact": "candidate", "Teaser sent": "offered", "No reply": "offered", "NDA, specs sent": "offered",
+  "Bid in": "offered", "LOI or deposit": "contract_out", "Won": "signed",
 };
 
 /** The Trades Preview offer stage for an old Bulk Trades buyer status ("Declined: price" is declined). */

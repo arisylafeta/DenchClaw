@@ -58,9 +58,9 @@ const DEMAND_SELECT = `
     ), '[]'::json) as fits,
     coalesce((
       select json_agg(json_build_object('lot_id', listing.id, 'title', coalesce(nullif(listing.spec->>'listing_title', ''), nullif(listing.context->>'listing_title', ''), listing.summary), 'status', case offer.stage
-          when 'to_contact' then 'To contact' when 'teaser_sent' then 'Teaser sent' when 'specs_nda' then 'NDA, specs sent'
-          when 'bid_in' then 'Bid in' when 'loi' then 'LOI or deposit' when 'won' then 'Won' when 'declined' then 'Declined'
-          when 'lost' then 'Lost' else 'To contact' end) order by offer.created_at)
+          when 'candidate' then 'To contact' when 'offered' then 'Offered' when 'contract_out' then 'Contract out'
+          when 'signed' then 'Signed' when 'invoiced' then 'Invoice out' when 'paid' then 'Paid' when 'complete' then 'Complete'
+          when 'declined' then 'Declined' when 'lost' then 'Lost' else 'To contact' end) order by offer.created_at)
       from crm_bulk_offers offer join crm_bulk_listings listing on listing.id = offer.bulk_listing_id
       where offer.counterpart_id = demand.id and offer.role = 'counterparty' and listing.id <> demand.id
     ), '[]'::json) as trades,
@@ -354,7 +354,7 @@ export async function addSuggestedBuyer(lotId: string, demandId: string, userId:
   // Trades Preview reads buyers as offers; the offer shares the buyer's id, as the Bulk Trades reconcile does.
   await queryPg(
     `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, counterpart_id, stage, data)
-     select $1, l.id, 'counterparty', $3, $4, $5, $6, $7, $2, 'to_contact', '{"source": "suggested buyer"}'
+     select $1, l.id, 'counterparty', $3, $4, $5, $6, $7, $2, 'candidate', '{"source": "suggested buyer"}'
      from crm_bulk_listings l where l.id = $8
      on conflict (id) do update set counterpart_id = excluded.counterpart_id`,
     [buyer.id, demandId, demand.person_id, demand.company_id, demand.buyer, contact, demand.wants, lotId],

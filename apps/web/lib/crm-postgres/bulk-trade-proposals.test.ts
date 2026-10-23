@@ -29,7 +29,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     user = row;
     lotId = (await trades.createBulkTrade({ title: "Proposal trade", trade_kind: "packs", trade_stage: "With buyers" }, user.id)).id;
     buyerId = `btb_${crypto.randomUUID()}`;
-    await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, name, stage) values ($1, $2, 'counterparty', 'Synthetic Buyer', 'to_contact')`,
+    await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, name, stage) values ($1, $2, 'counterparty', 'Synthetic Buyer', 'candidate')`,
       [buyerId, lotId]);
   });
 
@@ -59,7 +59,7 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     const [fact] = await pg.queryPg("select value, source_label, source_date::text from crm_bulk_listing_fields where bulk_listing_id = $1 and field_key = 'manufacture_date'", [lotId]);
     expect(fact).toMatchObject({ value: "2021 to 2025", source_label: "Gmail · sam@supplier.test", source_date: "2026-09-29" });
     expect(await pg.queryPg("select name, stage from crm_bulk_offers where bulk_listing_id = $1 and role = 'counterparty' order by created_at", [lotId]))
-      .toEqual([{ name: "Synthetic Buyer", stage: "teaser_sent" }, { name: "New Buyer Co", stage: "to_contact" }]);
+      .toEqual([{ name: "Synthetic Buyer", stage: "offered" }, { name: "New Buyer Co", stage: "candidate" }]);
     expect((await pg.queryPg("select next_action, next_due::text from crm_bulk_listings where id = $1", [lotId]))[0])
       .toEqual({ next_action: "Ask for the address", next_due: "2026-10-01" });
     expect(await pg.queryPg("select file_name, doc_type, visibility from crm_bulk_listing_documents where bulk_listing_id = $1", [lotId]))

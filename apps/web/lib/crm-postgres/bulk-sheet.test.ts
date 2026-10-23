@@ -31,9 +31,9 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
         ('btl_sheet_live', 'supply', 'Lot Seller', 'Live lot', 'open', null, '{"from_bulk_trade_lot": true}'),
         ('btl_sheet_done', 'supply', 'Lot Seller', 'Done lot', 'closed', 'other', '{"from_bulk_trade_lot": true}');
       insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values
-        ('bof_sheet_contact', 'bts_sheet_open', null, 'counterparty', 'to_contact'),
-        ('bof_sheet_bid', 'bts_sheet_open', null, 'counterparty', 'bid_in'),
-        ('bof_sheet_loi', 'bts_sheet_open', 'btd_sheet_new', 'counterparty', 'loi');
+        ('bof_sheet_contact', 'bts_sheet_open', null, 'counterparty', 'candidate'),
+        ('bof_sheet_bid', 'bts_sheet_open', null, 'counterparty', 'offered'),
+        ('bof_sheet_loi', 'bts_sheet_open', 'btd_sheet_new', 'counterparty', 'contract_out');
     `);
   });
 
@@ -46,9 +46,9 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     expect(rows.map((row) => `${row.kind}:${row.id}`).sort()).toEqual(
       ["demand:btd_sheet_new", "demand:btd_sheet_worked", "supply:bts_sheet_open", "supply:btl_sheet_live"].sort());
     const worked = rows.find((row) => row.id === "btd_sheet_worked")!;
-    expect(worked).toMatchObject({ progress: "Being worked", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
-    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Trade", tone: "closing", side: "buyer", latest: null });
-    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Trade", tone: "closing", side: "seller" });
+    expect(worked).toMatchObject({ progress: "New", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
+    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "buyer", latest: null });
+    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "seller" });
     expect(rows.filter((row) => row.id === "btl_sheet_live")).toHaveLength(1);
     expect(rows.find((row) => row.id === "btl_sheet_live")).toMatchObject({ kind: "supply", side: "seller" });
   });

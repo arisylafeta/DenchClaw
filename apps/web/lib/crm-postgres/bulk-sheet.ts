@@ -14,7 +14,8 @@ export const SHEET_QUERY = `
     (select count(*)::int from crm_bulk_listing_activity a
       where a.bulk_listing_id = listing.id and a.kind <> 'status') as activity_count,
     latest.kind as latest_kind, latest.title as latest_title, latest.occurred_at::text as latest_at,
-    offer.stage as furthest_stage
+    offer.stage as furthest_stage,
+    bulk_listing_stage(listing.id) as stage
   from crm_bulk_listings listing
   left join lateral (
     select a.kind, a.title, a.occurred_at from crm_bulk_listing_activity a
@@ -24,8 +25,8 @@ export const SHEET_QUERY = `
   left join lateral (
     select o.stage from crm_bulk_offers o
     where (o.bulk_listing_id = listing.id or o.counterpart_id = listing.id) and o.stage is not null
-    order by case o.stage when 'won' then 6 when 'loi' then 5 when 'bid_in' then 4
-      when 'specs_nda' then 3 when 'teaser_sent' then 2 when 'to_contact' then 1 else 0 end desc,
+    order by case o.stage when 'complete' then 7 when 'paid' then 6 when 'invoiced' then 5 when 'signed' then 4
+      when 'contract_out' then 3 when 'offered' then 2 when 'candidate' then 1 else 0 end desc,
       o.updated_at desc, o.id desc limit 1
   ) offer on true
   where listing.status = 'open' and listing.kind in ('demand', 'supply')`;

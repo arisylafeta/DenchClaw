@@ -36,10 +36,17 @@ export type BulkListingView = {
   title: string;
   /** The furthest stage reached by any offer on this listing or pointing at it (counterpart_id); null when none. */
   furthest_stage: OfferStage | null;
-  /** True when furthest_stage is loi or won: the listing is a trade. A label on the same record, not a separate one. */
+  /** One of LISTING_STAGES. */
+  stage: ListingStage;
+  /** True when furthest_stage is on the signing and paying track or beyond: the listing is a trade. A label on the same record, not a separate one. */
   is_trade: boolean;
   /** Present when kind is demand: the existing Demand row the demand panel renders. */
   demand?: Demand;
 };
 
-export const TRADE_STAGES: readonly OfferStage[] = ["loi", "won"];
+/** A trade is a listing on the signing and paying track or beyond: a contract is out with a counterparty. */
+export const TRADE_STAGES: readonly OfferStage[] = ["contract_out", "signed", "invoiced", "paid", "complete"];
+
+/** The six stages of a listing, in order. Computed by bulk_listing_stage() in Postgres; never stored. */
+export const LISTING_STAGES = ["New", "Qualified", "Matched", "Offered", "Signed & Paid", "Complete"] as const;
+export type ListingStage = (typeof LISTING_STAGES)[number];

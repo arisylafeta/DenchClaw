@@ -46,8 +46,8 @@ describe("listing routes", () => {
     mocks.add.mockResolvedValue({ id: "offer" });
     const post = (body: unknown) => POST(new Request(req, { method: "POST", body: JSON.stringify(body) }), params);
     expect((await post({ name: "Buyer", stage: "invalid" })).status).toBe(400);
-    expect((await post({ name: "Buyer", stage: "loi" })).status).toBe(201);
-    expect(mocks.add).toHaveBeenCalledWith("supply-1", expect.objectContaining({ name: "Buyer", stage: "loi" }));
+    expect((await post({ name: "Buyer", stage: "contract_out" })).status).toBe(201);
+    expect(mocks.add).toHaveBeenCalledWith("supply-1", expect.objectContaining({ name: "Buyer", stage: "contract_out" }));
   });
   it("uses the seller's mailbox context without a buyer profile", async () => {
     expect(await (await context(req, params)).json()).toEqual({ buyer: null, mail: [], person: null });

@@ -14,10 +14,11 @@ describe("Bulk Trades board", () => {
   it("puts each card in its stage column and opens it on click", () => {
     const onOpen = vi.fn();
     render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={onOpen}
-      shown={[row({}), row({ key: "b", id: "b", title: "5MWh Cells", side: "buyer", progress: "Bid in" }), row({ key: "c", id: "c", title: "Odd", progress: "Unknown" })]} />);
-    expect(within(screen.getByRole("region", { name: "New" })).getByText("40x Toyota Proace 50kWh Packs")).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "New" })).getByText("Odd")).toBeTruthy();
-    const bid = within(screen.getByRole("region", { name: "Bid in" }));
+      shown={[row({}), row({ key: "b", id: "b", title: "5MWh Cells", side: "buyer", progress: "Signed & Paid" }), row({ key: "c", id: "c", title: "Odd", progress: "Matched" })]} />);
+    expect(within(screen.getByRole("region", { name: "Offered" })).getByText("40x Toyota Proace 50kWh Packs")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Matched" })).getByText("Odd")).toBeTruthy();
+    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["New", "Qualified", "Matched", "Offered", "Signed & Paid", "Complete"]);
+    const bid = within(screen.getByRole("region", { name: "Signed & Paid" }));
     fireEvent.click(bid.getByText("5MWh Cells"));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
   });

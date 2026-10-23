@@ -32,7 +32,7 @@ def reputation_for(cur, company_id=None, person_id=None, email=None, two_way=Fal
         and status = 'closed' and closed_reason = 'bought_from_us')
       or exists(select 1 from crm_bulk_offers o left join crm_people p on p.id = o.person_id
         join crm_bulk_listings l on l.id = o.bulk_listing_id
-        where coalesce(o.company_id, p.company_id) = %(company)s and o.stage = 'won' and l.status = 'closed') as paid,
+        where coalesce(o.company_id, p.company_id) = %(company)s and o.stage in ('paid', 'complete') and l.status = 'closed') as paid,
       exists(select 1 from crm_bulk_offers o left join crm_people p on p.id = o.person_id
         where (coalesce(o.company_id, p.company_id) = %(company)s or o.person_id = %(person)s)
           and (exists(select 1 from crm_bulk_listing_activity a where a.offer_id = o.id and a.kind = 'quote'

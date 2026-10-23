@@ -1,21 +1,20 @@
 "use client";
 
 import type { SheetRow, SheetTone } from "@/lib/bulk-sheet";
+import type { ListingStage } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { BusyRegion } from "./bt-shimmer";
 import { ScoreCircle, SideChip } from "./opportunities-sheet";
 
-/** Read-only pipeline. A card sits in the column of the furthest stage any of its offers has reached, so moving work
- * on happens in the listing (offers and stages), not by dragging. */
-const COLUMNS: { name: string; progress: string[]; tone: SheetTone }[] = [
-  { name: "New", progress: ["New", "Being worked", "Offered"], tone: "new" },
-  { name: "To contact", progress: ["To contact"], tone: "new" },
-  { name: "Sent", progress: ["Sent"], tone: "waiting" },
-  { name: "Specs and NDA", progress: ["Specs and NDA"], tone: "active" },
-  { name: "Bid in", progress: ["Bid in"], tone: "active" },
-  { name: "Trade", progress: ["Trade"], tone: "closing" },
-  { name: "On hold", progress: ["On hold"], tone: "hold" },
-  { name: "Declined or lost", progress: ["Declined", "Lost"], tone: "waiting" },
+/** Read-only pipeline of the six listing stages (bulk_listing_stage). Work moves on by what happens in the listing:
+ * a saved match, an offer, a contract date. Nothing is dragged. */
+const COLUMNS: { name: ListingStage; tone: SheetTone; hint: string }[] = [
+  { name: "New", tone: "new", hint: "Captured, not vetted" },
+  { name: "Qualified", tone: "new", hint: "Basics are in" },
+  { name: "Matched", tone: "active", hint: "Counterparties found" },
+  { name: "Offered", tone: "waiting", hint: "Put to a counterparty" },
+  { name: "Signed & Paid", tone: "closing", hint: "Contract, invoice and payment" },
+  { name: "Complete", tone: "closing", hint: "Delivered" },
 ];
 const DOT: Record<SheetTone, string> = { new: "var(--bt-muted)", active: "var(--bt-blue)", waiting: "var(--bt-amber)", closing: "var(--bt-green)", hold: "var(--bt-purple)" };
 
@@ -48,15 +47,14 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
 }
 
 export function BulkBoard({ shown, loading, error, today, onOpen }: { shown: SheetRow[]; loading: boolean; error: string | null; today: string; onOpen: (row: SheetRow) => void }) {
-  const known = new Set(COLUMNS.flatMap((column) => column.progress));
   return (
     <BusyRegion busy={loading} label="Loading…">
       {error && <p className="text-[13px]" role="alert" style={{ color: "var(--bt-red)" }}>{error}</p>}
       <div className="flex gap-3 overflow-x-auto pb-3" aria-label="Pipeline">
         {COLUMNS.map((column) => {
-          const cards = shown.filter((row) => column.progress.includes(row.progress) || (column.name === "New" && !known.has(row.progress)));
+          const cards = shown.filter((row) => row.progress === column.name);
           return (
-            <section key={column.name} aria-label={column.name} className="flex w-[17.5rem] shrink-0 flex-col gap-2 rounded-xl p-2" style={{ background: "var(--bt-segment)" }}>
+            <section key={column.name} aria-label={column.name} title={column.hint} className="flex w-[17.5rem] shrink-0 flex-col gap-2 rounded-xl p-2" style={{ background: "var(--bt-segment)" }}>
               <header className="flex items-center gap-2 px-1.5 pb-0.5 pt-1">
                 <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: DOT[column.tone] }} />
                 <h2 className="text-[13px] font-semibold">{column.name}</h2>

@@ -25,9 +25,9 @@ Rules (reviewed plan, 22 Oct 2026):
 import argparse, json, sys
 import psycopg2, psycopg2.extras
 
-STAGE = {'To contact': 'to_contact', 'Teaser sent': 'teaser_sent', 'NDA, specs sent': 'specs_nda', 'Bid in': 'bid_in',
-         'LOI or deposit': 'loi', 'Won': 'won'}
-RANK = {None: -1, 'to_contact': 0, 'teaser_sent': 1, 'specs_nda': 2, 'bid_in': 3, 'loi': 4, 'won': 5, 'declined': 2, 'lost': 2}
+STAGE = {'To contact': 'candidate', 'Teaser sent': 'offered', 'NDA, specs sent': 'offered', 'Bid in': 'offered',
+         'LOI or deposit': 'contract_out', 'Won': 'signed'}
+RANK = {None: -1, 'candidate': 0, 'offered': 1, 'contract_out': 2, 'signed': 3, 'invoiced': 4, 'paid': 5, 'complete': 6, 'declined': 1, 'lost': 1}
 VISIBLE = {'buyer_added': 'outreach', 'buyer_updated': 'outreach', 'file_added': 'document', 'email_drafted': 'mail',
            'proposal_accepted': 'note'}
 HIDDEN = {'trade_created', 'trade_updated', 'field_updated', 'contact_added', 'bid_added'}

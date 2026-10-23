@@ -38,7 +38,7 @@ function ProgressChip({ row }: { row: SheetRow }) {
   return (
     <span className="inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium" style={{ background: tone.bg }}>
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ background: tone.dot }} />
-      {row.progress}
+      {row.progress}{row.held && <span style={{ color: "var(--bt-purple)" }}>· On hold</span>}
     </span>
   );
 }
@@ -93,7 +93,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
           <button type="button" disabled={loading} title={row.title}
             className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
           {!loading && <SideChip side={row.side} />}
-          {!loading && row.is_trade && row.progress !== "Trade" && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
+          {!loading && row.is_trade && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
           {!loading && <CopyIdButton id={row.id} />}
         </span>
         {(loading || row.company) && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company}</Sh></span>}
@@ -115,7 +115,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
 
 const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
   key: `loading:${index}`, id: "", kind: "demand", side: "buyer", title: "", company: null,
-  company_id: null, category: null, progress: "", tone: "new", score: null,
+  company_id: null, category: null, progress: "New", tone: "new", score: null,
   latest: null, next_action: null, next_due: null, owner: null, touched: null,
 }));
 

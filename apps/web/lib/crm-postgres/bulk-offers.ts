@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { queryPg } from "../postgres";
 
-export const OFFER_STAGES = ["to_contact", "teaser_sent", "specs_nda", "bid_in", "loi", "won", "declined", "lost"] as const;
+export const OFFER_STAGES = ["candidate", "offered", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"] as const;
 export type OfferStage = typeof OFFER_STAGES[number];
 
 export type OfferTerms = { amount?: number; unit?: string; currency?: string; firmness?: string; delivery_terms?: string; payment_terms?: string; expires_on?: string };
@@ -76,7 +76,7 @@ export async function addOffer(listingId: string, input: OfferInput): Promise<Of
   await queryPg(
     `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage)
      values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8)`,
-    [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null, input.stage ?? "to_contact"]);
+    [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null, input.stage ?? "candidate"]);
   return (await getOffer(listingId, id, null))!;
 }
 
@@ -109,7 +109,8 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
 }
 
 export const STAGE_LABEL: Record<OfferStage, string> = {
-  to_contact: "To contact", teaser_sent: "Sent", specs_nda: "Specs and NDA", bid_in: "Bid in", loi: "LOI", won: "Won", declined: "Declined", lost: "Lost",
+  candidate: "Candidate", offered: "Offered", contract_out: "Contract out", signed: "Signed", invoiced: "Invoice out", paid: "Paid",
+  complete: "Complete", declined: "Declined", lost: "Lost",
 };
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;

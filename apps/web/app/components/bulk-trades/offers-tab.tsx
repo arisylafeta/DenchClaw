@@ -10,25 +10,26 @@ import { rowFocus } from "./demand-page";
 
 import { BusyRegion, Sh } from "./bt-shimmer";
 
-const PLACEHOLDER_OFFER = { id: "loading", name: null, stage: "to_contact", messages: 1 } as Offer;
+const PLACEHOLDER_OFFER = { id: "loading", name: null, stage: "candidate", messages: 1 } as Offer;
 const PLACEHOLDER_OFFERS = Array.from({ length: 4 }, (_, i) => ({ ...PLACEHOLDER_OFFER, id: `loading-${i}` }));
 const PLACEHOLDER_THREAD = Array.from({ length: 4 }, (_, i) => ({ id: `loading-${i}`, channel: "note", title: "", body: " ", at: "", direction: null, ref: null, href: null } as ThreadEntry));
 
 const STAGES: [OfferStage, string][] = [
-  ["to_contact", "To contact"], ["teaser_sent", "Sent"], ["specs_nda", "Specs and NDA"], ["bid_in", "Bid in"],
-  ["loi", "LOI"], ["won", "Won"], ["declined", "Declined"], ["lost", "Lost"],
+  ["candidate", "Candidate"], ["offered", "Offered"],
+  ["contract_out", "Contract out"], ["signed", "Signed"], ["invoiced", "Invoice out"], ["paid", "Paid"], ["complete", "Complete"],
+  ["declined", "Declined"], ["lost", "Lost"],
 ];
 const STAGE_LABEL = Object.fromEntries(STAGES) as Record<OfferStage, string>;
+const GREEN = { fg: "var(--bt-green)", bg: "var(--bt-green-bg)", border: "var(--bt-green-border)" };
+const RED = { fg: "var(--bt-red)", bg: "var(--bt-red-bg)", border: "var(--bt-red-border)" };
 /** Stage badge colours: a dot and a tinted pill per stage, so the pipeline reads at a glance. */
 const STAGE_TONE: Record<OfferStage, { fg: string; bg: string; border: string }> = {
-  to_contact: { fg: "var(--bt-muted)", bg: "var(--bt-segment)", border: "var(--bt-border)" },
-  teaser_sent: { fg: "var(--bt-blue)", bg: "var(--bt-blue-bg)", border: "var(--bt-blue-border)" },
-  specs_nda: { fg: "var(--bt-purple)", bg: "var(--bt-purple-bg)", border: "var(--bt-purple-border)" },
-  bid_in: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
-  loi: { fg: "var(--bt-green)", bg: "var(--bt-green-bg)", border: "var(--bt-green-border)" },
-  won: { fg: "var(--bt-green)", bg: "var(--bt-green-bg)", border: "var(--bt-green-border)" },
-  declined: { fg: "var(--bt-red)", bg: "var(--bt-red-bg)", border: "var(--bt-red-border)" },
-  lost: { fg: "var(--bt-red)", bg: "var(--bt-red-bg)", border: "var(--bt-red-border)" },
+  candidate: { fg: "var(--bt-muted)", bg: "var(--bt-segment)", border: "var(--bt-border)" },
+  offered: { fg: "var(--bt-blue)", bg: "var(--bt-blue-bg)", border: "var(--bt-blue-border)" },
+  contract_out: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
+  signed: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
+  invoiced: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
+  paid: GREEN, complete: GREEN, declined: RED, lost: RED,
 };
 const CHANNEL_ICON = { mail: Mail, whatsapp: MessageCircle, call: Phone, note: StickyNote, quote: Tag, status: Tag, document: Tag, other: StickyNote } as const;
 
@@ -195,7 +196,7 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
     <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-9 pr-1">
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
-        <select aria-label="Stage" value={current.stage ?? "to_contact"} disabled={busy || !offer} onChange={(e) => void patch({ stage: e.target.value })}
+        <select aria-label="Stage" value={current.stage ?? "candidate"} disabled={busy || !offer} onChange={(e) => void patch({ stage: e.target.value })}
           className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>

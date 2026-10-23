@@ -9,7 +9,7 @@ describe("listing stage", () => {
   it.each([...LISTING_STAGE_ORDER])("orders %s independently of input order", (stage) => {
     const prefix = LISTING_STAGE_ORDER.slice(0, LISTING_STAGE_ORDER.indexOf(stage) + 1);
     expect(listingStage([stage, ...prefix, "declined", "lost"])).toEqual({
-      furthest_stage: stage, is_trade: stage === "loi" || stage === "won",
+      furthest_stage: stage, is_trade: ["contract_out", "signed", "invoiced", "paid", "complete"].includes(stage),
     });
   });
 });

@@ -4,7 +4,7 @@
 // several. A match between records is a link shown in the detail, not a reason to combine rows.
 // Missing values stay null: nothing here is guessed, and progress is only what the record states.
 
-import { TRADE_STAGES } from "./bulk-listing";
+import { LISTING_STAGES, TRADE_STAGES, type ListingStage } from "./bulk-listing";
 import type { OfferStage } from "./crm-postgres/bulk-offers";
 import type { BulkTradesRoute } from "./bulk-trades-url";
 import { demandTitle } from "./bulk-demand-header";
@@ -27,7 +27,10 @@ export type SheetRow = {
   company_id: string | null;
   /** Product family or trade kind, as recorded. */
   category: string | null;
-  progress: string;
+  /** The listing stage, one of LISTING_STAGES. */
+  progress: ListingStage;
+  /** On hold: a tag on the stage, not a stage of its own. */
+  held?: boolean;
   is_trade?: boolean;
   tone: SheetTone;
   /** Score 0-100: demand by expected fee, supply by value of all stock; null when not scored. */
@@ -67,27 +70,18 @@ export type ListingSheetInput = {
   latest_kind: string | null; latest_title: string | null; latest_at: string | null;
   observed_on: string | null; updated_at: string; next_action: string | null; next_due: string | null;
   furthest_stage: string | null;
+  /** From bulk_listing_stage(): New, Qualified, Matched, Offered, Signed & Paid, Complete. */
+  stage: ListingStage;
 };
 
-const OFFER_PROGRESS: Record<string, { progress: string; tone: SheetTone }> = {
-  to_contact: { progress: "To contact", tone: "new" },
-  teaser_sent: { progress: "Sent", tone: "waiting" },
-  specs_nda: { progress: "Specs and NDA", tone: "active" },
-  bid_in: { progress: "Bid in", tone: "active" },
-  loi: { progress: "Trade", tone: "closing" },
-  won: { progress: "Trade", tone: "closing" },
-  declined: { progress: "Declined", tone: "waiting" },
-  lost: { progress: "Lost", tone: "waiting" },
+const STAGE_TONE: Record<ListingStage, SheetTone> = {
+  New: "new", Qualified: "new", Matched: "active", Offered: "waiting", "Signed & Paid": "closing", Complete: "closing",
 };
 
 export function listingRow(input: ListingSheetInput): SheetRow {
   const specText = (key: string) => typeof input.spec[key] === "string" ? input.spec[key] as string : null;
   const ctxText = (key: string) => { const value = (input.context as Record<string, unknown> | null)?.[key]; return typeof value === "string" ? value : null; };
   const category = specText("product_family") ?? specText("trade_kind");
-  const fallback = input.kind === "demand"
-    ? input.activity_count > 0 ? "Being worked" : "New"
-    : "Offered";
-  const progress = input.furthest_stage ? OFFER_PROGRESS[input.furthest_stage] : null;
   const hold = specText("trade_stage") === "On hold" || !!specText("hold_until");
   return {
     key: input.id, id: input.id, kind: input.kind,
@@ -97,8 +91,8 @@ export function listingRow(input: ListingSheetInput): SheetRow {
       : text(ctxText("listing_title")) ?? text(specText("listing_title")) ?? text(specText("title")) ?? input.summary,
     company: text(input.party), company_id: input.company_id, category,
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
-    progress: hold ? "On hold" : progress?.progress ?? fallback,
-    tone: hold ? "hold" : progress?.tone ?? (input.activity_count > 0 ? "active" : "new"),
+    progress: input.stage, held: hold,
+    tone: hold ? "hold" : STAGE_TONE[input.stage],
     score: input.score,
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), next_due: input.next_due, owner: null,
@@ -133,7 +127,7 @@ export function filterSheet(rows: SheetRow[], filters: SheetFilters): SheetRow[]
 export function sheetOptions(rows: SheetRow[]) {
   const distinct = (pick: (row: SheetRow) => string | null) =>
     [...new Set(rows.map(pick).filter((value): value is string => !!value))].sort((a, b) => a.localeCompare(b));
-  return { progress: distinct((row) => row.progress), company: distinct((row) => row.company), category: distinct((row) => row.category) };
+  return { progress: distinct((row) => row.progress).sort((a, b) => LISTING_STAGES.indexOf(a as ListingStage) - LISTING_STAGES.indexOf(b as ListingStage)), company: distinct((row) => row.company), category: distinct((row) => row.category) };
 }
 
 const SIDES: readonly string[] = ["buyer", "seller"];

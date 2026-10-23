@@ -5,34 +5,35 @@ const demand = (over = {}) => listingRow({
   id: "d1", kind: "demand", party: "H. Nolden", company_id: "c1", summary: "Complete packs",
   spec: { product_family: "Ioniq" }, context: {}, status: "open", activity_count: 0, score: null,
   latest_kind: null, latest_title: null, latest_at: null, observed_on: "2026-10-01", updated_at: "2026-10-02",
-  next_action: null, next_due: null, furthest_stage: null, ...over,
+  next_action: null, next_due: null, furthest_stage: null, stage: "New", ...over,
 });
 const supply = (over = {}) => listingRow({
   id: "t1", kind: "supply", party: "Seller", company_id: null, summary: "eBS37 lot",
   spec: { trade_kind: "packs" }, context: {}, status: "open", activity_count: 0, score: null,
   latest_kind: null, latest_title: null, latest_at: null, observed_on: "2026-10-12", updated_at: "2026-10-12",
-  next_action: "Call buyer", next_due: "2026-10-20", furthest_stage: "teaser_sent", ...over,
+  next_action: "Call buyer", next_due: "2026-10-20", furthest_stage: "offered", stage: "Offered", ...over,
 });
 
 describe("sheet rows", () => {
   const listing = (over = {}) => listingRow({ id: "bt_1", kind: "supply", party: "Seller", company_id: null,
     summary: "Battery lot", spec: { is_trade: true }, context: {}, status: "open", score: null, activity_count: 0,
     latest_kind: null, latest_title: null, latest_at: null, observed_on: null, updated_at: "2026-10-21",
-    next_action: null, next_due: null, furthest_stage: null, ...over });
+    next_action: null, next_due: null, furthest_stage: null, stage: "Offered", ...over });
 
   it("keeps mirrored lots as supply listings, and makes a trade only from accepted offers", () => {
     expect(listing()).toMatchObject({ id: "bt_1", key: "bt_1", kind: "supply", side: "seller", progress: "Offered" });
-    for (const stage of ["loi", "won"]) expect(listing({ furthest_stage: stage }))
-      .toMatchObject({ progress: "Trade", tone: "closing" });
-    expect(listing({ kind: "demand", furthest_stage: "loi" })).toMatchObject({ side: "buyer", progress: "Trade" });
+    for (const stage of ["contract_out", "signed", "invoiced", "paid", "complete"]) expect(listing({ furthest_stage: stage, stage: "Signed & Paid" }))
+      .toMatchObject({ progress: "Signed & Paid", tone: "closing", is_trade: true });
+    expect(listing({ furthest_stage: "offered" }).is_trade).toBe(false);
+    expect(listing({ kind: "demand", furthest_stage: "contract_out", stage: "Signed & Paid" })).toMatchObject({ side: "buyer", progress: "Signed & Paid" });
   });
 
   it("shows offer progress and preserves an explicit hold", () => {
-    for (const [stage, label] of [["to_contact", "To contact"], ["teaser_sent", "Sent"], ["specs_nda", "Specs and NDA"], ["bid_in", "Bid in"]])
-      expect(listing({ furthest_stage: stage }).progress).toBe(label);
-    expect(listing({ furthest_stage: "bid_in", spec: { trade_stage: "On hold", hold_until: "2026-11-01" } }))
-      .toMatchObject({ progress: "On hold", tone: "hold" });
-    expect(listing({ kind: "demand", activity_count: 1 })).toMatchObject({ progress: "Being worked" });
+    for (const stage of ["New", "Qualified", "Matched", "Offered", "Signed & Paid", "Complete"])
+      expect(listing({ stage }).progress).toBe(stage);
+    expect(listing({ stage: "Offered", spec: { trade_stage: "On hold", hold_until: "2026-11-01" } }))
+      .toMatchObject({ progress: "Offered", held: true, tone: "hold" });
+    expect(listing({ stage: "Offered" })).toMatchObject({ held: false });
   });
   it("states only what the record says: a new demand has no development, next action or owner", () => {
     expect(demand()).toMatchObject({ progress: "New", latest: null, next_action: null, owner: null, side: "buyer" });
@@ -40,17 +41,17 @@ describe("sheet rows", () => {
 
   it("shows the latest recorded demand activity without inventing a trade", () => {
     expect(demand({ activity_count: 2, latest_kind: "outreach", latest_title: "Asked A", latest_at: "2026-10-05" }))
-      .toMatchObject({ progress: "Being worked", latest: { label: "Asked A", kind: "Outreach", at: "2026-10-05" } });
+      .toMatchObject({ progress: "New", latest: { label: "Asked A", kind: "Outreach", at: "2026-10-05" } });
   });
 
 });
 
 describe("sheet filters", () => {
-  const rows = [demand(), supply(), supply({ id: "t2", summary: "Cells lot", party: "Other", spec: { trade_kind: "cells" }, furthest_stage: "loi", observed_on: "2026-10-11" })];
+  const rows = [demand(), supply(), supply({ id: "t2", summary: "Cells lot", party: "Other", spec: { trade_kind: "cells" }, furthest_stage: "contract_out", stage: "Signed & Paid", observed_on: "2026-10-11" })];
 
   it("filters by side, progress, company and category and searches across the visible text", () => {
     expect(filterSheet(rows, { ...NO_FILTERS, side: "buyer" }).map((row) => row.id)).toEqual(["d1"]);
-    expect(filterSheet(rows, { ...NO_FILTERS, progress: "Trade" }).map((row) => row.id)).toEqual(["t2"]);
+    expect(filterSheet(rows, { ...NO_FILTERS, progress: "Signed & Paid" }).map((row) => row.id)).toEqual(["t2"]);
     expect(filterSheet(rows, { ...NO_FILTERS, company: "Seller" }).map((row) => row.id)).toEqual(["t1"]);
     expect(filterSheet(rows, { ...NO_FILTERS, category: "cells" }).map((row) => row.id)).toEqual(["t2"]);
     expect(filterSheet(rows, { ...NO_FILTERS, query: "nolden" }).map((row) => row.id)).toEqual(["d1"]);
