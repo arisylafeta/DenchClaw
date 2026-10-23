@@ -18,7 +18,7 @@ export const BULK_TRADES_PATH = "bulk_trade";
 export const TRADES_PREVIEW_PATH = "~trades-preview";
 const PAGES: readonly string[] = [BULK_TRADES_PATH, TRADES_PREVIEW_PATH];
 
-export type BulkTradesTab = "today" | "trades" | "demand" | "supply";
+export type BulkTradesTab = "today" | "trades" | "demand" | "supply" | "board";
 
 export type BulkTradesRoute = {
   /** Explicit tab from the URL; null lets the page pick the viewer's last tab. */
@@ -38,7 +38,7 @@ export type BulkTradesRoute = {
 };
 
 const SHELL_PARAMS = ["terminal", "browse", "hidden"] as const;
-const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply"];
+const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply", "board"];
 export const BULK_TRADES_PARAMS = ["tab", "listing", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company"] as const;
 
 const EMPTY: BulkTradesRoute = { tab: null, listing: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null };

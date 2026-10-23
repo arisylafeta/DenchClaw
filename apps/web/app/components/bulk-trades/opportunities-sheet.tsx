@@ -44,7 +44,7 @@ function ProgressChip({ row }: { row: SheetRow }) {
 }
 
 /** A solid, coloured dot — bigger and simpler than a thin ring, reads at a glance without squinting at a number. */
-function ScoreCircle({ score, size = 28 }: { score: number | null; size?: number }) {
+export function ScoreCircle({ score, size = 28 }: { score: number | null; size?: number }) {
   const tone = score == null
     ? { bg: "var(--bt-segment)", fg: "var(--bt-muted)" }
     : score >= 80 ? { bg: "var(--bt-green-bg)", fg: "var(--bt-green)" }
@@ -60,7 +60,7 @@ function ScoreCircle({ score, size = 28 }: { score: number | null; size?: number
 }
 
 /** Which way the work runs: a buyer's need or a seller's stock. */
-function SideChip({ side }: { side: "buyer" | "seller" }) {
+export function SideChip({ side }: { side: "buyer" | "seller" }) {
   const buying = side === "buyer";
   return (
     <span className="mt-px shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium leading-4"
@@ -119,25 +119,13 @@ const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
   latest: null, next_action: null, next_due: null, owner: null, touched: null,
 }));
 
-export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, onFilters, onOpen, onNext }: {
-  rows: SheetRow[];
-  shown: SheetRow[];
-  filters: SheetFilters;
-  loading: boolean;
-  error: string | null;
-  today: string;
-  onFilters: (next: SheetFilters) => void;
-  onOpen: (row: SheetRow) => void;
-  onNext: (row: SheetRow, text: string | null) => Promise<void>;
-}) {
-  const busy = loading && !rows.length;
-  const displayRows = busy ? PLACEHOLDER_ROWS : shown;
+/** Search, starting point and menus; shared by the list and the board. */
+export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false }: { rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean }) {
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
   const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
   const sides = ["buyer", "seller"] as const;
   return (
-    <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative min-w-0 flex-1 basis-full sm:basis-64">
           <span className="sr-only">Search opportunities</span>
@@ -157,7 +145,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
             </button>
           ))}
         </div>
-        <Select label="Progress" value={filters.progress} options={options.progress} onChange={(progress) => set({ progress })} />
+        {!hideProgress && <Select label="Progress" value={filters.progress} options={options.progress} onChange={(progress) => set({ progress })} />}
         <Select label="Company" value={filters.company} options={options.company} onChange={(company) => set({ company })} />
         <Select label="Category" value={filters.category} options={options.category} onChange={(category) => set({ category })} />
         {filtered && (
@@ -167,6 +155,29 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
           </button>
         )}
       </div>
+  );
+}
+
+export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, onFilters, onOpen, onNext }: {
+  rows: SheetRow[];
+  shown: SheetRow[];
+  filters: SheetFilters;
+  loading: boolean;
+  error: string | null;
+  today: string;
+  onFilters: (next: SheetFilters) => void;
+  onOpen: (row: SheetRow) => void;
+  onNext: (row: SheetRow, text: string | null) => Promise<void>;
+}) {
+  const busy = loading && !rows.length;
+  const displayRows = busy ? PLACEHOLDER_ROWS : shown;
+  const options = sheetOptions(rows);
+  const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
+  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
+  const sides = ["buyer", "seller"] as const;
+  return (
+    <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
+      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} />
 
       <ErrorText error={error} />
       <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">

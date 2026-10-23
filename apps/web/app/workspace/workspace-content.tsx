@@ -1484,7 +1484,7 @@ function WorkspacePageInner() {
         "crm-inbox": { path: "~crm/inbox", name: "Mail" },
         "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
-        "trades-preview": { path: TRADES_PREVIEW_PATH, name: "Trades Preview" },
+        "trades-preview": { path: TRADES_PREVIEW_PATH, name: "Bulk Trades" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-listings": { path: "~platform-admin/listings", name: "Listings" },
         "platform-accounts": { path: "~platform-admin/accounts", name: "Accounts" },

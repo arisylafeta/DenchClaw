@@ -28,7 +28,7 @@ export function ListingDetail({ id, today, onClose, onOpenListing }: {
   if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} />;
   if (listing?.kind === "supply") return <SupplyListingPanel key={id} listing={listing} today={today} onChanged={load} onClose={onClose} onOpenListing={onOpenListing} />;
   return <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
-    <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Trades Preview</button>
+    <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>
     <ErrorText error={error} />
     {result?.id !== id && !error ? <div role="status" aria-busy="true" className="flex flex-col gap-3 pt-2">
       <span className="sr-only">Loading listing</span><h2 className="text-[20px] font-semibold"><Sh on chars={32} /></h2><p className="text-[13px]"><Sh on chars={48} /></p><p className="text-[13px]"><Sh on chars={64} /></p>

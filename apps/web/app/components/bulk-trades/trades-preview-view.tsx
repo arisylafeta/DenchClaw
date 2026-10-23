@@ -10,7 +10,8 @@ import { filterSheet, filtersFromRoute, routeFromFilters, type SheetFilters, typ
 import type { Demand } from "@/lib/bulk-demand";
 import { ListingDetail } from "./listing-detail";
 import { DemandDialog } from "./demand-editor";
-import { OpportunitiesSheet } from "./opportunities-sheet";
+import { OpportunitiesSheet, SheetFilterBar } from "./opportunities-sheet";
+import { BulkBoard } from "./bulk-board";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade-ui";
 import { TRADES_PREVIEW_PATH } from "@/lib/bulk-trades-url";
@@ -75,10 +76,12 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   const filters = useMemo(() => filtersFromRoute(route), [route]);
   const shown = useMemo(() => filterSheet(rows, filters), [rows, filters]);
   // Normalised from what the sheet shows, so an older ?tab=demand link keeps its filter through open and back.
-  const filterFields = routeFromFilters(filters);
+  const board = route.tab === "board";
+  const filterFields = { ...routeFromFilters(filters), tab: board ? ("board" as const) : null };
 
   /** Filters refine the current page (replace); opening a record is a new page (push). */
-  const setFilters = (next: SheetFilters) => navigate(routeFromFilters(next), "replace");
+  const setFilters = (next: SheetFilters) => navigate({ ...routeFromFilters(next), tab: filterFields.tab }, "replace");
+  const setView = (tab: "board" | null) => navigate({ ...routeFromFilters(filters), tab }, "replace");
   const open = (row: SheetRow) => navigate({ ...filterFields, listing: row.id });
   const closeDetail = () => navigate(filterFields);
   /** Saves a listing’s next action in place. */
@@ -99,7 +102,14 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   return (
     <div className="bulk-trades bt-preview flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-3 px-2 pb-3 pt-5 sm:px-3">
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Trades Preview</h1>
+        <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
+        <div role="tablist" aria-label="View" className="flex rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
+          {([["List", null], ["Board", "board"]] as const).map(([label, tab]) => (
+            <button key={label} type="button" role="tab" aria-selected={(tab === "board") === board} onClick={() => setView(tab)}
+              className="h-8 rounded-md px-3 text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"
+              style={(tab === "board") === board ? { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" } : { color: "var(--bt-text-2)" }}>{label}</button>
+          ))}
+        </div>
         <div className="flex-1" />
         <button type="button" onClick={() => setShowPossible(true)} className={`${buttonClass} h-9 rounded-lg`} style={buttonStyle}>
           <ShBlock on={!inboxLoaded} size={8}>{check && <CheckLine check={check} />}</ShBlock>Inbox · <Sh on={!inboxLoaded} chars={2}>{possible.length}</Sh>
@@ -120,8 +130,15 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
 
       <main className="flex-1 overflow-auto px-2 pb-8 pt-2 sm:px-3">
         <ErrorText error={actionError} />
-        <OpportunitiesSheet rows={rows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-          onFilters={setFilters} onOpen={open} onNext={saveNext} />
+        {board ? (
+          <div className="flex flex-col gap-4">
+            <SheetFilterBar rows={rows} filters={filters} onFilters={setFilters} hideProgress />
+            <BulkBoard shown={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
+          </div>
+        ) : (
+          <OpportunitiesSheet rows={rows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
+            onFilters={setFilters} onOpen={open} onNext={saveNext} />
+        )}
       </main>
 
 

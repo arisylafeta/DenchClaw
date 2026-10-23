@@ -13,7 +13,7 @@ export function ListingHeader({ listing, onBack }: { listing: BulkListingView; o
   const words = description.split(/\s+/);
   const long = words.length > 42;
   return <header className={css.root}>
-    <button type="button" onClick={onBack} className={css.back}><ArrowLeft size={13} aria-hidden /> Trades Preview</button>
+    <button type="button" onClick={onBack} className={css.back}><ArrowLeft size={13} aria-hidden /> Bulk Trades</button>
     <div className={css.titleRow}>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-1"><h2 className={css.title}>{listing.title}</h2><CopyIdButton id={listing.id} className="mt-1" /></div>

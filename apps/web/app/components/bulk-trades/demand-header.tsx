@@ -45,7 +45,7 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
     <header className={css.root}>
       {onBack && (
         <button type="button" onClick={onBack} className={css.back}>
-          <ArrowLeft size={13} aria-hidden /> Trades Preview
+          <ArrowLeft size={13} aria-hidden /> Bulk Trades
         </button>
       )}
       <div className={css.titleRow}>

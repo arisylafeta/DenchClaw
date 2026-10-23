@@ -8,6 +8,6 @@ describe("Trades Preview tab", () => {
     // The sidebar and in-app links open a synthetic folder node for the path.
     expect(nodeToContentTabKind("folder", "~trades-preview")).toBe("trades-preview");
     expect(inferContentTabKindFromPath("~trades-preview")).toBe("trades-preview");
-    expect(inferContentTabTitle("~trades-preview")).toBe("Trades Preview");
+    expect(inferContentTabTitle("~trades-preview")).toBe("Bulk Trades");
   });
 });

@@ -383,7 +383,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~crm/inbox") return "Mail";
   if (path === "~crm/leaderboard") return "Leaderboard";
   if (path === "~crm/calendar") return "Calendar";
-  if (path === "~trades-preview") return "Trades Preview";
+  if (path === "~trades-preview") return "Bulk Trades";
   if (path.startsWith("~mail/draft/")) return "Email draft";
   if (path.startsWith("~mail/message/")) return "Email";
   return path.split("/").pop() || path;
