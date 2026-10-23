@@ -409,6 +409,7 @@ export class HermesChatService {
       if (!invitee) { throw new ChatServiceError(400, "invite_needs_agent"); }
       if (!hermesProfiles().includes(invitee)) { throw new ChatServiceError(404, "unknown_profile"); }
       if (invitee === identity.profile) { throw new ChatServiceError(400, "invite_same_agent"); }
+      assertSafePrompt(actor, { text: task.join(" ") });
       await this.writable(key);
       return { conversation: await inviteToConversation(key, invitee, task.join(" "),actor) };
     }
@@ -473,6 +474,7 @@ export class HermesChatService {
     }
     if (action === "steer") {
       if (typeof body.text !== "string" || !body.text.trim() || Buffer.byteLength(body.text) > 65_536) {throw new ChatServiceError(400, "invalid_text");}
+      assertSafePrompt(actor, { text: body.text });
       return this.manager.callSession(retained, body.mode === "redirect" ? "session.redirect" : "session.steer", { session_id: "", text: body.text });
     }
     if (action === "approval" || action === "clarify") {
@@ -481,6 +483,7 @@ export class HermesChatService {
       if (action === "approval") {
         if (!["once", "session", "always", "deny"].includes(String(body.choice))) {throw new ChatServiceError(400, "invalid_choice");}
         await this.manager.callSession(retained, "approval.received", { session_id: "", request_id: String(body.request_id) });
+        await this.authorize(actor,key,"approve");
         this.manager.respondToRequest(retained, request.id, { choice: body.choice as "once" | "session" | "always" | "deny" });
       } else {
         const answers = z.record(z.string(), z.string().nullable()).safeParse(body.answers);
@@ -495,7 +498,10 @@ export class HermesChatService {
       const params = { session_id: "", subagent_id: body.subagent_id };
       if (body.action === "tail") {return this.manager.callSession(retained, "subagent.tail", params);}
       if (body.action === "interrupt") {return this.manager.callSession(retained, "subagent.interrupt", params);}
-      if (body.action === "steer" && typeof body.text === "string" && body.text.trim()) {return this.manager.callSession(retained, "subagent.steer", { ...params, text: body.text });}
+      if (body.action === "steer" && typeof body.text === "string" && body.text.trim()) {
+        assertSafePrompt(actor, { text: body.text });
+        return this.manager.callSession(retained, "subagent.steer", { ...params, text: body.text });
+      }
     }
     throw new ChatServiceError(400, "invalid_action");
   }
