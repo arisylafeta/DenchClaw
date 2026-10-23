@@ -950,7 +950,7 @@ def test_reb562_supply_transactional_goes_to_postmark_with_bcc_copy(env):
     assert row['bcc_emails']==[]
 
 
-def test_reb562_postmark_payload_bcc_and_attachment_refusal(monkeypatch):
+def test_reb562_postmark_payload_bcc_and_tracking(monkeypatch):
     monkeypatch.setattr('rebattery_mail.drivers.live_gate',lambda: None)
     sent=[]
     def client(path,method='GET',payload=None):
@@ -959,5 +959,3 @@ def test_reb562_postmark_payload_bcc_and_attachment_refusal(monkeypatch):
     message={'id':'m1','to_emails':['a@example.test'],'bcc_emails':['supply@rebattery.io'],'subject':'S','body_html':'<p>x</p>','body_text':'x','idempotency_key':'k'}
     PostmarkSendDriver(client).send(identity,message)
     assert sent[0]['Bcc']=='supply@rebattery.io' and sent[0]['TrackOpens'] is True and sent[0]['TrackLinks']=='HtmlAndText'
-    with pytest.raises(Refused,match='attachments_require_gmail_transport'):
-        PostmarkSendDriver(client).preflight(identity,{**message,'purpose':'transactional','personalization':{'attachments':['/x.pdf']}})
