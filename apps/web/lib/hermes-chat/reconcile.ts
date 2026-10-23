@@ -188,6 +188,12 @@ function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pi
 /** Stale fetches are identity no-ops. Repeated snapshots replace the base identically. */
 export function applySnapshot(state: ReconcileState, snapshot: GatewayChatSnapshot, loadToken: number, ctx: ReducerContext): ReconcileState {
   if (loadToken !== state.loadToken || (state.key !== null && snapshot.key !== state.key)) return state
+  // A previous gateway generation cannot replace the accepted base or its roster
+  // fence. Finish hydration against the current base and replay buffered frames
+  // normally, including requesting another resync for a changed generation.
+  if (typeof state.generation === 'number' && snapshot.generation < state.generation) {
+    return applyLive({ ...state, hydrating: false, buffered: [] }, state.buffered, ctx)
+  }
   const snapshotVersion = JSON.stringify(snapshot)
   if (!state.hydrating && state.snapshotVersion === snapshotVersion) return state
   const base = stateFromSnapshot(snapshot, ctx)

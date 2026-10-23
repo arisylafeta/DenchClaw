@@ -47,6 +47,32 @@ it('keeps completion during hydration terminal whether the roster omits it or st
   }
 })
 
+it('replays buffered lifecycle frames against the accepted generation after rejecting stale hydration', () => {
+  let state = refresh(running(), snapshot({ seq: 5, subagents: [{ subagent_id: 'old', status: 'running' }] }))
+  state = beginHydration(state)
+  state = applyLive(state, [start(6, 'new')], ctx)
+  state = applySnapshot(state, snapshot({ generation: 0, seq: 100, subagents: [] }), state.loadToken, ctx)
+  expect(state.hydrating).toBe(false)
+  expect(state.buffered).toEqual([])
+  expect(state.resyncRequired).toBe(false)
+  expect(state.generation).toBe(1)
+  expect(state.snapshotWatermark).toBe(5)
+  expect(state.watermark).toBe(6)
+  expect(state.subagents.items.map(child => child.id)).toEqual(['old', 'new'])
+  state = refresh(state, snapshot({ seq: 5, subagents: [] }))
+  expect(state.subagents.items.map(child => child.id)).toEqual(['new'])
+})
+
+it('requests resync for buffered newer-generation frames after rejecting stale hydration', () => {
+  let state = beginHydration(running())
+  state = applyLive(state, [{ ...start(1, 'new'), generation: 2 }], ctx)
+  state = applySnapshot(state, snapshot({ generation: 0, seq: 100, subagents: [] }), state.loadToken, ctx)
+  expect(state.hydrating).toBe(false)
+  expect(state.generation).toBe(1)
+  expect(state.resyncRequired).toBe(true)
+  expect(state.subagents.items.map(child => child.id)).toEqual(['old'])
+})
+
 it('does not let stale tokens, generations or regressive snapshots retire seeded workers', () => {
   let state = refresh(running(), snapshot({ seq: 5, subagents: [{ subagent_id: 'old', status: 'running' }] }))
   expect(applySnapshot(state, snapshot({ seq: 6, subagents: [] }), state.loadToken - 1, ctx)).toBe(state)
@@ -54,4 +80,12 @@ it('does not let stale tokens, generations or regressive snapshots retire seeded
   expect(activeSubagentCount(state.subagents.items)).toBe(1)
   state = refresh(state, snapshot({ generation: 0, seq: 100, subagents: [] }))
   expect(activeSubagentCount(state.subagents.items)).toBe(1)
+  expect(state.generation).toBe(1)
+  expect(state.snapshotWatermark).toBe(5)
+  state = refresh(state, snapshot({ seq: 4, subagents: [] }))
+  expect(activeSubagentCount(state.subagents.items)).toBe(1)
+  expect(state.subagents.retiredIds).not.toContain('old')
+  state = refresh(state, snapshot({ seq: 6, subagents: [] }))
+  expect(activeSubagentCount(state.subagents.items)).toBe(0)
+  expect(state.subagents.retiredIds).toContain('old')
 })
