@@ -193,7 +193,7 @@ export async function readMailDraft(id: string, userId: string): Promise<MailDra
 export async function readMailMessage(id: string, userId: string): Promise<MailMessageSummary | null> {
   const [row] = await queryPg<MailMessageSummary>(
     `select m.id,m.thread_id,m.direction,m.state,m.subject,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
-       m.body_preview,left(m.body_text,4000) as body_text,m.sent_at,m.created_at,m.updated_at,coalesce(m.has_attachments,false) as has_attachments
+       m.body_preview,m.body_text,m.body_html,m.sent_at,m.created_at,m.updated_at,coalesce(m.has_attachments,false) as has_attachments
      from mail_message m where m.id = $1 and ${mailboxScopeSql('m', '$2')}`, [id, userId]);
   return row ?? null;
 }

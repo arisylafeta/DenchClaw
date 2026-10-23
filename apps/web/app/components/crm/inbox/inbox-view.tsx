@@ -8,6 +8,8 @@ import { MailLine, MailLineSkeleton } from "./mail-line";
 import { Loading } from "../../ui/shimmer";
 import { AccountRail } from "./account-rail";
 import { ConversationsView } from "./conversations-view";
+import { InboxLayout } from "./inbox-layout";
+import { MailMessageView } from "./mail-message-view";
 import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsPanel } from "../../campaigns/campaigns-view";
 import { Mail, Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
@@ -120,6 +122,8 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   </div>;
 }
 function MailLogRows({ view, query }: { view: "sent" | "followups"; query: string }) {
+  const [selection, setSelection] = useState<{ id: string; query: string } | null>(null);
+  const selectedId = selection?.query === query ? selection.id : null;
   const [rows, setRows] = useState<(MailMessageListRow | MailFollowup)[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,7 +150,7 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
       if (latestQuery.current === snapshot) {setRows((current) => [...current, ...page.items]); setNextCursor(page.nextCursor);}
     } catch (failure) {setError(failure instanceof Error ? failure.message : "Could not load mail.");}
   }
-  return <div className="text-[13px]">
+  const list = <div className="text-[13px]">
     {loading && <Loading label={`Loading ${views[view].toLowerCase()}…`}>{Array.from({ length: 9 }, (_, i) => <MailLineSkeleton key={i} index={i} />)}</Loading>}
     {error && <p role="alert" className="px-8 py-6">{error}</p>}
     {!loading && !error && !rows.length && <p className="px-8 py-8" style={{ color: "var(--color-text-muted)" }}>No {views[view].toLowerCase()} match these filters.</p>}
@@ -154,11 +158,16 @@ function MailLogRows({ view, query }: { view: "sent" | "followups"; query: strin
       const counterparty = "direction" in row ? mailCounterparty(row) : null;
       return <li key={row.id} className={"direction" in row ? undefined : styles.logRow}>
       {"direction" in row ? <>
-        <MailLine id={row.id} prefix={row.is_self ? "To:" : undefined} name={counterparty?.name ?? counterparty?.email ?? null} email={counterparty?.email ?? null} subject={row.subject || "(No subject)"} snippet={row.body_preview} at={row.sent_at ?? row.created_at}
-          tag={<details className={styles.activity}><summary className={`${styles.chip} cursor-pointer`} aria-label={`Delivery activity: ${row.subject || "(No subject)"}`}>{row.state} · Activity</summary><div className={styles.activityPanel}><p>{(["sent", "delivered", "bounced", "opened", "clicked", "replied"] as const).map((event) => `${event}: ${row[`${event}_at`] ?? "not recorded"}`).join(" · ")}</p><p className="mt-1">Unsubscribed: {row.events?.some((event) => event.type === "unsubscribed") ? "recorded" : "not recorded"}</p></div></details>} />
+        <MailLine id={row.id} selected={selectedId === row.id} onOpen={() => setSelection({ id: row.id, query })} label={`Open email: ${row.subject || "(No subject)"}`} prefix={row.is_self ? "To:" : undefined} name={counterparty?.name ?? counterparty?.email ?? null} email={counterparty?.email ?? null} subject={row.subject || "(No subject)"} snippet={row.body_preview} at={row.sent_at ?? row.created_at}
+          tag={<span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><details className={styles.activity}><summary className={`${styles.chip} cursor-pointer`} aria-label={`Delivery activity: ${row.subject || "(No subject)"}`}>{row.state} · Activity</summary><div className={styles.activityPanel}><p>{(["sent", "delivered", "bounced", "opened", "clicked", "replied"] as const).map((event) => `${event}: ${row[`${event}_at`] ?? "not recorded"}`).join(" · ")}</p><p className="mt-1">Unsubscribed: {row.events?.some((event) => event.type === "unsubscribed") ? "recorded" : "not recorded"}</p></div></details></span>} />
         {["unknown", "sending"].includes(row.state) && <p role="status" className="px-4 pb-2 text-[12px]" style={{ color: "var(--bt-amber, #a16207)" }}>Reconcile before retrying: {row.state}</p>}
       </> : <><div className="flex items-center gap-2"><span className={styles.chip}>{row.state === "pending" && Date.parse(row.due_at) <= Date.now() ? "Due" : row.state}</span><span className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.identity_key}</span><span className="ml-auto text-[12px]" title={formatAbsoluteDate(row.due_at)}>Due {formatRelativeDate(row.due_at)}</span></div><p className="mt-2 truncate text-[14px]">{row.note}</p>{row.paused_reason && <p className="mt-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Paused: {row.paused_reason}</p>}</>}
     </li>;})}</ul>
     {nextCursor && <button onClick={() => void more()} className={`${styles.control} m-4`}>Load more</button>}
   </div>;
+  if (view !== "sent") return list;
+  return <InboxLayout storageKey="sent" hasSelection={!!selectedId} list={list} conversation={selectedId ? <div className="flex h-full min-h-0 flex-col">
+    <button type="button" onClick={() => setSelection(null)} className="self-start px-4 py-2 text-xs underline">Back to sent</button>
+    <div className="min-h-0 flex-1"><MailMessageView key={selectedId} messageId={selectedId} /></div>
+  </div> : undefined} />;
 }
