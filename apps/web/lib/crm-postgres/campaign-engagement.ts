@@ -49,7 +49,15 @@ export function countOpenSessions(times: number[]): number {
 
 // A normal AppleWebKit/iPhone UA is not evidence of Mail Privacy Protection.
 export function isProxyOrScanner(detail: Record<string, unknown>): boolean {
-  return /apple\s*mail\s*privacy|mail privacy protection|\bMPP\b|GoogleImageProxy|google image proxy|ggpht\.com|proofpoint|mimecast|barracuda|safelinks|urlscan|scanner|headless|\bbot\b|spider|crawler/i.test(JSON.stringify(detail));
+  if (["proxy", "proxy_evidence", "scanner", "scanner_evidence"].some((key) => detail[key] === true)) {
+    return true;
+  }
+  const details = detail.Details as Record<string, unknown> | undefined;
+  const client = detail.Client as Record<string, unknown> | undefined;
+  const os = detail.OS as Record<string, unknown> | string | undefined;
+  const signatures = /apple\s*mail\s*privacy|mail privacy protection|\bMPP\b|GoogleImageProxy|google image proxy|ggpht\.com|proofpoint|mimecast|barracuda|safelinks|urlscan|scanner|headless|\bbot\b|spider|crawler/i;
+  return [details?.Summary, detail.UserAgent, client?.Name, detail.Platform, typeof os === "string" ? os : os?.Name]
+    .some((value) => typeof value === "string" && signatures.test(value));
 }
 
 function dedupeMessageEvents(events: EngagementEvent[]): EngagementEvent[] {

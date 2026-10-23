@@ -24,6 +24,25 @@ describe("campaign engagement observations", () => {
     expect(isProxyOrScanner({})).toBe(false);
   });
 
+  it("honours only true boolean evidence, never metadata keys or destination URLs", () => {
+    for (const key of ["proxy", "proxy_evidence", "scanner", "scanner_evidence"]) {
+      expect(isProxyOrScanner({ [key]: true })).toBe(true);
+      for (const value of [false, "true", null]) {
+        expect(isProxyOrScanner({ [key]: value })).toBe(false);
+      }
+    }
+    expect(isProxyOrScanner({ scanner_metadata: "ordinary", Details: { Link: "https://example.com/scanner/manual" }, OriginalLink: "https://example.com/bot", Link: "https://example.com/proofpoint" })).toBe(false);
+    const [row] = rankCampaignEngagement([message([click(60, "https://example.com/scanner/manual")])]);
+    expect(row).toMatchObject({ flagged_clicks: 0, human_links_clicked: 1 });
+  });
+
+  it("inspects recognised client fields without serialising their metadata", () => {
+    for (const detail of [{ Details: { Summary: "Apple Mail Privacy Protection" } }, { UserAgent: "GoogleImageProxy" }, { Client: { Name: "Mimecast" } }, { Platform: "Headless" }, { OS: "Scanner" }, { OS: { Name: "Scanner" } }]) {
+      expect(isProxyOrScanner(detail)).toBe(true);
+    }
+    expect(isProxyOrScanner({ Client: { Name: "Safari", scanner: true }, OS: { Name: "iOS", crawler: true }, Details: { Summary: "Safari", scanner: true } })).toBe(false);
+  });
+
   it("keeps one-open/five-link scanners out of human clicks even with six tracked destinations", () => {
     const rows = rankCampaignEngagement([
       message([event("opened", 20), ...["a", "b", "c", "d", "e"].map((link) => click(30, link))]),
