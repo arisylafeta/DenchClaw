@@ -1,3 +1,4 @@
+import { authorizeAccess, canonicalIdentity, registerConversation, requireActor, assertSafePrompt, type ConversationActor } from "../conversation-access";
 import { createHash } from "node:crypto";
 import { GOAL_ACTIONS, goalFromControl, type GoalSnapshot } from "../hermes-chat/goal";
 import { persistedSessionGoal } from "../hermes-session-goal";
@@ -85,7 +86,7 @@ export function inviteCompletion<T extends { items: { text: string; display?: st
 }
 export function authorizeConversation(key: string) {
   let identity;
-  try { identity = parseConversationKey(key); } catch { throw new ChatServiceError(400, "invalid_conversation_key"); }
+  try { identity = canonicalIdentity(key); } catch { throw new ChatServiceError(400, "invalid_conversation_key"); }
   if (identity.kind !== "solo") throw new ChatServiceError(400, "solo_conversation_required");
   try { assertProfile(identity.profile); } catch { throw new ChatServiceError(404, "unknown_profile"); }
   return identity;
@@ -142,6 +143,9 @@ export class HermesChatService {
     const identity = authorizeConversation(key);
     return this.manager.retainSession(identity.profile, identity.id);
   }
+  async authorize(actor: ConversationActor | undefined,key: string, action: import("../conversation-access").AccessAction = "read") {
+    return authorizeAccess(actor,key,action,() => this.source(key));
+  }
   private async source(key: string): Promise<string | undefined> {
     const identity = authorizeConversation(key);
     const response = await nativeFetch(identity.profile, `/api/sessions/${encodeURIComponent(identity.id)}`, {}, this.newConversations.has(key) ? [404] : []);
@@ -154,9 +158,9 @@ export class HermesChatService {
     const source = await this.source(key);
     if (source === "cron" || source === "webhook") throw new ChatServiceError(409, "automation_read_only");
   }
-  async openForView(profile: string, storedId: string, pageOptions?: { before: number; limit: number }): Promise<GatewayChatSnapshot> {
+  async openForView(profile: string, storedId: string, pageOptions?: { before: number; limit: number }, actor?: ConversationActor): Promise<GatewayChatSnapshot> {
     const key = conversationKey("solo", storedId, profile);
-    authorizeConversation(key);
+    const { access } = await this.authorize(actor,key);
     const pending = this.newConversations.get(key);
     const source = await this.source(key);
     const retained = this.retainedKey(key);
@@ -175,7 +179,8 @@ export class HermesChatService {
     const replay = resume?.replayBoundary ?? (() => { const state = this.manager.eventsSince(retained); return { generation: state.generation, seq: state.latestSeq }; })();
     const history = pending && this.newConversations.has(key)
       ? { conversation: pending, messages: [] }
-      : await readConversation(key);
+      : await readConversation(key,0,undefined,actor);
+    Object.assign(history.conversation,{ access });
     history.conversation.source = source;
     const inflight = resume?.inflight ? { ...resume.inflight, user: stripAgentMessageContext(resume.inflight.user ?? "") } : resume?.inflight;
     const queued = resume?.queued ? { ...resume.queued, user: stripAgentMessageContext(resume.queued.user) } : resume?.queued;
@@ -212,20 +217,24 @@ export class HermesChatService {
     const start = Math.max(0, before - limit);
     return { messages: messages.slice(start, before), ...(start ? { olderCursor: String(start) } : {}) };
   }
-  async historyPage(key: string, before: string, limit = 200) {
+  async historyPage(key: string, before: string, limit = 200, actor?: ConversationActor) {
+    await this.authorize(actor,key);
     const identity = authorizeConversation(key);
     if (!/^\d+$/.test(before) || !Number.isSafeInteger(Number(before)) || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new ChatServiceError(400, "invalid_history_cursor");
     // Reuse exactly the snapshot mapper and pending classification, without paging twice.
-    const snapshot = await this.openForView(identity.profile, identity.id, { before: Number(before), limit });
+    const snapshot = await this.openForView(identity.profile, identity.id, { before: Number(before), limit },actor);
     return { messages: snapshot.messages, olderCursor: snapshot.olderCursor };
   }
-  async sendPrompt(key: string, prompt: GatewayPrompt) {
+  async sendPrompt(key: string, prompt: GatewayPrompt, actor?: ConversationActor) {
+    await this.authorize(actor,key,"write");
+    assertSafePrompt(actor,prompt);
     const identity = authorizeConversation(key);
     if (typeof prompt.text !== "string" || !prompt.text.trim() || Buffer.byteLength(prompt.text) > 65_536) throw new ChatServiceError(400, "invalid_prompt");
     await this.writable(key);
     try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
     const retained = this.retainedKey(key);
     return this.manager.serialize(retained, async () => {
+      await this.authorize(actor,key,"write");
       // Re-check inside the critical section: never stage an image into another send.
       await this.writable(key);
       let resume: SessionResumeResult | undefined;
@@ -305,22 +314,26 @@ export class HermesChatService {
       }
     });
   }
-  async createGatewayConversation(profiles: string[]) {
+  async createGatewayConversation(profiles: string[], actor?: ConversationActor) {
+    requireActor(actor);
     if (!Array.isArray(profiles) || profiles.length !== 1) throw new ChatServiceError(400, "one_profile_required");
     const profile = profiles[0];
     assertProfile(profile);
     const result = await this.manager.call("session.create", { profile, source: "crm", cols: 120 });
     this.manager.retainSession(profile, result.stored_session_id, result.session_id);
     const conversation = soloConversation(profile, { id: result.stored_session_id, source: "crm", started_at: Date.now() / 1000 });
+    Object.assign(conversation,{ access: await registerConversation(actor,conversation.key) });
     this.newConversations.set(conversation.key, conversation);
     return conversation;
   }
-  async branchConversation(key: string) {
+  async branchConversation(key: string, actor?: ConversationActor) {
+    const { access } = await this.authorize(actor,key,"derive");
     const identity = authorizeConversation(key);
     await this.source(key);
     const result = await this.manager.call("session.branch_stored", { parent_session_id: identity.id, profile: identity.profile, source: "crm" });
     this.manager.retainSession(identity.profile, result.stored_session_id, result.session_id);
-    return soloConversation(identity.profile, { id: result.stored_session_id, source: "crm", started_at: Date.now() / 1000 });
+    const conversation = soloConversation(identity.profile, { id: result.stored_session_id, source: "crm", started_at: Date.now() / 1000 });
+    return Object.assign(conversation,{ access: await registerConversation(actor,conversation.key,access) });
   }
   private async liveControls(key: string): Promise<string> {
     const retained = this.retainedKey(key);
@@ -328,7 +341,8 @@ export class HermesChatService {
     try { await this.manager.connect(); } catch { throw new ChatServiceError(503, "gateway_unavailable"); }
     return retained;
   }
-  async modelOptions(key: string) {
+  async modelOptions(key: string, actor?: ConversationActor) {
+    await this.authorize(actor,key);
     const identity = authorizeConversation(key);
     const retained = await this.liveControls(key);
     if (this.manager.session(retained)?.runtimeId) {
@@ -350,7 +364,8 @@ export class HermesChatService {
     const provider = model === options.model ? options.provider : options.providers.find(row => row.models?.includes(model))?.slug ?? options.provider;
     return { ...options, model, provider, reasoning, fast: fast.value === "fast" || fast.value === "ultrafast" };
   }
-  async slashComplete(key: string, body: unknown) {
+  async slashComplete(key: string, body: unknown, actor?: ConversationActor) {
+    await this.authorize(actor,key);
     const parsed = slashCompletionSchema.safeParse(body);
     if (!parsed.success) { throw new ChatServiceError(400, "invalid_slash_text"); }
     const identity = authorizeConversation(key);
@@ -369,7 +384,8 @@ export class HermesChatService {
       ]);
     return inviteCompletion(parsed.data.text, identity.profile, { ...completion, items: completion.items ?? [], replace_from: completion.replace_from ?? 1, catalog });
   }
-  async slashExecute(key: string, body: unknown) {
+  async slashExecute(key: string, body: unknown, actor?: ConversationActor) {
+    await this.authorize(actor,key,"write");
     const parsed = slashExecutionSchema.safeParse(body);
     if (!parsed.success) { throw new ChatServiceError(400, "invalid_slash_command"); }
     const identity = authorizeConversation(key);
@@ -377,6 +393,7 @@ export class HermesChatService {
     const parts = /^\/(\S+)([\s\S]*)$/u.exec(command)!;
     const name = parts[1].toLowerCase();
     const arg = parts[2].trim();
+    if (!["invite", "new", "branch", "help", "status", "usage"].includes(name) || /(?:--global|--profile|--session|\n|\r)/i.test(arg)) throw new ChatServiceError(400,"slash_not_allowed");
     // Not a Hermes command: it replaces this chat with a group that includes the invited agent.
     if (name === "invite") {
       const [invitee, ...task] = arg.split(/\s+/);
@@ -384,14 +401,15 @@ export class HermesChatService {
       if (!hermesProfiles().includes(invitee)) { throw new ChatServiceError(404, "unknown_profile"); }
       if (invitee === identity.profile) { throw new ChatServiceError(400, "invite_same_agent"); }
       await this.writable(key);
-      return { conversation: await inviteToConversation(key, invitee, task.join(" ")) };
+      return { conversation: await inviteToConversation(key, invitee, task.join(" "),actor) };
     }
     const retained = await this.liveControls(key);
     return this.manager.serialize(retained, async () => {
+      await this.authorize(actor,key,"write");
       await this.writable(key);
       // These create openable CRM conversations rather than mutating a slash worker's session.
-      if (name === "new") { return { conversation: await this.createGatewayConversation([identity.profile]) }; }
-      if (name === "branch") { return { conversation: await this.branchConversation(key) }; }
+      if (name === "new") { return { conversation: await this.createGatewayConversation([identity.profile],actor) }; }
+      if (name === "branch") { return { conversation: await this.branchConversation(key,actor) }; }
       if (!this.manager.session(retained)?.runtimeId) { await this.manager.resumeSession(retained); }
       try {
         return skillCollisionDirective(await this.manager.callSession(retained, "slash.exec", { session_id: "", command }), arg);
@@ -403,7 +421,8 @@ export class HermesChatService {
       }
     });
   }
-  async command(key: string, action: string, body: Record<string, unknown>) {
+  async command(key: string, action: string, body: Record<string, unknown>, actor?: ConversationActor) {
+    await this.authorize(actor,key,action === "approval" ? "approve" : "write");
     const retained = await this.liveControls(key);
     if (action === "model" || action === "reasoning" || action === "fast" || action === "control") {
       // A pick is an explicit intent to use this chat, so an idle chat resumes like a send would.
@@ -474,7 +493,7 @@ const globalChat = globalThis as typeof globalThis & { __hermesChatService?: Her
 export function getHermesChatService(): HermesChatService {
   return globalChat.__hermesChatService ??= new HermesChatService();
 }
-export function openForView(profile: string, storedId: string) { return getHermesChatService().openForView(profile, storedId); }
-export function sendPrompt(key: string, prompt: GatewayPrompt) { return getHermesChatService().sendPrompt(key, prompt); }
-export function createGatewayConversation(profiles: string[]) { return getHermesChatService().createGatewayConversation(profiles); }
-export function branchConversation(key: string) { return getHermesChatService().branchConversation(key); }
+export function openForView(profile: string, storedId: string, actor?: ConversationActor) { return getHermesChatService().openForView(profile, storedId,undefined,actor); }
+export function sendPrompt(key: string, prompt: GatewayPrompt, actor?: ConversationActor) { return getHermesChatService().sendPrompt(key, prompt,actor); }
+export function createGatewayConversation(profiles: string[], actor?: ConversationActor) { return getHermesChatService().createGatewayConversation(profiles,actor); }
+export function branchConversation(key: string, actor?: ConversationActor) { return getHermesChatService().branchConversation(key,actor); }

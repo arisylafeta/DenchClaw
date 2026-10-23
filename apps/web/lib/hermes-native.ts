@@ -1,3 +1,4 @@
+import { authorizeAccess, registerConversation, requireActor, ConversationAccessError, type ConversationActor, type ConversationAccess } from "./conversation-access";
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -124,6 +125,14 @@ export async function groupRpc<T>(method: string, params: Record<string, unknown
     if (connection.socket.readyState === WebSocket.OPEN) send(); else connection.socket.once("open", send);
   });
 }
+export async function authorizeNativeConversation(actor: ConversationActor | undefined,key: string,action: import("./conversation-access").AccessAction = "read") {
+  return authorizeAccess(actor,key,action,async () => {
+    const id = parseConversationKey(key); assertProfile(id.profile);
+    const response = await nativeFetch(id.profile,`/api/sessions/${encodeURIComponent(id.id)}`,{},[404]);
+    if (response.status === 404) return undefined;
+    const row = await response.json(); return (row.session ?? row).source;
+  });
+}
 export function soloConversation(profile: string, s: NativeSession): HermesConversation {
   return { key: conversationKey("solo", s.id, profile), kind: "solo", id: s.id, profile,
     title: s.title || "Untitled chat", updatedAt: (s.last_active || s.started_at || 0) * 1000,
@@ -178,14 +187,20 @@ function gatewayListStatus(rows: HermesConversation[]) {
   void pending.catch(() => gatewayListCache.delete(manager));
   return pending;
 }
-export async function listConversations() {
+export async function listConversations(actor?: ConversationActor) {
+  requireActor(actor);
   const warnings: string[] = [];
   const profiles = hermesProfiles();
   const soloLists = await Promise.all(profiles.map(async (profile) => {
     // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
     try {
       const page = await (await nativeFetch(profile, "/api/sessions?limit=200&offset=0")).json() as { data: NativeSession[] };
-      const rows = page.data.filter((row) => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map((row) => soloConversation(profile, row));
+      const rows: HermesConversation[] = [];
+      for (const session of page.data.filter(row => row.source !== "bot_room" && !row.hidden && !row.is_internal_child)) {
+        const row = soloConversation(profile,session);
+        try { const { access } = await authorizeAccess(actor,row.key,"read",async () => session.source); rows.push(Object.assign(row,{access})); }
+        catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) throw error; }
+      }
       // The API may append older pinned sessions beyond its 200-row recency window.
       // Preserve those rows and bound each metadata read, not the conversation list.
       const messagingIds = rows.filter(messagingConversation).map((row) => row.id);
@@ -200,7 +215,7 @@ export async function listConversations() {
       }
       for (const row of rows) if (Object.hasOwn(projects, row.id)) row.project = projects[row.id];
       return rows;
-    } catch { warnings.push(`Could not load chats for ${profile}`); return []; }
+    } catch (error) { if (error instanceof ConversationAccessError) throw error; warnings.push(`Could not load chats for ${profile}`); return []; }
   }));
   // Rows the dashboard gateway hosts get its authoritative status; the state.db heartbeat lags a
   // finished turn by up to its window and is restamped by background children, so it must not override it.
@@ -239,7 +254,11 @@ export async function listConversations() {
       let offset: number | null = 0;
       while (offset !== null) {
         const page: { rooms: Room[]; next_offset: number | null } = await groupRpc("groups.list", { limit: 100, offset });
-        for (const room of page.rooms) rooms.set(room.room_id, roomConversation(room));
+        for (const room of page.rooms) {
+          const row = roomConversation(room);
+          try { const { access } = await authorizeAccess(actor,row.key); rooms.set(room.room_id,Object.assign(row,{access})); }
+          catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) throw error; }
+        }
         if (page.next_offset !== null && page.next_offset <= offset) throw new Error("Invalid room pagination");
         offset = page.next_offset;
       }
@@ -250,7 +269,7 @@ export async function listConversations() {
           row.blocked = state.driver_status?.blocked ?? false;
         } catch { /* Unknown status must not be mistaken for idle or working. */ }
       }));
-    } catch { warnings.push("Could not load all Hermes group chats"); }
+    } catch (error) { if (error instanceof ConversationAccessError) throw error; warnings.push("Could not load all Hermes group chats"); }
   } else warnings.push("Group chats unavailable: configure the Hermes dashboard connection on the server");
   return { backend: "hermes", profiles, groupsAvailable: groupsConfigured(), warnings,
     sessions: [...soloLists.flat(), ...rooms.values()].sort((a, b) => b.updatedAt - a.updatedAt) };
@@ -266,21 +285,24 @@ export function roomMembers(profiles: string[]) {
     return { member_id: handle, profile, handle, display_name: profile, target: { kind: "local", profile } };
   });
 }
-export async function createConversation(profiles: string[], title?: string) {
+export async function createConversation(profiles: string[], title?: string, actor?: ConversationActor, inherited?: ConversationAccess) {
+  requireActor(actor);
   if (!Array.isArray(profiles) || profiles.length < 1 || profiles.length > 6 || new Set(profiles).size !== profiles.length) throw new Error("Choose one to six distinct bots");
   profiles.forEach(assertProfile);
   const id = randomUUID();
+  const access = await registerConversation(actor,conversationKey(profiles.length === 1 ? "solo" : "group",id,profiles.length === 1 ? profiles[0] : ""),inherited);
   if (profiles.length === 1) {
     await nativeFetch(profiles[0], "/api/sessions", { method: "POST", body: JSON.stringify({ id, title: title || "New chat", source: "web" }) });
     const result = await (await nativeFetch(profiles[0], `/api/sessions/${encodeURIComponent(id)}`)).json();
-    return soloConversation(profiles[0], result.session ?? result);
+    return Object.assign(soloConversation(profiles[0], result.session ?? result),{access});
   }
   const room = { room_id: id, name: title || profiles.join(", "), members: roomMembers(profiles) };
   await groupRpc("groups.create", room);
   const verified = await groupRpc<RoomState>("groups.state", { room_id: id });
-  return roomConversation(verified.room, verified.driver_status?.working ?? null);
+  return Object.assign(roomConversation(verified.room, verified.driver_status?.working ?? null),{access});
 }
-export async function readConversation(key: string, sinceSeq = 0, probeCap?: number) {
+export async function readConversation(key: string, sinceSeq = 0, probeCap?: number, actor?: ConversationActor) {
+  const { access } = await authorizeNativeConversation(actor,key);
   const identity = parseConversationKey(key);
   if (identity.kind === "group") {
     const state = await groupRpc<RoomState>("groups.state", { room_id: identity.id });
@@ -305,7 +327,7 @@ export async function readConversation(key: string, sinceSeq = 0, probeCap?: num
         memberId: e.payload.member_id ?? member?.member_id, turnId: e.payload.turn_id, taskId: e.payload.task_id, createdAt: e.created_at ? e.created_at * 1000 : undefined };
     });
     const conversation = roomConversation(state.room, state.driver_status?.working ?? null);
-    return { conversation, messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false,
+    return { conversation: Object.assign(conversation,{access}), messages, cursor: since, sinceSeq, blocked: state.driver_status?.blocked ?? false,
       members: state.room.members, driver: state.driver_status ?? {},
       settled: events.filter(e => e.kind === "turn.settled").map(e => ({ memberId: e.payload.member_id, turnId: e.payload.turn_id, taskId: e.payload.task_id, passed: e.payload.passed, createdAt: e.created_at ? e.created_at * 1000 : undefined })),
       events };
@@ -356,7 +378,7 @@ export async function readConversation(key: string, sinceSeq = 0, probeCap?: num
     const names = await sessionDisplayNames(identity.profile, [identity.id]);
     if (Object.hasOwn(names, identity.id)) conversation.title = names[identity.id];
   }
-  return { conversation, messages };
+  return { conversation: Object.assign(conversation,{access}), messages };
 }
 
 const HANDOFF_TURN_CHARS = 600;
@@ -386,14 +408,15 @@ export function inviteHandoff(host: string, invitee: string, session: { id: stri
   ].join("\n");
 }
 /** Turn a one-to-one chat into a group: new room with the host and the invitee, seeded with the recent transcript. */
-export async function inviteToConversation(key: string, invitee: string, task = "") {
+export async function inviteToConversation(key: string, invitee: string, task = "", actor?: ConversationActor) {
+  const { access } = await authorizeNativeConversation(actor,key,"derive");
   const identity = parseConversationKey(key);
   if (identity.kind !== "solo") throw new Error("Only a one-to-one chat can invite another agent");
   assertProfile(identity.profile); assertProfile(invitee);
   if (invitee === identity.profile) throw new Error("Pick a different agent than the one in this chat");
-  const source = await readConversation(key);
+  const source = await readConversation(key,0,undefined,actor);
   const title = source.conversation.title;
-  const room = await createConversation([identity.profile, invitee], title && title !== "Untitled chat" && title !== "New chat" ? `${title} · ${invitee}`.slice(0, 80) : undefined);
+  const room = await createConversation([identity.profile, invitee], title && title !== "Untitled chat" && title !== "New chat" ? `${title} · ${invitee}`.slice(0, 80) : undefined,actor,access);
   try {
     await groupRpc("groups.send", { room_id: room.id, event_id: `invite-${randomUUID()}`, payload: { text: inviteHandoff(identity.profile, invitee, { id: identity.id, title }, source.messages, task), thread_id: room.id } });
   } catch (error) {
