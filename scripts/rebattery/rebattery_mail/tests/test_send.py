@@ -929,3 +929,35 @@ def test_verification_gates_campaigns_only(env):
     with connection(read_only=True) as db:
         assert policy.recipient(db,email,{email:{'status':'unknown'}},campaign=False)==email
         with pytest.raises(Refused,match='recipient_unverified'):policy.recipient(db,email,{email:{'status':'unknown'}},campaign=True)
+
+
+def test_reb562_supply_transactional_goes_to_postmark_with_bcc_copy(env):
+    email=env+'0@example.test'
+    with connection() as db:
+        author,transport=policy.identity(db,'supply','transactional')
+        assert transport=='postmark-transactional' and author['postmark_stream']=='outbound'
+        # Personal and marketing mail from supply stay on Gmail; alex and ari are untouched.
+        assert policy.identity(db,'supply','personal')[1]=='gmail'
+        assert policy.identity(db,'supply','marketing')[1]=='gmail'
+        assert policy.identity(db,'alex','transactional')[1]=='gmail'
+        row,_=draft.prepare(db,'supply',[email],purpose='transactional',subject='Update',body='Hello',message_id=env+'bcc')
+    assert row['transport']=='postmark-transactional' and row['bcc_emails']==['supply@rebattery.io']
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',[email],subject='Update',body='Hello',message_id=env+'gm')
+    assert row['transport']=='gmail' and row['bcc_emails']==[]
+    with connection() as db:
+        row,_=draft.prepare(db,'hello',[email],purpose='transactional',subject='Update',body='Hello',message_id=env+'hl')
+    assert row['bcc_emails']==[]
+
+
+def test_reb562_postmark_payload_bcc_and_attachment_refusal(monkeypatch):
+    monkeypatch.setattr('rebattery_mail.drivers.live_gate',lambda: None)
+    sent=[]
+    def client(path,method='GET',payload=None):
+        sent.append(payload); return {'ErrorCode':0,'MessageID':'pm-1'}
+    identity={'display_name':'Supply @ ReBattery','address':'supply@rebattery.io','postmark_stream':'outbound'}
+    message={'id':'m1','to_emails':['a@example.test'],'bcc_emails':['supply@rebattery.io'],'subject':'S','body_html':'<p>x</p>','body_text':'x','idempotency_key':'k'}
+    PostmarkSendDriver(client).send(identity,message)
+    assert sent[0]['Bcc']=='supply@rebattery.io' and sent[0]['TrackOpens'] is True and sent[0]['TrackLinks']=='HtmlAndText'
+    with pytest.raises(Refused,match='attachments_require_gmail_transport'):
+        PostmarkSendDriver(client).preflight(identity,{**message,'purpose':'transactional','personalization':{'attachments':['/x.pdf']}})

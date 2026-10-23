@@ -61,7 +61,7 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
             rendered['html'] = text_to_html(rendered['text'])
     row = {'id':message_id or uuid4().hex,'direction':'outbound','state':'draft','identity_key':identity_key,
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
-           'cc_emails':sorted(set(e.strip().lower() for e in (cc or []) if e.strip())),'bcc_emails':[],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
+           'cc_emails':sorted(set(e.strip().lower() for e in (cc or []) if e.strip())),'bcc_emails':[author['address'].lower()] if transport == 'postmark-transactional' and author.get('gmail_account') else [],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
            'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and generated is None and author.get('signature_text') else ''),
            'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template and generated is None else ''),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
