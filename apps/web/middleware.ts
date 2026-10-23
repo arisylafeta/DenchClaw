@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { refreshSessionToken, sessionCookie } from "@/lib/auth";
 import { hasSameOrigin, requestOrigin } from "@/lib/request-origin";
+import { hasHostAccess, requiresHostAccess } from "@/lib/app-capabilities";
 
 const PUBLIC_ASSETS = new Set([
   "/rebattery-favicon.svg",
@@ -33,7 +34,7 @@ function isPublicPath(pathname: string): boolean {
 
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
-  if (isPublicPath(pathname)) return NextResponse.next();
+  if (isPublicPath(pathname)) { return NextResponse.next(); }
 
   if (!SAFE_METHODS.has(req.method) && !hasSameOrigin(req)) {
     return NextResponse.json({ error: "CSRF check failed" }, { status: 403 });
@@ -44,13 +45,21 @@ export async function middleware(req: NextRequest) {
   }
 
   const token = req.cookies.get("denchclaw_session")?.value;
-  if (!token || !(await refreshSessionToken(token))) {
+  const user = token ? await refreshSessionToken(token) : null;
+  if (!token || !user) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const loginUrl = new URL("/login", requestOrigin(req));
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
+  }
+
+  if (requiresHostAccess(pathname, req.method) && !hasHostAccess(user)) {
+    return NextResponse.json({ error: "Forbidden" }, {
+      status: 403,
+      headers: { "Cache-Control": "private, no-store", Vary: "Cookie" },
+    });
   }
 
   // Next 15's Node middleware runner starts clone finalization without awaiting

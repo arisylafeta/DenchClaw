@@ -23,13 +23,10 @@ function request(
   } = {},
 ) {
   const headers = new Headers();
-  if (options.origin) headers.set("origin", options.origin);
-  if (options.token)
-    headers.set("cookie", `denchclaw_session=${options.token}`);
-  if (options.forwardedHost)
-    headers.set("x-forwarded-host", options.forwardedHost);
-  if (options.forwardedProto)
-    headers.set("x-forwarded-proto", options.forwardedProto);
+  if (options.origin) { headers.set("origin", options.origin); }
+  if (options.token) { headers.set("cookie", `denchclaw_session=${options.token}`); }
+  if (options.forwardedHost) { headers.set("x-forwarded-host", options.forwardedHost); }
+  if (options.forwardedProto) { headers.set("x-forwarded-proto", options.forwardedProto); }
   return new NextRequest(
     `${options.requestBase ?? "https://crm.rebattery.io"}${path}`,
     {
@@ -174,8 +171,49 @@ describe("CRM auth middleware", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it("allows same-origin protected mutations and protects logout", async () => {
-    refreshSessionTokenMock.mockResolvedValue({ id: "user-1" });
+  it.each([
+    "/api/workspace/raw-file?path=%2Froot%2F.hermes%2Fstate.db",
+    "/api/workspace/file?path=private.jsonl",
+    "/api/workspace/browse-file?path=private.jsonl",
+    "/api/workspace/assets/private.jsonl",
+    "/api/workspace/db/query",
+    "/api/terminal/port",
+    "/api/settings/mcp",
+    "/api/profiles/switch",
+    "/api/apps/proxy",
+    "/api/skills/example/content",
+    "/api/memories",
+    "/platform-admin/messages",
+  ])("denies non-admin access to the host capability %s", async path => {
+    refreshSessionTokenMock.mockResolvedValue({ id: "staff", email: "sean@rebattery.io" });
+    const response = await middleware(request(path, { token: "synthetic" }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Forbidden" });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("does not trust client identity headers or read a forbidden upload body", async () => {
+    refreshSessionTokenMock.mockResolvedValue({ id: "staff", email: "sean@rebattery.io" });
+    const req = request("/api/workspace/upload", { token: "synthetic", method: "POST", origin: "https://crm.rebattery.io" });
+    req.headers.set("x-user-email", "ari@rebattery.io");
+    req.headers.set("x-role", "admin");
+    const read = vi.spyOn(req, "arrayBuffer");
+    expect((await middleware(req)).status).toBe(403);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(["/api/hermes/conversations", "/api/hermes/events", "/api/auth/me", "/api/crm/inbox", "/api/workspace/objects/person/entries", "/api/profiles"])("keeps scoped application routes available to staff: %s", async path => {
+    refreshSessionTokenMock.mockResolvedValue({ id: "staff", email: "sean@rebattery.io" });
+    expect((await middleware(request(path, { token: "synthetic" }))).status).toBe(200);
+  });
+
+  it.each(["ari@rebattery.io", "alex@rebattery.io"])("preserves explicit trusted host access for %s", async email => {
+    refreshSessionTokenMock.mockResolvedValue({ id: "admin", email });
+    expect((await middleware(request("/api/terminal/port", { token: "synthetic" }))).status).toBe(200);
+  });
+
+  it("allows same-origin protected mutations for a host admin and protects logout", async () => {
+    refreshSessionTokenMock.mockResolvedValue({ id: "user-1", email: "ari@rebattery.io" });
     const mutation = await middleware(
       request("/api/workspace/file", {
         method: "POST",
