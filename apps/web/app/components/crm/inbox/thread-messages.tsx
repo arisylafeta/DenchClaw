@@ -33,13 +33,16 @@ export type ThreadDetail = {
  *
  * `recipientName` powers the QuickReply placeholder ("Reply to Sarah…").
  *
- * `autoScrollOnLoad` defaults to true, which scrolls the LATEST message
+ * `initialMessageId` expands and scrolls to the clicked email; otherwise the
+ * latest visible message is selected. `autoScrollOnLoad` defaults to true.
+ * Without `initialMessageId`, it scrolls the LATEST message
  * into view once the detail loads. Inline expand contexts may want this
  * set to false to avoid yanking the page when a row opens far down the
  * list.
  */
 export function ThreadMessages({
   threadId,
+  initialMessageId,
   seedParticipants,
   recipientName,
   onOpenPerson,
@@ -49,6 +52,7 @@ export function ThreadMessages({
   onLoaded,
 }: {
   threadId: string;
+  initialMessageId?: string;
   seedParticipants?: ReadonlyArray<Participant>;
   recipientName?: string | null;
   onOpenPerson?: (id: string) => void;
@@ -108,18 +112,19 @@ export function ThreadMessages({
     return map;
   }, [detail, seedParticipants]);
 
-  // Optionally scroll-to-latest on load. We use scrollIntoView on the
+  // Optionally scroll to the selected message (or latest) on load. Use scrollIntoView on the
   // CONTAINER's last message rather than mutating a parent scroller, so
   // this works whether we're inside a dedicated pane or inline-expanded.
   useEffect(() => {
     if (!autoScrollOnLoad || !detail || !containerRef.current) {return;}
     requestAnimationFrame(() => {
-      const last = containerRef.current?.querySelector<HTMLElement>(
+      const selected = containerRef.current?.querySelector<HTMLElement>('[data-selected-message="true"]');
+      const last = selected ?? containerRef.current?.querySelector<HTMLElement>(
         '[data-thread-message="latest"]',
       );
       last?.scrollIntoView({ block: "nearest", behavior: "auto" });
     });
-  }, [detail, autoScrollOnLoad]);
+  }, [detail, autoScrollOnLoad, initialMessageId]);
 
   if (loading && !detail) {
     return <CrmLoadingState label="Loading conversation…" />;
@@ -138,17 +143,18 @@ export function ThreadMessages({
   if (!detail) {return null;}
 
   const lastMessageId = detail.messages.at(-1)?.id;
+  const expandedMessageId = detail.messages.some((message) => message.id === initialMessageId) ? initialMessageId : lastMessageId;
   const replyMessage = detail.messages.findLast((message) => message.direction === "inbound" && !message.is_self) ?? detail.messages.at(-1);
   const replyEmail = replyMessage?.direction === "inbound" && !replyMessage.is_self ? replyMessage.from_email ?? null : replyMessage?.to_emails?.[0] ?? null;
 
   return (
     <div ref={containerRef}>
       {detail.messages.map((msg) => (
-        <div key={msg.id} data-thread-message={msg.id === lastMessageId ? "latest" : undefined}>
+        <div key={msg.id} data-thread-message={msg.id === lastMessageId ? "latest" : undefined} data-selected-message={msg.id === initialMessageId ? "true" : undefined}>
           <MessageCard
             message={msg}
             people={peopleMap}
-            defaultExpanded={msg.id === lastMessageId}
+            defaultExpanded={msg.id === expandedMessageId}
             onOpenPerson={onOpenPerson}
           />
         </div>

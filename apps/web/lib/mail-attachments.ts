@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { queryPg } from "./postgres";
+import { mailboxScopeSql } from "./mail-scope";
 
 const run = promisify(execFile);
 const CLI = "/usr/local/bin/rebattery-mail";
@@ -16,7 +17,7 @@ export type AttachmentList = { attachments: MailAttachment[] } | { unavailable: 
 export function validMessageId(id: string) { return ID.test(id); }
 
 async function owns(messageId: string, userId: string) {
-  const rows = await queryPg<{ id: string }>("select id from mail_message where id = $1 and (mailbox_owner_id = $2::uuid or (mailbox_owner_id is null and 'shared' = any(labels)))", [messageId, userId]);
+  const rows = await queryPg<{ id: string }>(`select m.id from mail_message m where m.id = $1 and ${mailboxScopeSql('m', '$2')}`, [messageId, userId]);
   return rows.length > 0;
 }
 

@@ -31,10 +31,8 @@ export const NO_IDENTITY = 'none';
  * addresses that are not one person's mailbox). */
 export const SHARED_MAIL_LABEL = 'shared';
 
-/** A user's mailbox plus shared mail. */
-export function mailboxScopeSql(alias: string, owner: string) {
-  return `(${alias}.mailbox_owner_id = ${owner}::uuid or (${alias}.mailbox_owner_id is null and '${SHARED_MAIL_LABEL}' = any(${alias}.labels)))`;
-}
+export { mailboxScopeSql } from '../mail-scope';
+import { mailboxScopeSql } from '../mail-scope';
 
 function mailWhere(filters: MailFilters = {}) {
   const values: unknown[] = [];
@@ -110,7 +108,7 @@ export async function mailIdentityCounts(filters: MailFilters = {}): Promise<{ i
 
 export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnly = false) {
   const values = mailboxOwnerId ? [id, mailboxOwnerId] : [id];
-  const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? `and (mailbox_owner_id = $2::uuid or (mailbox_owner_id is null and exists (select 1 from mail_message shared where shared.thread_id = mail_thread.id and ${mailboxScopeSql('shared', '$2')})))` : ''}`, values);
+  const [thread] = await queryPg<Omit<MailThread, 'messages'>>(`select * from mail_thread where id = $1 ${mailboxOwnerId ? `and exists (select 1 from mail_message shared where shared.thread_id = mail_thread.id and ${mailboxScopeSql('shared', '$2')})` : ''}`, values);
   if (!thread) return null;
   const messages = await queryPg<MailMessageRow>(`select m.*, ${selfAddressSql('m.from_email')} as is_self, ${counterpartySql()}, coalesce(nullif(m.body_text,''),m.body_html) as body, m.body_preview as preview,
     coalesce((select jsonb_agg(e order by e.occurred_at,e.id) from mail_event e where e.message_id = m.id),'[]') as events,
@@ -118,8 +116,8 @@ export async function readMailThread(id: string, mailboxOwnerId?: string, crmOnl
     coalesce((select array_agg(r.person_id) from mail_message_recipient r where r.message_id = m.id and r.recipient_type = 'cc'),'{}') as cc_person_ids
     from mail_message m where m.thread_id = $1 ${mailboxOwnerId ? `and ${mailboxScopeSql('m', '$2')}` : ''} ${crmOnly ? 'and m.crm_visible' : ''} order by m.sent_at asc nulls last,m.id`, values);
   if (!messages.length) return null;
-  const people = await queryPg<MailParticipant>(`select id,full_name as name,email,null as avatar_url,${selfAddressSql('crm_people.email')} as is_self from crm_people where id in (select from_person_id from mail_message where thread_id = $1 union select r.person_id from mail_message_recipient r join mail_message m on m.id = r.message_id where m.thread_id = $1)`, [id]);
-  return { ...thread, thread_id: id, messages, people };
+  const people = await queryPg<MailParticipant>(`select id,full_name as name,email,null as avatar_url,${selfAddressSql('crm_people.email')} as is_self from crm_people where id in (select from_person_id from mail_message where id = any($1::text[]) union select person_id from mail_message_recipient where message_id = any($1::text[]))`, [messages.map(m => m.id)]);
+  return { ...thread, subject: messages.at(-1)?.subject ?? null, last_message_at: messages.at(-1)?.sent_at ?? null, message_count: messages.length, thread_id: id, messages, people };
 }
 
 export async function listMailFollowups(mailboxOwnerId?: string, dueOnly = false, filters: MailFilters = {}): Promise<MailFollowup[]> {
@@ -127,13 +125,14 @@ export async function listMailFollowups(mailboxOwnerId?: string, dueOnly = false
   const { values, where, bind } = mailWhere(messageFilters);
   const conditions: string[] = [];
   const owner = mailboxOwnerId ? bind(mailboxOwnerId) : null;
-  if (owner) conditions.push(`coalesce(anchor.mailbox_owner_id,t.mailbox_owner_id) = ${owner}::uuid`);
+  if (owner) conditions.push(`(coalesce(f.identity_key not in ('alex','ari'),true) or exists (select 1 from crm_users followup_user where followup_user.id = ${owner}::uuid and lower(followup_user.email) = f.identity_key || '@rebattery.io'))`);
+  if (owner) conditions.push(`exists (select 1 from mail_message scoped where (scoped.id = f.message_id or (f.message_id is null and scoped.thread_id = f.thread_id)) and ${mailboxScopeSql('scoped', owner)})`);
   if (crmOnly) conditions.push('coalesce(anchor.crm_visible,t.crm_visible,false)');
   if (identity) {
     const key = bind(identity);
-    conditions.push(`(coalesce(f.identity_key,anchor.identity_key) = ${key} or (f.identity_key is null and f.message_id is null and exists (select 1 from mail_message identity_message where identity_message.thread_id = f.thread_id and identity_message.identity_key = ${key} ${owner ? `and identity_message.mailbox_owner_id = ${owner}::uuid` : ''})))`);
+    conditions.push(`(coalesce(f.identity_key,anchor.identity_key) = ${key} or (f.identity_key is null and f.message_id is null and exists (select 1 from mail_message identity_message where identity_message.thread_id = f.thread_id and identity_message.identity_key = ${key} ${owner ? `and ${mailboxScopeSql('identity_message', owner)}` : ''})))`);
   }
-  if (where.length) conditions.push(`exists (select 1 from mail_message m where (m.id = f.message_id or (f.message_id is null and m.thread_id = f.thread_id)) ${owner ? `and m.mailbox_owner_id = ${owner}::uuid` : ''} and ${where.join(' and ')})`);
+  if (where.length) conditions.push(`exists (select 1 from mail_message m where (m.id = f.message_id or (f.message_id is null and m.thread_id = f.thread_id)) ${owner ? `and ${mailboxScopeSql('m', owner)}` : ''} and ${where.join(' and ')})`);
   if (dueOnly) conditions.push("f.state = 'pending' and f.due_at <= now()");
   return queryPg<MailFollowup>(`select f.* from mail_followup f left join mail_message anchor on anchor.id = f.message_id left join mail_thread t on t.id = coalesce(f.thread_id,anchor.thread_id) ${conditions.length ? `where ${conditions.join(' and ')}` : ''} order by f.due_at,f.id`, values);
 }
@@ -179,7 +178,7 @@ export async function readMailDraft(id: string, userId: string): Promise<MailDra
   const [row] = await queryPg<Omit<MailDraft, 'links' | 'warnings' | 'approval'> & { personalization: { oneoff?: { warnings?: unknown[] } } | null }>(
     `select m.id,m.state,m.identity_key,m.transport,m.purpose,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
        coalesce(m.bcc_emails,'{}') as bcc_emails,m.subject,m.body_text,m.body_html,m.thread_id,m.campaign_id,m.created_at,m.updated_at,m.personalization
-     from mail_message m where m.id = $1 and m.direction = 'outbound' and (m.mailbox_owner_id is null or m.mailbox_owner_id = $2::uuid)`, [id, userId]);
+     from mail_message m where m.id = $1 and m.direction = 'outbound' and ${mailboxScopeSql('m', '$2')}`, [id, userId]);
   if (!row) return null;
   const links = await queryPg<{ cta_key: string; destination_url: string }>('select cta_key,destination_url from mail_message_link where message_id = $1 order by cta_key', [id]);
   const [approval] = await queryPg<MailApproval>(
@@ -194,8 +193,8 @@ export async function readMailDraft(id: string, userId: string): Promise<MailDra
 export async function readMailMessage(id: string, userId: string): Promise<MailMessageSummary | null> {
   const [row] = await queryPg<MailMessageSummary>(
     `select m.id,m.thread_id,m.direction,m.state,m.subject,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
-       m.body_preview,left(m.body_text,4000) as body_text,m.sent_at,m.created_at,m.updated_at,coalesce(m.has_attachments,false) as has_attachments
-     from mail_message m where m.id = $1 and (m.mailbox_owner_id is null or m.mailbox_owner_id = $2::uuid)`, [id, userId]);
+       m.body_preview,m.body_text,m.body_html,m.sent_at,m.created_at,m.updated_at,coalesce(m.has_attachments,false) as has_attachments
+     from mail_message m where m.id = $1 and ${mailboxScopeSql('m', '$2')}`, [id, userId]);
   return row ?? null;
 }
 
@@ -204,7 +203,7 @@ export type MailDraftFilters = Pick<MailFilters, 'q' | 'identity' | 'to' | 'from
 export async function listMailDrafts(userId: string, limit = 50, filters: MailDraftFilters = {}): Promise<MailDraftListRow[]> {
   const values: unknown[] = [userId];
   const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
-  const where = [`m.direction = 'outbound'`, `m.state in ${DRAFT_STATES}`, `(m.mailbox_owner_id is null or m.mailbox_owner_id = $1::uuid)`];
+  const where = [`m.direction = 'outbound'`, `m.state in ${DRAFT_STATES}`, mailboxScopeSql('m', '$1')];
   for (const [key, column] of Object.entries({ identity: 'identity_key', purpose: 'purpose', transport: 'transport', from: 'from_email' })) {
     const value = filters[key as keyof MailDraftFilters];
     if (key === 'identity' && value === NO_IDENTITY) where.push('m.identity_key is null');

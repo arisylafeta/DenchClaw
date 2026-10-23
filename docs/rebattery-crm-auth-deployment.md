@@ -77,6 +77,22 @@ with `{"icon":"<Lucide icon>"}` for the active profile. The sidebar retains its
 existing 16px outline style. Refresh the CRM after changing metadata; no build
 or redeploy is required.
 
+## Mail identity visibility
+
+Mail visibility follows the identity, not the Gmail account that captured it.
+`alex` and `ari` are private to their matching application user, including legacy
+ownerless rows carrying a stale `shared` label. Every other configured identity
+(Supply, Support, Hello, Enterprise) is shared between authenticated CRM users,
+including mail captured through a founder's Gmail alias. Capture owner, labels
+and original provider records remain unchanged.
+
+For unclassified mail, retain a known capture owner's privacy. Ownerless messages
+addressed to or sent by a founder remain private to the corresponding participant;
+only non-personal ownerless legacy mail explicitly labelled `shared` is shared.
+Lists, identity counts, individual messages, draft reads, thread messages and
+participants, follow-ups, and attachment authorization use the same predicate in
+`lib/mail-scope.ts`. Internal-mail and CRM-only display filters remain separate.
+
 ## Shared CRM discovery views
 
 Companies and People have shared `Buyers` and `Dismantlers` saved views. Migration

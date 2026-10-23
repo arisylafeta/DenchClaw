@@ -37,9 +37,10 @@ export type MailDraft = {
 };
 export type MailDraftListRow = Pick<MailDraft, 'id' | 'state' | 'identity_key' | 'from_email' | 'to_emails' | 'subject' | 'created_at'> & { body_preview: string | null };
 
-/** One logged email (either direction) as shown by the chat email card. Bodies stay out; the thread opens in a tab. */
+/** One scoped logged email. Detail includes its body for messages without a thread. */
 export type MailMessageSummary = {
   id: string; thread_id: string | null; direction: 'inbound' | 'outbound'; state: string; subject: string | null;
   from_email: string | null; to_emails: string[]; cc_emails: string[]; body_preview: string | null; body_text: string | null;
+  body_html?: string | null;
   sent_at: string | null; created_at: string; updated_at: string; has_attachments: boolean;
 };
