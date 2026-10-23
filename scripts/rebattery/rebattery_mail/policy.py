@@ -70,7 +70,7 @@ def verification_note(evidence):
     return None
 
 
-def recipient(db, email, verification, suppressions=None):
+def recipient(db, email, verification, suppressions=None, campaign=True):
     email = email.strip().lower()
     if email in (suppressions or {}):
         raise Refused('recipient_suppressed', email=email)
@@ -97,7 +97,8 @@ def recipient(db, email, verification, suppressions=None):
         evidence = {'status': evidence}
     # ZeroBounce's role_based flag is deliberately not an exclusion. Catch-all domains are deliverable but
     # unconfirmable, so they send with a note. A named human may knowingly override anything else.
-    if evidence.get('status') != 'valid' and not catch_all(evidence) and not str(evidence.get('override_by') or '').strip():
+    # ZeroBounce verification gates campaigns only; one-off and transactional mail skips it (opt-out, bounce and suppression checks above always apply).
+    if campaign and evidence.get('status') != 'valid' and not catch_all(evidence) and not str(evidence.get('override_by') or '').strip():
         raise Refused('recipient_unverified', email=email, verification_status=evidence.get('status','missing'), verification_reason=evidence.get('sub_status'))
     return email
 

@@ -164,7 +164,7 @@ def preflight(message, driver):
                 if not person or person[0] != message['recipient_email']:
                     raise Refused('approval_stale','Frozen recipient address no longer matches the CRM person')
         for email in [*message['to_emails'],*(message.get('cc_emails') or [])]:
-            policy.recipient(db,email,message['personalization'].get('verification',{}),suppressions)
+            policy.recipient(db,email,message['personalization'].get('verification',{}),suppressions,campaign=bool(message.get('campaign_id')))
         replied = policy.thread_reply(db,message)
     if replied:
         pause_for_reply(message)

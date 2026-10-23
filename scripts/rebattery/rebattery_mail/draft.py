@@ -126,7 +126,7 @@ def create(args):
         exclusions = []
         for email in [*row['to_emails'],*row['cc_emails']]:
             try:
-                policy.recipient(db,email,row['personalization']['verification'])
+                policy.recipient(db,email,row['personalization']['verification'],campaign=bool(row.get('campaign_id')))
             except Refused as exc:
                 exclusions.append(exc.payload())
         if args.apply:
@@ -143,7 +143,7 @@ def preview(args):
             policy.content(row)
             for email in row['to_emails']:
                 try:
-                    policy.recipient(db,email,row['personalization'].get('verification',{}))
+                    policy.recipient(db,email,row['personalization'].get('verification',{}),campaign=bool(row.get('campaign_id')))
                 except Refused as exc:
                     exclusions.append(exc.payload())
     return {'subject_id':args.target,'messages':rows,'recipients':[e for r in rows for e in r['to_emails']], 'signature':{'text':author['signature_text'],'html':author['signature_html']},'exclusions':exclusions,'sha256':digest(rows),'dry_run':True}

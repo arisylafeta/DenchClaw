@@ -922,3 +922,10 @@ def test_cc_thread_collects_participants_without_own_or_to(env):
     with connection() as db:
         with pytest.raises(Refused,match='cc_thread_requires_thread'):
             draft.prepare(db,'alex',['buyer@example.test'],subject='S',body='B',cc_thread=True)
+
+
+def test_verification_gates_campaigns_only(env):
+    row=one(env);email=row['recipient_email']
+    with connection(read_only=True) as db:
+        assert policy.recipient(db,email,{email:{'status':'unknown'}},campaign=False)==email
+        with pytest.raises(Refused,match='recipient_unverified'):policy.recipient(db,email,{email:{'status':'unknown'}},campaign=True)
