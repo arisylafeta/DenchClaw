@@ -46,6 +46,30 @@ export async function authorizeAccess(actor: ConversationActor | undefined, key:
   if (!rows[0]) {throw new ConversationAccessError(404, "not_found");}
   return { access: accessFor(rows[0], user, action), version: Number(rows[0].version) };
 }
+/** Batch only server-discovered list rows; never accept a browser-provided source. */
+export async function authorizeListedConversations(actor: ConversationActor | undefined, conversations: Array<{ key: string; source?: string }>): Promise<Map<string,ConversationAccess>> {
+  const user = requireActor(actor);
+  const access = new Map<string,ConversationAccess>();
+  if (!conversations.length) {return access;}
+  const identities = conversations.map(row => {
+    const id = canonicalIdentity(row.key);
+    return {kind:id.kind,profile:id.profile,stored_id:id.id,origin:row.source ?? ""};
+  });
+  const external = identities.filter(id => id.kind === "solo" && externalSources.has(id.origin));
+  if (external.length) {
+    await db(`insert into hermes_security.conversation_access(kind,profile,stored_id,origin,visibility)
+      select kind,profile,stored_id,origin,'team' from jsonb_to_recordset($1::jsonb) as listed(kind text,profile text,stored_id text,origin text)
+      on conflict do nothing`,[JSON.stringify(external)]);
+  }
+  const rows = await db<AccessRow & {kind:"solo"|"group";profile:string;stored_id:string}>(`select a.* from hermes_security.conversation_access a
+    join jsonb_to_recordset($1::jsonb) as listed(kind text,profile text,stored_id text)
+    on a.kind=listed.kind and a.profile=listed.profile and a.stored_id=listed.stored_id`,[JSON.stringify(identities)]);
+  for (const row of rows) {
+    try {access.set(conversationKey(row.kind,row.stored_id,row.profile),accessFor(row,user));}
+    catch(error) {if (!(error instanceof ConversationAccessError) || error.status !== 404) {throw error;}}
+  }
+  return access;
+}
 export async function registerConversation(actor: ConversationActor | undefined, key: string, inherited?: ConversationAccess, parentKey?: string) {
   const user = requireActor(actor); const id = canonicalIdentity(key);
   if (inherited && inherited.ownerId !== user.id) {throw new ConversationAccessError(404, "not_found");}

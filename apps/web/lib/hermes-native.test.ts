@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-vi.mock("./postgres", () => ({queryPg:vi.fn(async () => [{owner_id:"user",creator_id:"user",origin:"crm",visibility:"team",version:1,deleted_at:null}])}));
+vi.mock("./postgres", () => ({queryPg:vi.fn(async (sql: string, params?: unknown[]) => {
+  const row = {owner_id:"user",creator_id:"user",origin:"crm",visibility:"team",version:1,deleted_at:null};
+  if (sql.includes("jsonb_to_recordset")) {
+    return sql.startsWith("select") ? JSON.parse(String(params?.[0])).map((identity: object) => ({...identity,...row})) : [];
+  }
+  return [row];
+})}));
 const actor = {id:"user",email:"ari@rebattery.io",displayName:"Synthetic owner"};
 import { WebSocketServer } from "ws";
 import { once } from "node:events";

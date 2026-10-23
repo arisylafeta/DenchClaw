@@ -1,4 +1,4 @@
-import { authorizeAccess, registerConversation, requireActor, ConversationAccessError, type ConversationActor, type ConversationAccess } from "./conversation-access";
+import { authorizeAccess, authorizeListedConversations, registerConversation, requireActor, ConversationAccessError, type ConversationActor, type ConversationAccess } from "./conversation-access";
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -197,10 +197,11 @@ export async function listConversations(actor?: ConversationActor) {
       const rows: HermesConversation[] = [];
       for (let offset=0;offset<10000 && rows.length<200;offset+=200) {
       const page = await (await nativeFetch(profile, `/api/sessions?limit=200&offset=${offset}`)).json() as { data: NativeSession[] };
-      for (const session of page.data.filter(row => row.source !== "bot_room" && !row.hidden && !row.is_internal_child)) {
-        const row = soloConversation(profile,session);
-        try { const { access } = await authorizeAccess(actor,row.key,"read",async () => session.source); rows.push(Object.assign(row,{access})); }
-        catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) {throw error;} }
+      const listed = page.data.filter(row => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map(session => soloConversation(profile,session));
+      const grants = await authorizeListedConversations(actor,listed);
+      for (const row of listed) {
+        const access = grants.get(row.key);
+        if (access) {rows.push(Object.assign(row,{access}));}
       }
       if (page.data.length < 200) {break;}
       }
@@ -257,10 +258,11 @@ export async function listConversations(actor?: ConversationActor) {
       let offset: number | null = 0;
       while (offset !== null) {
         const page: { rooms: Room[]; next_offset: number | null } = await groupRpc("groups.list", { limit: 100, offset });
-        for (const room of page.rooms) {
-          const row = roomConversation(room);
-          try { const { access } = await authorizeAccess(actor,row.key); rooms.set(room.room_id,Object.assign(row,{access})); }
-          catch(error) { if (!(error instanceof ConversationAccessError) || error.status !== 404) {throw error;} }
+        const listed = page.rooms.map(room => roomConversation(room));
+        const grants = await authorizeListedConversations(actor,listed);
+        for (const row of listed) {
+          const access = grants.get(row.key);
+          if (access) {rooms.set(row.id,Object.assign(row,{access}));}
         }
         if (page.next_offset !== null && page.next_offset <= offset) {throw new Error("Invalid room pagination");}
         offset = page.next_offset;
@@ -274,8 +276,19 @@ export async function listConversations(actor?: ConversationActor) {
       }));
     } catch (error) { if (error instanceof ConversationAccessError) {throw error;} warnings.push("Could not load all Hermes group chats"); }
   } else {warnings.push("Group chats unavailable: configure the Hermes dashboard connection on the server");}
+  const listed = [...new Map([...soloLists.flat(), ...rooms.values()].map(row => [row.key,row])).values()];
+  const sessions: HermesConversation[] = [];
+  // Recheck after slow metadata/status work, in bounded batches rather than one query per chat.
+  for (let offset=0;offset<listed.length;offset+=200) {
+    const batch = listed.slice(offset,offset+200);
+    const grants = await authorizeListedConversations(actor,batch);
+    for (const row of batch) {
+      const access = grants.get(row.key);
+      if (access) {sessions.push(Object.assign(row,{access}));}
+    }
+  }
   return { backend: "hermes", profiles, groupsAvailable: groupsConfigured(), warnings,
-    sessions: [...soloLists.flat(), ...rooms.values()].toSorted((a, b) => b.updatedAt - a.updatedAt) };
+    sessions: sessions.toSorted((a, b) => b.updatedAt - a.updatedAt) };
 }
 const MENTION_HANDLE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 /** Members are addressed as @<profile>; a profile that cannot be a mention handle falls back to a positional one. */

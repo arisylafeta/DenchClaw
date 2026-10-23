@@ -9,7 +9,7 @@ process.env.DATABASE_URL = testUrl;
 
 async function main() {
  const { queryPg, pgPool } = await import("../lib/postgres");
- const { authorizeAccess, registerConversation, changeSharing, tombstoneConversation } = await import("../lib/conversation-access");
+ const { authorizeAccess, authorizeListedConversations, registerConversation, changeSharing, tombstoneConversation } = await import("../lib/conversation-access");
  const { conversationKey } = await import("../lib/hermes-conversations");
  const owner={id:"00000000-0000-0000-0000-000000000001",email:"owner@example.test",displayName:"Owner"};
  const other={id:"00000000-0000-0000-0000-000000000002",email:"other@example.test",displayName:"Other"};
@@ -34,7 +34,13 @@ async function main() {
   const external=conversationKey("solo","module-discord","agent");
   assert.equal((await authorizeAccess(other,external,"read",async()=>"discord")).access.visibility,"team");
   await assert.rejects(authorizeAccess(other,conversationKey("solo","legacy-web","agent"),"read",async()=>"web"),{status:404});
-  console.log("Conversation access store integration passed: private/team/derive/revoke/tombstone/external/legacy");
+  const cli=conversationKey("solo","batch-cli","agent");
+  const legacy=conversationKey("solo","batch-legacy","agent");
+  const batch=[{key,source:"cli"},{key:derived},{key:external,source:"discord"},{key:cli,source:"cli"},{key:legacy,source:"crm"}];
+  assert.deepEqual([...await authorizeListedConversations(other,batch)].map(([id])=>id).toSorted(),[external,cli].toSorted());
+  assert.equal((await authorizeListedConversations(owner,batch)).get(derived)?.visibility,"private");
+  await assert.rejects(authorizeAccess(other,legacy),{status:404});
+  console.log("Conversation access store integration passed: private/team/derive/revoke/tombstone/external/legacy/batch");
  } finally { await pgPool.end(); }
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

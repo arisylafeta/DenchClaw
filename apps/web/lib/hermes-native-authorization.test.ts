@@ -16,11 +16,11 @@ beforeEach(()=>{vi.clearAllMocks();vi.mocked(queryPg).mockReset();vi.stubEnv("HE
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
 describe("native conversation authorization",()=>{
  it("filters before metadata/status enrichment and pages past a private first window",async()=>{
-  vi.mocked(queryPg).mockImplementation(async(_sql,params)=>[{...row,owner_id:params?.[2]==="mine"?actor.id:"another-owner"}]);
+  vi.mocked(queryPg).mockImplementation(async(_sql,params)=>JSON.parse(String(params?.[0])).map((identity:{stored_id:string})=>({...identity,...row,owner_id:identity.stored_id==="mine"?actor.id:"another-owner"})));
   const fetch=vi.fn(async(url:string)=>Response.json({data:url.includes("offset=0")?Array.from({length:200},(_,i)=>({id:`private-${i}`,source:"crm",title:"private title"})):[{id:"mine",source:"crm",title:"My chat"}]}));vi.stubGlobal("fetch",fetch);
   const result=await listConversations(actor);
   expect(result.sessions.map(session=>session.id)).toEqual(["mine"]);expect(JSON.stringify(result)).not.toContain("private title");
-  expect(fetch).toHaveBeenCalledTimes(2);expect(sessionProjectLabels).toHaveBeenCalledWith("agent",["mine"]);expect(recentSessionActivity).toHaveBeenCalledWith("agent",["mine"]);
+  expect(fetch).toHaveBeenCalledTimes(2);expect(queryPg).toHaveBeenCalledTimes(3);expect(sessionProjectLabels).toHaveBeenCalledWith("agent",["mine"]);expect(recentSessionActivity).toHaveBeenCalledWith("agent",["mine"]);
  });
  it("surfaces a registry outage as 503 instead of silently returning partial results",async()=>{
   vi.mocked(queryPg).mockRejectedValueOnce(Error("private storage detail"));vi.stubGlobal("fetch",vi.fn(async()=>Response.json({data:[{id:"mine",source:"crm"}]})));
