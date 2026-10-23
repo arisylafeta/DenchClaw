@@ -1,6 +1,8 @@
 // Client-safe identities. Profile filters never participate in routing a selected chat.
 export type HermesParticipant = { profile: string; memberId?: string; name: string; handle?: string };
+export type ConversationAccess = { visibility: "private" | "team"; ownerId: string | null; canShare: boolean; canDelete: boolean; canWrite: boolean; canApprove: boolean };
 export type HermesConversation = {
+  access?: ConversationAccess;
   key: string;
   kind: "solo" | "group";
   id: string;
@@ -29,6 +31,9 @@ export function parseConversationKey(key: string): { kind: "solo" | "group"; pro
     throw new Error("Invalid conversation identity");
   }
   return { kind: value[0] as "solo" | "group", profile: value[1], id: value[2] };
+}
+export function canViewConversation(row: HermesConversation, userId?: string | null): boolean {
+  return !!row.access && (row.access.visibility === "team" || (!!userId && row.access.visibility === "private" && row.access.ownerId === userId));
 }
 export function filterConversations(rows: HermesConversation[], profile: string | null) {
   return profile ? rows.filter((row) => row.participants.some((p) => p.profile === profile)) : rows;
@@ -81,9 +86,9 @@ function dayBucket(ms: number, now: Date) {
   const days = Math.ceil((startOfToday - ms) / 86_400_000);
   return days === 1 ? "Yesterday" : days <= 7 ? "Last 7 days" : days <= 30 ? "Last 30 days" : "Older";
 }
-export function applyChatView(rows: HermesConversation[], view: ChatView, query: string, now = new Date()) {
+export function applyChatView(rows: HermesConversation[], view: ChatView, query: string, now = new Date(), userId?: string) {
   const needle = query.trim().toLowerCase();
-  const unique = [...new Map(rows.map((row) => [row.key, row])).values()];
+  const unique = [...new Map(rows.filter((row) => canViewConversation(row, userId)).map((row) => [row.key, row])).values()];
   const searched = needle ? unique.filter((row) => row.title.toLowerCase().includes(needle) || row.participants.some((p) => p.name.toLowerCase().includes(needle))) : unique;
   const counts: Record<string, { id: string; label: string; count: number }> = Object.create(null);
   for (const row of searched) { const c = conversationChannel(row); (counts[c.id] ??= { ...c, count: 0 }).count++; }
@@ -98,9 +103,14 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
   // Discover sections in recency order regardless of the row sort preference.
   const sorted = [...shown].sort(recentFirst);
   for (const row of sorted) {
+    const scope = row.access?.visibility === "team" ? "shared" : "mine";
+    const detail = automation(row) ? sourceSection(row) : view.groupBy === "source" || view.groupBy === "none"
+      ? sourceSection(row) : { key: `view:${keyOf(row)}`, label: keyOf(row) };
+    const base = scope === "mine" ? "My chats" : "Shared";
     const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
-      : automation(row) ? sourceSection(row)
-      : view.groupBy === "source" || view.groupBy === "none" ? sourceSection(row) : { key: `view:${keyOf(row)}`, label: keyOf(row) };
+      : automation(row) ? { key: "automation", label: `${base} · Automation` }
+      : detail.key === "chats" || detail.key === "group" ? { key: scope, label: base }
+      : { key: `${scope}:${detail.key}`, label: `${base} · ${detail.label}` };
     const section = sections.get(bucket.key) ?? { ...bucket, rows: [] };
     section.rows.push(row); sections.set(bucket.key, section);
   }
@@ -108,7 +118,7 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
     section.rows.sort((a, b) => Number(!a.project) - Number(!b.project)
       || (a.project ?? "").localeCompare(b.project ?? "", undefined, { sensitivity: "base" }) || recentFirst(a, b));
   }
-  const order = ["pinned", "chats", "group", "discord", "whatsapp"];
-  const rank = (key: string) => key === "automation" ? 1000 : order.includes(key) ? order.indexOf(key) : 10;
+  const order = ["pinned", "mine", "shared"];
+  const rank = (key: string) => key === "automation" ? 1000 : order.includes(key) ? order.indexOf(key) : key.startsWith("mine:") ? 1.5 : 3;
   return { sections: [...sections.values()].sort((a, b) => rank(a.key) - rank(b.key)), channels: Object.values(counts).sort((a, b) => b.count - a.count), shown: shown.length, hiddenCount: searched.length - shown.length };
 }

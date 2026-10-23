@@ -10,13 +10,14 @@ const preference = vi.hoisted(() => ({ reduced: false as boolean | null }));
 // Keep the real Motion layout engine. Only control the OS preference in jsdom.
 vi.mock("framer-motion", async (original) => ({ ...await original<typeof import("framer-motion")>(), useReducedMotion: () => preference.reduced }));
 vi.mock("./profile-avatar", () => ({ ProfileAvatar: () => <span /> }));
+const access = { visibility: "team" as const, ownerId: null, canShare: false, canDelete: false, canWrite: true, canApprove: true };
 const rows: HermesConversation[] = [
-  { key: "new", id: "new", kind: "solo", title: "Newer chat", updatedAt: 200, working: false, project: "Beacon", participants: [] },
-  { key: "old", id: "old", kind: "solo", title: "Older chat", updatedAt: 100, working: true, project: "Beacon", participants: [] },
+  { access, key: "new", id: "new", kind: "solo", title: "Newer chat", updatedAt: 200, working: false, project: "Beacon", participants: [] },
+  { access, key: "old", id: "old", kind: "solo", title: "Older chat", updatedAt: 100, working: true, project: "Beacon", participants: [] },
 ];
 const sections = (sessions = rows) => applyChatView(sessions, DEFAULT_VIEW, "").sections;
 function controller(sessions = rows) {
-  return { ready: true, listing: { sessions, warnings: [] }, filter: null, selected: rows[1], seen: {}, error: null, select: vi.fn() } as unknown as HermesChatsController;
+  return { ready: true, listing: { userId: "user-a", sessions, warnings: [] }, filter: null, selected: rows[1], seen: {}, error: null, select: vi.fn() } as unknown as HermesChatsController;
 }
 beforeEach(() => { preference.reduced = false; localStorage.clear(); });
 afterEach(() => { vi.restoreAllMocks(); });

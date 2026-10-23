@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
+import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
 import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
@@ -9,7 +9,7 @@ import { ProfileAvatar } from "./profile-avatar";
 import { useConversationReorderMotion } from "./use-conversation-reorder-motion";
 import styles from "./hermes-conversations.module.css";
 
-type Listing = { backend: string; transport?: "gateway" | "sse"; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
+type Listing = { userId: string; backend: string; transport?: "gateway" | "sse"; sessions: HermesConversation[]; profiles: string[]; warnings: string[]; groupsAvailable: boolean };
 export type NewChatMode = "solo" | "group";
 export type ChatStatus = "running" | "awaiting" | "background" | "done" | "idle";
 const SEEN_KEY = "hermes-chats-seen";
@@ -20,9 +20,9 @@ const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: "source", label: "Source sections" }, { value: "channel", label: "Channel" }, { value: "agent", label: "Agent" },
   { value: "day", label: "Day" }, { value: "job", label: "Scheduled job" },
 ];
-function loadView(): ChatView {
+function loadView(userId?: string): ChatView {
   try {
-    return parseChatView(JSON.parse(localStorage.getItem(VIEW_KEY) || "null"));
+    return parseChatView(JSON.parse(localStorage.getItem(`${VIEW_KEY}:${userId}`) || "null"));
   } catch { /* Unavailable or invalid storage uses the default view. */ }
   return DEFAULT_VIEW;
 }
@@ -31,9 +31,9 @@ async function jsonResponse(response: Response) {
   if (!response.ok) throw new Error(data.error || "Hermes request failed");
   return data;
 }
-function loadSeen(): Record<string, number> {
+function loadSeen(userId: string): Record<string, number> {
   try {
-    const value = JSON.parse(localStorage.getItem(SEEN_KEY) || "{}");
+    const value = JSON.parse(localStorage.getItem(`${SEEN_KEY}:${userId}`) || "{}");
     return value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))) : {};
   } catch { return {}; }
 }
@@ -46,15 +46,14 @@ export function formatChatDate(ms: number, now = new Date()) {
 export function useHermesConversations() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(PROFILE_FILTER_KEY) || "null");
-      if (typeof saved === "string" && saved.length > 0 && saved.length <= 200) setFilter(saved);
-    } catch { /* Profile filter starts at All chats. */ }
-  }, []);
+  const account = useRef<string | null>(null);
+  const generation = useRef(0);
+  const reloadSequence = useRef(0);
+  const [sharingKey, setSharingKey] = useState<string | null>(null);
+  const sharingPending = useRef(false);
   const updateFilter = useCallback((profile: string | null) => {
     setFilter(profile);
-    try { localStorage.setItem(PROFILE_FILTER_KEY, JSON.stringify(profile)); } catch { /* In-memory filtering still works. */ }
+    if (account.current) try { localStorage.setItem(`${PROFILE_FILTER_KEY}:${account.current}`, JSON.stringify(profile)); } catch { /* Storage unavailable. */ }
   }, []);
   const [selected, setSelected] = useState<HermesConversation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,12 +62,6 @@ export function useHermesConversations() {
   const [dialog, setDialog] = useState<NewChatMode | null>(null);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [aliases, setAliases] = useState<Record<string, string>>({});
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(ALIAS_KEY) || "{}");
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) setAliases(Object.fromEntries(Object.entries(saved).filter(([, name]) => typeof name === "string" && name.trim().length > 0 && name.length <= 200)) as Record<string, string>);
-    } catch { /* Local aliases remain usable without storage. */ }
-  }, []);
   // False until the first listing request settles; separates "still asking" from "not a Hermes backend".
   const [ready, setReady] = useState(false);
   const newChat = useCallback((mode: NewChatMode = "solo") => setDialog(mode), []);
@@ -76,20 +69,37 @@ export function useHermesConversations() {
   const clear = useCallback(() => setSelected(null), []);
   const [pins, setPins] = useState<string[]>([]);
   const reload = useCallback(async () => {
+    const sequence = ++reloadSequence.current;
     try {
       const data = await jsonResponse(await fetch("/api/hermes/conversations"));
-      if (data.backend === "hermes") setListing(data);
+      if (sequence !== reloadSequence.current) return;
+      if (typeof data.userId !== "string" || !data.userId) throw new Error("Chat access could not be verified");
+      if (account.current !== data.userId) {
+        account.current = data.userId; generation.current++;
+        setSelected(null); setPins([]); setSeen(loadSeen(data.userId)); setAliases({}); setFilter(null);
+        setDialog(null); setLastCreatedKey(null); setCreating(false); setSharingKey(null); sharingPending.current = false;
+        try {
+          const aliases = JSON.parse(localStorage.getItem(`${ALIAS_KEY}:${data.userId}`) || "{}");
+          if (aliases && typeof aliases === "object" && !Array.isArray(aliases)) setAliases(Object.fromEntries(Object.entries(aliases).filter(([, v]) => typeof v === "string" && v.length <= 200)) as Record<string, string>);
+          const filter = JSON.parse(localStorage.getItem(`${PROFILE_FILTER_KEY}:${data.userId}`) || "null");
+          if (typeof filter === "string") setFilter(filter);
+        } catch { /* Account starts with clean local state. */ }
+      }
+      if (data.backend === "hermes") {
+        setListing(data);
+        setSelected(current => current ? data.sessions.find((row: HermesConversation) => row.key === current.key && canViewConversation(row, data.userId)) ?? null : null);
+      }
       setError(null);
       // Pins are per signed-in user on the server; a failed read keeps the last known set.
       try {
         const saved = await (await fetch("/api/hermes/pins")).json();
-        if (Array.isArray(saved?.pins)) setPins(saved.pins.filter((id: unknown) => typeof id === "string"));
+        if (sequence === reloadSequence.current && Array.isArray(saved?.pins)) setPins(saved.pins.filter((id: unknown) => typeof id === "string"));
       } catch { /* Keep the previous pins. */ }
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not load chats"); }
+    } catch (e) { if (sequence === reloadSequence.current) { generation.current++; setListing(null); setSelected(null); setPins([]); setError(e instanceof Error ? e.message : "Could not load chats"); } }
     finally { setReady(true); }
   }, []);
   useEffect(() => { void reload(); const timer = setInterval(() => void reload(), 10_000); return () => clearInterval(timer); }, [reload]);
-  useEffect(() => { setSeen(loadSeen()); }, []);
+
   // Chats first seen are baselined as read; later activity in a chat you are not viewing shows as "done".
   useEffect(() => {
     if (!listing) return;
@@ -97,82 +107,88 @@ export function useHermesConversations() {
       const next = { ...prev };
       for (const row of listing.sessions) if (next[row.key] === undefined || selected?.key === row.key) next[row.key] = Math.max(next[row.key] ?? 0, row.updatedAt);
       if (JSON.stringify(next) === JSON.stringify(prev)) return prev;
-      try { localStorage.setItem(SEEN_KEY, JSON.stringify(next)); } catch { /* Storage unavailable: unread dots reset on reload. */ }
+      try { localStorage.setItem(`${SEEN_KEY}:${listing.userId}`, JSON.stringify(next)); } catch { /* Storage unavailable: unread dots reset on reload. */ }
       return next;
     });
   }, [listing, selected?.key]);
-  const select = (row: HermesConversation) => { setSelected(row); setDialog(null); setError(null); };
+  const select = (row: HermesConversation) => { if (!canViewConversation(row, account.current)) return; setSelected(row); setDialog(null); setError(null); };
   /** Opens a conversation that is not in the listing (deep link, old chat). Resolves false when it cannot be loaded. */
   const selectKey = useCallback(async (key: string): Promise<boolean> => {
+    const token = generation.current;
+    setSelected(null);
     try {
       const data = await jsonResponse(await fetch(`/api/hermes/conversations/${encodeURIComponent(key)}`));
-      if (!data.conversation) return false;
+      if (token !== generation.current || (!data.conversation || !canViewConversation(data.conversation, account.current))) return false;
       setSelected(data.conversation); setDialog(null); setError(null);
       return true;
     } catch { return false; }
   }, []);
   const create = async (profiles: string[]) => {
     if (creating) return;
+    const token = generation.current;
     setCreating(true); setError(null);
     try {
       const data = await jsonResponse(await fetch("/api/hermes/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profiles }) }));
+      if (token !== generation.current) return;
       setLastCreatedKey(data.conversation.key);
       select(data.conversation); await reload();
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not create chat"); }
-    finally { setCreating(false); }
+    } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not create chat"); }
+    finally { if (token === generation.current) setCreating(false); }
   };
   const rename = async (row: HermesConversation, title: string) => {
+    const token = generation.current;
+    if (!row.access?.canWrite) return false;
     const next = title.trim();
     if (!next || next === row.title) return true;
     if (messagingConversation(row)) {
       const updated = { ...aliases, [row.key]: next.slice(0, 200) };
       setAliases(updated);
-      try { localStorage.setItem(ALIAS_KEY, JSON.stringify(updated)); } catch { /* In-memory rename still works. */ }
+      try { localStorage.setItem(`${ALIAS_KEY}:${account.current}`, JSON.stringify(updated)); } catch { /* In-memory rename still works. */ }
       return true;
     }
     try {
       const data = await jsonResponse(await fetch(`/api/hermes/conversations/${encodeURIComponent(row.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: next }) }));
+      if (token !== generation.current) return false;
       setSelected((current) => current?.key === row.key ? data.conversation : current);
       await reload();
       return true;
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not rename chat"); return false; }
+    } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not rename chat"); return false; }
   };
   const setPinned = useCallback(async (key: string, pinned: boolean) => {
+    const token = generation.current;
     const previous = pins;
     setPins(pinned ? [...new Set([...previous, key])] : previous.filter((id) => id !== key));
     try {
       const response = await fetch("/api/hermes/pins", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, pinned }) });
       const data = await response.json();
       if (!response.ok || !Array.isArray(data.pins)) throw new Error(data?.error === "chat_not_found" ? "That chat no longer exists" : "Could not update pin");
-      setPins(data.pins);
-    } catch (e) { setPins(previous); setError(e instanceof Error ? e.message : "Could not update pin"); }
+      if (token === generation.current) setPins(data.pins);
+    } catch (e) { if (token === generation.current) { setPins(previous); setError(e instanceof Error ? e.message : "Could not update pin"); } }
   }, [pins]);
-  // One-time move of browser-local pins (pre-server) into this user's server pins. Stale keys are skipped by the server.
-  const migrated = useRef(false);
-  useEffect(() => {
-    if (!ready || !listing || migrated.current) return;
-    migrated.current = true;
-    let local: string[] = [];
-    try { local = loadView().pins ?? []; } catch { /* Nothing to migrate. */ }
-    if (!local.length) return;
-    void (async () => {
-      for (const key of local) {
-        try { await fetch("/api/hermes/pins", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, pinned: true }) }); } catch { /* Skip; the next load retries. */ }
-      }
-      try {
-        const saved = await (await fetch("/api/hermes/pins")).json();
-        if (Array.isArray(saved?.pins)) setPins(saved.pins);
-        const view = loadView();
-        localStorage.setItem(VIEW_KEY, JSON.stringify({ ...view, pins: [] }));
-      } catch { /* Local pins stay until a later load succeeds. */ }
-    })();
-  }, [ready, listing]);
+  const setVisibility = async (row: HermesConversation, visibility: "private" | "team") => {
+    if (!row.access?.canShare || row.access.ownerId !== account.current || sharingPending.current) return false;
+    const token = generation.current;
+    sharingPending.current = true; setSharingKey(row.key); setError(null);
+    try {
+      await jsonResponse(await fetch(`/api/hermes/conversations/${encodeURIComponent(row.key)}/sharing`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ visibility }) }));
+      if (token !== generation.current) return false;
+      // Verify the exact target, rather than making an optimistic privacy claim.
+      const data = await jsonResponse(await fetch(`/api/hermes/conversations/${encodeURIComponent(row.key)}/sharing`));
+      if (token !== generation.current) return false;
+      if (data.access?.visibility !== visibility) throw new Error("Sharing change could not be verified");
+      reloadSequence.current++; // Discard a listing started before the verified sharing change.
+      setListing(current => current ? { ...current, sessions: current.sessions.map(item => item.key === row.key ? { ...item, access: data.access } : item) } : current);
+      setSelected(current => current?.key === row.key ? { ...current, access: data.access } : current);
+      return true;
+    } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not update sharing"); return false; }
+    finally { if (token === generation.current) { sharingPending.current = false; setSharingKey(null); } }
+  };
   const display = useCallback((row: HermesConversation) => messagingConversation(row) && Object.hasOwn(aliases, row.key) ? { ...row, title: aliases[row.key] } : row, [aliases]);
   const displayListing = useMemo(() => listing ? { ...listing, sessions: listing.sessions.map(display) } : null, [listing, display]);
   const displaySelected = useMemo(() => selected ? display(selected) : null, [selected, display]);
   return { enabled: listing?.backend === "hermes", ready, listing: displayListing, filter, setFilter: updateFilter, selected: displaySelected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
+    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; background = only subagents work; done means unseen output. */
@@ -199,7 +215,7 @@ export function ParticipantIcons({ row }: { row: HermesConversation }) {
   </span>;
 }
 function SourceIcon({ source }: { source: string }) {
-  const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "chats" ? MessageCircle : Hash;
+  const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" || source === "shared" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "chats" || source === "mine" ? MessageCircle : Hash;
   return <Icon size={12} aria-hidden="true" className="shrink-0" />;
 }
 function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmit: (title: string) => Promise<boolean>; onCancel: () => void }) {
@@ -217,12 +233,12 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
   const renamingNext = useRef(false);
   const [view, setView] = useState<ChatView>(DEFAULT_VIEW);
   const [query, setQuery] = useState("");
-  useEffect(() => { setView(loadView()); }, []);
+  useEffect(() => { setView(loadView(chats.listing?.userId)); setQuery(""); setRenaming(null); }, [chats.listing?.userId]);
   const updateView = (next: ChatView) => {
     setView(next);
-    try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
+    try { localStorage.setItem(`${VIEW_KEY}:${chats.listing?.userId}`, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
   };
-  const result = applyChatView(rows, { ...view, pins: chats.pins ?? [] }, query);
+  const result = applyChatView(rows, { ...view, pins: chats.pins ?? [] }, query, new Date(), chats.listing?.userId);
   const reorderMotion = useConversationReorderMotion(result.sections, JSON.stringify([view, chats.pins, query, chats.filter, chats.ready]));
 
   const serverPins = chats.pins ?? [];
@@ -278,9 +294,9 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
           <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
           <div className="min-w-0 flex-1">
             {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
-            <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => setRenaming(row.key)} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
+            <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => { if (row.access?.canWrite) setRenaming(row.key); }} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
               <span className="block truncate text-[12px] font-medium">{row.title}</span>
-              <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", section.key === "pinned" ? conversationChannel(row).label : "", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
+              <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", row.access?.visibility === "team" ? conversationChannel(row).label : "Private", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
             </button>}
           </div>
           <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
@@ -288,7 +304,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
           {renaming !== row.key && <DropdownMenu>
             <DropdownMenuTrigger aria-label={`More options for ${row.title}`} title="More options" className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><MoreVertical size={14} aria-hidden="true" /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom" finalFocus={() => { if (!renamingNext.current) return true; renamingNext.current = false; return false; }}>
-              <DropdownMenuItem onSelect={() => { renamingNext.current = true; setRenaming(row.key); }}><Pencil size={14} aria-hidden="true" />{messagingConversation(row) ? "Rename in this browser" : "Rename"}</DropdownMenuItem>
+              {row.access?.canWrite && <DropdownMenuItem onSelect={() => { renamingNext.current = true; setRenaming(row.key); }}><Pencil size={14} aria-hidden="true" />{messagingConversation(row) ? "Rename in this browser" : "Rename"}</DropdownMenuItem>}
+              {row.access?.canShare && row.access.ownerId === chats.listing?.userId && <DropdownMenuItem disabled={!!chats.sharingKey} onSelect={() => { if (row.access?.visibility === "private" && !window.confirm("Share this chat with the team? This reveals its full history to the team.")) return; void chats.setVisibility(row, row.access?.visibility === "team" ? "private" : "team"); }}>{chats.sharingKey === row.key ? "Updating sharing…" : row.access.visibility === "team" ? "Make private" : "Share with team"}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={() => { void navigator.clipboard?.writeText(row.id); }}><Copy size={14} aria-hidden="true" />Copy ID</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>}

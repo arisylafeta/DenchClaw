@@ -1,17 +1,18 @@
 import { expect, it } from "vitest";
-import { applyChatView, conversationKey, DEFAULT_VIEW, filterConversations, parseChatView, type HermesConversation } from "./hermes-conversations";
-const row = (source: string, profile = "alpha"): HermesConversation => ({ key: conversationKey("solo", source, profile), id: source, kind: "solo", profile, source, title: source, updatedAt: 100, participants: [{ profile, name: profile }], working: false });
+import { applyChatView as applyView, conversationKey, DEFAULT_VIEW, filterConversations, parseChatView, type HermesConversation } from "./hermes-conversations";
+const applyChatView = (...args: Parameters<typeof applyView>) => applyView(args[0], args[1], args[2], args[3], "user-a");
+const row = (source: string, profile = "alpha"): HermesConversation => ({ access: { visibility: source === "web" ? "private" : "team", ownerId: source === "web" ? "user-a" : null, canShare: source === "web", canDelete: source === "web", canWrite: true, canApprove: true }, key: conversationKey("solo", source, profile), id: source, kind: "solo", profile, source, title: source, updatedAt: 100, participants: [{ profile, name: profile }], working: false });
 it("orders source sections, keeps native groups distinct and emits each composite key once", () => {
   const rows = [row("cron"), row("whatsapp"), row("discord"), row("web"), row("discord", "beta"), row("telegram"), { ...row("group"), kind: "group" as const }];
   const view = { ...DEFAULT_VIEW, pins: [rows[2].key] };
   const result = applyChatView([...rows, rows[2]], view, "");
-  expect(result.sections.map((s) => s.label)).toEqual(["Pinned", "Chats", "Groups", "Discord", "WhatsApp", "Telegram", "Automation"]);
+  expect(result.sections.map((s) => s.label)).toEqual(["Pinned", "My chats", "Shared", "Shared · Telegram", "Shared · WhatsApp", "Shared · Discord", "Shared · Automation"]);
   const keys = result.sections.flatMap((s) => s.rows.map((r) => r.key));
   expect(new Set(keys).size).toBe(rows.length); expect(keys).toHaveLength(rows.length);
-  expect(result.sections.find((s) => s.key === "discord")?.rows[0].profile).toBe("beta");
-  expect(applyChatView(filterConversations(rows, "beta"), view, "").sections.map((s) => s.label)).toEqual(["Discord"]);
+  expect(result.sections.find((s) => s.key === "shared:discord")?.rows[0].profile).toBe("beta");
+  expect(applyChatView(filterConversations(rows, "beta"), view, "").sections.map((s) => s.label)).toEqual(["Shared · Discord"]);
   expect(applyChatView(rows, { ...view, hidden: ["discord"] }, "").sections.some((s) => s.key === "pinned")).toBe(false);
-  expect(applyChatView(rows, { ...view, pins: [] }, "").sections.find((s) => s.key === "discord")?.rows).toHaveLength(2);
+  expect(applyChatView(rows, { ...view, pins: [] }, "").sections.find((s) => s.key === "shared:discord")?.rows).toHaveLength(2);
 });
 it("keeps Day and Agent section order when project order differs from recency", () => {
   const now = new Date(2026, 9, 18, 12);
@@ -44,7 +45,7 @@ it("sorts inside existing sections, keeping pins first and missing projects last
   ];
   const view = { ...DEFAULT_VIEW, pins: ["harbour"] };
   const recent = applyChatView(rows, view, "");
-  expect(recent.sections.map((s) => s.label)).toEqual(["Pinned", "Chats", "Discord", "Automation"]);
+  expect(recent.sections.map((s) => s.label)).toEqual(["Pinned", "My chats", "Shared · Discord", "Shared · Automation"]);
   expect(recent.sections[1].rows.map((r) => r.key)).toEqual(["unknown", "beacon-new", "beacon-old"]);
   const project = applyChatView([...rows, rows[2]], { ...view, sortBy: "project" }, "");
   expect(project.sections.map((s) => s.label)).toEqual(recent.sections.map((s) => s.label));

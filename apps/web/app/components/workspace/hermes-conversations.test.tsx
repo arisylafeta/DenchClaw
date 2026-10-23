@@ -3,12 +3,14 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { applyChatView, automation, conversationChannel, DEFAULT_VIEW, conversationKey, type HermesConversation } from "@/lib/hermes-conversations";
+import { applyChatView as applyView, automation, conversationChannel, DEFAULT_VIEW, conversationKey, type HermesConversation } from "@/lib/hermes-conversations";
 import { chatStatus, HermesConversationList, HermesNewChatDialog, useHermesConversations } from "./hermes-conversations";
 import { ProfileSwitcher } from "./profile-switcher";
 vi.mock("./profile-avatar", () => ({ ProfileAvatar: ({ name }: { name: string }) => <span data-testid={`avatar-${name}`} /> }));
-const solo: HermesConversation = { key: conversationKey("solo", "same-id", "alpha"), id: "same-id", kind: "solo", profile: "alpha", title: "Alpha solo", participants: [{ profile: "alpha", name: "Alpha" }], updatedAt: 100, working: null };
-const group: HermesConversation = { key: conversationKey("group", "native-room"), id: "native-room", kind: "group", title: "Shared room", participants: [{ profile: "alpha", name: "Alpha", memberId: "a" }, { profile: "default", name: "Sol", memberId: "b" }], updatedAt: 200, working: false };
+const applyChatView = (...args: Parameters<typeof applyView>) => applyView(args[0], args[1], args[2], args[3], "user-a");
+const access = { visibility: "private" as const, ownerId: "user-a", canShare: true, canDelete: true, canWrite: true, canApprove: true };
+const solo: HermesConversation = { access, key: conversationKey("solo", "same-id", "alpha"), id: "same-id", kind: "solo", profile: "alpha", title: "Alpha solo", participants: [{ profile: "alpha", name: "Alpha" }], updatedAt: 100, working: null };
+const group: HermesConversation = { access: { ...access, visibility: "team", ownerId: "other", canShare: false, canDelete: false }, key: conversationKey("group", "native-room"), id: "native-room", kind: "group", title: "Shared room", participants: [{ profile: "alpha", name: "Alpha", memberId: "a" }, { profile: "default", name: "Sol", memberId: "b" }], updatedAt: 200, working: false };
 function Harness() {
   const chats = useHermesConversations();
   return <><ProfileSwitcher conversationFilter={{ value: chats.filter, profiles: chats.listing?.profiles ?? [], onChange: chats.setFilter }} /><button type="button" onClick={() => chats.newChat("solo")}>new solo</button><button type="button" onClick={() => chats.newChat("group")}>new group</button><HermesConversationList chats={chats} /><HermesNewChatDialog chats={chats} /></>;
@@ -35,7 +37,7 @@ beforeEach(() => {
     }
     if (url === "/api/hermes/conversations") {
       if (init?.method === "POST") return Response.json({ conversation: created });
-      return Response.json({ backend: "hermes", profiles: ["default", "alpha", "other"], sessions, warnings: [], groupsAvailable: true });
+      return Response.json({ userId: "user-a", backend: "hermes", profiles: ["default", "alpha", "other"], sessions, warnings: [], groupsAvailable: true });
     }
     const identity = url.includes(encodeURIComponent(group.key)) ? group : solo;
     if (init?.method === "POST") {
@@ -150,9 +152,9 @@ describe("Hermes unified chat UI", () => {
     sessions = [solo, { ...solo, key: "cron", title: "Daily digest", source: "cron" }];
     const user = userEvent.setup(); render(<Harness />);
     await screen.findByText("Alpha solo");
-    expect(screen.getByRole("button", { name: "Automation 1" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "My chats · Automation 1" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Daily digest")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Automation 1" }));
+    await user.click(screen.getByRole("button", { name: "My chats · Automation 1" }));
     expect(screen.getByRole("button", { name: "Open Daily digest" })).toHaveTextContent("read-only");
     await user.click(screen.getByRole("button", { name: "Open Daily digest" }));
     expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
@@ -169,12 +171,12 @@ describe("Hermes unified chat UI", () => {
     expect(screen.getByRole("button", { name: "Pinned 1" })).toHaveAttribute("aria-expanded", "false");
     await user.click(screen.getByRole("button", { name: "Pinned 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Unpin Alpha solo" }));
-    expect(within(screen.getByRole("region", { name: "Chats" })).getByText("Alpha solo")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "My chats" })).getByText("Alpha solo")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
   it("persists project sorting without rerouting and keeps hidden sources in the filter without notice copy", async () => {
-    localStorage.setItem("hermes-chats-view", JSON.stringify({ ...DEFAULT_VIEW, hidden: ["webhook", "cron"] }));
+    localStorage.setItem("hermes-chats-view:user-a", JSON.stringify({ ...DEFAULT_VIEW, hidden: ["webhook", "cron"] }));
     sessions = [{ ...solo, key: "unknown", title: "Recent chat", updatedAt: 900 }, { ...solo, key: "project", title: "Project chat", project: "Beacon" }];
     const user = userEvent.setup(); const first = render(<Harness />);
     await user.click(await screen.findByRole("button", { name: "Open Recent chat" }));
@@ -185,7 +187,7 @@ describe("Hermes unified chat UI", () => {
     expect(screen.getAllByRole("button", { name: /^Open / }).map((button) => button.getAttribute("aria-label"))).toEqual(["Open Project chat", "Open Recent chat"]);
     expect(screen.getByRole("button", { name: "Open Recent chat" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("button", { name: "Open Recent chat" })).toHaveTextContent("No project");
-    expect(JSON.parse(localStorage.getItem("hermes-chats-view")!)).toMatchObject({ sortBy: "project", hidden: ["webhook", "cron"] });
+    expect(JSON.parse(localStorage.getItem("hermes-chats-view:user-a")!)).toMatchObject({ sortBy: "project", hidden: ["webhook", "cron"] });
     first.unmount(); render(<Harness />);
     expect(await screen.findByRole("button", { name: "Open Project chat" })).toHaveTextContent("Beacon");
     screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
@@ -201,7 +203,7 @@ describe("Hermes unified chat UI", () => {
       { ...solo, key: "unread", title: "Unread chat", working: false, updatedAt: 500 },
       { ...solo, key: "background", title: "Background chat", working: false, background: true },
     ];
-    localStorage.setItem("hermes-chats-seen", JSON.stringify({ unread: 100 }));
+    localStorage.setItem("hermes-chats-seen:user-a", JSON.stringify({ unread: 100 }));
     render(<Harness />);
     await screen.findByRole("button", { name: "Open Running chat" });
     for (const [name, status] of [["Running", "running"], ["Blocked", "awaiting"], ["Unknown", "idle"], ["Idle", "idle"], ["Unread", "done"], ["Background", "background"]]) {
@@ -211,7 +213,7 @@ describe("Hermes unified chat UI", () => {
     }
   });
   it("migrates explicit hidden choices and keeps searched zero-count sources toggleable", async () => {
-    localStorage.setItem("hermes-chats-view", JSON.stringify({ hidden: ["discord", "cron", "webhook"], groupBy: "none" }));
+    localStorage.setItem("hermes-chats-view:user-a", JSON.stringify({ hidden: ["discord", "cron", "webhook"], groupBy: "none" }));
     sessions = [solo, { ...group, source: "discord", kind: "solo", title: "Hidden channel" }];
     const user = userEvent.setup(); render(<Harness />);
     await screen.findByText("Alpha solo");
@@ -220,7 +222,7 @@ describe("Hermes unified chat UI", () => {
     screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Discord 0" })).toHaveAttribute("aria-checked", "false");
     await user.click(screen.getByRole("menuitemcheckbox", { name: "Discord 0" }));
-    expect(JSON.parse(localStorage.getItem("hermes-chats-view")!)).toMatchObject({ version: 2, hidden: ["cron", "webhook"], groupBy: "source" });
+    expect(JSON.parse(localStorage.getItem("hermes-chats-view:user-a")!)).toMatchObject({ version: 2, hidden: ["cron", "webhook"], groupBy: "source" });
   });
   it.each(["Channel", "Agent", "Day", "Scheduled job"])("keeps pins unique in secondary %s view", async (label) => {
     const user = userEvent.setup(); render(<Harness />);
@@ -262,7 +264,7 @@ describe("Hermes unified chat UI", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("works with malformed/unavailable storage and clears an empty search", async () => {
-    localStorage.setItem("hermes-chats-view", '{"hidden":"bad","groupBy":"invalid"}');
+    localStorage.setItem("hermes-chats-view:user-a", '{"hidden":"bad","groupBy":"invalid"}');
     const user = userEvent.setup(); render(<Harness />); await screen.findByText("Alpha solo");
     const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
     try {
@@ -280,7 +282,7 @@ describe("chat view edge cases", () => {
     const rows = [0, -1, -86_400_000, -7 * 86_400_000, -30 * 86_400_000].map((offset, index) => ({ ...solo, key: `${index}`, updatedAt: midnight + offset }));
     const result = applyChatView(rows, { hidden: [], groupBy: "day" }, "", now);
     expect(result.sections.map((section) => [section.label, section.rows.map((row) => row.key)])).toEqual([
-      ["Today", ["0"]], ["Yesterday", ["1", "2"]], ["Last 7 days", ["3"]], ["Last 30 days", ["4"]],
+      ["My chats · Today", ["0"]], ["My chats · Yesterday", ["1", "2"]], ["My chats · Last 7 days", ["3"]], ["My chats · Last 30 days", ["4"]],
     ]);
     expect(conversationChannel({ ...solo, source: "crm" })).toEqual({ id: "crm", label: "CRM" });
     expect(automation({ ...solo, source: "cron" })).toBe(true);
@@ -316,7 +318,7 @@ describe("useHermesConversations loading and deep links", () => {
     expect(result.current.selected?.title).toBe("Older chat");
     await act(async () => { opened = await result.current.selectKey("missing"); });
     expect(opened).toBe(false);
-    expect(result.current.selected?.title).toBe("Older chat");
+    expect(result.current.selected).toBeNull();
   });
 });
 
@@ -330,11 +332,11 @@ describe("server-backed pins", () => {
     fireEvent.click(screen.getByRole("button", { name: "Unpin Alpha solo" }));
     await waitFor(() => expect(serverPins).toEqual([group.key]));
   });
-  it("migrates browser-local pins to the server once and clears them locally", async () => {
+  it("does not import unscoped browser-local pins into an account", async () => {
     localStorage.setItem("hermes-chats-view", JSON.stringify({ ...DEFAULT_VIEW, pins: [solo.key] }));
     render(<Harness2 />);
-    await waitFor(() => expect(serverPins).toEqual([solo.key]));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("hermes-chats-view")!).pins).toEqual([]));
+    await screen.findByText("Alpha solo");
+    expect(serverPins).toEqual([]);
   });
   it("rolls back and reports a failed pin", async () => {
     const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<Response>;
@@ -346,3 +348,78 @@ describe("server-backed pins", () => {
   });
 });
 function Harness2() { const chats = useHermesConversations(); return <HermesConversationList chats={chats} />; }
+
+describe("conversation privacy controls", () => {
+  it("separates owned private and shared chats, and hides missing access and another owner's private chats", async () => {
+    sessions = [solo, group, { ...solo, key: "unknown", title: "Unknown access", access: undefined }, { ...solo, key: "foreign", title: "Foreign private", access: { ...access, ownerId: "other" } }];
+    const user = userEvent.setup(); render(<Harness2 />);
+    expect(within(await screen.findByRole("region", { name: "My chats" })).getByText(solo.title)).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Shared" })).getByText(group.title)).toBeInTheDocument();
+    expect(screen.queryByText("Unknown access")).not.toBeInTheDocument();
+    expect(screen.queryByText("Foreign private")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More options for Shared room" }));
+    expect(screen.queryByRole("menuitem", { name: /Share with team|Make private|Delete/ })).not.toBeInTheDocument();
+  });
+  it("confirms history disclosure, verifies sharing and unsharing before moving the row", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<Response>;
+    let visibility: "private" | "team" = "private";
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/sharing")) {
+        if (init?.method === "PATCH") visibility = JSON.parse(init.body as string).visibility;
+        return Response.json({ access: { ...access, visibility } });
+      }
+      return base(url, init);
+    });
+    const user = userEvent.setup(); render(<Harness2 />);
+    await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Share with team" }));
+    await waitFor(() => expect(within(screen.getByRole("region", { name: "Shared" })).getByText(solo.title)).toBeInTheDocument());
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("full history"));
+    await user.click(screen.getByRole("button", { name: "More options for Alpha solo" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Make private" }));
+    await waitFor(() => expect(within(screen.getByRole("region", { name: "My chats" })).getByText(solo.title)).toBeInTheDocument());
+    expect(fetchMock.mock.calls.filter(([url, init]) => url.endsWith("/sharing") && !init?.method)).toHaveLength(2);
+    confirm.mockRestore();
+  });
+  it("keeps the last confirmed visibility during pending and failed sharing", async () => {
+    const { result } = renderHook(() => useHermesConversations());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    let resolve!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.setVisibility(solo, "team"); });
+    expect(result.current.sharingKey).toBe(solo.key);
+    expect(result.current.listing?.sessions.find(row => row.key === solo.key)?.access?.visibility).toBe("private");
+    await act(async () => { resolve(Response.json({ error: "Sharing unavailable" }, { status: 503 })); await pending; });
+    expect(result.current.sharingKey).toBeNull();
+    expect(result.current.error).toBe("Sharing unavailable");
+    expect(result.current.listing?.sessions.find(row => row.key === solo.key)?.access?.visibility).toBe("private");
+  });
+  it.each([401, 403, 404])("clears selection on denied detail (%s)", async status => {
+    const { result } = renderHook(() => useHermesConversations());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    act(() => result.current.select(solo));
+    fetchMock.mockImplementationOnce(() => Response.json({ error: "Access denied" }, { status }));
+    await act(async () => { expect(await result.current.selectKey(solo.key)).toBe(false); });
+    expect(result.current.selected).toBeNull();
+  });
+  it("clears account state and rejects an old account's late detail response", async () => {
+    localStorage.setItem("hermes-chats-profile-filter:user-a", JSON.stringify("alpha"));
+    const { result } = renderHook(() => useHermesConversations());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    act(() => result.current.select(solo));
+    let resolve!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.selectKey(solo.key); });
+    const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url === "/api/hermes/conversations" ? Response.json({ userId: "user-b", backend: "hermes", sessions: [group], profiles: [], warnings: [], groupsAvailable: true }) : base(url, init));
+    await act(async () => { await result.current.reload(); });
+    await act(async () => { resolve(Response.json({ conversation: solo })); expect(await pending).toBe(false); });
+    expect(result.current.selected).toBeNull();
+    expect(result.current.filter).toBeNull();
+    expect(result.current.listing?.userId).toBe("user-b");
+    expect(localStorage.getItem("hermes-chats-profile-filter:user-b")).toBeNull();
+  });
+});
