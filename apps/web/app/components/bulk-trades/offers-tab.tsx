@@ -1,9 +1,8 @@
 "use client";
 
 import { ChevronDown, ChevronRight, ExternalLink, Mail, MessageCircle, Phone, Plus, StickyNote, Tag, ArrowDownLeft, ArrowUpRight } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Offer, OfferStage, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
-import type { DemandSupply } from "@/lib/demand-supply-types";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "./trade-ui";
 import { rowFocus } from "./demand-page";
@@ -59,8 +58,21 @@ function Avatar({ name, size = 32, loading = false }: { name: string | null; siz
   );
 }
 
+/** Whose move it is on this offer: us, or them (with the date it started). Blank when not yet judged. */
+function WaitingPill({ offer }: { offer: Offer }) {
+  if (!offer.waiting_on) return null;
+  const them = offer.waiting_on === "them";
+  const since = offer.waiting_since ? ` since ${dateOf(offer.waiting_since)}` : "";
+  return (
+    <span data-waiting-on={offer.waiting_on} className="inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{ background: "transparent", color: them ? "var(--bt-muted)" : "var(--bt-amber)", borderColor: them ? "var(--bt-border)" : "var(--bt-amber-border)" }}>
+      {them ? "Waiting on them" : "On us"}{since}
+    </span>
+  );
+}
+
 /** Who we offered this to, one thread each. Inside a thread: the whole conversation, stage, terms and next step. */
-export function OffersTab({ demandId, listingId, showSuggestions = true, supply, supplyLoading = false, onChanged }: { demandId: string; listingId?: string; showSuggestions?: boolean; supply: DemandSupply | null; supplyLoading?: boolean; onChanged: () => void }) {
+export function OffersTab({ demandId, listingId, onChanged }: { demandId: string; listingId?: string; onChanged: () => void }) {
   const base = listingId ? `/api/bulk-listings/${encodeURIComponent(listingId)}/offers` : `/api/bulk-trades/demand/${encodeURIComponent(demandId)}/offers`;
   const [offers, setOffers] = useState<Offer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,50 +81,29 @@ export function OffersTab({ demandId, listingId, showSuggestions = true, supply,
     catch (err) { setError(err instanceof Error ? err.message : "Could not load offers."); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
-  return <OfferList showSuggestions={showSuggestions} offers={offers} error={error} supply={supply} supplyLoading={supplyLoading} base={base} onUpdated={() => { void load(); onChanged(); }} />;
+  return <OfferList offers={offers} error={error} base={base} onUpdated={() => { void load(); onChanged(); }} />;
 }
 
-function OfferList({ showSuggestions, offers, error, supply, supplyLoading, base, onUpdated }: {
-  showSuggestions: boolean; offers: Offer[] | null; error: string | null; supply: DemandSupply | null; supplyLoading: boolean; base: string; onUpdated: () => void;
+function OfferList({ offers, error, base, onUpdated }: {
+  offers: Offer[] | null; error: string | null; base: string; onUpdated: () => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [view, setView] = useState<"threads" | "suggested">("threads");
   const loading = offers === null && !error;
-  const suggestionsLoading = supply === null && supplyLoading;
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const suggestions = useMemo(() => {
-    const have = new Set((offers ?? []).map((o) => (o.name ?? "").toLowerCase()));
-    const seen = new Set<string>();
-    const out: { name: string; note: string }[] = [];
-    for (const g of supply?.groups ?? []) for (const s of g.bySeller) {
-      const key = s.name.toLowerCase();
-      if (have.has(key) || seen.has(key)) continue;
-      seen.add(key);
-      out.push({ name: s.name, note: `${s.units.toLocaleString("en-GB")} units · ${g.label}` });
-    }
-    return out.slice(0, 5);
-  }, [offers, supply]);
-  async function create(input: { name: string; contact?: string; wants?: string }) {
+  async function create(input: { name: string; contact?: string }) {
     setBusy(true); setFormError(null);
-    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer; onUpdated(); setView("threads"); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
+    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer; onUpdated(); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
     catch (err) { setFormError(err instanceof Error ? err.message : "Could not add."); }
     finally { setBusy(false); }
   }
   return (
-    <BusyRegion busy={loading || suggestionsLoading} label="Loading offers" className="flex w-full flex-col gap-4">
+    <BusyRegion busy={loading} label="Loading offers" className="flex w-full flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <div role="group" aria-label="Offers view" className="inline-flex gap-1 p-[3px]" style={{ background: "var(--bt-segment)" }}>
-          {([["threads", "Threads", offers?.length], ...(showSuggestions ? [["suggested", "Suggested", suggestionsLoading ? undefined : suggestions.length] as const] : [])] as const).map(([value, label, n]) => (
-            <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)} className={`${rowFocus} px-3 py-1 text-[12px]`}
-              style={{ background: view === value ? "var(--bt-badge)" : "transparent", color: view === value ? "var(--bt-on-badge)" : "var(--bt-muted)" }}>
-              {label} · <Sh on={n === undefined} chars={1}>{n}</Sh>
-            </button>
-          ))}
-        </div>
+        <h3 className="font-mono text-[11px] uppercase tracking-[0.06em]" style={{ color: "var(--bt-muted)" }}>Offers · <Sh on={loading} chars={1}>{offers?.length}</Sh></h3>
         <button type="button" className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle} onClick={() => setAdding(!adding)}>
           <Plus size={14} aria-hidden /> New offer
         </button>
@@ -125,7 +116,7 @@ function OfferList({ showSuggestions, offers, error, supply, supplyLoading, base
         </form>
       )}
       <ErrorText error={error ?? formError} />
-      {view === "threads" && (loading || (offers && offers.length > 0)) && (
+      {(loading || (offers && offers.length > 0)) && (
         <ul className="flex flex-col">
           {(loading ? PLACEHOLDER_OFFERS : offers ?? []).map((o) => {
             const terms = termsLine(o);
@@ -138,12 +129,13 @@ function OfferList({ showSuggestions, offers, error, supply, supplyLoading, base
                     <span className="flex items-center gap-2">
                       <span className="truncate text-[14px] font-semibold"><Sh on={loading} chars={18}>{o.name ?? "Unnamed"}</Sh></span>
                       <StagePill stage={o.stage} loading={loading} />
+                      {!loading && <WaitingPill offer={o} />}
                     </span>
                     <span className="mt-0.5 block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
                       <Sh on={loading} chars={32}>{[terms, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
                     </span>
                   </span>
-                  {o.messages > 0 && <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages}</Sh></span>}
+                  <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages > 0 ? `${o.messages} ${o.messages === 1 ? "message" : "messages"}${o.last_message_at ? ` · ${dateOf(o.last_message_at)}` : ""}` : "No messages"}</Sh></span>
                 </button>
                 {!loading && openId === o.id && <ThreadPanel base={base} offerId={o.id} onUpdated={onUpdated} />}
               </li>
@@ -151,23 +143,8 @@ function OfferList({ showSuggestions, offers, error, supply, supplyLoading, base
           })}
         </ul>
       )}
-      {view === "threads" && offers && !offers.length && !adding && (
-        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Start a thread for each person you offer this to. Their emails and WhatsApp messages, bids and next steps collect there.</p>
-      )}
-      {view === "suggested" && (
-        <section aria-label="Suggested" className="flex flex-col gap-1">
-          <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>Sellers in our inventory that fit this ask. Nobody has been contacted: starting a thread moves them to Threads.</p>
-          <ul>
-            {(suggestionsLoading ? Array.from({ length: 3 }, (_, i) => ({ name: `loading-${i}`, note: "" })) : suggestions).map((s) => (
-              <li key={s.name} className="flex items-center gap-3 border-t py-2 first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <Avatar name={s.name} size={28} loading={suggestionsLoading} />
-                <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium"><Sh on={suggestionsLoading} chars={18}>{s.name}</Sh></span><span className="block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={suggestionsLoading} chars={26}>{s.note}</Sh></span></span>
-                <button type="button" disabled={busy || suggestionsLoading} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={() => void create({ name: s.name, wants: s.note })}>Start thread</button>
-              </li>
-            ))}
-          </ul>
-          {!suggestionsLoading && !suggestions.length && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No new sellers to suggest.</p>}
-        </section>
+      {offers && !offers.length && !adding && (
+        <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No offers yet. Shortlist on Matches, or start a thread for each person you offer this to.</p>
       )}
     </BusyRegion>
   );

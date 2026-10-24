@@ -22,6 +22,9 @@ export type Offer = {
   terms: OfferTerms;
   next_step: string | null;
   next_due: string | null;
+  /** Who the next move is on: us (they spoke last, or we owe the step) or them (we spoke last). */
+  waiting_on: "us" | "them" | null;
+  waiting_since: string | null;
   updated_at: string;
   last_message_at: string | null;
   messages: number;
@@ -47,7 +50,8 @@ export type ThreadEntry = {
 const selectOffers = (user: string) => `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id,
   case when o.bulk_listing_id <> $1 then coalesce((select b.party from crm_bulk_listings b where b.id = o.bulk_listing_id), o.name) else o.name end as name, o.contact, o.stage,
   o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms, o.data->>'next_step' as next_step,
-  o.data->>'next_due' as next_due, o.updated_at::text,
+  o.data->>'next_due' as next_due,
+  case when o.data->>'waiting_on' in ('us','them') then o.data->>'waiting_on' end as waiting_on, o.data->>'waiting_since' as waiting_since, o.updated_at::text,
   nullif(greatest(
     (select max(a.occurred_at) from crm_bulk_listing_activity a where a.offer_id = o.id),
     (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')))
