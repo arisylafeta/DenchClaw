@@ -42,10 +42,11 @@ import { CompanyProfile } from "../components/crm/company-profile";
 import { ChatPanel, type ChatPanelHandle, type SubagentSpawnInfo } from "../components/chat-panel";
 import { EntryDetailPanel } from "../components/workspace/entry-detail-panel";
 import { TradesPreviewView } from "../components/bulk-trades/trades-preview-view";
+import { TradeListingTab } from "../components/bulk-trades/trade-listing-tab";
 import { MailDraftView } from "../components/crm/inbox/mail-draft-view";
 import { MailMessageView } from "../components/crm/inbox/mail-message-view";
 import { mailDraftPath, parseMailDraftPath, parseMailMessagePath } from "@/lib/mail-artifacts";
-import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute } from "@/lib/bulk-trades-url";
+import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute, parseTradeListingPath, tradeListingPath, type BulkTradesRoute } from "@/lib/bulk-trades-url";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
@@ -429,6 +430,7 @@ export function nodeToContentTabKind(nodeType: string, path: string): ContentTab
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === TRADES_PREVIEW_PATH) return "trades-preview";
+  if (parseTradeListingPath(path)) return "trade-listing";
   if (parseMailDraftPath(path)) return "mail-draft";
   if (parseMailMessagePath(path)) return "mail-message";
   switch (nodeType) {
@@ -1033,6 +1035,13 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         preview: options?.preview ?? true,
       },
     });
+  }, [showContent]);
+
+  /** A Bulk Trades listing in its own tab (reused when already open), so several can stay open side by side. */
+  const openTradeListing = useCallback((id: string, title?: string) => {
+    showContent();
+    const path = tradeListingPath(id);
+    dispatch({ type: "openContent", tab: { id: path, kind: "trade-listing", path, title: title || "Listing", preview: false } });
   }, [showContent]);
 
   // Resizable sidebar widths (desktop only; persisted in localStorage).
@@ -2238,11 +2247,13 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
    */
   /** Opens Trades Preview: the named record or filter, or its home when no href is given. */
   const openTradesPreview = useCallback((href?: string) => {
-    const route = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
+    const route: Partial<BulkTradesRoute> = href ? parseBulkTradesRoute(new URL(href, window.location.origin).searchParams) : {};
+    // A link to one record opens that record in its own tab; the sheet tab keeps its place.
+    if (route.listing) { openTradeListing(route.listing); return; }
     // null state: see use-bulk-trades-route.ts (Next ignores a push that carries its own `__NA` state).
     window.history.pushState(null, "", buildBulkTradesUrl(route, new URLSearchParams(window.location.search), TRADES_PREVIEW_PATH));
     handleNavigate("trades-preview");
-  }, [handleNavigate]);
+  }, [handleNavigate, openTradeListing]);
   /** Bulk Trades was retired (22 Oct 2026): its links (trade, demand, supply, filters) open the same record in Trades Preview. */
   const openBulkTrades = openTradesPreview;
   useEffect(() => {
@@ -2548,7 +2559,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
             ? "inbox" as const
             : activeContentTab?.kind === "crm-calendar"
               ? "calendar" as const
-              : activeContentTab?.kind === "trades-preview"
+              : (activeContentTab?.kind === "trades-preview" || activeContentTab?.kind === "trade-listing")
                 ? "trades-preview" as const
                 : null
     ),
@@ -2646,7 +2657,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
     handleNavigateToObject, refreshCurrentObject, handleEditorNavigate,
   ]);
 
-  const renderRightPanelContentBody = useCallback((c: ContentState, _tab: ContentTab | null) => (
+  const renderRightPanelContentBody = useCallback((c: ContentState, tab: ContentTab | null) => (
     <ContentRenderer
       content={c}
       workspaceExists={workspaceExists}
@@ -2663,6 +2674,9 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
       onNavigate={handleEditorNavigate}
       onOpenEntry={handleOpenEntry}
       onOpenMailDraft={(id, title) => { void handleFilePathClickFromChat(mailDraftPath(id), { title }); }}
+      onOpenListing={openTradeListing}
+      onCloseTab={() => { if (tab) dispatch({ type: "closeContent", id: tab.id }); }}
+      onRenameTab={(title) => { if (tab) dispatch({ type: "renameContent", id: tab.id, title }); }}
       activeEntryId={undefined}
       searchFn={searchIndex}
       onSelectCronJob={handleSelectCronJob}
@@ -2689,7 +2703,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
     searchIndex, handleSelectCronJob, handleBackToCronDashboard,
     cronView, cronCalMode, cronDate, cronRunFilter, cronRun,
     handleCronSendCommand, promoteTabByPath, setTableSelectionContext,
-    handleProfileTabChange,
+    handleProfileTabChange, openTradeListing,
   ]);
 
   const renderRightPanelPlaceholder = useCallback(() => (
@@ -3033,6 +3047,9 @@ function ContentRenderer({
   onNavigate,
   onOpenEntry,
   onOpenMailDraft,
+  onOpenListing,
+  onCloseTab,
+  onRenameTab,
   activeEntryId,
   searchFn,
   onSelectCronJob,
@@ -3071,6 +3088,10 @@ function ContentRenderer({
     relatedObjectId?: string,
   ) => void;
   onOpenMailDraft?: (id: string, title: string) => void;
+  /** Opens a Bulk Trades listing in its own tab. */
+  onOpenListing: (id: string, title?: string) => void;
+  onCloseTab: () => void;
+  onRenameTab: (title: string) => void;
   activeEntryId?: string;
   searchFn: (query: string, limit?: number) => import("@/lib/search-index").SearchIndexItem[];
   onSelectCronJob: (jobId: string) => void;
@@ -3334,7 +3355,10 @@ function ContentRenderer({
       return <InboxView key="mail-conversations" onOpenPerson={(id) => onOpenEntry("people", id)} onOpenDraft={onOpenMailDraft} />;
 
     case "trades-preview":
-      return <TradesPreviewView onOpenEntry={onOpenEntry} />;
+      return <TradesPreviewView onOpenEntry={onOpenEntry} onOpenListing={onOpenListing} />;
+
+    case "trade-listing":
+      return <TradeListingTab listingId={content.listingId} onOpenListing={onOpenListing} onClose={onCloseTab} onTitle={onRenameTab} />;
 
     case "mail-draft":
       return <MailDraftView key={content.draftId} draftId={content.draftId} />;

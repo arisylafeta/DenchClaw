@@ -14,14 +14,18 @@ import { OpportunitiesSheet, SheetFilterBar } from "./opportunities-sheet";
 import { BulkBoard } from "./bulk-board";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade-ui";
-import { TRADES_PREVIEW_PATH } from "@/lib/bulk-trades-url";
+import { BULK_TRADES_PARAMS, TRADES_PREVIEW_PATH } from "@/lib/bulk-trades-url";
+
+const SHEET_STATE_KEY = "bt-preview-sheet-state";
 import { useBulkTradesRoute } from "./use-bulk-trades-route";
 
 type Props = {
   onOpenEntry?: (objectName: string, entryId: string) => void;
+  /** Workspace host: open a listing in its own tab. Without it the listing opens in this page. */
+  onOpenListing?: (id: string, title?: string) => void;
 };
 
-export function TradesPreviewView({ onOpenEntry }: Props) {
+export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const { route, navigate } = useBulkTradesRoute(TRADES_PREVIEW_PATH);
   const [rows, setRows] = useState<SheetRow[]>([]);
   const [sheetLoaded, setSheetLoaded] = useState(false);
@@ -83,8 +87,30 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   /** Filters refine the current page (replace); opening a record is a new page (push). */
   const setFilters = (next: SheetFilters) => navigate({ ...routeFromFilters(next), tab: filterFields.tab }, "replace");
   const setView = (tab: "board" | null) => navigate({ ...routeFromFilters(filters), tab }, "replace");
-  const open = (row: SheetRow) => navigate({ ...filterFields, listing: row.id });
+  /** In the workspace a record opens in its own tab, so the sheet keeps its filters and place. */
+  const openId = (id: string, title?: string) => (onOpenListing ? onOpenListing(id, title) : navigate({ ...filterFields, listing: id }));
+  const open = (row: SheetRow) => openId(row.id, row.title);
   const closeDetail = () => navigate(filterFields);
+
+  // In the workspace, switching to a listing tab and back reloads the sheet from a bare URL.
+  // Keep the filters and view for this browser session so the sheet comes back as it was left.
+  const filterKey = JSON.stringify(filterFields);
+  const sheetSaved = useRef(false);
+  useEffect(() => {
+    if (!onOpenListing || route.listing) return;
+    if (!sheetSaved.current) {
+      sheetSaved.current = true;
+      const params = new URLSearchParams(window.location.search);
+      if (!BULK_TRADES_PARAMS.some((key) => params.has(key))) {
+        try {
+          const saved = JSON.parse(window.sessionStorage.getItem(SHEET_STATE_KEY) ?? "null");
+          if (saved && typeof saved === "object") { navigate(saved, "replace"); return; }
+        } catch { /* nothing saved: start from the bare page */ }
+      }
+    }
+    try { window.sessionStorage.setItem(SHEET_STATE_KEY, filterKey); } catch { /* storage unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, onOpenListing, route.listing]);
   /** Saves a listing’s next action in place. */
   async function saveNext(row: SheetRow, text: string | null) {
     await request(`/api/bulk-listings/${row.id}/next`, { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? row.next_due : null }) });
@@ -152,7 +178,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
             setPossible((current) => current.filter((candidate) => candidate.id !== decided.id));
             if (action === "accept") {
               load();
-              if (lotId) { navigate({ ...filterFields, listing: lotId }); setShowPossible(false); }
+              if (lotId) { openId(lotId); setShowPossible(false); }
             }
           }} />)}
           {!!acceptedDemand.length && <section className="mt-6" aria-label="Accepted demand">
@@ -173,7 +199,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
 
       {creating === "demand" && (
         <DemandDialog demand={null} onClose={() => setCreating(null)}
-          onSaved={(saved: Demand) => { setCreating(null); navigate({ ...filterFields, listing: saved.id }); }} />
+          onSaved={(saved: Demand) => { setCreating(null); openId(saved.id); }} />
       )}
     </div>
   );

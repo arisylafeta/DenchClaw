@@ -209,6 +209,30 @@ describe("Trades Preview sheet", () => {
     expect(new URLSearchParams(window.location.search).get("listing")).toBe("d1");
   });
 
+  it("hands a clicked row to the workspace as its own tab and leaves the sheet where it is", async () => {
+    const onOpenListing = vi.fn();
+    vi.stubGlobal("fetch", mockApi());
+    render(<TradesPreviewView onOpenListing={onOpenListing} />);
+    await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
+    expect(onOpenListing).toHaveBeenCalledWith("d1", expect.stringContaining("Ioniq"));
+    expect(new URLSearchParams(window.location.search).get("listing")).toBeNull();
+    expect(screen.getByText(/\d of \d live/)).toBeInTheDocument();
+  });
+
+  it("in the workspace, brings the filters back when the sheet tab is shown again", async () => {
+    window.sessionStorage.clear();
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&side=seller");
+    vi.stubGlobal("fetch", mockApi());
+    const first = render(<TradesPreviewView onOpenListing={vi.fn()} />);
+    expect(await screen.findByText("2 of 3 live")).toBeInTheDocument();
+    first.unmount();
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview");
+    render(<TradesPreviewView onOpenListing={vi.fn()} />);
+    expect(await screen.findByText("2 of 3 live")).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get("side")).toBe("seller");
+    window.sessionStorage.clear();
+  });
+
   it("shows the rows while the inbox is still loading", async () => {
     vi.stubGlobal("fetch", mockApi({ hangInbox: true }));
     render(<TradesPreviewView />);

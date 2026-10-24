@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeBulkTradesTab, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute,
+  parseTradeListingPath, tradeListingPath,
 } from "./bulk-trades-url";
 
 describe("bulk trades URLs", () => {
@@ -62,3 +63,18 @@ describe("bulk trades URLs", () => {
     expect(carryBulkTradesParams("path=bulk_trade", "path=%7Etrades-preview&demand=d1")).toBe("path=bulk_trade");
   });
 });
+
+describe("listing tab paths", () => {
+  it("round-trips ids, including the colon in a split listing id", () => {
+    for (const id of ["bulk-panasonic-oklahoma", "btd_fcbebcc3-a080-44ec-be85-d16c262085de:ioniq5"]) {
+      expect(parseTradeListingPath(tradeListingPath(id))).toBe(id);
+    }
+  });
+  it("rejects other paths and unsafe ids", () => {
+    expect(parseTradeListingPath("~trades-preview")).toBeNull();
+    expect(parseTradeListingPath("~trades-preview/listing/")).toBeNull();
+    expect(parseTradeListingPath("~trades-preview/listing/a/b")).toBeNull();
+    expect(parseTradeListingPath("~mail/message/abc")).toBeNull();
+  });
+});
+

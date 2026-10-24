@@ -72,6 +72,7 @@ export type ContentTabKind =
   | "crm-leaderboard"
   | "crm-calendar"
   | "trades-preview"
+  | "trade-listing"
   | "mail-draft"
   | "mail-message"
   | "crm-person"
@@ -358,6 +359,7 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
   if (path === "~crm/leaderboard") return "crm-leaderboard";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === "~trades-preview") return "trades-preview";
+  if (path.startsWith("~trades-preview/listing/")) return "trade-listing";
   if (path.startsWith("~mail/draft/")) return "mail-draft";
   if (path.startsWith("~mail/message/")) return "mail-message";
   // Direct/generated links must open the same editor before tree hydration.
@@ -387,6 +389,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~crm/leaderboard") return "Leaderboard";
   if (path === "~crm/calendar") return "Calendar";
   if (path === "~trades-preview") return "Bulk Trades";
+  if (path.startsWith("~trades-preview/listing/")) return "Listing";
   if (path.startsWith("~mail/draft/")) return "Email draft";
   if (path.startsWith("~mail/message/")) return "Email";
   return path.split("/").pop() || path;

@@ -7,18 +7,22 @@ import { ErrorText, sharedGet } from "./trade-ui";
 import { PreviewDemandPanel } from "./preview-demand-panel";
 import { SupplyListingPanel } from "./supply-listing-panel";
 
-export function ListingDetail({ id, today, onClose, onOpenListing }: {
+export function ListingDetail({ id, today, onClose, onOpenListing, onLoaded }: {
   id: string; today: string; onClose: () => void; onOpenListing: (id: string) => void;
+  /** Called with the listing once loaded, so a host tab can show its title. */
+  onLoaded?: (listing: BulkListingView) => void;
 }) {
   const [result, setResult] = useState<{ id: string; listing: BulkListingView | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(0);
+  const loaded = useRef(onLoaded);
+  loaded.current = onLoaded;
   const load = useCallback(async () => {
     const seq = ++latest.current;
     setError(null);
     try {
       const data = await sharedGet<{ listing: BulkListingView | null }>(`/api/bulk-listings/${encodeURIComponent(id)}`);
-      if (seq === latest.current) setResult({ id, listing: data.listing });
+      if (seq === latest.current) { setResult({ id, listing: data.listing }); if (data.listing) loaded.current?.(data.listing); }
     } catch (err) {
       if (seq === latest.current) setError(err instanceof Error ? err.message : "Could not load this listing.");
     }

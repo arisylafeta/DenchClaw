@@ -20,6 +20,7 @@ import {
   makeContentTab,
   openChat,
   openContent,
+  renameContent,
   promoteContent,
   projectUrlState,
   mergeOpenTabs,
@@ -697,3 +698,24 @@ describe("workspaceTabsReducer", () => {
     expect(next).toBe(replacement);
   });
 });
+
+describe("bulk trades listing tabs", () => {
+  const listing = (id: string, title = "Listing") => ({ id: `~trades-preview/listing/${id}`, kind: "trade-listing" as const, path: `~trades-preview/listing/${id}`, title, preview: false });
+  it("hydrates a listing path as a listing tab, separate from the sheet tab", () => {
+    expect(inferContentTabKindFromPath("~trades-preview/listing/abc")).toBe("trade-listing");
+    expect(inferContentTabKindFromPath("~trades-preview")).toBe("trades-preview");
+    expect(inferContentTabTitle("~trades-preview/listing/abc")).toBe("Listing");
+  });
+  it("keeps several listings open at once, reuses one already open, and renames it", () => {
+    let state: WorkspaceTabsState = EMPTY_TABS_STATE;
+    state = openContent(state, { id: "~trades-preview", kind: "trades-preview", path: "~trades-preview", title: "Bulk Trades", preview: false });
+    state = openContent(state, listing("a"));
+    state = openContent(state, listing("b"));
+    state = openContent(state, listing("a"));
+    expect(state.contentTabs.map((t) => t.id)).toEqual(["~trades-preview", "~trades-preview/listing/a", "~trades-preview/listing/b"]);
+    expect(state.activeContentId).toBe("~trades-preview/listing/a");
+    state = renameContent(state, "~trades-preview/listing/b", "500,000x Samsung 50E Cells");
+    expect(state.contentTabs[2].title).toBe("500,000x Samsung 50E Cells");
+  });
+});
+

@@ -38,6 +38,7 @@ import type {
   ObjectData,
 } from "./content-state";
 import type { ContentTab } from "@/lib/workspace-tabs";
+import { parseTradeListingPath } from "@/lib/bulk-trades-url";
 
 const MAX_CACHE_ENTRIES = 20;
 const OBJECT_VIEW_PARAM_KEYS = ["view", "viewType", "filters", "sort", "search", "page", "pageSize", "cols"];
@@ -348,6 +349,7 @@ function kindIsDerived(kind: ContentTab["kind"]): boolean {
     case "crm-leaderboard":
     case "crm-calendar":
     case "trades-preview":
+    case "trade-listing":
     case "mail-draft":
     case "mail-message":
     case "crm-person":
@@ -419,6 +421,8 @@ function resolveDerivedContent(
       return { kind: "crm-calendar" };
     case "trades-preview":
       return { kind: "trades-preview" };
+    case "trade-listing":
+      return { kind: "trade-listing", listingId: parseTradeListingPath(tab.path) ?? "" };
     case "mail-draft":
       return { kind: "mail-draft", draftId: tab.path.replace(/^~mail\/draft\//, "") };
     case "mail-message":

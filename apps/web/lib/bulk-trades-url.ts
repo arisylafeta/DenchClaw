@@ -16,6 +16,14 @@ export const BULK_TRADES_PATH = "bulk_trade";
  * use listing=<id> and accept the legacy trade/demand/supply params without leaving Preview.
  */
 export const TRADES_PREVIEW_PATH = "~trades-preview";
+/** One listing open in its own workspace tab: `~trades-preview/listing/<id>`. The id keeps any `:` it has. */
+const TRADE_LISTING_PREFIX = `${TRADES_PREVIEW_PATH}/listing/`;
+export function tradeListingPath(id: string): string { return `${TRADE_LISTING_PREFIX}${id}`; }
+export function parseTradeListingPath(path: string): string | null {
+  if (!path.startsWith(TRADE_LISTING_PREFIX)) return null;
+  const id = path.slice(TRADE_LISTING_PREFIX.length);
+  return /^[A-Za-z0-9_:.\-]{1,200}$/.test(id) ? id : null;
+}
 const PAGES: readonly string[] = [BULK_TRADES_PATH, TRADES_PREVIEW_PATH];
 
 export type BulkTradesTab = "today" | "trades" | "demand" | "supply" | "board";
