@@ -10,7 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 const listing = (id: string): BulkListingView => ({
   id, kind: "supply", party: "Example seller", title: "24 EV packs", summary: "Available packs", note: null,
   company_id: null, person_id: null, contact: null, email: null, quantity: "24", location: "Berlin", status: "open", closed_reason: null,
-  observed_on: null, next_action: null, next_due: null, spec: {}, context: { trade_kind: "packs" }, created_at: "2026-10-20", updated_at: "2026-10-20", is_trade: true, furthest_stage: "contract_out", stage: "Signed & Paid",
+  observed_on: null, next_action: null, next_due: null, waiting_on: "us", waiting_since: "2026-10-20", spec: {}, context: { trade_kind: "packs" }, created_at: "2026-10-20", updated_at: "2026-10-20", is_trade: true, furthest_stage: "contract_out", stage: "Signed & Paid",
 });
 const mount = (id: string) => render(<ListingDetail id={id} today="2026-10-21" onClose={() => {}} onOpenListing={() => {}} />);
 function mockListing(row: BulkListingView | null) {
@@ -28,6 +28,7 @@ it("renders a supply trade, the ordered tabs and its labelled seller conversatio
   const fetch = mockListing(listing("s1")); mount("s1");
   expect(await screen.findByRole("heading", { name: "24 EV packs" })).toBeInTheDocument();
   expect(screen.getByText("TRADE")).toBeInTheDocument();
+  expect(document.querySelector("[data-waiting-on=us]")).toHaveTextContent(/On us/);
   expect(Array.from(screen.getByRole("navigation", { name: "Detail sections" }).querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Offers", "Documents", "History"]);
   expect(await screen.findByRole("heading", { name: "Conversation with Example seller" })).toBeInTheDocument();
   fireEvent.click(await screen.findByRole("button", { name: /Email.*1 message/ }));

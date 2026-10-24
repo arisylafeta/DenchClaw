@@ -89,8 +89,8 @@ function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; c
 const TABS = ["Details", "Matches", "Offers", "Documents", "History"];
 const TAB_ICONS = { Details: ClipboardList, Matches: Combine, Documents: FileText, Offers: ArrowLeftRight, History: History };
 
-export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand, isTrade = false }: {
-  isTrade?: boolean;
+export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand, isTrade = false, waiting = null }: {
+  isTrade?: boolean; waiting?: { waiting_on: "us" | "them" | null; waiting_since: string | null } | null;
   demand: Demand;
   today: string;
   onChanged: () => void;
@@ -164,7 +164,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
     <div ref={top} role="region" aria-label="Demand detail" className={`${headerCss.panel} flex w-full min-w-0 flex-col gap-3`}>
       <BusyRegion busy={supplyLoading || context === null} label="Loading demand details" className="flex w-full min-w-0 flex-col gap-3">
       <div className={headerCss.card}>
-        <DemandHeader isTrade={isTrade} demand={demand} supply={supply} loadingSupply={supplyLoading} actions={actions("Overview")} onBack={onClose} />
+        <DemandHeader isTrade={isTrade} waiting={waiting} demand={demand} supply={supply} loadingSupply={supplyLoading} actions={actions("Overview")} onBack={onClose} />
         <SheetTabs
           tabs={TABS}
           icons={TAB_ICONS}

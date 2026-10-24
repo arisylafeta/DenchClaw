@@ -29,7 +29,7 @@ export function ListingDetail({ id, today, onClose, onOpenListing, onLoaded }: {
   }, [id]);
   useEffect(() => { void load(); return () => { latest.current++; }; }, [load]);
   const listing = result?.id === id ? result.listing : null;
-  if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} />;
+  if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} waiting={listing} />;
   if (listing?.kind === "supply") return <SupplyListingPanel key={id} listing={listing} today={today} onChanged={load} onClose={onClose} onOpenListing={onOpenListing} />;
   return <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
     <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>

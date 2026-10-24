@@ -15,6 +15,13 @@ const demand = {
 } as unknown as Demand;
 
 describe("compact preview header", () => {
+  it("shows a large waiting-on badge beside the name only when it is judged", () => {
+    const { rerender } = render(<DemandHeader demand={demand} supply={null} actions={null} waiting={{ waiting_on: "them", waiting_since: "2026-10-20" }} />);
+    expect(document.querySelector("[data-waiting-on=them]")).toHaveTextContent(/Waiting on them/);
+    rerender(<DemandHeader demand={demand} supply={null} actions={null} waiting={{ waiting_on: null, waiting_since: null }} />);
+    expect(document.querySelector("[data-waiting-on]")).toBeNull();
+  });
+
   it("keeps the brief recoverable, metadata visible and inferred waiting absent", () => {
     render(<DemandHeader demand={demand} supply={null} actions={<button>Edit demand</button>} />);
     expect(screen.getByRole("heading", { name: "4 × example battery packs" })).toBeInTheDocument();

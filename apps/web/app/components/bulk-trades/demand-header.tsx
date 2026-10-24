@@ -9,6 +9,7 @@ import type { DemandSupply } from "@/lib/demand-supply-types";
 import css from "./demand-header.module.css";
 import { Sh } from "./bt-shimmer";
 import { useRegistry } from "./use-registry";
+import { WaitingBadge } from "./opportunities-sheet";
 
 /** A circular score: the ring fills with the score out of 100. */
 export function ScoreRing({ score }: { score: number | null }) {
@@ -30,8 +31,8 @@ export function ScoreRing({ score }: { score: number | null }) {
 }
 
 /** Score, headline, buyer, status, three facts and a short brief. A fact we don't have says so quietly. */
-export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false }: {
-  isTrade?: boolean; demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
+export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false, waiting = null }: {
+  isTrade?: boolean; waiting?: { waiting_on: "us" | "them" | null; waiting_since: string | null } | null; demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const registry = useRegistry();
@@ -52,6 +53,7 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
         <ScoreRing score={demand.score} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-1"><h2 className={css.title}>{demandTitle(demand)}</h2><CopyIdButton id={demand.id} className="mt-1" /></div>
+          {waiting?.waiting_on && <div className="mt-2"><WaitingBadge row={waiting} large /></div>}
           <div className={css.sub}>
             <span>{demand.buyer}</span>{isTrade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
             {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}

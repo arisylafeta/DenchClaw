@@ -10,6 +10,7 @@ export type ListingRow = Omit<BulkListingView, "title" | "furthest_stage" | "is_
 export async function getListing(id: string): Promise<ListingRow | null> {
   return (await queryPg<ListingRow>(`select id, kind, party, company_id, person_id, contact, email, summary,
     quantity, location, note, status, closed_reason, observed_on::text, next_action, next_due::text,
+    case when waiting_on in ('us','them') then waiting_on end as waiting_on, waiting_since::text,
     spec, context, created_at::text, updated_at::text from crm_bulk_listings where id = $1`, [id]))[0] ?? null;
 }
 

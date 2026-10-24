@@ -28,6 +28,9 @@ export type BulkListingView = {
   observed_on: string | null;
   next_action: string | null;
   next_due: string | null;
+  /** Whose move it is: us or them. Null when not judged. */
+  waiting_on: "us" | "them" | null;
+  waiting_since: string | null;
   spec: Record<string, unknown>;
   context: Record<string, unknown>;
   created_at: string;

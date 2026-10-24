@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import type { BulkListingView } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { CopyIdButton } from "./copy-id-button";
+import { WaitingBadge } from "./opportunities-sheet";
 import css from "./demand-header.module.css";
 
 export function ListingHeader({ listing, onBack }: { listing: BulkListingView; onBack: () => void }) {
@@ -17,6 +18,7 @@ export function ListingHeader({ listing, onBack }: { listing: BulkListingView; o
     <div className={css.titleRow}>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-1"><h2 className={css.title}>{listing.title}</h2><CopyIdButton id={listing.id} className="mt-1" /></div>
+        {listing.waiting_on && <div className="mt-2"><WaitingBadge row={listing} large /></div>}
         <div className={css.sub}><span>{listing.party}</span><span className={css.chip}>{listing.status === "closed" ? "closed" : listing.stage}</span>
           {listing.context.priority === true && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
