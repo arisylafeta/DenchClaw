@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
-import { filterSheet, filtersFromRoute, routeFromFilters, type SheetFilters, type SheetRow } from "@/lib/bulk-sheet";
+import { filterSheet, filtersFromRoute, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
 import type { Demand } from "@/lib/bulk-demand";
 import { ListingDetail } from "./listing-detail";
 import { DemandDialog } from "./demand-editor";
@@ -34,6 +34,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState<"demand" | null>(null);
   const [adding, setAdding] = useState(false);
+  const [sort, setSort] = useState<SheetSort>("newest");
   const today = todayInLondon();
 
   // The sheet and the inbox load side by side: the rows never wait on the inbox, nor the inbox on the rows.
@@ -74,7 +75,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
   }, [detailOpen, load]);
 
   const filters = useMemo(() => filtersFromRoute(route), [route]);
-  const shown = useMemo(() => filterSheet(rows, filters), [rows, filters]);
+  const shown = useMemo(() => sortRows(filterSheet(rows, filters), sort), [rows, filters, sort]);
   // Normalised from what the sheet shows, so an older ?tab=demand link keeps its filter through open and back.
   const board = route.tab === "board";
   const filterFields = { ...routeFromFilters(filters), tab: board ? ("board" as const) : null };
@@ -137,7 +138,7 @@ export function TradesPreviewView({ onOpenEntry }: Props) {
           </div>
         ) : (
           <OpportunitiesSheet rows={rows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-            onFilters={setFilters} onOpen={open} onNext={saveNext} />
+            sort={sort} onSort={setSort} onFilters={setFilters} onOpen={open} onNext={saveNext} />
         )}
       </main>
 

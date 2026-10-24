@@ -27,3 +27,18 @@ describe("OpportunitiesSheet loading", () => {
     expect(onNext).not.toHaveBeenCalled();
   });
 });
+
+describe("OpportunitiesSheet sort control", () => {
+  it("offers a Sort menu only when a handler is given, and reports the chosen order", () => {
+    const base = { rows: [], shown: [], filters: NO_FILTERS, loading: false, error: null, today: "2026-10-20", onFilters: vi.fn(), onOpen: vi.fn(), onNext: vi.fn() };
+    const { rerender } = render(<OpportunitiesSheet {...base} />);
+    expect(screen.queryByLabelText("Sort by")).toBeNull();
+    const onSort = vi.fn();
+    rerender(<OpportunitiesSheet {...base} sort="newest" onSort={onSort} />);
+    const select = screen.getByLabelText("Sort by") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["newest", "score_desc", "score_asc", "due", "stage"]);
+    fireEvent.change(select, { target: { value: "score_asc" } });
+    expect(onSort).toHaveBeenCalledWith("score_asc");
+  });
+});
+

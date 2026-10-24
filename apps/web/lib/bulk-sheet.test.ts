@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listingRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet } from "./bulk-sheet";
+import { listingRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, sortRows, SHEET_SORTS } from "./bulk-sheet";
 
 const demand = (over = {}) => listingRow({
   id: "d1", kind: "demand", party: "H. Nolden", company_id: "c1", summary: "Complete packs",
@@ -92,5 +92,32 @@ describe("ranking", () => {
       supply({ id: "c", score: 93, updated_at: "2026-10-02" }), demand({ id: "d", score: 99 })];
     expect(filterSheet(rows, { ...NO_FILTERS, side: "seller" }).map((row) => row.id)).toEqual(["c", "b", "a"]);
     expect(filterSheet(rows, NO_FILTERS).map((row) => row.id)).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+describe("sortRows", () => {
+  const row = (id: string, over = {}) => ({ ...demand({ id }), ...over });
+  const rows = [
+    row("a", { score: 40, next_due: "2026-10-30", progress: "Matched", title: "A" }),
+    row("b", { score: null, next_due: null, progress: "New", title: "B" }),
+    row("c", { score: 90, next_due: "2026-10-25", progress: "Offered", title: "C" }),
+    row("d", { score: 12, next_due: null, progress: "Qualified", title: "D" }),
+  ];
+  const ids = (sort: (typeof SHEET_SORTS)[number]) => sortRows(rows, sort).map((r) => r.id);
+
+  it("keeps the incoming order for newest and never mutates its input", () => {
+    expect(ids("newest")).toEqual(["a", "b", "c", "d"]);
+    ids("score_desc");
+    expect(rows.map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+  });
+  it("sorts by score either way and always puts unscored rows last", () => {
+    expect(ids("score_desc")).toEqual(["c", "a", "d", "b"]);
+    expect(ids("score_asc")).toEqual(["d", "a", "c", "b"]);
+  });
+  it("sorts by soonest due date with undated rows last", () => {
+    expect(ids("due")).toEqual(["c", "a", "d", "b"]);
+  });
+  it("sorts by furthest stage first, then score", () => {
+    expect(ids("stage")).toEqual(["c", "a", "d", "b"]);
   });
 });

@@ -112,6 +112,27 @@ function rankSide(rows: SheetRow[], side: SheetFilters["side"]): SheetRow[] {
   return [...rows].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 }
 
+/** How the list is ordered. `newest` keeps the default order from filterSheet. */
+export const SHEET_SORTS = ["newest", "score_desc", "score_asc", "due", "stage"] as const;
+export type SheetSort = (typeof SHEET_SORTS)[number];
+export const SORT_LABEL: Record<SheetSort, string> = {
+  newest: "Newest first", score_desc: "Score: high to low", score_asc: "Score: low to high", due: "Next due: soonest", stage: "Stage: furthest first",
+};
+
+/** Orders already-filtered rows. Unscored rows and rows with no due date sort last in every score or date order, so they never crowd the top. */
+export function sortRows(rows: SheetRow[], sort: SheetSort): SheetRow[] {
+  if (sort === "newest") return rows;
+  const byTitle = (a: SheetRow, b: SheetRow) => a.title.localeCompare(b.title);
+  const scoreDesc = (a: SheetRow, b: SheetRow) => (b.score ?? -1) - (a.score ?? -1);
+  const out = [...rows];
+  switch (sort) {
+    case "score_desc": return out.sort((a, b) => scoreDesc(a, b) || byTitle(a, b));
+    case "score_asc": return out.sort((a, b) => (a.score === null) !== (b.score === null) ? (a.score === null ? 1 : -1) : (a.score ?? 0) - (b.score ?? 0) || byTitle(a, b));
+    case "due": return out.sort((a, b) => (a.next_due === null) !== (b.next_due === null) ? (a.next_due === null ? 1 : -1) : (a.next_due ?? "").localeCompare(b.next_due ?? "") || scoreDesc(a, b));
+    case "stage": return out.sort((a, b) => LISTING_STAGES.indexOf(b.progress) - LISTING_STAGES.indexOf(a.progress) || scoreDesc(a, b) || byTitle(a, b));
+  }
+}
+
 export function filterSheet(rows: SheetRow[], filters: SheetFilters): SheetRow[] {
   const needle = filters.query.trim().toLowerCase();
   return rankSide(rows.filter((row) =>

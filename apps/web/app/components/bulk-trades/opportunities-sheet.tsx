@@ -3,7 +3,7 @@
 import { CopyIdButton } from "./copy-id-button";
 import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Search, Flag } from "lucide-react";
-import { SIDE_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
+import { SHEET_SORTS, SIDE_LABEL, SORT_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
@@ -120,7 +120,7 @@ const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
 }));
 
 /** Search, starting point and menus; shared by the list and the board. */
-export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false }: { rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean }) {
+export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, sort, onSort }: { rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean; sort?: SheetSort; onSort?: (next: SheetSort) => void }) {
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
   const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
@@ -148,6 +148,12 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false 
         {!hideProgress && <Select label="Progress" value={filters.progress} options={options.progress} onChange={(progress) => set({ progress })} />}
         <Select label="Company" value={filters.company} options={options.company} onChange={(company) => set({ company })} />
         <Select label="Category" value={filters.category} options={options.category} onChange={(category) => set({ category })} />
+        {onSort && (
+          <select aria-label="Sort by" value={sort ?? "newest"} onChange={(event) => onSort(event.target.value as SheetSort)}
+            className={`${field} max-w-[13rem] min-w-0 flex-1 sm:flex-none`} style={fieldStyle}>
+            {SHEET_SORTS.map((value) => <option key={value} value={value}>{`Sort: ${SORT_LABEL[value]}`}</option>)}
+          </select>
+        )}
         {filtered && (
           <button type="button" className="h-9 rounded-lg px-2 text-[13px] underline" style={{ color: "var(--bt-text-2)" }}
             onClick={() => onFilters({ query: "", side: "all", progress: "all", company: "all", category: "all" })}>
@@ -158,7 +164,9 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false 
   );
 }
 
-export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, onFilters, onOpen, onNext }: {
+export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, sort, onSort, onFilters, onOpen, onNext }: {
+  sort?: SheetSort;
+  onSort?: (next: SheetSort) => void;
   rows: SheetRow[];
   shown: SheetRow[];
   filters: SheetFilters;
@@ -177,7 +185,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
   const sides = ["buyer", "seller"] as const;
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
-      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} />
+      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} sort={sort} onSort={onSort} />
 
       <ErrorText error={error} />
       <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">
