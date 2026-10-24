@@ -65,8 +65,6 @@ export async function demandSupply(demand: Demand): Promise<DemandSupply> {
     shortlisted,
     shortlistGone: missingShortlist,
     targetBuyEurPerKwh: r.buyerEurPerKwh != null ? r.buyerEurPerKwh * (1 - FEE_SHARE) : null,
-    targetBuyEurPerUnit: r.buyerEurPerUnit != null ? r.buyerEurPerUnit * (1 - FEE_SHARE) : null,
-    buyerUnit: r.buyerEurPerUnit != null ? demand.price_unit?.toLowerCase() ?? null : null,
     blocked: result.blocked,
     errors,
     fxNote: result.fxNote,

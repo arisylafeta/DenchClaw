@@ -126,7 +126,7 @@ it("has a Matches tab, the Bulk Trades supply matching list, with the group coun
         eurPerKwh: { min: 48, max: 52 }, totalEur: 8350, pricedUnits: 3, verdict: "exact", withPhotos: 0, items: [unit], more: 0 }],
       fill: { sellers: [{ name: "Example Breakers", units: 3 }], units: 3, need: 10, eurPerKwh: 48 } }],
     totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, trades: 20 }, hiddenCount: 0,
-    shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, targetBuyEurPerUnit: null, buyerUnit: null, blocked: null, errors: [], fxNote: "Approximate FX",
+    shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, blocked: null, errors: [], fxNote: "Approximate FX",
   };
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
     url.endsWith("/supply") ? supply : url.endsWith("/context") ? { buyer: null, mail: [] } : url.endsWith("/conversation") ? { conversation: null } : {},

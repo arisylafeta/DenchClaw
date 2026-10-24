@@ -117,12 +117,12 @@ function OfferList({ offers, error, base, onUpdated }: {
       )}
       <ErrorText error={error ?? formError} />
       {(loading || (offers && offers.length > 0)) && (
-        <ul className="flex flex-col">
+        <ul className="flex flex-col overflow-hidden border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", borderRadius: 10 }}>
           {(loading ? PLACEHOLDER_OFFERS : offers ?? []).map((o) => {
             const terms = termsLine(o);
             return (
-              <li key={o.id} className="border-t first:border-t-0" style={{ borderColor: "var(--bt-divider)" }}>
-                <button type="button" disabled={loading} aria-expanded={loading ? undefined : openId === o.id} onClick={() => setOpenId(openId === o.id ? null : o.id)} className={`${rowFocus} flex w-full items-center gap-3 px-1 py-3 text-left`}>
+              <li key={o.id} className="border-t first:border-t-0" style={{ borderColor: "var(--bt-border)" }}>
+                <button type="button" disabled={loading} aria-expanded={loading ? undefined : openId === o.id} onClick={() => setOpenId(openId === o.id ? null : o.id)} className={`${rowFocus} flex w-full items-center gap-3 px-4 py-3 text-left`}>
                   <span className="shrink-0" style={{ color: "var(--bt-muted)" }} aria-hidden>{openId === o.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
                   <Avatar name={o.name} loading={loading} />
                   <span className="min-w-0 flex-1">
@@ -170,7 +170,7 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
   const current = offer ?? PLACEHOLDER_OFFER;
   const terms = termsLine(current);
   return (
-    <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-9 pr-1">
+    <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-12 pr-4">
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
         <select aria-label="Stage" value={current.stage ?? "candidate"} disabled={busy || !offer} onChange={(e) => void patch({ stage: e.target.value })}

@@ -6,21 +6,17 @@ import type { DemandSupply } from "@/lib/demand-supply-types";
 import { SupplyTab } from "./demand-supply-tab";
 
 const base: DemandSupply = {
-  requirement: { pinned: [], unitsNeeded: 100000, kwhNeeded: null, buyerEurPerKwh: null, buyerEurPerUnit: null, country: "PL" },
+  requirement: { pinned: [], unitsNeeded: 100000, kwhNeeded: null, buyerEurPerKwh: null, buyerEurPerUnit: 1, country: "PL" },
   groups: [], totalGroups: 0, smallGroups: 0, totalUnits: 0, considered: { marketplace: 0, trades: 0 }, hiddenCount: 0,
-  shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, targetBuyEurPerUnit: null, buyerUnit: null, blocked: null, errors: [], fxNote: "Approximate FX",
+  shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: 0.9, blocked: null, errors: [], fxNote: "Approximate FX 1 GBP ≈ €1.16",
 };
-const view = (supply: DemandSupply) => render(<SupplyTab supply={supply} loading={false} error={null} onVerdict={async () => {}} busy={false} leads={[]} />);
 
-describe("In the market buy price", () => {
-  it("shows the target per unit when the buyer prices per cell", () => {
-    view({ ...base, requirement: { ...base.requirement, buyerEurPerUnit: 1 }, targetBuyEurPerUnit: 0.9, buyerUnit: "cell" });
-    expect(screen.getByText(/€0\.90 per cell/)).toBeTruthy();
-    expect(screen.getByText(/€1\.00 per cell/, { exact: false })).toBeTruthy();
+describe("Matches tab", () => {
+  it("shows no exchange-rate footnote, buy-at sentence or empty market section", () => {
+    render(<SupplyTab supply={base} loading={false} error={null} onVerdict={async () => {}} busy={false} leads={[]} />);
+    expect(screen.queryByText(/exchange rates/)).toBeNull();
+    expect(screen.queryByText(/Buy at/)).toBeNull();
     expect(screen.queryByText(/No buyer price yet/)).toBeNull();
-  });
-  it("still asks for a price when the buyer gave none", () => {
-    view(base);
-    expect(screen.getByText(/No buyer price yet/)).toBeTruthy();
+    expect(screen.queryByText(/In the market/)).toBeNull();
   });
 });

@@ -356,28 +356,16 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
           )}
         </>
       )}
-      <MarketSection supply={supply} leads={leads} />
-      <p className={css.note}>Prices in €/kWh use {supply.fxNote.replace(/^Approximate FX/, "approximate exchange rates")}.</p>
+      {leads.length > 0 && <MarketSection leads={leads} />}
     </div>
   );
 }
 
-/** Sellers outside our inventory. Ari's finder fills `leads`; this only shows them and the price to ask at. */
-function MarketSection({ supply, leads }: { supply: DemandSupply; leads: MarketLead[] }) {
-  const target = supply.targetBuyEurPerKwh;
-  const unitTarget = supply.targetBuyEurPerUnit;
-  const unit = supply.buyerUnit ?? "unit";
-  const perUnit = (n: number) => `€${n.toFixed(n < 10 ? 2 : 0)} per ${unit}`;
+/** Sellers outside our inventory. Ari's finder fills `leads`; shown only when there are some. */
+function MarketSection({ leads }: { leads: MarketLead[] }) {
   return (
     <section className="mt-4 flex flex-col gap-2">
       <h3 className={css.label}>In the market</h3>
-      <p className="text-[13px]">
-        {target != null
-          ? <>Buy at <strong>{perKwh(target)}</strong> or less to keep our 10% fee on the buyer&apos;s {perKwh(supply.requirement.buyerEurPerKwh)}.</>
-          : unitTarget != null
-            ? <>Buy at <strong>{perUnit(unitTarget)}</strong> or less to keep our 10% fee on the buyer&apos;s {perUnit(supply.requirement.buyerEurPerUnit!)}.</>
-            : <>No buyer price yet, so there is no target buy price. Ask the buyer for one first.</>}
-      </p>
       <div className={css.groups}>
         {leads.map((lead) => (
           <div key={lead.id} className={css.groupRow} style={{ gridTemplateColumns: "minmax(0,1fr) 90px 110px" }}>
@@ -389,7 +377,6 @@ function MarketSection({ supply, leads }: { supply: DemandSupply; leads: MarketL
             <span className={css.num}>{lead.status === "new" ? "Ask to buy" : lead.status}</span>
           </div>
         ))}
-        {!leads.length && <p className={css.empty}>Sellers outside our inventory will appear here once Ari&apos;s market finder is connected.</p>}
       </div>
     </section>
   );

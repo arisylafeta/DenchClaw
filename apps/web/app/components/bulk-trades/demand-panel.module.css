@@ -24,7 +24,7 @@
 .segment { display: inline-flex; gap: 2px; padding: 3px; background: var(--bt-segment); }
 .segment button { padding: 5px 10px; font-size: 12px; color: var(--bt-muted); border-radius: 0 !important; }
 .segment button[aria-pressed="true"] { background: var(--bt-badge); color: var(--bt-on-badge); }
-.groups { border: 1px solid var(--bt-border); }
+.groups { border: 1px solid var(--bt-border); border-radius: 10px; background: var(--bt-surface); overflow: hidden; }
 .group + .group { border-top: 1px solid var(--bt-divider); }
 .groupRow { display: grid; grid-template-columns: 64px minmax(0, 1fr) 84px 110px 20px; gap: 12px; align-items: start; width: 100%; padding: 14px 16px; text-align: left; }
 .groupRow:hover { background: var(--bt-row-hover); }
@@ -32,7 +32,7 @@
 .groupRowLot:hover { background: transparent; }
 .num { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
 .numSub { display: block; font-size: 11px; color: var(--bt-muted); font-weight: 400; }
-.units { overflow-x: auto; border-top: 1px solid var(--bt-divider); background: var(--bt-table-head); }
+.units { overflow-x: auto; border-top: 1px solid var(--bt-divider); background: var(--bt-surface); }
 .units table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 12px; }
 .units th { padding: 8px 10px; text-align: left; font-weight: 500; color: var(--bt-muted); white-space: nowrap; }
 .units td { padding: 9px 10px; border-top: 1px solid var(--bt-divider); vertical-align: top; }
@@ -65,7 +65,7 @@
 .fit[data-verdict="check"] { color: var(--bt-amber); border-color: var(--bt-amber-border); background: var(--bt-amber-tint); }
 
 /* Sellers inside a group: one row per collection, packs underneath. */
-.sellers { border-top: 1px solid var(--bt-divider); background: var(--bt-table-head); }
+.sellers { border-top: 1px solid var(--bt-divider); background: var(--bt-surface); }
 .seller + .seller { border-top: 1px solid var(--bt-divider); }
 .sellerRow { display: grid; grid-template-columns: 16px minmax(0, 1fr) 70px 96px 120px 72px; gap: 12px; align-items: center; width: 100%; padding: 10px 16px 10px 28px; text-align: left; }
 .sellerRow:hover { background: var(--bt-row-hover); }
