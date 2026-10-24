@@ -53,7 +53,6 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
         <ScoreRing score={demand.score} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-1"><h2 className={css.title}>{demandTitle(demand)}</h2><CopyIdButton id={demand.id} className="mt-1" /></div>
-          {waiting?.waiting_on && <div className="mt-2"><WaitingBadge row={waiting} large /></div>}
           <div className={css.sub}>
             <span>{demand.buyer}</span>{isTrade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
             {demand.tier && <span className={css.chip}>{demand.tier}-tier</span>}
@@ -61,7 +60,7 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
             {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
           </div>
         </div>
-        <div className={`${css.status} ${css.actions}`}>{actions}</div>
+        <div className={`${css.status} ${css.actions} flex items-start gap-2`}>{waiting?.waiting_on && <WaitingBadge row={waiting} large />}{actions}</div>
       </div>
       <dl className={css.facts}>
         <div className={css.fact}>

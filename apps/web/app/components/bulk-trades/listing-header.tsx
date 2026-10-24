@@ -18,12 +18,12 @@ export function ListingHeader({ listing, onBack }: { listing: BulkListingView; o
     <div className={css.titleRow}>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-1"><h2 className={css.title}>{listing.title}</h2><CopyIdButton id={listing.id} className="mt-1" /></div>
-        {listing.waiting_on && <div className="mt-2"><WaitingBadge row={listing} large /></div>}
         <div className={css.sub}><span>{listing.party}</span><span className={css.chip}>{listing.status === "closed" ? "closed" : listing.stage}</span>
           {listing.context.priority === true && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
         </div>
       </div>
+      {listing.waiting_on && <div className={`${css.status} flex items-start`}><WaitingBadge row={listing} large /></div>}
     </div>
     <dl className={css.facts}>{[
       ["Seller", listing.party], ["Quantity", listing.quantity], ["Location", listing.location],

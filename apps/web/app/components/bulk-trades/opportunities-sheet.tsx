@@ -40,7 +40,7 @@ export function WaitingBadge({ row, compact = false, large = false }: { row: Pic
   const since = row.waiting_since && !compact ? ` · ${shortDate(row.waiting_since)}` : "";
   return (
     <span data-waiting-on={row.waiting_on} title={row.waiting_since ? `${WAITING_LABEL[row.waiting_on]} since ${shortDate(row.waiting_since)}` : WAITING_LABEL[row.waiting_on]}
-      className={`inline-flex w-fit shrink-0 items-center rounded-full border font-medium whitespace-nowrap ${large ? "px-3.5 py-1.5 text-[15px] font-semibold" : "px-2 py-0.5 text-[11px]"}`}
+      className={`inline-flex w-fit shrink-0 items-center rounded-full border font-medium whitespace-nowrap ${large ? "h-9 rounded-none px-3 text-[13px] font-semibold" : "px-2 py-0.5 text-[11px]"}`}
       style={{ color: us ? "var(--bt-amber)" : "var(--bt-muted)", background: us ? "var(--bt-amber-bg)" : "transparent", borderColor: us ? "var(--bt-amber-border)" : "var(--bt-border)" }}>
       {WAITING_LABEL[row.waiting_on]}{since}
     </span>
