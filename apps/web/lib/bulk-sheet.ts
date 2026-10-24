@@ -10,6 +10,9 @@ import type { BulkTradesRoute } from "./bulk-trades-url";
 import { demandTitle } from "./bulk-demand-header";
 import type { BuyerContext } from "./buyer-context";
 
+export type WaitingOn = "us" | "them";
+export const WAITING_LABEL: Record<WaitingOn, string> = { us: "On us", them: "Waiting on them" };
+
 export type SheetKind = "demand" | "supply";
 /** Starting point: a buyer asking for something, or a seller offering it. A buyer-seller connection is shown in progress and details, not here. */
 export type SheetSide = "buyer" | "seller";
@@ -39,6 +42,9 @@ export type SheetRow = {
   latest: { label: string; at: string | null; kind?: string } | null;
   next_action: string | null;
   next_due: string | null;
+  /** Whose move it is: us (we owe the step, or they spoke last) or them (we spoke last). Null when not judged. */
+  waiting_on?: WaitingOn | null;
+  waiting_since?: string | null;
   owner: string | null;
   /** Date used to order the sheet, newest first. */
   touched: string | null;
@@ -50,9 +56,11 @@ export type SheetFilters = {
   progress: string;
   company: string;
   category: string;
+  /** Whose move it is; "us" lists what we still owe a follow-up on. */
+  waiting: WaitingOn | "all";
 };
 
-export const NO_FILTERS: SheetFilters = { query: "", side: "all", progress: "all", company: "all", category: "all" };
+export const NO_FILTERS: SheetFilters = { query: "", side: "all", progress: "all", company: "all", category: "all", waiting: "all" };
 
 export const SIDE_LABEL: Record<SheetSide, string> = { buyer: "Buying", seller: "Selling" };
 
@@ -69,6 +77,7 @@ export type ListingSheetInput = {
   status: string; score: number | null; activity_count: number;
   latest_kind: string | null; latest_title: string | null; latest_at: string | null;
   observed_on: string | null; updated_at: string; next_action: string | null; next_due: string | null;
+  waiting_on?: string | null; waiting_since?: string | null;
   furthest_stage: string | null;
   /** From bulk_listing_stage(): New, Qualified, Matched, Offered, Signed & Paid, Complete. */
   stage: ListingStage;
@@ -96,6 +105,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     score: input.score,
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), next_due: input.next_due, owner: null,
+    waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
   };
 }
@@ -140,6 +150,7 @@ export function filterSheet(rows: SheetRow[], filters: SheetFilters): SheetRow[]
     (filters.progress === "all" || row.progress === filters.progress) &&
     (filters.company === "all" || row.company === filters.company) &&
     (filters.category === "all" || row.category === filters.category) &&
+    (filters.waiting === "all" || row.waiting_on === filters.waiting) &&
     (!needle || [row.title, row.company, row.category, row.progress, row.latest?.label, row.next_action, row.owner]
       .some((value) => value?.toLowerCase().includes(needle)))), filters.side);
 }
@@ -154,7 +165,7 @@ export function sheetOptions(rows: SheetRow[]) {
 const SIDES: readonly string[] = ["buyer", "seller"];
 
 /** The sheet filters a URL asks for. Older tab=demand / tab=supply links mean buyer-led / seller-led. */
-export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" | "progress" | "company" | "category" | "tab">): SheetFilters {
+export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" | "progress" | "company" | "category" | "tab"> & { waiting?: string | null }): SheetFilters {
   const legacySide = route.tab === "demand" ? "buyer" : route.tab === "supply" ? "seller" : null;
   const side = route.side ?? legacySide;
   return {
@@ -163,6 +174,7 @@ export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" |
     progress: route.progress ?? "all",
     company: route.company ?? "all",
     category: route.category ?? "all",
+    waiting: route.waiting === "us" || route.waiting === "them" ? route.waiting : "all",
   };
 }
 
@@ -175,5 +187,6 @@ export function routeFromFilters(filters: SheetFilters): Partial<BulkTradesRoute
     progress: filters.progress === "all" ? null : filters.progress,
     company: filters.company === "all" ? null : filters.company,
     category: filters.category === "all" ? null : filters.category,
+    waiting: filters.waiting === "all" ? null : filters.waiting,
   };
 }

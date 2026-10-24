@@ -7,6 +7,7 @@ export const SHEET_QUERY = `
     listing.spec, listing.context, listing.status, listing.updated_at::text,
     to_char(listing.observed_on, 'YYYY-MM-DD') as observed_on,
     listing.next_action, to_char(listing.next_due, 'YYYY-MM-DD') as next_due,
+    listing.waiting_on, to_char(listing.waiting_since, 'YYYY-MM-DD') as waiting_since,
     case when listing.kind = 'demand' then bulk_demand_score(
       (listing.spec->>'fee_eur')::numeric, listing.spec->>'price_basis', listing.spec->>'reputation',
       greatest(listing.observed_on, (listing.spec->>'confirmed_on')::date))

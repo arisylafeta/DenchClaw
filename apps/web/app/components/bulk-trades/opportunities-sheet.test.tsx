@@ -42,3 +42,25 @@ describe("OpportunitiesSheet sort control", () => {
   });
 });
 
+describe("OpportunitiesSheet waiting-on", () => {
+  const mk = (id: string, waiting_on: "us" | "them" | null) => ({
+    key: id, id, kind: "demand" as const, side: "buyer" as const, title: `Row ${id}`, company: "Co", company_id: null, category: null,
+    progress: "New" as const, tone: "new" as const, score: null, latest: null, next_action: null, next_due: null, owner: null, touched: null,
+    waiting_on, waiting_since: waiting_on ? "2026-10-20" : null,
+  });
+  it("shows a badge per row, and a Waiting on filter that reports the choice", () => {
+    const onFilters = vi.fn();
+    const rows = [mk("a", "us"), mk("b", "them"), mk("c", null)];
+    render(<OpportunitiesSheet rows={rows} shown={rows} filters={NO_FILTERS} loading={false} error={null} today="2026-10-20" onFilters={onFilters} onOpen={vi.fn()} onNext={vi.fn()} />);
+    expect(document.querySelectorAll("[data-waiting-on=us]").length).toBe(1);
+    expect(document.querySelectorAll("[data-waiting-on=them]").length).toBe(1);
+    expect(screen.getByText(/On us/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Waiting on"), { target: { value: "us" } });
+    expect(onFilters).toHaveBeenCalledWith({ ...NO_FILTERS, waiting: "us" });
+  });
+  it("offers to clear a waiting-on filter", () => {
+    render(<OpportunitiesSheet rows={[]} shown={[]} filters={{ ...NO_FILTERS, waiting: "us" }} loading={false} error={null} today="2026-10-20" onFilters={vi.fn()} onOpen={vi.fn()} onNext={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
+  });
+});
+

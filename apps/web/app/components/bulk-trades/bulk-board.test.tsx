@@ -22,4 +22,13 @@ describe("Bulk Trades board", () => {
     fireEvent.click(bid.getByText("5MWh Cells"));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
   });
+
+  it("marks cards that wait on us or on them", () => {
+    render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={vi.fn()}
+      shown={[row({ waiting_on: "us", waiting_since: "2026-10-20" }), row({ key: "b", id: "b", title: "Other", waiting_on: "them" }), row({ key: "c", id: "c", title: "Unjudged" })]} />);
+    expect(document.querySelectorAll("[data-waiting-on=us]").length).toBe(1);
+    expect(document.querySelectorAll("[data-waiting-on=them]").length).toBe(1);
+    expect(screen.getByText("On us")).toBeTruthy();
+  });
 });
+

@@ -68,9 +68,9 @@ describe("sheet filters in the URL", () => {
 
   it("round-trips, keeping defaults out of the URL", () => {
     const filters = { ...NO_FILTERS, query: "nolden", side: "buyer" as const, progress: "New" };
-    expect(routeFromFilters(filters)).toEqual({ query: "nolden", side: "buyer", progress: "New", company: null, category: null });
+    expect(routeFromFilters(filters)).toEqual({ query: "nolden", side: "buyer", progress: "New", company: null, category: null, waiting: null });
     expect(filtersFromRoute({ ...route, ...routeFromFilters(filters) })).toEqual(filters);
-    expect(routeFromFilters(NO_FILTERS)).toEqual({ query: null, side: null, progress: null, company: null, category: null });
+    expect(routeFromFilters(NO_FILTERS)).toEqual({ query: null, side: null, progress: null, company: null, category: null, waiting: null });
   });
 
   it("maps older demand and supply tab links to the matching side, and ignores an unknown side", () => {
@@ -121,3 +121,25 @@ describe("sortRows", () => {
     expect(ids("stage")).toEqual(["c", "a", "d", "b"]);
   });
 });
+
+describe("waiting-on", () => {
+  const base = { id: "x", kind: "demand" as const, party: "P", company_id: null, summary: "s", spec: {}, context: {} as never, status: "open", score: null, activity_count: 0, latest_kind: null, latest_title: null, latest_at: null, observed_on: null, updated_at: "2026-10-01", next_action: null, next_due: null, furthest_stage: null, stage: "New" as const };
+  const rows = [
+    listingRow({ ...base, id: "a", waiting_on: "us", waiting_since: "2026-10-20" }),
+    listingRow({ ...base, id: "b", waiting_on: "them" }),
+    listingRow({ ...base, id: "c", waiting_on: null }),
+    listingRow({ ...base, id: "d", waiting_on: "nonsense" }),
+  ];
+  it("keeps only us or them, and the date it started", () => {
+    expect(rows.map((r) => r.waiting_on)).toEqual(["us", "them", null, null]);
+    expect(rows[0].waiting_since).toBe("2026-10-20");
+  });
+  it("filters to what is waiting on us and round-trips through the URL", () => {
+    expect(filterSheet(rows, { ...NO_FILTERS, waiting: "us" }).map((r) => r.id)).toEqual(["a"]);
+    expect(filterSheet(rows, { ...NO_FILTERS, waiting: "them" }).map((r) => r.id)).toEqual(["b"]);
+    expect(routeFromFilters({ ...NO_FILTERS, waiting: "us" }).waiting).toBe("us");
+    expect(filtersFromRoute({ query: null, side: null, progress: null, company: null, category: null, tab: null, waiting: "us" }).waiting).toBe("us");
+    expect(filtersFromRoute({ query: null, side: null, progress: null, company: null, category: null, tab: null, waiting: "bogus" }).waiting).toBe("all");
+  });
+});
+

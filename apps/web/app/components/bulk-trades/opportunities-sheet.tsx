@@ -3,7 +3,7 @@
 import { CopyIdButton } from "./copy-id-button";
 import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Search, Flag } from "lucide-react";
-import { SHEET_SORTS, SIDE_LABEL, SORT_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
+import { NO_FILTERS, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
@@ -30,6 +30,20 @@ function Select({ label, value, options, onChange }: { label: string; value: str
       <option value="all">{label}: all</option>
       {all.map((option) => <option key={option} value={option}>{option}</option>)}
     </select>
+  );
+}
+
+/** Whose move it is. "On us" is the one to act on, so it is the loud one; "them" stays quiet. */
+export function WaitingBadge({ row, compact = false }: { row: Pick<SheetRow, "waiting_on" | "waiting_since">; compact?: boolean }) {
+  if (!row.waiting_on) return null;
+  const us = row.waiting_on === "us";
+  const since = row.waiting_since && !compact ? ` · ${shortDate(row.waiting_since)}` : "";
+  return (
+    <span data-waiting-on={row.waiting_on} title={row.waiting_since ? `${WAITING_LABEL[row.waiting_on]} since ${shortDate(row.waiting_since)}` : WAITING_LABEL[row.waiting_on]}
+      className="inline-flex w-fit shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
+      style={{ color: us ? "var(--bt-amber)" : "var(--bt-muted)", background: us ? "var(--bt-amber-bg)" : "transparent", borderColor: us ? "var(--bt-amber-border)" : "var(--bt-border)" }}>
+      {WAITING_LABEL[row.waiting_on]}{since}
+    </span>
   );
 }
 
@@ -100,7 +114,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
         <span className="mt-1 inline-flex md:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       </span>
       <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company ?? "—"}</Sh></span>
-      <span><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh></span>
+      <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}</span>
       <span className="hidden min-w-0 lg:block">
         {loading ? <Sh on chars={7} /> : row.latest ? (
           <IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} />
@@ -116,14 +130,14 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
 const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
   key: `loading:${index}`, id: "", kind: "demand", side: "buyer", title: "", company: null,
   company_id: null, category: null, progress: "New", tone: "new", score: null,
-  latest: null, next_action: null, next_due: null, owner: null, touched: null,
+  latest: null, next_action: null, next_due: null, waiting_on: null, waiting_since: null, owner: null, touched: null,
 }));
 
 /** Search, starting point and menus; shared by the list and the board. */
 export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, sort, onSort }: { rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean; sort?: SheetSort; onSort?: (next: SheetSort) => void }) {
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
-  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
+  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all" || filters.waiting !== "all";
   const sides = ["buyer", "seller"] as const;
   return (
       <div className="flex flex-wrap items-center gap-2">
@@ -148,6 +162,12 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
         {!hideProgress && <Select label="Progress" value={filters.progress} options={options.progress} onChange={(progress) => set({ progress })} />}
         <Select label="Company" value={filters.company} options={options.company} onChange={(company) => set({ company })} />
         <Select label="Category" value={filters.category} options={options.category} onChange={(category) => set({ category })} />
+        <select aria-label="Waiting on" value={filters.waiting} onChange={(event) => set({ waiting: event.target.value as SheetFilters["waiting"] })}
+          className={`${field} max-w-[11rem] min-w-0 flex-1 sm:flex-none`} style={fieldStyle}>
+          <option value="all">Waiting on: all</option>
+          <option value="us">Waiting on: us</option>
+          <option value="them">Waiting on: them</option>
+        </select>
         {onSort && (
           <select aria-label="Sort by" value={sort ?? "newest"} onChange={(event) => onSort(event.target.value as SheetSort)}
             className={`${field} max-w-[13rem] min-w-0 flex-1 sm:flex-none`} style={fieldStyle}>
@@ -156,7 +176,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
         )}
         {filtered && (
           <button type="button" className="h-9 rounded-lg px-2 text-[13px] underline" style={{ color: "var(--bt-text-2)" }}
-            onClick={() => onFilters({ query: "", side: "all", progress: "all", company: "all", category: "all" })}>
+            onClick={() => onFilters(NO_FILTERS)}>
             Clear filters
           </button>
         )}
@@ -181,7 +201,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
   const displayRows = busy ? PLACEHOLDER_ROWS : shown;
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
-  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all";
+  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all" || filters.waiting !== "all";
   const sides = ["buyer", "seller"] as const;
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">

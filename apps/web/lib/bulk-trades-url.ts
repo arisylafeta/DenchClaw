@@ -43,13 +43,15 @@ export type BulkTradesRoute = {
   side: string | null;
   progress: string | null;
   company: string | null;
+  /** Whose move it is: us or them. */
+  waiting: string | null;
 };
 
 const SHELL_PARAMS = ["terminal", "browse", "hidden"] as const;
 const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply", "board"];
-export const BULK_TRADES_PARAMS = ["tab", "listing", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company"] as const;
+export const BULK_TRADES_PARAMS = ["tab", "listing", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company", "waiting"] as const;
 
-const EMPTY: BulkTradesRoute = { tab: null, listing: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null };
+const EMPTY: BulkTradesRoute = { tab: null, listing: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null, waiting: null };
 
 export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTradesRoute {
   const params = typeof search === "string" ? new URLSearchParams(search) : search;
@@ -66,6 +68,7 @@ export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTrad
     side: params.get("side") || null,
     progress: params.get("progress") || null,
     company: params.get("company") || null,
+    waiting: params.get("waiting") || null,
   };
 }
 
@@ -91,6 +94,7 @@ export function bulkTradesParams(patch: Partial<BulkTradesRoute>): URLSearchPara
   if (route.side) params.set("side", route.side);
   if (route.progress) params.set("progress", route.progress);
   if (route.company) params.set("company", route.company);
+  if (route.waiting) params.set("waiting", route.waiting);
   return params;
 }
 

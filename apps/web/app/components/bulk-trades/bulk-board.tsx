@@ -4,7 +4,7 @@ import type { SheetRow, SheetTone } from "@/lib/bulk-sheet";
 import type { ListingStage } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { BusyRegion } from "./bt-shimmer";
-import { ScoreCircle, SideChip } from "./opportunities-sheet";
+import { ScoreCircle, SideChip, WaitingBadge } from "./opportunities-sheet";
 
 /** Read-only pipeline of the six listing stages (bulk_listing_stage). Work moves on by what happens in the listing:
  * a saved match, an offer, a contract date. Nothing is dragged. */
@@ -31,7 +31,8 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
         </span>
         <span className="flex min-w-0 items-center gap-1.5">
           <SideChip side={row.side} />
-          {row.company && <span className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
+          {row.company && <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
+          <WaitingBadge row={row} compact />
         </span>
         {(row.next_action || row.latest) && (
           <span className="flex items-baseline gap-1.5 border-t pt-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
