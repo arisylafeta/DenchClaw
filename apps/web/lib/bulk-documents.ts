@@ -28,9 +28,8 @@ export type ListingDocument = {
   created_at: string;
 };
 
-/** Where a document sits on the page: still wanted, received from someone, or made and sent by us. */
-export function documentSection(doc: Pick<ListingDocument, "state" | "direction">): "needed" | "received" | "ours" {
-  if (doc.state === "needed" || doc.state === "requested") return "needed";
+/** Where a document sits on the page: received from someone, or made and sent by us. There is no "needed" section. */
+export function documentSection(doc: Pick<ListingDocument, "direction">): "received" | "ours" {
   return doc.direction === "received" ? "received" : "ours";
 }
 

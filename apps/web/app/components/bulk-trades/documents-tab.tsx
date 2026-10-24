@@ -1,20 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Link2, Paperclip, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { FileText, Link2, Trash2 } from "lucide-react";
 import { DIRECTION_LABEL, DOC_STATES, STATE_LABEL, documentSection, type DocState, type ListingDocument } from "@/lib/bulk-documents";
-import type { Registry } from "@/lib/bulk-registry";
-import { isImage, shortDate, type NeededFor } from "@/lib/bulk-trade-details";
+import { isImage, shortDate } from "@/lib/bulk-trade-details";
 import { ErrorText, request } from "./trade-ui";
-import { useRegistry } from "./use-registry";
 
 import { BusyRegion, Sh } from "./bt-shimmer";
 
 const docsUrl = (listingId: string, path = "") => `/api/bulk-listings/${encodeURIComponent(listingId)}/documents${path}`;
 const fileUrl = (listingId: string, doc: ListingDocument) => docsUrl(listingId, `/${doc.id}/file?view=1`);
-
-/** Required types with nothing recorded yet: wanted by the listing's kind, shown as needed. */
-type Wanted = { type: string; label: string; neededFor: NeededFor };
 
 const extension = (name: string | null) => {
   const dot = name?.lastIndexOf(".") ?? -1;
@@ -38,25 +33,17 @@ function Thumb({ listingId, doc, loading = false }: { listingId: string; doc: Li
 function DocCard({ listingId, doc, onChange, onRemove, onError, loading = false }: {
   listingId: string; doc: ListingDocument; loading?: boolean; onChange: (doc: ListingDocument) => void; onRemove: (id: string) => void; onError: (message: string) => void;
 }) {
-  const picker = useRef<HTMLInputElement>(null);
-  const wanted = documentSection(doc) === "needed";
   const open = doc.has_file ? fileUrl(listingId, doc) : doc.url;
   async function save(patch: Record<string, unknown>) {
     try { onChange((await request<{ document: ListingDocument }>(docsUrl(listingId, `/${doc.id}`), { method: "PATCH", body: JSON.stringify(patch) })).document); }
     catch (err) { onError(err instanceof Error ? err.message : "Could not save."); }
-  }
-  async function attach(file: File) {
-    const body = new FormData();
-    body.set("file", file);
-    try { onChange((await request<{ document: ListingDocument }>(docsUrl(listingId, `/${doc.id}`), { method: "PATCH", body })).document); }
-    catch (err) { onError(err instanceof Error ? err.message : "Could not upload."); }
   }
   async function remove() {
     try { await request(docsUrl(listingId, `/${doc.id}`), { method: "DELETE" }); onRemove(doc.id); }
     catch (err) { onError(err instanceof Error ? err.message : "Could not delete."); }
   }
   return (
-    <li className="flex min-w-0 flex-col border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", borderStyle: wanted ? "dashed" : "solid" }}>
+    <li className="flex min-w-0 flex-col border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
       <Thumb listingId={listingId} doc={doc} loading={loading} />
       <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
         <div className="line-clamp-2 text-[13px] font-semibold leading-snug" title={doc.title}>
@@ -73,44 +60,7 @@ function DocCard({ listingId, doc, onChange, onRemove, onError, loading = false 
           </select>}
           {doc.direction !== "received" && <span className="text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={7}>{DIRECTION_LABEL[doc.direction]}</Sh></span>}
           <span className="flex-1" />
-          {wanted && (
-            <>
-              <input ref={picker} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void attach(file); event.target.value = ""; }} />
-              <button disabled={loading} type="button" className="inline-flex items-center gap-1 text-[12px] font-medium hover:underline" onClick={() => picker.current?.click()}>
-                <Paperclip size={12} aria-hidden="true" /> Attach file
-              </button>
-            </>
-          )}
           <button disabled={loading} type="button" aria-label={`Delete ${doc.title}`} className="p-1" style={{ color: "var(--bt-muted)" }} onClick={() => void remove()}><Trash2 size={13} aria-hidden="true" /></button>
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function WantedCard({ listingId, item, onAdded, onError }: { listingId: string; item: Wanted; onAdded: (doc: ListingDocument) => void; onError: (message: string) => void }) {
-  const picker = useRef<HTMLInputElement>(null);
-  async function create(file: File | null) {
-    try {
-      if (file) {
-        const body = new FormData();
-        body.set("file", file); body.set("title", item.label); body.set("doc_type", item.type);
-        onAdded((await request<{ document: ListingDocument }>(docsUrl(listingId), { method: "POST", body })).document);
-      } else {
-        onAdded((await request<{ document: ListingDocument }>(docsUrl(listingId), { method: "POST", body: JSON.stringify({ title: item.label, doc_type: item.type, state: "needed" }) })).document);
-      }
-    } catch (err) { onError(err instanceof Error ? err.message : "Could not save."); }
-  }
-  return (
-    <li className="flex min-w-0 flex-col border border-dashed" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border-strong)" }}>
-      <div className="flex h-24 items-center justify-center border-b border-dashed text-[13px]" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>Not here yet</div>
-      <div className="flex flex-1 flex-col gap-1 p-3">
-        <div className="text-[13px] font-semibold leading-snug">{item.label}</div>
-        <div className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{item.type} · needed for {item.neededFor}</div>
-        <div className="mt-auto flex items-center gap-3 pt-2">
-          <input ref={picker} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void create(file); event.target.value = ""; }} />
-          <button type="button" className="inline-flex items-center gap-1 text-[12px] font-medium hover:underline" onClick={() => picker.current?.click()}><Paperclip size={12} aria-hidden="true" /> Attach file</button>
-          <button type="button" className="text-[12px] hover:underline" style={{ color: "var(--bt-muted)" }} onClick={() => void create(null)}>Mark as requested</button>
         </div>
       </div>
     </li>
@@ -127,11 +77,10 @@ function Section({ title, count, children, loading = false }: { title: string; c
 }
 
 /**
- * Documents of a bulk listing: what is wanted, what came in, and what we made or sent, as cards.
- * Required document types for the listing's kind show as wanted until something is recorded for them.
+ * Documents of a bulk listing: what came in, and what we made or sent, as cards. Nothing is listed as "needed":
+ * a document is only shown once there is something to show.
  */
-export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; wantsRequired: boolean }) {
-  const registry = useRegistry();
+export function DocumentsTab({ listingId }: { listingId: string }) {
   const [docs, setDocs] = useState<ListingDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -139,12 +88,12 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
     catch (err) { setError(err instanceof Error ? err.message : "Could not load documents."); }
   }, [listingId]);
   useEffect(() => { void load(); }, [load]);
-  if (!registry || !docs) return (
+  if (!docs) return (
     <BusyRegion busy={!error} label="Loading documents" className="flex w-full flex-col gap-6">
       <ErrorText error={error} />
-      {!error && (["Needed", "Received", "Ours"] as const).map((title, i) => (
+      {!error && (["Received", "Ours"] as const).map((title, i) => (
         <Section key={title} title={title} count={1} loading>
-          <DocCard listingId={listingId} loading doc={{ id: `loading-${i}`, title: "", doc_type: "", state: i === 0 ? "needed" : "received", direction: i === 2 ? "prepared" : "received", created_at: "", has_file: false } as ListingDocument} onChange={() => {}} onRemove={() => {}} onError={setError} />
+          <DocCard listingId={listingId} loading doc={{ id: `loading-${i}`, title: "", doc_type: "", state: "received", direction: i === 1 ? "prepared" : "received", created_at: "", has_file: false } as ListingDocument} onChange={() => {}} onRemove={() => {}} onError={setError} />
         </Section>
       ))}
     </BusyRegion>
@@ -152,13 +101,7 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
 
   const upsert = (doc: ListingDocument) => setDocs((current) => [doc, ...(current ?? []).filter((item) => item.id !== doc.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
   const remove = (id: string) => setDocs((current) => (current ?? []).filter((item) => item.id !== id));
-  const have = new Set(docs.filter((doc) => documentSection(doc) !== "needed").map((doc) => doc.doc_type));
-  const asked = new Set(docs.filter((doc) => documentSection(doc) === "needed").map((doc) => doc.doc_type));
-  const required: Wanted[] = wantsRequired
-    ? registry.requiredFiles.filter((file) => !have.has(file.type) && !asked.has(file.type)).map((file) => ({ type: file.type, label: file.label, neededFor: file.neededFor }))
-    : [];
   const sections = {
-    needed: docs.filter((doc) => documentSection(doc) === "needed"),
     received: docs.filter((doc) => documentSection(doc) === "received"),
     ours: docs.filter((doc) => documentSection(doc) === "ours"),
   };
@@ -166,15 +109,9 @@ export function DocumentsTab({ listingId, wantsRequired }: { listingId: string; 
   return (
     <div className="flex w-full flex-col gap-6" data-documents>
       <ErrorText error={error} />
-      {sections.needed.length + required.length > 0 && (
-        <Section title="Needed" count={sections.needed.length + required.length}>
-          {sections.needed.map(card)}
-          {required.map((item) => <WantedCard key={item.type} listingId={listingId} item={item} onAdded={upsert} onError={setError} />)}
-        </Section>
-      )}
       {sections.received.length > 0 && <Section title="Received" count={sections.received.length}>{sections.received.map(card)}</Section>}
       {sections.ours.length > 0 && <Section title="Ours" count={sections.ours.length}>{sections.ours.map(card)}</Section>}
-      {docs.length + required.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No documents yet.</p>}
+      {docs.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No documents yet.</p>}
     </div>
   );
 }

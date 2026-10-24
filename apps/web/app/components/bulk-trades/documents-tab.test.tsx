@@ -21,11 +21,11 @@ describe("DocumentsTab", () => {
   it("keeps document groups and card structure visible while values load", async () => {
     let resolve!: (response: Response) => void;
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { resolve = r; })));
-    render(<DocumentsTab listingId="d1" wantsRequired={false} />);
+    render(<DocumentsTab listingId="d1" />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading documents");
-    for (const title of ["Needed", "Received", "Ours"]) expect(screen.getByRole("heading", { name: new RegExp(title) })).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
-    expect(screen.getByRole("button", { name: "Attach file" })).toBeDisabled();
+    for (const title of ["Received", "Ours"]) expect(screen.getByRole("heading", { name: new RegExp(title) })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByRole("heading", { name: /Needed/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Buyer spec")).not.toBeInTheDocument();
     await act(async () => resolve(new Response(JSON.stringify({ documents: [doc({ title: "Buyer spec" })] }))));
     expect(await screen.findByText("Buyer spec")).toBeInTheDocument();
@@ -33,36 +33,24 @@ describe("DocumentsTab", () => {
     expect(screen.getByRole("heading", { name: "Received · 1" })).toBeInTheDocument();
   });
 
-  it("groups documents into needed, received and ours, and shows nothing for required types on a demand", async () => {
+  it("groups documents into received and ours, with no needed section and nothing for required types", async () => {
     const documents = [
       doc({ id: "n1", title: "Toyota pack datasheet", state: "needed" }),
       doc({ id: "r1", title: "Buyer spec", doc_type: "Datasheet" }),
       doc({ id: "o1", title: "RFS draft", doc_type: "RFS", direction: "prepared", state: "draft" }),
     ];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ documents }))));
-    render(<DocumentsTab listingId="d1" wantsRequired={false} />);
-    expect(await screen.findByRole("heading", { name: "Needed · 1" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Received · 1" })).toBeInTheDocument();
+    render(<DocumentsTab listingId="d1" />);
+    expect(await screen.findByRole("heading", { name: "Received · 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Needed/ })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Ours · 1" })).toBeInTheDocument();
     expect(screen.queryByText("BMS or test report")).not.toBeInTheDocument();
   });
 
   it("opens a link in a new tab and has no add buttons", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ documents: [doc({ id: "l1", title: "Granola call notes" })] }))));
-    render(<DocumentsTab listingId="d1" wantsRequired={false} />);
+    render(<DocumentsTab listingId="d1" />);
     expect(await screen.findByRole("link", { name: "Granola call notes" })).toHaveAttribute("target", "_blank");
     for (const name of ["Upload", "Add link", "Ask for a document"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
-  });
-
-  it("marks a required type as requested without a file", async () => {
-    const created = doc({ id: "n3", title: "Photos", doc_type: "Photos", state: "needed", url: null });
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "POST" ? { document: created } : { documents: [] })));
-    vi.stubGlobal("fetch", fetchMock);
-    render(<DocumentsTab listingId="bt_1" wantsRequired />);
-    const needed = (await screen.findByRole("heading", { name: /Needed · 4/ })).closest("section")!;
-    await userEvent.click(within(needed).getAllByRole("button", { name: "Mark as requested" })[0]);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/bt_1/documents", expect.objectContaining({
-      method: "POST", body: JSON.stringify({ title: "Photos", doc_type: "Photos", state: "needed" }),
-    })));
   });
 });
