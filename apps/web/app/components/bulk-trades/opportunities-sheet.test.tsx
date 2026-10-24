@@ -16,8 +16,8 @@ describe("OpportunitiesSheet loading", () => {
     }
     expect(screen.getByRole("button", { name: "Buying" })).toBeTruthy();
     expect(screen.getByRole("searchbox")).toBeTruthy();
-    expect(screen.queryByText("0 of 0 open")).toBeNull();
-    expect(screen.queryByText("Nothing open right now.")).toBeNull();
+    expect(screen.queryByText("0 of 0 live")).toBeNull();
+    expect(screen.queryByText("Nothing live right now.")).toBeNull();
     const rows = container.querySelectorAll("li");
     expect(rows.length).toBe(8);
     expect(rows[0].className).toContain("grid");

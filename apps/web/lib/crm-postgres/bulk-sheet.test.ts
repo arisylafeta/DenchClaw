@@ -41,12 +41,13 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     await pg.pgPool.end();
   });
 
-  it("lists open demand, open offers and live trades once each, and leaves history, qualifying and finished work out", async () => {
+  it("lists open and qualifying demand, open offers and live trades once each, and leaves history and finished work out", async () => {
     const rows = (await sheet.listSheet()).filter((row) => /^(btd|bts|btl)_sheet_/.test(row.id));
     expect(rows.map((row) => `${row.kind}:${row.id}`).sort()).toEqual(
-      ["demand:btd_sheet_new", "demand:btd_sheet_worked", "supply:bts_sheet_open", "supply:btl_sheet_live"].sort());
+      ["demand:btd_sheet_new", "demand:btd_sheet_qual", "demand:btd_sheet_worked", "supply:bts_sheet_open", "supply:btl_sheet_live"].sort());
     const worked = rows.find((row) => row.id === "btd_sheet_worked")!;
     expect(worked).toMatchObject({ progress: "New", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
+    expect(rows.find((row) => row.id === "btd_sheet_qual")).toMatchObject({ progress: "New", side: "buyer" });
     expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "buyer", latest: null });
     expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "seller" });
     expect(rows.filter((row) => row.id === "btl_sheet_live")).toHaveLength(1);

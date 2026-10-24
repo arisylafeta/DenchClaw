@@ -189,7 +189,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
 
       <ErrorText error={error} />
       <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">
-        <Sh on={busy} chars={14}>{`${shown.length} of ${rows.length} open`}</Sh>
+        <Sh on={busy} chars={14}>{`${shown.length} of ${rows.length} live`}</Sh>
       </p>
 
       <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -203,7 +203,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
           </ul>
         ) : (
           <p className="px-2 py-10 text-center text-[13px]" style={{ color: "var(--bt-muted)" }}>
-            {error ? "The sheet could not load." : filtered ? "No opportunities match these filters." : "Nothing open right now."}
+            {error ? "The sheet could not load." : filtered ? "No opportunities match these filters." : "Nothing live right now."}
           </p>
         )}
         </div>

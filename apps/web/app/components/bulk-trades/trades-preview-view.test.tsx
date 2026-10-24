@@ -88,7 +88,7 @@ describe("Trades Preview sheet", () => {
     expect(within(trade).getByText("Matched")).toBeInTheDocument();
     expect(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
     expect(within(trade).getByText(/Alex/)).toBeInTheDocument();
-    expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
+    expect(screen.getByText("3 of 3 live")).toBeInTheDocument();
     for (const gone of ["Today", "Trades", "Demand", "Supply"]) expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
   });
 
@@ -137,16 +137,16 @@ describe("Trades Preview sheet", () => {
     expect(new URLSearchParams(window.location.search).get("side")).toBe("seller");
 
     await userEvent.click(screen.getByRole("button", { name: "Selling" })); // pressing it again clears the filter
-    expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
+    expect(screen.getByText("3 of 3 live")).toBeInTheDocument();
     expect(new URLSearchParams(window.location.search).has("side")).toBe(false);
     expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Both/ })).not.toBeInTheDocument();
     await userEvent.type(screen.getByRole("searchbox"), "nolden");
-    expect(screen.getByText("1 of 3 open")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 live")).toBeInTheDocument();
     expect(new URLSearchParams(window.location.search).get("q")).toBe("nolden");
 
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("3 of 3 open")).toBeInTheDocument();
+    expect(screen.getByText("3 of 3 live")).toBeInTheDocument();
     expect(window.location.search).toBe("?path=%7Etrades-preview");
   });
 
@@ -154,13 +154,13 @@ describe("Trades Preview sheet", () => {
     nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&progress=Offered");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 3 live")).toBeInTheDocument();
     expect(screen.getByLabelText("Progress")).toHaveValue("Offered");
     first.unmount();
 
     nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&tab=demand");
     render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 3 open")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 3 live")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Buying" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -170,7 +170,7 @@ describe("Trades Preview sheet", () => {
     await screen.findByRole("button", { name: /12 Ioniq packs/ });
     await userEvent.type(screen.getByRole("searchbox"), "Seller Ltd");
     expect(screen.getByRole("searchbox")).toHaveValue("Seller Ltd");
-    expect(screen.getByText("2 of 3 open")).toBeInTheDocument();
+    expect(screen.getByText("2 of 3 live")).toBeInTheDocument();
   });
 
   it("an older tab=demand link keeps its filter through open and back, and Back refreshes the list", async () => {
@@ -198,7 +198,7 @@ describe("Trades Preview sheet", () => {
     expect(new URLSearchParams(window.location.search).get("listing")).toBe("bt_1");
 
     await userEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(await screen.findByText("2 of 3 open")).toBeInTheDocument();
+    expect(await screen.findByText("2 of 3 live")).toBeInTheDocument();
     expect(window.location.search).toBe("?path=%7Etrades-preview&side=seller");
   });
 
@@ -225,7 +225,7 @@ describe("Trades Preview sheet", () => {
     forgetShared();
     vi.stubGlobal("fetch", mockApi({ sheet: [] }));
     render(<TradesPreviewView />);
-    expect(await screen.findByText("Nothing open right now.")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing live right now.")).toBeInTheDocument();
   });
 
   it("shows the sheet's error and keeps the page usable", async () => {

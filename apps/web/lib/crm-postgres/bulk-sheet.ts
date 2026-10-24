@@ -1,7 +1,7 @@
 import { queryPg } from "../postgres";
 import { listingRow, sortSheet, type ListingSheetInput, type SheetRow } from "../bulk-sheet";
 
-/** One row per open listing, including lots already mirrored as supply listings. */
+/** One row per live listing (open or qualifying; a qualifying demand shows as stage New), including lots already mirrored as supply listings. */
 export const SHEET_QUERY = `
   select listing.id, listing.kind, listing.party, listing.company_id, listing.summary,
     listing.spec, listing.context, listing.status, listing.updated_at::text,
@@ -29,7 +29,7 @@ export const SHEET_QUERY = `
       when 'contract_out' then 3 when 'offered' then 2 when 'candidate' then 1 else 0 end desc,
       o.updated_at desc, o.id desc limit 1
   ) offer on true
-  where listing.status = 'open' and listing.kind in ('demand', 'supply')`;
+  where listing.status in ('open', 'qualifying') and listing.kind in ('demand', 'supply')`;
 
 export async function listSheet(): Promise<SheetRow[]> {
   return sortSheet((await queryPg<ListingSheetInput>(SHEET_QUERY)).map(listingRow));
