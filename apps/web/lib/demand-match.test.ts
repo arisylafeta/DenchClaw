@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, fewestSellers, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
+import { bestLine, bySeller, fewestSellers, foldDuplicateSupply, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -199,5 +199,59 @@ describe("matchDemand", () => {
     ]);
     expect(result.groups.map((g) => g.small)).toEqual([false, true]);
     expect(bestLine(result)?.text).toContain("Panasonic");
+  });
+});
+
+describe("missing quantity and price", () => {
+  const cells = (o: Partial<Candidate> = {}) => unit({ format: "Cells", model: "INR18650-26E", make: "Voltaplex", title: "Voltaplex INR18650-26E 2600mAh Cells", kwh: 0.0095, units: 600, price: 0.5, currency: "USD", ...o });
+  const ask = () => demand({ wants: "18650 cells", volume: 100_000, volume_unit: "cells", max_price: 1, price_currency: "EUR", price_unit: "cell" });
+
+  it("reads a per-cell buyer price as a unit price and compares the seller per cell", () => {
+    const r = requirementFor(ask(), new Set());
+    expect(r.priceUnit).toBe("cell");
+    const m = scoreCandidate(r, cells())!;
+    expect(m.economics.sellerEurPerUnit).toBeCloseTo(0.43, 2);
+    expect(m.economics.marginPct).toBeCloseTo(0.57, 2);
+    expect(m.verdict).toBe("exact");
+  });
+
+  it("does not turn an unstated quantity into one unit, and never calls it Exact", () => {
+    const m = scoreCandidate(requirementFor(ask(), new Set()), cells({ units: null, price: null }))!;
+    expect(m.verdict).toBe("check");
+    expect(m.checks.find((c) => c.key === "quantity")).toMatchObject({ state: "unknown", detail: "Quantity not stated" });
+    expect(m.economics.spreadEur).toBeNull();
+    const result = matchDemand(ask(), [cells({ units: null, price: null })]);
+    expect(result.groups[0].units).toBe(0);
+    expect(result.groups[0].unitsKnown).toBe(false);
+    expect(result.groups[0].small).toBe(false); // visible, not hidden as a small lot
+    expect(bestLine(result)!.text).not.toMatch(/\/100000|1 units/);
+  });
+
+  it("keeps a row with a quantity but no seller price as Check", () => {
+    const m = scoreCandidate(requirementFor(ask(), new Set()), cells({ price: null }))!;
+    expect(m.verdict).toBe("check");
+  });
+
+  it("keeps a cents-per-cell price instead of dropping it as a token price", () => {
+    const m = scoreCandidate(requirementFor(ask(), new Set()), cells({ price: 0.05, currency: "EUR" }))!;
+    expect(m.economics.sellerEurPerUnit).toBeCloseTo(0.05, 3);
+  });
+});
+
+describe("foldDuplicateSupply", () => {
+  const listing = unit({ key: "listing:v", seller: "Luis Diaz", make: "Voltaplex", model: "INR18650-26E", title: "Voltaplex INR18650-26E 0.01kWh", format: "Cells", units: 600 });
+  const shell = (o: Partial<Candidate> = {}) => unit({ key: "supply:s", source: "supply", seller: "Luis Diaz", title: "Voltaplex INR18650-26E 2600mAh Cells", format: "Cells", units: null, ...o });
+
+  it("folds a quantity-less supply row into the marketplace listing of the same seller and model", () => {
+    const out = foldDuplicateSupply([shell()], [listing]);
+    expect(out.feed).toHaveLength(0);
+    expect(out.listings[0].alsoIn).toEqual(["supply"]);
+    expect(listing.alsoIn).toEqual([]); // input untouched
+  });
+
+  it("keeps a supply row that states a quantity, another seller, or another model", () => {
+    expect(foldDuplicateSupply([shell({ units: 50 })], [listing]).feed).toHaveLength(1);
+    expect(foldDuplicateSupply([shell({ seller: "Other Co" })], [listing]).feed).toHaveLength(1);
+    expect(foldDuplicateSupply([shell({ title: "Samsung 30Q cells" })], [listing]).feed).toHaveLength(1);
   });
 });

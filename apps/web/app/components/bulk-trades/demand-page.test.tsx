@@ -81,11 +81,11 @@ const unit: SupplyUnitView = {
 };
 const sampleSupply: DemandSupply = {
   requirement: { pinned: ["MEB", "Packs"], unitsNeeded: 10, kwhNeeded: null, buyerEurPerKwh: null, buyerEurPerUnit: null, country: "GB" },
-  groups: [{ key: "vw|id.3|58|Packs", label: "Volkswagen ID.3 · 58 kWh", verdict: "exact", units: 3,
+  groups: [{ key: "vw|id.3|58|Packs", label: "Volkswagen ID.3 · 58 kWh", verdict: "exact", units: 3, unitsKnown: true, eurPerUnit: { min: 2784, max: 3016 },
     sellers: ["Example Breakers"], sources: ["marketplace"], eurPerKwh: { min: 48, max: 52 }, bestMarginPct: null,
     covers: { have: 3, need: 10 }, small: false, checks: unit.checks, items: [unit], more: 0,
     bySeller: [{ key: "example", name: "Example Breakers", country: "GB", location: "Yorkshire, United Kingdom", sources: ["marketplace"],
-      units: 3, kwh: { min: 58, max: 58 }, eurPerKwh: { min: 48, max: 52 }, totalEur: 8350, pricedUnits: 3, verdict: "exact", withPhotos: 1,
+      units: 3, kwh: { min: 58, max: 58 }, eurPerKwh: { min: 48, max: 52 }, eurPerUnit: { min: 2784, max: 3016 }, totalEur: 8350, pricedUnits: 3, verdict: "exact", withPhotos: 1,
       items: [unit], more: 0 }],
     fill: { sellers: [{ name: "Example Breakers", units: 3 }], units: 3, need: 10, eurPerKwh: 48 } }],
   totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, trades: 20 }, hiddenCount: 0,

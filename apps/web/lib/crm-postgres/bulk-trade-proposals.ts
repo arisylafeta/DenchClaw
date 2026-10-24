@@ -435,13 +435,24 @@ async function createSupplyListing(p: Proposal & { source_date: string | null },
       ? await client.query(`select id, company_id, coalesce(nullif(full_name, ''), email) as name from crm_people
           where lower(email) = $1 order by id limit 1`, [email])
       : { rows: [] as { id: string; company_id: string | null; name: string }[] };
+    // The same seller may already have this stock as an item row (marketplace or stock list): flag it instead of double counting.
+    const { rows: [twin] } = await client.query<{ id: string; title: string }>(
+      `select s.id, s.title from crm_stock_opportunities s
+       where ((s.company_id is not null and s.company_id = $1) or (s.person_id is not null and s.person_id = $2))
+         and length(regexp_replace(lower(coalesce(nullif(s.details->'marketplace'->>'model', ''), nullif(s.details->>'part_number', ''), '')), '[^a-z0-9]', '', 'g')) >= 5
+         and regexp_replace(lower($3), '[^a-z0-9]', '', 'g') like '%' || regexp_replace(lower(coalesce(nullif(s.details->'marketplace'->>'model', ''), s.details->>'part_number')), '[^a-z0-9]', '', 'g') || '%'
+       order by s.id limit 1`,
+      [person?.company_id ?? null, person?.id ?? null, title],
+    );
     await client.query(
       `insert into crm_bulk_listings (id, kind, party, company_id, person_id, email, summary, status, source_kind, source_id, source_thread,
          source_label, source_url, source_quote, observed_on, spec, context, next_action)
-       values ($1, 'supply', $2, $3, $4, $5, $6, 'open', 'email', $7, $8, $9, $10, $11, $12, $13, $14, 'Qualify this lead')`,
+       values ($1, 'supply', $2, $3, $4, $5, $6, 'open', 'email', $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [id, person?.name ?? email ?? "Unknown seller", person?.company_id ?? null, person?.id ?? null, email, title, `proposal:${p.id}`,
         (p as Proposal & { source_thread?: string | null }).source_thread ?? null, p.source_label, p.source_url, p.quote || null,
-        p.source_date, JSON.stringify(spec), JSON.stringify({ listing_title: title, proposal_id: p.id })],
+        p.source_date, JSON.stringify(spec),
+        JSON.stringify({ listing_title: title, proposal_id: p.id, ...(twin ? { possible_duplicate_of_stock: twin.id } : {}) }),
+        twin ? `Same seller already has "${twin.title}" as stock: close this as a duplicate or link it` : "Qualify this lead"],
     );
     if (email) {
       await client.query(

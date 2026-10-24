@@ -17,6 +17,18 @@ export const perKwh = (n: number | null | undefined) => (n == null ? "—" : `�
 export const count = (n: number) =>
   n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M` : n >= 100_000 ? `${Math.round(n / 1000)}k` : n.toLocaleString("en-GB");
 export const pct = (n: number | null | undefined) => (n == null ? "—" : `${Math.round(n * 100)}%`);
+type PriceRange = { min: number; max: number } | null;
+const unitFigure = (n: number) => (n < 10 ? n.toFixed(2) : String(Math.round(n)));
+/** The seller price as the buyer thinks of it: per unit (cell, pack) when the buyer prices per unit, else per kWh. */
+function priceText(kwh: PriceRange, perUnit: PriceRange, unit: string | null): string | null {
+  if (unit) {
+    if (!perUnit) return null;
+    const lo = unitFigure(perUnit.min);
+    return lo === unitFigure(perUnit.max) ? `€${lo}/${unit}` : `€${lo}–${unitFigure(perUnit.max)}/${unit}`;
+  }
+  if (!kwh) return null;
+  return Math.round(kwh.min) === Math.round(kwh.max) ? perKwh(kwh.min) : `€${Math.round(kwh.min)}–${Math.round(kwh.max)}`;
+}
 const money = (amount: number | null, currency: string | null) =>
   amount == null ? "—" : `${amount.toLocaleString("en-GB", { maximumFractionDigits: amount < 10 ? 2 : 0 })} ${currency ?? ""}`.trim();
 
@@ -85,14 +97,14 @@ const evidenceOf = (unit: SupplyUnitView) =>
     unit.year ? String(unit.year) : null, unit.partNumber].filter(Boolean).join(" · ");
 
 /** Packs one by one. Columns nobody filled are left out, and what the header already says is not repeated. */
-function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
-  items: SupplyUnitView[]; more?: number; hideSeller?: boolean; onVerdict: Verdict; busy: boolean;
+function UnitTable({ items, more = 0, hideSeller, onVerdict, busy, priceUnit }: {
+  items: SupplyUnitView[]; more?: number; hideSeller?: boolean; onVerdict: Verdict; busy: boolean; priceUnit: string | null;
 }) {
   const has = {
     where: items.some((u) => u.country || u.location),
     kwh: items.some((u) => u.kwh != null),
     price: items.some((u) => u.price != null),
-    perKwh: items.some((u) => u.eurPerKwh != null),
+    perKwh: items.some((u) => (priceUnit ? u.eurPerUnit : u.eurPerKwh) != null),
     evidence: items.some((u) => evidenceOf(u) || u.ai),
   };
   const oneSource = new Set(items.map((u) => [u.source, ...u.alsoIn].join("+"))).size === 1;
@@ -105,7 +117,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
             {has.where && <th>Where</th>}
             {has.kwh && <th className="r">kWh</th>}
             {has.price && <th className="r">Price</th>}
-            {has.perKwh && <th className="r">€/kWh</th>}
+            {has.perKwh && <th className="r">{priceUnit ? `€/${priceUnit}` : "€/kWh"}</th>}
             {has.evidence && <th>Evidence</th>}
             <th className="r"><span className="sr-only">Actions</span></th>
           </tr>
@@ -116,10 +128,10 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
               <td>
                 {!hideSeller && <div className="font-medium">{unit.seller ?? "Unknown seller"}</div>}
                 <div className="max-w-[260px] truncate" title={unit.title}>{unit.title}</div>
-                {(!hideSeller || !oneSource || (unit.units ?? 1) > 1) && (
+                {(!hideSeller || !oneSource || unit.units == null || unit.units > 1) && (
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     {(!hideSeller || !oneSource) && <SourceTags sources={[unit.source, ...unit.alsoIn]} />}
-                    {unit.units && unit.units > 1 ? <span className={css.note}>{count(unit.units)} units</span> : null}
+                    {unit.units == null ? <span className={css.note}>Quantity not stated</span> : unit.units > 1 ? <span className={css.note}>{count(unit.units)} units</span> : null}
                   </div>
                 )}
               </td>
@@ -133,7 +145,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
               )}
               {has.perKwh && (
                 <td className="r">
-                  <strong>{unit.eurPerKwh == null ? "" : perKwh(unit.eurPerKwh)}</strong>
+                  <strong>{priceUnit ? (unit.eurPerUnit == null ? "" : `€${unitFigure(unit.eurPerUnit)}`) : unit.eurPerKwh == null ? "" : perKwh(unit.eurPerKwh)}</strong>
                   {unit.cheapestRank === 0 && unit.peers > 1 && <div style={{ color: "var(--bt-green)" }} className="text-[11px]">Cheapest of {unit.peers}</div>}
                   {unit.marginPct != null && (
                     <div className="text-[11px]" style={{ color: unit.marginPct >= 0 ? "var(--bt-green)" : "var(--bt-red)" }}>
@@ -159,7 +171,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
 }
 
 /** One row per seller (one collection each); open a seller to see its packs one by one. */
-function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerView[]; unitWord: string; onVerdict: Verdict; busy: boolean }) {
+function SellerList({ sellers, unitWord, onVerdict, busy, priceUnit }: { sellers: SellerView[]; unitWord: string; onVerdict: Verdict; busy: boolean; priceUnit: string | null }) {
   const [open, setOpen] = useState<string | null>(sellers.length === 1 ? sellers[0].key : null);
   return (
     <div className={css.sellers}>
@@ -176,18 +188,18 @@ function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerVie
                   <SourceTags sources={seller.sources} />
                 </div>
               </div>
-              <span className={css.num}><strong>{count(seller.units)}</strong><span className={css.numSub}>{unitWord}</span></span>
+              <span className={css.num}><strong>{seller.units > 0 ? count(seller.units) : "—"}</strong><span className={css.numSub}>{seller.units > 0 ? unitWord : "quantity not stated"}</span></span>
               <span className={css.num}>
                 {seller.kwh ? (Math.round(seller.kwh.min) === Math.round(seller.kwh.max) ? `${seller.kwh.min < 1 ? `${Math.round(seller.kwh.min * 1000)} Wh` : `${Math.round(seller.kwh.min * 10) / 10} kWh`}` : `${Math.round(seller.kwh.min)}–${Math.round(seller.kwh.max)} kWh`) : "—"}
                 <span className={css.numSub}>{seller.withPhotos ? `${seller.withPhotos} with photos` : "no photos"}</span>
               </span>
               <span className={css.num}>
-                <strong>{seller.eurPerKwh ? (Math.round(seller.eurPerKwh.min) === Math.round(seller.eurPerKwh.max) ? perKwh(seller.eurPerKwh.min) : `€${Math.round(seller.eurPerKwh.min)}–${Math.round(seller.eurPerKwh.max)}`) : "No price"}</strong>
+                <strong>{priceText(seller.eurPerKwh, seller.eurPerUnit, priceUnit) ?? "No price"}</strong>
                 <span className={css.numSub}>{seller.totalEur != null ? `${eur(seller.totalEur)}${seller.pricedUnits < seller.units ? ` for ${seller.pricedUnits.toLocaleString("en-GB")}` : " total"}` : ""}</span>
               </span>
               <FitBadge verdict={seller.verdict} />
             </button>
-            {isOpen && <UnitTable items={seller.items} more={seller.more} hideSeller onVerdict={onVerdict} busy={busy} />}
+            {isOpen && <UnitTable items={seller.items} more={seller.more} hideSeller onVerdict={onVerdict} busy={busy} priceUnit={priceUnit} />}
           </div>
         );
       })}
@@ -195,8 +207,8 @@ function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerVie
   );
 }
 
-function GroupRow({ group, open, onToggle, onVerdict, busy }: {
-  group: SupplyGroupView; open: boolean; onToggle: () => void; onVerdict: Verdict; busy: boolean;
+function GroupRow({ group, open, onToggle, onVerdict, busy, priceUnit }: {
+  group: SupplyGroupView; open: boolean; onToggle: () => void; onVerdict: Verdict; busy: boolean; priceUnit: string | null;
 }) {
   const countries = [...new Set(group.bySeller.map((u) => u.country).filter(Boolean))];
   const unitWord = group.items[0]?.format === "Cells" ? "cells" : group.items[0]?.format === "Modules" ? "modules" : "packs";
@@ -213,7 +225,7 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
           <div className="text-[14px] font-semibold">{group.label}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
             <span>
-              {count(group.units)} {unitWord} · {group.bySeller.length === 1 ? group.bySeller[0].name : `${group.bySeller.length} sellers`}
+              {group.unitsKnown ? `${count(group.units)} ${unitWord}` : "Quantity not stated"} · {group.bySeller.length === 1 ? group.bySeller[0].name : `${group.bySeller.length} sellers`}
               {countries.length ? ` · ${countries.join(", ")}` : ""}
             </span>
             <SourceTags sources={group.sources} />
@@ -227,7 +239,7 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
             </div>
           )}
           {/* Anything listed passed the basics; only what needs a look gets a chip. */}
-          <Checks checks={group.checks.filter((c) => c.key !== "quantity" && c.key !== "price" && c.state !== "pass" && !(lot?.ai && c.detail.startsWith("AI:")))} />
+          <Checks checks={group.checks.filter((c) => ((c.key === "quantity" || c.key === "price") ? c.state === "unknown" && c.detail !== "Buyer has not given a price" : c.state !== "pass") && !(lot?.ai && c.detail.startsWith("AI:")))} />
           {lot && (evidenceOf(lot) || lot.ai) && (
             <p className="mt-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
               {[evidenceOf(lot), lot.ai ? `AI: ${lot.ai.reason}` : null].filter(Boolean).join(" · ")}
@@ -236,15 +248,14 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
         </div>
         <span className={css.num}>
           <strong style={{ color: covered ? "var(--bt-green)" : undefined }}>
-            {group.covers ? `${count(group.units)} / ${count(group.covers.need)}` : count(group.units)}
+            {!group.unitsKnown ? "—" : group.covers ? `${count(group.units)} / ${count(group.covers.need)}` : count(group.units)}
           </strong>
-          <span className={css.numSub}>{group.covers ? (covered ? "covers ask" : "units") : "units"}</span>
+          <span className={css.numSub}>{!group.unitsKnown ? "not stated" : group.covers ? (covered ? "covers ask" : "units") : "units"}</span>
         </span>
         <span className={css.num}>
-          <strong>{group.eurPerKwh ? (Math.round(group.eurPerKwh.min) === Math.round(group.eurPerKwh.max) ? perKwh(group.eurPerKwh.min)
-            : `€${Math.round(group.eurPerKwh.min)}–${Math.round(group.eurPerKwh.max)}`) : "No price"}</strong>
+          <strong>{priceText(group.eurPerKwh, group.eurPerUnit, priceUnit) ?? "No price"}</strong>
           <span className={css.numSub} style={{ color: group.bestMarginPct == null ? undefined : group.bestMarginPct >= 0 ? "var(--bt-green)" : "var(--bt-red)" }}>
-            {group.bestMarginPct == null ? (group.eurPerKwh && group.eurPerKwh.min !== group.eurPerKwh.max ? "per kWh" : "") :
+            {group.bestMarginPct == null ? (!priceUnit && group.eurPerKwh && group.eurPerKwh.min !== group.eurPerKwh.max ? "per kWh" : "") :
               group.bestMarginPct >= 0 ? `up to ${pct(group.bestMarginPct)} margin` : `${pct(-group.bestMarginPct)} over budget`}
           </span>
         </span>
@@ -252,8 +263,8 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
       </Row>
       {/* One seller: the header already names them, so open straight onto the packs. */}
       {open && !lot && (group.bySeller.length === 1
-        ? <UnitTable items={group.bySeller[0].items} more={group.bySeller[0].more} hideSeller onVerdict={onVerdict} busy={busy} />
-        : <SellerList sellers={group.bySeller} unitWord={unitWord} onVerdict={onVerdict} busy={busy} />)}
+        ? <UnitTable items={group.bySeller[0].items} more={group.bySeller[0].more} hideSeller onVerdict={onVerdict} busy={busy} priceUnit={priceUnit} />
+        : <SellerList sellers={group.bySeller} unitWord={unitWord} onVerdict={onVerdict} busy={busy} priceUnit={priceUnit} />)}
     </div>
   );
 }
@@ -289,7 +300,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
     const list = supply.groups.map((g) => {
       const bySeller = g.bySeller.map((seller) => {
         const items = seller.items.filter(keep);
-        return { ...seller, items, units: source === "all" ? seller.units : items.reduce((n, u) => n + (u.units ?? 1), 0) };
+        return { ...seller, items, units: source === "all" ? seller.units : items.reduce((n, u) => n + (u.units ?? 0), 0) };
       }).filter((seller) => seller.items.length);
       return { ...g, items: g.items.filter(keep), bySeller, units: source === "all" ? g.units : bySeller.reduce((n, x) => n + x.units, 0) };
     }).filter((g) => g.bySeller.length && (showSmall || !g.small));
@@ -301,6 +312,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
   if (error && !supply) return <p role="alert" className={css.empty} style={{ color: "var(--bt-red)" }}>{error}</p>;
   if (!supply) return null;
   const r = supply.requirement;
+  const priceUnit = r.priceUnit ?? null;
   const firstOpen = open ?? groups[0]?.key ?? null;
   const checked = supply.considered.marketplace + supply.considered.trades;
   const matchingOn = [...r.pinned, r.unitsNeeded ? `${r.unitsNeeded.toLocaleString("en-GB")} units` : null,
@@ -336,9 +348,9 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
             )}
           </div>
           <div className={css.groups}>
-            {source === "starred" && <UnitTable items={supply.shortlisted} onVerdict={onVerdict} busy={busy} />}
+            {source === "starred" && <UnitTable items={supply.shortlisted} onVerdict={onVerdict} busy={busy} priceUnit={priceUnit} />}
             {groups.slice(0, shown).map((group) => (
-              <GroupRow key={group.key} group={group} open={firstOpen === group.key} busy={busy} onVerdict={onVerdict}
+              <GroupRow key={group.key} group={group} open={firstOpen === group.key} busy={busy} onVerdict={onVerdict} priceUnit={priceUnit}
                 onToggle={() => setOpen(firstOpen === group.key ? "" : group.key)} />
             ))}
             {!groups.length && source !== "starred" && <p className={css.empty}>Nothing in our inventory matches{source !== "all" ? " from this source" : ""}.</p>}

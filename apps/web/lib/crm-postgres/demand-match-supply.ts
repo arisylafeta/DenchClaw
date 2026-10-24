@@ -5,7 +5,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "../platform-admin/supabase";
 import { queryPg } from "../postgres";
-import { countryFromText, kwhFromText, type Candidate, type Format, type SourceKind } from "../demand-match";
+import { countryFromText, foldDuplicateSupply, kwhFromText, type Candidate, type Format, type SourceKind } from "../demand-match";
 
 const CACHE_MS = 5 * 60_000;
 const SITE = "https://www.rebattery.io/marketplace/";
@@ -188,5 +188,6 @@ export async function inventoryFor(demandId: string): Promise<{ candidates: Cand
   // Listings are cached and shared, so merge into copies.
   const copies = listings.map((l) => ({ ...l, alsoIn: [] as SourceKind[] }));
   const notFit = new Set([...hidden].filter(([, v]) => v.verdict === "not_a_fit").map(([key]) => key));
-  return { candidates: [...feed, ...copies], hidden: notFit, verdicts: hidden, errors };
+  const folded = foldDuplicateSupply(feed, copies);
+  return { candidates: [...folded.feed, ...folded.listings], hidden: notFit, verdicts: hidden, errors };
 }

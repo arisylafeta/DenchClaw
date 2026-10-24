@@ -40,7 +40,7 @@ export type SupplyUnitView = {
 /** One seller inside a group: one collection. `items` are its packs, best first. */
 export type SellerView = Omit<SellerGroup, "matches"> & { items: SupplyUnitView[]; more: number };
 
-export type SupplyGroupView = Pick<MatchGroup, "key" | "label" | "verdict" | "units" | "sellers" | "sources" | "eurPerKwh"
+export type SupplyGroupView = Pick<MatchGroup, "key" | "label" | "verdict" | "units" | "unitsKnown" | "sellers" | "sources" | "eurPerKwh" | "eurPerUnit"
   | "bestMarginPct" | "covers" | "small"> & { checks: Check[]; items: SupplyUnitView[]; more: number;
     /** The group split by seller, and the fewest sellers that fill the ask. */
     bySeller: SellerView[]; fill: FillPlan | null };
@@ -52,6 +52,8 @@ export type DemandSupply = {
     kwhNeeded: number | null;
     buyerEurPerKwh: number | null;
     buyerEurPerUnit: number | null;
+    /** The unit the buyer prices in ("cell"), when per unit rather than per kWh. */
+    priceUnit?: string | null;
     country: string | null;
   };
   groups: SupplyGroupView[];
