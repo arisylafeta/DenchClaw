@@ -66,6 +66,9 @@ export type DemandSupply = {
   shortlistGone: string[];
   /** The most we can pay a seller per kWh and keep our usual fee, when the buyer gave a per-kWh price. */
   targetBuyEurPerKwh: number | null;
+  /** The same target when the buyer prices per unit (cell, pack, module) rather than per kWh, and that unit. */
+  targetBuyEurPerUnit: number | null;
+  buyerUnit: string | null;
   blocked: string | null;
   errors: string[];
   fxNote: string;

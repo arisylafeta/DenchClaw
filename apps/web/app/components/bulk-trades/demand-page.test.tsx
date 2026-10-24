@@ -89,7 +89,7 @@ const sampleSupply: DemandSupply = {
       items: [unit], more: 0 }],
     fill: { sellers: [{ name: "Example Breakers", units: 3 }], units: 3, need: 10, eurPerKwh: 48 } }],
   totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, trades: 20 }, hiddenCount: 0,
-  shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, blocked: null, errors: [], fxNote: "Approximate FX",
+  shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, targetBuyEurPerUnit: null, buyerUnit: null, blocked: null, errors: [], fxNote: "Approximate FX",
 };
 
 afterEach(() => vi.unstubAllGlobals());

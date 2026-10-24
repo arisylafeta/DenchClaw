@@ -365,13 +365,18 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
 /** Sellers outside our inventory. Ari's finder fills `leads`; this only shows them and the price to ask at. */
 function MarketSection({ supply, leads }: { supply: DemandSupply; leads: MarketLead[] }) {
   const target = supply.targetBuyEurPerKwh;
+  const unitTarget = supply.targetBuyEurPerUnit;
+  const unit = supply.buyerUnit ?? "unit";
+  const perUnit = (n: number) => `€${n.toFixed(n < 10 ? 2 : 0)} per ${unit}`;
   return (
     <section className="mt-4 flex flex-col gap-2">
       <h3 className={css.label}>In the market</h3>
       <p className="text-[13px]">
         {target != null
           ? <>Buy at <strong>{perKwh(target)}</strong> or less to keep our 10% fee on the buyer&apos;s {perKwh(supply.requirement.buyerEurPerKwh)}.</>
-          : <>No buyer price yet, so there is no target buy price. Ask the buyer for one first.</>}
+          : unitTarget != null
+            ? <>Buy at <strong>{perUnit(unitTarget)}</strong> or less to keep our 10% fee on the buyer&apos;s {perUnit(supply.requirement.buyerEurPerUnit!)}.</>
+            : <>No buyer price yet, so there is no target buy price. Ask the buyer for one first.</>}
       </p>
       <div className={css.groups}>
         {leads.map((lead) => (
