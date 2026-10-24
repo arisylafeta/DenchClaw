@@ -138,7 +138,7 @@ it("has a Matches tab, the Bulk Trades supply matching list, with the group coun
   } as unknown as Demand;
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
   const tabs = screen.getByRole("navigation", { name: "Detail sections" });
-  await waitFor(() => expect(Array.from(tabs.querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Matches · 1", "Offers", "Documents", "History"]));
+  await waitFor(() => expect(Array.from(tabs.querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Matches · 1", "Matcha", "Offers", "Documents", "History"]));
   fireEvent.click(screen.getByRole("button", { name: "Matches · 1" }));
   expect(await screen.findByText("Volkswagen ID.3 · 58 kWh")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Marketplace" })).toBeInTheDocument();

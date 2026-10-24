@@ -24,6 +24,7 @@ import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
 import { ListingConversation } from "./listing-conversation";
 import { DocumentsTab } from "./documents-tab";
+import { MatchaTab } from "./matcha-tab";
 import { SupplyTab } from "./demand-supply-tab";
 import type { SupplyUnitView } from "@/lib/demand-supply-types";
 import css from "./demand-panel.module.css";
@@ -86,8 +87,8 @@ function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; c
   );
 }
 
-const TABS = ["Details", "Matches", "Offers", "Documents", "History"];
-const TAB_ICONS = { Details: ClipboardList, Matches: Combine, Documents: FileText, Offers: ArrowLeftRight, History: History };
+const TABS = ["Details", "Matches", "Matcha", "Offers", "Documents", "History"];
+const TAB_ICONS = { Details: ClipboardList, Matches: Combine, Matcha: MessageCircle, Documents: FileText, Offers: ArrowLeftRight, History: History };
 
 export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTrade, onOpenSupply, onOpenDemand, isTrade = false, waiting = null }: {
   isTrade?: boolean; waiting?: { waiting_on: "us" | "them" | null; waiting_since: string | null } | null;
@@ -186,6 +187,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           onVerdict={verdict} busy={matchBusy} leads={[]} />
       )}
       {tab === "Matches" && matchError && <p className="text-[13px]" style={{ color: "var(--bt-red)" }}>{matchError}</p>}
+      <MatchaTab listingId={demand.id} active={tab === "Matcha"} />
       {tab === "Documents" && <DocumentsTab listingId={demand.id} />}
       {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} onChanged={onChanged} />}
       {tab === "History" && (
