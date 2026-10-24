@@ -102,7 +102,8 @@ function listingCandidate(row: ListingRow): Candidate {
 type FeedRow = { id: string; kind: "trade" | "auction" | "supply"; title: string; seller: string | null; size: string | null;
   location: string | null; seen: string | null; href: string; strength: "strong" | "partial" | null; reason: string | null };
 
-/** Live trades, auctions and supply batches, with the inbox check's judgement for this demand where it made one. */
+/** Live trades, auctions and supply batches, with the inbox check's judgement for this demand where it made one.
+ *  Listings from the demand's own buyer (same company, person or party) are left out. */
 export async function feedCandidates(demandId: string): Promise<Candidate[]> {
   const rows = await queryPg<FeedRow>(
     `select feed.id, feed.kind, feed.title, feed.seller, feed.size, feed.location, feed.seen, feed.href,
@@ -110,7 +111,14 @@ export async function feedCandidates(demandId: string): Promise<Candidate[]> {
      from crm_bulk_listing_supply_feed feed
      left join crm_bulk_trade_demand_matches dm on dm.lot_id = feed.id and dm.demand_id = $1 and not dm.hidden and feed.kind <> 'supply'
      left join crm_bulk_trade_supply_matches sm on sm.supply_id = feed.id and sm.demand_id = $1 and not sm.hidden and feed.kind = 'supply'
-     where feed.kind in ('trade', 'auction', 'supply')`,
+     left join crm_bulk_listings own on own.id = $1
+     left join crm_bulk_listings src on src.id = feed.id
+     where feed.kind in ('trade', 'auction', 'supply')
+       -- The buyer's own stock is not supply for their own demand.
+       and not coalesce(
+         (own.company_id is not null and own.company_id = src.company_id)
+         or (own.person_id is not null and own.person_id = src.person_id)
+         or (nullif(trim(own.party), '') is not null and lower(trim(own.party)) = lower(trim(src.party))), false)`,
     [demandId],
   );
   return rows.map((row) => {
