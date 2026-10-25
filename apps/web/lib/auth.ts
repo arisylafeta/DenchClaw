@@ -14,8 +14,8 @@ export const ALLOWED_EMAILS = new Set([
   "ari@rebattery.io",
   "alex@rebattery.io",
 ]);
-// Accounts allowed to sign in. ALLOWED_EMAILS stays the admin set.
-export const LOGIN_EMAILS = new Set([...ALLOWED_EMAILS, "sean@rebattery.io"]);
+// Sign-in is governed only by an active crm_users row with valid credentials.
+// ALLOWED_EMAILS remains the admin set (approvals, host access), not a login gate.
 export const SESSION_COOKIE = "denchclaw_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PASSWORD_LENGTH = 1024;
@@ -63,7 +63,7 @@ export async function login(
 ): Promise<AuthenticatedUser | null> {
   const normalized = email.trim().toLowerCase();
   if (
-    !LOGIN_EMAILS.has(normalized) ||
+    !normalized ||
     password.length === 0 ||
     password.length > MAX_PASSWORD_LENGTH
   ) {

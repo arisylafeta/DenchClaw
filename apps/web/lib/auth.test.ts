@@ -55,7 +55,7 @@ describe("CRM authentication", () => {
     ).resolves.toBe(false);
   });
 
-  it("allows only an active allowlisted user with the correct password", async () => {
+  it("signs in any active user row with the correct password, listed or not", async () => {
     queryPgMock
       .mockResolvedValueOnce([await userRow()])
       .mockResolvedValueOnce([]);
@@ -71,8 +71,26 @@ describe("CRM authentication", () => {
     expect(queryPgMock.mock.calls[1][0]).toContain("failed_login_count = 0");
   });
 
-  it("rejects unapproved emails and oversized passwords before querying", async () => {
+  it("has no email allow list: an unlisted email signs in when its user row is active", async () => {
+    queryPgMock
+      .mockResolvedValueOnce([
+        await userRow({ id: "user-9", email: "newperson@example.com", display_name: "New" }),
+      ])
+      .mockResolvedValueOnce([]);
+    await expect(
+      login("newperson@example.com", "correct horse battery staple"),
+    ).resolves.toEqual({ id: "user-9", email: "newperson@example.com", displayName: "New" });
+  });
+
+  it("returns null for an unknown email without creating a user", async () => {
+    queryPgMock.mockResolvedValueOnce([]);
     await expect(login("other@rebattery.io", "password")).resolves.toBeNull();
+    expect(queryPgMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects empty and oversized passwords before querying", async () => {
+    queryPgMock.mockClear();
+    await expect(login("ari@rebattery.io", "")).resolves.toBeNull();
     await expect(
       login("ari@rebattery.io", "x".repeat(1025)),
     ).resolves.toBeNull();

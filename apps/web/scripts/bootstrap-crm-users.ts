@@ -1,4 +1,4 @@
-import { ALLOWED_EMAILS, hashPassword } from "../lib/auth";
+import { hashPassword } from "../lib/auth";
 import { withPgTransaction } from "../lib/postgres";
 import { hashCrmBootstrapUsers } from "../lib/crm-bootstrap";
 
@@ -24,10 +24,6 @@ const ACTIONABLE_ASSIGNMENTS = [
 
 async function main() {
   const usersWithHashes = await hashCrmBootstrapUsers(hashPassword);
-  if (usersWithHashes.some((user) => !ALLOWED_EMAILS.has(user.email))) {
-    throw new Error("bootstrap users must match the authentication allowlist");
-  }
-
   await withPgTransaction(async (tx) => {
     for (const user of usersWithHashes) {
       await tx.query(
@@ -85,7 +81,7 @@ async function main() {
   });
 
   console.log(
-    `Bootstrapped ${usersWithHashes.length} allowlisted CRM users and reconciled actionable Work Task assignments`,
+    `Bootstrapped ${usersWithHashes.length} CRM users and reconciled actionable Work Task assignments`,
   );
 }
 
