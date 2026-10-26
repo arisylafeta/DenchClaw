@@ -36,7 +36,7 @@ describe("merged mail", () => {
     render(<InboxView />);
     expect(screen.getByRole("tab", { name: "Conversations" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: "Follow-ups" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Inbox" })).toBeNull();
     const upper = within(screen.getByRole("tablist", { name: "Inbox sections" }));
     expect(upper.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Mail", "WhatsApp", "Campaigns"]);
     expect(upper.getByRole("tab", { name: "Mail" })).toHaveAttribute("aria-selected", "true");
