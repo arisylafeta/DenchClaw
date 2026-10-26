@@ -14,11 +14,11 @@ import {
 import { DueChip, TONE_HEADING } from "../bulk-trades/trade-chips";
 import { darkButtonClass, darkButtonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
 import styles from "./dismantlers.module.css";
+import { COLUMNS } from "./dismantler-skeleton";
 import { GoalTag, StageDot, StageTag, metaLine, toneText } from "./dismantler-ui";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
 
-const COLUMNS = "grid-cols-[minmax(0,1.4fr)_100px_minmax(0,1.8fr)_110px_minmax(0,1fr)_90px]";
 const BACKLOG_COLUMNS = "grid-cols-[24px_minmax(0,1.4fr)_140px_160px_minmax(0,1fr)]";
 const BACKLOG_PAGE = 50;
 

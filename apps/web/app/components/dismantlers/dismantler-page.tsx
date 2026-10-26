@@ -19,6 +19,7 @@ import { firstName, greeting } from "@/lib/bulk-trade-details";
 import { Card, ErrorText, buttonClass, buttonStyle, darkButtonStyle, request } from "../bulk-trades/trade-ui";
 import { EditDismantlerDialog, EmailDialog, ParkDialog, SetNextDialog } from "./dismantler-dialogs";
 import { GoalTag, STAGE_DOT, StageTag, dismantlerUrl } from "./dismantler-ui";
+import { Bone, DetailSkeleton } from "./dismantler-skeleton";
 import styles from "./dismantlers.module.css";
 
 type Props = {
@@ -63,9 +64,19 @@ export function DismantlerPage({ id, owners, today, onBack, onSaved }: Props) {
 
   if (!detail) {
     return (
-      <div className="px-8 py-6">
-        <button type="button" onClick={onBack} className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Dismantlers</button>
-        {loadError ? <ErrorText error={loadError} /> : <p className="mt-4 text-sm" style={{ color: "var(--bt-muted)" }}>Loading…</p>}
+      <div className={`${styles.root} flex h-full flex-col`} aria-busy={!loadError}>
+        <header className="flex flex-col gap-2.5 border-b px-8 pb-5 pt-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
+            <button type="button" onClick={onBack} className="hover:underline">Dismantlers</button>
+          </nav>
+          {loadError ? <ErrorText error={loadError} /> : (
+            <>
+              <div className="flex flex-wrap items-center gap-2.5"><Bone w={220} h={30} /><Bone w={70} h={22} pill /><span className="flex-1" /><Bone w={60} h={36} /><Bone w={72} h={36} /></div>
+              <Bone w="45%" h={14} />
+            </>
+          )}
+        </header>
+        {!loadError && <DetailSkeleton />}
       </div>
     );
   }

@@ -16,3 +16,38 @@
 .root :global([data-table-part="search"]) {
   border-radius: 8px !important;
 }
+
+/* Loading placeholders. A soft tint with a light band sweeping across it. */
+.skeleton {
+  display: block;
+  max-width: 100%;
+  border-radius: 6px;
+  background-color: var(--bt-divider);
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--bt-surface) 70%, transparent) 50%,
+    transparent 70%
+  );
+  background-repeat: no-repeat;
+  background-size: 220% 100%;
+  background-position: 160% 0;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.pill {
+  border-radius: 999px;
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    background-position: -60% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background-image: none;
+  }
+}

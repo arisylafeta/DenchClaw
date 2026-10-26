@@ -8,6 +8,7 @@ import { AddDismantlerDialog, ImportDialog, OutreachDialog, ParkDialog } from ".
 import { DismantlerPage } from "./dismantler-page";
 import { DismantlersBoard } from "./dismantlers-board";
 import { DismantlersList } from "./dismantlers-list";
+import { BoardSkeleton, Bone, ListSkeleton, LoadingText, StageChipsSkeleton } from "./dismantler-skeleton";
 import { StageDot, dismantlerUrl } from "./dismantler-ui";
 import styles from "./dismantlers.module.css";
 
@@ -142,13 +143,23 @@ export function DismantlersView() {
           </button>
         </div>
 
-        <section aria-label="Goal" className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border md:grid-cols-5" style={{ borderColor: "var(--bt-border)", background: "var(--bt-divider)" }}>
+        <section aria-label="Goal" aria-busy={!loaded} className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border md:grid-cols-5" style={{ borderColor: "var(--bt-border)", background: "var(--bt-divider)" }}>
           {goalCells.map(([label, value, hint], index) => (
             <div key={label} className="flex flex-col gap-1 px-4 py-3"
               style={{ background: index === 0 ? "var(--bt-bg)" : "var(--bt-surface)" }}>
-              <span className="bt-label">{label}</span>
-              <span className="bt-mono text-[22px] font-semibold">{value}</span>
-              <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{hint}</span>
+              {loaded ? (
+                <>
+                  <span className="bt-label">{label}</span>
+                  <span className="bt-mono text-[22px] font-semibold">{value}</span>
+                  <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{hint}</span>
+                </>
+              ) : (
+                <>
+                  <span className="bt-label">{label}</span>
+                  <Bone w={72} h={24} className="my-0.5" />
+                  <Bone w="80%" h={11} />
+                </>
+              )}
             </div>
           ))}
         </section>
@@ -157,20 +168,34 @@ export function DismantlersView() {
           {tab("list", "List")}
           {tab("board", "Board")}
           <span className="flex-1" />
-          <nav aria-label="Stages" className="flex flex-wrap items-center gap-x-3.5 gap-y-1 pb-2 text-[13px]" style={{ color: "var(--bt-muted)" }}>
-            {STAGES.map((stage) => (
-              <span key={stage} className="flex items-center gap-1.5"><StageDot stage={stage} />{stage} <span className="bt-mono" style={{ color: "var(--bt-text)" }}>{counts[stage]}</span></span>
-            ))}
-            <span>· {inPlay} in play</span>
+          <nav aria-label="Stages" aria-busy={!loaded} className="flex flex-wrap items-center gap-x-3.5 gap-y-1 pb-2 text-[13px]" style={{ color: "var(--bt-muted)" }}>
+            {loaded ? (
+              <>
+                {STAGES.map((stage) => (
+                  <span key={stage} className="flex items-center gap-1.5"><StageDot stage={stage} />{stage} <span className="bt-mono" style={{ color: "var(--bt-text)" }}>{counts[stage]}</span></span>
+                ))}
+                <span>· {inPlay} in play</span>
+              </>
+            ) : (
+              <>
+                <LoadingText>Loading stage counts…</LoadingText>
+                <StageChipsSkeleton />
+              </>
+            )}
           </nav>
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto px-8 pb-8 pt-6">
+      <main aria-busy={!loaded} className="flex-1 overflow-auto px-8 pb-8 pt-6">
         <ErrorText error={loadError} />
         <ErrorText error={actionError} />
         {platformError && <p className="mb-3 text-[13px]" style={{ color: "var(--bt-amber)" }}>{platformError}</p>}
-        {loaded && !loadError && !dismantlers.length ? (
+        {!loaded ? (
+          <>
+            <LoadingText>Loading dismantlers…</LoadingText>
+            {mode === "list" ? <ListSkeleton /> : <BoardSkeleton />}
+          </>
+        ) : !loadError && !dismantlers.length ? (
           <div className="mx-auto mt-10 flex max-w-md flex-col items-center gap-3 text-center">
             <p className="text-sm">No dismantlers yet. Add one, or import a list of the ones you know about.</p>
             <div className="flex gap-2">
