@@ -13,6 +13,7 @@ const scrypt = promisify(nodeScrypt);
 export const ALLOWED_EMAILS = new Set([
   "ari@rebattery.io",
   "alex@rebattery.io",
+  "sean@rebattery.io",
 ]);
 // Sign-in is governed only by an active crm_users row with valid credentials.
 // ALLOWED_EMAILS remains the admin set (approvals, host access), not a login gate.
