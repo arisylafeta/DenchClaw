@@ -6,6 +6,20 @@ vi.mock("./postgres", () => ({queryPg:vi.fn(async (sql: string, params?: unknown
   }
   return [row];
 })}));
+// The Postgres index is exercised against a real database; here it is an in-memory stand-in over the mocked upstream.
+vi.mock("./hermes-session-index", () => {
+  const store = new Map<string, Array<Record<string, unknown>>>();
+  return {
+    syncProfileIndex: vi.fn(async (profile: string, fetchPage: (p: string, o: number, l: number) => Promise<{ data: Array<Record<string, unknown>> }>) => {
+      const rows: Array<Record<string, unknown>> = [];
+      for (let offset = 0; offset < 10000; offset += 200) { const page = await fetchPage(profile, offset, 200); rows.push(...page.data); if (page.data.length < 200) { break; } }
+      store.set(profile, rows);
+    }),
+    listIndexedSessions: vi.fn(async (_actor: unknown, profile: string, limit: number) => (store.get(profile) ?? [])
+      .filter((row) => !row.hidden && !row.is_internal_child && row.source !== "bot_room").slice(0, limit)
+      .map((session) => ({ session, access: { visibility: "team", ownerId: "user", canShare: true, canDelete: true, canWrite: true, canApprove: true } }))),
+  };
+});
 const actor = {id:"user",email:"ari@rebattery.io",displayName:"Synthetic owner"};
 import { WebSocketServer } from "ws";
 import { once } from "node:events";
@@ -235,23 +249,20 @@ describe("native Hermes conversations", () => {
     expect(filterConversations(data.sessions, "alpha").map((r) => r.title)).toEqual(["Alpha and Sol", "Alpha chat"]);
     expect(fetchMock.mock.calls.every(([url]) => url.includes("limit=200&offset=0"))).toBe(true);
   });
-  it("preserves older pinned backfill beyond the recent window and batches metadata reads", async () => {
+  it("lists only the newest 100 chats per profile from the index and batches metadata reads", async () => {
     vi.stubEnv("HERMES_CHAT_TRANSPORT", "sse");
-    const recent = Array.from({ length: 200 }, (_, index) => ({ id: `recent-${index}`, source: "discord", title: `Recent ${index}` }));
-    const olderPin = { id: "older-pinned", source: "whatsapp", title: "Older pinned chat", pinned: true };
+    const recent = Array.from({ length: 250 }, (_, index) => ({ id: `recent-${index}`, source: "discord", title: `Recent ${index}` }));
     vi.mocked(sessionDisplayNames).mockClear();
     vi.mocked(sessionProjectLabels).mockClear();
-    vi.mocked(sessionProjectLabels).mockImplementation(async (profile, ids): Promise<Record<string, string>> => profile === "default" && ids.includes(olderPin.id) ? { [olderPin.id]: "Harbour" } : {});
-    vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({ data: input.includes("/alpha/") ? [] : [...recent, olderPin] })));
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({ data: input.includes("/alpha/") ? [] : input.includes("offset=0") ? recent.slice(0, 200) : recent.slice(200) })));
     const result = await listConversations(actor);
-    expect(result.sessions).toHaveLength(201);
-    expect(result.sessions.find((row) => row.id === olderPin.id)).toMatchObject({ profile: "default", title: olderPin.title, project: "Harbour" });
-    expect(vi.mocked(sessionProjectLabels).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids.length)).toEqual([200, 1]);
+    expect(result.sessions).toHaveLength(100);
+    expect(result.sessions[0].id).toBe("recent-0");
+    expect(vi.mocked(sessionProjectLabels).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids.length)).toEqual([100]);
     vi.mocked(sessionProjectLabels).mockImplementation(async () => ({}));
-    const batches = vi.mocked(sessionDisplayNames).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids);
-    expect(batches.map((ids) => ids.length)).toEqual([200, 1]);
-    expect(batches.flat()).toContain(olderPin.id);
+    expect(vi.mocked(sessionDisplayNames).mock.calls.filter(([profile]) => profile === "default").map(([, ids]) => ids.length)).toEqual([100]);
   });
+
   it("keeps other profiles' chats when one profile's sessions cannot be read", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => input.includes("/alpha/") ? new Response("{}", { status: 401 }) : Response.json({ data: [{ id: "sol", title: "Sol chat" }] })));
     const result = await listConversations(actor);

@@ -15,15 +15,18 @@ const row={owner_id:"owner",creator_id:"owner",origin:"crm",visibility:"private"
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(queryPg).mockReset();vi.stubEnv("HERMES_API_BASE_URL","http://synthetic.invalid");vi.stubEnv("HERMES_API_KEY","synthetic");vi.stubEnv("HERMES_GATEWAY_WS_URL","");vi.stubEnv("HERMES_CHAT_TRANSPORT","sse");});
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
 describe("native conversation authorization",()=>{
- it("filters before metadata/status enrichment and pages past a private first window",async()=>{
-  vi.mocked(queryPg).mockImplementation(async(_sql,params)=>JSON.parse(String(params?.[0])).map((identity:{stored_id:string})=>({...identity,...row,owner_id:identity.stored_id==="mine"?actor.id:"another-owner"})));
-  const fetch=vi.fn(async(url:string)=>Response.json({data:url.includes("offset=0")?Array.from({length:200},(_,i)=>({id:`private-${i}`,source:"crm",title:"private title"})):[{id:"mine",source:"crm",title:"My chat"}]}));vi.stubGlobal("fetch",fetch);
+ it("reads only the actor's own and team-shared chats from the index, newest first, and never enriches others",async()=>{
+  vi.mocked(queryPg).mockImplementation(async(sql,params)=>String(sql).includes("row_number")?[{stored_id:"mine",source:"crm",title:"My chat",last_active:5,started_at:1,...row,rank:1}]:String(sql).includes("jsonb_to_recordset")&&String(sql).startsWith("select")?JSON.parse(String(params?.[0])).map((identity:object)=>({...identity,...row})):[]);
+  vi.stubGlobal("fetch",vi.fn(async()=>Response.json({data:[{id:"mine",source:"crm",title:"My chat"}]})));
   const result=await listConversations(actor);
-  expect(result.sessions.map(session=>session.id)).toEqual(["mine"]);expect(JSON.stringify(result)).not.toContain("private title");
-  expect(fetch).toHaveBeenCalledTimes(2);expect(queryPg).toHaveBeenCalledTimes(3);expect(sessionProjectLabels).toHaveBeenCalledWith("agent",["mine"]);expect(recentSessionActivity).toHaveBeenCalledWith("agent",["mine"]);
+  expect(result.sessions.map(session=>session.id)).toEqual(["mine"]);
+  const listing=vi.mocked(queryPg).mock.calls.find(([sql])=>String(sql).includes("row_number"));
+  expect(listing?.[1]).toEqual(["agent",actor.id,100,[]]);
+  expect(sessionProjectLabels).toHaveBeenCalledWith("agent",["mine"]);expect(recentSessionActivity).toHaveBeenCalledWith("agent",["mine"]);
  });
  it("surfaces a registry outage as 503 instead of silently returning partial results",async()=>{
-  vi.mocked(queryPg).mockRejectedValueOnce(Error("private storage detail"));vi.stubGlobal("fetch",vi.fn(async()=>Response.json({data:[{id:"mine",source:"crm"}]})));
+  vi.mocked(queryPg).mockImplementation(async(sql)=>{if(String(sql).includes("session_index")&&String(sql).includes("insert into hermes_security.conversation_access"))throw Error("private storage detail");return [];});
+  vi.stubGlobal("fetch",vi.fn(async()=>Response.json({data:[{id:"mine",source:"crm"}]})));
   await expect(listConversations(actor)).rejects.toMatchObject({status:503,message:"conversation_access_unavailable"});expect(sessionProjectLabels).not.toHaveBeenCalled();
  });
  it("persists private browser ownership before any native create call",async()=>{

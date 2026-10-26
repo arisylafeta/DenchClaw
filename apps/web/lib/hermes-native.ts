@@ -1,4 +1,6 @@
 import { authorizeAccess, authorizeListedConversations, registerConversation, requireActor, ConversationAccessError, type ConversationActor, type ConversationAccess } from "./conversation-access";
+import { queryPg } from "./postgres";
+import { listIndexedSessions, syncProfileIndex } from "./hermes-session-index";
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -187,24 +189,23 @@ function gatewayListStatus(rows: HermesConversation[]) {
   void pending.catch(() => gatewayListCache.delete(manager));
   return pending;
 }
+/** Newest chats listed per profile (own, team-shared and pinned); older ones open by link. */
+const LIST_LIMIT = 100;
 export async function listConversations(actor?: ConversationActor) {
   requireActor(actor);
   const warnings: string[] = [];
   const profiles = hermesProfiles();
+  const pinnedIds = new Map<string, string[]>();
+  for (const { conversation_key } of await queryPg<{ conversation_key: string }>("select conversation_key from crm_user_chat_pins where user_id=$1", [actor!.id]).catch(() => [])) {
+    try { const id = parseConversationKey(conversation_key); if (id.kind === "solo") { pinnedIds.set(id.profile, [...(pinnedIds.get(id.profile) ?? []), id.id]); } } catch { /* Stale pin key. */ }
+  }
   const soloLists = await Promise.all(profiles.map(async (profile) => {
-    // Newest first, one page: profiles can hold thousands of sessions and a full walk takes minutes.
+    // Profiles can hold thousands of sessions: read the Postgres index (newest page refreshed first) instead of walking upstream.
     try {
-      const rows: HermesConversation[] = [];
-      for (let offset=0;offset<10000 && rows.length<200;offset+=200) {
-      const page = await (await nativeFetch(profile, `/api/sessions?limit=200&offset=${offset}`)).json() as { data: NativeSession[] };
-      const listed = page.data.filter(row => row.source !== "bot_room" && !row.hidden && !row.is_internal_child).map(session => soloConversation(profile,session));
-      const grants = await authorizeListedConversations(actor,listed);
-      for (const row of listed) {
-        const access = grants.get(row.key);
-        if (access) {rows.push(Object.assign(row,{access}));}
-      }
-      if (page.data.length < 200) {break;}
-      }
+      // A failed refresh lists the index as it is; only an empty, never-synced profile has nothing to show.
+      await syncProfileIndex(profile, async (name, offset, limit) => await (await nativeFetch(name, `/api/sessions?limit=${limit}&offset=${offset}`)).json() as { data: NativeSession[] }).catch(() => { warnings.push(`Could not load chats for ${profile}`); });
+      const rows: HermesConversation[] = (await listIndexedSessions(actor!, profile, LIST_LIMIT, pinnedIds.get(profile) ?? []))
+        .map(({ session, access }) => Object.assign(soloConversation(profile, session as NativeSession), { access }));
       // The API may append older pinned sessions beyond its 200-row recency window.
       // Preserve those rows and bound each metadata read, not the conversation list.
       const messagingIds = rows.filter(messagingConversation).map((row) => row.id);
