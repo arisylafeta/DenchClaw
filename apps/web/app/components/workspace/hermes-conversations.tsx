@@ -110,7 +110,16 @@ export function useHermesConversations() {
     } catch (e) { if (sequence === reloadSequence.current) { generation.current++; setListing(null); setSelected(null); setPins([]); setAccountId(current => current === undefined ? null : current); setError(e instanceof Error ? e.message : "Could not load chats"); } }
     finally { setReady(true); }
   }, []);
-  useEffect(() => { void reload(); const timer = setInterval(() => void reload(), 10_000); return () => clearInterval(timer); }, [reload]);
+  // A listing can take longer than the refresh period under load. Each reload supersedes the previous one, so a tick that
+  // started a new request while one was still running meant no listing ever settled and the chat fell back to the retired
+  // transport. Ticks therefore skip while a request is in flight.
+  useEffect(() => {
+    let running = false;
+    const run = () => { if (running) return; running = true; void reload().finally(() => { running = false; }); };
+    run();
+    const timer = setInterval(run, 10_000);
+    return () => clearInterval(timer);
+  }, [reload]);
 
   // Chats first seen are baselined as read; later activity in a chat you are not viewing shows as "done".
   useEffect(() => {
