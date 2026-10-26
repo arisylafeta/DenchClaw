@@ -13,6 +13,9 @@ import type { BuyerContext } from "./buyer-context";
 export type WaitingOn = "us" | "them";
 export const WAITING_LABEL: Record<WaitingOn, string> = { us: "On us", them: "Waiting on them" };
 
+/** The commission the founders quote sellers: a fixed share of the deal value. */
+export const FEE_RATE = 0.1;
+
 export type SheetKind = "demand" | "supply";
 /** Starting point: a buyer asking for something, or a seller offering it. A buyer-seller connection is shown in progress and details, not here. */
 export type SheetSide = "buyer" | "seller";
@@ -38,6 +41,10 @@ export type SheetRow = {
   tone: SheetTone;
   /** Score 0-100: demand by expected fee, supply by value of all stock; null when not scored. */
   score: number | null;
+  /** Approximate deal value in EUR: supply is the value of all stock, demand is the fee divided by FEE_RATE. Null when unknown. */
+  value_eur?: number | null;
+  /** Our fee in EUR, a fixed FEE_RATE of the value. Null when the value is unknown. */
+  fee_eur?: number | null;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
   latest: { label: string; at: string | null; kind?: string } | null;
   next_action: string | null;
@@ -83,6 +90,26 @@ export type ListingSheetInput = {
   stage: ListingStage;
 };
 
+const positive = (value: unknown): number | null => {
+  const n = typeof value === "string" && value.trim() ? Number(value) : value;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/** Approximate value and fee at the fixed rate. Supply carries the value of all stock; demand carries the fee
+ * (set as FEE_RATE of volume x ceiling price, or of a matched lot), so its value is derived back from it. */
+export function valueAndFee(kind: SheetKind, spec: Record<string, unknown>): { value_eur: number | null; fee_eur: number | null } {
+  const value = kind === "supply" ? positive(spec.value_eur) : (() => { const fee = positive(spec.fee_eur); return fee === null ? null : Math.round(fee / FEE_RATE); })();
+  return { value_eur: value, fee_eur: value === null ? null : Math.round(value * FEE_RATE) };
+}
+
+/** Compact euro amount for the sheet, e.g. €850, €12.9k, €3.5M. */
+export function formatEurCompact(value: number | null | undefined): string {
+  if (value == null) return "—";
+  if (value < 1000) return `€${Math.round(value)}`;
+  if (value < 1_000_000) return `€${(value / 1000).toFixed(value < 100_000 ? 1 : 0).replace(/\.0$/, "")}k`;
+  return `€${(value / 1_000_000).toFixed(value < 10_000_000 ? 2 : 1).replace(/\.?0+$/, "")}M`;
+}
+
 const STAGE_TONE: Record<ListingStage, SheetTone> = {
   New: "new", Qualified: "new", Matched: "active", Offered: "waiting", "Signed & Paid": "closing", Complete: "closing",
 };
@@ -103,6 +130,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     progress: input.stage, held: hold,
     tone: hold ? "hold" : STAGE_TONE[input.stage],
     score: input.score,
+    ...valueAndFee(input.kind, input.spec),
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), next_due: input.next_due, owner: null,
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
@@ -123,10 +151,10 @@ function rankSide(rows: SheetRow[], side: SheetFilters["side"]): SheetRow[] {
 }
 
 /** How the list is ordered. `newest` keeps the default order from filterSheet. */
-export const SHEET_SORTS = ["newest", "score_desc", "score_asc", "due", "stage"] as const;
+export const SHEET_SORTS = ["newest", "score_desc", "score_asc", "due", "stage", "fee_desc"] as const;
 export type SheetSort = (typeof SHEET_SORTS)[number];
 export const SORT_LABEL: Record<SheetSort, string> = {
-  newest: "Newest first", score_desc: "Score: high to low", score_asc: "Score: low to high", due: "Next due: soonest", stage: "Stage: furthest first",
+  newest: "Newest first", score_desc: "Score: high to low", score_asc: "Score: low to high", due: "Next due: soonest", stage: "Stage: furthest first", fee_desc: "Fee: high to low",
 };
 
 /** Orders already-filtered rows. Unscored rows and rows with no due date sort last in every score or date order, so they never crowd the top. */
@@ -139,6 +167,7 @@ export function sortRows(rows: SheetRow[], sort: SheetSort): SheetRow[] {
     case "score_desc": return out.sort((a, b) => scoreDesc(a, b) || byTitle(a, b));
     case "score_asc": return out.sort((a, b) => (a.score === null) !== (b.score === null) ? (a.score === null ? 1 : -1) : (a.score ?? 0) - (b.score ?? 0) || byTitle(a, b));
     case "due": return out.sort((a, b) => (a.next_due === null) !== (b.next_due === null) ? (a.next_due === null ? 1 : -1) : (a.next_due ?? "").localeCompare(b.next_due ?? "") || scoreDesc(a, b));
+    case "fee_desc": return out.sort((a, b) => (b.fee_eur ?? -1) - (a.fee_eur ?? -1) || scoreDesc(a, b) || byTitle(a, b));
     case "stage": return out.sort((a, b) => LISTING_STAGES.indexOf(b.progress) - LISTING_STAGES.indexOf(a.progress) || scoreDesc(a, b) || byTitle(a, b));
   }
 }

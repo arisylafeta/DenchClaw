@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listingRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, sortRows, SHEET_SORTS } from "./bulk-sheet";
+import { listingRow, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, sortRows, SHEET_SORTS, valueAndFee, formatEurCompact } from "./bulk-sheet";
 
 const demand = (over = {}) => listingRow({
   id: "d1", kind: "demand", party: "H. Nolden", company_id: "c1", summary: "Complete packs",
@@ -143,3 +143,24 @@ describe("waiting-on", () => {
   });
 });
 
+
+describe("value and fee", () => {
+  it("takes supply value from spec.value_eur and a fixed 10% fee", () => {
+    expect(supply({ spec: { value_eur: 480000 } })).toMatchObject({ value_eur: 480000, fee_eur: 48000 });
+    expect(supply({ spec: { value_eur: "92575" } })).toMatchObject({ value_eur: 92575, fee_eur: 9258 });
+  });
+  it("derives demand value from the stored fee, which is 10% of it", () => {
+    expect(demand({ spec: { fee_eur: 18060 } })).toMatchObject({ value_eur: 180600, fee_eur: 18060 });
+  });
+  it("leaves both null when there is no usable value", () => {
+    for (const spec of [{}, { value_eur: 0 }, { value_eur: "n/a" }, { value_eur: -5 }]) expect(valueAndFee("supply", spec)).toEqual({ value_eur: null, fee_eur: null });
+    expect(valueAndFee("demand", {})).toEqual({ value_eur: null, fee_eur: null });
+  });
+  it("formats compactly", () => {
+    expect([150, 12852, 480000, 3_460_000, 16_000_000, null].map(formatEurCompact)).toEqual(["€150", "€12.9k", "€480k", "€3.46M", "€16M", "—"]);
+  });
+  it("sorts by fee high to low with unknown fees last", () => {
+    const rows = [supply({ id: "a", spec: { value_eur: 1000 } }), supply({ id: "b" }), demand({ id: "c", spec: { fee_eur: 900 } })];
+    expect(sortRows(rows, "fee_desc").map((r) => r.id)).toEqual(["c", "a", "b"]);
+  });
+});

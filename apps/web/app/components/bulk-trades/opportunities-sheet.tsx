@@ -3,7 +3,7 @@
 import { CopyIdButton } from "./copy-id-button";
 import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Search, Flag } from "lucide-react";
-import { NO_FILTERS, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
+import { NO_FILTERS, FEE_RATE, formatEurCompact, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
@@ -17,7 +17,7 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   hold: { dot: "var(--bt-purple)", bg: "var(--bt-purple-bg)" },
 };
 
-const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_5rem_minmax(12rem,1.5fr)]";
+const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_5rem_5rem_5rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -120,6 +120,10 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
           <IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} />
         ) : <span style={{ color: "var(--bt-muted)" }}>—</span>}
       </span>
+      <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No value recorded"}
+        style={{ color: row.value_eur != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={5}>{formatEurCompact(row.value_eur)}</Sh></span>
+      <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.fee_eur != null ? `Our fee at ${FEE_RATE * 100}%, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No value, so no fee"}
+        style={{ color: row.fee_eur != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={5}>{formatEurCompact(row.fee_eur)}</Sh></span>
       <span className="min-w-0">
         <NextActionCell loading={loading} value={row.next_action} due={row.next_due} owner={row.owner} today={today} onSave={(text) => onNext(row, text)} />
       </span>
@@ -213,9 +217,9 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
       </p>
 
       <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <div className="md:min-w-[54rem] lg:min-w-[62rem]">
+        <div className="md:min-w-[54rem] lg:min-w-[72rem]">
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span>Next action</span>
+          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span className="hidden lg:block">Value</span><span className="hidden lg:block" title={`Fixed ${FEE_RATE * 100}% of value`}>Fee</span><span>Next action</span>
         </div>
         {displayRows.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">

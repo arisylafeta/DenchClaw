@@ -96,8 +96,8 @@ describe("Trades Preview sheet", () => {
     vi.stubGlobal("fetch", mockApi({ sheet: [row({ company: null })] }));
     render(<TradesPreviewView />);
     const demand = (await screen.findByRole("button", { name: /12 Ioniq packs/ })).closest("li")!;
-    // Company and latest development are unrecorded: each shows a dash, never an invented value. The next action invites one.
-    expect(within(demand).getAllByText("—")).toHaveLength(2);
+    // Company, latest development, value and fee are unrecorded: each shows a dash.
+    expect(within(demand).getAllByText("—")).toHaveLength(4);
     expect(within(demand).getByRole("button", { name: "Add next action" })).toBeInTheDocument();
   });
 
