@@ -5,6 +5,7 @@ import { Check, Copy, FileText, Pencil, Send } from "lucide-react";
 import type { MailDraft } from "@/lib/mail-types";
 import { Loading } from "../../ui/shimmer";
 import { MessageBody } from "./message-body";
+import { DraftAttachments, attachmentIssues } from "./draft-attachments";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; draft: MailDraft };
 
@@ -50,6 +51,30 @@ export function approvalLabel(draft: Pick<MailDraft, "approval" | "state">, now 
   if (a.revoked_at) {return { tone: "warn", text: "Approval revoked" };}
   if (a.expires_at && Date.parse(a.expires_at) < now) {return { tone: "warn", text: "Approval expired" };}
   return { tone: "ok", text: `Approved by ${a.approved_by}${a.scope === "pilot" ? " (pilot)" : ""}` };
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
+const SENT_STATES = new Set(["sent", "accepted", "delivered", "opened", "clicked", "replied"]);
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"}`;
+
+/** "23rd Sept 2026 at 21:00", in the viewer's own time zone. */
+export function sentWhen(iso: string): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) { return null; }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${ordinal(date.getDate())} ${MONTHS[date.getMonth()]} ${date.getFullYear()} at ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** The line under the title: who it is from while a draft, who sent it and when once it has gone. */
+export function draftSubtitle(d: Pick<MailDraft, "state" | "identity_key" | "sent_at" | "accepted_at">): string {
+  const who = d.identity_key ? d.identity_key[0].toUpperCase() + d.identity_key.slice(1) : null;
+  if (d.state === "draft" || d.state === "frozen") { return `Draft${who ? ` from ${who}` : ""}`; }
+  if (d.state === "sending") { return `Sending${who ? ` from ${who}` : ""}…`; }
+  if (SENT_STATES.has(d.state)) {
+    const when = d.sent_at || d.accepted_at ? sentWhen(String(d.sent_at ?? d.accepted_at)) : null;
+    return `Sent${who ? ` by ${who}` : ""}${when ? ` on ${when}` : ""}`;
+  }
+  return `Already ${d.state}${who ? ` from ${who}` : ""}`;
 }
 
 const TONE: Record<"ok" | "muted" | "warn", string> = { ok: "var(--color-success)", muted: "var(--color-text-muted)", warn: "var(--color-warning)" };
@@ -125,7 +150,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
     try {
       await call(`/api/mail/drafts/${encodeURIComponent(d.id)}/send`, "POST", { confirm: true, updated_at: d.updated_at });
       setConfirming(false); setNotice({ tone: "ok", text: "Sent." });
-      setSaved({ ...d, state: "sent" });
+      setSaved({ ...d, state: "sent", sent_at: new Date().toISOString() });
     } catch (error) { setConfirming(false); setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not send." }); }
     finally { setBusy(null); }
   }
@@ -138,7 +163,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold sm:text-base">{(edit ? edit.subject : d.subject) || "(no subject)"}</h2>
           <p className="truncate text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {sent ? `Already ${d.state}` : edit ? "Editing" : "Draft"}{d.identity_key ? ` from ${d.identity_key}` : ""}
+            {edit ? `Editing${d.identity_key ? ` draft from ${d.identity_key[0].toUpperCase()}${d.identity_key.slice(1)}` : ""}` : draftSubtitle(d)}
           </p>
         </div>
         {editable && !edit && (
@@ -165,6 +190,10 @@ export function MailDraftView({ draftId }: { draftId: string }) {
               To {d.to_emails.join(", ")}{d.cc_emails.length ? `, Cc ${d.cc_emails.join(", ")}` : ""}<br />
               Subject: {d.subject || "(no subject)"}<br />From: {d.from_email ?? d.identity_key}
             </p>
+            {(d.attachments ?? []).length > 0 && <p className="mt-1 break-words text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+              With {d.attachments.length} {d.attachments.length === 1 ? "attachment" : "attachments"}: {d.attachments.map((file) => file.filename).join(", ")}
+            </p>}
+            {attachmentIssues(d.attachments ?? [], d.transport).map((issue) => <p key={issue} role="alert" className="mt-1 text-[12px]" style={{ color: "var(--color-warning)" }}>{issue}</p>)}
             <p className="mt-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>It goes out straight away and cannot be undone.</p>
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" autoFocus onClick={() => setConfirming(false)} disabled={busy === "send"} className={BUTTON} style={{ borderColor: "var(--color-border)" }}>Cancel</button>
@@ -181,14 +210,16 @@ export function MailDraftView({ draftId }: { draftId: string }) {
         <dl className="mb-5 rounded-lg border px-3.5" style={{ borderColor: "var(--color-border)", background: "var(--color-main-bg)" }}>
           <Field label="From">{d.from_email ?? d.identity_key ?? "Unknown sender"}</Field>
           <Field label="To">{d.to_emails.length ? d.to_emails.join(", ") : <span style={{ color: "var(--color-warning)" }}>No recipient</span>}</Field>
-          {d.cc_emails.length > 0 && <Field label="Cc">{d.cc_emails.join(", ")}</Field>}
-          {d.bcc_emails.length > 0 && <Field label="Bcc">{d.bcc_emails.join(", ")}</Field>}
+          <Field label="Cc">{d.cc_emails.length ? d.cc_emails.join(", ") : <span style={{ color: "var(--color-text-muted)" }}>None</span>}</Field>
+          <Field label="Bcc">{d.bcc_emails.length ? d.bcc_emails.join(", ") : <span style={{ color: "var(--color-text-muted)" }}>None</span>}</Field>
           <Field label="Subject">
             {edit
               ? <input aria-label="Subject" value={edit.subject} maxLength={300} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} className={INPUT} style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
               : d.subject ?? ""}
           </Field>
         </dl>
+
+        <DraftAttachments draftId={d.id} files={d.attachments ?? []} transport={d.transport} />
 
         {edit ? (
           <div>

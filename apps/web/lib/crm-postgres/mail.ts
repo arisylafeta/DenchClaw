@@ -1,6 +1,6 @@
 import { queryPg } from '../postgres';
 import { campaignReplyAtSql } from './mail-replies';
-import type { MailMessageSummary, MailDraft, MailDraftListRow, MailApproval, MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
+import type { MailMessageSummary, MailDraft, DraftAttachment, MailDraftListRow, MailApproval, MailFilters, MailMessageRow, MailMessageListRow, MailPage, MailThread, MailFollowup, MailCampaignSummary, MailParticipant } from '../mail-types';
 import { listCampaigns, getCampaignDetail } from './campaigns';
 
 // Match the complete domain, not lookalikes such as rebattery.io.evil.com.
@@ -171,9 +171,9 @@ export async function readMailCampaign(id: string, filters: MailFilters = {}) {
 const DRAFT_STATES = "('draft','frozen')";
 
 export async function readMailDraft(id: string, userId: string): Promise<MailDraft | null> {
-  const [row] = await queryPg<Omit<MailDraft, 'links' | 'warnings' | 'approval'> & { personalization: { oneoff?: { warnings?: unknown[] } } | null }>(
+  const [row] = await queryPg<Omit<MailDraft, 'links' | 'warnings' | 'approval' | 'attachments'> & { personalization: { oneoff?: { warnings?: unknown[] }; attachments?: unknown } | null }>(
     `select m.id,m.state,m.identity_key,m.transport,m.purpose,m.from_email,coalesce(m.to_emails,'{}') as to_emails,coalesce(m.cc_emails,'{}') as cc_emails,
-       coalesce(m.bcc_emails,'{}') as bcc_emails,m.subject,m.body_text,m.body_html,m.thread_id,m.campaign_id,m.created_at,m.updated_at,m.personalization
+       coalesce(m.bcc_emails,'{}') as bcc_emails,m.subject,m.body_text,m.body_html,m.thread_id,m.campaign_id,m.created_at,m.updated_at,m.sent_at,m.accepted_at,m.personalization
      from mail_message m where m.id = $1 and m.direction = 'outbound' and ${mailboxScopeSql('m', '$2')}`, [id, userId]);
   if (!row) {return null;}
   const links = await queryPg<{ cta_key: string; destination_url: string }>('select cta_key,destination_url from mail_message_link where message_id = $1 order by cta_key', [id]);
@@ -182,7 +182,26 @@ export async function readMailDraft(id: string, userId: string): Promise<MailDra
      where subject_type = 'message' and subject_id = $1 order by approved_at desc limit 1`, [id]);
   const { personalization, ...message } = row;
   const warnings = (personalization?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === 'string');
-  return { ...message, links, warnings, approval: approval ?? null };
+  return { ...message, links, warnings, approval: approval ?? null, attachments: draftAttachments(personalization?.attachments) };
+}
+
+/** The files stored with a draft. The server path stays out of the result: files are served by checksum. */
+export function draftAttachments(value: unknown): DraftAttachment[] {
+  if (!Array.isArray(value)) {return [];}
+  return value.flatMap((item): DraftAttachment[] => {
+    const a = item as {filename?: unknown; sha256?: unknown; mediaType?: unknown; sizeBytes?: unknown};
+    if (typeof a?.filename !== 'string' || typeof a.sha256 !== 'string') {return [];}
+    return [{ filename: a.filename, sha256: a.sha256, mediaType: typeof a.mediaType === 'string' ? a.mediaType : null, sizeBytes: typeof a.sizeBytes === 'number' ? a.sizeBytes : null }];
+  });
+}
+
+/** Server-side lookup of one stored draft attachment's file path, by checksum. Null unless the caller can see the draft. */
+export async function draftAttachmentFile(id: string, userId: string, sha256: string): Promise<{ path: string; filename: string; mediaType: string | null } | null> {
+  const [row] = await queryPg<{ personalization: { attachments?: unknown } | null }>(
+    `select m.personalization from mail_message m where m.id = $1 and m.direction = 'outbound' and ${mailboxScopeSql('m', '$2')}`, [id, userId]);
+  const list = (Array.isArray(row?.personalization?.attachments) ? row.personalization.attachments : []) as {sha256?: unknown; storedPath?: unknown; filename?: unknown; mediaType?: unknown}[];
+  const hit = list.find((a) => a.sha256 === sha256 && typeof a.storedPath === 'string' && typeof a.filename === 'string');
+  return hit ? { path: hit.storedPath as string, filename: hit.filename as string, mediaType: typeof hit.mediaType === 'string' ? hit.mediaType : null } : null;
 }
 
 /** One logged email by id. Same visibility as drafts: shared (no owner) or the signed-in user's own mailbox. Not filtered by crm_visible, so threads the CRM inbox hides still open. */

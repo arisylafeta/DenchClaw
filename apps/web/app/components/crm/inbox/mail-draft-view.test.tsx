@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { MailDraft } from "@/lib/mail-types";
-import { MailDraftView, approvalLabel } from "./mail-draft-view";
+import { MailDraftView, approvalLabel, draftSubtitle, sentWhen } from "./mail-draft-view";
 import { MailDraftsView } from "./mail-drafts-view";
 
 const draft: MailDraft = {
@@ -10,7 +10,7 @@ const draft: MailDraft = {
   to_emails: ["admin@example.test"], cc_emails: [], bcc_emails: [], subject: "Ioniq 5 battery enquiry",
   body_text: "Hi team,\n\nHow many packs?", body_html: null, thread_id: null, campaign_id: null, created_at: "2026-10-20T10:00:00Z", updated_at: "2026-10-20T10:00:00Z",
   editable: { main: "Hi team,\n\nHow many packs?", signature: null },
-  links: [{ cta_key: "listing", destination_url: "https://example.test/l" }], warnings: [], approval: null,
+  attachments: [], links: [{ cta_key: "listing", destination_url: "https://example.test/l" }], warnings: [], approval: null,
 };
 const respond = (body: unknown, status = 200) => vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
 afterEach(() => vi.unstubAllGlobals());
@@ -26,7 +26,48 @@ describe("approvalLabel", () => {
   });
 });
 
+describe("draftSubtitle", () => {
+  it("says who a draft is from, then who sent it and when", () => {
+    expect(draftSubtitle({ state: "draft", identity_key: "alex", sent_at: null, accepted_at: null })).toBe("Draft from Alex");
+    const local = new Date(2026, 8, 23, 21, 0).toISOString();
+    expect(sentWhen(local)).toBe("23rd Sept 2026 at 21:00");
+    expect(draftSubtitle({ state: "accepted", identity_key: "alex", sent_at: local, accepted_at: null })).toBe("Sent by Alex on 23rd Sept 2026 at 21:00");
+    expect(draftSubtitle({ state: "delivered", identity_key: "supply", sent_at: null, accepted_at: new Date(2026, 9, 2, 9, 5).toISOString() })).toBe("Sent by Supply on 2nd Oct 2026 at 09:05");
+    expect(draftSubtitle({ state: "sent", identity_key: null, sent_at: null, accepted_at: null })).toBe("Sent");
+    expect(draftSubtitle({ state: "sending", identity_key: "ari", sent_at: null, accepted_at: null })).toBe("Sending from Ari…");
+    expect(sentWhen(new Date(2026, 9, 11, 8, 0).toISOString())).toContain("11th Oct");
+    expect(sentWhen(new Date(2026, 9, 22, 8, 0).toISOString())).toContain("22nd Oct");
+  });
+});
+
 describe("MailDraftView", () => {
+  it("always shows Cc and Bcc, saying None when empty", async () => {
+    respond(draft);
+    render(<MailDraftView draftId="d1" />);
+    await screen.findByRole("heading", { name: "Ioniq 5 battery enquiry" });
+    expect(screen.getByText("Cc").nextSibling).toHaveTextContent("None");
+    expect(screen.getByText("Bcc").nextSibling).toHaveTextContent("None");
+    expect(screen.getByText("Draft from Ari")).toBeInTheDocument();
+  });
+  it("shows attachments with name, size, preview and a download link, and lists them in the send confirmation", async () => {
+    const sha = "a".repeat(64); const sha2 = "b".repeat(64);
+    respond({ ...draft, attachments: [{ filename: "01 - plate.jpg", sha256: sha, mediaType: "image/jpeg", sizeBytes: 201804 }, { filename: "list.csv", sha256: sha2, mediaType: "text/csv", sizeBytes: 900 }] });
+    const { container } = render(<MailDraftView draftId="d1" />);
+    const link = await screen.findByRole("link", { name: /01 - plate.jpg/ });
+    expect(link).toHaveAttribute("href", `/api/mail/drafts/d1/attachments/${sha}`);
+    expect(link).toHaveAttribute("download", "01 - plate.jpg");
+    expect(link).toHaveTextContent("197 KB");
+    expect(container.querySelector(`img[src="/api/mail/drafts/d1/attachments/${sha}?inline=1"]`)).not.toBeNull();
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+    expect(screen.getByText(/2 attachments/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("With 2 attachments: 01 - plate.jpg, list.csv");
+  });
+  it("warns when the transport cannot carry the files", async () => {
+    respond({ ...draft, transport: "postmark-transactional", attachments: [{ filename: "a.pdf", sha256: "c".repeat(64), mediaType: "application/pdf", sizeBytes: 10 }] });
+    render(<MailDraftView draftId="d1" />);
+    expect(await screen.findByText(/Postmark, which refuses attachments/)).toBeInTheDocument();
+  });
   it("shows recipients, subject, body, frozen links and the approval note", async () => {
     respond(draft);
     render(<MailDraftView draftId="d1" />);
@@ -71,6 +112,7 @@ describe("MailDraftView", () => {
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, send" }));
     expect(await screen.findByText("Sent.")).toBeInTheDocument();
+    expect(screen.getByText(/^Sent by Ari on /)).toBeInTheDocument();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(post[0]).toBe("/api/mail/drafts/d1/send");
     expect(JSON.parse(String(post[1]!.body))).toEqual({ confirm: true, updated_at: "2026-10-20T10:00:00Z" });

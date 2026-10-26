@@ -28,12 +28,15 @@ export type MailFilters = { view?: 'conversations' | 'campaigns' | 'drafts' | 's
 export type MailPage<T> = { items: T[]; nextCursor: string | null };
 
 export type MailApproval = { id: string; sha256: string; scope: 'pilot' | 'full'; approved_by: string; approved_at: string; expires_at: string | null; revoked_at: string | null; recipient_count: number };
+/** A file stored with an unsent draft (never the server path). */
+export type DraftAttachment = { filename: string; sha256: string; mediaType: string | null; sizeBytes: number | null };
 export type MailDraft = {
   id: string; state: string; identity_key: string | null; transport: MailTransport; purpose: MailPurpose | null;
   from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null;
   body_text: string | null; body_html: string | null; thread_id: string | null; campaign_id: string | null;
-  created_at: string; updated_at: string; links: { cta_key: string; destination_url: string }[]; warnings: string[];
+  created_at: string; updated_at: string; sent_at?: string | null; accepted_at?: string | null; links: { cta_key: string; destination_url: string }[]; warnings: string[];
   approval: MailApproval | null;
+  attachments: DraftAttachment[];
   /** Added by the draft API: the copy a person edits, and the identity signature frozen after it (null when the draft has none). */
   editable?: { main: string; signature: string | null };
 };
