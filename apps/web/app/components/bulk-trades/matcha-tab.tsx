@@ -32,6 +32,13 @@ export function MatchaTab({ listingId, active }: { listingId: string; active: bo
       .catch((err) => { if (live) setError(err instanceof Error ? err.message : "Could not open the Matcha chat."); });
     return () => { live = false; };
   }, [started, listingId]);
+  // /new or a branch inside the tab starts another chat: keep the listing pinned to that one.
+  const follow = (conversation: HermesConversation) => {
+    setOpened((current) => current && { ...current, chat: { ...current.chat, conversation } });
+    void fetch(`/api/bulk-listings/${encodeURIComponent(listingId)}/matcha-chat`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: conversation.key }),
+    }).catch(() => undefined);
+  };
   if (!started) return null;
   const chat = opened?.id === listingId ? opened.chat : null;
   return (
@@ -46,6 +53,7 @@ export function MatchaTab({ listingId, active }: { listingId: string; active: bo
             sessionTitle={chat.conversation.title}
             fileContext={{ path: `~trades-preview/listing/${listingId}`, filename: listingId, isDirectory: true }}
             visible={active}
+            onBranched={follow}
             compact
           />}
     </div>

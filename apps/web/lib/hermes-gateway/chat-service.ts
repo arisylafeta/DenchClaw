@@ -323,6 +323,7 @@ export class HermesChatService {
       }
     });
   }
+  pendingConversation(key: string): HermesConversation | undefined { return this.newConversations.get(key); }
   async createGatewayConversation(profiles: string[], actor?: ConversationActor) {
     requireActor(actor);
     if (!Array.isArray(profiles) || profiles.length !== 1) {throw new ChatServiceError(400, "one_profile_required");}
@@ -512,5 +513,7 @@ export function getHermesChatService(): HermesChatService {
 }
 export function openForView(profile: string, storedId: string, actor?: ConversationActor) { return getHermesChatService().openForView(profile, storedId,undefined,actor); }
 export function sendPrompt(key: string, prompt: GatewayPrompt, actor?: ConversationActor) { return getHermesChatService().sendPrompt(key, prompt,actor); }
+/** A conversation created in this process that Hermes has not stored yet (no message sent). */
+export function pendingGatewayConversation(key: string) { return getHermesChatService().pendingConversation(key); }
 export function createGatewayConversation(profiles: string[], actor?: ConversationActor) { return getHermesChatService().createGatewayConversation(profiles,actor); }
 export function branchConversation(key: string, actor?: ConversationActor) { return getHermesChatService().branchConversation(key,actor); }
