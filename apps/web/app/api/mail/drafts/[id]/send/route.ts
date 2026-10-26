@@ -1,6 +1,6 @@
 import { ALLOWED_EMAILS, currentUser } from '@/lib/auth';
 import { readMailDraft } from '@/lib/crm-postgres/mail';
-import { DraftActionError, sendDraft } from '@/lib/mail-draft-actions';
+import { DraftActionError, sameVersion, sendDraft } from '@/lib/mail-draft-actions';
 export const dynamic = 'force-dynamic';
 
 /** Sends one unsent draft. Admins only (the CLI treats the named approver as the go-ahead), and only the exact version the person confirmed. */
@@ -13,7 +13,7 @@ export async function POST(req: Request, context: {params: Promise<{id:string}>}
  if (!body || body.confirm !== true || typeof body.updated_at !== 'string') return Response.json({error:'Confirmation and updated_at are required.'},{status:400});
  const draft = await readMailDraft(id,user.id);
  if (!draft) return Response.json({error:'Not found'},{status:404});
- if (Date.parse(draft.updated_at) !== Date.parse(body.updated_at)) return Response.json({error:'This draft changed since you looked at it. Review it again before sending.'},{status:409});
+ if (!sameVersion(draft.updated_at,body.updated_at)) return Response.json({error:'This draft changed since you looked at it. Review it again before sending.'},{status:409});
  try {
   return Response.json(await sendDraft(draft,user.displayName));
  } catch (error) {

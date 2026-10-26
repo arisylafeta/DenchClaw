@@ -5,6 +5,12 @@ import type { MailDraft } from "./mail-types";
 const run = promisify(execFile);
 const CLI = "/usr/local/bin/rebattery-mail";
 
+/** Same instant, whether either side is a pg Date or an ISO string. `Date.parse(date)` would drop the milliseconds. */
+export function sameVersion(a: string | Date, b: string | Date): boolean {
+  const left = new Date(a).getTime(); const right = new Date(b).getTime();
+  return Number.isFinite(left) && left === right;
+}
+
 export class DraftActionError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }

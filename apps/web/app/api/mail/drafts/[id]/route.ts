@@ -1,6 +1,6 @@
 import { currentUser } from '@/lib/auth';
 import { readMailDraft } from '@/lib/crm-postgres/mail';
-import { DraftActionError, editDraft, editableCopy } from '@/lib/mail-draft-actions';
+import { DraftActionError, editDraft, editableCopy, sameVersion } from '@/lib/mail-draft-actions';
 export const dynamic = 'force-dynamic';
 type Context = {params: Promise<{id:string}>};
 
@@ -26,7 +26,7 @@ export async function PATCH(req: Request, context: Context) {
  if (typeof body.subject === 'string' && (!body.subject.trim() || body.subject.length > 300)) return Response.json({error:'The subject must be 1 to 300 characters.'},{status:400});
  const current = await readMailDraft(id,user.id);
  if (!current) return Response.json({error:'Not found'},{status:404});
- if (Date.parse(current.updated_at) !== Date.parse(body.updated_at)) return Response.json({error:'This draft changed since you opened it. Reload to see the latest.'},{status:409});
+ if (!sameVersion(current.updated_at,body.updated_at)) return Response.json({error:'This draft changed since you opened it. Reload to see the latest.'},{status:409});
  try {
   await editDraft(current,{subject: body.subject as string | undefined, body: body.body as string | undefined});
   const updated = await readMailDraft(id,user.id);
