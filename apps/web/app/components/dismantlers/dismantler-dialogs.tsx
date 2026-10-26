@@ -65,7 +65,7 @@ export function AddDismantlerDialog({ today, onClose, onAdded }: {
       footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Add dismantler</button>}>
       <FormField label="Company">
         {company ? (
-          <div className="flex items-center gap-2 border px-2.5 py-2 text-sm" style={{ borderColor: "var(--bt-text)" }}>
+          <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-sm" style={{ borderColor: "var(--bt-text)" }}>
             <span className="flex-1 font-semibold">{company.name}</span>
             <span className="text-xs" style={{ color: "var(--bt-muted)" }}>Already in the CRM</span>
             <button type="button" onClick={() => setCompany(null)} className="text-xs font-medium hover:underline" style={{ color: "var(--bt-link)" }}>Change</button>
@@ -75,7 +75,7 @@ export function AddDismantlerDialog({ today, onClose, onAdded }: {
         )}
       </FormField>
       {!company && query.trim().length >= 2 && (
-        <div role="listbox" aria-label="Matching companies" className="-mt-1.5 flex flex-col border" style={{ borderColor: "var(--bt-border)" }}>
+        <div role="listbox" aria-label="Matching companies" className="-mt-1.5 flex flex-col overflow-hidden rounded-lg border" style={{ borderColor: "var(--bt-border)" }}>
           {matches.map((match) => (
             <button key={match.id} type="button" role="option" aria-selected={false} onClick={() => setCompany(match)}
               className="flex items-center gap-2 border-b px-2.5 py-2 text-left text-sm last:border-b-0 hover:bg-[var(--bt-row-hover)]" style={{ borderColor: "var(--bt-divider)" }}>
@@ -138,7 +138,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         <button type="button" disabled={busy || !text.trim()} onClick={() => void send(false)} className={darkButtonClass} style={darkButtonStyle}>Preview</button>
       )}>
       {plan ? (
-        <div className="flex max-h-[360px] flex-col overflow-auto border" style={{ borderColor: "var(--bt-border)" }}>
+        <div className="flex max-h-[360px] flex-col overflow-auto rounded-lg border" style={{ borderColor: "var(--bt-border)" }}>
           {plan.map((item) => (
             <div key={item.name} className="flex items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0" style={{ borderColor: "var(--bt-divider)" }}>
               <span className="flex-1">{item.name}</span>
@@ -152,7 +152,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         <FormField label="One dismantler per line: name, country, eBay seller, battery listings">
           <textarea value={text} onChange={(event) => setText(event.target.value)} rows={10} autoFocus
             placeholder={"Prestige Auto Salvage, UK, prestige-auto-salvage, 16\nSoton Car Parts, UK, sotoncarparts, 15"}
-            className="w-full border px-2.5 py-2 font-mono text-[13px]" style={inputStyle} />
+            className="w-full rounded-lg border px-2.5 py-2 font-mono text-[13px]" style={inputStyle} />
         </FormField>
       )}
       <p className="text-xs" style={{ color: "var(--bt-muted)" }}>

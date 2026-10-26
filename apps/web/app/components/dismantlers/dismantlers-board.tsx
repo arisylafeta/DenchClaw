@@ -56,7 +56,7 @@ const drag = (d: Dismantler) => ({
 
 function ColumnHeader({ stage, count }: { stage: Stage; count: number }) {
   return (
-    <header className="flex items-center gap-2 border-b px-3.5 py-3" style={{ borderColor: "var(--bt-divider)" }}>
+    <header className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
       <StageDot stage={stage} />
       <h2 className="flex-1 text-sm font-semibold">{stage}</h2>
       <span className="bt-mono text-xs" style={{ color: "var(--bt-muted)" }}>{count}</span>
@@ -83,13 +83,13 @@ function FoundColumn({ dismantlers, onOpen, onMove, onShowList }: Omit<Props, "t
   });
 
   return (
-    <section aria-label="Found" {...handlers} className="flex w-[250px] shrink-0 flex-col border" style={columnStyle(over)}>
+    <section aria-label="Found" {...handlers} className="flex w-[250px] shrink-0 flex-col rounded-2xl border" style={columnStyle(over)}>
       <ColumnHeader stage="Found" count={found.length} />
       <div className="flex flex-col gap-1 p-2">
         {found.slice(0, FOUND_SHOWN).map((d) => {
           const isOpen = unfolded.has(d.id);
           return (
-            <div key={d.id} {...drag(d)} className="cursor-grab border active:cursor-grabbing" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+            <div key={d.id} {...drag(d)} className="cursor-grab rounded-xl border active:cursor-grabbing" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
               <button type="button" aria-expanded={isOpen} onClick={() => toggle(d.id)}
                 className="flex w-full items-center gap-1.5 px-2 py-[7px] text-left">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -105,11 +105,11 @@ function FoundColumn({ dismantlers, onOpen, onMove, onShowList }: Omit<Props, "t
                   {d.ebay_listings != null && <span>{d.ebay_listings} battery listings on eBay</span>}
                   {d.next_step && <span>{d.next_step}</span>}
                   <div className="mt-0.5 flex gap-1.5">
-                    <button type="button" onClick={() => onMove(d, "Talking")} className="h-7 px-2.5 text-xs font-medium"
+                    <button type="button" onClick={() => onMove(d, "Talking")} className="h-7 rounded-lg px-2.5 text-xs font-medium"
                       style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
                       Talking →
                     </button>
-                    <button type="button" onClick={() => onOpen(d)} className="h-7 border px-2.5 text-xs font-medium"
+                    <button type="button" onClick={() => onOpen(d)} className="h-7 rounded-lg border px-2.5 text-xs font-medium"
                       style={{ borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
                       Open
                     </button>
@@ -132,7 +132,7 @@ function FoundColumn({ dismantlers, onOpen, onMove, onShowList }: Omit<Props, "t
 
 function Empty({ text }: { text: string }) {
   return (
-    <div className="border border-dashed px-2.5 py-4 text-center text-xs leading-[1.45]" style={{ borderColor: "var(--bt-dashed)", color: "var(--bt-muted)" }}>
+    <div className="rounded-xl border border-dashed px-2.5 py-4 text-center text-xs leading-[1.45]" style={{ borderColor: "var(--bt-dashed)", color: "var(--bt-muted)" }}>
       {text}
     </div>
   );
@@ -148,11 +148,11 @@ function Column({ stage, dismantlers, today, onOpen, onMove }: Omit<Props, "onSh
       || String(a.next_step_due ?? "9999").localeCompare(String(b.next_step_due ?? "9999")));
 
   return (
-    <section aria-label={stage} {...handlers} className="flex w-[250px] shrink-0 flex-col border" style={columnStyle(over)}>
+    <section aria-label={stage} {...handlers} className="flex w-[250px] shrink-0 flex-col rounded-2xl border" style={columnStyle(over)}>
       <ColumnHeader stage={stage} count={cards.length} />
       <div className="flex min-h-[120px] flex-col gap-2 p-2">
         {cards.map((d) => (
-          <div key={d.id} {...drag(d)} className="flex cursor-grab flex-col gap-2 border p-3 hover:border-[var(--bt-border-strong)] active:cursor-grabbing"
+          <div key={d.id} {...drag(d)} className="flex cursor-grab flex-col gap-2 rounded-xl border p-3 shadow-sm hover:border-[var(--bt-border-strong)] active:cursor-grabbing"
             style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             <div>
               <div className="flex items-center gap-1.5">
@@ -170,7 +170,7 @@ function Column({ stage, dismantlers, today, onOpen, onMove }: Omit<Props, "onSh
               <span className="flex-1" />
               {next && (
                 <button type="button" onClick={() => onMove(d, next)} aria-label={`Move ${d.name} to ${next}`} title={`Move to ${next}`}
-                  className="h-[26px] border px-2 text-xs font-medium hover:bg-[var(--bt-row-hover)]"
+                  className="h-[26px] rounded-lg border px-2 text-xs font-medium hover:bg-[var(--bt-row-hover)]"
                   style={{ borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
                   {next} →
                 </button>
@@ -194,7 +194,7 @@ function ParkedColumn({ dismantlers, today, onOpen, onMove }: Omit<Props, "onSho
     return (
       <button type="button" {...handlers} onClick={() => setOpen(true)}
         aria-label={`Open Parked, ${parked.length} ${parked.length === 1 ? "dismantler" : "dismantlers"}`}
-        className="flex max-h-[360px] w-11 shrink-0 flex-col items-center gap-2.5 border py-3"
+        className="flex max-h-[360px] w-11 shrink-0 flex-col items-center gap-2.5 rounded-2xl border py-3"
         style={{ background: over ? "var(--bt-column-over)" : "var(--bt-bg)", borderColor: "var(--bt-border)" }}>
         <StageDot stage="Parked" />
         <span className="bt-mono text-xs" style={{ color: "var(--bt-muted)" }}>{parked.length}</span>
@@ -203,16 +203,16 @@ function ParkedColumn({ dismantlers, today, onOpen, onMove }: Omit<Props, "onSho
     );
   }
   return (
-    <section aria-label="Parked" {...handlers} className="flex w-[250px] shrink-0 flex-col border" style={columnStyle(over)}>
-      <header className="flex items-center gap-2 border-b px-3.5 py-3" style={{ borderColor: "var(--bt-divider)" }}>
+    <section aria-label="Parked" {...handlers} className="flex w-[250px] shrink-0 flex-col rounded-2xl border" style={columnStyle(over)}>
+      <header className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
         <StageDot stage="Parked" />
         <h2 className="flex-1 text-sm font-semibold">Parked</h2>
         <span className="bt-mono text-xs" style={{ color: "var(--bt-muted)" }}>{parked.length}</span>
-        <button type="button" onClick={() => setOpen(false)} aria-label="Fold Parked" className="h-6 w-6 text-sm" style={{ color: "var(--bt-muted)" }}>‹</button>
+        <button type="button" onClick={() => setOpen(false)} aria-label="Fold Parked" className="h-6 w-6 rounded-md text-sm hover:bg-[var(--bt-row-hover)]" style={{ color: "var(--bt-muted)" }}>‹</button>
       </header>
       <div className="flex flex-col gap-2 p-2">
         {parked.map((d) => (
-          <div key={d.id} {...drag(d)} className="flex cursor-grab flex-col gap-1 border p-3" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          <div key={d.id} {...drag(d)} className="flex cursor-grab flex-col gap-1 rounded-xl border p-3" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
             <button type="button" onClick={() => onOpen(d)} className="truncate text-left text-sm font-semibold hover:underline">{d.name}</button>
             {d.park_reason && <span className="text-xs" style={{ color: "var(--bt-text-2)" }}>{d.park_reason}</span>}
             {d.revisit_on && (

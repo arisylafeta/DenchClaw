@@ -23,17 +23,17 @@ export const STAGE_DOT: Record<Stage, string> = {
 
 export function StageTag({ stage }: { stage: Stage }) {
   return (
-    <span className="whitespace-nowrap border px-2 py-0.5 text-xs font-medium" style={STAGE_TAG[stage]}>{stage}</span>
+    <span className="whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium" style={STAGE_TAG[stage]}>{stage}</span>
   );
 }
 
 export function StageDot({ stage }: { stage: Stage }) {
-  return <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0" style={{ background: STAGE_DOT[stage] }} />;
+  return <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STAGE_DOT[stage] }} />;
 }
 
 export function GoalTag() {
   return (
-    <span className="bt-mono shrink-0 border px-1.5 text-[10px] font-medium uppercase tracking-[0.1em]" style={{ borderColor: "var(--bt-text)" }}>
+    <span className="bt-mono shrink-0 rounded-full border px-2 text-[10px] font-medium uppercase tracking-[0.1em]" style={{ borderColor: "var(--bt-text)" }}>
       Q4 goal
     </span>
   );

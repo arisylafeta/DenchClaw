@@ -19,6 +19,7 @@ import { firstName, greeting } from "@/lib/bulk-trade-details";
 import { Card, ErrorText, buttonClass, buttonStyle, darkButtonStyle, request } from "../bulk-trades/trade-ui";
 import { EditDismantlerDialog, EmailDialog, ParkDialog, SetNextDialog } from "./dismantler-dialogs";
 import { GoalTag, STAGE_DOT, StageTag, dismantlerUrl } from "./dismantler-ui";
+import styles from "./dismantlers.module.css";
 
 type Props = {
   id: string;
@@ -78,7 +79,7 @@ export function DismantlerPage({ id, owners, today, onBack, onSaved }: Props) {
   ].filter(Boolean).join(" · ");
 
   return (
-    <div className="flex h-full flex-col">
+    <div className={`${styles.root} flex h-full flex-col`}>
       <header className="flex flex-col gap-2.5 border-b px-8 pb-5 pt-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <nav aria-label="Breadcrumb" className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
           <button type="button" onClick={onBack} className="hover:underline">Dismantlers</button> / {d.name}
@@ -149,7 +150,7 @@ function Journey({ d, today, onMove }: { d: Dismantler; today: string; onMove: (
           const state = position < index ? "done" : position === index ? "now" : "todo";
           return (
             <li key={stage} className="flex flex-col gap-1.5" aria-current={state === "now" ? "step" : undefined}>
-              <span aria-hidden="true" className="h-1" style={{ background: state === "done" ? "var(--bt-text)" : state === "now" ? STAGE_DOT[stage] : "var(--bt-divider)" }} />
+              <span aria-hidden="true" className="h-1 rounded-full" style={{ background: state === "done" ? "var(--bt-text)" : state === "now" ? STAGE_DOT[stage] : "var(--bt-divider)" }} />
               <span className="flex items-center gap-1.5 text-[13px]"
                 style={{ fontWeight: state === "now" ? 700 : 500, color: state === "todo" ? "var(--bt-muted)" : "var(--bt-text)" }}>
                 {state === "done" && (
@@ -225,11 +226,11 @@ function NextStepBar({ detail, today, onSave }: { detail: DismantlerDetail; toda
     }
   }
 
-  const small = "inline-flex h-8 items-center whitespace-nowrap border px-3 text-[13px] font-medium";
+  const small = "inline-flex h-8 items-center whitespace-nowrap rounded-lg border px-3 text-[13px] font-medium";
   return (
-    <section aria-label="Next step" className="flex flex-wrap items-center gap-x-4 gap-y-2 border px-4 py-3"
+    <section aria-label="Next step" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3"
       style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-      <span className="shrink-0 whitespace-nowrap border px-2 py-0.5 text-xs font-medium" style={TONE_STYLE[due.tone]}>
+      <span className="shrink-0 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium" style={TONE_STYLE[due.tone]}>
         {d.next_step ? due.text : "No next step"}
       </span>
       <div className="min-w-[220px] flex-1">
@@ -252,14 +253,14 @@ function NextStepBar({ detail, today, onSave }: { detail: DismantlerDetail; toda
       </button>
       {d.next_step && (
         <div ref={menu} className="relative">
-          <button type="button" aria-expanded={snoozing} onClick={() => setSnoozing((open) => !open)} className="h-8 px-2 text-[13px] font-medium" style={{ color: "var(--bt-muted)" }}>
+          <button type="button" aria-expanded={snoozing} onClick={() => setSnoozing((open) => !open)} className="h-8 rounded-lg px-2 text-[13px] font-medium hover:bg-[var(--bt-row-hover)]" style={{ color: "var(--bt-muted)" }}>
             Snooze
           </button>
           {snoozing && (
-            <div role="menu" className="absolute right-0 top-9 z-10 flex w-40 flex-col border py-1 shadow-lg"
+            <div role="menu" className="absolute right-0 top-9 z-10 flex w-40 flex-col rounded-xl border py-1 shadow-lg"
               style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
               {([["Tomorrow", 1], ["In 3 days", 3], ["Next week", 7]] as const).map(([label, days]) => (
-                <button key={label} type="button" role="menuitem" onClick={() => void snooze(days)} className="px-3 py-2 text-left text-sm hover:bg-[var(--bt-row-hover)]">
+                <button key={label} type="button" role="menuitem" onClick={() => void snooze(days)} className="mx-1 rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--bt-row-hover)]">
                   {label}
                 </button>
               ))}
@@ -429,7 +430,7 @@ function Notes({ d, onSave }: { d: Dismantler; onSave: (patch: DismantlerPatch) 
         onChange={(event) => setValue(event.target.value)}
         onBlur={() => { if (value.trim() !== (d.notes ?? "")) void onSave({ notes: value }); }}
         placeholder="Anything worth remembering: who decides, what they worry about, how they list today"
-        className="w-full border px-2.5 py-2 text-[13px] leading-relaxed"
+        className="w-full rounded-lg border px-2.5 py-2 text-[13px] leading-relaxed"
         style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" }}
       />
       <p className="text-xs" style={{ color: "var(--bt-muted)" }}>Saved when you click away.</p>

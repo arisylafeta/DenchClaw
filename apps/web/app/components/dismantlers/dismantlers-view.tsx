@@ -9,6 +9,7 @@ import { DismantlerPage } from "./dismantler-page";
 import { DismantlersBoard } from "./dismantlers-board";
 import { DismantlersList } from "./dismantlers-list";
 import { StageDot, dismantlerUrl } from "./dismantler-ui";
+import styles from "./dismantlers.module.css";
 
 type Mode = "list" | "board";
 const MODE_KEY = "dismantlers:view";
@@ -82,7 +83,7 @@ export function DismantlersView() {
 
   if (openId) {
     return (
-      <div className="bulk-trades h-full">
+      <div className={`bulk-trades ${styles.root} h-full`}>
         <DismantlerPage
           key={openId}
           id={openId}
@@ -111,7 +112,7 @@ export function DismantlersView() {
       role="tab"
       aria-selected={mode === value}
       onClick={() => switchMode(value)}
-      className="border-b-2 px-3.5 py-3 text-sm"
+      className="rounded-t-lg border-b-2 px-3.5 py-3 text-sm hover:bg-[var(--bt-row-hover)]"
       style={mode === value
         ? { borderColor: "var(--bt-text)", color: "var(--bt-text)", fontWeight: 600 }
         : { borderColor: "transparent", color: "var(--bt-muted)", fontWeight: 500 }}
@@ -121,7 +122,7 @@ export function DismantlersView() {
   );
 
   return (
-    <div className="bulk-trades flex h-full flex-col">
+    <div className={`bulk-trades ${styles.root} flex h-full flex-col`}>
       <header className="flex flex-col gap-3.5 border-b px-8 pt-5" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-[26px] font-semibold tracking-[-0.01em]">Dismantlers</h1>
@@ -131,7 +132,7 @@ export function DismantlersView() {
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="flex h-9 items-center gap-1.5 border px-3.5 text-[13px] font-medium hover:bg-[var(--bt-accent-hover)]"
+            className="flex h-9 items-center gap-1.5 rounded-lg border px-3.5 text-[13px] font-medium hover:bg-[var(--bt-accent-hover)]"
             style={{ background: "var(--bt-accent)", borderColor: "var(--bt-accent)", color: "var(--bt-on-accent)" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
@@ -141,10 +142,10 @@ export function DismantlersView() {
           </button>
         </div>
 
-        <section aria-label="Goal" className="grid grid-cols-2 border md:grid-cols-5" style={{ borderColor: "var(--bt-border)" }}>
+        <section aria-label="Goal" className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border md:grid-cols-5" style={{ borderColor: "var(--bt-border)", background: "var(--bt-divider)" }}>
           {goalCells.map(([label, value, hint], index) => (
-            <div key={label} className="flex flex-col gap-1 border-r px-3.5 py-2.5 last:border-r-0"
-              style={{ borderColor: "var(--bt-divider)", background: index === 0 ? "var(--bt-bg)" : "var(--bt-surface)" }}>
+            <div key={label} className="flex flex-col gap-1 px-4 py-3"
+              style={{ background: index === 0 ? "var(--bt-bg)" : "var(--bt-surface)" }}>
               <span className="bt-label">{label}</span>
               <span className="bt-mono text-[22px] font-semibold">{value}</span>
               <span className="text-xs" style={{ color: "var(--bt-muted)" }}>{hint}</span>

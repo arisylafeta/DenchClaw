@@ -1,0 +1,18 @@
+/* Softer shapes for the Dismantlers page. Scoped here so Bulk Trades keeps its square look. */
+.root :global(.rounded-none) {
+  border-radius: 8px;
+}
+
+.root section:global(.rounded-none),
+.root [role="dialog"]:global(.rounded-none) {
+  border-radius: 14px;
+}
+
+.root :global([data-table-part="toolbar"]) :is(button, [role="button"], select, input:not([type="checkbox"])),
+.root :global([data-table-part="footer"]) :is(button, [role="button"], select, input:not([type="checkbox"])) {
+  border-radius: 8px !important;
+}
+
+.root :global([data-table-part="search"]) {
+  border-radius: 8px !important;
+}

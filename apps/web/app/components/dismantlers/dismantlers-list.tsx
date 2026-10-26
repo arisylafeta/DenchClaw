@@ -13,6 +13,7 @@ import {
 } from "@/lib/dismantlers";
 import { DueChip, TONE_HEADING } from "../bulk-trades/trade-chips";
 import { darkButtonClass, darkButtonStyle, inputClass, inputStyle } from "../bulk-trades/trade-ui";
+import styles from "./dismantlers.module.css";
 import { GoalTag, StageDot, StageTag, metaLine, toneText } from "./dismantler-ui";
 import tableStyles from "../ui/data-table.module.css";
 import { TableCellContent } from "../ui/table-cell";
@@ -35,21 +36,21 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
   const parked = dismantlers.filter((d) => d.stage === "Parked").length;
 
   return (
-    <div className={`bulk-trades ${tableStyles.surface} flex flex-col gap-5`}>
+    <div className={`bulk-trades ${styles.root} ${tableStyles.surface} flex flex-col gap-5`}>
       {groups.length ? (
         <>
           <div className="overflow-x-auto">
             <div className="flex min-w-[960px] flex-col gap-5">
-          <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-4 border-b px-3 py-2 font-medium`}>
+          <div data-table-part="grid-header" className={`grid ${COLUMNS} gap-4 rounded-lg px-4 py-2 font-medium`} style={{ background: "var(--bt-table-head)", color: "var(--bt-muted)" }}>
             <span>Dismantler</span><span>Stage</span><span>Next step</span><span>Due</span><span>On ReBattery</span><span>Last contact</span>
           </div>
           {groups.map((group) => (
-            <section key={group.name} className="flex flex-col gap-1.5" aria-label={group.name}>
-              <h2 className="flex items-center gap-2 px-1 text-[13px] font-semibold" style={{ color: TONE_HEADING[GROUP_TONE[group.name]] }}>
+            <section key={group.name} className="flex flex-col gap-2" aria-label={group.name}>
+              <h2 className="flex items-center gap-2 px-2 text-[13px] font-semibold" style={{ color: TONE_HEADING[GROUP_TONE[group.name]] }}>
                 {group.name}
                 <span className="font-medium" style={{ color: "var(--bt-muted)" }}>{group.dismantlers.length}</span>
               </h2>
-              <div className="border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+              <div className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
                 {group.dismantlers.map((d) => (
                   <div
                     key={d.id}
@@ -63,7 +64,7 @@ export function DismantlersList({ dismantlers, today, onOpen, onStartOutreach, o
                       }
                     }}
                     onClick={() => onOpen(d)}
-                    className={`grid w-full ${COLUMNS} items-center gap-4 border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]`}
+                    className={`grid w-full ${COLUMNS} items-center gap-4 border-b px-4 py-3 text-left text-xs transition-colors last:border-b-0 hover:bg-[var(--bt-row-hover)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--bt-text)]`}
                     style={{ borderColor: "var(--bt-divider)" }}
                   >
                     <TableCellContent>
@@ -156,9 +157,9 @@ function Backlog({ found, onOpen, onStartOutreach }: {
   });
 
   return (
-    <section aria-label="Found" className="mt-2 border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+    <section aria-label="Found" className="mt-2 overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2.5 px-5 py-3.5 text-left hover:bg-[var(--bt-row-hover)]">
+        className="flex w-full items-center gap-2.5 px-5 py-4 text-left transition-colors hover:bg-[var(--bt-row-hover)]">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
           aria-hidden="true" className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}>
           <path d="m9 18 6-6-6-6" />
@@ -182,10 +183,10 @@ function Backlog({ found, onOpen, onStartOutreach }: {
               className={`${inputClass} !h-8 !w-[280px] text-xs`}
               style={inputStyle}
             />
-            <div role="group" aria-label="Country" className="flex flex-wrap border" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
+            <div role="group" aria-label="Country" className="flex flex-wrap gap-0.5 rounded-lg border p-0.5" style={{ borderColor: "var(--bt-border)", background: "var(--bt-surface)" }}>
               {countries.map((name) => (
                 <button key={name} type="button" aria-pressed={country === name} onClick={() => { setCountry(name); setShown(BACKLOG_PAGE); }}
-                  className="h-8 px-3 text-xs font-medium"
+                  className="h-7 rounded-md px-3 text-xs font-medium"
                   style={country === name ? { background: "var(--bt-badge)", color: "var(--bt-on-badge)" } : { color: "var(--bt-text)" }}>
                   {name}
                 </button>
@@ -202,12 +203,12 @@ function Backlog({ found, onOpen, onStartOutreach }: {
           </div>
           <div className="overflow-x-auto">
             <div className="min-w-[960px]">
-          <div data-table-part="grid-header" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-3 py-2 font-medium`} style={{ borderColor: "var(--bt-divider)" }}>
+          <div data-table-part="grid-header" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-4 py-2.5 font-medium`} style={{ borderColor: "var(--bt-divider)", background: "var(--bt-table-head)", color: "var(--bt-muted)" }}>
             <input type="checkbox" aria-label="Select all shown" checked={allVisiblePicked} onChange={toggleVisible} className="h-4 w-4 accent-[var(--bt-text)]" />
             <span>Dismantler</span><span>Country</span><span>eBay battery listings</span><span>Found via</span>
           </div>
           {visible.map((d) => (
-            <div key={d.id} data-table-part="grid-row" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-3 py-2 text-xs`}
+            <div key={d.id} data-table-part="grid-row" className={`grid ${BACKLOG_COLUMNS} items-center gap-3.5 border-b px-4 py-3 text-xs transition-colors hover:bg-[var(--bt-row-hover)]`}
               style={{ borderColor: "var(--bt-divider)", background: picked.has(d.id) ? "var(--bt-bg)" : undefined }}>
               <TableCellContent><input type="checkbox" aria-label={`Select ${d.name}`} checked={picked.has(d.id)} onChange={() => toggle(d.id)} className="h-4 w-4 accent-[var(--bt-text)]" /></TableCellContent>
               <TableCellContent>
