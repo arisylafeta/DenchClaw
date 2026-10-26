@@ -6,10 +6,10 @@ import { hermesChatTransport } from "@/lib/hermes-gateway/transport-flag";
 import { createGatewayConversation } from "@/lib/hermes-gateway/chat-service";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export async function GET(req?: Request) {
+export async function GET(req: Request) {
   const actor = await currentUser(); if (!actor) {return Response.json({error:"Unauthorized"},{status:401});}
   if (resolveAgentBackend() !== "hermes") {return Response.json({ backend: "openclaw" });}
-  try { return Response.json({ ...await listConversations(actor, { query: req ? new URL(req.url).searchParams.get("q") ?? "" : "" }), userId:actor.id, transport: hermesChatTransport() }); }
+  try { return Response.json({ ...await listConversations(actor, { query: new URL(req.url).searchParams.get("q") ?? "" }), userId:actor.id, transport: hermesChatTransport() }); }
   catch (error) { return accessErrorResponse(error); }
 }
 export async function POST(req: Request) {

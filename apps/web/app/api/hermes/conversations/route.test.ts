@@ -13,7 +13,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe("Hermes conversation routes", () => {
   it("leaves legacy mode alone and never touches Hermes", async () => {
     vi.stubEnv("DENCH_AGENT_BACKEND", "openclaw");
-    expect(await (await GET()).json()).toEqual({ backend: "openclaw" });
+    expect(await (await GET(new Request("http://localhost/api/hermes/conversations"))).json()).toEqual({ backend: "openclaw" });
     expect((await POST(request({ profiles: ["alpha"] }))).status).toBe(404);
     expect(native.listConversations).not.toHaveBeenCalled(); expect(native.createConversation).not.toHaveBeenCalled();
   });
