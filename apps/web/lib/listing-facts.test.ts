@@ -17,6 +17,11 @@ describe("supplyFacts", () => {
     expect(facts.find((f) => f.key === "location")).toMatchObject({ value: null, status: "missing", group: "Logistics" });
   });
 
+  it("reads a field whose alternatives were stored as null (agent-written rows) instead of throwing", () => {
+    const facts = supplyFacts(TEST_REGISTRY, "packs", [field("model", "EPES233", { alternatives: null as unknown as [] })]);
+    expect(facts.find((f) => f.key === "model")).toMatchObject({ value: "EPES233", claims: [{ value: "EPES233" }] });
+  });
+
   it("keeps every claim of a conflict, the recorded one first", () => {
     const facts = supplyFacts(TEST_REGISTRY, "packs", [field("quantity", "161", { status: "conflict",
       alternatives: [{ value: "about 200", source_label: "Call", source_url: null, source_date: "2026-09-20" }] })]);

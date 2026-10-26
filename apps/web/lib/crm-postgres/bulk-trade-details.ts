@@ -69,7 +69,7 @@ const CONTACT_SELECT = `select id, name, company, email, phone from crm_bulk_tra
 
 const FIELD_SELECT = `
   select field_key, value, status, visibility, source_label, source_url,
-    to_char(source_date, 'YYYY-MM-DD') as source_date, alternatives
+    to_char(source_date, 'YYYY-MM-DD') as source_date, coalesce(alternatives, '[]'::jsonb) as alternatives
   from crm_bulk_trade_fields`;
 
 /** Listing fields use the same wire mapping as the original Bulk Trades detail. */
@@ -77,7 +77,7 @@ export async function listingFields(id: string): Promise<TradeField[]> {
   const fields = await queryPg<TradeField>(`${FIELD_SELECT} where lot_id = $1`, [id]);
   if (fields.length) return fields;
   return queryPg<TradeField>(`select field_key, value, status, visibility, source_label, source_url,
-    to_char(source_date, 'YYYY-MM-DD') as source_date, alternatives
+    to_char(source_date, 'YYYY-MM-DD') as source_date, coalesce(alternatives, '[]'::jsonb) as alternatives
     from crm_bulk_listing_fields where bulk_listing_id = $1`, [id]);
 }
 

@@ -40,7 +40,7 @@ export function supplyFacts(registry: Registry, kind: TradeKind, fields: TradeFi
     const value = present(row?.value);
     const status: FieldStatus = value ? row!.status : row?.status === "conflict" ? "conflict" : "missing";
     const claims: Claim[] = row
-      ? [row, ...row.alternatives].map((claim) => ({ value: claim.value, source: claim.source_label, url: claim.source_url, date: claim.source_date }))
+      ? [row, ...(row.alternatives ?? [])].map((claim) => ({ value: claim.value, source: claim.source_label, url: claim.source_url, date: claim.source_date }))
       : [];
     return {
       key: template.key, label: template.label, group: template.group ?? "Product", value, status, claims,

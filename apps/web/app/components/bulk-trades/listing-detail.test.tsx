@@ -57,3 +57,23 @@ it("shows not-found text for a missing listing", async () => {
   mockListing(null); mount("missing");
   expect(await screen.findByText("This listing no longer exists.")).toBeInTheDocument();
 });
+
+it("keeps a listing whose fields have no alternatives (null) from crashing the page", async () => {
+  const fetch = vi.fn(async (url: string) => new Response(JSON.stringify(
+    url.endsWith("/fields") ? { fields: [{ field_key: "model", value: "EPES233", status: "confirmed", visibility: "teaser", source_label: null, source_url: null, source_date: null, alternatives: null }] }
+      : url.endsWith("/context") ? { person: null, mail: [] } : url.endsWith("/conversation") ? { conversation: [] } : { listing: listing("s2") })));
+  vi.stubGlobal("fetch", fetch);
+  mount("s2");
+  expect(await screen.findByRole("heading", { name: "24 EV packs" })).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+it("shows a back link instead of a blank page when a listing cannot render", async () => {
+  const onClose = vi.fn();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/fields") ? { fields: "oops" } : url.endsWith("/context") ? { person: null, mail: [] } : url.endsWith("/conversation") ? { conversation: [] } : { listing: listing("s3") }))));
+  render(<ListingDetail id="s3" today="2026-10-21" onClose={onClose} onOpenListing={() => {}} />);
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("could not be displayed");
+  fireEvent.click(screen.getByRole("button", { name: /Bulk Trades/ }));
+  expect(onClose).toHaveBeenCalled();
+});
