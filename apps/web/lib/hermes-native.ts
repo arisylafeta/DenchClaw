@@ -191,7 +191,9 @@ function gatewayListStatus(rows: HermesConversation[]) {
 }
 /** Newest chats listed per profile (own, team-shared and pinned); older ones open by link. */
 const LIST_LIMIT = 100;
-export async function listConversations(actor?: ConversationActor) {
+/** `query` searches the titles of every indexed chat the actor may see, not just the newest ones. */
+export async function listConversations(actor?: ConversationActor, options: { query?: string } = {}) {
+  const query = (options.query ?? "").trim().slice(0, 100);
   requireActor(actor);
   const warnings: string[] = [];
   const profiles = hermesProfiles();
@@ -204,7 +206,7 @@ export async function listConversations(actor?: ConversationActor) {
     try {
       // A failed refresh lists the index as it is; only an empty, never-synced profile has nothing to show.
       await syncProfileIndex(profile, async (name, offset, limit) => await (await nativeFetch(name, `/api/sessions?limit=${limit}&offset=${offset}`)).json() as { data: NativeSession[] }).catch(() => { warnings.push(`Could not load chats for ${profile}`); });
-      const rows: HermesConversation[] = (await listIndexedSessions(actor!, profile, LIST_LIMIT, pinnedIds.get(profile) ?? []))
+      const rows: HermesConversation[] = (await listIndexedSessions(actor!, profile, LIST_LIMIT, query ? [] : pinnedIds.get(profile) ?? [], query))
         .map(({ session, access }) => Object.assign(soloConversation(profile, session as NativeSession), { access }));
       // The API may append older pinned sessions beyond its 200-row recency window.
       // Preserve those rows and bound each metadata read, not the conversation list.

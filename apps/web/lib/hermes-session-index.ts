@@ -75,11 +75,11 @@ type IndexRow = { stored_id: string; source: string | null; title: string | null
   owner_id: string | null; creator_id: string | null; origin: string; visibility: "private" | "team"; version: string | number; deleted_at: string | null };
 
 /** Newest sessions of one profile the actor may see (own, team-shared, external), plus pinned ones. */
-export async function listIndexedSessions(actor: ConversationActor, profile: string, limit: number, pinned: string[]): Promise<Array<{ session: IndexedSession; access: ConversationAccess }>> {
-  try { return await listIndexed(actor, profile, limit, pinned); }
+export async function listIndexedSessions(actor: ConversationActor, profile: string, limit: number, pinned: string[], search = ""): Promise<Array<{ session: IndexedSession; access: ConversationAccess }>> {
+  try { return await listIndexed(actor, profile, limit, pinned, search); }
   catch (error) { if (error instanceof ConversationAccessError) { throw error; } throw new ConversationAccessError(503, "conversation_access_unavailable"); }
 }
-async function listIndexed(actor: ConversationActor, profile: string, limit: number, pinned: string[]): Promise<Array<{ session: IndexedSession; access: ConversationAccess }>> {
+async function listIndexed(actor: ConversationActor, profile: string, limit: number, pinned: string[], search: string): Promise<Array<{ session: IndexedSession; access: ConversationAccess }>> {
   // External sources are team-visible by definition; register any the index has seen that the ACL has not.
   await queryPg(`insert into hermes_security.conversation_access(kind,profile,stored_id,origin,visibility)
     select 'solo', i.profile, i.stored_id, i.source, 'team' from hermes_security.session_index i
@@ -93,7 +93,8 @@ async function listIndexed(actor: ConversationActor, profile: string, limit: num
       join hermes_security.conversation_access a on a.kind='solo' and a.profile=i.profile and a.stored_id=i.stored_id
       where i.profile=$1 and not i.hidden and not i.is_internal_child and coalesce(i.source,'') <> 'bot_room'
         and a.deleted_at is null and (a.owner_id=$2 or a.visibility='team')
-    ) t where rank <= $3 or stored_id = any($4::text[]) order by rank`, [profile, actor.id, limit, pinned]);
+        and ($5::text = '' or i.title ilike '%' || $5 || '%' escape '\')
+    ) t where rank <= $3 or stored_id = any($4::text[]) order by rank`, [profile, actor.id, limit, pinned, search.replace(/[\\%_]/g, "\\$&")]);
   return rows.map(row => ({
     session: { id: row.stored_id, source: row.source ?? undefined, title: row.title ?? undefined, last_active: row.last_active || undefined, started_at: row.started_at || undefined },
     access: accessFor({ owner_id: row.owner_id, creator_id: row.creator_id, origin: row.origin, visibility: row.visibility, version: Number(row.version), deleted_at: row.deleted_at }, actor),

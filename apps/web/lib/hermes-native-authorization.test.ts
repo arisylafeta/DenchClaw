@@ -21,7 +21,7 @@ describe("native conversation authorization",()=>{
   const result=await listConversations(actor);
   expect(result.sessions.map(session=>session.id)).toEqual(["mine"]);
   const listing=vi.mocked(queryPg).mock.calls.find(([sql])=>String(sql).includes("row_number"));
-  expect(listing?.[1]).toEqual(["agent",actor.id,100,[]]);
+  expect(listing?.[1]).toEqual(["agent",actor.id,100,[],""]);
   expect(sessionProjectLabels).toHaveBeenCalledWith("agent",["mine"]);expect(recentSessionActivity).toHaveBeenCalledWith("agent",["mine"]);
  });
  it("surfaces a registry outage as 503 instead of silently returning partial results",async()=>{

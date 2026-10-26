@@ -270,11 +270,25 @@ function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmi
     className="w-full rounded border border-[var(--color-border)] bg-transparent px-1 text-xs font-medium" />;
 }
 export function HermesConversationList({ chats, workingKeys, awaitingKeys, backgroundKeys, onOpen }: { chats: HermesChatsController; workingKeys?: Set<string>; awaitingKeys?: Set<string>; backgroundKeys?: Set<string>; onOpen?: () => void }) {
-  const rows = filterConversations(chats.listing?.sessions ?? [], chats.filter);
+  const [query, setQuery] = useState("");
+  // The list holds only the newest chats per profile; a search also asks the server's index so older chats are found.
+  const [found, setFound] = useState<{ query: string; rows: HermesConversation[] } | null>(null);
+  useEffect(() => {
+    const text = query.trim();
+    if (!text || !chats.enabled) { setFound(null); return; }
+    let live = true;
+    const timer = setTimeout(() => {
+      void fetch(`/api/hermes/conversations?q=${encodeURIComponent(text)}`).then(r => r.json()).then(data => {
+        if (live && Array.isArray(data?.sessions)) setFound({ query: text, rows: data.sessions });
+      }).catch(() => undefined);
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [query, chats.enabled]);
+  const listed = chats.listing?.sessions ?? [];
+  const rows = filterConversations(found && found.query === query.trim() ? [...listed, ...found.rows.filter(row => !listed.some(known => known.key === row.key))] : listed, chats.filter);
   const [renaming, setRenaming] = useState<string | null>(null);
   const renamingNext = useRef(false);
   const [view, setView] = useState<ChatView>(DEFAULT_VIEW);
-  const [query, setQuery] = useState("");
   useEffect(() => { setView(loadView(chats.listing?.userId)); setQuery(""); setRenaming(null); }, [chats.listing?.userId]);
   const updateView = (next: ChatView) => {
     setView(next);
