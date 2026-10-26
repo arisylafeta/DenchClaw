@@ -3389,7 +3389,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 							/>
 						</svg>
 						<div className="min-w-0 flex-1 text-xs break-words">
-							{(error || streamError) && <p>{error?.message ?? streamError}</p>}
+							{(error || streamError) && (/gateway_transport_required/.test(error?.message ?? streamError ?? "")
+								? <p>This chat is from an older session and can no longer send. {onChooseConversation ? <button type="button" className="underline" onClick={() => onChooseConversation()}>Start a new chat</button> : "Start a new chat or reload the page."}</p>
+								: <p>{error?.message ?? streamError}</p>)}
 							{attachmentError && <p>{attachmentError}</p>}
 						</div>
 						{attachmentError && (
