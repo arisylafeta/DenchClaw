@@ -34,6 +34,8 @@ export type MailDraft = {
   body_text: string | null; body_html: string | null; thread_id: string | null; campaign_id: string | null;
   created_at: string; updated_at: string; links: { cta_key: string; destination_url: string }[]; warnings: string[];
   approval: MailApproval | null;
+  /** Added by the draft API: the copy a person edits, and the identity signature frozen after it (null when the draft has none). */
+  editable?: { main: string; signature: string | null };
 };
 export type MailDraftListRow = Pick<MailDraft, 'id' | 'state' | 'identity_key' | 'from_email' | 'to_emails' | 'subject' | 'created_at'> & { body_preview: string | null };
 

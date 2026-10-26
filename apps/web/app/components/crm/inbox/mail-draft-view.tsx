@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, FileText } from "lucide-react";
+import { Check, Copy, FileText, Pencil, Send } from "lucide-react";
 import type { MailDraft } from "@/lib/mail-types";
 import { Loading } from "../../ui/shimmer";
 import { MessageBody } from "./message-body";
@@ -71,57 +71,144 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** Content-tab view of one prepared mail draft. Read-only: approval and send stay in the CLI. */
+const BUTTON = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50";
+const INPUT = "w-full rounded-md border bg-transparent px-2 py-1 text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]";
+
+async function call(url: string, method: string, body: unknown): Promise<MailDraft> {
+  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) { throw new Error(data?.error ?? "Something went wrong."); }
+  return data as MailDraft;
+}
+
+/** Content-tab view of one prepared mail draft. Unsent drafts can be edited here and sent after a confirmation. */
 export function MailDraftView({ draftId }: { draftId: string }) {
   const load = useMailDraft(draftId);
   const [copied, setCopied] = useState(false);
-  const draft = load.status === "ready" ? load.draft : null;
+  // The latest version this tab saved; wins over the poll until the poll catches up.
+  const [saved, setSaved] = useState<MailDraft | null>(null);
+  const [edit, setEdit] = useState<{ subject: string; body: string } | null>(null);
+  const [busy, setBusy] = useState<"save" | "send" | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
+  const polled = load.status === "ready" ? load.draft : null;
+  const draft = saved && saved.id === draftId && (!polled || Date.parse(saved.updated_at) >= Date.parse(polled.updated_at)) ? saved : polled;
   const copy = useCallback(async () => {
     if (!draft) {return;}
     try { await navigator.clipboard.writeText(plainCopy(draft)); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { /* clipboard unavailable */ }
   }, [draft]);
 
-  if (load.status === "loading") {
+  if (!draft && load.status === "loading") {
     return <Loading label="Loading draft…" variant="detail" />;
   }
-  if (load.status === "error") {
-    return <div role="alert" className="p-6 text-[13px]" style={{ color: "var(--color-error)" }}>{load.message}</div>;
+  if (!draft) {
+    return <div role="alert" className="p-6 text-[13px]" style={{ color: "var(--color-error)" }}>{load.status === "error" ? load.message : "Could not load this draft."}</div>;
   }
-  const d = load.draft;
+  const d = draft;
   const approval = approvalLabel(d);
   const sent = d.state !== "draft" && d.state !== "frozen";
+  const editable = d.state === "draft" && !d.campaign_id;
+  const signature = d.editable?.signature ?? null;
+  const startEdit = () => { setNotice(null); setConfirming(false); setEdit({ subject: d.subject ?? "", body: d.editable?.main ?? d.body_text ?? "" }); };
+  const dirty = !!edit && (edit.subject !== (d.subject ?? "") || edit.body !== (d.editable?.main ?? d.body_text ?? ""));
+  async function save() {
+    if (!edit) {return;}
+    setBusy("save"); setNotice(null);
+    try {
+      const updated = await call(`/api/mail/drafts/${encodeURIComponent(d.id)}`, "PATCH", { subject: edit.subject, body: edit.body, updated_at: d.updated_at });
+      setSaved(updated); setEdit(null); setNotice({ tone: "ok", text: "Saved." });
+    } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not save." }); }
+    finally { setBusy(null); }
+  }
+  async function send() {
+    setBusy("send"); setNotice(null);
+    try {
+      await call(`/api/mail/drafts/${encodeURIComponent(d.id)}/send`, "POST", { confirm: true, updated_at: d.updated_at });
+      setConfirming(false); setNotice({ tone: "ok", text: "Sent." });
+      setSaved({ ...d, state: "sent" });
+    } catch (error) { setConfirming(false); setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not send." }); }
+    finally { setBusy(null); }
+  }
   return (
     <section aria-label="Email draft" className="flex h-full min-h-0 flex-col" style={{ background: "var(--color-surface)", color: "var(--color-text)" }}>
-      <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b px-4 py-3 sm:px-6" style={{ borderColor: "var(--color-border)" }}>
+      <header className="relative flex min-h-14 shrink-0 items-center gap-2.5 border-b px-4 py-3 sm:px-6" style={{ borderColor: "var(--color-border)" }}>
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ background: "var(--color-surface-hover)", color: "var(--color-text-secondary)" }}>
           <FileText className="size-4" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold sm:text-base">{d.subject || "(no subject)"}</h2>
+          <h2 className="truncate text-sm font-semibold sm:text-base">{(edit ? edit.subject : d.subject) || "(no subject)"}</h2>
           <p className="truncate text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {sent ? `Already ${d.state}` : "Draft"}{d.identity_key ? ` from ${d.identity_key}` : ""}
+            {sent ? `Already ${d.state}` : edit ? "Editing" : "Draft"}{d.identity_key ? ` from ${d.identity_key}` : ""}
           </p>
         </div>
-        <button type="button" onClick={() => void copy()} aria-label="Copy draft as text" title="Copy draft as text"
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
-          style={{ borderColor: "var(--color-border)" }}>
+        {editable && !edit && (
+          <button type="button" onClick={startEdit} aria-label="Edit draft" title="Edit subject and message" className={BUTTON} style={{ borderColor: "var(--color-border)" }}>
+            <Pencil className="size-3.5" aria-hidden />Edit
+          </button>
+        )}
+        <button type="button" onClick={() => void copy()} aria-label="Copy draft as text" title="Copy draft as text" className={BUTTON} style={{ borderColor: "var(--color-border)" }}>
           {copied ? <Check className="size-3.5" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
           {copied ? "Copied" : "Copy"}
         </button>
+        {editable && (
+          <button type="button" onClick={() => setConfirming(true)} disabled={!!edit || busy !== null || !d.to_emails.length} aria-haspopup="dialog"
+            title={edit ? "Save or cancel your edit first" : !d.to_emails.length ? "Add a recipient first" : "Send this email"}
+            className={`${BUTTON} !border-transparent`} style={{ background: "var(--color-accent-fill, var(--color-accent))", color: "var(--color-accent-fill-text, #0a0a0a)" }}>
+            <Send className="size-3.5" aria-hidden />Send
+          </button>
+        )}
+        {confirming && (
+          <div role="alertdialog" aria-label="Confirm send" className="absolute right-4 top-full z-20 mt-1 w-[min(22rem,calc(100%-2rem))] rounded-lg border p-3 text-[13px] shadow-lg sm:right-6"
+            style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}>
+            <p className="font-medium">Send this email now?</p>
+            <p className="mt-1 break-words text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+              To {d.to_emails.join(", ")}{d.cc_emails.length ? `, Cc ${d.cc_emails.join(", ")}` : ""}<br />
+              Subject: {d.subject || "(no subject)"}<br />From: {d.from_email ?? d.identity_key}
+            </p>
+            <p className="mt-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>It goes out straight away and cannot be undone.</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" autoFocus onClick={() => setConfirming(false)} disabled={busy === "send"} className={BUTTON} style={{ borderColor: "var(--color-border)" }}>Cancel</button>
+              <button type="button" onClick={() => void send()} disabled={busy === "send"} className={`${BUTTON} !border-transparent`} style={{ background: "var(--color-accent-fill, var(--color-accent))", color: "var(--color-accent-fill-text, #0a0a0a)" }}>
+                {busy === "send" ? "Sending…" : "Yes, send"}
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
+        {notice && <p role={notice.tone === "error" ? "alert" : "status"} className="mb-3 text-[12px]" style={{ color: notice.tone === "error" ? "var(--color-error)" : "var(--color-success)" }}>{notice.text}</p>}
         <dl className="mb-5 rounded-lg border px-3.5" style={{ borderColor: "var(--color-border)", background: "var(--color-main-bg)" }}>
           <Field label="From">{d.from_email ?? d.identity_key ?? "Unknown sender"}</Field>
           <Field label="To">{d.to_emails.length ? d.to_emails.join(", ") : <span style={{ color: "var(--color-warning)" }}>No recipient</span>}</Field>
           {d.cc_emails.length > 0 && <Field label="Cc">{d.cc_emails.join(", ")}</Field>}
           {d.bcc_emails.length > 0 && <Field label="Bcc">{d.bcc_emails.join(", ")}</Field>}
-          <Field label="Subject">{d.subject ?? ""}</Field>
+          <Field label="Subject">
+            {edit
+              ? <input aria-label="Subject" value={edit.subject} maxLength={300} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} className={INPUT} style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
+              : d.subject ?? ""}
+          </Field>
         </dl>
 
-        <article aria-label="Message body" className="rounded-lg border px-5 py-4" style={{ borderColor: "var(--color-border)", background: "#fff", color: "#1c1c1a" }}>
-          <MessageBody body={d.body_text} html={d.body_html} preview={null} ownCopy />
-        </article>
+        {edit ? (
+          <div>
+            <textarea aria-label="Message" value={edit.body} onChange={(e) => setEdit({ ...edit, body: e.target.value })} rows={Math.min(24, Math.max(10, edit.body.split("\n").length + 2))}
+              className={`${INPUT} resize-y rounded-lg px-4 py-3 leading-relaxed`} style={{ borderColor: "var(--color-border)", background: "#fff", color: "#1c1c1a" }} />
+            <p className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+              {signature ? "The sender signature is added below your message automatically." : "This draft has no separate signature; everything above is sent as written."} Formatting is plain paragraphs.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button type="button" onClick={() => void save()} disabled={!dirty || busy !== null || !edit.subject.trim() || !edit.body.trim()} className={`${BUTTON} !border-transparent`} style={{ background: "var(--color-accent-fill, var(--color-accent))", color: "var(--color-accent-fill-text, #0a0a0a)" }}>
+                {busy === "save" ? "Saving…" : "Save"}
+              </button>
+              <button type="button" onClick={() => setEdit(null)} disabled={busy !== null} className={BUTTON} style={{ borderColor: "var(--color-border)" }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <article aria-label="Message body" className="rounded-lg border px-5 py-4" style={{ borderColor: "var(--color-border)", background: "#fff", color: "#1c1c1a" }}>
+            <MessageBody body={d.body_text} html={d.body_html} preview={null} ownCopy />
+          </article>
+        )}
 
         {d.links.length > 0 && (
           <div className="mt-4 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
@@ -139,7 +226,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
           <span aria-hidden className="size-1.5 rounded-full" style={{ background: TONE[approval.tone] }} />
           {approval.text}
         </span>
-        <span style={{ color: "var(--color-text-muted)" }}>Approve and send with rebattery-mail. Nothing is sent from here.</span>
+        <span style={{ color: "var(--color-text-muted)" }}>{editable ? "Sending here records you as the approver." : "Approve and send with rebattery-mail."}</span>
       </footer>
     </section>
   );

@@ -8,7 +8,8 @@ import { MailDraftsView } from "./mail-drafts-view";
 const draft: MailDraft = {
   id: "d1", state: "draft", identity_key: "ari", transport: "gmail", purpose: "personal", from_email: "ari@rebattery.io",
   to_emails: ["admin@example.test"], cc_emails: [], bcc_emails: [], subject: "Ioniq 5 battery enquiry",
-  body_text: "Hi team,\n\nHow many packs?", body_html: null, thread_id: null, campaign_id: null, created_at: "2026-10-20T10:00:00Z",
+  body_text: "Hi team,\n\nHow many packs?", body_html: null, thread_id: null, campaign_id: null, created_at: "2026-10-20T10:00:00Z", updated_at: "2026-10-20T10:00:00Z",
+  editable: { main: "Hi team,\n\nHow many packs?", signature: null },
   links: [{ cta_key: "listing", destination_url: "https://example.test/l" }], warnings: [], approval: null,
 };
 const respond = (body: unknown, status = 200) => vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
@@ -26,7 +27,7 @@ describe("approvalLabel", () => {
 });
 
 describe("MailDraftView", () => {
-  it("shows recipients, subject, body, frozen links and the read-only approval note", async () => {
+  it("shows recipients, subject, body, frozen links and the approval note", async () => {
     respond(draft);
     render(<MailDraftView draftId="d1" />);
     expect(await screen.findByRole("heading", { name: "Ioniq 5 battery enquiry" })).toBeInTheDocument();
@@ -34,7 +35,53 @@ describe("MailDraftView", () => {
     expect(screen.getByText(/How many packs\?/)).toBeInTheDocument();
     expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
     expect(screen.getByText(/listing: https:\/\/example.test\/l/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeEnabled();
+  });
+  it("offers no edit or send once the draft is sent", async () => {
+    respond({ ...draft, state: "sent" });
+    render(<MailDraftView draftId="d1" />);
+    await screen.findByRole("heading", { name: "Ioniq 5 battery enquiry" });
+    expect(screen.queryByRole("button", { name: /send|edit draft/i })).toBeNull();
+  });
+  it("edits the subject and message and saves them", async () => {
+    const updated = { ...draft, subject: "New subject", body_text: "Changed", updated_at: "2026-10-20T10:05:00Z", editable: { main: "Changed", signature: null } };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "PATCH" ? updated : draft)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MailDraftView draftId="d1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Subject" }), { target: { value: "New subject" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Changed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("heading", { name: "New subject" })).toBeInTheDocument();
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(patch[0]).toBe("/api/mail/drafts/d1");
+    expect(JSON.parse(String(patch[1]!.body))).toEqual({ subject: "New subject", body: "Changed", updated_at: "2026-10-20T10:00:00Z" });
+  });
+  it("only sends after a confirmation, naming the version it showed", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "POST" ? { sent: true } : draft)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MailDraftView draftId="d1" />);
+    fireEvent.click(await screen.findByRole("button", { name: /^send$/i }));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("admin@example.test");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send" }));
+    expect(await screen.findByText("Sent.")).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
+    expect(post[0]).toBe("/api/mail/drafts/d1/send");
+    expect(JSON.parse(String(post[1]!.body))).toEqual({ confirm: true, updated_at: "2026-10-20T10:00:00Z" });
+    expect(screen.queryByRole("button", { name: /^send$/i })).toBeNull();
+  });
+  it("shows why a send was refused", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? new Response(JSON.stringify({ error: "recipient_suppressed" }), { status: 409 }) : new Response(JSON.stringify(draft))));
+    render(<MailDraftView draftId="d1" />);
+    fireEvent.click(await screen.findByRole("button", { name: /^send$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("recipient_suppressed");
   });
   it("copies the draft as plain text", async () => {
     respond(draft);
