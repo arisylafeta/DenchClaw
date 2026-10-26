@@ -12,7 +12,7 @@ import { InboxLayout } from "./inbox-layout";
 import { MailMessageView } from "./mail-message-view";
 import { MailDraftsView } from "./mail-drafts-view";
 import { CampaignsPanel } from "../../campaigns/campaigns-view";
-import { Mail, Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, Mail, Megaphone, MessageCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { formatAbsoluteDate, formatRelativeDate } from "../format-relative-date";
 import styles from "./mail.module.css";
 import { mailCounterparty } from "@/lib/mail-counterparty";
@@ -49,6 +49,8 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   }));
   const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId ?? params.get("campaignDetail"));
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Search and filters live in a collapsible row to keep the page height for mail. It opens by itself when something is already filtered.
+  const [searchOpen, setSearchOpen] = useState(() => !!params.get("q") || ["from", "to", "thread", "identity", "direction", "transport", "purpose", "state", "event", "campaign", "since", "until"].some((key) => !!params.get(key)));
   const [campaignStatus, setCampaignStatus] = useState("");
   const query = mailQuery(filters);
   const view = filters.view ?? "conversations";
@@ -67,37 +69,49 @@ export function InboxView({ onOpenPerson, onOpenDraft, initialView, initialCampa
   }, [query, campaignId, router]);
   const update = (key: string, value: string | boolean) => setFilters((current) => ({ ...current, [key]: value }));
   const activeFilters = Object.entries(filters).filter(([key, value]) => !["view", "q", "limit", "crmOnly", "showInternal"].includes(key) && value !== "" && value !== undefined);
+  const searchCount = activeFilters.length + (filters.q ? 1 : 0);
+  // The "/" shortcut asks the page to open the row and focus its search box.
+  useEffect(() => {
+    const open = () => { setSearchOpen(true); setTimeout(() => { const input = document.querySelector<HTMLInputElement>('#mail-search-panel input[type="search"]'); input?.focus(); input?.select(); }, 0); };
+    window.addEventListener("inbox:open-search", open);
+    return () => window.removeEventListener("inbox:open-search", open);
+  }, []);
   return <div className={`${styles.page} inbox-surface flex h-full min-h-0 flex-col`}>
     <header className={styles.header}>
       <nav role="tablist" aria-label="Inbox sections" className={styles.tabs}>
         {sections.map(({ key, label, view: target, views: group, icon: Icon }) => <button key={key} role="tab" aria-selected={group.includes(view)} className={`${styles.tab} inline-flex items-center gap-1.5`} onClick={() => { if (!group.includes(view)) { setFilters((current) => ({ ...current, view: target, q: "", thread: "" })); setFiltersOpen(false); } }}><Icon size={14} aria-hidden />{label}</button>)}
       </nav>
-      {section === "mail" && <div role="group" aria-label="Mail filters" className={styles.toolbar}>
-        <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
-          <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
-          <input aria-label="Search mail" placeholder="Search mail…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
-        </label>
-        <button type="button" aria-expanded={filtersOpen} aria-controls="mail-filter-options" className={`${styles.control} ${styles.button}`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden />Filters{activeFilters.length > 0 && <span aria-label={`${activeFilters.length} active filters`} className="inline-flex min-w-4 items-center justify-center rounded bg-[var(--color-surface-hover)] px-1 text-[10px] font-medium">{activeFilters.length}</span>}</button>
-        <label className="ml-1 flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.crmOnly} onChange={(event) => update("crmOnly", event.target.checked)} />CRM-only</label>
-        <label className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.showInternal === true} onChange={(event) => setFilters((current) => { const { showInternal: _omit, ...rest } = current; return event.target.checked ? { ...rest, showInternal: true } : rest; })} />Show internal</label>
-        {activeFilters.map(([key, value]) => <button key={key} className={styles.chip} aria-label={`Remove ${key} filter`} onClick={() => update(key, "")}><span className="capitalize">{key}</span>: {String(value)}<X size={11} aria-hidden /></button>)}
-      </div>}
-      {section === "whatsapp" && <div role="group" aria-label="WhatsApp search" className={styles.toolbar}>
-        <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
-          <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
-          <input aria-label="Search chats" placeholder="Search chats…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
-        </label>
-      </div>}
-      {section === "campaigns" && <div role="group" aria-label="Campaign filters" className={styles.toolbar}>
-        <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
-          <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
-          <input aria-label="Search campaigns" placeholder="Search campaigns…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
-        </label>
-        <label className="flex items-center gap-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Status
-          <select aria-label="Campaign status" className={styles.control} value={campaignStatus} onChange={(event) => setCampaignStatus(event.target.value)}><option value="">All</option>{campaignStatuses.map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select>
-        </label>
-      </div>}
+      <button type="button" aria-expanded={searchOpen} aria-controls="mail-search-panel" aria-label={searchCount ? `Search and filters, ${searchCount} active` : "Search and filters"} title="Search and filters (/)" className={`${styles.searchToggle} inline-flex items-center gap-1.5`} onClick={() => setSearchOpen((open) => !open)}>
+        <Search size={14} aria-hidden /><span className="hidden sm:inline">Search</span>{searchCount > 0 && <span aria-hidden className={styles.badge}>{searchCount}</span>}<ChevronDown size={13} aria-hidden className={searchOpen ? "rotate-180" : ""} />
+      </button>
     </header>
+    {searchOpen && <div id="mail-search-panel">
+    {section === "mail" && <div role="group" aria-label="Mail filters" className={styles.toolbar}>
+      <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
+        <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
+        <input aria-label="Search mail" placeholder="Search mail…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
+      </label>
+      <button type="button" aria-expanded={filtersOpen} aria-controls="mail-filter-options" className={`${styles.control} ${styles.button}`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden />Filters{activeFilters.length > 0 && <span aria-label={`${activeFilters.length} active filters`} className="inline-flex min-w-4 items-center justify-center rounded bg-[var(--color-surface-hover)] px-1 text-[10px] font-medium">{activeFilters.length}</span>}</button>
+      <label className="ml-1 flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.crmOnly} onChange={(event) => update("crmOnly", event.target.checked)} />CRM-only</label>
+      <label className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}><input type="checkbox" className="accent-[var(--color-accent)]" checked={filters.showInternal === true} onChange={(event) => setFilters((current) => { const { showInternal: _omit, ...rest } = current; return event.target.checked ? { ...rest, showInternal: true } : rest; })} />Show internal</label>
+      {activeFilters.map(([key, value]) => <button key={key} className={styles.chip} aria-label={`Remove ${key} filter`} onClick={() => update(key, "")}><span className="capitalize">{key}</span>: {String(value)}<X size={11} aria-hidden /></button>)}
+    </div>}
+    {section === "whatsapp" && <div role="group" aria-label="WhatsApp search" className={styles.toolbar}>
+      <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
+        <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
+        <input aria-label="Search chats" placeholder="Search chats…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
+      </label>
+    </div>}
+    {section === "campaigns" && <div role="group" aria-label="Campaign filters" className={styles.toolbar}>
+      <label className="relative flex min-w-48 max-w-sm flex-1 items-center">
+        <Search size={14} aria-hidden className="absolute left-2.5" style={{ color: "var(--color-text-muted)" }} />
+        <input aria-label="Search campaigns" placeholder="Search campaigns…" className={`${styles.control} w-full !pl-8`} type="search" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
+      </label>
+      <label className="flex items-center gap-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Status
+        <select aria-label="Campaign status" className={styles.control} value={campaignStatus} onChange={(event) => setCampaignStatus(event.target.value)}><option value="">All</option>{campaignStatuses.map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select>
+      </label>
+    </div>}
+    </div>}
     {section === "mail" && filtersOpen && <div id="mail-filter-options" className={styles.filters}>
       {Object.entries(filterOptions).map(([key, options]) => <label key={key} className={styles.filter}><span className="capitalize">{key}</span><select aria-label={key} className={styles.control} value={String(filters[key as keyof MailFilters] ?? "")} onChange={(event) => update(key, event.target.value)}><option value="">All</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>)}
       {(["campaign", "from", "to", "thread"] as const).map((key) => <label key={key} className={styles.filter}><span className="capitalize">{key}</span><input className={styles.control} value={filters[key] ?? ""} onChange={(event) => update(key, event.target.value)} /></label>)}

@@ -24,13 +24,30 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+const openSearch = () => { const toggle = screen.getByRole("button", { name: /^Search and filters/ }); if (toggle.getAttribute("aria-expanded") !== "true") { fireEvent.click(toggle); } };
+
 describe("merged mail", () => {
   it("does not navigate again when the Mail URL is already synchronized", async () => {
     navigation.params = new URLSearchParams("crm=inbox&view=conversations&crmOnly=true");
     render(<InboxView />);
+    openSearch();
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     await screen.findByRole("combobox", { name: "direction" });
     expect(navigation.replace).not.toHaveBeenCalled();
+  });
+  it("keeps search and filters in a collapsed row, opened by the toggle, a filtered URL or the / shortcut event", async () => {
+    const { unmount } = render(<InboxView />);
+    const toggle = screen.getByRole("button", { name: "Search and filters" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    window.dispatchEvent(new Event("inbox:open-search"));
+    expect(await screen.findByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search mail" })).toHaveFocus());
+    unmount();
+    navigation.params = new URLSearchParams("crm=inbox&view=conversations&q=battery&identity=ari");
+    render(<InboxView />);
+    expect(screen.getByRole("button", { name: "Search and filters, 2 active" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("searchbox", { name: "Search mail" })).toHaveValue("battery");
   });
   it("switches the mail views and loads the matching shared-store APIs", async () => {
     render(<InboxView />);
@@ -67,10 +84,11 @@ describe("merged mail", () => {
     expect(screen.getByText("Campaign reply")).toBeInTheDocument();
     expect(screen.getByText("Latest outbound reply")).toBeInTheDocument();
     expect(screen.getByText("(7)")).toBeInTheDocument();
-    expect(screen.getAllByRole("checkbox")).toHaveLength(5);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
   });
   it("hides internal mail by default and requests it only when Show internal is ticked", async () => {
     render(<InboxView />);
+    openSearch();
     await screen.findByRole("checkbox", { name: /show internal/i });
     expect(vi.mocked(fetch).mock.calls.every(([url]) => !String(url).includes("showInternal"))).toBe(true);
     fireEvent.click(screen.getByRole("checkbox", { name: /show internal/i }));
@@ -91,6 +109,7 @@ describe("merged mail", () => {
   });
   it("maps all filters to API query parameters including whole-log scope", async () => {
     render(<InboxView initialView="sent" />);
+    openSearch();
     fireEvent.change(screen.getByRole("searchbox", { name: "Search mail" }), { target: { value: "battery" } });
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     fireEvent.click(screen.getByRole("button", { name: /^ari/ }));
@@ -169,6 +188,8 @@ describe("merged mail", () => {
   it("adapts the toolbar to each section: mail filters only on Mail, one search on Campaigns and WhatsApp", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ items: [], threads: [], nextCursor: null })));
     render(<InboxView />);
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    openSearch();
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "WhatsApp" }));
     expect(screen.getByRole("searchbox", { name: "Search chats" })).toBeInTheDocument();

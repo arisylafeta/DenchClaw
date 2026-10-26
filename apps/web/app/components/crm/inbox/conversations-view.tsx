@@ -204,6 +204,7 @@ export function ConversationsView({
         setSelectedThreadId(null);
       },
       focusSearch: () => {
+        window.dispatchEvent(new Event("inbox:open-search"));
         const input = document.querySelector<HTMLInputElement>('[aria-label="Search mail"]') ?? searchInputRef.current;
         input?.focus();
         input?.select();

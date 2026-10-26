@@ -29,6 +29,7 @@ it('does not open the reader when expanding delivery activity',async()=>{
 });
 it('closes a selected email when filters change',async()=>{
  render(<InboxView initialView="sent"/>);fireEvent.click(await screen.findByRole('button',{name:'Open email: Your stock is live'}));await screen.findByTitle('Email body');
+ fireEvent.click(screen.getByRole('button',{name:/^Search and filters/}));
  fireEvent.change(screen.getByRole('searchbox',{name:'Search mail'}),{target:{value:'other'}});
  await waitFor(()=>expect(screen.queryByRole('button',{name:'Back to sent'})).not.toBeInTheDocument());
  fireEvent.change(screen.getByRole('searchbox',{name:'Search mail'}),{target:{value:''}});
