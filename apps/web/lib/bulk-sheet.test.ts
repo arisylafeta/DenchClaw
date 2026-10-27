@@ -59,6 +59,13 @@ describe("sheet filters", () => {
     expect(filterSheet(rows, { ...NO_FILTERS, query: "nolden" }).map((row) => row.id)).toEqual(["d1"]);
   });
 
+  it("filters by driver", () => {
+    const owned = [demand({ context: { owner: "Alex" } }), supply({ context: { owner: "Sean" } }), supply({ id: "t3" })];
+    expect(filterSheet(owned, { ...NO_FILTERS, owner: "Alex" }).map((row) => row.id)).toEqual(["d1"]);
+    expect(filterSheet(owned, { ...NO_FILTERS, owner: "Sean" }).map((row) => row.id)).toEqual(["t1"]);
+    expect(filterSheet(owned, NO_FILTERS)).toHaveLength(3);
+  });
+
   it("offers only values that exist, and sorts newest development first", () => {
     expect(sheetOptions(rows).category).toEqual(["cells", "Ioniq", "packs"]);
     expect(sortSheet(rows).map((row) => row.id)).toEqual(["t1", "t2", "d1"]);
@@ -70,9 +77,16 @@ describe("sheet filters in the URL", () => {
 
   it("round-trips, keeping defaults out of the URL", () => {
     const filters = { ...NO_FILTERS, query: "nolden", side: "buyer" as const, progress: "New" };
-    expect(routeFromFilters(filters)).toEqual({ query: "nolden", side: "buyer", progress: "New", company: null, category: null, waiting: null });
+    expect(routeFromFilters(filters)).toEqual({ query: "nolden", side: "buyer", progress: "New", company: null, category: null, waiting: null, owner: null });
     expect(filtersFromRoute({ ...route, ...routeFromFilters(filters) })).toEqual(filters);
-    expect(routeFromFilters(NO_FILTERS)).toEqual({ query: null, side: null, progress: null, company: null, category: null, waiting: null });
+    expect(routeFromFilters(NO_FILTERS)).toEqual({ query: null, side: null, progress: null, company: null, category: null, waiting: null, owner: null });
+  });
+
+  it("keeps the driver filter in the URL as owner, and ignores anyone who is not a driver", () => {
+    expect(routeFromFilters({ ...NO_FILTERS, owner: "Sean" }).owner).toBe("Sean");
+    expect(filtersFromRoute({ ...route, owner: "Alex" }).owner).toBe("Alex");
+    expect(filtersFromRoute({ ...route, owner: "Bob" }).owner).toBe("all");
+    expect(filtersFromRoute(route).owner).toBe("all");
   });
 
   it("maps older demand and supply tab links to the matching side, and ignores an unknown side", () => {

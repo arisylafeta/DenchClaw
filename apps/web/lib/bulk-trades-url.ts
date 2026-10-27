@@ -5,6 +5,7 @@
  * this module owns everything else, so shell navigation, chat links and the page agree.
  *
  *   Tab:        /?path=bulk_trade&tab=today|trades|demand|supply
+ *   Preview:    /?path=~trades-preview&tab=demand|supply|board&owner=Alex|Sean|Ari  (no tab is Today)
  *   Trade:      /?path=bulk_trade&trade=<id>
  *   Demand:     /?path=bulk_trade&demand=<id>      (list: &tab=demand&status=open|qualifying|closed&q=…&category=…)
  *   Supply:     /?path=bulk_trade&supply=<id>      (list: &tab=supply&status=open|closed&q=…)
@@ -45,13 +46,15 @@ export type BulkTradesRoute = {
   company: string | null;
   /** Whose move it is: us or them. */
   waiting: string | null;
+  /** Trades Preview: the driver (deal owner) whose work to show. */
+  owner: string | null;
 };
 
 const SHELL_PARAMS = ["terminal", "browse", "hidden"] as const;
 const TABS: BulkTradesTab[] = ["today", "trades", "demand", "supply", "board"];
-export const BULK_TRADES_PARAMS = ["tab", "listing", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company", "waiting"] as const;
+export const BULK_TRADES_PARAMS = ["tab", "listing", "trade", "demand", "supply", "status", "q", "category", "side", "progress", "company", "waiting", "owner"] as const;
 
-const EMPTY: BulkTradesRoute = { tab: null, listing: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null, waiting: null };
+const EMPTY: BulkTradesRoute = { tab: null, listing: null, trade: null, demand: null, supply: null, status: null, query: null, category: null, side: null, progress: null, company: null, waiting: null, owner: null };
 
 export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTradesRoute {
   const params = typeof search === "string" ? new URLSearchParams(search) : search;
@@ -69,6 +72,7 @@ export function parseBulkTradesRoute(search: string | URLSearchParams): BulkTrad
     progress: params.get("progress") || null,
     company: params.get("company") || null,
     waiting: params.get("waiting") || null,
+    owner: params.get("owner") || null,
   };
 }
 
@@ -77,6 +81,21 @@ export function activeBulkTradesTab(route: BulkTradesRoute, fallback: BulkTrades
   if (route.supply) return "supply";
   if (route.demand) return "demand";
   return route.tab ?? fallback;
+}
+
+/** The four Trades Preview tabs. Requests is the demand sheet, Supply the supply sheet. */
+export type PreviewTab = "today" | "demand" | "supply" | "board";
+
+/**
+ * The Trades Preview tab a route shows. No tab is Today. Older links keep working: tab=trades is the Board,
+ * and a link with no tab but side=buyer or side=seller (the old mixed sheet) opens Requests or Supply.
+ */
+export function previewTab(route: Pick<BulkTradesRoute, "tab" | "side">): PreviewTab {
+  if (route.tab === "board" || route.tab === "trades") return "board";
+  if (route.tab === "demand" || route.tab === "supply" || route.tab === "today") return route.tab;
+  if (route.side === "buyer") return "demand";
+  if (route.side === "seller") return "supply";
+  return "today";
 }
 
 /** Build the params for a route (without `path`), omitting empty values. */
@@ -95,6 +114,7 @@ export function bulkTradesParams(patch: Partial<BulkTradesRoute>): URLSearchPara
   if (route.progress) params.set("progress", route.progress);
   if (route.company) params.set("company", route.company);
   if (route.waiting) params.set("waiting", route.waiting);
+  if (route.owner) params.set("owner", route.owner);
   return params;
 }
 

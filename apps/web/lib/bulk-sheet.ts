@@ -4,7 +4,7 @@
 // several. A match between records is a link shown in the detail, not a reason to combine rows.
 // Missing values stay null: nothing here is guessed, and progress is only what the record states.
 
-import { dealOwner } from "./bulk-owner";
+import { dealOwner, type DealOwner } from "./bulk-owner";
 import { likelihoodOf } from "./bulk-likelihood";
 import { LISTING_STAGES, TRADE_STAGES, type ListingStage } from "./bulk-listing";
 import type { OfferStage } from "./crm-postgres/bulk-offers";
@@ -72,9 +72,11 @@ export type SheetFilters = {
   category: string;
   /** Whose move it is; "us" lists what we still owe a follow-up on. */
   waiting: WaitingOn | "all";
+  /** The driver whose deals to show (context.owner). */
+  owner: DealOwner | "all";
 };
 
-export const NO_FILTERS: SheetFilters = { query: "", side: "all", progress: "all", company: "all", category: "all", waiting: "all" };
+export const NO_FILTERS: SheetFilters = { query: "", side: "all", progress: "all", company: "all", category: "all", waiting: "all", owner: "all" };
 
 export const SIDE_LABEL: Record<SheetSide, string> = { buyer: "Buying", seller: "Selling" };
 
@@ -196,6 +198,7 @@ export function filterSheet(rows: SheetRow[], filters: SheetFilters): SheetRow[]
     (filters.company === "all" || row.company === filters.company) &&
     (filters.category === "all" || row.category === filters.category) &&
     (filters.waiting === "all" || row.waiting_on === filters.waiting) &&
+    (!filters.owner || filters.owner === "all" || row.owner === filters.owner) &&
     (!needle || [row.title, row.company, row.category, row.progress, row.latest?.label, row.next_action, row.owner]
       .some((value) => value?.toLowerCase().includes(needle)))), filters.side);
 }
@@ -210,7 +213,7 @@ export function sheetOptions(rows: SheetRow[]) {
 const SIDES: readonly string[] = ["buyer", "seller"];
 
 /** The sheet filters a URL asks for. Older tab=demand / tab=supply links mean buyer-led / seller-led. */
-export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" | "progress" | "company" | "category" | "tab"> & { waiting?: string | null }): SheetFilters {
+export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" | "progress" | "company" | "category" | "tab"> & { waiting?: string | null; owner?: string | null }): SheetFilters {
   const legacySide = route.tab === "demand" ? "buyer" : route.tab === "supply" ? "seller" : null;
   const side = route.side ?? legacySide;
   return {
@@ -220,6 +223,7 @@ export function filtersFromRoute(route: Pick<BulkTradesRoute, "query" | "side" |
     company: route.company ?? "all",
     category: route.category ?? "all",
     waiting: route.waiting === "us" || route.waiting === "them" ? route.waiting : "all",
+    owner: dealOwner(route.owner) ?? "all",
   };
 }
 
@@ -233,5 +237,6 @@ export function routeFromFilters(filters: SheetFilters): Partial<BulkTradesRoute
     company: filters.company === "all" ? null : filters.company,
     category: filters.category === "all" ? null : filters.category,
     waiting: filters.waiting === "all" ? null : filters.waiting,
+    owner: !filters.owner || filters.owner === "all" ? null : filters.owner,
   };
 }
