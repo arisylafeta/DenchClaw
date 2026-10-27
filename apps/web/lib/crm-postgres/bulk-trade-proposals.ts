@@ -425,6 +425,24 @@ async function logListingActivity(client: PgTransaction, listingId: string, titl
   );
 }
 
+/** Stock rows of the same seller (company or person) whose model or part number the new supply's title names.
+ *  The same stock must not be a supply listing and a stock row at once (count the deal or its items, never both). */
+export async function duplicateStockFor(
+  client: Pick<PgTransaction, "query">, companyId: string | null, personId: string | null, title: string,
+): Promise<{ id: string; title: string }[]> {
+  if (!companyId && !personId) return [];
+  const { rows } = await client.query(
+    `select s.id, s.title from crm_stock_opportunities s
+     where (($1::text is not null and s.company_id = $1) or ($2::text is not null and s.person_id = $2))
+       and length(regexp_replace(lower(coalesce(nullif(s.details->'marketplace'->>'model', ''), nullif(s.details->>'part_number', ''), '')), '[^a-z0-9]', '', 'g')) >= 5
+       and regexp_replace(lower($3), '[^a-z0-9]', '', 'g')
+           like '%' || regexp_replace(lower(coalesce(nullif(s.details->'marketplace'->>'model', ''), s.details->>'part_number')), '[^a-z0-9]', '', 'g') || '%'
+     limit 5`,
+    [companyId, personId, title],
+  );
+  return rows as { id: string; title: string }[];
+}
+
 /** An accepted "possible trade" as an open supply listing, its sender as the contact offer, and a Story entry. */
 async function createSupplyListing(p: Proposal & { source_date: string | null }, title: string, email: string | null, userId: string): Promise<string> {
   return withPgTransaction(async (client) => {
@@ -435,13 +453,16 @@ async function createSupplyListing(p: Proposal & { source_date: string | null },
       ? await client.query(`select id, company_id, coalesce(nullif(full_name, ''), email) as name from crm_people
           where lower(email) = $1 order by id limit 1`, [email])
       : { rows: [] as { id: string; company_id: string | null; name: string }[] };
+    const dupes = await duplicateStockFor(client, person?.company_id ?? null, person?.id ?? null, title);
     await client.query(
       `insert into crm_bulk_listings (id, kind, party, company_id, person_id, email, summary, status, source_kind, source_id, source_thread,
          source_label, source_url, source_quote, observed_on, spec, context, next_action)
-       values ($1, 'supply', $2, $3, $4, $5, $6, 'open', 'email', $7, $8, $9, $10, $11, $12, $13, $14, 'Qualify this lead')`,
+       values ($1, 'supply', $2, $3, $4, $5, $6, 'open', 'email', $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [id, person?.name ?? email ?? "Unknown seller", person?.company_id ?? null, person?.id ?? null, email, title, `proposal:${p.id}`,
         (p as Proposal & { source_thread?: string | null }).source_thread ?? null, p.source_label, p.source_url, p.quote || null,
-        p.source_date, JSON.stringify(spec), JSON.stringify({ listing_title: title, proposal_id: p.id })],
+        p.source_date, JSON.stringify(spec),
+        JSON.stringify({ listing_title: title, proposal_id: p.id, ...(dupes.length ? { possible_duplicate_of_stock: dupes.map((d) => d.id) } : {}) }),
+        dupes.length ? `Possible duplicate of stock row ${dupes[0].id} (${dupes[0].title}): link it or close this as duplicate` : "Qualify this lead"],
     );
     if (email) {
       await client.query(

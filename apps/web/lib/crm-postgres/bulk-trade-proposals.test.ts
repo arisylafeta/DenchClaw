@@ -296,3 +296,16 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     });
   });
 });
+
+describe("duplicateStockFor (REB-566)", () => {
+  it("asks nothing when the seller is unknown, otherwise passes company, person and title", async () => {
+    vi.resetModules();
+    vi.doMock("../postgres", () => ({ queryPg: vi.fn(), withPgTransaction: vi.fn() }));
+    const { duplicateStockFor } = await import("./bulk-trade-proposals");
+    const query = vi.fn(async () => ({ rows: [{ id: "sto_1", title: "SP05" }] }));
+    expect(await duplicateStockFor({ query } as never, null, null, "SP05 system")).toEqual([]);
+    expect(query).not.toHaveBeenCalled();
+    expect(await duplicateStockFor({ query } as never, "c1", null, "SP05 system")).toEqual([{ id: "sto_1", title: "SP05" }]);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("crm_stock_opportunities"), ["c1", null, "SP05 system"]);
+  });
+});
