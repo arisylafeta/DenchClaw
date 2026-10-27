@@ -238,3 +238,17 @@
 .toast button { border: 0; background: none; color: #9dbbff; font-weight: 600; }
 .error { color: var(--red); font-size: 13.5px; }
 @media (prefers-reduced-motion: reduce) { .root * { transition: none !important; animation: none !important; } }
+
+/* attachments + stock list */
+.attlink { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.attx { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 2px; }
+.attx:hover { color: var(--red); }
+.ic.xl { background: var(--green-soft); color: var(--green); }
+.qstock { border-color: color-mix(in srgb, var(--blue) 45%, transparent) !important; color: var(--blue-ink); background: var(--blue-soft) !important; font-weight: 600; }
+.stockform { display: flex; flex-direction: column; gap: 9px; margin: 0 16px 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); font-size: 13.5px; }
+.stockform label { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; color: var(--muted); }
+.stockform input:not([type="checkbox"]), .stockform select { border: 1px solid var(--line); background: var(--card); border-radius: 9px; padding: 7px 9px; outline: none; min-width: 0; color: var(--ink); }
+.stockform .check { display: flex; gap: 8px; color: var(--ink2); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 11px; font-size: 13px; color: var(--muted); }
+.chips button[aria-pressed="true"] { background: var(--blue-soft); color: var(--blue-ink); border-color: color-mix(in srgb, var(--blue) 45%, transparent); }

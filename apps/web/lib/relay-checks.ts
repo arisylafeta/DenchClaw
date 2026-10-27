@@ -37,7 +37,7 @@ export function beforeYouSend(draft: CheckDraft, facts: CheckFacts): Verdict {
   if (!unknown.length && amountsIn(draft.body).length) good.push("the numbers match the thread and deal");
   if (facts.unit === "cell" && /kwh/i.test(draft.body)) issues.push({ level: "check", text: "Units: this deal is priced per cell, the draft mentions kWh." });
   if (facts.unit === "kwh" && /per cell|\/\s?cell/i.test(draft.body)) issues.push({ level: "check", text: "Units: this deal is priced per kWh, the draft says per cell." });
-  if (/\battached\b|\battach(ing)?\b/i.test(draft.body) && !draft.attachments) issues.push({ level: "check", text: "Says 'attached' but nothing is attached." });
+  if (/\b(attached|enclosed|attaching)\b/i.test(draft.body) && !draft.attachments) issues.push({ level: "block", text: "Says 'attached' but nothing is attached. Attach the file or change the wording." });
   else if (draft.attachments) good.push(draft.attachments === 1 ? "the attachment is there" : "the attachments are there");
   if (/\[BLANK\]|\[[A-Z ]{3,}\]/.test(draft.body)) issues.push({ level: "block", text: "There's a blank to fill in." });
   const state = issues.some((i) => i.level === "block") ? "stop" : issues.length ? "check" : "ok";

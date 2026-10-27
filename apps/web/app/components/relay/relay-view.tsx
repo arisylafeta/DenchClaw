@@ -383,6 +383,10 @@ function Editor({ item, draft, reload, say, onBack, onNext }: {
       await reload();
     } catch (err) { say(err instanceof Error ? err.message : "Couldn't reach Gmail."); }
   };
+  const detach = async (sha256: string, filename: string) => {
+    try { await api(`/api/relay/drafts/${draft.id}/attachments`, { method: "DELETE", body: { sha256 } }); say(`Removed ${filename}`); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
+  };
   const issueText = (issue: Issue, k: number) => (
     <span key={k}>{issue.text}{issue.fix && <> <button type="button" className={s.fixl} onClick={() => setToOverride(issue.fix!.to)}>{issue.fix.label}</button></>} </span>
   );
@@ -406,10 +410,13 @@ function Editor({ item, draft, reload, say, onBack, onNext }: {
       {mail.attachments.length > 0 && (
         <div className={s.atts}>
           {mail.attachments.map((a) => (
-            <a key={a.sha256} className={s.att} href={`/api/mail/drafts/${mail.id}/attachments/${a.sha256}`} target="_blank" rel="noopener noreferrer">
-              <span className={s.ic}>{(a.filename.split(".").pop() ?? "").toUpperCase().slice(0, 4)}</span>
-              <div><b>{a.filename}</b><span>{a.sizeBytes ? `${Math.max(1, Math.round(a.sizeBytes / 1024))} KB` : ""}</span></div>
-            </a>
+            <div key={a.sha256} className={s.att}>
+              <a className={s.attlink} href={`/api/mail/drafts/${mail.id}/attachments/${a.sha256}`} target="_blank" rel="noopener noreferrer">
+                <span className={cx(s.ic, /xlsx?$/i.test(a.filename) && s.xl)}>{(a.filename.split(".").pop() ?? "").toUpperCase().slice(0, 4)}</span>
+                <div><b>{a.filename}</b><span>{a.sizeBytes ? `${Math.max(1, Math.round(a.sizeBytes / 1024))} KB · open` : "open"}</span></div>
+              </a>
+              {!sent && <button type="button" className={s.attx} aria-label={`Remove ${a.filename}`} onClick={() => void detach(a.sha256, a.filename)}>×</button>}
+            </div>
           ))}
         </div>
       )}
@@ -437,6 +444,7 @@ type Bubble = { who: "bot" | "me" | "work"; text: string };
 
 function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; rules: { id: string; text: string }[]; reload: () => Promise<void>; say: (t: string) => void }) {
   const [mode, setMode] = useState<"edit" | "ask" | "rules">("edit");
+  const [stock, setStock] = useState(false);
   const [chat, setChat] = useState<Bubble[]>([{ who: "bot", text: draft?.source_note ? `Drafted v1 from your note: "${draft.source_note}". Edit it directly, or tell me what to change.` : "Tell me what to change in this email." }]);
   const [input, setInput] = useState("");
   const [rule, setRule] = useState("");
@@ -482,7 +490,12 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
       {mode === "edit" && (
         <>
           <div className={s.chat} ref={chatRef}>{chat.map((m, k) => <div key={k} className={cx(s.bub, s[m.who])}>{m.text}</div>)}</div>
-          <div className={s.quick}>{["Shorter", "Warmer", "Firmer", "Add a clear next step"].map((q) => <button key={q} type="button" disabled={busy} onClick={() => void edit(q)}>{q}</button>)}</div>
+          {stock && draft?.mail && draft.state !== "sent"
+            ? <StockListForm draftId={draft.id} onClose={() => setStock(false)} onDone={async (text) => { setStock(false); setChat((c) => [...c, { who: "bot", text }]); await reload(); }} say={say} />
+            : <div className={s.quick}>
+                <button type="button" className={s.qstock} disabled={busy || !draft?.mail || draft.state === "sent"} onClick={() => setStock(true)}>Attach stock list</button>
+                {["Shorter", "Warmer", "Firmer", "Add a clear next step"].map((q) => <button key={q} type="button" disabled={busy} onClick={() => void edit(q)}>{q}</button>)}
+              </div>}
           <form className={s.ask} onSubmit={(e) => { e.preventDefault(); if (input.trim()) void edit(input.trim()); }}>
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Tell Relay what to change" aria-label="Edit instruction" disabled={busy} />
             <button type="submit" aria-label="Apply" disabled={busy}><Arrow /></button>
@@ -510,6 +523,61 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
         </div>
       )}
     </aside>
+  );
+}
+
+// ---------------------------------------------------------------- Stock list
+
+type StockFilters = { chemistry: string[]; types: string[]; makes: string[]; minKwh: number | null; countries: string[]; prices: boolean; currency: "GBP" | "EUR" };
+type StockSummary = { rows: number; total_kwh: number; by_type: Record<string, number>; by_country: Record<string, number>; excluded: Record<string, number>; gaps: unknown[] };
+const TYPE_OPTIONS = [["pack", "Packs"], ["module", "Modules"], ["cell", "Cells"], ["container", "Containers"]] as const;
+const splitList = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
+
+/** Filters prefilled from the email; builds the Excel list (supplier details stripped) and attaches it. */
+function StockListForm({ draftId, onClose, onDone, say }: { draftId: string; onClose: () => void; onDone: (summary: string) => Promise<void>; say: (t: string) => void }) {
+  const [f, setF] = useState<StockFilters | null>(null);
+  const [makes, setMakes] = useState("");
+  const [countries, setCountries] = useState("");
+  const [chem, setChem] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api<{ filters: StockFilters }>(`/api/relay/drafts/${draftId}/stock-list`).then(({ filters }) => {
+      setF(filters); setMakes(filters.makes.join(", ")); setCountries(filters.countries.join(", ")); setChem(filters.chemistry.join(", "));
+    }).catch(() => setF({ chemistry: [], types: [], makes: [], minKwh: null, countries: [], prices: false, currency: "GBP" }));
+  }, [draftId]);
+  if (!f) return <p className={s.muted} style={{ padding: "0 16px 12px" }} role="status">Reading the email…</p>;
+  const build = async () => {
+    setBusy(true);
+    try {
+      const body = { ...f, chemistry: splitList(chem), makes: splitList(makes), countries: splitList(countries) };
+      const { summary } = await api<{ summary: StockSummary }>(`/api/relay/drafts/${draftId}/stock-list`, { method: "POST", body });
+      const types = Object.entries(summary.by_type).map(([k, v]) => `${v} ${k.toLowerCase()}${v === 1 ? "" : "s"}`).join(", ");
+      const where = Object.entries(summary.by_country).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} ${v}`).join(", ");
+      await onDone(`Attached the stock list: ${summary.rows} rows (${types}), ${Math.round(summary.total_kwh).toLocaleString("en-GB")} kWh in total. By country: ${where}. Supplier names, towns and refs are left out.${f.prices ? "" : " No prices."} Open it under the email to check before sending.`);
+    } catch (err) { say(err instanceof Error ? err.message : "Couldn't build the list."); } finally { setBusy(false); }
+  };
+  return (
+    <form className={s.stockform} onSubmit={(e) => { e.preventDefault(); void build(); }}>
+      <b>Stock list for this email</b>
+      <div className={s.chips} role="group" aria-label="Types">
+        {TYPE_OPTIONS.map(([key, label]) => {
+          const on = f.types.includes(key);
+          return <button key={key} type="button" aria-pressed={on} onClick={() => setF({ ...f, types: on ? f.types.filter((t) => t !== key) : [...f.types, key] })}>{label}</button>;
+        })}
+      </div>
+      <label>Chemistry<input value={chem} onChange={(e) => setChem(e.target.value)} placeholder="Any, or e.g. LFP, NMC" /></label>
+      <label>Makes<input value={makes} onChange={(e) => setMakes(e.target.value)} placeholder="Any, or e.g. Volkswagen, Tesla" /></label>
+      <label>Countries<input value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="Any, or e.g. United Kingdom, Germany" /></label>
+      <label>Min kWh<input type="number" min={0} value={f.minKwh ?? ""} onChange={(e) => setF({ ...f, minKwh: e.target.value === "" ? null : Number(e.target.value) })} placeholder="Any" /></label>
+      <label className={s.check}><input type="checkbox" checked={f.prices} onChange={(e) => setF({ ...f, prices: e.target.checked })} />Include prices
+        {f.prices && <select value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value as "GBP" | "EUR" })} aria-label="Currency"><option value="GBP">£ GBP</option><option value="EUR">€ EUR</option></select>}
+      </label>
+      <span className={s.muted} style={{ fontSize: 12.5 }}>Excel, one row per lot. Country only: no supplier names, towns, refs or links.</span>
+      <div className={s.acts}>
+        <button type="button" className={cx(s.btn, s.ghost)} onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="submit" className={cx(s.btn, s.blue)} disabled={busy}>{busy ? "Building…" : "Build and attach"}</button>
+      </div>
+    </form>
   );
 }
 

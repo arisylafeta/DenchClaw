@@ -1,10 +1,12 @@
 import "server-only";
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { queryPg, withPgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
-import { editDraft, identitySignatures, textToHtml, splitCopy } from "./mail-draft-actions";
+import { editDraft, editableCopy, identitySignatures, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn } from "./relay-checks";
 
@@ -203,6 +205,7 @@ const DRAFT_SYSTEM = (rules: string[]) => `You are Relay, drafting emails for Al
 Write exactly what Alex asked for in his note, in his voice. Follow these writing rules strictly:
 ${rules.map((r) => `- ${r}`).join("\n")}
 - Never invent facts: prices, quantities, dates, tests, partners, logistics or availability must come from the thread, the deal or Alex's note. Use a [BLANK] if something is missing.
+- Nothing is attached to this draft. Never write that something is attached, enclosed or included as a file. If a file is needed, say you will send it, and add a to-do.
 - Greet by first name ("Hi Mark,"), sign off "Best,\\nAlex". Do not add a signature block; it is added automatically.
 - No em dashes. British English.
 Return ONLY JSON:
@@ -359,13 +362,92 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
   if (!mail || mail.state !== "draft") throw new RelayError(409, "This email was already sent.");
   const rules = (await listRules(ownerId)).map((r) => r.text);
-  const current = mail.body_text ?? "";
-  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. Keep facts unchanged unless told. Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\nNo signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed"}.`;
+  const current = (await editableCopy(mail)).main;
+  const files = (mail.attachments ?? []).map((a) => a.filename);
+  const attachedLine = files.length ? `Files actually attached: ${files.join(", ")}. Only these may be called attached.` : "No files are attached. Never write that anything is attached, enclosed or included; if asked to attach something, say in the note that it needs the Attach stock list button or Gmail.";
+  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can only change the text: you cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\nNo signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}.`;
   const parsed = parseJson(await askAgent(system, `Instruction: ${instruction}\n\nCurrent draft:\n${current}`, 120_000));
   const body = String(parsed.body ?? "").trim();
   if (!body) throw new RelayError(502, "The assistant returned an empty draft. Try again.");
+  if (!files.length && claimsAttachment(body) && !claimsAttachment(current)) {
+    throw new RelayError(422, "I can't attach files from here, so I didn't change the email. Use Attach stock list, or add the file in Gmail.");
+  }
   await editDraft(mail, { body });
   return { body, note: String(parsed.note ?? "Updated the draft.").slice(0, 200) };
+}
+
+const claimsAttachment = (text: string) => /\b(attached|enclosed|attaching|i've attached|please find)\b/i.test(text);
+
+// ---------- stock lists ----------
+
+const STOCK_LIST = "/root/denchclaw/scripts-live/scripts/rebattery/stock_list.py";
+export type StockFilters = { chemistry: string[]; types: string[]; makes: string[]; minKwh: number | null; countries: string[]; prices: boolean; currency: "GBP" | "EUR" };
+export type StockSummary = { file: string; rows: number; total_kwh: number; by_type: Record<string, number>; by_country: Record<string, number>; excluded: Record<string, number>; gaps: unknown[] };
+
+const CHEMS: [RegExp, string][] = [[/\blfp\b|lifepo/i, "LFP"], [/\bnmc\b|\bncm\b/i, "NMC"], [/\bnca\b/i, "NCA"], [/\blto\b/i, "LTO"]];
+const TYPES: [RegExp, string][] = [[/\bpacks?\b/i, "pack"], [/\bmodules?\b/i, "module"], [/\bcells?\b/i, "cell"], [/\bcontainers?\b|\bbess\b|\bcabinets?\b/i, "container"]];
+const MAKES = ["Volkswagen", "Skoda", "Audi", "Cupra", "Tesla", "Nissan", "Renault", "Hyundai", "Kia", "BMW", "Mercedes", "Jaguar", "Porsche", "MG", "BYD", "Stellantis", "Peugeot", "Fiat", "Toyota", "Volvo", "Polestar", "Ford", "CATL", "LG", "Samsung", "Panasonic"];
+
+/** First guess at the list a buyer wants, from Alex's note and their latest email. Alex confirms or changes it. */
+export async function suggestStockFilters(draftId: string, ownerId: string): Promise<StockFilters> {
+  const relayDraft = await relayDraftForOwner(draftId, ownerId);
+  if (!relayDraft) throw new RelayError(404, "Not found");
+  const [item] = await queryPg<{ context: string; last_text: string | null; note: string }>(
+    "select context, last_message->>'text' as last_text, note from relay_item where id = $1", [relayDraft.item_id]);
+  const text = `${relayDraft.source_note} ${item?.note ?? ""} ${item?.last_text ?? ""} ${item?.context ?? ""}`;
+  return {
+    chemistry: CHEMS.filter(([re]) => re.test(text)).map(([, v]) => v),
+    types: TYPES.filter(([re]) => re.test(text)).map(([, v]) => v),
+    makes: MAKES.filter((m) => new RegExp(`\\b${m}\\b`, "i").test(text)),
+    minKwh: null, countries: [], prices: false, currency: /€|eur\b/i.test(text) ? "EUR" : "GBP",
+  };
+}
+
+/** Builds the buyer stock list (Excel, fixed columns, supplier details stripped) and attaches it to the draft. */
+export async function attachStockList(draftId: string, ownerId: string, f: StockFilters): Promise<StockSummary> {
+  const relayDraft = await relayDraftForOwner(draftId, ownerId);
+  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  const label = [...f.chemistry, ...f.makes, ...f.types.map((t) => `${t}s`)].join(" ").trim() || "available";
+  const day = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const dir = mkdtempSync(join(tmpdir(), "relay-stock-"));
+  const out = join(dir, `ReBattery stock - ${label.replace(/[^\w .-]/g, "")} - ${day}.xlsx`);
+  const args = [STOCK_LIST, "--out", out, "--title", `ReBattery stock - ${label}`];
+  if (f.chemistry.length) args.push("--chemistry", f.chemistry.join(","));
+  if (f.types.length) args.push("--type", f.types.join(","));
+  if (f.makes.length) args.push("--make", f.makes.join(","));
+  if (f.countries.length) args.push("--countries", f.countries.join(","));
+  if (f.minKwh != null) args.push("--min-kwh", String(f.minKwh));
+  if (f.prices) args.push("--prices", "--currency", f.currency);
+  try {
+    let summary: StockSummary;
+    try {
+      const { stdout } = await run("/usr/bin/python3", args, { timeout: 120_000, maxBuffer: 8 << 20 });
+      summary = JSON.parse(stdout.trim().split("\n").pop() ?? "{}") as StockSummary;
+    } catch (error) {
+      const code = (error as { code?: number }).code;
+      throw new RelayError(code === 2 ? 422 : 502, code === 2 ? "The stock list failed its privacy check (a supplier detail slipped in), so nothing was attached." : "Couldn't build the stock list. Try again.");
+    }
+    if (!summary.rows) throw new RelayError(404, "No stock matches those filters. Widen them and try again.");
+    try {
+      await run(MAIL_CLI, ["attachment", "add", relayDraft.mail_message_id, out], { timeout: 60_000, maxBuffer: 4 << 20 });
+    } catch {
+      throw new RelayError(502, "Built the list but couldn't attach it to the draft. Try again.");
+    }
+    return summary;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Removes an attachment from an unsent draft. */
+export async function detachFile(draftId: string, ownerId: string, sha256: string): Promise<void> {
+  const relayDraft = await relayDraftForOwner(draftId, ownerId);
+  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  try {
+    await run(MAIL_CLI, ["attachment", "remove", relayDraft.mail_message_id, sha256], { timeout: 60_000 });
+  } catch {
+    throw new RelayError(409, "Couldn't remove it. The email may already be sent.");
+  }
 }
 
 // ---------- Gmail drafts ----------
@@ -379,7 +461,7 @@ function gogEnv(): NodeJS.ProcessEnv {
 export async function saveToGmailDrafts(draftId: string, ownerId: string): Promise<{ gmailDraftId: string | null }> {
   const relayDraft = await relayDraftForOwner(draftId, ownerId);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
-  const [m] = await queryPg<{ subject: string | null; body_html: string | null; body_text: string | null; to_emails: string[]; cc_emails: string[]; from_email: string | null; personalization: { reply_gmail_message_id?: string } | null; state: string }>(
+  const [m] = await queryPg<{ subject: string | null; body_html: string | null; body_text: string | null; to_emails: string[]; cc_emails: string[]; from_email: string | null; personalization: { reply_gmail_message_id?: string; attachments?: { storedPath?: string }[] } | null; state: string }>(
     "select subject, body_html, body_text, coalesce(to_emails,'{}') as to_emails, coalesce(cc_emails,'{}') as cc_emails, from_email, personalization, state from mail_message where id = $1", [relayDraft.mail_message_id]);
   if (!m) throw new RelayError(404, "Not found");
   if (m.state !== "draft") throw new RelayError(409, "This email was already sent.");
@@ -389,6 +471,7 @@ export async function saveToGmailDrafts(draftId: string, ownerId: string): Promi
   if (m.cc_emails.length) args.push("--cc", m.cc_emails.join(","));
   if (m.from_email && m.from_email !== "alex@rebattery.io") args.push("--from", m.from_email);
   if (m.personalization?.reply_gmail_message_id) args.push("--reply-to-message-id", m.personalization.reply_gmail_message_id);
+  for (const file of m.personalization?.attachments ?? []) if (file.storedPath) args.push("--attach", file.storedPath);
   try {
     const { stdout } = await run(process.env.GOG_BIN || "gog", args, { env: gogEnv(), timeout: 60_000, maxBuffer: 4 << 20 });
     const parsed = JSON.parse(stdout) as { draftId?: string; id?: string; draft?: { id?: string } };
