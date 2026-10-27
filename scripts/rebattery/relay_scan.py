@@ -501,16 +501,76 @@ def load_companies_by_domain(cur, domains: list[str]) -> dict[str, dict]:
     return {r["domain"]: dict(r) for r in cur.fetchall()}
 
 
-def load_deals(cur, thread_ids: list[str]) -> dict[str, dict]:
+def load_deals(cur, thread_ids: list[str]) -> dict[str, set[str]]:
+    """Listings each mail thread is tagged with in Bulk Trades (confirmed or proposed links)."""
     if not thread_ids or not table_exists(cur, "crm_bulk_thread_links"):
         return {}
     cur.execute(
-        """select distinct on (l.thread_id) l.thread_id, l.bulk_listing_id, b.summary, b.quantity
-             from crm_bulk_thread_links l join crm_bulk_listings b on b.id = l.bulk_listing_id
-            where l.channel = 'mail' and l.thread_id = any(%s) and l.state in ('confirmed', 'proposed')
-            order by l.thread_id, (l.state = 'confirmed') desc, l.labelled_at desc""",
+        """select thread_id, bulk_listing_id from crm_bulk_thread_links
+            where channel = 'mail' and thread_id = any(%s) and state in ('confirmed', 'proposed')""",
         (thread_ids,))
-    return {r["thread_id"]: dict(r) for r in cur.fetchall()}
+    out: dict[str, set[str]] = {}
+    for r in cur.fetchall():
+        out.setdefault(r["thread_id"], set()).add(r["bulk_listing_id"])
+    return out
+
+
+def load_owned_listings(cur) -> dict[str, list[dict]]:
+    """Bulk Trades listings keyed by the owner's email and by their company domain ("@domain")."""
+    if not table_exists(cur, "crm_bulk_listings"):
+        return {}
+    cur.execute(
+        """select b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(coalesce(b.email, p.email)) as email
+             from crm_bulk_listings b left join crm_people p on p.id = b.person_id
+            where coalesce(b.email, p.email) is not null""")
+    out: dict[str, list[dict]] = {}
+    for r in cur.fetchall():
+        email = email_of(r["email"])
+        if not email:
+            continue
+        row = dict(r)
+        out.setdefault(email, []).append(row)
+        domain = domain_of(email)
+        if domain and domain not in FREEMAIL:
+            out.setdefault("@" + domain, []).append(row)
+    return out
+
+
+WORD = re.compile(r"[a-z0-9]{3,}")
+STOP = {"the", "and", "for", "with", "from", "packs", "pack", "battery", "batteries", "kwh", "your", "you", "this", "that", "are", "have"}
+
+
+def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[str], text: str, owned: dict[str, list[dict]]) -> dict | None:
+    """The counterpart's own listing for this thread: a buyer's demand request or a supplier's supply opportunity.
+
+    Alex, 27 Oct: a buyer emailing about someone else's stock is linked to their demand, never to that supply.
+    Prefers the listing the thread is tagged with, then the best word match with the email, then open, then newest.
+    None when the counterpart owns no listing.
+    """
+    if not counterpart:
+        return None
+    seen, candidates = set(), []
+    for key in (counterpart, "@" + (domain_of(counterpart) or "")):
+        for row in owned.get(key, []):
+            if row["id"] not in seen:
+                seen.add(row["id"])
+                candidates.append(row)
+    want = {"buyer": "demand", "supplier": "supply"}.get(contact_type or "")
+    if want and any(c["kind"] == want for c in candidates):
+        candidates = [c for c in candidates if c["kind"] == want]
+    if not candidates:
+        return None
+    words = set(WORD.findall(text.lower())) - STOP
+
+    def score(c: dict) -> tuple:
+        overlap = len(words & (set(WORD.findall((c["summary"] or "").lower())) - STOP))
+        is_open = c["status"] in ("open", "qualifying")
+        return (c["id"] in linked, overlap if (is_open or overlap >= 2) else -1, is_open, c["updated_at"] or dt.datetime.min.replace(tzinfo=dt.timezone.utc))
+
+    best = max(candidates, key=score)
+    if best["id"] not in linked and best["status"] not in ("open", "qualifying") and score(best)[1] < 2:
+        return None
+    return {"bulk_listing_id": best["id"], "summary": best["summary"], "quantity": best["quantity"]}
 
 
 def load_open_deal_emails(cur) -> set[str]:
@@ -759,10 +819,11 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         company_row = ctx_global["companies"].get(domain_of(counterpart)) or {}
         brief = briefs.get(gid) if isinstance(briefs.get(gid), dict) else None
         tri = triage.get(gid) or {}
-        deal = ctx_global["deals"].get(tid)
+        thread_text = " ".join([th.get("subject") or ""] + [m.get("text") or "" for m in msgs[-3:]])
         contact_type = ((brief or {}).get("contact_type") if (brief or {}).get("contact_type") in CONTACT_TYPES else None) \
             or purpose_type(person.get("purpose")) or purpose_type(company_row.get("purpose")) \
             or STREAM_TYPE.get(tri.get("automated_stream") or "") or (item or {}).get("contact_type")
+        deal = choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}))
         deal_linked = bool(deal) or counterpart in ctx_global.get("open_deal_emails", set())
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
                "last_to": ctx_global["last_to"], "last_from": ctx_global["last_from"],
@@ -882,6 +943,7 @@ def main(argv: list[str] | None = None) -> int:
             "companies": load_companies_by_domain(cur, sorted({domain_of(e) for e in counterparts} - FREEMAIL - {""})),
             "deals": load_deals(cur, list(threads)),
             "open_deal_emails": load_open_deal_emails(cur),
+            "owned": load_owned_listings(cur),
             "last_to": last_to, "last_from": last_from,
         }
         rows, jobs, seen = build_rows(threads, existing, ctx_global, now, args)

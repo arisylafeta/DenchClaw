@@ -259,6 +259,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void draft(i); } }}
                       />
                       <button type="button" className={cx(s.arrow, note.trim() && s.ready)} disabled={busy[i.id]} onClick={() => void draft(i)} aria-label="Draft this reply"><Arrow /></button>
+                      {tab === "action" && <button type="button" className={s.doneb} title="No reply needed: marks it read and labels it Sorted in Gmail" onClick={() => void done(i)}>Done</button>}
                     </div>
                     {!isOpen && <div className={s.hint}>{busy[i.id] ? "Drafting…" : note.trim() ? "Ready: press the arrow (or ⌘↵) to draft" : "Click to read the full email"}</div>}
                   </>
@@ -515,21 +516,33 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
 // ---------------------------------------------------------------- To-dos
 
 function Todos({ todos, reload, say }: { todos: RelayTodo[]; reload: () => Promise<void>; say: (t: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [adding, setAdding] = useState(false);
+  const add = async () => {
+    if (!title.trim() || adding) return;
+    setAdding(true);
+    try { const r = await api<{ reb_key: string }>(`/api/relay/todos`, { method: "POST", body: { title: title.trim() } }); setTitle(""); say(`Added · ${r.reb_key} in Work Tasks`); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't add it."); } finally { setAdding(false); }
+  };
   const act = async (t: RelayTodo, action: "done") => {
     try { await api(`/api/relay/todos/${t.id}`, { method: "POST", body: { action } }); say("Nice. Marked done in Work Tasks"); await reload(); } catch (err) { say(err instanceof Error ? err.message : "Couldn't update."); }
   };
   return (
     <section aria-label="To-dos">
       <div className={s.phead}><span className={s.tag}>To-dos · synced to Work Tasks</span></div>
+      <form className={cx(s.card, s.addtodo)} onSubmit={(e) => { e.preventDefault(); void add(); }}>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a to-do, e.g. call Lubomír about the Brno delivery" aria-label="New to-do" disabled={adding} />
+        <button type="submit" className={cx(s.btn, s.blue)} disabled={!title.trim() || adding}>{adding ? "Adding…" : "Add"}</button>
+      </form>
       <div className={s.card} style={{ marginTop: 10 }}>
-        {!todos.length ? <div className={s.empty}><b>No to-dos yet</b><span className={s.muted}>Accept suggestions under any email in Review.</span></div> : (
+        {!todos.length ? <div className={s.empty}><b>No to-dos yet</b><span className={s.muted}>Add one above, or accept suggestions under any email in Review.</span></div> : (
           <>
             <div className={cx(s.trow, s.h)}><span /><span>To-do</span><span>From</span><span>Work Task</span></div>
             {todos.map((t) => (
               <div key={t.id} className={cx(s.trow, t.state === "done" && s.done)}>
                 <button type="button" className={cx(s.cb, t.state === "done" && s.on)} aria-label="Mark done" disabled={t.state === "done"} onClick={() => void act(t, "done")}>{t.state === "done" ? "✓" : ""}</button>
                 <div style={{ minWidth: 0 }}><b>{t.title}</b>{t.detail && <div className={s.muted} style={{ fontSize: 13 }}>{t.detail}</div>}</div>
-                <span className={s.muted}>{t.source}</span>
+                <span className={s.muted}>{t.source ?? "You"}</span>
                 {t.reb_key ? <span className={s.key}>{t.reb_key}</span> : <span />}
               </div>
             ))}

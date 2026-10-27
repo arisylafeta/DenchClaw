@@ -58,7 +58,7 @@ export type RelayDraftView = {
   } | null;
 };
 
-export type RelayTodo = { id: string; item_id: string; title: string; detail: string; kind: "suggested" | "promise"; state: string; reb_key: string | null; source: string | null; created_at: string };
+export type RelayTodo = { id: string; item_id: string | null; title: string; detail: string; kind: "suggested" | "promise" | "manual"; state: string; reb_key: string | null; source: string | null; created_at: string };
 /** What the "Before you send" note checks a draft against: amounts seen in the thread, deal and note; everyone on the thread; the deal's price unit. */
 export type RelayFacts = { amounts: string[]; participants: string[]; unit: "cell" | "kwh" | null };
 export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: RelayTodo[]; facts: RelayFacts };
@@ -86,7 +86,7 @@ export async function relayCounts(ownerId: string): Promise<RelayCounts> {
        count(*) filter (where status = 'open' and tab = 'follow' and (snooze_until is null or snooze_until <= now()))::int as follow,
        count(*) filter (where status = 'open' and tab = 'other' and (snooze_until is null or snooze_until <= now()))::int as other,
        count(*) filter (where status = 'review')::int as review,
-       (select count(*) from relay_todo t join relay_item x on x.id = t.item_id where x.owner_id = $1::uuid and t.state = 'accepted')::int as todos,
+       (select count(*) from relay_todo t where t.owner_id = $1::uuid and t.state = 'accepted')::int as todos,
        (select count(*) from relay_draft d join relay_item x on x.id = d.item_id where x.owner_id = $1::uuid and d.state = 'sent' and d.updated_at >= date_trunc('day', now()))::int as sent_today,
        count(*) filter (where status = 'done' and updated_at >= date_trunc('day', now()))::int as done_today
      from relay_item where owner_id = $1::uuid`, [ownerId]);
@@ -257,8 +257,8 @@ export async function draftFromNote(itemId: string, ownerId: string, note: strin
     for (const t of todos) {
       const title = String(t.title ?? "").trim().slice(0, 160);
       if (!title) continue;
-      await tx.query("insert into relay_todo (item_id, title, detail, kind) values ($1, $2, $3, $4)",
-        [itemId, title, String(t.detail ?? "").slice(0, 200), t.kind === "promise" ? "promise" : "suggested"]);
+      await tx.query("insert into relay_todo (item_id, owner_id, title, detail, kind) values ($1, $5::uuid, $2, $3, $4)",
+        [itemId, title, String(t.detail ?? "").slice(0, 200), t.kind === "promise" ? "promise" : "suggested", ownerId]);
     }
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [itemId]);
   });
@@ -426,9 +426,9 @@ export const canUseRelay = (email: string | null | undefined) => (email ?? "").t
 /** Accepts a suggested to-do: creates a Work Task (next REB key) in the Backlog project, assigned to the owner. */
 export async function acceptTodo(todoId: string, owner: { id: string; email: string }): Promise<{ reb_key: string }> {
   return withPgTransaction(async (tx) => {
-    const { rows: [todo] } = await tx.query<{ id: string; title: string; detail: string; state: string; item_id: string; headline: string; counterpart_name: string | null }>(
-      `select t.id, t.title, t.detail, t.state, t.item_id, i.headline, i.counterpart_name from relay_todo t join relay_item i on i.id = t.item_id
-       where t.id = $1 and i.owner_id = $2::uuid for update of t`, [todoId, owner.id]);
+    const { rows: [todo] } = await tx.query<{ id: string; title: string; detail: string; state: string; item_id: string | null; headline: string | null; counterpart_name: string | null }>(
+      `select t.id, t.title, t.detail, t.state, t.item_id, i.headline, i.counterpart_name from relay_todo t left join relay_item i on i.id = t.item_id
+       where t.id = $1 and t.owner_id = $2::uuid for update of t`, [todoId, owner.id]);
     if (!todo) throw new RelayError(404, "Not found");
     if (todo.state !== "suggested") throw new RelayError(409, "Already handled.");
     await tx.query("lock table work_tasks in share row exclusive mode");
@@ -441,7 +441,7 @@ export async function acceptTodo(todoId: string, owner: { id: string; email: str
     if (dup) title = `${title} (${todo.counterpart_name ?? "Relay"})`;
     await tx.query(`insert into work_tasks (id, reb_key, title, status, project_id, priority, repository, task_details, assignee_email, assignee_id)
       values ($1, $2, $3, 'Planned', $4, 'Medium', 'runtime-only', $5, $6, $7::uuid)`,
-      [taskId, rebKey, title, project?.id ?? null, `${todo.detail ? `${todo.detail}\n\n` : ""}From Relay: ${todo.counterpart_name ?? ""} · ${todo.headline}`.trim(), assignee, assignee ? owner.id : null]);
+      [taskId, rebKey, title, project?.id ?? null, `${todo.detail ? `${todo.detail}\n\n` : ""}${todo.item_id ? `From Relay: ${todo.counterpart_name ?? ""} · ${todo.headline ?? ""}` : "Added in Relay"}`.trim(), assignee, assignee ? owner.id : null]);
     await tx.query("update relay_todo set state = 'accepted', work_task_id = $2, updated_at = now() where id = $1", [todoId, taskId]);
     return { reb_key: rebKey };
   });
@@ -450,12 +450,18 @@ export async function acceptTodo(todoId: string, owner: { id: string; email: str
 /** A promise Relay spotted in the draft ("I'll send the stock list"), added straight to the owner's to-dos. */
 export async function addPromiseTodo(itemId: string, owner: { id: string; email: string }, title: string): Promise<{ reb_key: string }> {
   if (!await readRelayItem(itemId, owner.id)) throw new RelayError(404, "Not found");
-  const [row] = await queryPg<{ id: string }>("insert into relay_todo (item_id, title, detail, kind) values ($1, $2, 'Promised in this email', 'promise') returning id", [itemId, title.slice(0, 160)]);
+  const [row] = await queryPg<{ id: string }>("insert into relay_todo (item_id, owner_id, title, detail, kind) values ($1, $3::uuid, $2, 'Promised in this email', 'promise') returning id", [itemId, title.slice(0, 160), owner.id]);
+  return acceptTodo(row.id, owner);
+}
+
+/** A to-do Alex adds himself on the To-dos tab, not tied to an email. Becomes a Work Task straight away. */
+export async function addTodo(owner: { id: string; email: string }, title: string, detail: string): Promise<{ reb_key: string }> {
+  const [row] = await queryPg<{ id: string }>("insert into relay_todo (owner_id, title, detail, kind) values ($1::uuid, $2, $3, 'manual') returning id", [owner.id, title.slice(0, 160), detail.slice(0, 300)]);
   return acceptTodo(row.id, owner);
 }
 
 export async function setTodoState(todoId: string, ownerId: string, state: "dismissed" | "done"): Promise<void> {
-  await queryPg(`update relay_todo t set state = $3, updated_at = now() from relay_item i where t.id = $1 and i.id = t.item_id and i.owner_id = $2::uuid`, [todoId, ownerId, state]);
+  await queryPg(`update relay_todo set state = $3, updated_at = now() where id = $1 and owner_id = $2::uuid`, [todoId, ownerId, state]);
   if (state === "done") {
     await queryPg(`update work_tasks w set status = 'Done' from relay_todo t where t.id = $1 and w.id = t.work_task_id`, [todoId]);
   }
@@ -464,8 +470,8 @@ export async function setTodoState(todoId: string, ownerId: string, state: "dism
 export async function listAcceptedTodos(ownerId: string): Promise<RelayTodo[]> {
   return queryPg<RelayTodo>(
     `select t.id, t.item_id, t.title, t.detail, t.kind, t.state, w.reb_key, coalesce(i.counterpart_name, i.counterpart_email) as source, t.created_at
-     from relay_todo t join relay_item i on i.id = t.item_id left join work_tasks w on w.id = t.work_task_id
-     where i.owner_id = $1::uuid and t.state in ('accepted','done') order by t.state, t.created_at desc limit 200`, [ownerId]);
+     from relay_todo t left join relay_item i on i.id = t.item_id left join work_tasks w on w.id = t.work_task_id
+     where t.owner_id = $1::uuid and t.state in ('accepted','done') order by t.state, t.created_at desc limit 200`, [ownerId]);
 }
 
 // ---------- chat ----------

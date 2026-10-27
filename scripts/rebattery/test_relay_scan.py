@@ -334,9 +334,10 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
       ('mf1', 'inbound', 'gmail', null, '{owner}', 'gmail_thread_f', 'Kokam cells', 'We want Kokam cells', 'buyer@cells.example', '{{alex@rebattery.io}}', 'received', '{t(9)}', 'gf1'),
       ('mf2', 'outbound', 'gmail', 'personal', '{owner}', 'gmail_thread_f', 'Re: Kokam cells', 'Would you take EUR 35 per cell?', 'alex@rebattery.io', '{{buyer@cells.example}}', 'accepted', '{t(6)}', 'gf2'),
       ('mn1', 'inbound', 'gmail', null, '{owner}', 'gmail_thread_n', 'Newsletter', 'News', 'noreply@news.example', '{{alex@rebattery.io}}', 'received', '{t(1)}', 'gn1');
-    insert into crm_bulk_listings (id, kind, party, summary, quantity, status) values ('bl1', 'supply', 'us', 'Kokam cells', '13,104 units', 'open');
+    insert into crm_bulk_listings (id, kind, party, summary, quantity, status, email) values ('bl1', 'demand', 'Cells buyer', 'Kokam cells', '13,104 units', 'open', 'buyer@cells.example'),
+      ('bl2', 'supply', 'us', 'Kokam cells from Firstground', '85,000 cells', 'open', 'helmuth@firstground.example');
     insert into crm_bulk_thread_links (channel, thread_id, bulk_listing_id, confidence, state, labelled_by, confirmed_by)
-      values ('mail', 'gmail_thread_f', 'bl1', 'high', 'confirmed', 'test', 'test');
+      values ('mail', 'gmail_thread_f', 'bl2', 'high', 'confirmed', 'test', 'test');
     """
     res = psql(TEST_DB, fixtures)
     assert res.returncode == 0, res.stderr[-2000:]
@@ -373,3 +374,30 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
                         f"select status, done_reason, note from {SCHEMA}.relay_item where gmail_thread_id = 'a'"],
                        text=True, capture_output=True, check=True).stdout.strip()
     assert a == "done|replied|call him"
+
+
+def _listing(id, kind, status, summary, email):
+    return {"id": id, "kind": kind, "status": status, "summary": summary, "quantity": None,
+            "updated_at": dt.datetime(2026, 10, 1, tzinfo=UTC), "email": email}
+
+
+def test_choose_deal_links_the_buyers_own_demand_not_the_supply():
+    stn = "jason@stnpower.com"
+    owned = {stn: [_listing("d1", "demand", "open", "Toyota Proace 50 kWh trial pack", stn),
+                   _listing("d2", "demand", "open", "52 kWh LFP Stellantis van packs", stn)]}
+    owned["@stnpower.com"] = owned[stn]
+    # The thread is tagged with Iveco's supply listing, which STN does not own.
+    got = rs.choose_deal(stn, "buyer", {"iveco-supply"}, "Re: Stellantis 52 kWh LFP packs for the vans", owned)
+    assert got["bulk_listing_id"] == "d2"
+
+
+def test_choose_deal_prefers_the_tagged_own_listing_and_supply_for_suppliers():
+    sup = "sven@b30.eu"
+    owned = {sup: [_listing("s1", "supply", "open", "ZOE modules", sup), _listing("x", "demand", "open", "cells", sup)]}
+    assert rs.choose_deal(sup, "supplier", {"s1"}, "hello", owned)["bulk_listing_id"] == "s1"
+
+
+def test_choose_deal_none_when_nothing_owned_or_only_unrelated_closed():
+    assert rs.choose_deal("a@b.com", "buyer", {"someone-else"}, "packs", {}) is None
+    owned = {"a@b.com": [_listing("c", "demand", "closed", "Lucid Air packs", "a@b.com")]}
+    assert rs.choose_deal("a@b.com", "buyer", set(), "Kona packs", owned) is None

@@ -103,6 +103,11 @@
 .arrow.ready { background: var(--blue); color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--blue) 35%, transparent); }
 .arrow svg { width: 20px; height: 20px; }
 .arrow[disabled] { opacity: .6; cursor: progress; }
+.doneb { height: 44px; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 0 14px; font-size: 13.5px; font-weight: 600; color: var(--ink2); flex-shrink: 0; }
+.doneb:hover { border-color: var(--green); color: var(--green); }
+.addtodo { display: flex; gap: 8px; padding: 10px; margin-top: 10px; }
+.addtodo input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--soft); border-radius: 11px; padding: 10px 12px; outline: none; }
+.addtodo input:focus { border-color: var(--blue); background: var(--card); }
 .hint { font-size: 12.5px; color: var(--muted); padding: 0 18px 14px 68px; margin-top: -8px; }
 .oacts { display: flex; gap: 6px; justify-content: flex-end; }
 .oacts button { border: 1px solid var(--line); background: var(--card); border-radius: 9px; padding: 5px 9px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
