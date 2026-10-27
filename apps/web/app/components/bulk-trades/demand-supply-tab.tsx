@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { Check as CheckIcon, ChevronDown, ChevronRight, CircleHelp, ExternalLink, Minus, Star, X } from "lucide-react";
 import type { Check, SourceKind } from "@/lib/demand-match";
 import type { DemandSupply, MarketLead, SellerView, SupplyGroupView, SupplyUnitView } from "@/lib/demand-supply-types";
@@ -16,6 +16,17 @@ export const perKwh = (n: number | null | undefined) => (n == null ? "—" : `�
 /** Whole counts, shortened once they stop fitting a column: 680,000 → 680k, 10,000,000 → 10M. */
 export const count = (n: number) =>
   n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M` : n >= 100_000 ? `${Math.round(n / 1000)}k` : n.toLocaleString("en-GB");
+/** Seller price per cell, pack or module, for buyers who price per unit rather than per kWh. */
+export const perUnit = (n: number | null | undefined, word: string) => (n == null ? "—" : `€${n < 10 ? n.toFixed(2) : Math.round(n)}/${word}`);
+const unitNoun = (format: string | null | undefined) => (format === "Cells" ? "cell" : format === "Modules" ? "module" : format === "Systems" ? "system" : "pack");
+/** Set when the buyer prices per unit: prices are then shown per cell/pack/module, never derived €/kWh. */
+const PerUnit = createContext<string | null>(null);
+const priceRange = (kwh: { min: number; max: number } | null, unit: { min: number; max: number } | null, word: string | null) => {
+  const r = word ? unit : kwh;
+  if (!r) return "No price";
+  const f = (n: number) => (word ? perUnit(n, word) : perKwh(n));
+  return Math.round(r.min * 100) === Math.round(r.max * 100) ? f(r.min) : `${f(r.min)}–${word ? r.max.toFixed(2) : Math.round(r.max)}`;
+};
 export const pct = (n: number | null | undefined) => (n == null ? "—" : `${Math.round(n * 100)}%`);
 const money = (amount: number | null, currency: string | null) =>
   amount == null ? "—" : `${amount.toLocaleString("en-GB", { maximumFractionDigits: amount < 10 ? 2 : 0 })} ${currency ?? ""}`.trim();
@@ -88,11 +99,12 @@ const evidenceOf = (unit: SupplyUnitView) =>
 function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
   items: SupplyUnitView[]; more?: number; hideSeller?: boolean; onVerdict: Verdict; busy: boolean;
 }) {
+  const perUnitWord = useContext(PerUnit);
   const has = {
     where: items.some((u) => u.country || u.location),
     kwh: items.some((u) => u.kwh != null),
     price: items.some((u) => u.price != null),
-    perKwh: items.some((u) => u.eurPerKwh != null),
+    perKwh: items.some((u) => (perUnitWord ? u.eurPerUnit : u.eurPerKwh) != null),
     evidence: items.some((u) => evidenceOf(u) || u.ai),
   };
   const oneSource = new Set(items.map((u) => [u.source, ...u.alsoIn].join("+"))).size === 1;
@@ -105,7 +117,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
             {has.where && <th>Where</th>}
             {has.kwh && <th className="r">kWh</th>}
             {has.price && <th className="r">Price</th>}
-            {has.perKwh && <th className="r">€/kWh</th>}
+            {has.perKwh && <th className="r">{perUnitWord ? `€/${perUnitWord}` : "€/kWh"}</th>}
             {has.evidence && <th>Evidence</th>}
             <th className="r"><span className="sr-only">Actions</span></th>
           </tr>
@@ -119,7 +131,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
                 {(!hideSeller || !oneSource || (unit.units ?? 1) > 1) && (
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     {(!hideSeller || !oneSource) && <SourceTags sources={[unit.source, ...unit.alsoIn]} />}
-                    {unit.units && unit.units > 1 ? <span className={css.note}>{count(unit.units)} units</span> : null}
+                    {unit.units && unit.units > 1 ? <span className={css.note}>{count(unit.units)} units</span> : unit.units == null ? <span className={css.note}>Quantity not stated</span> : null}
                   </div>
                 )}
               </td>
@@ -133,7 +145,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
               )}
               {has.perKwh && (
                 <td className="r">
-                  <strong>{unit.eurPerKwh == null ? "" : perKwh(unit.eurPerKwh)}</strong>
+                  <strong>{perUnitWord ? (unit.eurPerUnit == null ? "" : perUnit(unit.eurPerUnit, perUnitWord)) : unit.eurPerKwh == null ? "" : perKwh(unit.eurPerKwh)}</strong>
                   {unit.cheapestRank === 0 && unit.peers > 1 && <div style={{ color: "var(--bt-green)" }} className="text-[11px]">Cheapest of {unit.peers}</div>}
                   {unit.marginPct != null && (
                     <div className="text-[11px]" style={{ color: unit.marginPct >= 0 ? "var(--bt-green)" : "var(--bt-red)" }}>
@@ -160,6 +172,7 @@ function UnitTable({ items, more = 0, hideSeller, onVerdict, busy }: {
 
 /** One row per seller (one collection each); open a seller to see its packs one by one. */
 function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerView[]; unitWord: string; onVerdict: Verdict; busy: boolean }) {
+  const perUnitWord = useContext(PerUnit);
   const [open, setOpen] = useState<string | null>(sellers.length === 1 ? sellers[0].key : null);
   return (
     <div className={css.sellers}>
@@ -176,13 +189,13 @@ function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerVie
                   <SourceTags sources={seller.sources} />
                 </div>
               </div>
-              <span className={css.num}><strong>{count(seller.units)}</strong><span className={css.numSub}>{unitWord}</span></span>
+              <span className={css.num}>{seller.units > 0 ? <><strong>{count(seller.units)}</strong><span className={css.numSub}>{unitWord}</span></> : <span className={css.numSub}>Quantity not stated</span>}</span>
               <span className={css.num}>
                 {seller.kwh ? (Math.round(seller.kwh.min) === Math.round(seller.kwh.max) ? `${seller.kwh.min < 1 ? `${Math.round(seller.kwh.min * 1000)} Wh` : `${Math.round(seller.kwh.min * 10) / 10} kWh`}` : `${Math.round(seller.kwh.min)}–${Math.round(seller.kwh.max)} kWh`) : "—"}
                 <span className={css.numSub}>{seller.withPhotos ? `${seller.withPhotos} with photos` : "no photos"}</span>
               </span>
               <span className={css.num}>
-                <strong>{seller.eurPerKwh ? (Math.round(seller.eurPerKwh.min) === Math.round(seller.eurPerKwh.max) ? perKwh(seller.eurPerKwh.min) : `€${Math.round(seller.eurPerKwh.min)}–${Math.round(seller.eurPerKwh.max)}`) : "No price"}</strong>
+                <strong>{priceRange(seller.eurPerKwh, seller.eurPerUnit, perUnitWord)}</strong>
                 <span className={css.numSub}>{seller.totalEur != null ? `${eur(seller.totalEur)}${seller.pricedUnits < seller.units ? ` for ${seller.pricedUnits.toLocaleString("en-GB")}` : " total"}` : ""}</span>
               </span>
               <FitBadge verdict={seller.verdict} />
@@ -198,6 +211,7 @@ function SellerList({ sellers, unitWord, onVerdict, busy }: { sellers: SellerVie
 function GroupRow({ group, open, onToggle, onVerdict, busy }: {
   group: SupplyGroupView; open: boolean; onToggle: () => void; onVerdict: Verdict; busy: boolean;
 }) {
+  const perUnitWord = useContext(PerUnit);
   const countries = [...new Set(group.bySeller.map((u) => u.country).filter(Boolean))];
   const unitWord = group.items[0]?.format === "Cells" ? "cells" : group.items[0]?.format === "Modules" ? "modules" : "packs";
   const covered = group.covers ? group.covers.have >= group.covers.need : null;
@@ -213,7 +227,7 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
           <div className="text-[14px] font-semibold">{group.label}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
             <span>
-              {count(group.units)} {unitWord} · {group.bySeller.length === 1 ? group.bySeller[0].name : `${group.bySeller.length} sellers`}
+              {group.units > 0 ? `${count(group.units)} ${unitWord}` : "Quantity not stated"} · {group.bySeller.length === 1 ? group.bySeller[0].name : `${group.bySeller.length} sellers`}
               {countries.length ? ` · ${countries.join(", ")}` : ""}
             </span>
             <SourceTags sources={group.sources} />
@@ -236,15 +250,14 @@ function GroupRow({ group, open, onToggle, onVerdict, busy }: {
         </div>
         <span className={css.num}>
           <strong style={{ color: covered ? "var(--bt-green)" : undefined }}>
-            {group.covers ? `${count(group.units)} / ${count(group.covers.need)}` : count(group.units)}
+            {group.units === 0 ? "—" : group.covers ? `${count(group.units)} / ${count(group.covers.need)}` : count(group.units)}
           </strong>
-          <span className={css.numSub}>{group.covers ? (covered ? "covers ask" : "units") : "units"}</span>
+          <span className={css.numSub}>{group.units === 0 ? "not stated" : group.covers ? (covered ? "covers ask" : "units") : "units"}</span>
         </span>
         <span className={css.num}>
-          <strong>{group.eurPerKwh ? (Math.round(group.eurPerKwh.min) === Math.round(group.eurPerKwh.max) ? perKwh(group.eurPerKwh.min)
-            : `€${Math.round(group.eurPerKwh.min)}–${Math.round(group.eurPerKwh.max)}`) : "No price"}</strong>
+          <strong>{priceRange(group.eurPerKwh, group.eurPerUnit, perUnitWord)}</strong>
           <span className={css.numSub} style={{ color: group.bestMarginPct == null ? undefined : group.bestMarginPct >= 0 ? "var(--bt-green)" : "var(--bt-red)" }}>
-            {group.bestMarginPct == null ? (group.eurPerKwh && group.eurPerKwh.min !== group.eurPerKwh.max ? "per kWh" : "") :
+            {group.bestMarginPct == null ? (group.eurPerKwh && group.eurPerKwh.min !== group.eurPerKwh.max && !perUnitWord ? "per kWh" : "") :
               group.bestMarginPct >= 0 ? `up to ${pct(group.bestMarginPct)} margin` : `${pct(-group.bestMarginPct)} over budget`}
           </span>
         </span>
@@ -301,11 +314,13 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
   if (error && !supply) return <p role="alert" className={css.empty} style={{ color: "var(--bt-red)" }}>{error}</p>;
   if (!supply) return null;
   const r = supply.requirement;
+  const perUnitWord = r.buyerEurPerUnit != null && r.buyerEurPerKwh == null ? unitNoun(groups.flatMap((g) => g.items)[0]?.format) : null;
   const firstOpen = open ?? groups[0]?.key ?? null;
   const checked = supply.considered.marketplace + supply.considered.trades;
   const matchingOn = [...r.pinned, r.unitsNeeded ? `${r.unitsNeeded.toLocaleString("en-GB")} units` : null,
     r.buyerEurPerKwh != null ? `≤ ${perKwh(r.buyerEurPerKwh)}` : null, r.country ? `to ${r.country}` : null].filter(Boolean).join(" · ");
   return (
+    <PerUnit.Provider value={perUnitWord}>
     <div className="flex flex-col gap-4">
       <p className={css.note}>
         Matching on {matchingOn || "the ask's wording"}
@@ -358,6 +373,7 @@ export function SupplyTab({ supply, loading, error, onVerdict, busy, onEdit, lea
       )}
       {leads.length > 0 && <MarketSection leads={leads} />}
     </div>
+    </PerUnit.Provider>
   );
 }
 

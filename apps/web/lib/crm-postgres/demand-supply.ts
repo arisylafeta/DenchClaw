@@ -2,7 +2,7 @@ import "server-only";
 
 // The Suitable supply view for one demand row, and the best-match line for every open row on the Demand list.
 import type { Demand } from "../bulk-demand";
-import { matchDemand, bestLine, bySeller, fewestSellers, type Match, type MatchGroup } from "../demand-match";
+import { matchDemand, bestLine, bySeller, fewestSellers, mergeSupplyDuplicates, type Match, type MatchGroup } from "../demand-match";
 import type { DemandSupply, SupplyGroupView, SupplyUnitView, BestMatchLine } from "../demand-supply-types";
 import { feedCandidates, inventoryFor, marketplaceCandidates, matchVerdicts, type MatchVerdict } from "./demand-match-supply";
 import { addDemandActivity } from "./bulk-demand-activity";
@@ -31,7 +31,7 @@ function groupView(g: MatchGroup, verdicts: Map<string, MatchVerdict>): SupplyGr
   const sellers = bySeller(g.matches);
   return {
     key: g.key, label: g.label, verdict: g.verdict, units: g.units, sellers: g.sellers, sources: g.sources,
-    eurPerKwh: g.eurPerKwh, bestMarginPct: g.bestMarginPct, covers: g.covers, small: g.small, checks: g.matches[0].checks,
+    eurPerKwh: g.eurPerKwh, eurPerUnit: g.eurPerUnit, bestMarginPct: g.bestMarginPct, covers: g.covers, small: g.small, checks: g.matches[0].checks,
     items: g.matches.slice(0, UNITS_PER_GROUP).map((m) => unitView(m, verdicts)), more: Math.max(0, g.matches.length - UNITS_PER_GROUP),
     bySeller: sellers.map(({ matches, ...seller }) => ({
       ...seller, items: matches.slice(0, UNITS_PER_SELLER).map((m) => unitView(m, verdicts)), more: Math.max(0, matches.length - UNITS_PER_SELLER),
@@ -95,7 +95,8 @@ export function bestMatchLines(fresh = false): Promise<Record<string, BestMatchL
       for (const row of demand.filter((d) => d.status !== "closed")) {
         const [feed, verdicts] = await Promise.all([feedCandidates(row.id), matchVerdicts(row.id)]);
         const hidden = new Set([...verdicts].filter(([, v]) => v.verdict === "not_a_fit").map(([k]) => k));
-        const result = matchDemand(row, [...feed, ...base], hidden);
+        const merged = mergeSupplyDuplicates(feed, base);
+        const result = matchDemand(row, [...merged.feed, ...merged.listings], hidden);
         const line = bestLine(result);
         out[row.id] = line
           ? { ...line, groups: result.groups.filter((g) => !g.small).length, shortlisted: [...verdicts.values()].filter((v) => v.verdict === "shortlist").length }

@@ -78,6 +78,8 @@ export type MatchGroup = {
   sellers: string[];
   sources: SourceKind[];
   eurPerKwh: { min: number; max: number } | null;
+  /** Seller price per cell/pack/module in EUR, for buyers who price per unit. */
+  eurPerUnit: { min: number; max: number } | null;
   bestMarginPct: number | null;
   /** Units the group can cover against the ask, when the ask has a unit count. */
   covers: { have: number; need: number } | null;
@@ -417,8 +419,8 @@ export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
   const buyerEurPerUnit = req.buyerEurPerUnit ?? (req.buyerEurPerKwh != null && c.kwh ? req.buyerEurPerKwh * c.kwh : null);
   const marginPct = buyerEurPerUnit != null && sellerEurPerUnit != null && buyerEurPerUnit > 0
     ? (buyerEurPerUnit - sellerEurPerUnit) / buyerEurPerUnit : null;
-  const coverUnits = Math.min(c.units ?? 1, req.unitsNeeded ?? c.units ?? 1);
-  const spreadEur = marginPct != null ? (buyerEurPerUnit! - sellerEurPerUnit!) * coverUnits : null;
+  const coverUnits = c.units == null ? null : Math.min(c.units, req.unitsNeeded ?? c.units);
+  const spreadEur = marginPct != null && coverUnits != null ? (buyerEurPerUnit! - sellerEurPerUnit!) * coverUnits : null;
   if (marginPct != null) {
     checks.push({ key: "price", label: "Price", state: marginPct >= 0.1 ? "pass" : marginPct >= 0 ? "partial" : "fail",
       detail: marginPct >= 0 ? `${Math.round(marginPct * 100)}% under the buyer's max` : `${Math.round(-marginPct * 100)}% over the buyer's max` });
@@ -427,8 +429,10 @@ export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
       detail: sellerEurPerUnit == null ? "No seller price" : "Buyer has not given a price" });
   }
 
-  // Quantity.
-  if (req.unitsNeeded) {
+  // Quantity. A seller who has not stated one is "Check", never counted as one unit.
+  if (c.units == null && (req.unitsNeeded || req.kwhNeeded)) {
+    checks.push({ key: "quantity", label: "Quantity", state: "unknown", detail: "Quantity not stated" });
+  } else if (req.unitsNeeded) {
     const have = c.units ?? 1;
     checks.push({ key: "quantity", label: "Quantity", state: have >= req.unitsNeeded ? "pass" : "partial",
       detail: `${have} of ${req.unitsNeeded} ${have >= req.unitsNeeded ? "" : "(group with others below)"}`.trim() });
@@ -439,7 +443,9 @@ export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
   }
 
   // Location, seller trust and freshness are shown as columns, not scored: the trader judges them at a glance.
-  const verdict = checks.every((x) => !PRODUCT_CHECKS.has(x.key) || x.state === "pass") ? "exact" : "check";
+  // Exact needs every product check to pass and no missing quantity or seller price; a buyer with no price set does not count against it.
+  const missingFact = checks.some((x) => (x.key === "quantity" && x.state === "unknown") || (x.key === "price" && x.state === "unknown" && sellerEurPerUnit == null));
+  const verdict = !missingFact && checks.every((x) => !PRODUCT_CHECKS.has(x.key) || x.state === "pass") ? "exact" : "check";
   const make = (c.make ?? "").toLowerCase();
   const modelWord = norm(c.model ?? c.title).trim().split(" ").filter((w) => w !== make)[0] ?? "";
   const groupKey = `${make}|${modelWord}|${c.kwh ? Math.round(c.kwh) : "?"}|${c.format ?? ""}`;
@@ -488,7 +494,8 @@ export function matchDemand(demand: Demand, candidates: Candidate[], hidden: Set
     priced.forEach((m, i) => { m.economics.cheapestRank = i; m.economics.peers = priced.length; });
     // Within a group: best fit first, then cheapest, so the unit to buy is always on top.
     list.sort((a, b) => FIT_RANK[a.verdict] - FIT_RANK[b.verdict] || priceOf(a) - priceOf(b));
-    const units = list.reduce((s, m) => s + (m.candidate.units ?? 1), 0);
+    const units = list.reduce((s, m) => s + (m.candidate.units ?? 0), 0);
+    const perUnit = list.map((m) => m.economics.sellerEurPerUnit).filter((x): x is number => x != null);
     const best = list[0];
     const need = requirement.unitsNeeded;
     const margins = list.map((m) => m.economics.marginPct).filter((x): x is number => x != null);
@@ -499,6 +506,7 @@ export function matchDemand(demand: Demand, candidates: Candidate[], hidden: Set
       sellers: bySeller(list).map((seller) => seller.name),
       sources: [...new Set(list.flatMap((m) => [m.candidate.source, ...m.candidate.alsoIn]))],
       eurPerKwh: priced.length ? { min: priced[0].economics.sellerEurPerKwh!, max: priced[priced.length - 1].economics.sellerEurPerKwh! } : null,
+      eurPerUnit: perUnit.length ? { min: Math.min(...perUnit), max: Math.max(...perUnit) } : null,
       bestMarginPct: margins.length ? Math.max(...margins) : null,
       covers: need ? { have: units, need } : null,
       small: !!need && need >= 50 && units < need * SMALL_SHARE,
@@ -526,6 +534,22 @@ export const sellerKey = (name: string | null) =>
   (name ?? "").toLowerCase().replace(/\(.*\)|\b(autohandel|lkq|automotive|auto|recycling|nv|ltd|limited|as|ab|bv|uab)\b|b\.v\./g, " ")
     .trim().split(/\s+/)[0] || (name ?? "").toLowerCase();
 
+/** A Supply listing that restates a marketplace listing (same seller, and its title names the listing's model or part number)
+ *  is shown once, as the marketplace row tagged with both sources. Returns the rows to keep. */
+export function mergeSupplyDuplicates(feed: Candidate[], listings: Candidate[]): { feed: Candidate[]; listings: Candidate[] } {
+  const copies = listings.map((l) => ({ ...l, alsoIn: [...l.alsoIn] }));
+  const kept: Candidate[] = [];
+  for (const f of feed) {
+    const title = ` ${norm(f.title)} `;
+    const twin = f.source === "supply" ? copies.find((l) => {
+      if (sellerKey(l.seller) !== sellerKey(f.seller) || !f.seller) return false;
+      return [l.model, l.partNumber].some((t) => { const k = norm(t ?? "").trim(); return k.length >= 4 && title.includes(` ${k} `); });
+    }) : undefined;
+    if (twin) { if (!twin.alsoIn.includes("supply")) twin.alsoIn.push("supply"); } else kept.push(f);
+  }
+  return { feed: kept, listings: copies };
+}
+
 export type SellerGroup = {
   key: string;
   name: string;
@@ -535,6 +559,7 @@ export type SellerGroup = {
   units: number;
   kwh: { min: number; max: number } | null;
   eurPerKwh: { min: number; max: number } | null;
+  eurPerUnit: { min: number; max: number } | null;
   /** EUR for the priced units only; `pricedUnits` says how many that is. */
   totalEur: number | null;
   pricedUnits: number;
@@ -552,10 +577,11 @@ export function bySeller(matches: Match[]): SellerGroup[] {
   }
   const out: SellerGroup[] = [];
   for (const [key, list] of map) {
-    const units = list.reduce((n, m) => n + (m.candidate.units ?? 1), 0);
+    const units = list.reduce((n, m) => n + (m.candidate.units ?? 0), 0);
     const kwhs = list.map((m) => m.candidate.kwh).filter((k): k is number => k != null);
     const priced = list.filter((m) => m.economics.sellerEurPerKwh != null);
     const perKwh = priced.map((m) => m.economics.sellerEurPerKwh!);
+    const perUnit = list.map((m) => m.economics.sellerEurPerUnit).filter((x): x is number => x != null);
     // The name from the row with most units reads best ("Silverlake Automotive Recycling" over "Silverlake").
     const names = list.map((m) => m.candidate.seller).filter((n): n is string => !!n).sort((a, b) => b.length - a.length);
     out.push({
@@ -566,8 +592,9 @@ export function bySeller(matches: Match[]): SellerGroup[] {
       units,
       kwh: kwhs.length ? { min: Math.min(...kwhs), max: Math.max(...kwhs) } : null,
       eurPerKwh: perKwh.length ? { min: Math.min(...perKwh), max: Math.max(...perKwh) } : null,
-      totalEur: priced.length ? priced.reduce((sum, m) => sum + m.economics.sellerEurPerUnit! * (m.candidate.units ?? 1), 0) : null,
-      pricedUnits: priced.reduce((n, m) => n + (m.candidate.units ?? 1), 0),
+      eurPerUnit: perUnit.length ? { min: Math.min(...perUnit), max: Math.max(...perUnit) } : null,
+      totalEur: priced.some((m) => m.candidate.units != null) ? priced.reduce((sum, m) => sum + m.economics.sellerEurPerUnit! * (m.candidate.units ?? 0), 0) : null,
+      pricedUnits: priced.reduce((n, m) => n + (m.candidate.units ?? 0), 0),
       verdict: list.some((m) => m.verdict === "exact") ? "exact" : "check",
       withPhotos: list.filter((m) => m.candidate.photos > 0).length,
       matches: list,
@@ -594,7 +621,7 @@ export function fewestSellers(sellers: SellerGroup[], need: number | null): Fill
     let take = 0;
     for (const m of [...seller.matches].sort((a, b) => (a.economics.sellerEurPerKwh ?? 1e9) - (b.economics.sellerEurPerKwh ?? 1e9))) {
       if (have + take >= need) break;
-      const n = Math.min(m.candidate.units ?? 1, need - have - take);
+      const n = Math.min(m.candidate.units ?? 0, need - have - take);
       take += n;
       if (m.economics.sellerEurPerUnit != null && m.candidate.kwh) {
         eur += m.economics.sellerEurPerUnit * n;
@@ -612,6 +639,6 @@ export function bestLine(result: MatchResult): { text: string; verdict: Match["v
   const top = result.groups.find((g) => !g.small);
   if (!top) return null;
   const margin = top.bestMarginPct != null ? ` · ${Math.round(top.bestMarginPct * 100)}% margin` : "";
-  const units = top.covers ? ` · ${Math.min(top.units, top.covers.need)}/${top.covers.need}` : top.units > 1 ? ` · ${top.units} units` : "";
+  const units = top.units === 0 ? " · quantity not stated" : top.covers ? ` · ${Math.min(top.units, top.covers.need)}/${top.covers.need}` : top.units > 1 ? ` · ${top.units} units` : "";
   return { verdict: top.verdict, text: `${top.label}${units}${margin}` };
 }

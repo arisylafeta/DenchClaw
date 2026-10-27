@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, fewestSellers, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
+import { bestLine, bySeller, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -199,5 +199,55 @@ describe("matchDemand", () => {
     ]);
     expect(result.groups.map((g) => g.small)).toEqual([false, true]);
     expect(bestLine(result)?.text).toContain("Panasonic");
+  });
+});
+
+describe("missing quantity and per-unit prices (REB-566)", () => {
+  const cellDemand = () => demand({ wants: "Samsung INR21700-50E cells", quantity: "100,000 cells" });
+  const cellAsk = () => requirementFor(cellDemand(), new Set(["samsung"]));
+  const cell = (o: Partial<Candidate> = {}) => unit({ format: "Cells", make: "Samsung", title: "Samsung INR21700-50E", ...o });
+
+  it("is Check, with 'Quantity not stated', when the seller gives no quantity", () => {
+    const m = scoreCandidate(cellAsk(), cell({ units: null, price: 0.43, currency: "EUR" }))!;
+    expect(m.verdict).toBe("check");
+    expect(m.checks.find((c) => c.key === "quantity")).toMatchObject({ state: "unknown", detail: "Quantity not stated" });
+  });
+
+  it("does not count unknown quantity towards covering the ask", () => {
+    const res = matchDemand(cellDemand(), [cell({ units: null }), cell({ units: 600, price: 0.5 })], new Set());
+    expect(res.groups[0].units).toBe(600);
+    expect(res.groups[0].covers).toEqual({ have: 600, need: 100000 });
+    const none = matchDemand(cellDemand(), [cell({ units: null })], new Set());
+    expect(none.groups[0].units).toBe(0);
+    expect(none.groups[0].matches[0].economics.spreadEur).toBeNull();
+  });
+
+  it("is Check when the seller has no price, even if the product matches", () => {
+    const m = scoreCandidate(cellAsk(), cell({ units: 100000, price: null }))!;
+    expect(m.verdict).toBe("check");
+  });
+
+  it("keeps a per-unit seller price range on groups and sellers", () => {
+    const res = matchDemand(cellDemand(), [cell({ units: 600, price: 0.5 }), cell({ units: 100, price: 0.43, seller: "Other" })], new Set());
+    expect(res.groups[0].eurPerUnit).toEqual({ min: 0.43, max: 0.5 });
+    expect(bySeller(res.groups[0].matches)[0].eurPerUnit).not.toBeNull();
+  });
+});
+
+describe("supply/marketplace duplicates (REB-566)", () => {
+  it("shows one row for a Supply shell that restates a marketplace listing, tagged with both sources", () => {
+    const market = unit({ seller: "Voltaplex", model: "INR18650-26E", title: "Samsung INR18650-26E", format: "Cells", units: 600, price: 0.5 });
+    const shell = unit({ source: "supply", seller: "Voltaplex", title: "Voltaplex INR18650-26E cells", units: null });
+    const other = unit({ source: "supply", seller: "Voltaplex", title: "Voltaplex NCR18650B cells", units: 10 });
+    const res = mergeSupplyDuplicates([shell, other], [market]);
+    expect(res.feed).toEqual([other]);
+    expect(res.listings[0].alsoIn).toEqual(["supply"]);
+    expect(market.alsoIn).toEqual([]);
+  });
+  it("does not merge a different seller or a trade", () => {
+    const market = unit({ seller: "Voltaplex", model: "INR18650-26E", title: "x" });
+    const diff = unit({ source: "supply", seller: "Other Co", title: "INR18650-26E cells" });
+    const trade = unit({ source: "trade", seller: "Voltaplex", title: "INR18650-26E cells" });
+    expect(mergeSupplyDuplicates([diff, trade], [market]).feed).toHaveLength(2);
   });
 });
