@@ -9,6 +9,7 @@ import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT } from "./relay-checks";
+import { offerLines, type OfferRow } from "./relay-offers";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -159,12 +160,28 @@ async function threadMessages(mailThreadId: string | null): Promise<ThreadMessag
      order by coalesce(sent_at, accepted_at, created_at) desc limit 8`, [mailThreadId]);
 }
 
-async function dealSummary(listingId: string | null): Promise<string> {
+/** The offers made to this counterpart on the deal (its own listing, or a supply offered to it). Never another buyer's. */
+async function counterpartOffers(listingId: string, counterpartEmail: string | null): Promise<string> {
+  const email = (counterpartEmail ?? "").trim().toLowerCase();
+  if (!email) return "";
+  const rows = await queryPg<OfferRow>(
+    `select o.name, o.stage, o.wants, o.terms, o.last_touch_on::text, o.last_touch_via, o.data->>'waiting_on' as waiting_on, o.declined_reason
+     from crm_bulk_offers o
+     where o.role = 'counterparty' and (o.bulk_listing_id = $1 or o.counterpart_id = $1)
+       and (lower(o.contact) = $2 or o.person_id in (select id from crm_people where lower(email) = $2)
+            or o.company_id in (select company_id from crm_people where lower(email) = $2 and company_id is not null))
+     order by o.updated_at desc limit 5`, [listingId, email]).catch(() => [] as OfferRow[]);
+  return offerLines(rows);
+}
+
+async function dealSummary(listingId: string | null, counterpartEmail: string | null = null): Promise<string> {
   if (!listingId) return "";
   const [row] = await queryPg<Record<string, unknown>>("select * from crm_bulk_listings where id = $1", [listingId]).catch(() => []);
   if (!row) return "";
   const keep = Object.entries(row).filter(([key, value]) => value !== null && value !== "" && !/(_at|_id|^id|match_hash)$/.test(key) && !(value instanceof Date)).slice(0, 40);
-  return keep.map(([key, value]) => `${key}: ${(typeof value === "object" ? JSON.stringify(value) : String(value)).slice(0, 400)}`).join("\n");
+  const deal = keep.map(([key, value]) => `${key}: ${(typeof value === "object" ? JSON.stringify(value) : String(value)).slice(0, 400)}`).join("\n");
+  const offers = await counterpartOffers(listingId, counterpartEmail);
+  return offers ? `${deal}\n${offers}` : deal;
 }
 
 const stripQuoted = (text: string) => text.split(/\n(?:On .{5,120}wrote:|-{2,} ?Original Message|From: .+\nSent: )/)[0].replace(/\n>.*$/gm, "").trim();
@@ -222,7 +239,7 @@ export type DraftResult = { item: RelayItem };
 async function draftContext(item: RelayItem, ownerId: string, note: string) {
   const messages = await threadMessages(item.mail_thread_id);
   const rules = (await listRules(ownerId)).map((r) => r.text);
-  const deal = await dealSummary(item.bulk_listing_id);
+  const deal = await dealSummary(item.bulk_listing_id, item.counterpart_email);
   const lastInbound = messages.find((m) => m.direction === "inbound");
   const transcript = [...messages].reverse().map((m) => `--- ${m.direction === "inbound" ? `From ${m.from_email}` : `From Alex (${m.from_email})`} · ${m.at}\nTo: ${m.to_emails.join(", ")}${m.cc_emails.length ? `\nCc: ${m.cc_emails.join(", ")}` : ""}\nSubject: ${m.subject ?? ""}\n${stripQuoted(m.body_text ?? "").slice(0, 3000)}`).join("\n\n");
   const prompt = `Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
@@ -417,7 +434,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const facts = new Map<string, RelayFacts>();
   for (const item of items) {
     const messages = await threadMessages(item.mail_thread_id);
-    const deal = await dealSummary(item.bulk_listing_id);
+    const deal = await dealSummary(item.bulk_listing_id, item.counterpart_email);
     const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).join("\n") : ""}`).join("\n");
     const corpus = [deal, notes, item.context, item.last_message?.text ?? "", ...messages.map((m) => m.body_text ?? "")].join("\n");
     const participants = [...new Set(messages.flatMap((m) => [m.from_email ?? "", ...m.to_emails, ...m.cc_emails]).concat(item.counterpart_email ?? "")

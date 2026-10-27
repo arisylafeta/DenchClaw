@@ -1,7 +1,6 @@
 """Tests for bulk_offer_mail_index.py against a throwaway Postgres: scripts/rebattery/crm-test-db.sh up, then
 BULK_TRADES_TEST_DATABASE_URL=<url> python3 -m pytest scripts/rebattery/test_bulk_offer_mail_index.py"""
 import os
-import stat
 import subprocess
 import sys
 import uuid
@@ -90,14 +89,14 @@ def test_indexes_sent_offer_mail_idempotently(db):
     _, cur, ids = db
     link(cur, ids)
     mail(cur, f"m1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"], thread=ids["thread"])
-    out = run("--apply", "--no-alert", "--since", "2026-10-01")
+    out = run("--apply", "--since", "2026-10-01")
     assert out.returncode == 0, out.stderr
     assert "indexed 1" in out.stdout and "story 1" in out.stdout
     cur.execute("select state, labelled_by from crm_bulk_thread_links where thread_id = %s and offer_id = %s", (ids["thread"], ids["offer"]))
     assert cur.fetchone() == ("proposed", "test")  # the existing link is kept, not duplicated
     cur.execute("select last_touch_on::text, last_touch_via, data->>'waiting_on' from crm_bulk_offers where id = %s", (ids["offer"],))
     assert cur.fetchone() == ("2026-10-20", "mail", "them")
-    again = run("--apply", "--no-alert", "--since", "2026-10-01")
+    again = run("--apply", "--since", "2026-10-01")
     assert "indexed 0" in again.stdout and "story 0" in again.stdout
     assert count(cur, "select count(*) from crm_bulk_listing_activity where bulk_listing_id = %s and kind = 'mail'", (ids["sup"],)) == 1
 
@@ -106,7 +105,7 @@ def test_skips_campaign_mail_and_unrelated_recipients(db):
     _, cur, ids = db
     mail(cur, f"c1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"], campaign="camp_x")
     mail(cur, f"u1_{ids['tag']}", "outbound", "2026-10-20T11:00:00Z", to="nobody@elsewhere.test")
-    out = run("--apply", "--no-alert", "--since", "2026-10-01", "--include-recipient")
+    out = run("--apply", "--since", "2026-10-01", "--include-recipient")
     assert "indexed 0" in out.stdout and "not_offer_mail 1" in out.stdout
 
 
@@ -116,83 +115,69 @@ def test_ambiguous_recipient_is_listed_not_guessed(db):
     cur.execute("insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, stage, data) values (%s,%s,'counterparty',%s,%s,'Buyer Co','offered','{}')",
                 (ids["offer2"], ids["sup"] + "b", ids["person"], ids["co"]))
     mail(cur, f"m1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"])
-    out = run("--apply", "--no-alert", "--since", "2026-10-01", "--include-recipient")
+    out = run("--apply", "--since", "2026-10-01", "--include-recipient")
     cur.execute("delete from crm_bulk_listings where id = %s", (ids["sup"] + "b",))
     assert "indexed 0" in out.stdout and "ambiguous 1" in out.stdout
-
-
-def test_reply_is_logged_at_its_real_time_and_alerts_once(db, tmp_path):
-    _, cur, ids = db
-    link(cur, ids)
-    mail(cur, f"m1_{ids['tag']}", "outbound", ago(5), to=ids["email"], person=ids["person"], thread=ids["thread"])
-    reply_at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=1)
-    mail(cur, f"r1_{ids['tag']}", "inbound", reply_at.isoformat(), frm=ids["email"], thread=ids["thread"], subject="Re: STN offer")
-    fake = tmp_path / "hermes"
-    fake.write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path}/sent.txt\n")
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    env = {"PATH": f"{tmp_path}:{os.environ['PATH']}"}
-    out = run("--apply", "--since", "2026-10-01", "--alert-to", "discord:1", extra_env=env)
-    assert out.returncode == 0, out.stderr
-    assert "replies 1" in out.stdout
-    cur.execute("select occurred_at at time zone 'utc', data->>'state' from crm_bulk_listing_activity where bulk_listing_id = %s and data->>'state' = 'received'", (ids["sup"],))
-    when, state = cur.fetchone()
-    assert when.replace(tzinfo=timezone.utc) == reply_at and state == "received"
-    cur.execute("select last_touch_on::text, data->>'waiting_on' from crm_bulk_offers where id = %s", (ids["offer"],))
-    assert cur.fetchone() == (reply_at.date().isoformat(), "us")
-    cur.execute("select stage from crm_bulk_offers where id = %s", (ids["offer"],))
-    assert cur.fetchone()[0] == "offered"  # never moves the stage
-    sent = (tmp_path / "sent.txt").read_text()
-    assert "discord:1" in sent and "Buyer Co" in sent and "@" not in sent.replace("rebattery.io", "")
-    run("--apply", "--since", "2026-10-01", "--alert-to", "discord:1", extra_env=env)
-    assert (tmp_path / "sent.txt").read_text().count("Reply on a bulk offer") == 1
-
-
-def test_flags_an_offer_with_no_reply_past_its_chase_date_once(db, tmp_path):
-    _, cur, ids = db
-    link(cur, ids)
-    cur.execute("update crm_bulk_offers set data = jsonb_build_object('chase_on', '2026-10-25') where id = %s", (ids["offer"],))
-    mail(cur, f"m1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"], thread=ids["thread"])
-    fake = tmp_path / "hermes"
-    fake.write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path}/sent.txt\n")
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    env = {"PATH": f"{tmp_path}:{os.environ['PATH']}"}
-    out = run("--apply", "--since", "2026-10-01", "--alert-to", "discord:1", extra_env=env)
-    assert "overdue 1" in out.stdout
-    run("--apply", "--since", "2026-10-01", "--alert-to", "discord:1", extra_env=env)
-    assert (tmp_path / "sent.txt").read_text().count("Chase due") == 1
 
 
 def test_recipient_only_match_is_listed_but_not_indexed_by_default(db):
     _, cur, ids = db
     mail(cur, f"m1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"])
-    out = run("--apply", "--no-alert", "--since", "2026-10-01")
+    out = run("--apply", "--since", "2026-10-01")
     assert "indexed 0" in out.stdout and "recipient_only 1" in out.stdout
     assert count(cur, "select count(*) from crm_bulk_offer_mail where bulk_listing_id = %s", (ids["sup"],)) == 0
-    forced = run("--apply", "--no-alert", "--since", "2026-10-01", "--include-recipient")
+    forced = run("--apply", "--since", "2026-10-01", "--include-recipient")
     assert "indexed 1" in forced.stdout
 
 
 def test_fills_the_thread_and_proposes_the_link_once_gmail_sync_supplies_it(db):
     _, cur, ids = db
     mail(cur, f"m1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"])
-    assert "indexed 1" in run("--apply", "--no-alert", "--since", "2026-10-01", "--include-recipient").stdout
+    assert "indexed 1" in run("--apply", "--since", "2026-10-01", "--include-recipient").stdout
     assert count(cur, "select count(*) from crm_bulk_thread_links where thread_id = %s", (ids["thread"],)) == 0
     thread_row(cur, ids["thread"])
     cur.execute("update mail_message set thread_id = %s where id = %s", (ids["thread"], f"m1_{ids['tag']}"))
-    out = run("--apply", "--no-alert", "--since", "2026-10-01")
+    out = run("--apply", "--since", "2026-10-01")
     assert "threads_filled 1" in out.stdout
     cur.execute("select state from crm_bulk_thread_links where thread_id = %s and offer_id = %s", (ids["thread"], ids["offer"]))
     assert cur.fetchone() == ("proposed",)
 
 
-def test_old_replies_and_stale_offers_are_logged_but_not_announced(db, tmp_path):
+def test_reply_is_logged_at_its_real_time_and_never_moves_the_stage(db):
     _, cur, ids = db
     link(cur, ids)
-    mail(cur, f"m1_{ids['tag']}", "outbound", ago(60), to=ids["email"], person=ids["person"], thread=ids["thread"])
-    mail(cur, f"r1_{ids['tag']}", "inbound", ago(40), frm=ids["email"], thread=ids["thread"], subject="Re: STN offer")
-    fake = tmp_path / "hermes"
-    fake.write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path}/sent.txt\n")
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    out = run("--apply", "--since", "2026-01-01", "--alert-to", "discord:1", extra_env={"PATH": f"{tmp_path}:{os.environ['PATH']}"})
-    assert "replies 1" in out.stdout and "overdue 0" in out.stdout
-    assert not (tmp_path / "sent.txt").exists()
+    mail(cur, f"m1_{ids['tag']}", "outbound", ago(5), to=ids["email"], person=ids["person"], thread=ids["thread"])
+    reply_at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=1)
+    mail(cur, f"r1_{ids['tag']}", "inbound", reply_at.isoformat(), frm=ids["email"], thread=ids["thread"], subject="Re: STN offer")
+    out = run("--apply", "--since", "2026-10-01")
+    assert out.returncode == 0, out.stderr
+    assert "replies 1" in out.stdout
+    cur.execute("select occurred_at at time zone 'utc', data->>'state' from crm_bulk_listing_activity where bulk_listing_id = %s and data->>'state' = 'received'", (ids["sup"],))
+    when, state = cur.fetchone()
+    assert when.replace(tzinfo=timezone.utc) == reply_at and state == "received"
+    cur.execute("select last_touch_on::text, data->>'waiting_on', stage from crm_bulk_offers where id = %s", (ids["offer"],))
+    assert cur.fetchone() == (reply_at.date().isoformat(), "us", "offered")
+    assert "replies 0" in run("--apply", "--since", "2026-10-01").stdout
+
+
+def test_a_relay_send_on_the_counterparts_deal_ties_the_mail_to_the_offer(db):
+    _, cur, ids = db
+    cur.execute("insert into crm_users (email, display_name, password_hash) values (%s, 'Alex', 'x') returning id", (f"relay_{ids['tag']}@example.test",))
+    owner = cur.fetchone()[0]
+    dem = ids["sup"] + "d"
+    cur.execute("insert into crm_bulk_listings (id, kind, party, company_id, summary, status, spec) values (%s, 'demand', 'Buyer Co', %s, 'Wants packs', 'open', '{\"intent\":\"request\"}')", (dem, ids["co"]))
+    cur.execute("update crm_bulk_offers set counterpart_id = %s where id = %s", (dem, ids["offer"]))
+    mail(cur, f"m1_{ids['tag']}", "outbound", ago(2), to=ids["email"], person=ids["person"], thread=ids["thread"])
+    cur.execute("insert into relay_item (id, owner_id, gmail_thread_id, tab, bulk_listing_id) values (%s, %s, 'g1', 'action', %s)", (f"ri_{ids['tag']}", owner, dem))
+    cur.execute("insert into relay_draft (item_id, role, mail_message_id, state) values (%s, 'primary', %s, 'sent')", (f"ri_{ids['tag']}", f"m1_{ids['tag']}"))
+    try:
+        out = run("--apply", "--since", "2026-10-01")
+        assert "indexed 1" in out.stdout, out.stdout
+        cur.execute("select matched_by from crm_bulk_offer_mail where offer_id = %s", (ids["offer"],))
+        assert cur.fetchone() == ("relay",)
+        assert count(cur, "select count(*) from crm_bulk_thread_links where thread_id = %s and offer_id = %s and state = 'proposed'", (ids["thread"], ids["offer"])) == 1
+    finally:
+        cur.execute("delete from relay_item where id = %s", (f"ri_{ids['tag']}",))
+        cur.execute("update crm_bulk_offers set counterpart_id = null where id = %s", (ids["offer"],))
+        cur.execute("delete from crm_bulk_listings where id = %s", (dem,))
+        cur.execute("delete from crm_users where id = %s", (owner,))

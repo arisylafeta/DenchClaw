@@ -5,22 +5,21 @@ Runs after the Gmail sync. Reads sent mail, and for each message tied to a bulk 
   1. records one row in crm_bulk_offer_mail (the index);
   2. links the Gmail thread to the listing and offer as `proposed` (never `confirmed`);
   3. stamps the offer's last touch and writes the Story `mail` row if it is missing;
-  4. when a reply lands on an indexed thread, logs it at its real time and sets the offer to waiting on us;
-  5. flags offers at `offered` with no reply past their chase date.
-It never sends mail, moves a stage or closes a record. Dry run unless --apply. Idempotent: a second run changes nothing.
+  4. when a reply lands on an indexed thread, logs it at its real time and sets the offer to waiting on us.
+It never sends mail, moves a stage, closes a record or alerts: Relay (~crm/relay) is where replies and chases are seen.
+Dry run unless --apply. Idempotent: a second run changes nothing.
 
-  bulk_offer_mail_index.py [--apply] [--since YYYY-MM-DD] [--no-alert] [--alert-to discord:<chat id>] [--include-recipient]
+  bulk_offer_mail_index.py [--apply] [--since YYYY-MM-DD] [--include-recipient]
 
-A message is tied to an offer by an existing thread link (confident). Matching only by recipient is weak (the same person gets
+A message is tied to an offer by an existing thread link, or by a Relay send on an item whose deal holds exactly one offer
+for the recipient (both confident). Matching only by recipient is weak (the same person gets
 intros, auction updates and replies about other things), so it is off unless --include-recipient; those hits are counted and listed.
 
-Exit code 1 when any message failed, so the cron job shows the failure. Alerts go through `hermes send` (no model), and
-carry company, listing and dates only, never email addresses.
+Exit code 1 when any message failed, so the cron job shows the failure.
 """
 import argparse
 import json
 import os
-import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 
@@ -28,13 +27,9 @@ import psycopg2
 import psycopg2.extras
 
 DSN = os.environ.get("DENCH_CRM_DSN", "host=/var/run/postgresql dbname=denchclaw")
-ALERT_REPLY_DAYS = 3    # older replies are logged but not announced
-ALERT_CHASE_DAYS = 30   # an offer sent longer ago than this is stale, not a chase to announce
 ACTIVE = ("candidate", "offered", "contract_out", "signed", "invoiced", "paid")
 OUR_DOMAIN = "@rebattery.io"
-DEFAULT_CHASE_DAYS = 7
 CRM = "https://crm.rebattery.io/?path=~trades-preview&listing="
-DEFAULT_ALERT = "discord:1523383956878266388"  # the offers and deals channel
 
 
 def rows(cur, sql, args=()):
@@ -68,10 +63,24 @@ def find_offers(cur, m):
     emails = [e.lower() for e in m["recipients"] if e and not e.lower().endswith(OUR_DOMAIN)]
     if not emails and not m["person_id"]:
         return "recipient", []
+    # Sent from a Relay item: its deal (the counterpart's own listing) points at the offers made to them.
+    via_relay = rows(cur, base + """and exists (select 1 from relay_draft d join relay_item ri on ri.id = d.item_id
+                                       where d.mail_message_id = %s and ri.bulk_listing_id is not null
+                                         and (o.bulk_listing_id = ri.bulk_listing_id or o.counterpart_id = ri.bulk_listing_id))
+                                     and (o.person_id = %s or lower(o.contact) = any(%s)
+                                          or exists (select 1 from crm_people p where p.id = o.person_id and lower(p.email) = any(%s)))""",
+                     (list(ACTIVE), m["id"], m["person_id"], emails, emails)) if relay_tables(cur) else []
+    if len(via_relay) == 1:
+        return "relay", via_relay
     found = rows(cur, base + """and (o.person_id = %s or lower(o.contact) = any(%s)
                                       or exists (select 1 from crm_people p where p.id = o.person_id and lower(p.email) = any(%s)))""",
                  (list(ACTIVE), m["person_id"], emails, emails))
     return "recipient", found
+
+
+def relay_tables(cur):
+    cur.execute("select to_regclass('relay_draft') is not null and to_regclass('relay_item') is not null as ok")
+    return cur.fetchone()["ok"]
 
 
 def pick(offers, m):
@@ -152,42 +161,18 @@ def replies(cur):
         order by coalesce(r.sent_at, r.created_at)""", ("%" + OUR_DOMAIN,))
 
 
-def overdue(cur, today, window_days=ALERT_CHASE_DAYS):
-    return rows(cur, """
-        select o.id as offer_id, o.bulk_listing_id as listing_id, o.name, l.party,
-               coalesce(nullif(o.data->>'chase_on', ''), nullif(o.data->>'next_due', ''), (max(i.sent_at)::date + %s)::text) as chase_on,
-               max(i.sent_at)::date as sent_on, (array_agg(i.message_id order by i.sent_at desc))[1] as last_message
-        from crm_bulk_offers o join crm_bulk_offer_mail i on i.offer_id = o.id
-        join crm_bulk_listings l on l.id = o.bulk_listing_id and l.status <> 'closed'
-        where o.stage = 'offered' and coalesce(o.data->>'waiting_on', 'them') <> 'us'
-          and not exists (select 1 from crm_bulk_offer_mail x where x.offer_id = o.id and x.replied_at is not null and x.replied_at >= i.sent_at)
-          and not exists (select 1 from crm_bulk_offer_mail x where x.offer_id = o.id and x.chase_alerted_at is not null and x.sent_at = (select max(sent_at) from crm_bulk_offer_mail where offer_id = o.id))
-        group by o.id, o.bulk_listing_id, o.name, l.party, o.data
-        having max(i.sent_at) >= %s::date - %s and coalesce(nullif(o.data->>'chase_on', ''), nullif(o.data->>'next_due', ''), (max(i.sent_at)::date + %s)::text) < %s
-        order by 5""", (DEFAULT_CHASE_DAYS, today.isoformat(), window_days, DEFAULT_CHASE_DAYS, today.isoformat()))
-
-
-def send_alert(target, text):
-    r = subprocess.run(["hermes", "-p", "default", "send", "--json", "-t", target, text], capture_output=True, text=True, timeout=120)
-    if r.returncode != 0:
-        raise RuntimeError(f"hermes send failed: {r.stderr.strip()[:300] or r.stdout.strip()[:300]}")
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--since", default=(date.today() - timedelta(days=14)).isoformat())
-    ap.add_argument("--no-alert", action="store_true")
-    ap.add_argument("--alert-to", default=os.environ.get("BULK_OFFER_ALERT_TO", DEFAULT_ALERT))
     ap.add_argument("--include-recipient", action="store_true", help="also index mail tied to an offer only by its recipient")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     conn = psycopg2.connect(DSN)
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    s = dict(indexed=0, linked=0, touched=0, story=0, threads_filled=0, replies=0, not_offer_mail=0, recipient_only=0, ambiguous=0, overdue=0, errors=0)
-    recipient_only, ambiguous, alerts, errors = [], [], [], []
-    today = datetime.now(timezone.utc).date()
+    s = dict(indexed=0, linked=0, touched=0, story=0, threads_filled=0, replies=0, not_offer_mail=0, recipient_only=0, ambiguous=0, errors=0)
+    recipient_only, ambiguous, errors = [], [], []
     waiting = {}  # offer id -> (who, when): the latest message decides
 
     for m in new_mail(cur, args.since):
@@ -235,8 +220,6 @@ def main():
                     waiting[r["offer_id"]] = ("us", r["reply_at"])
             cur.execute("""update crm_bulk_offer_mail set replied_at = coalesce(replied_at, %s), reply_message_id = coalesce(reply_message_id, %s)
                            where message_id = %s""", (r["reply_at"], r["reply_id"], r["sent_id"]))
-            if r["reply_at"] >= datetime.now(timezone.utc) - timedelta(days=ALERT_REPLY_DAYS):
-                alerts.append((r["sent_id"], f"Reply on a bulk offer: **{who}** answered about {r['party']}. Log it, then propose the next step. {CRM}{r['listing_id']}"))
             cur.execute("release savepoint r")
         except Exception as exc:
             cur.execute("rollback to savepoint r")
@@ -245,30 +228,8 @@ def main():
     for offer_id, (who, when) in waiting.items():
         set_waiting(cur, offer_id, who, when)
 
-    chases = overdue(cur, today)
-    s["overdue"] = len(chases)
-    if args.verbose or not args.apply:
-        for c in chases:
-            print(f"  chase due {c['chase_on']}: {c['name'] or c['party']} / {c['party']} (sent {c['sent_on']})")
-    for c in chases:
-        alerts.append((None, f"Chase due: **{c['name'] or c['party']}** has had the offer since {c['sent_on']}, no reply, chase date {c['chase_on']}. {CRM}{c['listing_id']}"))
-
     if args.apply:
         conn.commit()
-        if alerts and not args.no_alert:
-            body = "Bulk offers\n" + "\n".join(f"- {t}" for _, t in alerts[:15]) + (f"\n(+{len(alerts) - 15} more)" if len(alerts) > 15 else "")
-            try:
-                send_alert(args.alert_to, body)
-                for sent_id, _ in alerts:
-                    if sent_id:
-                        cur.execute("update crm_bulk_offer_mail set reply_alerted_at = now() where message_id = %s and reply_alerted_at is null", (sent_id,))
-                for c in chases:
-                    cur.execute("update crm_bulk_offer_mail set chase_alerted_at = now() where message_id = %s", (c["last_message"],))
-                conn.commit()
-            except Exception as exc:
-                conn.rollback()
-                s["errors"] += 1
-                errors.append(f"alert: {exc}")
     else:
         conn.rollback()
     mode = "APPLIED" if args.apply else "DRY RUN (nothing written)"
