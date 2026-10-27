@@ -252,3 +252,12 @@
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chips button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 11px; font-size: 13px; color: var(--muted); }
 .chips button[aria-pressed="true"] { background: var(--blue-soft); color: var(--blue-ink); border-color: color-mix(in srgb, var(--blue) 45%, transparent); }
+
+/* agent jobs */
+.st.work { background: var(--blue); animation: pulse 2s infinite; }
+.jobsteps { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px 18px; font-size: 14px; }
+.jobsteps .done::before { content: "✓ "; color: var(--green); }
+.jobsteps .now { display: flex; align-items: center; gap: 8px; color: var(--ink2); }
+.jobsteps .err { color: var(--red); font-weight: 500; }
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--blue-tag); border-top-color: var(--blue); animation: spin 0.9s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }

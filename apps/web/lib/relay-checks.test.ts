@@ -35,3 +35,13 @@ describe("relay checks", () => {
     expect(promisesIn("Thanks. I'll send the stock list tomorrow. We will confirm by Friday.")).toEqual(["Send the stock list tomorrow", "Confirm by Friday"]);
   });
 });
+
+import { NEEDS_AGENT } from "./relay-checks";
+describe("NEEDS_AGENT", () => {
+  it("sends work to the agent and words to the quick draft", () => {
+    expect(NEEDS_AGENT.test("research our battery supply for LFP and make a csv")).toBe(true);
+    expect(NEEDS_AGENT.test("attach the Ioniq 5 stock list")).toBe(true);
+    expect(NEEDS_AGENT.test("thank him, offer €38, ask for volumes")).toBe(false);
+    expect(NEEDS_AGENT.test("say the price has gone up, still keen?")).toBe(false);
+  });
+});

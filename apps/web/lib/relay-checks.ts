@@ -53,3 +53,6 @@ export function promisesIn(body: string): string[] {
   }
   return out.slice(0, 3);
 }
+
+/** Notes that ask for work rather than words go to a background agent job (research, lists, files). */
+export const NEEDS_AGENT = /\b(research|find|look (?:up|for|into)|search|check (?:our|the|what|which|if)|pull|csv|excel|spreadsheet|stock ?list|inventory list|attach|invoice|quote sheet|compare|analy[sz]e|work out|calculate|enrich)/i;

@@ -3,8 +3,8 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
-import type { RelayDraftView, RelayItem, RelayReviewItem, RelayTab, RelayTodo } from "@/lib/relay";
-import { beforeYouSend, promisesIn, type Issue } from "@/lib/relay-checks";
+import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayTab, RelayTodo } from "@/lib/relay";
+import { beforeYouSend, NEEDS_AGENT, promisesIn, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
@@ -153,12 +153,13 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
     const note = noteOf(i).trim();
     if (!note) { say("Add a note first: how do you want to reply?"); setOpen(i.id); return; }
     setBusy((b) => ({ ...b, [i.id]: true }));
-    say(`Drafting v1 for ${firstName(i.counterpart_name)}…`);
+    const agent = NEEDS_AGENT.test(note);
+    say(agent ? `Relay is on it for ${firstName(i.counterpart_name)} · follow progress in Review` : `Drafting v1 for ${firstName(i.counterpart_name)}…`);
     try {
       await api(`/api/relay/items/${i.id}/draft`, { method: "POST", body: { note } });
       setGone((g) => ({ ...g, [i.id]: true }));
       await reload();
-      say(`Drafted · ${firstName(i.counterpart_name)} is in Review`, onDrafted);
+      say(agent ? `Working on ${firstName(i.counterpart_name)} in Review (a few minutes)` : `Drafted · ${firstName(i.counterpart_name)} is in Review`, onDrafted);
     } catch (err) {
       say(err instanceof Error ? err.message : "Couldn't draft. Try again.");
     } finally {
@@ -261,7 +262,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       <button type="button" className={cx(s.arrow, note.trim() && s.ready)} disabled={busy[i.id]} onClick={() => void draft(i)} aria-label="Draft this reply"><Arrow /></button>
                       {tab === "action" && <button type="button" className={s.doneb} title="No reply needed: marks it read and labels it Sorted in Gmail" onClick={() => void done(i)}>Done</button>}
                     </div>
-                    {!isOpen && <div className={s.hint}>{busy[i.id] ? "Drafting…" : note.trim() ? "Ready: press the arrow (or ⌘↵) to draft" : "Click to read the full email"}</div>}
+                    {!isOpen && <div className={s.hint}>{busy[i.id] ? "Drafting…" : note.trim() ? (NEEDS_AGENT.test(note) ? "Relay will do the work first (research, lists, files), then draft. Takes a few minutes." : "Ready: press the arrow (or ⌘↵) to draft") : "Click to read the full email"}</div>}
                   </>
                 )}
               </div>
@@ -279,6 +280,12 @@ type Local = { subject: string; body: string; updated_at: string };
 function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void }) {
   const items = data.review;
   const [cur, setCur] = useState(0);
+  const working = items.some((x) => x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status));
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => void reload(), 8000);
+    return () => clearInterval(t);
+  }, [working, reload]);
   const [views, setViews] = useState<Record<string, string>>({});
   const index = Math.min(cur, Math.max(0, items.length - 1));
   const item = items[index];
@@ -295,14 +302,16 @@ function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Pr
         <button className={s.navb} type="button" aria-label="Previous" onClick={() => setCur((index - 1 + items.length) % items.length)}>‹</button>
         {items.map((x, k) => {
           const name = x.counterpart_name || x.counterpart_email || "?";
-          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, x.drafts.filter((d) => d.role === "primary").every(isSent) && s.sent)} /></button>;
+          const busyJob = !x.drafts.length && x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status);
+          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, busyJob && s.work, !busyJob && x.drafts.length > 0 && x.drafts.filter((d) => d.role === "primary").every(isSent) && s.sent)} /></button>;
         })}
         <button className={s.navb} type="button" aria-label="Next" onClick={() => setCur((index + 1) % items.length)}>›</button>
         <span className={s.count}>{index + 1} of {items.length}</span>
       </div>
       <div className={s.rgrid}>
         <div className={s.col}>
-          {draft ? <Editor key={draft.id} item={item} draft={draft} reload={reload} say={say} onBack={onBack}
+          {!draft && item.job ? <JobCard job={item.job} itemId={item.id} reload={reload} say={say} />
+            : draft ? <Editor key={draft.id} item={item} draft={draft} reload={reload} say={say} onBack={onBack}
             onNext={() => { const next = ordered.find((d) => d.id !== draft.id && !isSent(d)); if (next) setViews((v) => ({ ...v, [item.id]: next.id })); else if (allSent) setCur(index + 1); }} />
             : <div className={cx(s.card, s.empty)}><span className={s.muted}>No draft on this email.</span></div>}
           {ordered.length > 1 && (
@@ -325,6 +334,37 @@ function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Pr
         <AiPanel key={item.id} item={item} draft={draft} rules={data.rules} reload={reload} say={say} />
       </div>
     </section>
+  );
+}
+
+/** An agent job in progress or failed: steps so far, elapsed time, and Retry / Quick draft when it fails. */
+function JobCard({ job, itemId, reload, say }: { job: RelayJob; itemId: string; reload: () => Promise<void>; say: (t: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const failed = job.status === "failed";
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(job.started_at ?? job.created_at).getTime()) / 60_000));
+  const act = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    try { await fn(); say(done); await reload(); } catch (err) { say(err instanceof Error ? err.message : "That didn't work."); } finally { setBusy(false); }
+  };
+  return (
+    <div className={cx(s.card, s.editor)}>
+      <div className={s.ebar}>
+        <div><div className={s.lab}>Agent job</div><h2>{failed ? "Relay couldn't finish this" : "Relay is working on this"}</h2></div>
+        <span className={cx(s.pill, failed ? s.urgent : s.medium)}><i />{failed ? "Failed" : job.status === "queued" ? "Queued" : `${minutes} min`}</span>
+      </div>
+      <div className={s.fromnote}>Your note: <b>&ldquo;{job.note}&rdquo;</b></div>
+      <div className={s.jobsteps}>
+        {job.steps.map((step, k) => <span key={k} className={s.done}>{step}</span>)}
+        {!failed && <span className={s.now}><i className={s.spin} aria-hidden />{job.status === "ready" || job.status === "finalising" ? "Writing the draft and attaching files" : "Researching and preparing files. Usually 2 to 5 minutes; you can carry on in the Inbox."}</span>}
+        {failed && <span className={s.err}>{job.error ?? "Something went wrong."}</span>}
+      </div>
+      {failed && (
+        <div className={s.eact}>
+          <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => void act(() => api(`/api/relay/items/${itemId}/job`, { method: "POST" }), "Trying again")}>Retry</button>
+          <button type="button" className={s.btn} disabled={busy} onClick={() => void act(() => api(`/api/relay/items/${itemId}/draft`, { method: "POST", body: { note: job.note, mode: "quick" } }), "Quick draft ready")}>Quick draft instead</button>
+        </div>
+      )}
+    </div>
   );
 }
 

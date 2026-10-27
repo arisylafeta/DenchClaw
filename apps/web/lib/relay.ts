@@ -1,6 +1,6 @@
 import "server-only";
-import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -8,7 +8,7 @@ import { queryPg, withPgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
-import { amountsIn } from "./relay-checks";
+import { amountsIn, NEEDS_AGENT } from "./relay-checks";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -63,7 +63,7 @@ export type RelayDraftView = {
 export type RelayTodo = { id: string; item_id: string | null; title: string; detail: string; kind: "suggested" | "promise" | "manual"; state: string; reb_key: string | null; source: string | null; created_at: string };
 /** What the "Before you send" note checks a draft against: amounts seen in the thread, deal and note; everyone on the thread; the deal's price unit. */
 export type RelayFacts = { amounts: string[]; participants: string[]; unit: "cell" | "kwh" | null };
-export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: RelayTodo[]; facts: RelayFacts };
+export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: RelayTodo[]; facts: RelayFacts; job: RelayJob | null };
 
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
@@ -216,27 +216,49 @@ Return ONLY JSON:
 
 export type DraftResult = { item: RelayItem };
 
-/** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. */
-export async function draftFromNote(itemId: string, ownerId: string, note: string): Promise<RelayItem> {
-  const item = await readRelayItem(itemId, ownerId);
-  if (!item) throw new RelayError(404, "Not found");
-  if (!note.trim()) throw new RelayError(400, "Add a note first: how do you want to reply?");
-  await updateRelayItem(itemId, ownerId, { note });
+/** Everything a draft is written from: the thread, the deal, the writing rules and who the reply goes to. */
+async function draftContext(item: RelayItem, ownerId: string, note: string) {
   const messages = await threadMessages(item.mail_thread_id);
   const rules = (await listRules(ownerId)).map((r) => r.text);
   const deal = await dealSummary(item.bulk_listing_id);
   const lastInbound = messages.find((m) => m.direction === "inbound");
   const transcript = [...messages].reverse().map((m) => `--- ${m.direction === "inbound" ? `From ${m.from_email}` : `From Alex (${m.from_email})`} · ${m.at}\nTo: ${m.to_emails.join(", ")}${m.cc_emails.length ? `\nCc: ${m.cc_emails.join(", ")}` : ""}\nSubject: ${m.subject ?? ""}\n${stripQuoted(m.body_text ?? "").slice(0, 3000)}`).join("\n\n");
   const prompt = `Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
-  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(rules), prompt));
-  const identity = replyIdentity(messages);
   const to = (lastInbound?.from_email ?? item.counterpart_email ?? "").trim();
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
-  const subject = String(parsed.subject || messages[0]?.subject || item.headline || "").slice(0, 300) || "Re:";
+  return { messages, rules, prompt, to, identity: replyIdentity(messages) };
+}
+
+/** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. Notes that need work start an agent job instead. */
+export async function draftFromNote(itemId: string, ownerId: string, note: string, mode: "auto" | "quick" = "auto"): Promise<RelayItem> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  if (!note.trim()) throw new RelayError(400, "Add a note first: how do you want to reply?");
+  await updateRelayItem(itemId, ownerId, { note });
+  if (mode === "auto" && NEEDS_AGENT.test(note)) {
+    await startJob(item, ownerId, note);
+    return (await readRelayItem(itemId, ownerId))!;
+  }
+  const ctx = await draftContext(item, ownerId, note);
+  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules), ctx.prompt));
+  await saveDraftOutputs(item, ownerId, note, ctx, parsed, []);
+  return (await readRelayItem(itemId, ownerId))!;
+}
+
+/** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts and agent jobs. */
+async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[]): Promise<void> {
+  const itemId = item.id;
+  const rawSubject = String(parsed.subject || ctx.messages[0]?.subject || item.headline || "").trim();
+  const subject = (rawSubject.replace(/^((re|aw|fw|fwd)\s*:\s*)+/i, (m) => (/^(re|aw)/i.test(m) ? "Re: " : m)).slice(0, 300)) || "Re:";
   const body = String(parsed.body ?? "").trim();
   if (!body) throw new RelayError(502, "The assistant returned an empty draft. Try again.");
-  const log = Array.isArray(parsed.log) ? parsed.log.filter((l): l is string => typeof l === "string").slice(0, 4) : [];
-  const primaryId = await createMailDraft({ identity, to: [to], ccThread: true, thread: item.mail_thread_id, subject, body });
+  const log = Array.isArray(parsed.log) ? parsed.log.filter((l): l is string => typeof l === "string").slice(0, 6) : [];
+  const sources = Array.isArray(parsed.sources) ? parsed.sources.filter((l): l is string => typeof l === "string").slice(0, 6).map((l) => `Source: ${l}`) : [];
+  const primaryId = await createMailDraft({ identity: ctx.identity, to: [ctx.to], ccThread: true, thread: item.mail_thread_id, subject, body });
+  if (files.length) {
+    try { await run(MAIL_CLI, ["attachment", "add", primaryId, ...files], { timeout: 60_000, maxBuffer: 4 << 20 }); }
+    catch { log.push("Couldn't attach the files; attach them with Attach stock list or in Gmail"); }
+  }
   const followOns = Array.isArray(parsed.follow_ons) ? (parsed.follow_ons as Record<string, unknown>[]).slice(0, 3) : [];
   const todos = Array.isArray(parsed.todos) ? (parsed.todos as Record<string, unknown>[]).slice(0, 3) : [];
   const followRows: { title: string; why: string; mailId: string | null }[] = [];
@@ -244,14 +266,14 @@ export async function draftFromNote(itemId: string, ownerId: string, note: strin
     const fTo = typeof f.to === "string" && /@/.test(f.to) ? f.to.trim() : "";
     const fBody = String(f.body ?? "").trim();
     if (!fBody) continue;
-    // A follow-on with no known recipient is kept as a draft to a placeholder the owner must replace.
+    // A follow-on with no known recipient has no draft yet; the card says so.
     const mailId = fTo ? await createMailDraft({ identity: "alex", to: [fTo], ccThread: false, thread: null, subject: String(f.subject ?? f.title ?? "").slice(0, 300) || "(no subject)", body: fBody }).catch(() => null) : null;
     followRows.push({ title: String(f.title ?? "Follow-on email").slice(0, 120), why: String(f.why ?? "").slice(0, 200), mailId });
   }
   await withPgTransaction(async (tx) => {
     await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state = 'draft'", [itemId]);
     await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb)`,
-      [itemId, `Reply to ${item.counterpart_name ?? to}`, primaryId, note, JSON.stringify(log)]);
+      [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources])]);
     for (const [index, f] of followRows.entries()) {
       await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note) values ($1, 'follow', $2, $3, $4, $5, $6)`,
         [itemId, index + 1, f.title, f.why, f.mailId, note]);
@@ -265,7 +287,91 @@ export async function draftFromNote(itemId: string, ownerId: string, note: strin
     }
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [itemId]);
   });
-  return (await readRelayItem(itemId, ownerId))!;
+}
+
+// ---------- agent jobs ----------
+
+const JOB_ROOT = "/srv/rebattery-data/relay-jobs";
+const JOB_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_job.py";
+const JOB_STALE_MINUTES = 25;
+export type RelayJob = { id: string; item_id: string; status: "queued" | "running" | "ready" | "finalising" | "done" | "failed"; steps: string[]; error: string | null; created_at: string; started_at: string | null; finished_at: string | null; note: string };
+
+const JOB_SYSTEM = (rules: string[], dir: string) => `You are Relay, Alex Polglase's email agent at ReBattery (a UK marketplace and broker for used EV and storage batteries).
+Alex's note asks for work before a reply can be written. Do the work with your tools, then write the reply.
+
+What you may do:
+- Read the CRM database read-only: psql -X -A -d denchclaw -c "<select ...>" (tables include crm_stock_opportunities, crm_bulk_listings, crm_people, crm_companies, mail_message). SELECT only.
+- Build a buyer stock list with the fixed builder, never by hand: /usr/bin/python3 /root/denchclaw/scripts-live/scripts/rebattery/stock_list.py --out "${dir}/ReBattery stock - <scope> - <D Mon YYYY>.xlsx" [--chemistry LFP,NMC] [--type pack,module,cell,container] [--make ...] [--countries ...] [--min-kwh N] [--prices --currency GBP|EUR]. Run with --dry-run first to see counts. Prices only if Alex's note asks for them.
+- Read skills and files for context. Write files ONLY inside ${dir}.
+
+What you must never do: send, draft, edit or label any email (no rebattery-mail draft/edit/send, no gog gmail), write to any database, contact anyone, or name a supplier, town or stock ref in the email.
+
+Writing rules for the reply:
+${rules.map((r) => `- ${r}`).join("\n")}
+- Every number in the email must come from the thread, the deal, Alex's note or your research (list where in "sources").
+- Only say a file is attached if it is in "files". Greet by first name, sign off "Best,\\nAlex", no signature block, no em dashes, British English.
+
+Finish with ONLY this JSON as your final message:
+{"subject": "Re: …", "body": "the reply", "files": ["absolute paths of files you made in ${dir} to attach"], "sources": ["one line per fact you used, e.g. CRM stock: 76 LFP lots, 19,454 kWh"], "todos": [{"title": "…", "detail": "…", "kind": "suggested" | "promise"}], "follow_ons": [], "log": ["3-6 short past-tense lines of what you did"]}`;
+
+/** Queues an agent job for the note and starts the runner. The item moves to Review straight away and shows progress there. */
+async function startJob(item: RelayItem, ownerId: string, note: string): Promise<void> {
+  const ctx = await draftContext(item, ownerId, note);
+  const [job] = await queryPg<{ id: string }>("insert into relay_job (item_id, owner_id, note, steps) values ($1, $2::uuid, $3, $4::jsonb) returning id",
+    [item.id, ownerId, note, JSON.stringify(["Queued"])]);
+  const dir = join(JOB_ROOT, job.id);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, "prompt.txt"), `${JOB_SYSTEM(ctx.rules, dir)}\n\n${ctx.prompt}`, { mode: 0o600 });
+  await withPgTransaction(async (tx) => {
+    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state = 'draft'", [item.id]);
+    await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [item.id]);
+  });
+  const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
+  child.unref();
+}
+
+/** Runs the item's last agent job again with the same note. */
+export async function retryJob(itemId: string, ownerId: string): Promise<void> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  const [last] = await queryPg<{ note: string; status: string }>("select note, status from relay_job where item_id = $1 order by created_at desc limit 1", [itemId]);
+  if (!last) throw new RelayError(404, "Nothing to retry.");
+  if (["queued", "running", "finalising"].includes(last.status)) throw new RelayError(409, "Relay is still working on this.");
+  await startJob(item, ownerId, last.note);
+}
+
+/** Latest job per item in Review. Jobs stuck past the time limit are marked failed. */
+export async function jobsFor(itemIds: string[]): Promise<Map<string, RelayJob>> {
+  if (!itemIds.length) return new Map();
+  await queryPg(`update relay_job set status = 'failed', error = 'Timed out', finished_at = now()
+    where item_id = any($1) and status in ('queued','running','finalising') and created_at < now() - ($2 || ' minutes')::interval`, [itemIds, String(JOB_STALE_MINUTES)]);
+  const rows = await queryPg<RelayJob>(`select distinct on (item_id) id, item_id, status, steps, error, created_at, started_at, finished_at, note
+    from relay_job where item_id = any($1) order by item_id, created_at desc`, [itemIds]);
+  return new Map(rows.map((r) => [r.item_id, r]));
+}
+
+/** Turns finished agent results into drafts. Runs when Relay loads; each job is claimed once. */
+export async function finaliseJobs(ownerId: string): Promise<void> {
+  const claimed = await queryPg<{ id: string; item_id: string; note: string; result: Record<string, unknown> }>(
+    `update relay_job set status = 'finalising' where owner_id = $1::uuid and status = 'ready' returning id, item_id, note, result`, [ownerId]);
+  for (const job of claimed) {
+    try {
+      const item = await readRelayItem(job.item_id, ownerId);
+      if (!item) throw new Error("Email no longer in Relay");
+      const dir = realpathSync(join(JOB_ROOT, job.id));
+      const files = (Array.isArray(job.result.files) ? job.result.files : []).filter((f): f is string => typeof f === "string").flatMap((f) => {
+        try {
+          const real = realpathSync(f);
+          return real.startsWith(`${dir}/`) && /\.(xlsx|csv|pdf|docx)$/i.test(real) && statSync(real).size < 10 << 20 ? [real] : [];
+        } catch { return []; }
+      });
+      const ctx = await draftContext(item, ownerId, job.note);
+      await saveDraftOutputs(item, ownerId, job.note, ctx, job.result, files);
+      await queryPg("update relay_job set status = 'done', finished_at = now(), steps = steps || $2::jsonb where id = $1", [job.id, JSON.stringify(["Draft ready"])]);
+    } catch (error) {
+      await queryPg("update relay_job set status = 'failed', error = $2, finished_at = now() where id = $1", [job.id, (error instanceof Error ? error.message : "Couldn't save the draft").slice(0, 300)]);
+    }
+  }
 }
 
 type NewDraft = { identity: "alex" | "supply"; to: string[]; ccThread: boolean; thread: string | null; subject: string; body: string };
@@ -295,6 +401,7 @@ type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; posit
 
 /** Items in Review with their drafts (read live from mail_message) and suggested to-dos. */
 export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
+  await finaliseJobs(ownerId);
   const signatures = await identitySignatures();
   const items = await queryPg<RelayItem>(`select ${ITEM_COLUMNS} from relay_item i where i.owner_id = $1::uuid and i.status = 'review' order by i.updated_at asc`, [ownerId]);
   if (!items.length) return [];
@@ -309,15 +416,17 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   for (const item of items) {
     const messages = await threadMessages(item.mail_thread_id);
     const deal = await dealSummary(item.bulk_listing_id);
-    const notes = drafts.filter((d) => d.item_id === item.id).map((d) => d.source_note).join("\n");
+    const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).join("\n") : ""}`).join("\n");
     const corpus = [deal, notes, item.context, item.last_message?.text ?? "", ...messages.map((m) => m.body_text ?? "")].join("\n");
     const participants = [...new Set(messages.flatMap((m) => [m.from_email ?? "", ...m.to_emails, ...m.cc_emails]).concat(item.counterpart_email ?? "")
       .map((a) => a.toLowerCase().trim()).filter((a) => a && !a.endsWith("@rebattery.io")))];
     const unit = /per[ -]cell|\/\s?cell|each cell/i.test(deal) ? "cell" : /kwh/i.test(deal) ? "kwh" : null;
     facts.set(item.id, { amounts: amountsIn(corpus), participants, unit });
   }
+  const jobs = await jobsFor(ids);
   return items.map((item) => ({
     ...item,
+    job: jobs.get(item.id) ?? null,
     facts: facts.get(item.id) ?? { amounts: [], participants: [], unit: null },
     drafts: drafts.filter((d) => d.item_id === item.id).map((d) => {
       const m = d.mail_message_id ? byMail.get(d.mail_message_id) : undefined;

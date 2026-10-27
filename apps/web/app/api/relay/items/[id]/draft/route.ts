@@ -11,10 +11,12 @@ export async function POST(req: Request, { params }: Context) {
   const guard = await guardRelay();
   if ("response" in guard) return guard.response;
   const { id } = await params;
-  const note = (await readBody(req))?.note;
+  const body = await readBody(req);
+  const note = body?.note;
+  const mode = body?.mode;
   if (typeof note !== "string") return Response.json({ error: "note required" }, { status: 400 });
   try {
-    return Response.json({ item: await draftFromNote(id, guard.user.id, note) });
+    return Response.json({ item: await draftFromNote(id, guard.user.id, note, mode === "quick" ? "quick" : "auto") });
   } catch (error) {
     return relayError(error);
   }
