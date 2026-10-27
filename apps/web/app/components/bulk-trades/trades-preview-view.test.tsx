@@ -78,47 +78,80 @@ function mockApi({ inbox, sheet = ROWS, hangInbox }: Api = {}) {
 describe("Trades Preview sheet", () => {
   beforeEach(() => { forgetShared(); window.localStorage.clear(); nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview"); });
   afterEach(() => vi.unstubAllGlobals());
+  const go = (search: string) => nativeReplace(NEXT_STATE, "", `/?path=%7Etrades-preview${search}`);
+  const params = () => new URLSearchParams(window.location.search);
+  const rowOf = (name: RegExp) => screen.getByRole("button", { name }).closest("li")!;
 
-  it("shows one row per source record with its company, progress, latest development and next action, and no tabs", async () => {
+  it("opens on Today: four tabs, the driver filter, the quarter target and next actions by due date", async () => {
+    vi.stubGlobal("fetch", mockApi());
+    render(<TradesPreviewView />);
+    const today = await screen.findByRole("region", { name: "Today" });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Today", "Requests", "Supply", "Board"]);
+    expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
+    expect(within(screen.getByRole("group", { name: "Driver" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Alex", "Sean", "Ari"]);
+    expect(screen.getByRole("region", { name: "Quarter target" })).toHaveTextContent("£54k (≈ €62k)");
+    expect(within(today).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
+    const none = screen.getByRole("region", { name: "No next action" });
+    expect(within(none).getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
+    expect(within(none).getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Selling" })).not.toBeInTheDocument();
+    expect(window.location.search).toBe("?path=%7Etrades-preview");
+  });
+
+  it("Requests lists demand only, without the side toggle, and offers only demand stages", async () => {
+    go("&tab=demand");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
-    const trade = screen.getByRole("button", { name: /Synthetic eBS37/ }).closest("li")!;
+    expect(screen.queryByRole("button", { name: /3 hybrid packs/ })).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 1 live")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Buying" })).not.toBeInTheDocument();
+    const progress = Array.from((screen.getByLabelText("Progress") as HTMLSelectElement).options).map((o) => o.value);
+    expect(progress).toEqual(["all", "New", "Qualified", "Sourcing", "Found", "Can't source", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+  });
+
+  it("Supply lists supply with its stage, chance, owner and next action", async () => {
+    go("&tab=supply");
+    vi.stubGlobal("fetch", mockApi({ sheet: [...ROWS.slice(0, 2), { ...ROWS[2], likelihood: 60 }] }));
+    render(<TradesPreviewView />);
+    const trade = (await screen.findByRole("button", { name: /Synthetic eBS37/ })).closest("li")!;
+    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
     expect(within(trade).getByText("Available")).toBeInTheDocument();
     expect(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
-    expect(within(trade).getByText(/Alex/)).toBeInTheDocument();
-    expect(screen.getByText("3 of 3 live")).toBeInTheDocument();
-    for (const gone of ["Today", "Trades", "Demand", "Supply"]) expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
+    expect(trade.querySelector("[data-owner]")).toHaveTextContent("Alex");
+    expect(trade.querySelector("[data-chance]")).toHaveTextContent("60%");
+    const progress = Array.from((screen.getByLabelText("Progress") as HTMLSelectElement).options).map((o) => o.value);
+    expect(progress).toEqual(["all", "New", "Qualified", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
   });
 
   it("says plainly when a value is not recorded instead of guessing", async () => {
+    go("&tab=demand");
     vi.stubGlobal("fetch", mockApi({ sheet: [row({ company: null })] }));
     render(<TradesPreviewView />);
     const demand = (await screen.findByRole("button", { name: /12 Ioniq packs/ })).closest("li")!;
-    // Company, latest development, value and fee are unrecorded: each shows a dash.
-    expect(within(demand).getAllByText("—")).toHaveLength(4);
+    // Company, latest development, value, fee, chance and owner are unrecorded: each shows a dash.
+    expect(within(demand).getAllByText("—")).toHaveLength(6);
     expect(within(demand).getByRole("button", { name: "Add next action" })).toBeInTheDocument();
   });
 
-  it("edits the next action in place for a listing and for a trade without opening the row", async () => {
+  it("edits the next action in place on Today without opening the row", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/bulk-listings/d1/next" || url === "/api/bulk-trades/bt_1") return new Response(JSON.stringify({}));
+      if (url === "/api/bulk-listings/d1/next" || url === "/api/bulk-listings/bt_1/next") return new Response(JSON.stringify({}));
       return mockApi()(url, init);
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<TradesPreviewView />);
-    const demand = (await screen.findByRole("button", { name: /12 Ioniq packs/ })).closest("li")!;
-    await userEvent.click(within(demand).getByRole("button", { name: "Add next action" }));
+    await screen.findByRole("region", { name: "No next action" });
+    await userEvent.click(within(rowOf(/12 Ioniq packs/)).getByRole("button", { name: "Add next action" }));
     await userEvent.type(screen.getByLabelText("Next action"), "Send price list{Enter}");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/next", expect.objectContaining({
       method: "PUT", body: JSON.stringify({ next_action: "Send price list", next_due: null }),
     })));
-    expect(await within(demand).findByRole("button", { name: "Edit next action: Send price list" })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("demand")).toBeNull();
+    // It now has an undated next action.
+    expect(within(await screen.findByRole("region", { name: "No date" })).getByRole("button", { name: "Edit next action: Send price list" })).toBeInTheDocument();
+    expect(params().get("listing")).toBeNull();
 
-    const trade = screen.getByRole("button", { name: /Synthetic eBS37/ }).closest("li")!;
-    await userEvent.click(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Edit next action: Call the buyer/ }));
     const input = screen.getByLabelText("Next action");
     await userEvent.clear(input);
     await userEvent.type(input, "Chase the bid{Enter}");
@@ -127,109 +160,136 @@ describe("Trades Preview sheet", () => {
     })));
   });
 
-  it("filters by search and starting point, and keeps the filters in the URL", async () => {
+  it("filters Supply by search, keeps it in the URL, and clears back to the tab", async () => {
+    go("&tab=supply");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await screen.findByRole("button", { name: /12 Ioniq packs/ });
-    await userEvent.click(screen.getByRole("button", { name: "Selling" }));
-    expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("side")).toBe("seller");
-
-    await userEvent.click(screen.getByRole("button", { name: "Selling" })); // pressing it again clears the filter
-    expect(screen.getByText("3 of 3 live")).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).has("side")).toBe(false);
-    expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Both/ })).not.toBeInTheDocument();
-    await userEvent.type(screen.getByRole("searchbox"), "nolden");
-    expect(screen.getByText("1 of 3 live")).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("q")).toBe("nolden");
-
+    await screen.findByRole("button", { name: /3 hybrid packs/ });
+    await userEvent.type(screen.getByRole("searchbox"), "hybrid");
+    expect(screen.getByText("1 of 2 live")).toBeInTheDocument();
+    expect(params().get("q")).toBe("hybrid");
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("3 of 3 live")).toBeInTheDocument();
-    expect(window.location.search).toBe("?path=%7Etrades-preview");
-  });
-
-  it("opens a filtered view from a link, and an older tab=demand link as buyer-led", async () => {
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&progress=Offered");
-    vi.stubGlobal("fetch", mockApi());
-    const first = render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 3 live")).toBeInTheDocument();
-    expect(screen.getByLabelText("Progress")).toHaveValue("Offered");
-    first.unmount();
-
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&tab=demand");
-    render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 3 live")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Buying" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
+    expect(window.location.search).toBe("?path=%7Etrades-preview&tab=supply");
   });
 
   it("keeps the spaces while a multiword search is typed", async () => {
+    go("&tab=supply");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await screen.findByRole("button", { name: /12 Ioniq packs/ });
+    await screen.findByRole("button", { name: /3 hybrid packs/ });
     await userEvent.type(screen.getByRole("searchbox"), "Seller Ltd");
     expect(screen.getByRole("searchbox")).toHaveValue("Seller Ltd");
-    expect(screen.getByText("2 of 3 live")).toBeInTheDocument();
+    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
   });
 
-  it("an older tab=demand link keeps its filter through open and back, and Back refreshes the list", async () => {
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&tab=demand");
+  it("filters every tab by driver, keeps it in the URL and across tabs, and resets the other filters on a tab change", async () => {
+    go("&tab=supply&q=packs");
+    vi.stubGlobal("fetch", mockApi());
+    render(<TradesPreviewView />);
+    await screen.findByRole("button", { name: /3 hybrid packs/ });
+    await userEvent.click(screen.getByRole("button", { name: "Alex" }));
+    expect(params().get("owner")).toBe("Alex");
+    expect(screen.getByText("1 of 2 live")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /3 hybrid packs/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Today" }));
+    expect(window.location.search).toBe("?path=%7Etrades-preview&owner=Alex");
+    expect(screen.getByRole("region", { name: "Quarter target" })).toHaveTextContent("£27k (≈ €31k)");
+    expect(screen.getByRole("button", { name: /Synthetic eBS37/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(params().has("owner")).toBe(false);
+    expect(screen.getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
+  });
+
+  it("opens filtered views from links, and older links on the right tab", async () => {
+    go("&tab=supply&progress=Offered");
+    vi.stubGlobal("fetch", mockApi());
+    const first = render(<TradesPreviewView />);
+    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    expect(screen.getByLabelText("Progress")).toHaveValue("Offered");
+    first.unmount();
+
+    for (const [search, tab] of [["&side=buyer", "Requests"], ["&side=seller", "Supply"], ["&tab=board", "Board"], ["&tab=trades", "Board"], ["&owner=Sean", "Today"]] as const) {
+      go(search);
+      const view = render(<TradesPreviewView />);
+      expect(await screen.findByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+      view.unmount();
+    }
+  });
+
+  it("an older side=buyer link opens Requests, keeps it through open and back, and Back refreshes the list", async () => {
+    go("&side=buyer");
     const fetchMock = mockApi();
     vi.stubGlobal("fetch", fetchMock);
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
-    expect(new URLSearchParams(window.location.search).get("side")).toBe("buyer");
+    expect(params().get("listing")).toBe("d1");
+    expect(params().get("tab")).toBe("demand");
     const loads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/bulk-trades/sheet").length;
     const before = loads();
 
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&side=buyer"); // browser Back, not the breadcrumb
+    go("&tab=demand"); // browser Back, not the breadcrumb
     window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(await screen.findByRole("button", { name: "Buying" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("tab", { name: "Requests" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(loads()).toBeGreaterThan(before));
   });
 
-  it("opens a trade by link or by click, and Back returns to the same filtered sheet", async () => {
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&side=seller");
+  it("opens a trade by click, and Back returns to the same tab", async () => {
+    go("&tab=supply&owner=Alex");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "Listing bt_1" })).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("listing")).toBe("bt_1");
+    expect(params().get("listing")).toBe("bt_1");
 
     await userEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(await screen.findByText("2 of 3 live")).toBeInTheDocument();
-    expect(window.location.search).toBe("?path=%7Etrades-preview&side=seller");
+    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    expect(window.location.search).toBe("?path=%7Etrades-preview&tab=supply&owner=Alex");
   });
 
-  it("clicking a demand row opens that demand by id", async () => {
+  it("clicking a row on Today opens that listing by id", async () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
-    expect(new URLSearchParams(window.location.search).get("listing")).toBe("d1");
+    expect(params().get("listing")).toBe("d1");
+  });
+
+  it("puts only deals on the Board, and the Today nudge for unsized deals opens it", async () => {
+    vi.stubGlobal("fetch", mockApi());
+    render(<TradesPreviewView />);
+    await userEvent.click(await screen.findByRole("button", { name: "1 deal needs a fee or chance" }));
+    expect(params().get("tab")).toBe("board");
+    const offered = await screen.findByRole("region", { name: "Offered" });
+    expect(within(offered).getByText("3 hybrid packs")).toBeInTheDocument();
+    expect(within(offered).getByText("1 unsized")).toBeInTheDocument();
+    expect(screen.queryByText("12 Ioniq packs")).not.toBeInTheDocument();
+    expect(screen.queryByText("Synthetic eBS37")).not.toBeInTheDocument();
   });
 
   it("hands a clicked row to the workspace as its own tab and leaves the sheet where it is", async () => {
     const onOpenListing = vi.fn();
+    go("&tab=demand");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView onOpenListing={onOpenListing} />);
     await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
     expect(onOpenListing).toHaveBeenCalledWith("d1", expect.stringContaining("Ioniq"));
-    expect(new URLSearchParams(window.location.search).get("listing")).toBeNull();
+    expect(params().get("listing")).toBeNull();
     expect(screen.getByText(/\d of \d live/)).toBeInTheDocument();
   });
 
-  it("in the workspace, brings the filters back when the sheet tab is shown again", async () => {
+  it("in the workspace, brings the tab and filters back when the sheet tab is shown again", async () => {
     window.sessionStorage.clear();
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&side=seller");
+    go("&tab=supply&owner=Alex");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView onOpenListing={vi.fn()} />);
-    expect(await screen.findByText("2 of 3 live")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
     first.unmount();
-    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview");
+    go("");
     render(<TradesPreviewView onOpenListing={vi.fn()} />);
-    expect(await screen.findByText("2 of 3 live")).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("side")).toBe("seller");
+    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    expect(params().get("tab")).toBe("supply");
+    expect(params().get("owner")).toBe("Alex");
     window.sessionStorage.clear();
   });
 
@@ -240,7 +300,7 @@ describe("Trades Preview sheet", () => {
     expect(screen.getByRole("button", { name: /Inbox ·/ })).toBeInTheDocument();
   });
 
-  it("distinguishes loading, an empty sheet and a filter that matches nothing", async () => {
+  it("distinguishes loading and an empty sheet on Today and on a list", async () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
     const loading = render(<TradesPreviewView />);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
@@ -248,6 +308,11 @@ describe("Trades Preview sheet", () => {
 
     forgetShared();
     vi.stubGlobal("fetch", mockApi({ sheet: [] }));
+    const empty = render(<TradesPreviewView />);
+    expect(await screen.findByText("Nothing open right now.")).toBeInTheDocument();
+    empty.unmount();
+
+    go("&tab=demand");
     render(<TradesPreviewView />);
     expect(await screen.findByText("Nothing live right now.")).toBeInTheDocument();
   });
@@ -255,9 +320,13 @@ describe("Trades Preview sheet", () => {
   it("shows the sheet's error and keeps the page usable", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/bulk-trades/sheet"
       ? new Response(JSON.stringify({ error: "Database unavailable" }), { status: 500 }) : new Response(JSON.stringify({ trades: [], owners: [] }))));
-    render(<TradesPreviewView />);
+    const first = render(<TradesPreviewView />);
     expect(await screen.findByText("Database unavailable")).toBeInTheDocument();
-    expect(screen.getByText("The sheet could not load.")).toBeInTheDocument();
+    expect(screen.getByText("The list could not load.")).toBeInTheDocument();
+    first.unmount();
+    nativeReplace(NEXT_STATE, "", "/?path=%7Etrades-preview&tab=supply");
+    render(<TradesPreviewView />);
+    expect(await screen.findByText("The sheet could not load.")).toBeInTheDocument();
   });
 
   it("shows the inbox check status and possible new trades", async () => {

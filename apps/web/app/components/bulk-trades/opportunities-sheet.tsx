@@ -18,7 +18,7 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   warning: { dot: "var(--bt-red)", bg: "var(--bt-red-bg)" },
 };
 
-const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_5rem_5rem_5rem_minmax(12rem,1.5fr)]";
+const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_4rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_4.5rem_4.5rem_4.5rem_3.5rem_4rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -48,7 +48,7 @@ export function WaitingBadge({ row, compact = false, large = false }: { row: Pic
   );
 }
 
-function ProgressChip({ row }: { row: SheetRow }) {
+export function ProgressChip({ row }: { row: Pick<SheetRow, "tone" | "progress" | "held"> }) {
   const tone = TONE[row.tone];
   return (
     <span className="inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium" style={{ background: tone.bg }}>
@@ -97,7 +97,7 @@ function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: 
   );
 }
 
-function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
+function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = true }: { loading?: boolean; showSide?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
   const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
   return (
     <li aria-hidden={loading || undefined} onClick={() => { if (!loading) onOpen(row); }}
@@ -107,11 +107,11 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
         <span className="flex items-start gap-1">
           <button type="button" disabled={loading} title={row.title}
             className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
-          {!loading && <SideChip side={row.side} />}
+          {!loading && showSide && <SideChip side={row.side} />}
           {!loading && row.is_trade && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
           {!loading && <CopyIdButton id={row.id} />}
         </span>
-        {(loading || row.company) && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company}</Sh></span>}
+        {(loading || row.company || row.owner) && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={14}>{[row.company, row.owner].filter(Boolean).join(" · ")}</Sh></span>}
         <span className="mt-1 inline-flex md:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       </span>
       <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company ?? "—"}</Sh></span>
@@ -123,13 +123,21 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false }: { loading
       </span>
       <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No value recorded"}
         style={{ color: row.value_eur != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={5}>{formatEurCompact(row.value_eur)}</Sh></span>
-      <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.fee_eur != null ? `Our fee at ${FEE_RATE * 100}%, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No value, so no fee"}
+      <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.fee_eur != null ? `${row.fee_is_override ? "Fee set by hand" : `Our fee at ${FEE_RATE * 100}% of value`}, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No value, so no fee"}
         style={{ color: row.fee_eur != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={5}>{formatEurCompact(row.fee_eur)}</Sh></span>
+      <span data-chance className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}
+        style={{ color: row.likelihood != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : "—"}</Sh></span>
+      <span data-owner className="hidden min-w-0 truncate text-[13px] md:block" style={{ color: row.owner ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={4}>{row.owner ?? "—"}</Sh></span>
       <span className="min-w-0">
-        <NextActionCell loading={loading} value={row.next_action} due={row.next_due} owner={row.owner} today={today} onSave={(text) => onNext(row, text)} />
+        <NextActionCell loading={loading} value={row.next_action} due={row.next_due} today={today} onSave={(text) => onNext(row, text)} />
       </span>
     </li>
   );
+}
+
+/** True when the filter bar narrows the rows. The driver is a page choice, and a locked side is the tab itself. */
+function isFiltered(filters: SheetFilters, sideLocked: boolean): boolean {
+  return filters.query.trim() !== "" || (!sideLocked && filters.side !== "all") || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all" || filters.waiting !== "all";
 }
 
 const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
@@ -139,10 +147,17 @@ const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
 }));
 
 /** Search, starting point and menus; shared by the list and the board. */
-export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, sort, onSort }: { rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean; sort?: SheetSort; onSort?: (next: SheetSort) => void }) {
+export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, hideSide = false, stages, sort, onSort }: {
+  rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean;
+  /** The sheet is locked to one kind (Requests or Supply): no Buying/Selling toggle. */
+  hideSide?: boolean;
+  /** The Progress choices; defaults to the stages present in the rows. */
+  stages?: readonly string[];
+  sort?: SheetSort; onSort?: (next: SheetSort) => void;
+}) {
   const options = sheetOptions(rows);
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
-  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all" || filters.waiting !== "all";
+  const filtered = isFiltered(filters, hideSide);
   const sides = ["buyer", "seller"] as const;
   return (
       <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +168,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
             placeholder="Search buyers, offers, trades" className={`${field} w-full pl-9`} style={fieldStyle} />
         </label>
         {/* Starting point. Neither selected shows everything; pressing the selected one again clears it. */}
-        <div role="group" aria-label="Starting point" className="flex rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
+        {!hideSide && <div role="group" aria-label="Starting point" className="flex rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
           {sides.map((value) => (
             <button key={value} type="button" aria-pressed={filters.side === value} onClick={() => set({ side: filters.side === value ? "all" : value })}
               className="h-8 shrink-0 rounded-md px-3 text-[13px] whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"
@@ -163,8 +178,8 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
               {SIDE_LABEL[value]}
             </button>
           ))}
-        </div>
-        {!hideProgress && <Select label="Progress" value={filters.progress} options={options.progress} onChange={(progress) => set({ progress })} />}
+        </div>}
+        {!hideProgress && <Select label="Progress" value={filters.progress} options={stages ? [...stages] : options.progress} onChange={(progress) => set({ progress })} />}
         <Select label="Company" value={filters.company} options={options.company} onChange={(company) => set({ company })} />
         <Select label="Category" value={filters.category} options={options.category} onChange={(category) => set({ category })} />
         <select aria-label="Waiting on" value={filters.waiting} onChange={(event) => set({ waiting: event.target.value as SheetFilters["waiting"] })}
@@ -181,7 +196,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
         )}
         {filtered && (
           <button type="button" className="h-9 rounded-lg px-2 text-[13px] underline" style={{ color: "var(--bt-text-2)" }}
-            onClick={() => onFilters(NO_FILTERS)}>
+            onClick={() => onFilters({ ...NO_FILTERS, owner: filters.owner, side: hideSide ? filters.side : "all" })}>
             Clear filters
           </button>
         )}
@@ -189,7 +204,9 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
   );
 }
 
-export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, sort, onSort, onFilters, onOpen, onNext }: {
+export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, sort, onSort, onFilters, onOpen, onNext, hideSide = false, stages }: {
+  hideSide?: boolean;
+  stages?: readonly string[];
   sort?: SheetSort;
   onSort?: (next: SheetSort) => void;
   rows: SheetRow[];
@@ -204,13 +221,10 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
 }) {
   const busy = loading && !rows.length;
   const displayRows = busy ? PLACEHOLDER_ROWS : shown;
-  const options = sheetOptions(rows);
-  const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
-  const filtered = filters.query.trim() !== "" || filters.side !== "all" || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all" || filters.waiting !== "all";
-  const sides = ["buyer", "seller"] as const;
+  const filtered = isFiltered(filters, hideSide);
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
-      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} sort={sort} onSort={onSort} />
+      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} sort={sort} onSort={onSort} hideSide={hideSide} stages={stages} />
 
       <ErrorText error={error} />
       <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">
@@ -218,13 +232,13 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
       </p>
 
       <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <div className="md:min-w-[54rem] lg:min-w-[72rem]">
+        <div className="md:min-w-[56rem] lg:min-w-[78rem]">
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span className="hidden lg:block">Value</span><span className="hidden lg:block" title={`Fixed ${FEE_RATE * 100}% of value`}>Fee</span><span>Next action</span>
+          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span className="hidden lg:block">Value</span><span className="hidden lg:block" title={`${FEE_RATE * 100}% of value unless set`}>Fee</span><span className="hidden lg:block" title="Chance the deal completes">Chance</span><span>Owner</span><span>Next action</span>
         </div>
         {displayRows.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">
-            {displayRows.map((row) => <SheetRowItem key={row.key} row={row} loading={busy} today={today} onOpen={onOpen} onNext={onNext} />)}
+            {displayRows.map((row) => <SheetRowItem key={row.key} row={row} loading={busy} today={today} onOpen={onOpen} onNext={onNext} showSide={!hideSide} />)}
           </ul>
         ) : (
           <p className="px-2 py-10 text-center text-[13px]" style={{ color: "var(--bt-muted)" }}>
