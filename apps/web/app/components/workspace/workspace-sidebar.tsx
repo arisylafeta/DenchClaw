@@ -126,6 +126,7 @@ type WorkspaceSidebarProps = {
       | "crm-campaigns"
       | "crm-home"
       | "crm-leaderboard"
+      | "crm-relay"
       | "crm-inbox"
       | "crm-calendar"
       | "trades-preview"
@@ -138,7 +139,7 @@ type WorkspaceSidebarProps = {
       | "platform-payout-reviews",
   ) => void;
   /** Currently-active CRM nav item, used to highlight the row. */
-  activeCrmTarget?: "home" | "people" | "companies" | "campaigns" | "leaderboard" | "inbox" | "calendar" | "trades-preview" | null;
+  activeCrmTarget?: "home" | "people" | "companies" | "campaigns" | "leaderboard" | "relay" | "inbox" | "calendar" | "trades-preview" | null;
   /** Currently-active marketplace operations page. */
   activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
@@ -433,12 +434,18 @@ export function WorkspaceSidebar({
 			),
 		},
 		{
+			id: "crm-relay" as const,
+			label: "Relay",
+			target: "relay" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4Z" /></svg>,
+		},
+		{
 			id: "trades-preview" as const,
 			label: "Bulk Trades",
 			target: "trades-preview" as const,
 			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>,
 		},
-	];
+	].filter((item) => item.id !== "crm-relay" || authUser?.email?.toLowerCase() === "alex@rebattery.io");
 
 	const platformNavItems = [
 		{

@@ -70,6 +70,7 @@ export type ContentTabKind =
   | "crm-inbox"
   | "crm-home"
   | "crm-leaderboard"
+  | "crm-relay"
   | "crm-calendar"
   | "trades-preview"
   | "trade-listing"
@@ -357,6 +358,7 @@ export function inferContentTabKindFromPath(path: string): ContentTabKind {
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/home") return "crm-home";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
+  if (path === "~crm/relay") return "crm-relay";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === "~trades-preview") return "trades-preview";
   if (path.startsWith("~trades-preview/listing/")) return "trade-listing";
@@ -387,6 +389,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   if (path === "~crm/inbox") return "Mail";
   if (path === "~crm/home") return "Home";
   if (path === "~crm/leaderboard") return "Leaderboard";
+  if (path === "~crm/relay") return "Relay";
   if (path === "~crm/calendar") return "Calendar";
   if (path === "~trades-preview") return "Bulk Trades";
   if (path.startsWith("~trades-preview/listing/")) return "Listing";

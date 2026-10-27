@@ -27,6 +27,11 @@ async function identities(): Promise<Identity[]> {
   return list;
 }
 
+/** Signature text per identity key, so callers can show a draft's main copy without the signature. */
+export async function identitySignatures(): Promise<Map<string, string | null>> {
+  return new Map((await identities().catch(() => [])).map((i) => [i.key, i.signature_text]));
+}
+
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Same paragraph markup `mail-draft-recopy.py` writes. */

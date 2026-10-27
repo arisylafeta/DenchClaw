@@ -118,6 +118,7 @@ export type ContentState =
   | { kind: "crm-inbox" }
   | { kind: "crm-home" }
   | { kind: "crm-leaderboard" }
+  | { kind: "crm-relay" }
   | { kind: "crm-calendar" }
   | { kind: "trades-preview" }
   | { kind: "trade-listing"; listingId: string }

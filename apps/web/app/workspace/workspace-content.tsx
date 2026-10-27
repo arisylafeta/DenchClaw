@@ -50,6 +50,7 @@ import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTra
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
 import { LeaderboardView } from "../components/leaderboard/leaderboard-view";
+import { RelayView } from "../components/relay/relay-view";
 import { HomeView } from "../components/home/home-view";
 import { useSearchIndex } from "@/lib/search-index";
 import {
@@ -428,6 +429,7 @@ export function nodeToContentTabKind(nodeType: string, path: string): ContentTab
   if (path === "~crm/inbox") return "crm-inbox";
   if (path === "~crm/home") return "crm-home";
   if (path === "~crm/leaderboard") return "crm-leaderboard";
+  if (path === "~crm/relay") return "crm-relay";
   if (path === "~crm/calendar") return "crm-calendar";
   if (path === TRADES_PREVIEW_PATH) return "trades-preview";
   if (parseTradeListingPath(path)) return "trade-listing";
@@ -1491,6 +1493,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         | "crm-campaigns"
         | "crm-home"
         | "crm-leaderboard"
+        | "crm-relay"
         | "crm-inbox"
         | "crm-calendar"
         | "trades-preview"
@@ -1529,6 +1532,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         "crm-inbox": { path: "~crm/inbox", name: "Mail" },
         "crm-home": { path: "~crm/home", name: "Home" },
         "crm-leaderboard": { path: "~crm/leaderboard", name: "Leaderboard" },
+        "crm-relay": { path: "~crm/relay", name: "Relay" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "trades-preview": { path: TRADES_PREVIEW_PATH, name: "Bulk Trades" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
@@ -2555,6 +2559,8 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
             ? "home" as const
           : activeContentTab?.kind === "crm-leaderboard"
             ? "leaderboard" as const
+          : activeContentTab?.kind === "crm-relay"
+            ? "relay" as const
           : activeContentTab?.kind === "crm-inbox"
             ? "inbox" as const
             : activeContentTab?.kind === "crm-calendar"
@@ -3348,6 +3354,8 @@ function ContentRenderer({
     case "crm-home":
       return <HomeView />;
 
+    case "crm-relay":
+      return <RelayView onOpenListing={onOpenListing} />;
     case "crm-leaderboard":
       return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 
