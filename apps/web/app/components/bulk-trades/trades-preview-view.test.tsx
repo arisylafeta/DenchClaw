@@ -89,7 +89,7 @@ describe("Trades Preview sheet", () => {
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Today", "Requests", "Supply", "Board"]);
     expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
     expect(within(screen.getByRole("group", { name: "Driver" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Alex", "Sean", "Ari"]);
-    expect(screen.getByRole("region", { name: "Quarter target" })).toHaveTextContent("£54k (≈ €62k)");
+    expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("£54k (≈ €62k)");
     expect(within(today).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
     const none = screen.getByRole("region", { name: "No next action" });
     expect(within(none).getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
@@ -194,11 +194,18 @@ describe("Trades Preview sheet", () => {
     expect(screen.queryByRole("button", { name: /3 hybrid packs/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Today" }));
     expect(window.location.search).toBe("?path=%7Etrades-preview&owner=Alex");
-    expect(screen.getByRole("region", { name: "Quarter target" })).toHaveTextContent("£27k (≈ €31k)");
+    const target = screen.getByRole("region", { name: "Pipeline against quarter target" });
+    expect(target).toHaveTextContent("£27k (≈ €31k)");
+    expect(target).toHaveTextContent("not fees banked this quarter");
+    expect(target).not.toHaveTextContent("Includes deals with no owner");
     expect(screen.getByRole("button", { name: /Synthetic eBS37/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Ari" }));
+    expect(screen.queryByRole("region", { name: "Pipeline against quarter target" })).not.toBeInTheDocument();
+    expect(screen.getByText("Targets are set for Alex and Sean.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "All" }));
     expect(params().has("owner")).toBe(false);
+    expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("Includes deals with no owner.");
     expect(screen.getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
   });
 

@@ -11,7 +11,8 @@ describe("quarter target", () => {
   it("is £27k per driver: both drivers for All, one for a single owner, in approximate euros", () => {
     expect([QUARTER_TARGET_GBP, EUR_PER_GBP]).toEqual([27000, 1.15]);
     expect(quarterTarget("all")).toEqual({ gbp: 54000, eur: 62100, needed_eur: 310500 });
-    for (const owner of ["Alex", "Sean", "Ari"] as const) expect(quarterTarget(owner)).toEqual({ gbp: 27000, eur: 31050, needed_eur: 155250 });
+    for (const owner of ["Alex", "Sean"] as const) expect(quarterTarget(owner)).toEqual({ gbp: 27000, eur: 31050, needed_eur: 155250 });
+    expect(quarterTarget("Ari")).toBeNull();
   });
 });
 

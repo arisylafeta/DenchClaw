@@ -7,14 +7,15 @@ import type { SheetRow } from "./bulk-sheet";
 export const QUARTER_TARGET_GBP = 27_000;
 /** Approximate rate used only to show the target in EUR next to the EUR fees; not a live rate. */
 export const EUR_PER_GBP = 1.15;
-/** How many drivers share the target when every owner is shown (Alex and Sean). */
-export const TARGET_DRIVERS = 2;
+/** The drivers with a target. Ari owns deals but has none. */
+export const TARGET_DRIVERS: readonly DealOwner[] = ["Alex", "Sean"];
 /** Share of the Board's deals we expect to win; the unweighted fees needed are the target divided by this. */
 export const WIN_RATE = 0.2;
 
-/** The quarter target for the owner filter: both drivers for All, one for a single owner. */
-export function quarterTarget(owner: DealOwner | "all"): { gbp: number; eur: number; needed_eur: number } {
-  const gbp = QUARTER_TARGET_GBP * (owner === "all" ? TARGET_DRIVERS : 1);
+/** The quarter target for the owner filter: both drivers for All, one for Alex or Sean, none (null) for anyone else. */
+export function quarterTarget(owner: DealOwner | "all"): { gbp: number; eur: number; needed_eur: number } | null {
+  if (owner !== "all" && !TARGET_DRIVERS.includes(owner)) return null;
+  const gbp = QUARTER_TARGET_GBP * (owner === "all" ? TARGET_DRIVERS.length : 1);
   const eur = Math.round(gbp * EUR_PER_GBP);
   return { gbp, eur, needed_eur: Math.round(eur / WIN_RATE) };
 }

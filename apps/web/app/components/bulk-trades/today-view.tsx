@@ -32,22 +32,28 @@ function Meter({ label, hint, value, of, focal = false, loading }: { label: stri
   );
 }
 
-/** This quarter's take against the target: what the Board's deals are worth weighted by their chance, and in full against a 20% win rate. */
+/** Open deals on the Board against the quarter target: their fees weighted by chance, and in full against what a
+ * 20% win rate needs. Not take banked this quarter: there is no quarter accounting yet. */
 export function QuarterTarget({ rows, owner, loading, onOpenBoard }: { rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; onOpenBoard: () => void }) {
   const target = quarterTarget(owner);
+  if (!target) {
+    return <p data-no-target className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Targets are set for Alex and Sean.</p>;
+  }
   const totals = dealTotals(boardRows(rows));
   return (
-    <section aria-label="Quarter target" className="flex flex-col gap-3 rounded-xl border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+    <section aria-label="Pipeline against quarter target" className="flex flex-col gap-3 rounded-xl border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="text-[14px] font-semibold">Quarter target{owner !== "all" && <span className="font-normal" style={{ color: "var(--bt-muted)" }}> · {owner}</span>}</h2>
+        <h2 className="text-[14px] font-semibold">Pipeline against quarter target{owner !== "all" && <span className="font-normal" style={{ color: "var(--bt-muted)" }}> · {owner}</span>}</h2>
         <span className="text-[14px] font-semibold tabular-nums" title={`Approx. at €${EUR_PER_GBP} to £1`}>
           {roundK("£", target.gbp)} <span className="font-normal" style={{ color: "var(--bt-muted)" }}>(≈ {roundK("€", target.eur)})</span>
         </span>
       </header>
-      <Meter label="Weighted fees" hint="fee × chance on the Board" value={totals.weighted_eur} of={target.eur} focal loading={loading} />
+      <Meter label="Weighted fees" hint="fee × chance" value={totals.weighted_eur} of={target.eur} focal loading={loading} />
       <Meter label="All fees" hint={`needed at a ${WIN_RATE * 100}% win rate`} value={totals.fee_eur} of={target.needed_eur} loading={loading} />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>Euro amounts approx. at €{EUR_PER_GBP} to £1.</p>
+        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>
+          Open deals on the Board, Offered to Delivered, not fees banked this quarter.{owner === "all" && " Includes deals with no owner."} Euro amounts approx. at €{EUR_PER_GBP} to £1.
+        </p>
         {!loading && totals.unsized > 0 && (
           <button type="button" onClick={onOpenBoard} data-unsized-nudge
             className="inline-flex h-8 items-center rounded-lg border px-3 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"
