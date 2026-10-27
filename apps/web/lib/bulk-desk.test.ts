@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardRows, dealTotals, EUR_PER_GBP, QUARTER_TARGET_GBP, quarterTarget, todayGroups, weightedFee } from "./bulk-desk";
+import { boardRows, countedDeals, dealTotals, EUR_PER_GBP, QUARTER_TARGET_GBP, quarterTarget, todayGroups, weightedFee } from "./bulk-desk";
 import type { SheetRow } from "./bulk-sheet";
 
 const row = (id: string, over: Partial<SheetRow> = {}): SheetRow => ({
@@ -26,6 +26,17 @@ describe("deal totals", () => {
     const rows = [row("a", { value_eur: 40000, fee_eur: 4000, likelihood: 50 }), row("b", { fee_eur: 2200, likelihood: 100 }), row("c", { fee_eur: 9000 }), row("d", { likelihood: 40 })];
     expect(dealTotals(rows)).toEqual({ count: 4, value_eur: 40000, fee_eur: 15200, weighted_eur: 4200, unsized: 2 });
     expect(dealTotals([])).toEqual({ count: 0, value_eur: 0, fee_eur: 0, weighted_eur: 0, unsized: 0 });
+  });
+  it("counts a supply offered to a demand once, on the demand, when both are in the set", () => {
+    const demand = row("d1", { kind: "demand", side: "buyer", fee_eur: 3000, likelihood: 50, value_eur: 30000, paired_listing_id: "s1" });
+    const supply = row("s1", { fee_eur: 4800, likelihood: 60, value_eur: 48000, paired_listing_id: "d1" });
+    const other = row("s2", { fee_eur: 1000, likelihood: 100, paired_listing_id: "d9" });
+    expect(countedDeals([demand, supply, other]).map((r) => r.id)).toEqual(["d1", "s2"]);
+    expect(dealTotals([demand, supply, other])).toEqual({ count: 2, value_eur: 30000, fee_eur: 4000, weighted_eur: 2500, unsized: 0 });
+    // Without its demand in the set, the supply counts.
+    expect(dealTotals([supply, other])).toMatchObject({ count: 2, fee_eur: 5800 });
+    // An unsized paired supply is not counted as unsized either.
+    expect(dealTotals([demand, row("s1", { paired_listing_id: "d1" })]).unsized).toBe(0);
   });
   it("keeps only deal stages for the Board", () => {
     const stages = ["New", "Qualified", "Sourcing", "Found", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;

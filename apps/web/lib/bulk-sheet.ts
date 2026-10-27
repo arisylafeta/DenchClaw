@@ -52,6 +52,9 @@ export type SheetRow = {
   fee_eur?: number | null;
   /** True when the fee was set by hand rather than taken as FEE_RATE of the value. */
   fee_is_override?: boolean;
+  /** The listing on the other side of this listing's furthest live offer (the offer's own listing or its counterpart_id),
+   * when that offer links two listings. One deal then shows on both, and totals count it once, on the demand. */
+  paired_listing_id?: string | null;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
   latest: { label: string; at: string | null; kind?: string } | null;
   next_action: string | null;
@@ -95,6 +98,7 @@ export type ListingSheetInput = {
   observed_on: string | null; updated_at: string; next_action: string | null; next_due: string | null;
   waiting_on?: string | null; waiting_since?: string | null;
   furthest_stage: string | null;
+  paired_listing_id?: string | null;
   /** From bulk_listing_stage(): one of LISTING_STAGES. */
   stage: ListingStage;
 };
@@ -146,6 +150,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
       : text(ctxText("listing_title")) ?? text(specText("listing_title")) ?? text(specText("title")) ?? input.summary,
     company: text(input.party), company_id: input.company_id, category,
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
+    paired_listing_id: input.paired_listing_id ?? null,
     progress: stage, held: hold,
     // A stage this code does not know (a database ahead of or behind migration 095) keeps a neutral colour instead of breaking the sheet.
     tone: hold ? "hold" : STAGE_TONE[stage] ?? "new",

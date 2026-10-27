@@ -24,7 +24,17 @@ export function weightedFee(row: Pick<SheetRow, "fee_eur" | "likelihood">): numb
   return row.fee_eur != null && row.likelihood != null ? (row.fee_eur * row.likelihood) / 100 : null;
 }
 
+/**
+ * The rows that count as deals in a total. A supply listing offered to a demand listing is one deal that shows on both;
+ * it is counted once, on the demand side: a supply row is left out when the demand it is paired with is in the same set.
+ */
+export function countedDeals(rows: SheetRow[]): SheetRow[] {
+  const demand = new Set(rows.filter((row) => row.kind === "demand").map((row) => row.id));
+  return rows.filter((row) => !(row.kind === "supply" && row.paired_listing_id && demand.has(row.paired_listing_id)));
+}
+
 export type DealTotals = {
+  /** Deals counted, after pairing (see countedDeals). */
   count: number;
   /** Sum of known values. */
   value_eur: number;
@@ -36,8 +46,9 @@ export type DealTotals = {
   unsized: number;
 };
 
+/** Totals over the rows, counting a paired supply and demand once (see countedDeals). */
 export function dealTotals(rows: SheetRow[]): DealTotals {
-  return rows.reduce<DealTotals>((sum, row) => {
+  return countedDeals(rows).reduce<DealTotals>((sum, row) => {
     const weighted = weightedFee(row);
     return {
       count: sum.count + 1,
