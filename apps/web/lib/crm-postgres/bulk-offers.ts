@@ -30,6 +30,13 @@ export type Offer = {
   messages: number;
   /** True when the offer sits on another listing and points back at this one (counterpart_id); `name` is then that listing's party. */
   incoming: boolean;
+  /** The other side's listing, when this offer is linked to one. */
+  counterpart_id: string | null;
+  /** For a mirrored (incoming) offer: the kind and a short label of the listing that holds it. */
+  from_kind: "supply" | "demand" | null;
+  from_label: string | null;
+  /** Live listings on the opposite side that this offer could be linked to (only while it is unlinked). */
+  link_options: { id: string; label: string }[];
   /** Inbox threads picked for this offer by hand. When set, only these threads are its email. */
   threads: string[];
 };
@@ -59,7 +66,15 @@ const selectOffers = (user: string) => `select o.id, o.bulk_listing_id as listin
   ((select count(*) from crm_bulk_listing_activity a where a.offer_id = o.id)
    + (select count(*) from mail_message m where m.crm_visible and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed'))))::int as messages,
   array((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')) as threads
-  , (o.bulk_listing_id <> $1) as incoming
+  , (o.bulk_listing_id <> $1) as incoming, o.counterpart_id
+  , case when o.bulk_listing_id <> $1 then (select b.kind from crm_bulk_listings b where b.id = o.bulk_listing_id) end as from_kind
+  , case when o.bulk_listing_id <> $1 then (select concat_ws(', ', b.party, nullif(left(coalesce(b.context->>'listing_title', b.summary), 60), '')) from crm_bulk_listings b where b.id = o.bulk_listing_id) end as from_label
+  , case when o.bulk_listing_id = $1 and o.counterpart_id is null and o.role = 'counterparty' then coalesce((
+      select jsonb_agg(jsonb_build_object('id', c.id, 'label', concat_ws(', ', c.party, nullif(left(coalesce(c.context->>'listing_title', c.summary), 60), ''))) order by c.id)
+      from crm_bulk_listings c join crm_bulk_listings me on me.id = o.bulk_listing_id
+      where c.status <> 'closed' and c.kind <> me.kind and c.id <> me.id
+        and ((o.company_id is not null and c.company_id = o.company_id) or (o.person_id is not null and c.person_id = o.person_id))), '[]'::jsonb)
+    else '[]'::jsonb end as link_options
   from crm_bulk_offers o`;
 
 /** Threads on a listing: the people we have offered it to (or asked), newest touch first. Contacts on the owner's side are not threads. */
@@ -75,13 +90,74 @@ export async function getOffer(listingId: string, offerId: string, userId: strin
 
 export type OfferInput = { name: string; contact?: string | null; personId?: string | null; companyId?: string | null; wants?: string | null; stage?: OfferStage };
 
-export async function addOffer(listingId: string, input: OfferInput): Promise<Offer> {
+export class OfferConflict extends Error {
+  constructor(message: string, readonly existingOfferId?: string) { super(message); this.name = "OfferConflict"; }
+}
+
+type LiveListing = { id: string; kind: "supply" | "demand"; label: string };
+
+/** Live listings on the opposite side of `listingId` that belong to the same company or person as the offer. */
+export async function linkCandidates(listingId: string, companyId: string | null, personId: string | null): Promise<LiveListing[]> {
+  if (!companyId && !personId) return [];
+  return queryPg<LiveListing>(
+    `select c.id, c.kind, concat_ws(', ', c.party, nullif(left(coalesce(c.context->>'listing_title', c.summary), 60), '')) as label
+     from crm_bulk_listings c join crm_bulk_listings me on me.id = $1
+     where c.status <> 'closed' and c.kind <> me.kind and c.id <> me.id
+       and (($2::text is not null and c.company_id = $2) or ($3::text is not null and c.person_id = $3))
+     order by c.id`, [listingId, companyId, personId]);
+}
+
+/** The existing offer for this pairing, in either direction. */
+async function pairOffer(a: string, b: string): Promise<string | null> {
+  const [row] = await queryPg<{ id: string }>(
+    `select id from crm_bulk_offers where role = 'counterparty'
+       and ((bulk_listing_id = $1 and counterpart_id = $2) or (bulk_listing_id = $2 and counterpart_id = $1)) limit 1`, [a, b]);
+  return row?.id ?? null;
+}
+
+/** Stores the offer once, on the listing it was made on. When the other party has exactly one live listing of the opposite
+ *  kind the two are linked at once, so the offer shows on both sides; with several it stays unlinked and the caller can ask which. */
+export async function addOffer(listingId: string, input: OfferInput & { counterpartId?: string | null }): Promise<Offer> {
   const id = `bof_${randomUUID()}`;
+  let counterpartId = input.counterpartId ?? null;
+  if (counterpartId) {
+    const [t] = await queryPg<{ ok: boolean }>(
+      `select (t.status <> 'closed' and t.kind <> me.kind) as ok from crm_bulk_listings t, crm_bulk_listings me where t.id = $2 and me.id = $1`, [listingId, counterpartId]);
+    if (!t?.ok) throw new OfferConflict("Link to a live listing on the opposite side.");
+  } else {
+    const found = await linkCandidates(listingId, input.companyId ?? null, input.personId ?? null);
+    if (found.length === 1) counterpartId = found[0].id;
+  }
+  if (counterpartId) {
+    const existing = await pairOffer(listingId, counterpartId);
+    if (existing) throw new OfferConflict("This pairing already has an offer.", existing);
+  }
   await queryPg(
-    `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage)
-     values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8)`,
-    [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null, input.stage ?? "candidate"]);
+    `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage, counterpart_id)
+     values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8, $9)`,
+    [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null, input.stage ?? "candidate", counterpartId]);
   return (await getOffer(listingId, id, null))!;
+}
+
+/** Links an unlinked offer to a live listing on the opposite side, or clears the link (null). */
+export async function linkOffer(listingId: string, offerId: string, targetId: string | null, actorUserId: string | null): Promise<Offer | null> {
+  const current = await getOffer(listingId, offerId, actorUserId);
+  if (!current || current.incoming) return null;
+  if (targetId) {
+    const [t] = await queryPg<{ ok: boolean }>(
+      `select (t.status <> 'closed' and t.kind <> me.kind) as ok from crm_bulk_listings t, crm_bulk_listings me where t.id = $2 and me.id = $1`, [listingId, targetId]);
+    if (!t?.ok) throw new OfferConflict("Link to a live listing on the opposite side.");
+    const existing = await pairOffer(listingId, targetId);
+    if (existing && existing !== offerId) throw new OfferConflict("This pairing already has an offer.", existing);
+  }
+  await queryPg(
+    `update crm_bulk_offers set counterpart_id = $3, data = data || jsonb_build_object('previous_counterpart_id', counterpart_id), updated_at = now()
+     where id = $2 and bulk_listing_id = $1`, [listingId, offerId, targetId]);
+  await queryPg(
+    `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
+     values ($1, $2, $3, 'status', $4, $5::jsonb, $6)`,
+    [listingId, offerId, current.person_id, `${current.name ?? "Offer"} · ${targetId ? "linked to " + targetId : "unlinked"}`, JSON.stringify({ from: current.counterpart_id, counterpart_id: targetId }), actorUserId]);
+  return getOffer(listingId, offerId, actorUserId);
 }
 
 export type OfferPatch = { stage?: OfferStage; nextStep?: string | null; nextDue?: string | null; wants?: string | null; terms?: OfferTerms; declinedReason?: string | null };

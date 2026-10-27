@@ -1,5 +1,5 @@
 import { getListing } from "@/lib/crm-postgres/bulk-listings";
-import { OFFER_STAGES, addThreadEntry, getOffer, offerThread, updateOffer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
+import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offerThread, updateOffer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,11 @@ export async function PATCH(req: Request, { params }: Context) {
   }
   if ("nextDue" in body && patch.nextDue && !/^\d{4}-\d{2}-\d{2}$/.test(patch.nextDue)) return badRequest("Use a date like 2026-10-30.");
   if ("terms" in body) { if (!body.terms || typeof body.terms !== "object" || Array.isArray(body.terms)) return badRequest("Terms must be an object."); patch.terms = body.terms as OfferPatch["terms"]; }
+  if ("counterpartId" in body) {
+    if (body.counterpartId != null && typeof body.counterpartId !== "string") return badRequest("counterpartId must be text or null.");
+    try { if (!await linkOffer(id, offerId, (body.counterpartId as string | null) || null, guard.userId)) return notFound("Offer"); }
+    catch (err) { if (err instanceof OfferConflict) return Response.json({ error: err.message, offerId: err.existingOfferId ?? null }, { status: 409 }); throw err; }
+  }
   const offer = await updateOffer(id, offerId, patch, guard.userId);
   return offer ? Response.json({ offer }) : notFound("Offer");
 }

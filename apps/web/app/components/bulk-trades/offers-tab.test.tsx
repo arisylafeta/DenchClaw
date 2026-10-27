@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Offer, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { OffersTab } from "./offers-tab";
@@ -12,6 +12,7 @@ const offer: Offer = {
   stage: "offered", declined_reason: null, wants: null, last_touch_on: "2026-10-12", last_touch_via: "mail",
   terms: { amount: 380, currency: "EUR", unit: "pack", firmness: "firm" }, next_step: "Send specs", next_due: null, waiting_on: "them", waiting_since: "2026-10-12",
   updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2, threads: [], incoming: false,
+  counterpart_id: null, from_kind: null, from_label: null, link_options: [],
 };
 const thread: ThreadEntry[] = [
   { id: "m1", channel: "mail", direction: "inbound", title: "Re: packs", body: "We can bid 380 per pack", at: "2026-10-12T10:00:00Z", ref: "t1", href: "/?crm=inbox&view=conversations&thread=t1&crmOnly=false" },
@@ -92,5 +93,28 @@ describe("Offers tab", () => {
     await userEvent.click(screen.getByRole("button", { name: /Attero Recycling/ }));
     await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Stage" }), "contract_out");
     expect(calls.some((c) => c.method === "PATCH" && c.body === JSON.stringify({ stage: "contract_out" }))).toBe(true);
+  });
+});
+
+describe("offer pairing labels (REB-565)", () => {
+  beforeEach(() => forgetShared());
+  it("labels a mirrored offer with the listing that holds it", async () => {
+    const mirrored = { ...offer, id: "bof_2", incoming: true, counterpart_id: "d1", from_kind: "supply" as const, from_label: "WHS Energy, Panasonic Oklahoma" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ offers: [mirrored] }), { status: 200 })));
+    render(<OffersTab demandId="d1" listingId="d1" onChanged={() => {}} />);
+    expect(await screen.findByText(/From supply: WHS Energy, Panasonic Oklahoma/)).toBeTruthy();
+  });
+  it("offers to link an unlinked offer when the buyer has a live listing", async () => {
+    const open = { ...offer, link_options: [{ id: "btd_1", label: "ELG Battery, 100k cells" }] };
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      return new Response(JSON.stringify(url.endsWith("/offers") ? { offers: [open] } : { offer: open, thread: [] }), { status: 200 });
+    }));
+    render(<OffersTab demandId="s1" listingId="s1" onChanged={() => {}} />);
+    fireEvent.click(await screen.findByText("Attero Recycling"));
+    const select = await screen.findByLabelText("Link to listing");
+    fireEvent.change(select, { target: { value: "btd_1" } });
+    await waitFor(() => expect(calls.some((c) => c.startsWith("PATCH"))).toBe(true));
   });
 });

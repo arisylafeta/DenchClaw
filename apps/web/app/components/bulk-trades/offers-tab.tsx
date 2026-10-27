@@ -132,7 +132,7 @@ function OfferList({ offers, error, base, onUpdated }: {
                       {!loading && <WaitingPill offer={o} />}
                     </span>
                     <span className="mt-0.5 block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
-                      <Sh on={loading} chars={32}>{[terms, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
+                      <Sh on={loading} chars={32}>{[o.incoming && o.from_kind ? `From ${o.from_kind}: ${o.from_label ?? ""}` : null, terms, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
                     </span>
                   </span>
                   <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages > 0 ? `${o.messages} ${o.messages === 1 ? "message" : "messages"}${o.last_message_at ? ` · ${dateOf(o.last_message_at)}` : ""}` : "No messages"}</Sh></span>
@@ -178,6 +178,17 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
+      {offer && !offer.incoming && offer.link_options.length > 0 && (
+        <label className="flex items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
+          Not linked.
+          <select aria-label="Link to listing" value="" disabled={busy}
+            onChange={(e) => e.target.value && void patch({ counterpartId: e.target.value })}
+            className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+            <option value="">Link to a live listing…</option>
+            {offer.link_options.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+          </select>
+        </label>
+      )}
       {terms && <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Latest terms </span><strong>{terms}</strong></p>}
       <ErrorText error={error} />
       <section aria-label="Thread">
