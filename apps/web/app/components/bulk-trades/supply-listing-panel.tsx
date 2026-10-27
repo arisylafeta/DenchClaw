@@ -73,7 +73,7 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
       {fields === null || !registry ? <ShBlock on size={32} /> : <ListingDetails facts={facts} />}
     </BusyRegion>}
     <MatchaTab listingId={listing.id} active={tab === "Matcha"} />
-    <SupplyMatchesTab listingId={listing.id} active={tab === "Matches"} onOpenListing={onOpenListing} />
+    <SupplyMatchesTab listingId={listing.id} active={tab === "Matches"} onOpenListing={onOpenListing} onSaved={onChanged} />
     {tab === "Offers" && <OffersTab demandId={listing.id} listingId={listing.id} onChanged={onChanged} />}
     {tab === "Documents" && <DocumentsTab listingId={listing.id} />}
     {tab === "History" && <DemandActions story section="Activity" activityEndpoint={endpoint} demand={{ id: listing.id, status: listing.status }} today={today} onChanged={onChanged} onClose={onClose} onEdit={() => {}} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} />}
