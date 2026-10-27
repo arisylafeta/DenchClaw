@@ -203,5 +203,6 @@ describe("stages", () => {
     expect(LISTING_STAGES.map((stage) => STAGE_TONE[stage])).toEqual(
       ["new", "new", "active", "active", "warning", "active", "waiting", "waiting", "closing", "closing", "closing"]);
     expect(demand({ stage: "Can't source" })).toMatchObject({ progress: "Can't source", tone: "warning" });
+    expect(demand({ stage: "Signed & Paid" as never })).toMatchObject({ progress: "Signed & Paid", tone: "new" });
   });
 });

@@ -146,7 +146,8 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     company: text(input.party), company_id: input.company_id, category,
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
     progress: input.stage, held: hold,
-    tone: hold ? "hold" : STAGE_TONE[input.stage],
+    // A stage this code does not know (a database ahead of or behind migration 095) keeps a neutral colour instead of breaking the sheet.
+    tone: hold ? "hold" : STAGE_TONE[input.stage] ?? "new",
     score: input.score,
     ...valueAndFee(input.kind, input.spec, input.context as Record<string, unknown> | null),
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
