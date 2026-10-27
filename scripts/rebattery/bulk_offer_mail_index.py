@@ -168,7 +168,7 @@ def overdue(cur, today, window_days=ALERT_CHASE_DAYS):
 
 
 def send_alert(target, text):
-    r = subprocess.run(["hermes", "send", "--json", "-t", target, text], capture_output=True, text=True, timeout=120)
+    r = subprocess.run(["hermes", "-p", "default", "send", "--json", "-t", target, text], capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
         raise RuntimeError(f"hermes send failed: {r.stderr.strip()[:300] or r.stdout.strip()[:300]}")
 
