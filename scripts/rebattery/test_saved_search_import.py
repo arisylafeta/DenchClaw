@@ -171,6 +171,42 @@ class GateTest(unittest.TestCase):
         self.assertEqual(saved.gate({"wants": "leaf 40kwh", "details": "8 modules", "quantity": "one"})[1], 40)
 
 
+class SourcingRequestDefinitionTest(unittest.TestCase):
+    def missing(self, **overrides):
+        base = {"wants": "Hyundai Kona 64 kWh", "timing": "now", "target_price": 2500, "country": "PL"}
+        base.update(overrides)
+        return saved.missing_fields(base)
+
+    def test_a_sourcing_request_has_model_timeline_price_and_location(self):
+        self.assertEqual(self.missing(), [])
+        self.assertEqual(self.missing(wants="Nissan"), ["model"])
+        self.assertEqual(self.missing(wants="sdfdsfsdf"), ["model"])
+        self.assertEqual(self.missing(timing="browsing"), ["timeline"])
+        self.assertEqual(self.missing(target_price=None), ["price"])
+        self.assertEqual(self.missing(country=None), ["location"])
+        self.assertEqual(self.missing(wants="Nissan", target_price=None, country=None), ["model", "price", "location"])
+
+    def test_the_seven_real_requests(self):
+        def check(wants, timing, price, country):
+            return saved.missing_fields({"wants": wants, "timing": timing, "target_price": price, "country": country})
+        self.assertEqual(check("Ig chem e101Ah", "now", None, "UA"), ["price"])
+        self.assertEqual(check("21700 18650", "now", 1.0, "PL"), [])
+        self.assertEqual(check("nissan leaf 40kwh pack", "now", None, "GR"), ["price"])
+        self.assertEqual(check("Nissan", "now", None, "GB"), ["model", "price"])
+        self.assertEqual(check("60 volt 20 ahlithium", "three_months", 200.0, "GB"), [])
+
+    def test_each_outcome_says_what_happened_to_the_request(self):
+        row = {"wants": "Nissan", "email": "a@b.com", "source_url": "https://x"}
+        req = request(country="GB", target_price=None, target_currency=None)
+        incomplete = saved.announcement(req, row, "incomplete", None, ["model", "price"])
+        self.assertIn("New enquiry, not a sourcing request", incomplete)
+        self.assertIn("Missing: model, price. Not chased.", incomplete)
+        self.assertIn("under 200 kWh", saved.announcement(req, row, "small", 62))
+        self.assertIn("About 62 kWh. Marketplace route, not in Trades.", saved.announcement(req, row, "small", 62))
+        self.assertIn("size cannot be read", saved.announcement(req, row, "review"))
+        self.assertIn("In Trades.", saved.announcement(req, {**row, "company_id": None}, "imported", 640))
+
+
 class FetchTest(unittest.TestCase):
     def test_reads_every_page(self):
         pages = [[{"id": i} for i in range(1000)], [{"id": 1000}, {"id": 1001}]]
