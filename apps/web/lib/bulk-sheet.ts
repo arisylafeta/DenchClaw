@@ -48,8 +48,10 @@ export type SheetRow = {
   value_eur?: number | null;
   /** Chance (0-100 %) the deal completes, set per deal. Null when not set. */
   likelihood?: number | null;
-  /** Our fee in EUR, a fixed FEE_RATE of the value. Null when the value is unknown. */
+  /** Our fee in EUR: the fee set on the listing (context.fee_eur), else FEE_RATE of the value. Null when neither is known. */
   fee_eur?: number | null;
+  /** True when the fee was set by hand rather than taken as FEE_RATE of the value. */
+  fee_is_override?: boolean;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
   latest: { label: string; at: string | null; kind?: string } | null;
   next_action: string | null;
@@ -100,11 +102,19 @@ const positive = (value: unknown): number | null => {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
 };
 
-/** Approximate value and fee at the fixed rate. Supply carries the value of all stock; demand carries the fee
- * (set as FEE_RATE of volume x ceiling price, or of a matched lot), so its value is derived back from it. */
-export function valueAndFee(kind: SheetKind, spec: Record<string, unknown>): { value_eur: number | null; fee_eur: number | null } {
+/** A fee set by hand on a listing (context.fee_eur), in whole EUR. Zero is a real answer (no fee); anything else unusable is null. */
+export function feeOverrideOf(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+}
+
+/** Approximate value and fee. Supply carries the value of all stock; demand carries the fee (set as FEE_RATE of
+ * volume x ceiling price, or of a matched lot), so its value is derived back from it. The fee is the one set on the
+ * listing (context.fee_eur) when there is one, else FEE_RATE of the value. */
+export function valueAndFee(kind: SheetKind, spec: Record<string, unknown>, context?: Record<string, unknown> | null): { value_eur: number | null; fee_eur: number | null; fee_is_override: boolean } {
   const value = kind === "supply" ? positive(spec.value_eur) : (() => { const fee = positive(spec.fee_eur); return fee === null ? null : Math.round(fee / FEE_RATE); })();
-  return { value_eur: value, fee_eur: value === null ? null : Math.round(value * FEE_RATE) };
+  const override = feeOverrideOf(context?.fee_eur);
+  if (override !== null) return { value_eur: value, fee_eur: override, fee_is_override: true };
+  return { value_eur: value, fee_eur: value === null ? null : Math.round(value * FEE_RATE), fee_is_override: false };
 }
 
 /** Compact euro amount for the sheet, e.g. €850, €12.9k, €3.5M. */
@@ -136,7 +146,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     progress: input.stage, held: hold,
     tone: hold ? "hold" : STAGE_TONE[input.stage],
     score: input.score,
-    ...valueAndFee(input.kind, input.spec),
+    ...valueAndFee(input.kind, input.spec, input.context as Record<string, unknown> | null),
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), likelihood: likelihoodOf((input.context as Record<string, unknown> | null)?.likelihood), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,

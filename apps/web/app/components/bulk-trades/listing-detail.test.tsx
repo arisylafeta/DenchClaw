@@ -77,3 +77,35 @@ it("shows a back link instead of a blank page when a listing cannot render", asy
   fireEvent.click(screen.getByRole("button", { name: /Bulk Trades/ }));
   expect(onClose).toHaveBeenCalled();
 });
+
+it("sets a fee on a supply listing from its header, with the 10% default as the placeholder", async () => {
+  const row = listing("s4"); row.spec = { value_eur: 48000 }; row.context = { trade_kind: "packs", fee_eur: 3000 };
+  const fetch = mockListing(row); mount("s4");
+  const input = await screen.findByLabelText("Fee in euros");
+  expect(input).toHaveValue("3000");
+  expect(input).toHaveAttribute("placeholder", "4,800");
+  fireEvent.change(input, { target: { value: "5,500" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/s4/fee", expect.objectContaining({ method: "PUT", body: JSON.stringify({ fee_eur: 5500 }) })));
+  fireEvent.change(input, { target: { value: "" } });
+  fireEvent.blur(input);
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/s4/fee", expect.objectContaining({ body: JSON.stringify({ fee_eur: null }) })));
+  expect(screen.queryByRole("button", { name: "Can't source" })).toBeNull(); // demand only
+});
+
+it("marks a demand as one we can't source, with a reason, and clears it", async () => {
+  const row = listing("d-cs"); row.kind = "demand";
+  row.demand = { id: row.id, buyer: "Example buyer", wants: "12 Ioniq packs", kind: "standing", spec: {}, context: {}, context_notes: [], status: "open", fits: [], trades: [], missing: [], inventory_matches: [] } as unknown as NonNullable<BulkListingView["demand"]>;
+  const fetch = mockListing(row); const view = mount(row.id);
+  fireEvent.click(await screen.findByRole("button", { name: "Can't source" }));
+  fireEvent.change(screen.getByLabelText("Why we can't source it"), { target: { value: "No Ioniq packs this quarter" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/d-cs/cant-source", expect.objectContaining({ method: "PUT", body: JSON.stringify({ reason: "No Ioniq packs this quarter" }) })));
+  view.unmount();
+
+  row.context = { cant_source: "No Ioniq packs this quarter" };
+  const again = mockListing(row); mount(row.id);
+  expect(await screen.findByText("Can't source: No Ioniq packs this quarter")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  await waitFor(() => expect(again).toHaveBeenCalledWith("/api/bulk-listings/d-cs/cant-source", expect.objectContaining({ body: JSON.stringify({ reason: null }) })));
+});

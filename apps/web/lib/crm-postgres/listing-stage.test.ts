@@ -59,12 +59,15 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
   });
 
   it("marks a demand Can't source while a reason is set, over Found, but never over a live deal", async () => {
-    const reason = (text: string | null) => pg.queryPg(
-      `update crm_bulk_listings set context = case when $2::text is null then context - 'cant_source' else jsonb_set(context, '{cant_source}', to_jsonb($2::text)) end where id = $1`, ["stg_demand", text]);
+    const { setListingCantSource } = await import("./bulk-listing-cant-source");
+    const reason = (text: string | null) => setListingCantSource("stg_demand", text);
+    expect(await setListingCantSource("stg_ready", "Supply cannot be unsourceable")).toBe(false);
     await reason("No Ioniq packs in Europe this quarter");
     expect(await stage("stg_demand")).toBe("Can't source");
-    await reason("   ");
-    expect(await stage("stg_demand")).toBe("Qualified");
+    await pg.queryPg(`update crm_bulk_listings set context = jsonb_set(context, '{cant_source}', '"   "') where id = 'stg_demand'`);
+    expect(await stage("stg_demand")).toBe("Qualified"); // a blank reason does not count
+    await reason(null);
+    expect((await pg.queryPg<{ has: boolean }>("select context ? 'cant_source' as has from crm_bulk_listings where id = 'stg_demand'"))[0].has).toBe(false);
     await pg.queryPg("insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values ('stg_dc', 'stg_ready', 'stg_demand', 'counterparty', 'candidate')");
     await reason("Gone quiet");
     expect(await stage("stg_demand")).toBe("Can't source");
@@ -96,6 +99,17 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     await offer("stg_o1", "complete");
     expect(await stage("stg_ready")).toBe("Delivered");
     await pg.queryPg("delete from crm_bulk_offers where id in ('stg_o1', 'stg_o2')");
+  });
+
+  it("stores a fee override on either kind as a number, and clears it", async () => {
+    const { setListingFee } = await import("./bulk-listing-fee");
+    const fee = async (id: string) => (await pg.queryPg<{ fee: unknown }>("select context->'fee_eur' as fee from crm_bulk_listings where id = $1", [id]))[0].fee;
+    expect(await setListingFee("stg_demand", 4200)).toBe(true);
+    expect(await setListingFee("stg_ready", 0)).toBe(true);
+    expect([await fee("stg_demand"), await fee("stg_ready")]).toEqual([4200, 0]);
+    await setListingFee("stg_demand", null);
+    expect(await fee("stg_demand")).toBeNull();
+    expect(await setListingFee("stg_missing", 1)).toBe(false);
   });
 
   it("an unknown listing is New", async () => {

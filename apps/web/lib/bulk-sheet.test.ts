@@ -155,8 +155,16 @@ describe("value and fee", () => {
     expect(demand({ spec: { fee_eur: 18060 } })).toMatchObject({ value_eur: 180600, fee_eur: 18060 });
   });
   it("leaves both null when there is no usable value", () => {
-    for (const spec of [{}, { value_eur: 0 }, { value_eur: "n/a" }, { value_eur: -5 }]) expect(valueAndFee("supply", spec)).toEqual({ value_eur: null, fee_eur: null });
-    expect(valueAndFee("demand", {})).toEqual({ value_eur: null, fee_eur: null });
+    for (const spec of [{}, { value_eur: 0 }, { value_eur: "n/a" }, { value_eur: -5 }]) expect(valueAndFee("supply", spec)).toEqual({ value_eur: null, fee_eur: null, fee_is_override: false });
+    expect(valueAndFee("demand", {})).toEqual({ value_eur: null, fee_eur: null, fee_is_override: false });
+  });
+  it("uses a fee set on the listing over the 10% default, for either kind, even without a value", () => {
+    expect(valueAndFee("supply", { value_eur: 480000 }, { fee_eur: 20000 })).toEqual({ value_eur: 480000, fee_eur: 20000, fee_is_override: true });
+    expect(valueAndFee("demand", { fee_eur: 18060 }, { fee_eur: 9000.4 })).toEqual({ value_eur: 180600, fee_eur: 9000, fee_is_override: true });
+    expect(valueAndFee("supply", {}, { fee_eur: 2500 })).toEqual({ value_eur: null, fee_eur: 2500, fee_is_override: true });
+    expect(valueAndFee("supply", { value_eur: 1000 }, { fee_eur: 0 })).toMatchObject({ fee_eur: 0, fee_is_override: true });
+    for (const fee_eur of [null, -1, "5000", Number.NaN]) expect(valueAndFee("supply", { value_eur: 1000 }, { fee_eur })).toEqual({ value_eur: 1000, fee_eur: 100, fee_is_override: false });
+    expect(supply({ spec: { value_eur: 50000 }, context: { fee_eur: 7000 } })).toMatchObject({ value_eur: 50000, fee_eur: 7000, fee_is_override: true });
   });
   it("formats compactly", () => {
     expect([150, 12852, 480000, 3_460_000, 16_000_000, null].map(formatEurCompact)).toEqual(["€150", "€12.9k", "€480k", "€3.46M", "€16M", "—"]);
