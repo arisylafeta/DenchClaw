@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Imports saved searches into stated company profiles and sourcing requests as qualifying demand.
 
+A request is imported only when it is worth at least MIN_KWH (units x kWh per unit). Each decision is kept in
+crm_sourcing_request_imports, so a demand deleted from the CRM is never imported again. Requests whose size cannot be
+read from their text are left for a person and listed in the summary.
+
 Run without --apply to preview in a rolled-back transaction. --announce reports new requests only.
 Unsubscribing from alerts is not evidence that a buyer stopped buying; unsubscribed searches are skipped.
 """
@@ -197,6 +201,49 @@ def map_sourcing_request(request):
     }
 
 
+MIN_KWH = 200
+BAND_FLOOR = {"one": 1, "few": 2, "many": 10}  # the form's quantity bands, as units at least
+CELL_KWH = {"18650": 0.011, "21700": 0.016}    # conservative kWh per cylindrical cell
+_NUM = r"(\d+(?:[.,]\d+)?)"
+
+
+def _num(text):
+    return float(text.replace(",", "."))
+
+
+def estimate_kwh(request):
+    """Total kWh the request asks for (units x kWh per unit), or None when its text does not say."""
+    import re
+    text = " ".join(str(request.get(k) or "") for k in ("wants", "details", "capacity_text")).lower()
+    cells = False
+    match = re.search(_NUM + r"\s*mwh", text)
+    if match:
+        per_unit = _num(match.group(1)) * 1000
+    elif (match := re.search(_NUM + r"\s*kwh", text)):
+        per_unit = _num(match.group(1))
+    elif (match := re.search(_NUM + r"\s*v(?:olts?)?\s*[, x]*\s*" + _NUM + r"\s*ah", text)):
+        per_unit = _num(match.group(1)) * _num(match.group(2)) / 1000
+    else:
+        found = [kwh for name, kwh in CELL_KWH.items() if name in text]
+        if not found:
+            return None
+        per_unit, cells = max(found), True
+    units = request.get("quantity_value") or BAND_FLOOR.get(request.get("quantity"), 1)
+    if cells:  # "100000 sztuk" is a count of cells; a count beside a pack size ("8 modules") is not
+        count = re.search(r"(\d{1,3}(?:[ ,]\d{3})+|\d+)\s*(?:pcs|pieces|units|cells|sztuk|szt)", text)
+        if count:
+            units = max(units, int(re.sub(r"[ ,]", "", count.group(1))))
+    return per_unit * float(units)
+
+
+def gate(request):
+    """pass, below (known size under MIN_KWH) or unknown (size not readable from the text)."""
+    kwh = estimate_kwh(request)
+    if kwh is None:
+        return "unknown", None
+    return ("pass" if kwh >= MIN_KWH else "below"), kwh
+
+
 ANNOUNCE_WITHIN = dt.timedelta(hours=24)  # older requests are imported quietly (backfills, re-imports)
 ANNOUNCE_MAX = 5                          # per run; the rest are summed up in one line
 DETAILS_MAX = 600
@@ -280,8 +327,9 @@ def fetch_sourcing_requests(env_path=PLATFORM_ENV):
     """Every sourcing request from the platform."""
     return fetch_platform(
         "sourcing_requests",
-        "id,email,wants,details,filters,catalog_path,quantity,timing,target_price,target_currency,country,source,status,created_at",
+        "id,email,wants,details,filters,catalog_path,quantity,quantity_value,capacity_text,timing,target_price,target_currency,country,source,status,created_at",
         {}, env_path)
+
 
 
 
@@ -313,23 +361,48 @@ def main():
     else:
         requests = fetch_sourcing_requests(args.platform_env)
     search_rows = [row for row in (map_saved_search(search) for search in searches) if row]
-    request_rows = [row for row in (map_sourcing_request(request) for request in requests) if row]
     requests_by_source = {f"sourcing_request:{request['id']}": request for request in requests}
     notes = []
-    rows = search_rows + request_rows
     skipped = len(searches) - len(search_rows)
-    skipped_requests = len(requests) - len(request_rows)
 
     conn = psycopg2.connect(args.dsn)
     added = closed = 0
     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""create table if not exists crm_sourcing_request_imports (
+            source_id text primary key, outcome text not null check (outcome in ('imported', 'skipped')),
+            kwh numeric, decided_on timestamptz not null default now())""")
+        cur.execute("select source_id from crm_sourcing_request_imports")
+        decided = {r["source_id"] for r in cur.fetchall()}
+        request_rows, below, review = [], [], []
+        skipped_requests = 0
+        for request in requests:
+            source_id = f"sourcing_request:{request['id']}"
+            row = map_sourcing_request(request)
+            if source_id in decided or not row:
+                skipped_requests += 1
+                continue
+            verdict, kwh = gate(request)
+            if verdict == "pass":
+                request_rows.append(row)
+                row["_kwh"] = kwh
+            elif verdict == "below":
+                below.append(source_id)
+                cur.execute("insert into crm_sourcing_request_imports (source_id, outcome, kwh) values (%s, 'skipped', %s)",
+                            (source_id, kwh))
+            else:
+                review.append(f"{request['wants'][:40]} ({request['email']})")
+        rows = search_rows + request_rows
         for row in rows:
+            kwh = row.pop("_kwh", None)
             unsubscribed = row.pop("unsubscribed", False)
             if unsubscribed:
                 continue
             survey.link(cur, row)
             new = survey.insert(cur, row)
             added += new
+            if row["source_id"].startswith("sourcing_request:"):
+                cur.execute("insert into crm_sourcing_request_imports (source_id, outcome, kwh) values (%s, 'imported', %s)"
+                            " on conflict do nothing", (row["source_id"], kwh))
             request = requests_by_source.get(row["source_id"])
             if new and request and is_recent(request):
                 notes.append(announcement(request, row))
@@ -346,7 +419,9 @@ def main():
     verb = "added" if args.apply else "would add"
     summary = (f"{verb} {added} and {'closed' if args.apply else 'would close'} {closed} of {len(search_rows)} saved"
                f" searches and {len(request_rows)} sourcing requests ({skipped} searches and {skipped_requests}"
-               f" requests skipped: unconfirmed, internal or test)")
+               f" requests skipped: unconfirmed, internal, test or already decided); {len(below)} requests under {MIN_KWH} kWh"
+               f" recorded as skipped; {len(review)} need a person to read the size"
+               + (": " + "; ".join(review) if review else ""))
     if args.announce:
         # stdout is the Discord message: only new requests, and nothing at all on a quiet run.
         print(summary, file=sys.stderr)
