@@ -20,6 +20,9 @@ const PUBLIC_ROUTES = new Set([
   "/api/auth/login",
   "/api/webhooks/postmark-mail",
   "/api/settings/mcp/connect/callback",
+  // Platform server-to-server (Jules commercial-buyer path); each route checks its own bearer secret.
+  "/api/commercial-buyer/stock",
+  "/api/commercial-buyer/buy-requests",
 ]);
 // /t/ serves tracked links from trade emails; tokens are random and only forward.
 const PUBLIC_PREFIXES = ["/api/apps/webhooks/", "/t/"];
