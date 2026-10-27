@@ -89,7 +89,8 @@ export async function sendDraft(draft: MailDraft, approver: string): Promise<{ s
   if (draft.state !== "draft") { throw new DraftActionError(409, "This draft was already sent or is being sent."); }
   if (!draft.to_emails.length) { throw new DraftActionError(400, "Add a recipient before sending."); }
   try {
-    await run(CLI, ["send", "--apply", "--approved-by", approver, "--", draft.id], { timeout: 120_000, maxBuffer: 4 << 20 });
+    // Long timeout on purpose: killing the CLI after its claim leaves a message "sending" that may or may not have gone.
+    await run(CLI, ["send", "--apply", "--approved-by", approver, "--", draft.id], { timeout: 600_000, maxBuffer: 4 << 20 });
     return { sent: true };
   } catch (error) { throw cliError(error); }
 }

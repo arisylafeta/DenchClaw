@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { queryPg, withPgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
-import { editDraft, editableCopy, identitySignatures, textToHtml, splitCopy } from "./mail-draft-actions";
+import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT } from "./relay-checks";
 
@@ -57,6 +57,8 @@ export type RelayDraftView = {
   mail: {
     id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[];
     subject: string | null; main: string; updated_at: string; attachments: DraftAttachment[]; transport: string | null;
+    /** Why the last send attempt did not go out, if it didn't. */
+    failure: { reason: string; detail?: unknown } | null;
   } | null;
 };
 
@@ -408,7 +410,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const ids = items.map((i) => i.id);
   const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
-  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown } | null; transport: string | null }>(
+  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown } } | null; transport: string | null }>(
     `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,subject,body_text,updated_at,personalization,transport from mail_message where id = any($1)`, [mailIds]) : [];
   const byMail = new Map(mails.map((m) => [m.id, m]));
   const todos = await queryPg<RelayTodo>(`select t.id,t.item_id,t.title,t.detail,t.kind,t.state,w.reb_key,null as source,t.created_at from relay_todo t left join work_tasks w on w.id = t.work_task_id where t.item_id = any($1) and t.state in ('suggested','accepted') order by t.created_at`, [ids]);
@@ -424,31 +426,71 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
     facts.set(item.id, { amounts: amountsIn(corpus), participants, unit });
   }
   const jobs = await jobsFor(ids);
-  return items.map((item) => ({
+  const settled = await settleItems(ids);
+  return items.filter((item) => !settled.has(item.id)).map((item) => ({
     ...item,
     job: jobs.get(item.id) ?? null,
     facts: facts.get(item.id) ?? { amounts: [], participants: [], unit: null },
     drafts: drafts.filter((d) => d.item_id === item.id).map((d) => {
       const m = d.mail_message_id ? byMail.get(d.mail_message_id) : undefined;
-      const sent = m && m.state !== "draft" && m.state !== "frozen";
+      const sent = m?.state === "accepted";
       return {
         id: d.id, role: d.role, position: d.position, title: d.title, why: d.why, state: sent ? "sent" : d.state, source_note: d.source_note,
         agent_log: Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).filter((l): l is string => typeof l === "string") : [],
         mail_message_id: d.mail_message_id, gmail_draft_id: d.gmail_draft_id,
         mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, subject: m.subject,
-          main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport } : null,
+          main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport,
+          failure: m.personalization?.send_failure ?? null } : null,
       };
     }),
     todos: todos.filter((t) => t.item_id === item.id),
   }));
 }
 
-/** When every draft of an item is sent or skipped, the item is done. */
-export async function settleItem(itemId: string): Promise<void> {
+/** Drafts Gmail accepted are sent; an item whose primary reply is sent is done. Returns the items that just closed. */
+export async function settleItems(itemIds: string[]): Promise<Set<string>> {
+  if (!itemIds.length) return new Set();
   await queryPg(`update relay_draft d set state = 'sent', updated_at = now() from mail_message m
-    where d.item_id = $1 and m.id = d.mail_message_id and d.state in ('draft','gmail') and m.state not in ('draft','frozen')`, [itemId]);
-  await queryPg(`update relay_item set status = 'done', done_reason = 'sent', updated_at = now() where id = $1 and status = 'review'
-    and not exists (select 1 from relay_draft where item_id = $1 and role = 'primary' and state in ('draft','gmail'))`, [itemId]);
+    where d.item_id = any($1) and m.id = d.mail_message_id and d.state in ('draft','gmail') and m.state = 'accepted'`, [itemIds]);
+  const closed = await queryPg<{ id: string }>(`update relay_item i set status = 'done', done_reason = 'sent', updated_at = now()
+    where i.id = any($1) and i.status = 'review'
+      and exists (select 1 from relay_draft d where d.item_id = i.id and d.role = 'primary' and d.state = 'sent')
+      and not exists (select 1 from relay_draft d where d.item_id = i.id and d.role = 'primary' and d.state in ('draft','gmail'))
+    returning i.id`, [itemIds]);
+  return new Set(closed.map((r) => r.id));
+}
+
+// ---------- sending ----------
+
+const SEND_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_send.py";
+
+/**
+ * Starts the send of the exact version Alex confirmed, detached from the request: the mail CLI's own gates run
+ * (approval digest, reply check, suppression, one claim per message) and it records the outcome on the message.
+ * Nothing here can kill a send half way, so a send is never left "maybe sent" by a web timeout.
+ */
+export async function queueSend(draftId: string, owner: { id: string; email: string }, updatedAt: string): Promise<void> {
+  const relayDraft = await relayDraftForOwner(draftId, owner.id);
+  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  const mail = await readMailDraft(relayDraft.mail_message_id, owner.id);
+  if (!mail) throw new RelayError(404, "Not found");
+  if (mail.state !== "draft") throw new RelayError(409, mail.state === "accepted" ? "Already sent." : "A send is already in progress or needs checking.");
+  if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
+  if (!mail.to_emails.length) throw new RelayError(400, "Add a recipient before sending.");
+  const child = spawn("/usr/bin/python3", [SEND_RUNNER, mail.id, owner.email], { detached: true, stdio: "ignore" });
+  child.unref();
+}
+
+/** "Check if it went": looks for the email in Gmail Sent; marks it sent, or returns it to a draft that can be sent again. */
+export async function settleStuckSend(draftId: string, ownerId: string): Promise<{ outcome: "sent" | "released" | "wait"; retry_after_seconds?: number }> {
+  const relayDraft = await relayDraftForOwner(draftId, ownerId);
+  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  try {
+    const { stdout } = await run(MAIL_CLI, ["release", "--apply", relayDraft.mail_message_id], { timeout: 120_000, maxBuffer: 4 << 20 });
+    return JSON.parse(stdout.slice(stdout.indexOf("{"))) as { outcome: "sent" | "released" | "wait"; retry_after_seconds?: number };
+  } catch {
+    throw new RelayError(502, "Couldn't check Gmail just now. Try again in a minute.");
+  }
 }
 
 export async function relayDraftForOwner(draftId: string, ownerId: string): Promise<(DraftRow & { owner_ok: boolean; mail_thread_id: string | null }) | null> {

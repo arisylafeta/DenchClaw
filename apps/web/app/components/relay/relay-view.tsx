@@ -71,22 +71,38 @@ export function RelayView({ onOpenListing }: { onOpenListing?: (id: string, titl
     }
   }, []);
   useEffect(() => { void load(tab); }, [tab, load]);
-  // Sends run in the background after Alex confirms: the page moves on and reports the outcome when it lands.
+  // Sends run on the server after Alex confirms. The page moves on, watches the message's own state, and reports
+  // the outcome: Sent, or why not. The send itself does not depend on this tab staying open.
   const [sending, setSending] = useState<Record<string, string>>({});
-  const startSend = useCallback((draftId: string, updatedAt: string, toLabel: string) => {
-    setSending((m) => ({ ...m, [draftId]: toLabel }));
-    void api(`/api/relay/drafts/${draftId}/send`, { method: "POST", body: { confirm: true, updated_at: updatedAt } })
-      .then(() => say(`Sent to ${toLabel}`))
-      .catch((err) => say(`Not sent to ${toLabel}: ${err instanceof Error ? err.message : "something went wrong"}. It's back in Review.`))
-      .finally(() => { setSending((m) => { const next = { ...m }; delete next[draftId]; return next; }); void load(tab); });
+  const startSend = useCallback(async (draftId: string, updatedAt: string, toLabel: string) => {
+    try {
+      await api(`/api/relay/drafts/${draftId}/send`, { method: "POST", body: { confirm: true, updated_at: updatedAt } });
+      setSending((m) => ({ ...m, [draftId]: toLabel }));
+      say(`Sending to ${toLabel}…`);
+      void load(tab);
+      return true;
+    } catch (err) {
+      say(`Not sent: ${err instanceof Error ? err.message : "something went wrong"}`);
+      return false;
+    }
   }, [say, load, tab]);
-  // A send still finishes on the server if the tab closes, but the outcome toast would be lost: ask first.
+  // While sends are pending, check every few seconds and report each outcome once.
   useEffect(() => {
     if (!Object.keys(sending).length) return;
-    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [sending]);
+    const t = setInterval(() => void load(tab), 4000);
+    return () => clearInterval(t);
+  }, [sending, load, tab]);
+  useEffect(() => {
+    if (!data || !Object.keys(sending).length) return;
+    const drafts = new Map(data.review.flatMap((x) => x.drafts).map((d) => [d.id, d]));
+    const done: string[] = [];
+    for (const [id, to] of Object.entries(sending)) {
+      const mail = drafts.get(id)?.mail;
+      if (!mail || mail.state === "accepted") { say(`Sent to ${to}`); done.push(id); }
+      else if (mail.state === "failed" || mail.state === "unknown" || (mail.state === "draft" && mail.failure)) { say(`Not sent to ${to}: ${failureText(mail.failure, mail.state)}`); done.push(id); }
+    }
+    if (done.length) setSending((m) => Object.fromEntries(Object.entries(m).filter(([id]) => !done.includes(id))));
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   // The scan runs every 10 minutes; refresh the page each minute so new mail and the scan time show up.
   useEffect(() => {
     const id = setInterval(() => { tick((n) => n + 1); if (document.visibilityState === "visible") void load(tab); }, 60_000);
@@ -295,7 +311,7 @@ type Local = { subject: string; body: string; updated_at: string };
 
 function Review({ data, reload, say, onBack, sending, startSend }: {
   data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void;
-  sending: Record<string, string>; startSend: (draftId: string, updatedAt: string, toLabel: string) => void;
+  sending: Record<string, string>; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>;
 }) {
   const items = data.review;
   const [cur, setCur] = useState(0);
@@ -396,9 +412,30 @@ function JobCard({ job, itemId, reload, say }: { job: RelayJob; itemId: string; 
   );
 }
 
+/** Plain words for why a send didn't go out. */
+function failureText(failure: { reason: string; detail?: unknown } | null, state: string): string {
+  const detail = (failure?.detail ?? {}) as { cause?: string; rule?: string; refused?: string };
+  const reason = detail.cause ?? detail.refused ?? failure?.reason ?? state;
+  const words: Record<string, string> = {
+    thread_has_reply: "they replied since this was drafted. Read their reply first.",
+    gmail_auth_unavailable: "Gmail login check failed. Try again in a minute.",
+    gmail_read_failed: "couldn't read Gmail to check for new replies. Try again.",
+    approval_digest_mismatch: "the draft changed while sending. Check it and send again.",
+    reply_mailbox_unavailable: "couldn't find the mailbox to check for replies.",
+    gmail_reply_anchor_missing: "couldn't find the email it replies to.",
+    recipient_suppressed: "the recipient is on the do-not-email list.",
+    not_sent_released: "an earlier attempt didn't go out. It's ready to send again.",
+    send_timed_out: "the send took too long. Use Check if it went.",
+    unknown: "Gmail didn't confirm. Use Check if it went.",
+    failed: "Gmail refused it. Use Check if it went.",
+    preflight_error: "a pre-send check failed. Try again.",
+  };
+  return words[reason] ?? `${reason.replace(/_/g, " ")}.`;
+}
+
 function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend }: {
   item: RelayReviewItem; draft: RelayDraftView; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void; onNext: () => void;
-  sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => void;
+  sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>;
 }) {
   const mail = draft.mail;
   const [local, setLocal] = useState<Local | null>(mail ? { subject: mail.subject ?? "", body: mail.main, updated_at: mail.updated_at } : null);
@@ -437,10 +474,17 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     try {
       const version = await save();
       if (!version) return;
-      startSend(draft.id, version.updated_at, to.join(", "));
-      say(`Sending to ${to.join(", ")} in the background`);
-      onNext();
+      if (await startSend(draft.id, version.updated_at, to.join(", "))) onNext();
     } finally { setSending(false); }
+  };
+  const [checking, setChecking] = useState(false);
+  const checkSent = async () => {
+    setChecking(true);
+    try {
+      const r = await api<{ outcome: string; retry_after_seconds?: number }>(`/api/relay/drafts/${draft.id}/release`, { method: "POST" });
+      say(r.outcome === "sent" ? "It did go: found in Gmail Sent. Marked as sent." : r.outcome === "released" ? "It didn't go. Back to a draft, ready to send again." : `Still settling. Try again in ${Math.ceil((r.retry_after_seconds ?? 60) / 60)} min.`);
+      await reload();
+    } catch (err) { say(err instanceof Error ? err.message : "Couldn't check."); } finally { setChecking(false); }
   };
   const markDone = async () => {
     try { await api(`/api/relay/items/${item.id}/done`, { method: "POST" }); say("Done · no reply. Marked read and labelled Sorted in Gmail"); await reload(); }
@@ -492,13 +536,19 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
           ))}
         </div>
       )}
+      {mail.state === "draft" && mail.failure && !sendingTo && <div className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)", marginBottom: 0 }}><b>Last try didn&apos;t send:</b> {failureText(mail.failure, mail.state)}</div>}
       {!sent && (
         <div className={cx(s.bys, verdict.state === "check" && s.check, verdict.state === "stop" && s.stop)} aria-live="polite">
           <div className={s.bysh}><span className={s.spark} aria-hidden>✦</span><b>Before you send</b><span className={s.state}>{verdict.state === "ok" ? "All clear" : verdict.state === "check" ? "Check" : "Blocked"}</span></div>
           <p><strong>{lead}</strong> {verdict.issues.map(issueText)}{okLine}{hasPromise ? " Any promise in this email is in your to-dos below." : ""}</p>
         </div>
       )}
-      {sendingTo ? <div className={s.sentbox} style={{ background: "var(--blue-soft)", color: "var(--blue-ink)" }}>Sending to {sendingTo} in the background…</div>
+      {(sendingTo || mail.state === "sending") ? <div className={s.sentbox} style={{ background: "var(--blue-soft)", color: "var(--blue-ink)" }}>Sending to {sendingTo ?? to.join(", ")}… You can carry on; Relay tells you when it lands.</div>
+        : (mail.state === "failed" || mail.state === "unknown") ? (
+          <div className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)" }}>
+            <b>Not sent{mail.state === "unknown" ? " (unconfirmed)" : ""}:</b> {failureText(mail.failure, mail.state)}{" "}
+            <button type="button" className={s.fixl} disabled={checking} onClick={() => void checkSent()}>{checking ? "Checking Gmail…" : "Check if it went"}</button>
+          </div>)
         : sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div> : (
         <div className={s.eact}>
           <button className={cx(s.btn, arming ? s.confirm : s.pri)} type="button" disabled={blocked || sending || saving} onClick={() => void send()}>{sending ? "Sending…" : arming ? `Confirm send to ${firstName(to[0])}` : "Send"} <Arrow /></button>
