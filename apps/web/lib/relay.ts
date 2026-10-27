@@ -91,7 +91,9 @@ export async function relayCounts(ownerId: string): Promise<RelayCounts> {
        count(*) filter (where status = 'open' and tab = 'follow' and (snooze_until is null or snooze_until <= now()))::int as follow,
        count(*) filter (where status = 'open' and tab = 'other' and (snooze_until is null or snooze_until <= now()))::int as other,
        count(*) filter (where status = 'review')::int as review,
-       (select count(*) from relay_todo t where t.owner_id = $1::uuid and t.state = 'accepted')::int as todos,
+       (select count(*) from work_tasks w left join relay_task_meta m on m.work_task_id = w.id
+          where lower(w.assignee_email) = (select lower(email) from crm_users where id = $1::uuid) and w.status in ('Planned','In Progress')
+          and (m.snooze_until is null or m.snooze_until <= now()))::int as todos,
        (select count(*) from relay_draft d join relay_item x on x.id = d.item_id where x.owner_id = $1::uuid and d.state = 'sent' and d.updated_at >= date_trunc('day', now()))::int as sent_today,
        count(*) filter (where status = 'done' and updated_at >= date_trunc('day', now()))::int as done_today
      from relay_item where owner_id = $1::uuid`, [ownerId]);
@@ -724,6 +726,98 @@ export async function listAcceptedTodos(ownerId: string): Promise<RelayTodo[]> {
     `select t.id, t.item_id, t.title, t.detail, t.kind, t.state, w.reb_key, coalesce(i.counterpart_name, i.counterpart_email) as source, t.created_at
      from relay_todo t left join relay_item i on i.id = t.item_id left join work_tasks w on w.id = t.work_task_id
      where t.owner_id = $1::uuid and t.state in ('accepted','done') order by t.state, t.created_at desc limit 200`, [ownerId]);
+}
+
+// ---------- to-dos (Work Tasks) ----------
+
+export type RelayTask = {
+  id: string; reb_key: string; title: string; status: string; created_at: string;
+  category: "market" | "trade" | "ops" | "decide" | "mine" | "other";
+  next_step: string; urgent_reason: string | null; due_at: string | null;
+  question: string | null; yes_label: string | null; no_label: string | null;
+  action_label: string | null; action_kind: "draft" | "open" | "none";
+  link_kind: "mail" | "deal" | "shop" | "chat" | null; link_label: string | null;
+  relay_item_id: string | null; bulk_listing_id: string | null; link_url: string | null; open_message_id: string | null;
+  snooze_until: string | null;
+};
+
+/** Every open Work Task assigned to the owner, with Relay's notes on it. Snoozed tasks stay hidden until their time. */
+export async function listTasks(owner: { id: string; email: string }): Promise<RelayTask[]> {
+  return queryPg<RelayTask>(
+    `select w.id, w.reb_key, w.status, w.created_at,
+       coalesce(nullif(m.title,''), w.title) as title,
+       case when t.kind = 'manual' then 'mine' else coalesce(m.category, 'other') end as category,
+       coalesce(m.next_step, '') as next_step, m.urgent_reason, m.due_at::text as due_at, m.question, m.yes_label, m.no_label,
+       m.action_label, coalesce(m.action_kind, 'none') as action_kind, m.link_kind, m.link_label,
+       m.relay_item_id, m.bulk_listing_id, m.link_url, m.snooze_until,
+       (select mm.id from mail_message mm where mm.thread_id = coalesce(m.mail_thread_id, ri.mail_thread_id)
+          order by coalesce(mm.sent_at, mm.created_at) desc limit 1) as open_message_id
+     from work_tasks w
+     left join relay_task_meta m on m.work_task_id = w.id
+     left join relay_item ri on ri.id = m.relay_item_id
+     left join lateral (select kind from relay_todo where work_task_id = w.id limit 1) t on true
+     where lower(w.assignee_email) = lower($1) and w.status in ('Planned', 'In Progress')
+       and (m.snooze_until is null or m.snooze_until <= now())
+     order by m.due_at nulls last, w.created_at asc limit 300`, [owner.email]);
+}
+
+async function ownTask(taskId: string, owner: { email: string }) {
+  const [row] = await queryPg<{ id: string; status: string }>("select id, status from work_tasks where id = $1 and lower(assignee_email) = lower($2)", [taskId, owner.email]);
+  if (!row) throw new RelayError(404, "Not found");
+  return row;
+}
+
+/** Done, retire or snooze a task. Done and retire close the Work Task itself. */
+export async function updateTask(taskId: string, owner: { id: string; email: string }, action: "done" | "retire" | "snooze" | "reopen", until?: string): Promise<void> {
+  await ownTask(taskId, owner);
+  if (action === "snooze") {
+    const when = until ? new Date(until) : null;
+    if (!when || Number.isNaN(when.getTime()) || when.getTime() < Date.now()) throw new RelayError(400, "Pick a time in the future.");
+    await queryPg(`insert into relay_task_meta (work_task_id, snooze_until) values ($1, $2)
+      on conflict (work_task_id) do update set snooze_until = excluded.snooze_until, updated_at = now()`, [taskId, when.toISOString()]);
+    return;
+  }
+  const status = action === "done" ? "Done" : action === "retire" ? "Retired" : "Planned";
+  await queryPg("update work_tasks set status = $2, updated_at = now() where id = $1", [taskId, status]);
+  await queryPg("update relay_todo set state = $2, updated_at = now() where work_task_id = $1", [taskId, action === "reopen" ? "accepted" : "done"]);
+  if (action === "reopen") await queryPg("update relay_task_meta set snooze_until = null, updated_at = now() where work_task_id = $1", [taskId]);
+}
+
+/** "Draft in Relay": drafts the reply on the task's thread from its note, so it lands in Review (an agent job if it needs research or a list). */
+export async function draftForTask(taskId: string, owner: { id: string; email: string }): Promise<{ itemId: string }> {
+  await ownTask(taskId, owner);
+  const [meta] = await queryPg<{ relay_item_id: string | null; mail_thread_id: string | null; action_note: string; next_step: string; title: string }>(
+    "select relay_item_id, mail_thread_id, action_note, next_step, title from relay_task_meta where work_task_id = $1", [taskId]);
+  if (!meta) throw new RelayError(409, "Relay hasn't read this task yet. Try again in a few minutes.");
+  let itemId = meta.relay_item_id;
+  if (!itemId && meta.mail_thread_id) {
+    // The thread isn't in Relay yet: add it, using its latest inbound sender as the person.
+    const [made] = await queryPg<{ id: string }>(
+      `insert into relay_item (owner_id, gmail_thread_id, mail_thread_id, tab, status, headline, counterpart_email, counterpart_name)
+       select $1::uuid, t.gmail_thread_id, t.id, 'action', 'open', $3,
+         (select from_email from mail_message where thread_id = t.id and direction = 'inbound' order by coalesce(sent_at, created_at) desc limit 1),
+         (select p.full_name from mail_message mm join crm_people p on lower(p.email) = lower(mm.from_email)
+            where mm.thread_id = t.id and mm.direction = 'inbound' order by coalesce(mm.sent_at, mm.created_at) desc limit 1)
+       from mail_thread t where t.id = $2
+       on conflict (owner_id, gmail_thread_id) do update set updated_at = now()
+       returning id`, [owner.id, meta.mail_thread_id, meta.title.slice(0, 200)]);
+    itemId = made?.id ?? null;
+    if (itemId) await queryPg("update relay_task_meta set relay_item_id = $2 where work_task_id = $1", [taskId, itemId]);
+  }
+  if (!itemId) throw new RelayError(409, "There's no email thread linked to this task to reply on.");
+  await draftFromNote(itemId, owner.id, (meta.action_note || meta.next_step || meta.title).slice(0, 2000));
+  return { itemId };
+}
+
+/** A to-do added on the To-dos tab: a Work Task in the Backlog, shown under "Added by you". */
+export async function addTask(owner: { id: string; email: string }, title: string, dueLabel: string | null): Promise<{ reb_key: string }> {
+  const created = await addTodo(owner, title, dueLabel ? `Due ${dueLabel}` : "");
+  const [task] = await queryPg<{ id: string }>("select id from work_tasks where reb_key = $1", [created.reb_key]);
+  if (task) {
+    await queryPg(`insert into relay_task_meta (work_task_id, category, title, next_step, action_kind, classified_at) values ($1, 'mine', $2, $3, 'none', now())
+      on conflict (work_task_id) do nothing`, [task.id, title.slice(0, 160), dueLabel ? `Due ${dueLabel}` : ""]);
+  }
+  return created;
 }
 
 // ---------- chat ----------

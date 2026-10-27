@@ -45,7 +45,7 @@ import { TradesPreviewView } from "../components/bulk-trades/trades-preview-view
 import { TradeListingTab } from "../components/bulk-trades/trade-listing-tab";
 import { MailDraftView } from "../components/crm/inbox/mail-draft-view";
 import { MailMessageView } from "../components/crm/inbox/mail-message-view";
-import { mailDraftPath, parseMailDraftPath, parseMailMessagePath } from "@/lib/mail-artifacts";
+import { mailDraftPath, mailMessagePath, parseMailDraftPath, parseMailMessagePath } from "@/lib/mail-artifacts";
 import { BULK_TRADES_PATH, TRADES_PREVIEW_PATH, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute, parseTradeListingPath, tradeListingPath, type BulkTradesRoute } from "@/lib/bulk-trades-url";
 import { DismantlersView } from "../components/dismantlers/dismantlers-view";
 import { MarketplacePulseView } from "../components/marketplace-pulse/marketplace-pulse-view";
@@ -2681,6 +2681,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
       onOpenEntry={handleOpenEntry}
       onOpenMailDraft={(id, title) => { void handleFilePathClickFromChat(mailDraftPath(id), { title }); }}
       onOpenListing={openTradeListing}
+      onOpenMailMessage={(id, title) => { void handleFilePathClickFromChat(mailMessagePath(id), { title }); }}
       onCloseTab={() => { if (tab) dispatch({ type: "closeContent", id: tab.id }); }}
       onRenameTab={(title) => { if (tab) dispatch({ type: "renameContent", id: tab.id, title }); }}
       activeEntryId={undefined}
@@ -3054,6 +3055,7 @@ function ContentRenderer({
   onOpenEntry,
   onOpenMailDraft,
   onOpenListing,
+  onOpenMailMessage,
   onCloseTab,
   onRenameTab,
   activeEntryId,
@@ -3096,6 +3098,7 @@ function ContentRenderer({
   onOpenMailDraft?: (id: string, title: string) => void;
   /** Opens a Bulk Trades listing in its own tab. */
   onOpenListing: (id: string, title?: string) => void;
+  onOpenMailMessage?: (id: string, title?: string) => void;
   onCloseTab: () => void;
   onRenameTab: (title: string) => void;
   activeEntryId?: string;
@@ -3355,7 +3358,7 @@ function ContentRenderer({
       return <HomeView />;
 
     case "crm-relay":
-      return <RelayView onOpenListing={onOpenListing} />;
+      return <RelayView onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} />;
     case "crm-leaderboard":
       return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 

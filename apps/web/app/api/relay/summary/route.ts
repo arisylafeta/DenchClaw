@@ -1,5 +1,5 @@
 import { guardRelay, relayError } from "@/lib/relay-route";
-import { listAcceptedTodos, listRelayItems, listReview, listRules, relayCounts, RELAY_TABS, type RelayTab } from "@/lib/relay";
+import { listTasks, listRelayItems, listReview, listRules, relayCounts, RELAY_TABS, type RelayTab } from "@/lib/relay";
 import { queryPg } from "@/lib/postgres";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   try {
     const id = guard.user.id;
     const [counts, items, review, todos, rules, scan] = await Promise.all([
-      relayCounts(id), listRelayItems(id, tab), listReview(id), listAcceptedTodos(id), listRules(id),
+      relayCounts(id), listRelayItems(id, tab), listReview(id), listTasks(guard.user), listRules(id),
       queryPg<{ at: string | null }>("select max(updated_at)::text as at from relay_item where owner_id = $1::uuid", [id]),
     ]);
     const [avg] = await queryPg<{ minutes: number | null }>(

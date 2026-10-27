@@ -3,14 +3,14 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
-import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayTab, RelayTodo } from "@/lib/relay";
+import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
 
 type Counts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number };
-type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTodo[]; rules: { id: string; text: string }[]; scannedAt: string | null; avgReplyMinutes: number | null };
+type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; rules: { id: string; text: string }[]; scannedAt: string | null; avgReplyMinutes: number | null };
 type Page = "inbox" | "review" | "todos";
 
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
@@ -46,7 +46,7 @@ async function api<T>(url: string, init?: { method?: string; body?: unknown }): 
 const Arrow = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 const Logo = () => <span className={s.logo}><i /></span>;
 
-export function RelayView({ onOpenListing }: { onOpenListing?: (id: string, title?: string) => void }) {
+export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void }) {
   const [page, setPage] = useState<Page>("inbox");
   const [tab, setTab] = useState<RelayTab>("action");
   const [data, setData] = useState<Summary | null>(null);
@@ -148,7 +148,7 @@ export function RelayView({ onOpenListing }: { onOpenListing?: (id: string, titl
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
         {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onDrafted={() => setPage("review")} />}
         {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} />}
-        {data && page === "todos" && <Todos todos={data.todos} reload={() => load(tab)} say={say} />}
+        {data && page === "todos" && <Tasks tasks={data.todos} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
       </div>
       <div className={cx(s.toast, toast && s.on)} role="status" aria-live="polite">
         <span>{toast?.text}</span>
@@ -707,40 +707,224 @@ function StockListForm({ draftId, onClose, onDone, say }: { draftId: string; onC
 
 // ---------------------------------------------------------------- To-dos
 
-function Todos({ todos, reload, say }: { todos: RelayTodo[]; reload: () => Promise<void>; say: (t: string) => void }) {
-  const [title, setTitle] = useState("");
-  const [adding, setAdding] = useState(false);
-  const add = async () => {
-    if (!title.trim() || adding) return;
-    setAdding(true);
-    try { const r = await api<{ reb_key: string }>(`/api/relay/todos`, { method: "POST", body: { title: title.trim() } }); setTitle(""); say(`Added · ${r.reb_key} in Work Tasks`); await reload(); }
-    catch (err) { say(err instanceof Error ? err.message : "Couldn't add it."); } finally { setAdding(false); }
-  };
-  const act = async (t: RelayTodo, action: "done") => {
-    try { await api(`/api/relay/todos/${t.id}`, { method: "POST", body: { action } }); say("Nice. Marked done in Work Tasks"); await reload(); } catch (err) { say(err instanceof Error ? err.message : "Couldn't update."); }
-  };
+/** Holder for the suggested to-dos shown under a draft in Review. */
+const Todos = {} as { Suggested: (props: { item: RelayReviewItem; draft: RelayDraftView | undefined; reload: () => Promise<void>; say: (t: string) => void }) => React.ReactElement | null };
+
+// ---------------------------------------------------------------- To-dos (Work Tasks)
+
+const CATEGORIES: { key: RelayTask["category"]; name: string; hint: string; colour: string; soft: string; icon: string }[] = [
+  { key: "market", name: "Marketplace replies", hint: "Buyers waiting in marketplace chats", colour: "var(--blue)", soft: "var(--blue-soft)", icon: '<path d="M3 9h18l-2 11H5z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/>' },
+  { key: "trade", name: "Buyers and suppliers", hint: "People to reply to or chase", colour: "var(--violet)", soft: "var(--violet-soft)", icon: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 20a6 6 0 0 0-3-5.2"/>' },
+  { key: "ops", name: "Recycling and paperwork", hint: "Quotes, invoices and forms", colour: "var(--teal)", soft: "var(--teal-soft)", icon: '<path d="M7 19H4l3.5-6M17 19h3l-3.5-6M12 4l2 3.5M9.5 7.5 12 4"/><path d="M8 13l4-7 4 7M8 19h8"/>' },
+  { key: "decide", name: "Needs a decision", hint: "One answer and Relay closes it", colour: "var(--amber)", soft: "var(--amber-soft)", icon: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5h.01"/>' },
+  { key: "mine", name: "Added by you", hint: "", colour: "var(--green)", soft: "var(--green-soft)", icon: '<path d="M12 5v14M5 12h14"/>' },
+  { key: "other", name: "Other", hint: "Relay is still reading these", colour: "var(--muted)", soft: "var(--soft)", icon: '<circle cx="12" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>' },
+];
+const LINK_ICON: Record<string, string> = {
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  deal: '<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  shop: '<path d="M3 9h18l-2 11H5z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+};
+const Svg = ({ d, className }: { d: string; className?: string }) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden dangerouslySetInnerHTML={{ __html: d }} />;
+const ageDays = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86_400_000));
+
+/** Snooze choices relative to now; mornings are 8:00 local. */
+function snoozeChoices(now = new Date()): { label: string; hint: string; at: Date }[] {
+  const at = (days: number, hour = 8) => { const d = new Date(now); d.setDate(d.getDate() + days); d.setHours(hour, 0, 0, 0); return d; };
+  const fmt = (d: Date) => d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const toMonday = ((8 - now.getDay()) % 7) || 7;
+  const list = [
+    ...(now.getHours() < 16 ? [{ label: "Later today", hint: "5 pm", at: at(0, 17) }] : []),
+    { label: "Tomorrow", hint: fmt(at(1)), at: at(1) },
+    { label: "Monday", hint: fmt(at(toMonday)), at: at(toMonday) },
+    { label: "Next week", hint: fmt(at(7)), at: at(7) },
+    { label: "In 2 weeks", hint: fmt(at(14)), at: at(14) },
+    { label: "In a month", hint: fmt(at(30)), at: at(30) },
+  ];
+  return list.filter((c, i, all) => all.findIndex((o) => o.hint === c.hint) === i);
+}
+
+function SnoozeMenu({ onPick }: { onPick: (at: Date, label: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", close); document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  const pick = (at: Date, label: string) => { setOpen(false); onPick(at, label); };
   return (
-    <section aria-label="To-dos">
-      <div className={s.phead}><span className={s.tag}>To-dos · synced to Work Tasks</span></div>
-      <form className={cx(s.card, s.addtodo)} onSubmit={(e) => { e.preventDefault(); void add(); }}>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a to-do, e.g. call Lubomír about the Brno delivery" aria-label="New to-do" disabled={adding} />
-        <button type="submit" className={cx(s.btn, s.blue)} disabled={!title.trim() || adding}>{adding ? "Adding…" : "Add"}</button>
+    <span className={s.snz} ref={ref} onClick={(e) => e.stopPropagation()}>
+      <button type="button" className={s.tbtn} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>Snooze ▾</button>
+      {open && (
+        <div className={s.menu} role="menu">
+          {snoozeChoices().map((c) => <button key={c.label} type="button" role="menuitem" onClick={() => pick(c.at, c.label.toLowerCase())}>{c.label}<span>{c.hint}</span></button>)}
+          <div className={s.msep} />
+          <label className={s.mlabel}>Pick a date
+            <input type="date" min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)} onChange={(e) => { if (e.target.value) { const d = new Date(`${e.target.value}T08:00:00`); pick(d, d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })); } }} />
+          </label>
+        </div>
+      )}
+    </span>
+  );
+}
+
+const DUE_WORDS: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", tomorrow: "Tomorrow", today: "Today" };
+const DUE_RE = /\b(mon|tue|wed|thu|fri|tomorrow|today)\b/i;
+
+function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted }: {
+  tasks: RelayTask[]; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void;
+  onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void; onDrafted: () => void;
+}) {
+  const [filter, setFilter] = useState<string>("all");
+  const [sel, setSel] = useState<string | null>(null);
+  const [gone, setGone] = useState<Record<string, boolean>>({});
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [title, setTitle] = useState("");
+  const visible = tasks.filter((t) => !gone[t.id]);
+  const urgent = visible.filter((t) => t.urgent_reason).slice(0, 3);
+  const rest = visible.filter((t) => !urgent.includes(t));
+  const used = CATEGORIES.filter((c) => rest.some((t) => t.category === c.key));
+  const shown = filter === "all" || !used.some((c) => c.key === filter) ? used : used.filter((c) => c.key === filter);
+  const order = shown.flatMap((c) => rest.filter((t) => t.category === c.key)).map((t) => t.id);
+
+  const post = (id: string, body: unknown) => api(`/api/relay/tasks/${id}`, { method: "POST", body });
+  const hide = (id: string) => setGone((g) => ({ ...g, [id]: true }));
+  const unhide = (id: string) => setGone((g) => { const n = { ...g }; delete n[id]; return n; });
+  const close = async (t: RelayTask, action: "done" | "retire") => {
+    hide(t.id);
+    try {
+      await post(t.id, { action });
+      say(`${t.reb_key} ${action === "done" ? "done" : "retired"} · closed in Work Tasks`, async () => { await post(t.id, { action: "reopen" }).catch(() => undefined); unhide(t.id); await reload(); });
+      void reload();
+    } catch (err) { unhide(t.id); say(err instanceof Error ? err.message : "Couldn't update the task."); }
+  };
+  const tick = (t: RelayTask) => { setTicked((x) => ({ ...x, [t.id]: true })); setTimeout(() => void close(t, "done"), 350); };
+  const snooze = async (t: RelayTask, at: Date, label: string) => {
+    hide(t.id);
+    try {
+      await post(t.id, { action: "snooze", until: at.toISOString() });
+      say(`Snoozed until ${label}`, async () => { await post(t.id, { action: "reopen" }).catch(() => undefined); unhide(t.id); await reload(); });
+    } catch (err) { unhide(t.id); say(err instanceof Error ? err.message : "Couldn't snooze it."); }
+  };
+  const open = (t: RelayTask) => {
+    if (t.open_message_id && onOpenMailMessage) onOpenMailMessage(t.open_message_id, t.link_label ?? t.title);
+    else if (t.bulk_listing_id && onOpenListing) onOpenListing(t.bulk_listing_id, t.link_label ?? undefined);
+    else if (t.link_url) window.open(t.link_url, "_blank", "noopener");
+    else say("Nothing linked to open for this one.");
+  };
+  const act = async (t: RelayTask) => {
+    if (t.action_kind !== "draft") { open(t); return; }
+    setBusy((b) => ({ ...b, [t.id]: true }));
+    say(`Drafting for ${t.reb_key}…`);
+    try { await post(t.id, { action: "draft" }); say(`Drafted · ${t.reb_key} is in Review`, onDrafted); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't draft it."); }
+    finally { setBusy((b) => ({ ...b, [t.id]: false })); }
+  };
+  const decide = (t: RelayTask, yes: boolean) => {
+    if (yes) void close(t, /retire/i.test(t.yes_label ?? "") ? "retire" : "done");
+    else { const at = new Date(); at.setDate(at.getDate() + 3); at.setHours(8, 0, 0, 0); void snooze(t, at, "in 3 days"); }
+  };
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = title.trim();
+    if (!text) return;
+    const due = text.match(DUE_RE)?.[1]?.toLowerCase();
+    try {
+      const r = await api<{ reb_key: string }>("/api/relay/todos", { method: "POST", body: { title: text.replace(DUE_RE, "").replace(/\s{2,}/g, " ").trim(), due: due ? DUE_WORDS[due] : null } });
+      setTitle(""); say(`Added ${r.reb_key} to Work Tasks`); await reload();
+    } catch (err) { say(err instanceof Error ? err.message : "Couldn't add it."); }
+  };
+  // J/K move, E done, Enter acts, S snoozes (opens the menu on the selected row).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest("input, textarea, [role=menu]")) return;
+      const key = e.key.toLowerCase();
+      if (key === "j" || key === "k") {
+        if (!order.length) return;
+        const i = sel ? order.indexOf(sel) : -1;
+        const next = order[Math.max(0, Math.min(order.length - 1, i < 0 ? 0 : i + (key === "j" ? 1 : -1)))];
+        setSel(next); document.getElementById(`task-${next}`)?.scrollIntoView({ block: "nearest" }); e.preventDefault();
+      } else if (sel) {
+        const t = visible.find((x) => x.id === sel);
+        if (!t) return;
+        if (key === "e") { tick(t); setSel(null); }
+        else if (key === "enter") void act(t);
+        else if (key === "s") { (document.querySelector(`#task-${sel} [aria-haspopup=menu]`) as HTMLButtonElement | null)?.click(); e.preventDefault(); }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
+  const link = (t: RelayTask) => t.link_label ? <button type="button" className={s.tlink} onClick={(e) => { e.stopPropagation(); open(t); }}><Svg d={LINK_ICON[t.link_kind ?? "chat"]} /><span>{t.link_label}</span></button> : null;
+  const actionButton = (t: RelayTask, primary = true) => t.action_kind !== "none" && (t.action_kind === "draft" || t.open_message_id || t.bulk_listing_id || t.link_url)
+    ? <button type="button" className={cx(s.tbtn, primary && s.tpri)} disabled={busy[t.id]} onClick={(e) => { e.stopPropagation(); void act(t); }}>{busy[t.id] ? "Drafting…" : t.action_label || (t.action_kind === "draft" ? "Draft in Relay" : "Open")}</button> : null;
+
+  return (
+    <section aria-label="To-dos" className={s.tasks}>
+      <form className={s.tadd} onSubmit={(e) => void add(e)}>
+        <Svg d='<path d="M12 5v14M5 12h14"/>' />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a to-do… try “call Lubomír Fri”" aria-label="New to-do" />
+        {DUE_RE.test(title) && <span className={s.parsed}>Due {DUE_WORDS[title.match(DUE_RE)![1].toLowerCase()]}</span>}
       </form>
-      <div className={s.card} style={{ marginTop: 10 }}>
-        {!todos.length ? <div className={s.empty}><b>No to-dos yet</b><span className={s.muted}>Add one above, or accept suggestions under any email in Review.</span></div> : (
-          <>
-            <div className={cx(s.trow, s.h)}><span /><span>To-do</span><span>From</span><span>Work Task</span></div>
-            {todos.map((t) => (
-              <div key={t.id} className={cx(s.trow, t.state === "done" && s.done)}>
-                <button type="button" className={cx(s.cb, t.state === "done" && s.on)} aria-label="Mark done" disabled={t.state === "done"} onClick={() => void act(t, "done")}>{t.state === "done" ? "✓" : ""}</button>
-                <div style={{ minWidth: 0 }}><b>{t.title}</b>{t.detail && <div className={s.muted} style={{ fontSize: 13 }}>{t.detail}</div>}</div>
-                <span className={s.muted}>{t.source ?? "You"}</span>
-                {t.reb_key ? <span className={s.key}>{t.reb_key}</span> : <span />}
-              </div>
-            ))}
-          </>
-        )}
+
+      <div className={s.uhead}><h2>Most urgent</h2><span>Picked by due date, money at stake and how long it has waited</span></div>
+      <div className={s.urgent}>
+        {urgent.length ? urgent.map((t) => (
+          <div key={t.id} className={s.ucard} id={`task-${t.id}`}>
+            <span className={cx(s.why, /draft|waiting/i.test(t.urgent_reason ?? "") && s.whyamber)}>● {t.urgent_reason}</span>
+            <b>{t.title}</b>
+            {t.next_step && <p>{t.next_step}</p>}
+            <div className={s.ufoot}>{link(t)}<span className={s.tkey}>{t.reb_key}</span><span className={s.sp} />
+              <SnoozeMenu onPick={(at, label) => void snooze(t, at, label)} />
+              <button type="button" className={s.tbtn} onClick={() => void close(t, "done")}>Done</button>{actionButton(t)}</div>
+          </div>
+        )) : <div className={s.uempty}><b>Nothing urgent</b>Everything with a date is handled.</div>}
       </div>
+
+      <div className={s.tfilters} role="group" aria-label="Filter">
+        {[{ key: "all", name: "Everything", colour: "" }, ...used].map((c) => (
+          <button key={c.key} type="button" className={s.tf} aria-pressed={filter === c.key || (c.key === "all" && !used.some((u) => u.key === filter))} onClick={() => setFilter(c.key)}>
+            {c.colour && <span className={s.gl} style={{ background: c.colour }} />}{c.name} <span className={s.n}>{c.key === "all" ? rest.length : rest.filter((t) => t.category === c.key).length}</span>
+          </button>
+        ))}
+        <span className={s.keys}><span><kbd>J</kbd> <kbd>K</kbd> move</span><span><kbd>E</kbd> done</span><span><kbd>↵</kbd> act</span><span><kbd>S</kbd> snooze</span></span>
+      </div>
+
+      {shown.length === 0 && !urgent.length && <div className={cx(s.card, s.empty)}><b>All clear</b><span className={s.muted}>No open to-dos. Add one above.</span></div>}
+      {shown.map((c) => {
+        const list = rest.filter((t) => t.category === c.key);
+        return (
+          <section key={c.key} className={s.tgroup} aria-label={c.name}>
+            <div className={s.tghead}><span className={s.glyph} style={{ background: c.soft, color: c.colour }}><Svg d={c.icon} /></span><h3>{c.name}</h3><span className={s.n}>{list.length}</span>{c.hint && <span className={s.thint}>{c.hint}</span>}</div>
+            {list.map((t) => {
+              const age = ageDays(t.created_at);
+              return (
+                <div key={t.id} id={`task-${t.id}`} className={cx(s.trow, sel === t.id && s.tsel)} onClick={() => setSel(t.id)}>
+                  <button type="button" className={cx(s.tcb, ticked[t.id] && s.ton)} aria-label={`Mark ${t.reb_key} done`} onClick={(e) => { e.stopPropagation(); tick(t); }}><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></button>
+                  <div className={s.tmain}>
+                    <div className={s.tt}><b>{t.title}</b><span className={s.tkey}>{t.reb_key}</span></div>
+                    {t.next_step && <div className={cx(s.tnext, sel === t.id && s.tnextopen)}>{t.next_step}</div>}
+                    {t.category === "decide" && t.question && (
+                      <div className={s.tq}><span>{t.question}</span>
+                        <button type="button" className={s.tbtn} onClick={(e) => { e.stopPropagation(); decide(t, false); }}>{t.no_label || "Not yet"}</button>
+                        <button type="button" className={cx(s.tbtn, s.tpri)} onClick={(e) => { e.stopPropagation(); decide(t, true); }}>{t.yes_label || "Yes, mark done"}</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className={s.tside}>{link(t)}<span className={cx(s.tage, age >= 14 && s.told)}>{age}d</span></div>
+                  {t.category !== "decide" && <div className={s.thov}>{actionButton(t)}<SnoozeMenu onPick={(at, label) => void snooze(t, at, label)} /></div>}
+                </div>
+              );
+            })}
+          </section>
+        );
+      })}
     </section>
   );
 }

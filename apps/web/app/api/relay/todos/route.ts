@@ -1,5 +1,5 @@
 import { guardRelay, readBody, relayError } from "@/lib/relay-route";
-import { addTodo } from "@/lib/relay";
+import { addTask } from "@/lib/relay";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   if (!title) return Response.json({ error: "Add what needs doing." }, { status: 400 });
   try {
-    return Response.json(await addTodo(guard.user, title, typeof body?.detail === "string" ? body.detail.trim() : ""));
+    return Response.json(await addTask(guard.user, title, typeof body?.due === "string" && body.due.trim() ? body.due.trim().slice(0, 40) : null));
   } catch (error) {
     return relayError(error);
   }
