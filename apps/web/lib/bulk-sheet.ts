@@ -6,7 +6,7 @@
 
 import { dealOwner, type DealOwner } from "./bulk-owner";
 import { likelihoodOf } from "./bulk-likelihood";
-import { LISTING_STAGES, TRADE_STAGES, type ListingStage } from "./bulk-listing";
+import { LISTING_STAGES, listingStageOf, TRADE_STAGES, type ListingStage } from "./bulk-listing";
 import type { OfferStage } from "./crm-postgres/bulk-offers";
 import type { BulkTradesRoute } from "./bulk-trades-url";
 import { demandTitle } from "./bulk-demand-header";
@@ -137,6 +137,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
   const ctxText = (key: string) => { const value = (input.context as Record<string, unknown> | null)?.[key]; return typeof value === "string" ? value : null; };
   const category = specText("product_family") ?? specText("trade_kind");
   const hold = specText("trade_stage") === "On hold" || !!specText("hold_until");
+  const stage = listingStageOf(input.stage, input.kind);
   return {
     key: input.id, id: input.id, kind: input.kind,
     side: input.kind === "demand" ? "buyer" : "seller",
@@ -145,9 +146,9 @@ export function listingRow(input: ListingSheetInput): SheetRow {
       : text(ctxText("listing_title")) ?? text(specText("listing_title")) ?? text(specText("title")) ?? input.summary,
     company: text(input.party), company_id: input.company_id, category,
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
-    progress: input.stage, held: hold,
+    progress: stage, held: hold,
     // A stage this code does not know (a database ahead of or behind migration 095) keeps a neutral colour instead of breaking the sheet.
-    tone: hold ? "hold" : STAGE_TONE[input.stage] ?? "new",
+    tone: hold ? "hold" : STAGE_TONE[stage] ?? "new",
     score: input.score,
     ...valueAndFee(input.kind, input.spec, input.context as Record<string, unknown> | null),
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOARD_STAGES, DEMAND_STAGES, LISTING_STAGES, SUPPLY_STAGES, stagesFor } from "./bulk-listing";
+import { BOARD_STAGES, DEMAND_STAGES, LISTING_STAGES, SUPPLY_STAGES, listingStageOf, progressFor, stagesFor } from "./bulk-listing";
 import { listingRow, STAGE_TONE, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, sortRows, SHEET_SORTS, valueAndFee, formatEurCompact } from "./bulk-sheet";
 
 const demand = (over = {}) => listingRow({
@@ -203,6 +203,23 @@ describe("stages", () => {
     expect(LISTING_STAGES.map((stage) => STAGE_TONE[stage])).toEqual(
       ["new", "new", "active", "active", "warning", "active", "waiting", "waiting", "closing", "closing", "closing"]);
     expect(demand({ stage: "Can't source" })).toMatchObject({ progress: "Can't source", tone: "warning" });
-    expect(demand({ stage: "Signed & Paid" as never })).toMatchObject({ progress: "Signed & Paid", tone: "new" });
+    expect(demand({ stage: "Mystery" as never })).toMatchObject({ progress: "Mystery", tone: "new" });
+  });
+  it("reads the labels of a database without migration 095 as today's stages", () => {
+    expect(demand({ stage: "Matched" as never })).toMatchObject({ progress: "Found", tone: "active" });
+    expect(supply({ stage: "Matched" as never })).toMatchObject({ progress: "Available", tone: "active" });
+    expect(supply({ stage: "Signed & Paid" as never })).toMatchObject({ progress: "Agreed", tone: "closing" });
+    expect(demand({ stage: "Complete" as never })).toMatchObject({ progress: "Delivered", tone: "closing" });
+    expect(listingStageOf("Offered", "supply")).toBe("Offered");
+  });
+  it("keeps, maps or drops a Progress filter for a list of one kind", () => {
+    expect(progressFor("Found", "demand")).toBe("Found");
+    expect(progressFor("Found", "supply")).toBeNull();
+    expect(progressFor("Matched", "demand")).toBe("Found");
+    expect(progressFor("Matched", "supply")).toBe("Available");
+    expect(progressFor("Signed & Paid", "supply")).toBe("Agreed");
+    expect(progressFor("Complete", "demand")).toBe("Delivered");
+    expect(progressFor("Can't source", "supply")).toBeNull();
+    expect(progressFor("bogus", "demand")).toBeNull();
   });
 });
