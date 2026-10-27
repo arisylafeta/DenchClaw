@@ -70,7 +70,7 @@ describe.skipIf(!TEST_URL)("commercial-buyer stock and buy requests (REB-577)", 
     expect(offers.map((o) => [o.company_id, o.stage, o.data.stock.map((s) => s.stock_id)])).toEqual([
       [id("breaker_a"), "candidate", [id("live_a")]], [id("breaker_b"), "candidate", [id("live_b")]]]);
     const [{ stage }] = await pg.queryPg<{ stage: string }>("select bulk_listing_stage($1) as stage", [first.listingId]);
-    expect(stage).toBe("Matched");
+    expect(stage).toBe("Found");
 
     const again = await stock.createBuyRequest(input, rows);
     expect(again).toMatchObject({ listingId: first.listingId, created: false, offersAdded: 0 });

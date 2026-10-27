@@ -14,7 +14,7 @@ const PLACEHOLDER_OFFERS = Array.from({ length: 4 }, (_, i) => ({ ...PLACEHOLDER
 const PLACEHOLDER_THREAD = Array.from({ length: 4 }, (_, i) => ({ id: `loading-${i}`, channel: "note", title: "", body: " ", at: "", direction: null, ref: null, href: null } as ThreadEntry));
 
 const STAGES: [OfferStage, string][] = [
-  ["candidate", "Candidate"], ["offered", "Offered"],
+  ["candidate", "Candidate"], ["offered", "Offered"], ["negotiating", "Negotiating"],
   ["contract_out", "Contract out"], ["signed", "Signed"], ["invoiced", "Invoice out"], ["paid", "Paid"], ["complete", "Complete"],
   ["declined", "Declined"], ["lost", "Lost"],
 ];
@@ -25,6 +25,7 @@ const RED = { fg: "var(--bt-red)", bg: "var(--bt-red-bg)", border: "var(--bt-red
 const STAGE_TONE: Record<OfferStage, { fg: string; bg: string; border: string }> = {
   candidate: { fg: "var(--bt-muted)", bg: "var(--bt-segment)", border: "var(--bt-border)" },
   offered: { fg: "var(--bt-blue)", bg: "var(--bt-blue-bg)", border: "var(--bt-blue-border)" },
+  negotiating: { fg: "var(--bt-blue)", bg: "var(--bt-blue-bg)", border: "var(--bt-blue-border)" },
   contract_out: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
   signed: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },
   invoiced: { fg: "var(--bt-amber)", bg: "var(--bt-amber-bg)", border: "var(--bt-amber-border)" },

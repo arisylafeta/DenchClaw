@@ -6,17 +6,16 @@ import { shortDate } from "@/lib/bulk-trade-details";
 import { BusyRegion } from "./bt-shimmer";
 import { ScoreCircle, SideChip, WaitingBadge } from "./opportunities-sheet";
 
-/** Read-only pipeline of the six listing stages (bulk_listing_stage). Work moves on by what happens in the listing:
- * a saved match, an offer, a contract date. Nothing is dragged. */
+/** Read-only pipeline of the deal stages (bulk_listing_stage): only listings with an offer out are here. Work moves
+ * on by what happens to its offers (Offers tab). Nothing is dragged. */
 const COLUMNS: { name: ListingStage; tone: SheetTone; hint: string }[] = [
-  { name: "New", tone: "new", hint: "Captured, not vetted" },
-  { name: "Qualified", tone: "new", hint: "Basics are in" },
-  { name: "Matched", tone: "active", hint: "Counterparties found" },
   { name: "Offered", tone: "waiting", hint: "Put to a counterparty" },
-  { name: "Signed & Paid", tone: "closing", hint: "Contract, invoice and payment" },
-  { name: "Complete", tone: "closing", hint: "Delivered" },
+  { name: "Negotiating", tone: "waiting", hint: "Terms under discussion" },
+  { name: "Agreed", tone: "closing", hint: "Contract out, signed or invoiced" },
+  { name: "Paid", tone: "closing", hint: "Payment received" },
+  { name: "Delivered", tone: "closing", hint: "Delivered" },
 ];
-const DOT: Record<SheetTone, string> = { new: "var(--bt-muted)", active: "var(--bt-blue)", waiting: "var(--bt-amber)", closing: "var(--bt-green)", hold: "var(--bt-purple)" };
+const DOT: Record<SheetTone, string> = { new: "var(--bt-muted)", active: "var(--bt-blue)", waiting: "var(--bt-amber)", closing: "var(--bt-green)", hold: "var(--bt-purple)", warning: "var(--bt-red)" };
 
 function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void }) {
   const overdue = !!row.next_due && row.next_due < today;

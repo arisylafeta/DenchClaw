@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { queryPg } from "../postgres";
 
-export const OFFER_STAGES = ["candidate", "offered", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"] as const;
+export const OFFER_STAGES = ["candidate", "offered", "negotiating", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"] as const;
 export type OfferStage = typeof OFFER_STAGES[number];
 
 export type OfferTerms = { amount?: number; unit?: string; currency?: string; firmness?: string; delivery_terms?: string; payment_terms?: string; expires_on?: string };
@@ -189,7 +189,7 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
 }
 
 export const STAGE_LABEL: Record<OfferStage, string> = {
-  candidate: "Candidate", offered: "Offered", contract_out: "Contract out", signed: "Signed", invoiced: "Invoice out", paid: "Paid",
+  candidate: "Candidate", offered: "Offered", negotiating: "Negotiating", contract_out: "Contract out", signed: "Signed", invoiced: "Invoice out", paid: "Paid",
   complete: "Complete", declined: "Declined", lost: "Lost",
 };
 

@@ -27,8 +27,8 @@ export const SHEET_QUERY = `
   left join lateral (
     select o.stage from crm_bulk_offers o
     where (o.bulk_listing_id = listing.id or o.counterpart_id = listing.id) and o.stage is not null
-    order by case o.stage when 'complete' then 7 when 'paid' then 6 when 'invoiced' then 5 when 'signed' then 4
-      when 'contract_out' then 3 when 'offered' then 2 when 'candidate' then 1 else 0 end desc,
+    order by case o.stage when 'complete' then 8 when 'paid' then 7 when 'invoiced' then 6 when 'signed' then 5
+      when 'contract_out' then 4 when 'negotiating' then 3 when 'offered' then 2 when 'candidate' then 1 else 0 end desc,
       o.updated_at desc, o.id desc limit 1
   ) offer on true
   where listing.status in ('open', 'qualifying') and listing.kind in ('demand', 'supply')`;

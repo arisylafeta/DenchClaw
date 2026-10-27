@@ -50,7 +50,7 @@ const ROWS: SheetRow[] = [
   row({}),
   row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Offered",
     latest: { label: "Offer by email", at: "2026-10-07" } }),
-  row({ key: "bt_1", kind: "supply", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "Matched",
+  row({ key: "bt_1", kind: "supply", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "Available",
     tone: "active", next_action: "Call the buyer", owner: "Alex", next_due: today }),
 ];
 
@@ -85,7 +85,7 @@ describe("Trades Preview sheet", () => {
     expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
     const trade = screen.getByRole("button", { name: /Synthetic eBS37/ }).closest("li")!;
-    expect(within(trade).getByText("Matched")).toBeInTheDocument();
+    expect(within(trade).getByText("Available")).toBeInTheDocument();
     expect(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
     expect(within(trade).getByText(/Alex/)).toBeInTheDocument();
     expect(screen.getByText("3 of 3 live")).toBeInTheDocument();

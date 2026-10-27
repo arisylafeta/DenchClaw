@@ -15,6 +15,7 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   waiting: { dot: "var(--bt-amber)", bg: "var(--bt-amber-bg)" },
   closing: { dot: "var(--bt-green)", bg: "var(--bt-green-bg)" },
   hold: { dot: "var(--bt-purple)", bg: "var(--bt-purple-bg)" },
+  warning: { dot: "var(--bt-red)", bg: "var(--bt-red-bg)" },
 };
 
 const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_5rem_5rem_5rem_minmax(12rem,1.5fr)]";

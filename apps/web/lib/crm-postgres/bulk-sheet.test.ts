@@ -48,8 +48,8 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     const worked = rows.find((row) => row.id === "btd_sheet_worked")!;
     expect(worked).toMatchObject({ progress: "New", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
     expect(rows.find((row) => row.id === "btd_sheet_qual")).toMatchObject({ progress: "New", side: "buyer" });
-    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "buyer", latest: null });
-    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "seller" });
+    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Agreed", tone: "closing", side: "buyer", latest: null });
+    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Agreed", tone: "closing", side: "seller" });
     expect(rows.filter((row) => row.id === "btl_sheet_live")).toHaveLength(1);
     expect(rows.find((row) => row.id === "btl_sheet_live")).toMatchObject({ kind: "supply", side: "seller" });
   });

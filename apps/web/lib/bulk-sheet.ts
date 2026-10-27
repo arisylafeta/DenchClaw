@@ -21,7 +21,8 @@ export const FEE_RATE = 0.1;
 export type SheetKind = "demand" | "supply";
 /** Starting point: a buyer asking for something, or a seller offering it. A buyer-seller connection is shown in progress and details, not here. */
 export type SheetSide = "buyer" | "seller";
-export type SheetTone = "new" | "active" | "waiting" | "closing" | "hold";
+/** Stage colour. `warning` reads as a problem (Can't source); `hold` is a paused listing. */
+export type SheetTone = "new" | "active" | "waiting" | "closing" | "hold" | "warning";
 
 export type SheetRow = {
   /** The listing id, unique across demand and supply. */
@@ -90,7 +91,7 @@ export type ListingSheetInput = {
   observed_on: string | null; updated_at: string; next_action: string | null; next_due: string | null;
   waiting_on?: string | null; waiting_since?: string | null;
   furthest_stage: string | null;
-  /** From bulk_listing_stage(): New, Qualified, Matched, Offered, Signed & Paid, Complete. */
+  /** From bulk_listing_stage(): one of LISTING_STAGES. */
   stage: ListingStage;
 };
 
@@ -114,8 +115,9 @@ export function formatEurCompact(value: number | null | undefined): string {
   return `€${(value / 1_000_000).toFixed(value < 10_000_000 ? 2 : 1).replace(/\.?0+$/, "")}M`;
 }
 
-const STAGE_TONE: Record<ListingStage, SheetTone> = {
-  New: "new", Qualified: "new", Matched: "active", Offered: "waiting", "Signed & Paid": "closing", Complete: "closing",
+export const STAGE_TONE: Record<ListingStage, SheetTone> = {
+  New: "new", Qualified: "new", Sourcing: "active", Found: "active", Available: "active", "Can't source": "warning",
+  Offered: "waiting", Negotiating: "waiting", Agreed: "closing", Paid: "closing", Delivered: "closing",
 };
 
 export function listingRow(input: ListingSheetInput): SheetRow {
