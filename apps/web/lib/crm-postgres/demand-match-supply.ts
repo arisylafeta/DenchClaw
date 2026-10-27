@@ -99,7 +99,7 @@ function listingCandidate(row: ListingRow): Candidate {
   };
 }
 
-type FeedRow = { id: string; kind: "trade" | "auction" | "supply"; title: string; seller: string | null; size: string | null;
+export type FeedRow = { id: string; kind: "trade" | "auction" | "supply"; title: string; seller: string | null; size: string | null;
   location: string | null; seen: string | null; href: string; strength: "strong" | "partial" | null; reason: string | null };
 
 /** Live trades, auctions and supply batches, with the inbox check's judgement for this demand where it made one.
@@ -121,7 +121,11 @@ export async function feedCandidates(demandId: string): Promise<Candidate[]> {
          or (nullif(trim(own.party), '') is not null and lower(trim(own.party)) = lower(trim(src.party))), false)`,
     [demandId],
   );
-  return rows.map((row) => {
+  return rows.map(feedRowCandidate);
+}
+
+/** One feed row (live trade, auction or supply batch) as a match candidate. */
+export function feedRowCandidate(row: FeedRow): Candidate {
     const kwhText = kwhFromText(row.title);
     // Size first ("680,000 cells"), else a title that starts with the count ("40 Toyota Proace 50 kWh packs").
     const unitWord = /(packs?|cells?|modules?|units?|containers?|systems?)\b/i;
@@ -158,7 +162,6 @@ export async function feedCandidates(demandId: string): Promise<Candidate[]> {
       ai: row.strength ? { strength: row.strength, reason: row.reason ?? "" } : null,
       alsoIn: [],
     } satisfies Candidate;
-  });
 }
 
 /** Every candidate for one demand row, plus the units hidden as "Not a fit" for it. */

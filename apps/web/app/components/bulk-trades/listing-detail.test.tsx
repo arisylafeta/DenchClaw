@@ -29,7 +29,7 @@ it("renders a supply trade, the ordered tabs and its labelled seller conversatio
   expect(await screen.findByRole("heading", { name: "24 EV packs" })).toBeInTheDocument();
   expect(screen.getByText("TRADE")).toBeInTheDocument();
   expect(document.querySelector("[data-waiting-on=us]")).toHaveTextContent(/On us/);
-  expect(Array.from(screen.getByRole("navigation", { name: "Detail sections" }).querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Matcha", "Offers", "Documents", "History"]);
+  expect(Array.from(screen.getByRole("navigation", { name: "Detail sections" }).querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Matcha", "Matches", "Offers", "Documents", "History"]);
   expect(await screen.findByRole("heading", { name: "Conversation with Example seller" })).toBeInTheDocument();
   fireEvent.click(await screen.findByRole("button", { name: /Email.*1 message/ }));
   expect(screen.getByText("Batch confirmed")).toBeInTheDocument();

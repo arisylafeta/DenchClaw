@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, ClipboardList, FileText, History, MessageCircle } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, FileText, History, MessageCircle, Users } from "lucide-react";
 import type { BulkListingView } from "@/lib/bulk-listing";
 import type { TradeField } from "@/lib/bulk-trade-details";
 import type { TradeKind } from "@/lib/bulk-trades";
@@ -16,14 +16,15 @@ import { ListingConversation, type ListingMail } from "./listing-conversation";
 import { ListingDetails } from "./listing-details";
 import { useRegistry } from "./use-registry";
 import { OffersTab } from "./offers-tab";
+import { SupplyMatchesTab } from "./supply-matches-tab";
 import { DocumentsTab } from "./documents-tab";
 import { MatchaTab } from "./matcha-tab";
 import { DemandActions } from "./demand-actions";
 import css from "./demand-header.module.css";
 
 type Context = { person?: PartyPerson | null; mail: ListingMail[] };
-const TABS = ["Details", "Matcha", "Offers", "Documents", "History"];
-const ICONS = { Details: ClipboardList, Matcha: MessageCircle, Offers: ArrowLeftRight, Documents: FileText, History };
+const TABS = ["Details", "Matcha", "Matches", "Offers", "Documents", "History"];
+const ICONS = { Details: ClipboardList, Matcha: MessageCircle, Matches: Users, Offers: ArrowLeftRight, Documents: FileText, History };
 
 export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenListing }: {
   listing: BulkListingView; today: string; onChanged: () => void; onClose: () => void; onOpenListing: (id: string) => void;
@@ -72,6 +73,7 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
       {fields === null || !registry ? <ShBlock on size={32} /> : <ListingDetails facts={facts} />}
     </BusyRegion>}
     <MatchaTab listingId={listing.id} active={tab === "Matcha"} />
+    <SupplyMatchesTab listingId={listing.id} active={tab === "Matches"} onOpenListing={onOpenListing} />
     {tab === "Offers" && <OffersTab demandId={listing.id} listingId={listing.id} onChanged={onChanged} />}
     {tab === "Documents" && <DocumentsTab listingId={listing.id} />}
     {tab === "History" && <DemandActions story section="Activity" activityEndpoint={endpoint} demand={{ id: listing.id, status: listing.status }} today={today} onChanged={onChanged} onClose={onClose} onEdit={() => {}} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} />}
