@@ -171,6 +171,14 @@ class JulesRequestImportTest(unittest.TestCase):
         self.assertIn("When: Next month", row["note"])
         self.assertNotIn("None", row["note"])
 
+    def test_commercial_buy_request_keeps_stock_lines(self):
+        lines = [{"groupKey": "grp_0123456789abcdef", "label": "Kia e-Niro 64 kWh pack", "quantity": 4, "targetPriceEur": 3900}]
+        row = saved.map_sourcing_request(self.jules(request_kind="buy_request", stock_lines=lines))
+        self.assertEqual(row["source_label"], "Jules commercial buyer")
+        self.assertTrue(row["spec"]["commercial_buyer"])
+        self.assertIn("Stock line: 4x Kia e-Niro 64 kWh pack at EUR 3,900 each (grp_0123456789abcdef)", row["note"])
+        self.assertNotIn("commercial_buyer", saved.map_sourcing_request(self.jules())["spec"])
+
     def test_quantity_and_timing_fallbacks(self):
         row = saved.map_sourcing_request(self.jules(quantity_text=None, timing_text=None))
         self.assertEqual(row["quantity"], "40 modules")

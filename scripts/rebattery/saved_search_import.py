@@ -215,6 +215,14 @@ def map_sourcing_request(request):
         else:
             notes.append(f"Target price: {currency or 'unspecified currency'} {float(price):,.2f} per {unit or 'unit'}")
     jules = request.get("source") == "jules"
+    # A commercial buyer's request (REB-577) normally reaches the CRM at once with stock attached per supplier; this
+    # import is the fallback when that hand-off failed, so keep the chosen stock groups visible on the demand.
+    buy_request = jules and request.get("request_kind") == "buy_request"
+    if buy_request:
+        spec["commercial_buyer"] = True
+        for line in request.get("stock_lines") or []:
+            target = f" at EUR {line['targetPriceEur']:,.0f} each" if line.get("targetPriceEur") else ""
+            notes.append(f"Stock line: {line.get('quantity')}x {line.get('label')}{target} ({line.get('groupKey')})")
     asked_from = REQUEST_SOURCES.get(request.get("source"), "the marketplace")
     notes.append("Asked us to source it through Jules on rebattery.io." if jules else
                  f"Asked us to source it from {asked_from} on rebattery.io.")
@@ -226,7 +234,7 @@ def map_sourcing_request(request):
         "location": request.get("country"), "spec": spec, **structured,
         "note": "\n".join(notes), "observed_on": str(request["created_at"])[:10],
         "source_kind": "jules" if jules else "import", "source_id": f"sourcing_request:{request['id']}",
-        "source_label": "Jules" if jules else "Sourcing request",
+        "source_label": "Jules commercial buyer" if buy_request else "Jules" if jules else "Sourcing request",
         "source_url": (f"{SITE}/operations/jules/{request['conversation_id']}"
                        if jules and request.get("conversation_id") else
                        f"{SITE}{request.get('catalog_path') or '/marketplace/listings'}"),

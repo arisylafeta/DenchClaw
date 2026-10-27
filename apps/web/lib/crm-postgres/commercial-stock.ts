@@ -17,7 +17,7 @@ const LIVE_STOCK = `
     s.details->>'chemistry' as chemistry, s.details->>'powertrain' as powertrain,
     ${num("s.details->'year'")}::int as year,
     coalesce(nullif(c.country, ''), nullif(s.location, '')) as country,
-    coalesce(${num("s.details->'quantity_available'")}, s.quantity, 1)::float8 as quantity,
+    floor(coalesce(${num("s.details->'quantity_available'")}, s.quantity, 1))::int as quantity,
     ${num("s.details->'price_eur_ex_vat'")}::float8 as price_eur_ex_vat,
     ${num("s.details->'price_eur'")}::float8 as price_eur,
     coalesce(s.details->'sync'->>'lastSeen', s.details->'availability'->>'checked_on', s.observed_on::text, s.updated_at::date::text) as seen_on,
@@ -28,7 +28,8 @@ const LIVE_STOCK = `
     and coalesce(s.details->>'deliver', 'true') <> 'false'
     and coalesce(s.details->'availability'->>'state', '') not in ('sold', 'not_found', 'gone')
     and coalesce(s.details->'sync'->>'available', 'true') <> 'false'
-    and nullif(trim(s.details->>'make'), '') is not null`;
+    and nullif(trim(s.details->>'make'), '') is not null
+    and coalesce(${num("s.details->'quantity_available'")}, s.quantity, 1) >= 1`;
 
 export async function liveStock(): Promise<StockRow[]> {
   return queryPg<StockRow>(LIVE_STOCK);
@@ -87,7 +88,7 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
   const summary = allocations.map(lineSummary).join("; ");
   const prices = input.lines.map((line) => line.targetPriceEur).filter((price): price is number => typeof price === "number" && price > 0);
 
-  return withPgTransaction(async (tx) => {
+  const write = () => withPgTransaction(async (tx) => {
     const sourceId = `sourcing_request:${input.sourcingRequestId}`;
     // Serialise concurrent calls for the same request.
     await tx.query("select pg_advisory_xact_lock(hashtext($1))", [sourceId]);
@@ -96,23 +97,24 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
     let listingId = existing.rows[0]?.id;
     const created = !listingId;
     const person = await buyerPerson(tx, input.email);
+    // The demand checks allow one volume unit; mixed formats keep the count in `quantity` only.
+    const formats = new Set(allocations.flatMap((a) => a.rows.map((r) => normalFormat(r.row.format))));
+    const format = formats.size === 1 ? [...formats][0] : null;
+    const facts = {
+      models: [...new Set(allocations.map((a) => a.label).filter(Boolean))],
+      ...(format ? { volume: units, volume_unit: `${format}s`, formats: [`${format[0].toUpperCase()}${format.slice(1)}s`] } : {}),
+      ...(prices.length === input.lines.length && prices.length && (format === "pack" || format === "cell")
+        ? { max_price: Math.max(...prices), price_currency: "EUR", price_unit: format } : {}),
+      ...(input.neededBy ? { needed_by: input.neededBy } : {}),
+      commercial_buyer: true,
+    };
+    const buyRequest = { sourcing_request_id: input.sourcingRequestId, conversation_id: input.conversationId, lines: input.lines };
+    const note = [summary, input.timing ? `When: ${input.timing}` : null].filter(Boolean).join("\n");
     if (!listingId) {
       listingId = `btd_${randomUUID()}`;
-      // The demand checks allow one volume unit; mixed formats keep the count in `quantity` only.
-      const formats = new Set(allocations.flatMap((a) => a.rows.map((r) => normalFormat(r.row.format))));
-      const format = formats.size === 1 ? [...formats][0] : null;
-      const spec = {
-        intent: "request",
-        models: [...new Set(allocations.map((a) => a.label).filter(Boolean))],
-        ...(format ? { volume: units, volume_unit: `${format}s`, formats: [`${format[0].toUpperCase()}${format.slice(1)}s`] } : {}),
-        ...(prices.length === input.lines.length && prices.length && (format === "pack" || format === "cell")
-          ? { max_price: Math.max(...prices), price_currency: "EUR", price_unit: format } : {}),
-        ...(input.neededBy ? { needed_by: input.neededBy } : {}),
-        commercial_buyer: true,
-      };
       const context = {
         listing_title: `${units}x ${allocations.map((a) => a.label ?? "battery").slice(0, 3).join(", ")}`.slice(0, 160),
-        buy_request: { sourcing_request_id: input.sourcingRequestId, conversation_id: input.conversationId, lines: input.lines },
+        buy_request: buyRequest,
         next_action: "Review the attached stock per supplier and prepare buying requests.",
       };
       await tx.query(
@@ -120,30 +122,55 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
            observed_on, source_kind, source_id, source_label, source_url, spec, context)
          values ($1, 'demand', $2, $3, $4, $5, $6, $7, $8, $9, 'open', current_date, 'jules', $10, 'Jules commercial buyer', $11, $12, $13)`,
         [listingId, person.company ?? input.email, person.company_id, person.id, input.email, input.wants.slice(0, 2000), `${units} units`,
-          input.country, [summary, input.timing ? `When: ${input.timing}` : null].filter(Boolean).join("\n"), sourceId,
-          input.conversationId ? `${SITE}/operations/jules/${input.conversationId}` : null, JSON.stringify(spec), JSON.stringify(context)]);
+          input.country, note, sourceId, input.conversationId ? `${SITE}/operations/jules/${input.conversationId}` : null,
+          JSON.stringify({ intent: "request", ...facts }), JSON.stringify(context)]);
+    } else {
+      // A resend or an edited request: bring the demand up to date. Price, volume and timing facts are replaced as a set
+      // so a removed target price does not linger; the importer's fallback row gains the same shape.
+      await tx.query(
+        `update crm_bulk_listings set summary = $2, quantity = $3, note = $4, location = coalesce($5, location),
+           spec = (spec - array['models', 'volume', 'volume_unit', 'formats', 'max_price', 'price_currency', 'price_unit', 'needed_by']) || $6::jsonb,
+           context = jsonb_set(context, '{buy_request}', $7::jsonb), updated_at = now()
+         where id = $1`,
+        [listingId, input.wants.slice(0, 2000), `${units} units`, note, input.country, JSON.stringify(facts), JSON.stringify(buyRequest)]);
     }
 
-    let offersAdded = 0;
+    let offersAdded = 0, offersUpdated = 0, offersDropped = 0;
+    const current = await tx.query<{ id: string; company_id: string | null; person_id: string | null; stage: string | null; data: { source?: string } }>(
+      "select id, company_id, person_id, stage, data from crm_bulk_offers where bulk_listing_id = $1 and role = 'counterparty'", [listingId]);
+    const seen = new Set<string>();
     for (const supplier of suppliers) {
       const stock = supplier.lines.map(({ allocation, row, units: taken }) => ({
         stock_id: row.id, group_key: allocation.groupKey, label: allocation.label, units: taken,
         price_eur_ex_vat: row.price_eur_ex_vat, price_eur: row.price_eur, target_price_eur: allocation.targetPriceEur,
       }));
-      const prior = await tx.query<{ id: string }>(
-        `select id from crm_bulk_offers where bulk_listing_id = $1 and role = 'counterparty'
-           and coalesce(company_id, '') = coalesce($2, '') and (company_id is not null or person_id = $3) limit 1`,
-        [listingId, supplier.company_id, supplier.person_id]);
-      if (prior.rows[0]) continue;
       const wanted = supplier.lines.reduce((sum, line) => sum + line.units, 0);
+      const wants = `Buy ${wanted} unit${wanted === 1 ? "" : "s"} from their stock for a commercial buyer`;
+      const terms = stock.every((line) => line.target_price_eur) ? { amount: Math.max(...stock.map((line) => line.target_price_eur!)), unit: "unit", currency: "EUR" } : {};
+      const prior = current.rows.find((offer) => supplier.company_id ? offer.company_id === supplier.company_id : !offer.company_id && offer.person_id === supplier.person_id);
+      if (prior) {
+        seen.add(prior.id);
+        // Only offers still at candidate follow the request; anything staff have moved on is theirs.
+        if (prior.stage !== "candidate" || prior.data?.source !== "commercial_buyer") continue;
+        await tx.query(
+          `update crm_bulk_offers set wants = $2, terms = $3, data = data || $4::jsonb, updated_at = now() where id = $1`,
+          [prior.id, wants, JSON.stringify(terms), JSON.stringify({ stock })]);
+        offersUpdated += 1;
+        continue;
+      }
       await tx.query(
         `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, wants, stage, terms, data)
          values ($1, $2, 'counterparty', $3, $4, $5, $6, 'candidate', $7, $8)`,
-        [`bof_${randomUUID()}`, listingId, supplier.person_id, supplier.company_id, supplier.supplier ?? "Supplier",
-          `Buy ${wanted} unit${wanted === 1 ? "" : "s"} from their stock for a commercial buyer`,
-          JSON.stringify(stock.every((line) => line.target_price_eur) ? { amount: Math.max(...stock.map((line) => line.target_price_eur!)), unit: "unit", currency: "EUR" } : {}),
-          JSON.stringify({ source: "commercial_buyer", stock, next_step: "Prepare a buying request (draft only)" })]);
+        [`bof_${randomUUID()}`, listingId, supplier.person_id, supplier.company_id, supplier.supplier ?? "Supplier", wants,
+          JSON.stringify(terms), JSON.stringify({ source: "commercial_buyer", stock, next_step: "Prepare a buying request (draft only)" })]);
       offersAdded += 1;
+    }
+    for (const offer of current.rows) {
+      if (seen.has(offer.id) || offer.stage !== "candidate" || offer.data?.source !== "commercial_buyer") continue;
+      await tx.query(
+        `update crm_bulk_offers set stage = 'declined', declined_reason = 'Buyer changed the request; this stock is no longer wanted',
+           data = data || '{"stock": []}'::jsonb, updated_at = now() where id = $1`, [offer.id]);
+      offersDropped += 1;
     }
 
     await tx.query(
@@ -151,7 +178,7 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
        values ($1, $2, 'supply', $3, $4, $5)`,
       [listingId, person.id,
         created ? `Buy request from Jules: ${units} units, stock from ${suppliers.length} supplier${suppliers.length === 1 ? "" : "s"} attached`
-          : `Buy request resubmitted: ${offersAdded} new supplier offer${offersAdded === 1 ? "" : "s"}`,
+          : `Buy request resent: ${offersAdded} supplier offer${offersAdded === 1 ? "" : "s"} added, ${offersUpdated} updated, ${offersDropped} dropped`,
         summary,
         JSON.stringify({ sourcing_request_id: input.sourcingRequestId, allocations: allocations.map((a) => ({
           group_key: a.groupKey, label: a.label, wanted: a.wanted, allocated: a.allocated, stock_ids: a.rows.map((r) => r.row.id) })) })]);
@@ -161,4 +188,12 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
       lines: allocations.map((a) => ({ groupKey: a.groupKey, label: a.label, wanted: a.wanted, allocated: a.allocated })),
     };
   });
+
+  try {
+    return await write();
+  } catch (error) {
+    // The daily importer may insert the same demand between our lookup and insert; the second try finds it.
+    if ((error as { code?: string }).code === "23505") return write();
+    throw error;
+  }
 }

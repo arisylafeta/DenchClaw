@@ -20,11 +20,19 @@ describe("aggregateStock", () => {
     const groups = aggregateStock(stock);
     expect(groups).toHaveLength(2);
     const id3 = groups.find((group) => group.make === "Volkswagen")!;
-    expect(id3).toMatchObject({ units: 4, sources: 2, priceEurExVat: { min: 5000, median: 5000, max: 5000, priced: 1 }, priceEurIncVatOnly: 1 });
+    expect(id3).toMatchObject({ units: 4, priceEurIncVatOnly: 1 });
     const peugeot = groups.find((group) => group.make === "Peugeot")!;
-    expect(peugeot).toMatchObject({ units: 2, countries: ["Lithuania", "Sweden"], years: { min: 2021, max: 2022 }, synced: 1 });
+    expect(peugeot).toMatchObject({ units: 2, years: { min: 2021, max: 2022 } });
     const text = JSON.stringify(groups);
     for (const secret of ["Secret Breaker", "Other Dismantler", "co_a", "co_b", "p_a", "sto_1", "sto_4"]) expect(text).not.toContain(secret);
+  });
+
+  it("hides source count, countries and exact prices below three suppliers", () => {
+    const [few] = aggregateStock([row({ id: "a", price_eur_ex_vat: 4180 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 4777 })]);
+    expect(few).toMatchObject({ sources: null, countries: [], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
+    const [crowd] = aggregateStock([row({ id: "a" }), row({ id: "b", company_id: "co_b", country: "Lithuania", price_eur_ex_vat: 3500 }),
+      row({ id: "c", company_id: "co_c", country: "Norway", price_eur_ex_vat: 4500, sync_class: "static" })]);
+    expect(crowd).toMatchObject({ sources: 3, countries: ["Lithuania", "Norway", "Sweden"], synced: 2, priceEurExVat: { min: 3500, median: 4000, max: 4500, priced: 3 } });
   });
 
   it("uses an opaque key that depends only on the spec", () => {
@@ -40,6 +48,8 @@ describe("matchesFilters", () => {
     expect(stock.filter((r) => matchesFilters(r, { make: "vw" }, today)).map((r) => r.id)).toEqual(["sto_3", "sto_4"]);
     expect(stock.filter((r) => matchesFilters(r, { kwhMin: 55 }, today)).map((r) => r.id)).toEqual(["sto_3", "sto_4"]);
     expect(stock.filter((r) => matchesFilters(r, { maxPriceEurExVat: 3800 }, today)).map((r) => r.id)).toEqual(["sto_2"]);
+    expect(matchesFilters(row({ powertrain: "PHEV" }), { powertrain: "HEV" }, today)).toBe(false);
+    expect(matchesFilters(row({ powertrain: "HEV" }), { powertrain: "hev" }, today)).toBe(true);
     expect(matchesFilters(row({ seen_on: "2026-08-01" }), { seenWithinDays: 30 }, today)).toBe(false);
     expect(matchesFilters(row({ make: null }), {}, today)).toBe(false);
   });

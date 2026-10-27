@@ -52,15 +52,23 @@ export type StockGroup = {
   chemistry: string | null;
   powertrain: string | null;
   units: number;
-  sources: number;
+  /** Distinct suppliers; null when fewer than MIN_SOURCES, so a single seller cannot be singled out. */
+  sources: number | null;
+  /** Empty when fewer than MIN_SOURCES. */
   countries: string[];
   years: { min: number; max: number } | null;
-  priceEurExVat: { min: number; median: number; max: number; priced: number } | null;
+  /** With fewer than MIN_SOURCES only a band rounded to PRICE_BAND_EUR is shown and median is null. */
+  priceEurExVat: { min: number; median: number | null; max: number; priced: number } | null;
   /** Rows priced only with VAT included or with unknown VAT. */
   priceEurIncVatOnly: number;
   lastSeen: string | null;
-  synced: number;
+  /** Rows refreshed by a supplier sync or marketplace mirror; null when fewer than MIN_SOURCES. */
+  synced: number | null;
 };
+
+/** Below this many suppliers a group shows no supplier count, countries or exact prices. */
+export const MIN_SOURCES = 3;
+export const PRICE_BAND_EUR = 500;
 
 const MAKE_ALIASES: Record<string, string> = {
   vw: "Volkswagen", volkswagen: "Volkswagen", mercedes: "Mercedes-Benz", "mercedes-benz": "Mercedes-Benz",
@@ -114,7 +122,7 @@ export function matchesFilters(row: StockRow, filters: StockFilters, today = new
     && includes(row.model, filters.model)
     && (!filters.format || normalFormat(row.format) === filters.format)
     && includes(row.chemistry, filters.chemistry)
-    && includes(row.powertrain, filters.powertrain)
+    && (!filters.powertrain || (row.powertrain ?? "").toLowerCase() === filters.powertrain.trim().toLowerCase())
     && includes(row.country, filters.country)
     && (filters.kwhMin === undefined || (kwh !== null && kwh >= filters.kwhMin))
     && (filters.kwhMax === undefined || (kwh !== null && kwh <= filters.kwhMax))
@@ -160,19 +168,24 @@ export function aggregateStock(rows: StockRow[]): StockGroup[] {
       capacityKwh: normalKwh(first.capacity_kwh),
       chemistry: clean(first.chemistry)?.toUpperCase() ?? null,
     };
+    const sources = new Set(members.map((row) => row.company_id ?? row.person_id)).size;
+    const crowd = sources >= MIN_SOURCES;
     result.push({
       groupKey,
       label: labelFor(group),
       ...group,
       powertrain: clean(first.powertrain),
-      units: members.reduce((sum, row) => sum + (row.quantity > 0 ? row.quantity : 1), 0),
-      sources: new Set(members.map((row) => row.company_id ?? row.person_id)).size,
-      countries: [...new Set(members.map((row) => clean(row.country)).filter((country): country is string => Boolean(country)))].sort(),
+      units: members.reduce((sum, row) => sum + row.quantity, 0),
+      sources: crowd ? sources : null,
+      countries: crowd ? [...new Set(members.map((row) => clean(row.country)).filter((country): country is string => Boolean(country)))].sort() : [],
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
-      priceEurExVat: exVat.length ? { min: round(Math.min(...exVat)), median: round(median(exVat)), max: round(Math.max(...exVat)), priced: exVat.length } : null,
+      priceEurExVat: !exVat.length ? null : crowd
+        ? { min: round(Math.min(...exVat)), median: round(median(exVat)), max: round(Math.max(...exVat)), priced: exVat.length }
+        : { min: Math.max(PRICE_BAND_EUR, Math.floor(Math.min(...exVat) / PRICE_BAND_EUR) * PRICE_BAND_EUR),
+          median: null, max: Math.ceil(Math.max(...exVat) / PRICE_BAND_EUR) * PRICE_BAND_EUR, priced: exVat.length },
       priceEurIncVatOnly: members.filter((row) => row.price_eur_ex_vat === null && row.price_eur !== null).length,
       lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
-      synced: members.filter((row) => row.sync_class === "synced" || row.sync_class === "marketplace").length,
+      synced: crowd ? members.filter((row) => row.sync_class === "synced" || row.sync_class === "marketplace").length : null,
     });
   }
   return result.sort((a, b) => b.units - a.units || a.label.localeCompare(b.label));
@@ -210,7 +223,7 @@ export function allocate(lines: BuyLine[], rows: StockRow[]): Allocation[] {
     let allocated = 0;
     for (const row of candidates) {
       if (allocated >= line.quantity) break;
-      const units = Math.min(row.quantity > 0 ? row.quantity : 1, line.quantity - allocated);
+      const units = Math.min(row.quantity, line.quantity - allocated);
       picked.push({ row, units });
       used.add(row.id);
       allocated += units;

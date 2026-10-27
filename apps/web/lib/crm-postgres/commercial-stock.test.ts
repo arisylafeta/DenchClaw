@@ -77,4 +77,36 @@ describe.skipIf(!TEST_URL)("commercial-buyer stock and buy requests (REB-577)", 
     const [{ count }] = await pg.queryPg<{ count: number }>("select count(*)::int as count from crm_bulk_offers where bulk_listing_id = $1", [first.listingId]);
     expect(count).toBe(2);
   });
+
+  it("follows an edited request: updates the demand, keeps changed suppliers and drops unneeded candidates", async () => {
+    const rows = await mine();
+    const groupKey = pure.groupKeyFor(rows[0]);
+    const input = { sourcingRequestId: requestId, conversationId: null, email, wants: "One Peugeot 208 pack", country: "FR", neededBy: null, timing: null,
+      lines: [{ groupKey, quantity: 1 }] };
+    const edited = await stock.createBuyRequest(input, rows);
+    expect(edited).toMatchObject({ created: false, offersAdded: 0, lines: [{ wanted: 1, allocated: 1 }] });
+    const [listing] = await pg.queryPg<{ summary: string; spec: Record<string, unknown> }>("select summary, spec from crm_bulk_listings where id = $1", [edited.listingId]);
+    expect(listing.summary).toBe("One Peugeot 208 pack");
+    expect(listing.spec).toMatchObject({ volume: 1 });
+    expect(listing.spec).not.toHaveProperty("max_price");
+    const offers = await pg.queryPg<{ company_id: string; stage: string }>(
+      "select company_id, stage from crm_bulk_offers where bulk_listing_id = $1 order by company_id", [edited.listingId]);
+    expect(offers.map((o) => [o.company_id, o.stage])).toEqual([[id("breaker_a"), "candidate"], [id("breaker_b"), "declined"]]);
+  });
+
+  it("attaches stock to a demand the daily importer created first", async () => {
+    const otherRequest = crypto.randomUUID();
+    const importedId = id("btd_imported");
+    await pg.queryPg(
+      `insert into crm_bulk_listings (id, kind, party, email, summary, status, source_kind, source_id, spec)
+       values ($1, 'demand', $2, $2, 'Peugeot packs', 'qualifying', 'jules', $3, '{"intent": "request"}')`, [importedId, email, `sourcing_request:${otherRequest}`]);
+    try {
+      const rows = await mine();
+      const result = await stock.createBuyRequest({ sourcingRequestId: otherRequest, conversationId: null, email, wants: "Peugeot packs", country: null,
+        neededBy: null, timing: null, lines: [{ groupKey: pure.groupKeyFor(rows[0]), quantity: 2 }] }, rows);
+      expect(result).toMatchObject({ listingId: importedId, created: false, offersAdded: 2 });
+    } finally {
+      await pg.queryPg("delete from crm_bulk_listings where id = $1", [importedId]);
+    }
+  });
 });
