@@ -1,6 +1,6 @@
 "use client";
 
-import type { SheetRow, SheetTone } from "@/lib/bulk-sheet";
+import { formatEurCompact, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
 import type { ListingStage } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { BusyRegion } from "./bt-shimmer";
@@ -34,6 +34,11 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
           {row.company && <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{row.company}</span>}
           <WaitingBadge row={row} compact />
         </span>
+        <span className="flex items-center justify-between gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
+          <span data-card-value title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No value recorded"}
+            className="font-medium tabular-nums" style={row.value_eur != null ? { color: "var(--bt-text)" } : undefined}>{formatEurCompact(row.value_eur)}</span>
+          <span data-card-owner className="truncate">{row.owner ? `Owner ${row.owner}` : "No owner"}</span>
+        </span>
         {(row.next_action || row.latest) && (
           <span className="flex items-baseline gap-1.5 border-t pt-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
             <span className="min-w-0 flex-1 truncate">{row.next_action ?? row.latest?.label}</span>
@@ -59,7 +64,10 @@ export function BulkBoard({ shown, loading, error, today, onOpen }: { shown: She
               <header className="flex items-center gap-2 px-1.5 pb-0.5 pt-1">
                 <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: DOT[column.tone] }} />
                 <h2 className="text-[13px] font-semibold">{column.name}</h2>
-                <span className="text-[12px] tabular-nums" style={{ color: "var(--bt-muted)" }}>{cards.length}</span>
+                <span className="text-[12px] tabular-nums" style={{ color: "var(--bt-muted)" }}>({cards.length})</span>
+                <span data-stage-total className="ml-auto text-[12px] font-medium tabular-nums" title="Total value of the deals in this stage" style={{ color: "var(--bt-text-2)" }}>
+                  {formatEurCompact(cards.reduce((sum, row) => sum + (row.value_eur ?? 0), 0))}
+                </span>
               </header>
               <ul className="flex flex-col gap-2">
                 {cards.map((row) => <Card key={row.key} row={row} today={today} onOpen={onOpen} />)}

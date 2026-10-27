@@ -31,7 +31,8 @@ export function ScoreRing({ score }: { score: number | null }) {
 }
 
 /** Score, headline, buyer, status, three facts and a short brief. A fact we don't have says so quietly. */
-export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false, waiting = null }: {
+export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false, waiting = null, ownerPicker = null }: {
+  ownerPicker?: React.ReactNode;
   isTrade?: boolean; waiting?: { waiting_on: "us" | "them" | null; waiting_since: string | null } | null; demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -60,7 +61,7 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
             {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
           </div>
         </div>
-        <div className={`${css.status} ${css.actions} flex items-start gap-2`}>{waiting?.waiting_on && <WaitingBadge row={waiting} large />}{actions}</div>
+        <div className={`${css.status} ${css.actions} flex items-start gap-2`}>{waiting?.waiting_on && <WaitingBadge row={waiting} large />}{ownerPicker}{actions}</div>
       </div>
       <dl className={css.facts}>
         <div className={css.fact}>

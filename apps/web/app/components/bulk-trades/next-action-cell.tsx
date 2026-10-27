@@ -71,9 +71,9 @@ export function NextActionCell({ value, due, owner, today, onSave, loading = fal
       {loading ? <span className="text-[13px] leading-snug"><Sh on chars={22} /></span> : value
         ? <span className="line-clamp-2 text-[13px] leading-snug group-hover:underline">{value}</span>
         : <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Add next step</span>}
-      {value && (due || owner) && (
+      {((value && due) || owner) && (
         <span className="text-[12px]" style={{ color: overdue ? "var(--bt-red)" : "var(--bt-muted)" }}>
-          {[owner, due ? `${overdue ? "Overdue" : "Due"} ${shortDate(due.slice(0, 10))}` : null].filter(Boolean).join(" · ")}
+          {[owner, value && due ? `${overdue ? "Overdue" : "Due"} ${shortDate(due.slice(0, 10))}` : null].filter(Boolean).join(" · ")}
         </span>
       )}
     </button>

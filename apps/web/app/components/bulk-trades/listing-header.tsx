@@ -4,11 +4,12 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { BulkListingView } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
+import { OwnerPicker } from "./owner-picker";
 import { CopyIdButton } from "./copy-id-button";
 import { WaitingBadge } from "./opportunities-sheet";
 import css from "./demand-header.module.css";
 
-export function ListingHeader({ listing, onBack }: { listing: BulkListingView; onBack: () => void }) {
+export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkListingView; onBack: () => void; onChanged?: () => void }) {
   const [open, setOpen] = useState(false);
   const description = [listing.summary, listing.note].filter(Boolean).join("\n\n");
   const words = description.split(/\s+/);
@@ -23,7 +24,7 @@ export function ListingHeader({ listing, onBack }: { listing: BulkListingView; o
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
         </div>
       </div>
-      {listing.waiting_on && <div className={`${css.status} flex items-start`}><WaitingBadge row={listing} large /></div>}
+      <div className={`${css.status} flex items-start gap-2`}>{listing.waiting_on && <WaitingBadge row={listing} large />}<OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /></div>
     </div>
     <dl className={css.facts}>{[
       ["Seller", listing.party], ["Quantity", listing.quantity], ["Location", listing.location],
