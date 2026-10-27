@@ -88,13 +88,15 @@ export type PreviewTab = "today" | "demand" | "supply" | "board";
 
 /**
  * The Trades Preview tab a route shows. No tab is Today. Older links keep working: tab=trades is the Board,
- * and a link with no tab but side=buyer or side=seller (the old mixed sheet) opens Requests or Supply.
+ * a link with no tab but side=buyer or side=seller (the old mixed sheet) opens Requests or Supply, and one with
+ * no tab and no side but sheet filters (q, company, category, waiting, progress) opens Requests.
  */
-export function previewTab(route: Pick<BulkTradesRoute, "tab" | "side">): PreviewTab {
+export function previewTab(route: Pick<BulkTradesRoute, "tab" | "side"> & Partial<Pick<BulkTradesRoute, "query" | "company" | "category" | "waiting" | "progress">>): PreviewTab {
   if (route.tab === "board" || route.tab === "trades") return "board";
   if (route.tab === "demand" || route.tab === "supply" || route.tab === "today") return route.tab;
   if (route.side === "buyer") return "demand";
   if (route.side === "seller") return "supply";
+  if (route.query || route.company || route.category || route.waiting || route.progress) return "demand";
   return "today";
 }
 

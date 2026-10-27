@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
 import { filterSheet, filtersFromRoute, NO_FILTERS, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
-import { DEMAND_STAGES, SUPPLY_STAGES } from "@/lib/bulk-listing";
+import { DEMAND_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
 import { boardRows } from "@/lib/bulk-desk";
 import type { DealOwner } from "@/lib/bulk-owner";
 import type { Demand } from "@/lib/bulk-demand";
@@ -93,7 +93,10 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const tab = previewTab(route);
   const filters = useMemo<SheetFilters>(() => {
     const base = filtersFromRoute(route);
-    return { ...base, side: tab === "demand" ? "buyer" : tab === "supply" ? "seller" : tab === "board" ? base.side : "all" };
+    // A Progress value from an older link or another tab is mapped to this tab's stages, or dropped. The Board has no Progress filter.
+    const kind = tab === "demand" ? "demand" : tab === "supply" ? "supply" : null;
+    const progress = kind && base.progress !== "all" ? progressFor(base.progress, kind) ?? "all" : kind ? base.progress : "all";
+    return { ...base, progress, side: tab === "demand" ? "buyer" : tab === "supply" ? "seller" : tab === "board" ? base.side : "all" };
   }, [route, tab]);
   const tabRows = useMemo(() => tab === "demand" ? rows.filter((row) => row.kind === "demand")
     : tab === "supply" ? rows.filter((row) => row.kind === "supply") : tab === "board" ? boardRows(rows) : rows, [rows, tab]);

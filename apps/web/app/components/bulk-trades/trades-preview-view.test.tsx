@@ -217,12 +217,26 @@ describe("Trades Preview sheet", () => {
     expect(screen.getByLabelText("Progress")).toHaveValue("Offered");
     first.unmount();
 
-    for (const [search, tab] of [["&side=buyer", "Requests"], ["&side=seller", "Supply"], ["&tab=board", "Board"], ["&tab=trades", "Board"], ["&owner=Sean", "Today"]] as const) {
+    for (const [search, tab] of [["&q=ioniq", "Requests"], ["&progress=New", "Requests"], ["&side=buyer", "Requests"], ["&side=seller", "Supply"], ["&tab=board", "Board"], ["&tab=trades", "Board"], ["&owner=Sean", "Today"]] as const) {
       go(search);
       const view = render(<TradesPreviewView />);
       expect(await screen.findByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
       view.unmount();
     }
+  });
+
+  it("maps an older Progress value to the tab's stage, and drops one the tab does not have", async () => {
+    go("&tab=supply&progress=Matched");
+    vi.stubGlobal("fetch", mockApi());
+    const first = render(<TradesPreviewView />);
+    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    expect(screen.getByLabelText("Progress")).toHaveValue("Available");
+    first.unmount();
+
+    go("&tab=supply&progress=Sourcing");
+    render(<TradesPreviewView />);
+    expect(await screen.findByText("2 of 2 live")).toBeInTheDocument();
+    expect(screen.getByLabelText("Progress")).toHaveValue("all");
   });
 
   it("an older side=buyer link opens Requests, keeps it through open and back, and Back refreshes the list", async () => {

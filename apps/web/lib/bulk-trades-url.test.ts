@@ -92,6 +92,8 @@ describe("Trades Preview tabs", () => {
     expect(previewTab(route("side=bogus"))).toBe("today");
     expect(previewTab(route("tab=board&side=buyer"))).toBe("board");
     expect(previewTab(route("tab=nonsense&side=seller"))).toBe("supply");
+    for (const filter of ["q=leaf", "company=Acme", "category=packs", "waiting=us", "progress=Matched"]) expect(previewTab(route(filter))).toBe("demand");
+    expect(previewTab(route("owner=Sean"))).toBe("today");
   });
   it("round-trips the driver as owner and carries it through shell re-projection", () => {
     const parsed = route("tab=supply&owner=Sean");
