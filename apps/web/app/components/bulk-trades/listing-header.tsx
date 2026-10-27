@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { BulkListingView } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
+import { ConvictionPicker } from "./conviction-picker";
 import { OwnerPicker } from "./owner-picker";
 import { CopyIdButton } from "./copy-id-button";
 import { WaitingBadge } from "./opportunities-sheet";
@@ -24,7 +25,7 @@ export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkLis
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
         </div>
       </div>
-      <div className={`${css.status} flex items-start gap-2`}>{listing.waiting_on && <WaitingBadge row={listing} large />}<OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /></div>
+      <div className={`${css.status} flex items-start gap-2`}>{listing.waiting_on && <WaitingBadge row={listing} large />}<ConvictionPicker listingId={listing.id} conviction={listing.context.conviction} onChanged={onChanged} /><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /></div>
     </div>
     <dl className={css.facts}>{[
       ["Seller", listing.party], ["Quantity", listing.quantity], ["Location", listing.location],
