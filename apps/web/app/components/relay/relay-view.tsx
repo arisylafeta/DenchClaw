@@ -71,6 +71,22 @@ export function RelayView({ onOpenListing }: { onOpenListing?: (id: string, titl
     }
   }, []);
   useEffect(() => { void load(tab); }, [tab, load]);
+  // Sends run in the background after Alex confirms: the page moves on and reports the outcome when it lands.
+  const [sending, setSending] = useState<Record<string, string>>({});
+  const startSend = useCallback((draftId: string, updatedAt: string, toLabel: string) => {
+    setSending((m) => ({ ...m, [draftId]: toLabel }));
+    void api(`/api/relay/drafts/${draftId}/send`, { method: "POST", body: { confirm: true, updated_at: updatedAt } })
+      .then(() => say(`Sent to ${toLabel}`))
+      .catch((err) => say(`Not sent to ${toLabel}: ${err instanceof Error ? err.message : "something went wrong"}. It's back in Review.`))
+      .finally(() => { setSending((m) => { const next = { ...m }; delete next[draftId]; return next; }); void load(tab); });
+  }, [say, load, tab]);
+  // A send still finishes on the server if the tab closes, but the outcome toast would be lost: ask first.
+  useEffect(() => {
+    if (!Object.keys(sending).length) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [sending]);
   // The scan runs every 10 minutes; refresh the page each minute so new mail and the scan time show up.
   useEffect(() => {
     const id = setInterval(() => { tick((n) => n + 1); if (document.visibilityState === "visible") void load(tab); }, 60_000);
@@ -115,7 +131,7 @@ export function RelayView({ onOpenListing }: { onOpenListing?: (id: string, titl
         {error && <p className={s.error} role="alert">{error}</p>}
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
         {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onDrafted={() => setPage("review")} />}
-        {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} />}
+        {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} />}
         {data && page === "todos" && <Todos todos={data.todos} reload={() => load(tab)} say={say} />}
       </div>
       <div className={cx(s.toast, toast && s.on)} role="status" aria-live="polite">
@@ -277,7 +293,10 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
 
 type Local = { subject: string; body: string; updated_at: string };
 
-function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void }) {
+function Review({ data, reload, say, onBack, sending, startSend }: {
+  data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void;
+  sending: Record<string, string>; startSend: (draftId: string, updatedAt: string, toLabel: string) => void;
+}) {
   const items = data.review;
   const [cur, setCur] = useState(0);
   const working = items.some((x) => x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status));
@@ -293,8 +312,7 @@ function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Pr
   const ordered = [...item.drafts].sort((a, b) => a.position - b.position);
   const viewId = views[item.id] && ordered.some((d) => d.id === views[item.id]) ? views[item.id] : ordered[0]?.id;
   const draft = ordered.find((d) => d.id === viewId) ?? ordered[0];
-  const isSent = (d: RelayDraftView) => d.state === "sent";
-  const allSent = ordered.filter((d) => d.role === "primary").every(isSent);
+  const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending;
   return (
     <section aria-label="Review">
       <div className={s.phead}><span className={s.tag}>In review</span></div>
@@ -303,7 +321,7 @@ function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Pr
         {items.map((x, k) => {
           const name = x.counterpart_name || x.counterpart_email || "?";
           const busyJob = !x.drafts.length && x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status);
-          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, busyJob && s.work, !busyJob && x.drafts.length > 0 && x.drafts.filter((d) => d.role === "primary").every(isSent) && s.sent)} /></button>;
+          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, (busyJob || x.drafts.some((d) => d.id in sending)) && s.work, !busyJob && x.drafts.length > 0 && x.drafts.filter((d) => d.role === "primary").every((d) => d.state === "sent") && s.sent)} /></button>;
         })}
         <button className={s.navb} type="button" aria-label="Next" onClick={() => setCur((index + 1) % items.length)}>›</button>
         <span className={s.count}>{index + 1} of {items.length}</span>
@@ -311,8 +329,14 @@ function Review({ data, reload, say, onBack }: { data: Summary; reload: () => Pr
       <div className={s.rgrid}>
         <div className={s.col}>
           {!draft && item.job ? <JobCard job={item.job} itemId={item.id} reload={reload} say={say} />
-            : draft ? <Editor key={draft.id} item={item} draft={draft} reload={reload} say={say} onBack={onBack}
-            onNext={() => { const next = ordered.find((d) => d.id !== draft.id && !isSent(d)); if (next) setViews((v) => ({ ...v, [item.id]: next.id })); else if (allSent) setCur(index + 1); }} />
+            : draft ? <Editor key={draft.id} item={item} draft={draft} reload={reload} say={say} onBack={onBack} sendingTo={sending[draft.id]}
+            startSend={startSend}
+            onNext={() => {
+              // The draft just confirmed counts as sent: go to its next unsent email, else the next person.
+              const next = ordered.find((d) => d.id !== draft.id && !isSent(d));
+              if (next) setViews((v) => ({ ...v, [item.id]: next.id }));
+              else if (items.length > 1) setCur((index + 1) % items.length);
+            }} />
             : <div className={cx(s.card, s.empty)}><span className={s.muted}>No draft on this email.</span></div>}
           {ordered.length > 1 && (
             <div>
@@ -364,12 +388,17 @@ function JobCard({ job, itemId, reload, say }: { job: RelayJob; itemId: string; 
           <button type="button" className={s.btn} disabled={busy} onClick={() => void act(() => api(`/api/relay/items/${itemId}/draft`, { method: "POST", body: { note: job.note, mode: "quick" } }), "Quick draft ready")}>Quick draft instead</button>
         </div>
       )}
+      <div className={s.eact} style={failed ? { paddingTop: 0 } : undefined}>
+        <span className={s.sp} />
+        <button type="button" className={cx(s.btn, s.ghost)} disabled={busy} onClick={() => void act(() => api(`/api/relay/items/${itemId}/done`, { method: "POST" }), "Done · no reply. Marked read and labelled Sorted in Gmail")}>Done, no reply</button>
+      </div>
     </div>
   );
 }
 
-function Editor({ item, draft, reload, say, onBack, onNext }: {
+function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend }: {
   item: RelayReviewItem; draft: RelayDraftView; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void; onNext: () => void;
+  sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => void;
 }) {
   const mail = draft.mail;
   const [local, setLocal] = useState<Local | null>(mail ? { subject: mail.subject ?? "", body: mail.main, updated_at: mail.updated_at } : null);
@@ -408,11 +437,14 @@ function Editor({ item, draft, reload, say, onBack, onNext }: {
     try {
       const version = await save();
       if (!version) return;
-      await api(`/api/relay/drafts/${draft.id}/send`, { method: "POST", body: { confirm: true, updated_at: version.updated_at } });
-      say(`Sent to ${to.join(", ")}`);
-      await reload();
+      startSend(draft.id, version.updated_at, to.join(", "));
+      say(`Sending to ${to.join(", ")} in the background`);
       onNext();
-    } catch (err) { say(err instanceof Error ? err.message : "Couldn't send."); } finally { setSending(false); }
+    } finally { setSending(false); }
+  };
+  const markDone = async () => {
+    try { await api(`/api/relay/items/${item.id}/done`, { method: "POST" }); say("Done · no reply. Marked read and labelled Sorted in Gmail"); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't update Gmail."); }
   };
   const toGmail = async () => {
     const version = await save();
@@ -466,11 +498,13 @@ function Editor({ item, draft, reload, say, onBack, onNext }: {
           <p><strong>{lead}</strong> {verdict.issues.map(issueText)}{okLine}{hasPromise ? " Any promise in this email is in your to-dos below." : ""}</p>
         </div>
       )}
-      {sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div> : (
+      {sendingTo ? <div className={s.sentbox} style={{ background: "var(--blue-soft)", color: "var(--blue-ink)" }}>Sending to {sendingTo} in the background…</div>
+        : sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div> : (
         <div className={s.eact}>
           <button className={cx(s.btn, arming ? s.confirm : s.pri)} type="button" disabled={blocked || sending || saving} onClick={() => void send()}>{sending ? "Sending…" : arming ? `Confirm send to ${firstName(to[0])}` : "Send"} <Arrow /></button>
           <button className={s.btn} type="button" disabled={saving} onClick={() => void toGmail()}>{draft.state === "gmail" ? "✓ In Gmail drafts" : "Add to Gmail drafts"}</button>
           <span className={s.sp} />
+          {draft.role === "primary" && <button className={cx(s.btn, s.ghost)} type="button" title="No reply needed after all: marks it read and labels it Sorted in Gmail; the draft is dropped" onClick={() => void markDone()}>Done, no reply</button>}
           <button className={cx(s.btn, s.ghost)} type="button" onClick={onBack}>Back to inbox</button>
         </div>
       )}

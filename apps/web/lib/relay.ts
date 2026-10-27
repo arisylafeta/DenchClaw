@@ -604,6 +604,7 @@ export async function markDone(itemId: string, ownerId: string, ownerEmail: stri
   } catch {
     throw new RelayError(502, "Gmail didn't accept the change. Try again.");
   }
+  await queryPg("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [itemId]);
   return updateRelayItem(itemId, ownerId, { status: "done", done_reason: "user_done" });
 }
 
