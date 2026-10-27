@@ -2,7 +2,7 @@
 """Imports saved searches into stated company profiles and sourcing requests as qualifying demand.
 
 A sourcing request has a model, a timeline, a price and a location; without all four it is an enquiry and is neither
-imported nor chased. A complete one is imported only when it is worth at least MIN_KWH (units x kWh per unit). Each
+imported nor chased. A complete one is imported only when it is worth at least MIN_KWH (units x kWh per unit) or MIN_USD (units x target price). Each
 decision (imported, skipped, review) is kept in crm_sourcing_request_imports, so a demand deleted from the CRM is never
 imported again. A complete request whose size cannot be read from its text is marked review for a person. Every new
 request is announced with its outcome.
@@ -221,6 +221,8 @@ def missing_fields(request):
 
 
 MIN_KWH = 200
+MIN_USD = 50000                                 # or this much in total goods value
+USD_PER = {"USD": 1.0, "EUR": 1 / 0.86, "GBP": 1.15 / 0.86}  # the 0.86 and 1.15 rates the CRM already uses
 BAND_FLOOR = {"one": 1, "few": 2, "many": 10}  # the form's quantity bands, as units at least
 CELL_KWH = {"18650": 0.011, "21700": 0.016}    # conservative kWh per cylindrical cell
 _NUM = r"(\d+(?:[.,]\d+)?)"
@@ -255,12 +257,26 @@ def estimate_kwh(request):
     return per_unit * float(units)
 
 
+def estimate_usd(request):
+    """Total goods value in USD (units x target price per unit), or None without a price."""
+    import re
+    price, currency = request.get("target_price"), request.get("target_currency")
+    if price is None or currency not in USD_PER:
+        return None
+    text = " ".join(str(request.get(k) or "") for k in ("wants", "details")).lower()
+    units = float(request.get("quantity_value") or BAND_FLOOR.get(request.get("quantity"), 1))
+    count = re.search(r"(\d{1,3}(?:[ ,]\d{3})+|\d+)\s*(?:pcs|pieces|units|cells|sztuk|szt)", text)
+    if count:
+        units = max(units, float(re.sub(r"[ ,]", "", count.group(1))))
+    return units * float(price) * USD_PER[currency]
+
+
 def gate(request):
-    """pass, below (known size under MIN_KWH) or unknown (size not readable from the text)."""
-    kwh = estimate_kwh(request)
-    if kwh is None:
-        return "unknown", None
-    return ("pass" if kwh >= MIN_KWH else "below"), kwh
+    """pass (MIN_KWH or MIN_USD reached), below (known and under both) or unknown (size not readable and value short)."""
+    kwh, usd = estimate_kwh(request), estimate_usd(request)
+    if (kwh is not None and kwh >= MIN_KWH) or (usd is not None and usd >= MIN_USD):
+        return "pass", kwh
+    return ("below" if kwh is not None else "unknown"), kwh
 
 
 ANNOUNCE_WITHIN = dt.timedelta(hours=24)  # older requests are imported quietly (backfills, re-imports)

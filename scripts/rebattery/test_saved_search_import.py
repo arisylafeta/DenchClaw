@@ -166,6 +166,14 @@ class GateTest(unittest.TestCase):
         self.assertEqual(self.verdict("40 kWh pack", "few", quantity_value=5), "pass")  # 200 exactly
         self.assertEqual(self.verdict("1.2 MWh container"), "pass")
 
+    def test_fifty_thousand_dollars_also_qualifies(self):
+        # 100,000 cells at EUR 1 is about USD 116k even though the cell size is unknown
+        self.assertEqual(self.verdict("some cell", "many", "100000 pcs", target_price=1, target_currency="EUR"), "pass")
+        self.assertEqual(self.verdict("some pack", "many", target_price=5100, target_currency="USD"), "pass")   # 10 x 5,100
+        self.assertEqual(self.verdict("some pack", "many", target_price=4000, target_currency="USD"), "unknown")  # USD 40k
+        self.assertEqual(self.verdict("40 kWh pack", "one", target_price=44000, target_currency="EUR"), "pass")  # USD 51k
+        self.assertEqual(self.verdict("40 kWh pack", "one", target_price=2000, target_currency="GBP"), "below")
+
     def test_cells_are_counted_but_packs_are_not_multiplied_by_module_counts(self):
         self.assertEqual(saved.gate({"wants": "18650", "details": "20000 pcs", "quantity": "many"})[1], 220)
         self.assertEqual(saved.gate({"wants": "leaf 40kwh", "details": "8 modules", "quantity": "one"})[1], 40)
