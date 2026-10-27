@@ -158,26 +158,3 @@ def test_reply_is_logged_at_its_real_time_and_never_moves_the_stage(db):
     cur.execute("select last_touch_on::text, data->>'waiting_on', stage from crm_bulk_offers where id = %s", (ids["offer"],))
     assert cur.fetchone() == (reply_at.date().isoformat(), "us", "offered")
     assert "replies 0" in run("--apply", "--since", "2026-10-01").stdout
-
-
-def test_a_relay_send_on_the_counterparts_deal_ties_the_mail_to_the_offer(db):
-    _, cur, ids = db
-    cur.execute("insert into crm_users (email, display_name, password_hash) values (%s, 'Alex', 'x') returning id", (f"relay_{ids['tag']}@example.test",))
-    owner = cur.fetchone()[0]
-    dem = ids["sup"] + "d"
-    cur.execute("insert into crm_bulk_listings (id, kind, party, company_id, summary, status, spec) values (%s, 'demand', 'Buyer Co', %s, 'Wants packs', 'open', '{\"intent\":\"request\"}')", (dem, ids["co"]))
-    cur.execute("update crm_bulk_offers set counterpart_id = %s where id = %s", (dem, ids["offer"]))
-    mail(cur, f"m1_{ids['tag']}", "outbound", ago(2), to=ids["email"], person=ids["person"], thread=ids["thread"])
-    cur.execute("insert into relay_item (id, owner_id, gmail_thread_id, tab, bulk_listing_id) values (%s, %s, 'g1', 'action', %s)", (f"ri_{ids['tag']}", owner, dem))
-    cur.execute("insert into relay_draft (item_id, role, mail_message_id, state) values (%s, 'primary', %s, 'sent')", (f"ri_{ids['tag']}", f"m1_{ids['tag']}"))
-    try:
-        out = run("--apply", "--since", "2026-10-01")
-        assert "indexed 1" in out.stdout, out.stdout
-        cur.execute("select matched_by from crm_bulk_offer_mail where offer_id = %s", (ids["offer"],))
-        assert cur.fetchone() == ("relay",)
-        assert count(cur, "select count(*) from crm_bulk_thread_links where thread_id = %s and offer_id = %s and state = 'proposed'", (ids["thread"], ids["offer"])) == 1
-    finally:
-        cur.execute("delete from relay_item where id = %s", (f"ri_{ids['tag']}",))
-        cur.execute("update crm_bulk_offers set counterpart_id = null where id = %s", (ids["offer"],))
-        cur.execute("delete from crm_bulk_listings where id = %s", (dem,))
-        cur.execute("delete from crm_users where id = %s", (owner,))

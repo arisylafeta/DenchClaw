@@ -6,13 +6,12 @@ Runs after the Gmail sync. Reads sent mail, and for each message tied to a bulk 
   2. links the Gmail thread to the listing and offer as `proposed` (never `confirmed`);
   3. stamps the offer's last touch and writes the Story `mail` row if it is missing;
   4. when a reply lands on an indexed thread, logs it at its real time and sets the offer to waiting on us.
-It never sends mail, moves a stage, closes a record or alerts: Relay (~crm/relay) is where replies and chases are seen.
+It never sends mail, moves a stage, closes a record or alerts. It does not read or write Relay.
 Dry run unless --apply. Idempotent: a second run changes nothing.
 
   bulk_offer_mail_index.py [--apply] [--since YYYY-MM-DD] [--include-recipient]
 
-A message is tied to an offer by an existing thread link, or by a Relay send on an item whose deal holds exactly one offer
-for the recipient (both confident). Matching only by recipient is weak (the same person gets
+A message is tied to an offer by an existing thread link (confident). Matching only by recipient is weak (the same person gets
 intros, auction updates and replies about other things), so it is off unless --include-recipient; those hits are counted and listed.
 
 Exit code 1 when any message failed, so the cron job shows the failure.
@@ -63,24 +62,10 @@ def find_offers(cur, m):
     emails = [e.lower() for e in m["recipients"] if e and not e.lower().endswith(OUR_DOMAIN)]
     if not emails and not m["person_id"]:
         return "recipient", []
-    # Sent from a Relay item: its deal (the counterpart's own listing) points at the offers made to them.
-    via_relay = rows(cur, base + """and exists (select 1 from relay_draft d join relay_item ri on ri.id = d.item_id
-                                       where d.mail_message_id = %s and ri.bulk_listing_id is not null
-                                         and (o.bulk_listing_id = ri.bulk_listing_id or o.counterpart_id = ri.bulk_listing_id))
-                                     and (o.person_id = %s or lower(o.contact) = any(%s)
-                                          or exists (select 1 from crm_people p where p.id = o.person_id and lower(p.email) = any(%s)))""",
-                     (list(ACTIVE), m["id"], m["person_id"], emails, emails)) if relay_tables(cur) else []
-    if len(via_relay) == 1:
-        return "relay", via_relay
     found = rows(cur, base + """and (o.person_id = %s or lower(o.contact) = any(%s)
                                       or exists (select 1 from crm_people p where p.id = o.person_id and lower(p.email) = any(%s)))""",
                  (list(ACTIVE), m["person_id"], emails, emails))
     return "recipient", found
-
-
-def relay_tables(cur):
-    cur.execute("select to_regclass('relay_draft') is not null and to_regclass('relay_item') is not null as ok")
-    return cur.fetchone()["ok"]
 
 
 def pick(offers, m):
