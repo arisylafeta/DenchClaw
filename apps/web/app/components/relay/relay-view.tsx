@@ -873,14 +873,14 @@ function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted
         {DUE_RE.test(title) && <span className={s.parsed}>Due {DUE_WORDS[title.match(DUE_RE)![1].toLowerCase()]}</span>}
       </form>
 
-      <div className={s.uhead}><h2>Most urgent</h2><span>Picked by due date, money at stake and how long it has waited</span></div>
+      <div className={s.uhead}><h2>Most urgent</h2></div>
       <div className={s.urgent}>
         {urgent.length ? urgent.map((t) => (
           <div key={t.id} className={s.ucard} id={`task-${t.id}`}>
             <span className={cx(s.why, /draft|waiting/i.test(t.urgent_reason ?? "") && s.whyamber)}>● {t.urgent_reason}</span>
             <b>{t.title}</b>
             {t.next_step && <p>{t.next_step}</p>}
-            <div className={s.ufoot}>{link(t)}<span className={s.tkey}>{t.reb_key}</span><span className={s.sp} />
+            <div className={s.ufoot}>
               <SnoozeMenu onPick={(at, label) => void snooze(t, at, label)} />
               <button type="button" className={s.tbtn} onClick={() => void close(t, "done")}>Done</button>{actionButton(t)}</div>
           </div>
@@ -893,7 +893,6 @@ function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted
             {c.colour && <span className={s.gl} style={{ background: c.colour }} />}{c.name} <span className={s.n}>{c.key === "all" ? rest.length : rest.filter((t) => t.category === c.key).length}</span>
           </button>
         ))}
-        <span className={s.keys}><span><kbd>J</kbd> <kbd>K</kbd> move</span><span><kbd>E</kbd> done</span><span><kbd>↵</kbd> act</span><span><kbd>S</kbd> snooze</span></span>
       </div>
 
       {shown.length === 0 && !urgent.length && <div className={cx(s.card, s.empty)}><b>All clear</b><span className={s.muted}>No open to-dos. Add one above.</span></div>}
@@ -901,23 +900,26 @@ function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted
         const list = rest.filter((t) => t.category === c.key);
         return (
           <section key={c.key} className={s.tgroup} aria-label={c.name}>
-            <div className={s.tghead}><span className={s.glyph} style={{ background: c.soft, color: c.colour }}><Svg d={c.icon} /></span><h3>{c.name}</h3><span className={s.n}>{list.length}</span>{c.hint && <span className={s.thint}>{c.hint}</span>}</div>
+            <div className={s.tghead}><span className={s.glyph} style={{ background: c.soft, color: c.colour }}><Svg d={c.icon} /></span><h3>{c.name}</h3><span className={s.n}>{list.length}</span></div>
             {list.map((t) => {
               const age = ageDays(t.created_at);
               return (
                 <div key={t.id} id={`task-${t.id}`} className={cx(s.trow, sel === t.id && s.tsel)} onClick={() => setSel(t.id)}>
                   <button type="button" className={cx(s.tcb, ticked[t.id] && s.ton)} aria-label={`Mark ${t.reb_key} done`} onClick={(e) => { e.stopPropagation(); tick(t); }}><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></button>
                   <div className={s.tmain}>
-                    <div className={s.tt}><b>{t.title}</b><span className={s.tkey}>{t.reb_key}</span></div>
-                    {t.next_step && <div className={cx(s.tnext, sel === t.id && s.tnextopen)}>{t.next_step}</div>}
-                    {t.category === "decide" && t.question && (
-                      <div className={s.tq}><span>{t.question}</span>
-                        <button type="button" className={s.tbtn} onClick={(e) => { e.stopPropagation(); decide(t, false); }}>{t.no_label || "Not yet"}</button>
-                        <button type="button" className={cx(s.tbtn, s.tpri)} onClick={(e) => { e.stopPropagation(); decide(t, true); }}>{t.yes_label || "Yes, mark done"}</button>
-                      </div>
-                    )}
+                    <div className={s.tt}><b title={t.next_step || t.title}>{t.title}</b><span className={s.tkey}>{t.reb_key}</span></div>
+                    {t.category === "decide" && t.question ? <div className={s.tq} title={t.question}>{t.question}</div>
+                      : sel === t.id && t.next_step ? <div className={s.tnext}>{t.next_step}</div> : null}
                   </div>
-                  <div className={s.tside}>{link(t)}<span className={cx(s.tage, age >= 14 && s.told)}>{age}d</span></div>
+                  <div className={s.tside}>
+                    {t.category === "decide" && t.question
+                      ? <span className={s.tanswers}>
+                          <button type="button" className={s.tbtn} onClick={(e) => { e.stopPropagation(); decide(t, false); }}>{t.no_label || "Not yet"}</button>
+                          <button type="button" className={cx(s.tbtn, s.tpri)} onClick={(e) => { e.stopPropagation(); decide(t, true); }}>{t.yes_label || "Yes, mark done"}</button>
+                        </span>
+                      : link(t)}
+                    <span className={cx(s.tage, age >= 14 && s.told)}>{age}d</span>
+                  </div>
                   {t.category !== "decide" && <div className={s.thov}>{actionButton(t)}<SnoozeMenu onPick={(at, label) => void snooze(t, at, label)} /></div>}
                 </div>
               );
