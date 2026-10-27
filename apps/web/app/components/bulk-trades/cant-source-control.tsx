@@ -25,13 +25,13 @@ export function CantSourceControl({ listingId, reason, onChanged }: { listingId:
     return <span className="inline-flex max-w-[18rem] items-center gap-1.5">
       <span data-cant-source title={`Can't source: ${current}`} className="min-w-0 truncate rounded-full border px-2 py-0.5 text-[12px] font-medium"
         style={{ color: "var(--bt-red)", background: "var(--bt-red-bg)", borderColor: "var(--bt-red-border)" }}>Can&apos;t source: {current}</span>
-      <button type="button" disabled={busy} onClick={() => void save(null)} className="shrink-0 text-[12px] underline" style={{ color: "var(--bt-text-2)" }}>Clear</button>
+      <button type="button" aria-label="Clear can't source" disabled={busy} onClick={() => void save(null)} className="shrink-0 text-[12px] underline" style={{ color: "var(--bt-text-2)" }}>Clear</button>
       {error && <span role="alert" className="text-[12px]" style={{ color: "var(--bt-red)" }}>{error}</span>}
     </span>;
   }
   if (editing) {
     return <form className="inline-flex items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void save(draft); }}>
-      <input autoFocus aria-label="Why we can't source it" placeholder="Reason" value={draft} maxLength={300} disabled={busy}
+      <input autoFocus aria-label="Why we can't source it" placeholder="Reason" value={draft} maxLength={300} disabled={busy} aria-invalid={error ? true : undefined}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setEditing(false); } }}
         className={`${small} w-44 bg-transparent`} style={{ borderColor: error ? "var(--bt-red)" : "var(--bt-border)", color: "var(--bt-text)" }} />

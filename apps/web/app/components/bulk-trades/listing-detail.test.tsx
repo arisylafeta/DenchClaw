@@ -106,6 +106,39 @@ it("marks a demand as one we can't source, with a reason, and clears it", async 
   row.context = { cant_source: "No Ioniq packs this quarter" };
   const again = mockListing(row); mount(row.id);
   expect(await screen.findByText("Can't source: No Ioniq packs this quarter")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  fireEvent.click(screen.getByRole("button", { name: "Clear can't source" }));
   await waitFor(() => expect(again).toHaveBeenCalledWith("/api/bulk-listings/d-cs/cant-source", expect.objectContaining({ body: JSON.stringify({ reason: null }) })));
+});
+
+it("reads a dot before three digits as thousands, saves once on Enter then blur, and shows a failed save", async () => {
+  const row = listing("s5"); row.spec = { value_eur: 48000 }; row.context = { trade_kind: "packs" };
+  let fail = false;
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/fee") && init?.method === "PUT") return fail ? new Response(JSON.stringify({ error: "Database unavailable" }), { status: 500 }) : new Response(JSON.stringify({ fee_eur: 1 }));
+    return new Response(JSON.stringify(url.endsWith("/context") ? { person: null, mail: [] } : url.endsWith("/conversation") ? { conversation: [] }
+      : url.endsWith("/fields") ? { fields: [] } : { listing: row }));
+  });
+  vi.stubGlobal("fetch", fetch); mount("s5");
+  const input = await screen.findByLabelText("Fee in euros");
+  const puts = () => fetch.mock.calls.filter(([url, init]) => String(url).endsWith("/fee") && (init as RequestInit | undefined)?.method === "PUT");
+  fireEvent.change(input, { target: { value: "10.000" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.blur(input);
+  await waitFor(() => expect(puts()).toHaveLength(1));
+  expect(puts()[0][1]).toMatchObject({ body: JSON.stringify({ fee_eur: 10000 }) });
+  fireEvent.blur(input);
+  expect(puts()).toHaveLength(1);
+
+  fireEvent.change(input, { target: { value: "ten" } });
+  fireEvent.blur(input);
+  expect(await screen.findByText("Enter a number of euros")).toBeInTheDocument();
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(puts()).toHaveLength(1);
+
+  fail = true;
+  fireEvent.change(input, { target: { value: "1.250" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(await screen.findByText("Could not save the fee")).toBeInTheDocument();
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(puts()[1][1]).toMatchObject({ body: JSON.stringify({ fee_eur: 1250 }) });
 });
