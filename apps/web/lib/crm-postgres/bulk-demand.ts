@@ -1,4 +1,4 @@
-import { convictionScoreSql } from "../bulk-conviction";
+import { likelihoodScoreSql } from "../bulk-likelihood";
 import { randomUUID } from "node:crypto";
 import { queryPg } from "../postgres";
 import { todayInLondon } from "../bulk-trades";
@@ -43,7 +43,7 @@ const DEMAND_SELECT = `
     (select count(*)::int from crm_bulk_listing_activity activity where activity.bulk_listing_id = demand.id) as activity_count,
     (select max(activity.occurred_at)::text from crm_bulk_listing_activity activity where activity.bulk_listing_id = demand.id) as last_activity_at,
     to_char(greatest(demand.observed_on, demand.confirmed_on), 'YYYY-MM-DD') as asked_on,
-    case when demand.status <> 'closed' then ${convictionScoreSql(`bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
+    case when demand.status <> 'closed' then ${likelihoodScoreSql(`bulk_demand_score(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on))`, "demand.context")} end as score,
     case when demand.status <> 'closed' then bulk_demand_expected_fee(demand.fee_eur, demand.price_basis, demand.reputation,
       greatest(demand.observed_on, demand.confirmed_on))::float8 end as expected_fee,

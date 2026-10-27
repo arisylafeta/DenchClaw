@@ -1,6 +1,6 @@
 "use client";
 
-import { ConvictionPicker } from "./conviction-picker";
+import { LikelihoodPicker } from "./likelihood-picker";
 import { OwnerPicker } from "./owner-picker";
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { BulkListingView } from "@/lib/bulk-listing";
@@ -49,7 +49,7 @@ function ListingDetailInner({ id, today, onClose, onOpenListing, onLoaded }: {
   }, [id]);
   useEffect(() => { void load(); return () => { latest.current++; }; }, [load]);
   const listing = result?.id === id ? result.listing : null;
-  if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} waiting={listing} ownerPicker={<><ConvictionPicker listingId={listing.id} conviction={listing.context.conviction} onChanged={load} /><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={load} /></>} />;
+  if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} waiting={listing} ownerPicker={<><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={load} /><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={load} /></>} />;
   if (listing?.kind === "supply") return <SupplyListingPanel key={id} listing={listing} today={today} onChanged={load} onClose={onClose} onOpenListing={onOpenListing} />;
   return <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
     <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>

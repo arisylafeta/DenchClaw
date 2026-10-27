@@ -37,7 +37,7 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
         <span className="flex items-center justify-between gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
           <span data-card-value title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No value recorded"}
             className="font-medium tabular-nums" style={row.value_eur != null ? { color: "var(--bt-text)" } : undefined}>{formatEurCompact(row.value_eur)}</span>
-          <span data-card-owner className="truncate">{row.owner ? `Owner ${row.owner}` : "No owner"}</span>
+          <span data-card-owner className="truncate">{[row.likelihood != null ? `${row.likelihood}%` : null, row.owner ? `Owner ${row.owner}` : "No owner"].filter(Boolean).join(" · ")}</span>
         </span>
         {(row.next_action || row.latest) && (
           <span className="flex items-baseline gap-1.5 border-t pt-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>

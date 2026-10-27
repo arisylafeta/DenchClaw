@@ -1,4 +1,4 @@
-import { convictionScoreSql } from "../bulk-conviction";
+import { likelihoodScoreSql } from "../bulk-likelihood";
 import { queryPg } from "../postgres";
 import { listingRow, sortSheet, type ListingSheetInput, type SheetRow } from "../bulk-sheet";
 
@@ -9,7 +9,7 @@ export const SHEET_QUERY = `
     to_char(listing.observed_on, 'YYYY-MM-DD') as observed_on,
     listing.next_action, to_char(listing.next_due, 'YYYY-MM-DD') as next_due,
     listing.waiting_on, to_char(listing.waiting_since, 'YYYY-MM-DD') as waiting_since,
-    ${convictionScoreSql(`case when listing.kind = 'demand' then bulk_demand_score(
+    ${likelihoodScoreSql(`case when listing.kind = 'demand' then bulk_demand_score(
       (listing.spec->>'fee_eur')::numeric, listing.spec->>'price_basis', listing.spec->>'reputation',
       greatest(listing.observed_on, (listing.spec->>'confirmed_on')::date))
       else bulk_supply_score((listing.spec->>'value_eur')::numeric) end`, "listing.context")} as score,

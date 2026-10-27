@@ -33,11 +33,11 @@ describe("Bulk Trades board", () => {
 
   it("shows each card's value and owner and the stage total beside the stage name", () => {
     render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={vi.fn()}
-      shown={[row({ value_eur: 1_000_000, owner: "Sean" }), row({ key: "b", id: "b", value_eur: 500_000 }), row({ key: "c", id: "c", progress: "New" })]} />);
+      shown={[row({ value_eur: 1_000_000, owner: "Sean", likelihood: 70 }), row({ key: "b", id: "b", value_eur: 500_000 }), row({ key: "c", id: "c", progress: "New" })]} />);
     const offered = within(screen.getByRole("region", { name: "Offered" }));
     expect(offered.getByText("(2)")).toBeTruthy();
     expect(offered.getByText("€1.5M").closest("[data-stage-total]")).toBeTruthy();
-    expect(offered.getByText("Owner Sean")).toBeTruthy();
+    expect(offered.getByText("70% · Owner Sean")).toBeTruthy();
     expect(offered.getByText("No owner")).toBeTruthy();
     expect(offered.getByText("€1M")).toBeTruthy();
   });

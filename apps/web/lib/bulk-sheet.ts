@@ -5,6 +5,7 @@
 // Missing values stay null: nothing here is guessed, and progress is only what the record states.
 
 import { dealOwner } from "./bulk-owner";
+import { likelihoodOf } from "./bulk-likelihood";
 import { LISTING_STAGES, TRADE_STAGES, type ListingStage } from "./bulk-listing";
 import type { OfferStage } from "./crm-postgres/bulk-offers";
 import type { BulkTradesRoute } from "./bulk-trades-url";
@@ -44,6 +45,8 @@ export type SheetRow = {
   score: number | null;
   /** Approximate deal value in EUR: supply is the value of all stock, demand is the fee divided by FEE_RATE. Null when unknown. */
   value_eur?: number | null;
+  /** Chance (0-100 %) the deal completes, set per deal. Null when not set. */
+  likelihood?: number | null;
   /** Our fee in EUR, a fixed FEE_RATE of the value. Null when the value is unknown. */
   fee_eur?: number | null;
   /** The most recent recorded development, if any. `label` is what happened; `at` is its date. */
@@ -133,7 +136,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     score: input.score,
     ...valueAndFee(input.kind, input.spec),
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
-    next_action: text(input.next_action), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
+    next_action: text(input.next_action), likelihood: likelihoodOf((input.context as Record<string, unknown> | null)?.likelihood), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
   };
