@@ -93,7 +93,8 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
     // Serialise concurrent calls for the same request.
     await tx.query("select pg_advisory_xact_lock(hashtext($1))", [sourceId]);
     const existing = await tx.query<{ id: string }>(
-      "select id from crm_bulk_listings where kind = 'demand' and source_kind = 'jules' and source_id = $1", [sourceId]);
+      `select id from crm_bulk_listings where kind = 'demand' and source_kind in ('jules', 'import') and source_id = $1
+       order by (source_kind = 'jules') desc limit 1`, [sourceId]);
     let listingId = existing.rows[0]?.id;
     const created = !listingId;
     const person = await buyerPerson(tx, input.email);
@@ -133,6 +134,13 @@ export async function createBuyRequest(input: BuyRequestInput, stock?: StockRow[
            context = jsonb_set(context, '{buy_request}', $7::jsonb), updated_at = now()
          where id = $1`,
         [listingId, input.wants.slice(0, 2000), `${units} units`, note, input.country, JSON.stringify(facts), JSON.stringify(buyRequest)]);
+    }
+
+    // The daily sourcing import (scripts-live saved_search_import.py) skips requests it has a decision for; record
+    // ours so it never adds a second demand for this request.
+    const ledger = await tx.query<{ ok: boolean }>("select to_regclass('crm_sourcing_request_imports') is not null as ok");
+    if (ledger.rows[0]?.ok) {
+      await tx.query("insert into crm_sourcing_request_imports (source_id, outcome) values ($1, 'imported') on conflict do nothing", [sourceId]);
     }
 
     let offersAdded = 0, offersUpdated = 0, offersDropped = 0;

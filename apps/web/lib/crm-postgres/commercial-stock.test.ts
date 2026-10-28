@@ -99,12 +99,18 @@ describe.skipIf(!TEST_URL)("commercial-buyer stock and buy requests (REB-577)", 
     const importedId = id("btd_imported");
     await pg.queryPg(
       `insert into crm_bulk_listings (id, kind, party, email, summary, status, source_kind, source_id, spec)
-       values ($1, 'demand', $2, $2, 'Peugeot packs', 'qualifying', 'jules', $3, '{"intent": "request"}')`, [importedId, email, `sourcing_request:${otherRequest}`]);
+       values ($1, 'demand', $2, $2, 'Peugeot packs', 'qualifying', 'import', $3, '{"intent": "request"}')`, [importedId, email, `sourcing_request:${otherRequest}`]);
     try {
       const rows = await mine();
       const result = await stock.createBuyRequest({ sourcingRequestId: otherRequest, conversationId: null, email, wants: "Peugeot packs", country: null,
         neededBy: null, timing: null, lines: [{ groupKey: pure.groupKeyFor(rows[0]), quantity: 2 }] }, rows);
       expect(result).toMatchObject({ listingId: importedId, created: false, offersAdded: 2 });
+      const [ledger] = await pg.queryPg<{ ok: boolean }>("select to_regclass('crm_sourcing_request_imports') is not null as ok");
+      if (ledger.ok) {
+        const decided = await pg.queryPg("select outcome from crm_sourcing_request_imports where source_id = $1", [`sourcing_request:${otherRequest}`]);
+        expect(decided).toEqual([{ outcome: "imported" }]);
+        await pg.queryPg("delete from crm_sourcing_request_imports where source_id = any($1)", [[`sourcing_request:${otherRequest}`, `sourcing_request:${requestId}`]]);
+      }
     } finally {
       await pg.queryPg("delete from crm_bulk_listings where id = $1", [importedId]);
     }
