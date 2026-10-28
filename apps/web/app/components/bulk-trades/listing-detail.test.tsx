@@ -142,3 +142,19 @@ it("reads a dot before three digits as thousands, saves once on Enter then blur,
   expect(input).toHaveAttribute("aria-invalid", "true");
   expect(puts()[1][1]).toMatchObject({ body: JSON.stringify({ fee_eur: 1250 }) });
 });
+
+it("removes a listing as a bulk trade only after a confirmation, then goes back", async () => {
+  const onClose = vi.fn();
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => new Response(JSON.stringify(
+    url.endsWith("/remove") ? { ok: true } : url.endsWith("/fields") ? { fields: [] } : url.endsWith("/context") ? { person: null, mail: [] } : url.endsWith("/conversation") ? { conversation: [] } : { listing: listing("s9") })));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ListingDetail id="s9" today="2026-10-21" onClose={onClose} onOpenListing={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove as bulk trade" }));
+  expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith("/remove"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Yes, remove" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
+  const call = fetchMock.mock.calls.find(([u]) => String(u).endsWith("/remove"))!;
+  expect(call[0]).toBe("/api/bulk-listings/s9/remove");
+  expect(call[1]?.method).toBe("POST");
+});
