@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStock, allocate, bySupplier, groupKeyFor, matchesFilters, type StockRow } from "./commercial-stock";
+import { aggregateStock, groupKeyFor, matchesFilters, type StockRow } from "./commercial-stock";
 
 const row = (over: Partial<StockRow>): StockRow => ({
   id: "sto_1", company_id: "co_a", person_id: "p_a", supplier: "Secret Breaker AB", status: "opportunity",
@@ -52,29 +52,5 @@ describe("matchesFilters", () => {
     expect(matchesFilters(row({ powertrain: "HEV" }), { powertrain: "hev" }, today)).toBe(true);
     expect(matchesFilters(row({ seen_on: "2026-08-01" }), { seenWithinDays: 30 }, today)).toBe(false);
     expect(matchesFilters(row({ make: null }), {}, today)).toBe(false);
-  });
-});
-
-describe("allocate", () => {
-  it("takes synced stock first, then cheaper, and records a shortfall", () => {
-    const key = groupKeyFor(stock[0]);
-    const [line] = allocate([{ groupKey: key, quantity: 3, targetPriceEur: 3800 }], stock);
-    expect(line.rows.map((r) => r.row.id)).toEqual(["sto_1", "sto_2"]);
-    expect(line).toMatchObject({ wanted: 3, allocated: 2, targetPriceEur: 3800 });
-    expect(line.label).toContain("Peugeot");
-  });
-
-  it("splits a quantity across rows and suppliers and groups offers per supplier", () => {
-    const key = groupKeyFor(stock[3]);
-    const allocations = allocate([{ groupKey: key, quantity: 2 }], stock);
-    expect(allocations[0].rows.map((r) => [r.row.id, r.units])).toEqual([["sto_4", 2]]);
-    const both = allocate([{ groupKey: groupKeyFor(stock[0]), quantity: 2 }, { groupKey: key, quantity: 4 }], stock);
-    const suppliers = bySupplier(both);
-    expect(suppliers.map((s) => [s.company_id, s.lines.length])).toEqual([["co_a", 2], ["co_b", 2]]);
-  });
-
-  it("keeps an unknown group as an empty line with the buyer-side label", () => {
-    const [line] = allocate([{ groupKey: "grp_0000000000000000", quantity: 5, label: "Tesla Model 3" }], stock);
-    expect(line).toMatchObject({ allocated: 0, rows: [], label: "Tesla Model 3" });
   });
 });

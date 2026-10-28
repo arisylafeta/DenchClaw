@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 /**
  * Commercial-buyer stock (REB-577): dismantler stock from `crm_stock_opportunities`, aggregated into
- * supplier-free groups for Jules' commercial-buyer path. Nothing in a `StockGroup` may identify a supplier:
+ * supplier-free groups for Jules' commercial-buyer path. Read only: the platform never writes to the CRM. Nothing in a `StockGroup` may identify a supplier:
  * no names, CRM ids, supplier references, VINs or source URLs. Group keys are opaque hashes of the spec.
  */
 
@@ -189,60 +189,4 @@ export function aggregateStock(rows: StockRow[]): StockGroup[] {
     });
   }
   return result.sort((a, b) => b.units - a.units || a.label.localeCompare(b.label));
-}
-
-export type BuyLine = { groupKey: string; quantity: number; targetPriceEur?: number | null; label?: string | null };
-
-export type Allocation = {
-  groupKey: string;
-  label: string | null;
-  wanted: number;
-  allocated: number;
-  targetPriceEur: number | null;
-  rows: { row: StockRow; units: number }[];
-};
-
-/**
- * Picks stock for each wanted line: freshest synced rows first, then cheapest ex-VAT price, until the quantity is
- * covered. A line with too little stock takes everything there is; `allocated < wanted` records the shortfall.
- */
-export function allocate(lines: BuyLine[], rows: StockRow[]): Allocation[] {
-  const byGroup = new Map<string, StockRow[]>();
-  for (const row of rows) {
-    const key = groupKeyFor(row);
-    byGroup.set(key, [...(byGroup.get(key) ?? []), row]);
-  }
-  const used = new Set<string>();
-  return lines.map((line) => {
-    const candidates = (byGroup.get(line.groupKey) ?? []).filter((row) => !used.has(row.id)).sort((a, b) =>
-      Number(b.sync_class === "synced") - Number(a.sync_class === "synced")
-      || (a.price_eur_ex_vat ?? Infinity) - (b.price_eur_ex_vat ?? Infinity)
-      || (b.seen_on ?? "").localeCompare(a.seen_on ?? "")
-      || a.id.localeCompare(b.id));
-    const picked: Allocation["rows"] = [];
-    let allocated = 0;
-    for (const row of candidates) {
-      if (allocated >= line.quantity) break;
-      const units = Math.min(row.quantity, line.quantity - allocated);
-      picked.push({ row, units });
-      used.add(row.id);
-      allocated += units;
-    }
-    const label = (picked[0] ? aggregateStock([picked[0].row])[0]?.label : null) ?? line.label ?? null;
-    return { groupKey: line.groupKey, label, wanted: line.quantity, allocated, targetPriceEur: line.targetPriceEur ?? null, rows: picked };
-  });
-}
-
-/** Allocated rows per supplier, for one candidate offer each. */
-export function bySupplier(allocations: Allocation[]) {
-  const suppliers = new Map<string, { company_id: string | null; person_id: string; supplier: string | null; lines: { allocation: Allocation; row: StockRow; units: number }[] }>();
-  for (const allocation of allocations) {
-    for (const { row, units } of allocation.rows) {
-      const key = row.company_id ?? `person:${row.person_id}`;
-      const entry = suppliers.get(key) ?? { company_id: row.company_id, person_id: row.person_id, supplier: row.supplier, lines: [] };
-      entry.lines.push({ allocation, row, units });
-      suppliers.set(key, entry);
-    }
-  }
-  return [...suppliers.values()];
 }

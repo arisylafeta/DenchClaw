@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -26,29 +25,3 @@ export function commercialStockAuthorised(request: Request, expected = secret())
 }
 
 export const unauthorised = () => Response.json({ error: "Unauthorised" }, { status: 401 });
-
-/** The team channel where sourcing requests are announced. */
-const DISCORD_TARGET = process.env.COMMERCIAL_BUYER_DISCORD_TARGET || "discord:1523383956878266388";
-const HERMES_BIN = process.env.HERMES_BIN || "/usr/local/lib/hermes-agent/.hermes/bin/hermes";
-
-const quiet = (text: string) => text.replace(/@/g, "@\u200b");
-
-export function buyRequestAnnouncement(input: { listingId: string; email: string; units: number; lines: { label: string | null; wanted: number; allocated: number }[]; suppliers: number }) {
-  const base = (process.env.BULK_TRADES_LINK_BASE || "https://crm.rebattery.io").replace(/\/+$/, "");
-  return [
-    `**New buy request** (Jules, commercial buyer) · ${input.units} units · stock from ${input.suppliers} supplier${input.suppliers === 1 ? "" : "s"} attached`,
-    ...input.lines.slice(0, 8).map((line) => `- ${line.wanted}x ${quiet(line.label ?? "battery")}${line.allocated < line.wanted ? ` (only ${line.allocated} in stock)` : ""}`),
-    `Buyer: ${quiet(input.email)}`,
-    `<${base}/?path=%7Etrades-preview&listing=${encodeURIComponent(input.listingId)}>`,
-  ].join("\n");
-}
-
-/** Best effort: the demand is already saved, so a failed post is logged, never raised. */
-export function announceBuyRequest(text: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(HERMES_BIN, ["-p", "default", "send", "--json", "-t", DISCORD_TARGET, text], { timeout: 60_000 }, (error, stdout) => {
-      if (error) { console.error("[commercial-buyer] Discord announcement failed", { reason: error.message.slice(0, 200) }); resolve(false); return; }
-      try { resolve(Boolean(JSON.parse(stdout).success)); } catch { resolve(false); }
-    });
-  });
-}
