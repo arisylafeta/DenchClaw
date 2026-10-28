@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStock, groupKeyFor, matchesFilters, normalModel, supplierToken, type StockRow } from "./commercial-stock";
+import {
+  aggregateStock, chemistryFamilies, cleanModel, effectiveFormat, groupKeyFor, matchesFilters, normalCountry, normalModel, normalPowertrain,
+  searchRows, suggestModels, supplierToken, type StockRow,
+} from "./commercial-stock";
 
 const row = (over: Partial<StockRow>): StockRow => ({
   id: "sto_1", company_id: "co_a", person_id: "p_a", supplier: "Secret Breaker AB", status: "opportunity",
@@ -59,7 +62,7 @@ describe("matchesFilters", () => {
     expect(normalModel("VW", "Volkswagen ID.4")).toBe("ID.4");
     expect(normalModel("Kia", "Kiaxx")).toBe("Kiaxx");
     expect(groupKeyFor(row({ make: "Hyundai", model: "Hyundai Ioniq 5" }))).toBe(groupKeyFor(row({ make: "Hyundai", model: "Ioniq 5" })));
-    expect(aggregateStock([row({ make: "Hyundai", model: "Hyundai Ioniq 5" })])[0].label).toBe("Hyundai Ioniq 5 50 kWh NMC622 pack");
+    expect(aggregateStock([row({ make: "Hyundai", model: "Hyundai Ioniq 5" })])[0]).toMatchObject({ label: "Hyundai Ioniq 5 50 kWh pack", chemistry: "NMC" });
   });
 
   it("gives per-supplier units under scoped opaque tokens", () => {
@@ -71,5 +74,90 @@ describe("matchesFilters", () => {
     expect(JSON.stringify(group)).not.toMatch(/"c1"|"c2"|Secret Breaker/);
     expect(supplierToken("c1", "conv-1234", "k".repeat(32))).toBe(group.suppliers[0].supplier);
     expect(supplierToken("c1", "conv-9999", "k".repeat(32))).not.toBe(group.suppliers[0].supplier);
+  });
+});
+
+describe("forgiving search", () => {
+  const today = new Date("2026-10-27T12:00:00Z");
+  const hit = (over: Partial<StockRow>, filters: Parameters<typeof matchesFilters>[1]) => matchesFilters(row(over), filters, today);
+
+  it("folds case, accents, spaces and punctuation in model names", () => {
+    expect(hit({ make: "VW", model: "ID.3" }, { model: "ID3" })).toBe(true);
+    expect(hit({ make: "Tesla", model: "Model 3" }, { model: "Model3" })).toBe(true);
+    expect(hit({ make: "Renault", model: "ZOE" }, { model: "Zoé" })).toBe(true);
+    expect(hit({ make: "Kia", model: "e-Niro" }, { model: "Niro EV" })).toBe(true);
+  });
+
+  it("tolerates one typo in words but not in numbers", () => {
+    expect(hit({ make: "Hyundai", model: "Ioniq 5" }, { model: "Ionic 5" })).toBe(true);
+    expect(hit({ make: "Tesla", model: "Model S" }, { model: "Model3" })).toBe(false);
+    expect(hit({ make: "Hyundai", model: "Ioniq 58 kWh" }, { model: "Ioniq 5" })).toBe(false);
+    expect(hit({ make: "Peugeot", model: "e208" }, { model: "208" })).toBe(true);
+  });
+
+  it("expands platforms and groups", () => {
+    expect(hit({ make: "Škoda", model: "Enyaq iV 80" }, { model: "MEB" })).toBe(true);
+    expect(hit({ make: "Volkswagen", model: "Golf" }, { model: "MEB" })).toBe(false);
+    expect(hit({ make: "Vauxhall", model: "Corsa-e" }, { make: "Stellantis" })).toBe(true);
+    expect(hit({ make: "Renault", model: "Zoe" }, { make: "Stellantis" })).toBe(false);
+  });
+
+  it("normalises countries, powertrains and chemistries", () => {
+    expect(normalCountry("Sariai, Lithuania")).toBe("Lithuania");
+    expect(normalCountry("DE")).toBe("Germany");
+    expect(normalCountry("uk")).toBe("United Kingdom");
+    expect(hit({ country: "Sweden" }, { country: "DE" })).toBe(false);
+    expect(hit({ country: "Germany" }, { country: "Deutschland" })).toBe(true);
+    expect(normalPowertrain("plug-in hybrid")).toBe("PHEV");
+    expect(normalPowertrain("Electric")).toBe("BEV");
+    expect(hit({ powertrain: "Electric" }, { powertrain: "BEV" })).toBe(true);
+    expect(chemistryFamilies("LiFePO4")).toEqual(["LFP"]);
+    expect(chemistryFamilies("NMC | UNKNOWN")).toEqual(["NMC"]);
+    expect(hit({ chemistry: "LFP" }, { chemistry: "LiFePO4" })).toBe(true);
+    expect(hit({ chemistry: "NMC622" }, { chemistry: "LFP" })).toBe(false);
+  });
+
+  it("recognises cell and module lots and hides them unless asked", () => {
+    expect(effectiveFormat({ make: "EVE", model: "INR18650 33V", format: null, quantity: 95647 })).toBe("cell");
+    expect(effectiveFormat({ make: "LG Chem (renault)", model: "LG Renault ZOE 2P8S Module", format: null, quantity: 89000 })).toBe("module");
+    expect(effectiveFormat({ make: "Kia", model: "Niro", format: null, quantity: 1 })).toBe("pack");
+    expect(hit({ make: "EVE", model: "INR18650 33V", format: null, quantity: 95647 }, {})).toBe(false);
+    expect(hit({ make: "EVE", model: "INR18650 33V", format: null, quantity: 95647 }, { format: "cell" })).toBe(true);
+    expect(hit({ make: "LG Chem", model: "ZOE Module", format: "module", quantity: 500 }, { model: "Zoe" })).toBe(false);
+  });
+
+  it("widens kWh a little around a single value and uses graph kWh only when none is stated", () => {
+    expect(hit({ capacity_kwh: 77.4 }, { kwhMin: 77, kwhMax: 77 })).toBe(true);
+    expect(hit({ capacity_kwh: null, usable_kwh: 64.8, gross_kwh: 68 }, { kwhMin: 66, kwhMax: 70 })).toBe(true);
+    expect(hit({ capacity_kwh: 72.6, gross_kwh: 77.4 }, { kwhMin: 75, kwhMax: 80 })).toBe(false);
+  });
+
+  it("falls back to the vehicles a pack fits only when the model text finds nothing", () => {
+    const rows = [row({ id: "a", make: "Kia", model: "Soul EV", fits: "Kia Soul EV 2019-2023; Kia Niro EV" }), row({ id: "b", make: "Kia", model: "Niro" })];
+    expect(searchRows(rows, { model: "Niro" }, today)).toMatchObject({ matchedOn: "model", rows: [{ id: "b" }] });
+    expect(searchRows([rows[0]], { model: "Niro" }, today)).toMatchObject({ matchedOn: "fits", rows: [{ id: "a" }] });
+  });
+
+  it("suggests close names when nothing matches", () => {
+    const rows = [row({ make: "Tesla", model: "Model Y" }), row({ make: "Hyundai", model: "Ioniq 5" })];
+    expect(suggestModels(rows, { make: "Tesl" })).toEqual(["Tesla"]);
+    expect(suggestModels(rows, { model: "Zorblax" })).toEqual([]);
+  });
+});
+
+describe("grouping", () => {
+  it("merges model spellings of the same pack and keeps different kWh apart", () => {
+    const key = (model: string, kwh: number | null) => groupKeyFor(row({ make: "Kia", model, capacity_kwh: kwh, chemistry: null }));
+    expect(key("Niro Mk2", 64.8)).toBe(key("Niro II", 64.8));
+    expect(key("Niro SG2 Mk2", 64.8)).toBe(key("e-Niro", 64.8));
+    expect(key("Niro (listed as Niro EV)", 64.8)).toBe(key("NIRO 2022-> pack", 64.8));
+    expect(key("Niro", 64)).not.toBe(key("Niro", 64.8));
+    expect(groupKeyFor(row({ chemistry: "NMC622" }))).toBe(groupKeyFor(row({ chemistry: "LFP" })));
+  });
+
+  it("cleans display models", () => {
+    expect(cleanModel("VW", "VW ID.3 (E11, E12) Pro  107 kW  145 PS (11.2020-> )")).toBe("ID.3 Pro");
+    expect(cleanModel("Hyundai", "IONIQ 5 (listed as Ioniq) 77.4 kWh battery")).toBe("IONIQ 5");
+    expect(cleanModel("Mercedes", "MB C 205 2014-21")).toBe("C 205");
   });
 });

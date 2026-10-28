@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { aggregateStock, matchesFilters, supplierToken } from "@/lib/commercial-stock";
+import { aggregateStock, interpretFilters, searchRows, suggestModels, supplierToken } from "@/lib/commercial-stock";
 import { commercialStockAuthorised, secret, unauthorised } from "@/lib/commercial-stock-access";
 import { liveStock } from "@/lib/crm-postgres/commercial-stock";
 
@@ -24,7 +24,8 @@ export async function POST(request: Request): Promise<Response> {
   if (!commercialStockAuthorised(request)) return unauthorised();
   const parsed = filters.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid filters" }, { status: 400 });
-  const rows = (await liveStock()).filter((row) => matchesFilters(row, parsed.data));
+  const all = await liveStock();
+  const { rows, matchedOn } = searchRows(all, parsed.data);
   const key = secret() ?? randomUUID();
   const scope = parsed.data.scope ?? randomUUID();
   const groups = aggregateStock(rows, (supplierId) => supplierToken(supplierId, scope, key));
@@ -32,5 +33,7 @@ export async function POST(request: Request): Promise<Response> {
     groups: groups.slice(0, parsed.data.limit ?? 20),
     totalGroups: groups.length,
     totalUnits: groups.reduce((sum, group) => sum + group.units, 0),
+    interpreted: { ...interpretFilters(parsed.data), ...(matchedOn === "fits" ? { matchedOn: "vehicles the pack fits" } : {}) },
+    ...(groups.length ? {} : { suggestions: suggestModels(all, parsed.data) }),
   });
 }

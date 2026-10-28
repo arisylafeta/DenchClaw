@@ -20,7 +20,12 @@ const LIVE_STOCK = `
     ${num("s.details->'price_eur_ex_vat'")}::float8 as price_eur_ex_vat,
     ${num("s.details->'price_eur'")}::float8 as price_eur,
     coalesce(s.details->'sync'->>'lastSeen', s.details->'availability'->>'checked_on', s.observed_on::text, s.updated_at::date::text) as seen_on,
-    s.details->>'sync_class' as sync_class
+    s.details->>'sync_class' as sync_class,
+    case when s.details->'battery_graph'->>'found' = 'yes' then s.details->'battery_graph'->>'pack_key' end as pack_key,
+    case when s.details->'battery_graph'->>'found' = 'yes' then s.details->'battery_graph'->>'pack' end as pack_name,
+    case when s.details->'battery_graph'->>'found' = 'yes' then s.details->'battery_graph'->>'fits' end as fits,
+    case when s.details->'battery_graph'->>'found' = 'yes' then ${num("s.details->'battery_graph'->'usable_kwh'")}::float8 end as usable_kwh,
+    case when s.details->'battery_graph'->>'found' = 'yes' then ${num("s.details->'battery_graph'->'gross_kwh'")}::float8 end as gross_kwh
   from crm_stock_opportunities s
   left join crm_companies c on c.id = s.company_id
   where s.status in ('opportunity', 'listed')
