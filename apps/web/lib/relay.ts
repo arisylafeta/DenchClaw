@@ -55,7 +55,7 @@ export type RelayDraftView = {
   mail_message_id: string | null;
   gmail_draft_id: string | null;
   mail: {
-    id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[];
+    id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[];
     subject: string | null; main: string; updated_at: string; attachments: DraftAttachment[]; transport: string | null;
     /** Why the last send attempt did not go out, if it didn't. */
     failure: { reason: string; detail?: unknown } | null;
@@ -412,8 +412,8 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const ids = items.map((i) => i.id);
   const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
-  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown } } | null; transport: string | null }>(
-    `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,subject,body_text,updated_at,personalization,transport from mail_message where id = any($1)`, [mailIds]) : [];
+  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown } } | null; transport: string | null }>(
+    `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport from mail_message where id = any($1)`, [mailIds]) : [];
   const byMail = new Map(mails.map((m) => [m.id, m]));
   const todos = await queryPg<RelayTodo>(`select t.id,t.item_id,t.title,t.detail,t.kind,t.state,w.reb_key,null as source,t.created_at from relay_todo t left join work_tasks w on w.id = t.work_task_id where t.item_id = any($1) and t.state in ('suggested','accepted') order by t.created_at`, [ids]);
   const facts = new Map<string, RelayFacts>();
@@ -440,7 +440,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
         id: d.id, role: d.role, position: d.position, title: d.title, why: d.why, state: sent ? "sent" : d.state, source_note: d.source_note,
         agent_log: Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).filter((l): l is string => typeof l === "string") : [],
         mail_message_id: d.mail_message_id, gmail_draft_id: d.gmail_draft_id,
-        mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, subject: m.subject,
+        mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, bcc_emails: m.bcc_emails, subject: m.subject,
           main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport,
           failure: m.personalization?.send_failure ?? null } : null,
       };
@@ -518,14 +518,15 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   const current = (await editableCopy(mail)).main;
   const files = (mail.attachments ?? []).map((a) => a.filename);
   const attachedLine = files.length ? `Files actually attached: ${files.join(", ")}. Only these may be called attached.` : "No files are attached. Never write that anything is attached, enclosed or included; if asked to attach something, say in the note that it needs the Attach stock list button or Gmail.";
-  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can only change the text: you cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\nNo signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}.`;
+  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can change the text and the Cc and Bcc lists (Cc now: ${mail.cc_emails.join(", ") || "none"}; Bcc now: ${mail.bcc_emails.join(", ") || "none"}), never the To line: you cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\nNo signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}.`;
   const parsed = parseJson(await askAgent(system, `Instruction: ${instruction}\n\nCurrent draft:\n${current}`, 120_000));
   const body = String(parsed.body ?? "").trim();
   if (!body) throw new RelayError(502, "The assistant returned an empty draft. Try again.");
   if (!files.length && claimsAttachment(body) && !claimsAttachment(current)) {
     throw new RelayError(422, "I can't attach files from here, so I didn't change the email. Use Attach stock list, or add the file in Gmail.");
   }
-  await editDraft(mail, { body });
+  const list = (v: unknown) => Array.isArray(v) ? v.filter((a): a is string => typeof a === "string") : undefined;
+  await editDraft(mail, { body, cc: list(parsed.cc), bcc: list(parsed.bcc) });
   return { body, note: String(parsed.note ?? "Updated the draft.").slice(0, 200) };
 }
 

@@ -97,7 +97,18 @@ describe("MailDraftView", () => {
     expect(await screen.findByRole("heading", { name: "New subject" })).toBeInTheDocument();
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
     expect(patch[0]).toBe("/api/mail/drafts/d1");
-    expect(JSON.parse(String(patch[1]!.body))).toEqual({ subject: "New subject", body: "Changed", updated_at: "2026-10-20T10:00:00Z" });
+    expect(JSON.parse(String(patch[1]!.body))).toEqual({ subject: "New subject", body: "Changed", cc: [], bcc: [], updated_at: "2026-10-20T10:00:00Z" });
+  });
+  it("edits Cc and Bcc as text and saves them as lists", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "PATCH" ? { ...draft, cc_emails: ["a@x.co", "b@x.co"], updated_at: "2026-10-20T10:05:00Z" } : draft)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MailDraftView draftId="d1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Cc" }), { target: { value: "B@x.co; a@x.co" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, i]) => i?.method === "PATCH")).toBe(true));
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([, i]) => i?.method === "PATCH")![1]!.body));
+    expect(body).toMatchObject({ cc: ["a@x.co", "b@x.co"], bcc: [] });
   });
   it("only sends after a confirmation, naming the version it showed", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "POST" ? { sent: true } : draft)));

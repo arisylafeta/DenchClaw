@@ -99,6 +99,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const BUTTON = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50";
 const INPUT = "w-full rounded-md border bg-transparent px-2 py-1 text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]";
 
+const addrs = (v: string) => v.replace(/;/g, ",").split(",").map((a) => a.trim().toLowerCase()).filter(Boolean).sort().join(",");
+
 async function call(url: string, method: string, body: unknown): Promise<MailDraft> {
   const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => null);
@@ -112,7 +114,7 @@ export function MailDraftView({ draftId }: { draftId: string }) {
   const [copied, setCopied] = useState(false);
   // The latest version this tab saved; wins over the poll until the poll catches up.
   const [saved, setSaved] = useState<MailDraft | null>(null);
-  const [edit, setEdit] = useState<{ subject: string; body: string } | null>(null);
+  const [edit, setEdit] = useState<{ subject: string; body: string; cc: string; bcc: string } | null>(null);
   const [busy, setBusy] = useState<"save" | "send" | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
@@ -134,13 +136,13 @@ export function MailDraftView({ draftId }: { draftId: string }) {
   const sent = d.state !== "draft" && d.state !== "frozen";
   const editable = d.state === "draft" && !d.campaign_id;
   const signature = d.editable?.signature ?? null;
-  const startEdit = () => { setNotice(null); setConfirming(false); setEdit({ subject: d.subject ?? "", body: d.editable?.main ?? d.body_text ?? "" }); };
-  const dirty = !!edit && (edit.subject !== (d.subject ?? "") || edit.body !== (d.editable?.main ?? d.body_text ?? ""));
+  const startEdit = () => { setNotice(null); setConfirming(false); setEdit({ subject: d.subject ?? "", body: d.editable?.main ?? d.body_text ?? "", cc: d.cc_emails.join(", "), bcc: d.bcc_emails.join(", ") }); };
+  const dirty = !!edit && (edit.subject !== (d.subject ?? "") || edit.body !== (d.editable?.main ?? d.body_text ?? "") || addrs(edit.cc) !== d.cc_emails.join(",") || addrs(edit.bcc) !== d.bcc_emails.join(","));
   async function save() {
     if (!edit) {return;}
     setBusy("save"); setNotice(null);
     try {
-      const updated = await call(`/api/mail/drafts/${encodeURIComponent(d.id)}`, "PATCH", { subject: edit.subject, body: edit.body, updated_at: d.updated_at });
+      const updated = await call(`/api/mail/drafts/${encodeURIComponent(d.id)}`, "PATCH", { subject: edit.subject, body: edit.body, cc: addrs(edit.cc).split(",").filter(Boolean), bcc: addrs(edit.bcc).split(",").filter(Boolean), updated_at: d.updated_at });
       setSaved(updated); setEdit(null); setNotice({ tone: "ok", text: "Saved." });
     } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not save." }); }
     finally { setBusy(null); }
@@ -210,8 +212,16 @@ export function MailDraftView({ draftId }: { draftId: string }) {
         <dl className="mb-5 rounded-lg border px-3.5" style={{ borderColor: "var(--color-border)", background: "var(--color-main-bg)" }}>
           <Field label="From">{d.from_email ?? d.identity_key ?? "Unknown sender"}</Field>
           <Field label="To">{d.to_emails.length ? d.to_emails.join(", ") : <span style={{ color: "var(--color-warning)" }}>No recipient</span>}</Field>
-          <Field label="Cc">{d.cc_emails.length ? d.cc_emails.join(", ") : <span style={{ color: "var(--color-text-muted)" }}>None</span>}</Field>
-          <Field label="Bcc">{d.bcc_emails.length ? d.bcc_emails.join(", ") : <span style={{ color: "var(--color-text-muted)" }}>None</span>}</Field>
+          <Field label="Cc">
+            {edit && d.transport === "gmail"
+              ? <input aria-label="Cc" value={edit.cc} placeholder="Addresses, comma separated" onChange={(e) => setEdit({ ...edit, cc: e.target.value })} className={INPUT} style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
+              : d.cc_emails.length ? d.cc_emails.join(", ") : <span style={{ color: "var(--color-text-muted)" }}>None</span>}
+          </Field>
+          <Field label="Bcc">
+            {edit && d.transport === "gmail"
+              ? <input aria-label="Bcc" value={edit.bcc} placeholder="Addresses, comma separated" onChange={(e) => setEdit({ ...edit, bcc: e.target.value })} className={INPUT} style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
+              : d.bcc_emails.length ? d.bcc_emails.join(", ") : <span style={{ color: "var(--color-text-muted)" }}>None</span>}
+          </Field>
           <Field label="Subject">
             {edit
               ? <input aria-label="Subject" value={edit.subject} maxLength={300} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} className={INPUT} style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />

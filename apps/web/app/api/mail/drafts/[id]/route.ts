@@ -19,8 +19,8 @@ export async function PATCH(req: Request, context: Context) {
  const user = await currentUser();
  if (!user) return Response.json({error:'Unauthorized'},{status:401});
  const {id} = await context.params;
- const body = await req.json().catch(() => null) as {subject?: unknown; body?: unknown; updated_at?: unknown} | null;
- if (!body || (body.subject !== undefined && typeof body.subject !== 'string') || (body.body !== undefined && typeof body.body !== 'string') || typeof body.updated_at !== 'string') {
+ const body = await req.json().catch(() => null) as {subject?: unknown; body?: unknown; cc?: unknown; bcc?: unknown; updated_at?: unknown} | null;
+ if (!body || (body.subject !== undefined && typeof body.subject !== 'string') || (body.body !== undefined && typeof body.body !== 'string') || [body.cc,body.bcc].some((v) => v !== undefined && !(Array.isArray(v) && v.every((a) => typeof a === 'string'))) || typeof body.updated_at !== 'string') {
   return Response.json({error:'subject, body and updated_at are required in the right shape'},{status:400});
  }
  if (typeof body.subject === 'string' && (!body.subject.trim() || body.subject.length > 300)) return Response.json({error:'The subject must be 1 to 300 characters.'},{status:400});
@@ -28,7 +28,7 @@ export async function PATCH(req: Request, context: Context) {
  if (!current) return Response.json({error:'Not found'},{status:404});
  if (!sameVersion(current.updated_at,body.updated_at)) return Response.json({error:'This draft changed since you opened it. Reload to see the latest.'},{status:409});
  try {
-  await editDraft(current,{subject: body.subject as string | undefined, body: body.body as string | undefined});
+  await editDraft(current,{subject: body.subject as string | undefined, body: body.body as string | undefined, cc: body.cc as string[] | undefined, bcc: body.bcc as string[] | undefined});
   const updated = await readMailDraft(id,user.id);
   return updated ? Response.json(await withCopy(updated)) : Response.json({error:'Not found'},{status:404});
  } catch (error) {

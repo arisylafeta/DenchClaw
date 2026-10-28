@@ -68,7 +68,7 @@ function cliError(error: unknown): DraftActionError {
 }
 
 /** Applies a subject and/or main-copy edit to an unsent draft through the CLI, so the frozen digest and content policy still apply. */
-export async function editDraft(draft: MailDraft, changes: { subject?: string; body?: string }): Promise<void> {
+export async function editDraft(draft: MailDraft, changes: { subject?: string; body?: string; cc?: string[]; bcc?: string[] }): Promise<void> {
   if (draft.state !== "draft") { throw new DraftActionError(409, "This draft was already sent or is being sent."); }
   const args = ["edit"];
   if (typeof changes.subject === "string" && changes.subject !== (draft.subject ?? "")) { args.push(`--subject=${changes.subject}`); }
@@ -81,6 +81,12 @@ export async function editDraft(draft: MailDraft, changes: { subject?: string; b
       const signatureText = signed ? (identity?.signature_text ?? "") : "";
       args.push(`--body=${body}${signatureText ? `\n\n${signatureText}` : ""}`, `--html=${textToHtml(body, signed ? (identity?.signature_html ?? "") : "")}`);
     }
+  }
+  for (const key of ["cc", "bcc"] as const) {
+    const next = changes[key];
+    if (!next) { continue; }
+    const clean = [...new Set(next.map((a) => a.trim().toLowerCase()).filter(Boolean))].sort();
+    if (clean.join(",") !== [...(draft[`${key}_emails`] ?? [])].sort().join(",")) { args.push(`--${key}=${clean.join(",")}`); }
   }
   if (args.length === 1) { return; }
   try { await run(CLI, [...args, "--", draft.id], { timeout: 60_000, maxBuffer: 4 << 20 }); } catch (error) { throw cliError(error); }

@@ -163,9 +163,20 @@ def _strip_unsubscribe(text, html):
     return text.replace(policy.UNSUBSCRIBE, ''), html.replace(policy.UNSUBSCRIBE, '')
 
 
+_EMAIL = re.compile(r'^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$')
+
+
+def _address_list(value):
+    """Comma-separated addresses -> sorted unique lowercase list; an empty string clears the list."""
+    found = sorted({a.strip().lower() for a in value.replace(';', ',').split(',') if a.strip()})
+    if any(not _EMAIL.match(a) for a in found):
+        raise Refused('invalid_recipient_address')
+    return found
+
+
 def edit(args):
     """Change an unsent draft in place. Switching away from marketing drops the unsubscribe footer."""
-    changes = {k: getattr(args, k) for k in ('purpose', 'subject', 'body', 'html') if getattr(args, k, None) is not None}
+    changes = {k: getattr(args, k) for k in ('purpose', 'subject', 'body', 'html', 'cc', 'bcc') if getattr(args, k, None) is not None}
     if not changes:
         raise UsageError('nothing_to_edit')
     with connection() as db:
@@ -188,8 +199,17 @@ def edit(args):
             text, html = changes.get('body', text), changes.get('html', html)
             row.update(purpose=purpose, subject=changes.get('subject', row['subject']), body_text=text, body_html=html)
             policy.content(row)
-            cur.execute('update mail_message set purpose=%s,subject=%s,body_text=%s,body_html=%s,updated_at=now() where id=%s',
-                        (row['purpose'], row['subject'], row['body_text'], row['body_html'], args.target))
+            for key in ('cc', 'bcc'):
+                if key in changes:
+                    row[key + '_emails'] = _address_list(changes[key])
+            row['cc_emails'] = [e for e in row['cc_emails'] if e not in row['to_emails']]
+            row['bcc_emails'] = [e for e in row['bcc_emails'] if e not in row['to_emails'] and e not in row['cc_emails']]
+            if (row['cc_emails'] or row['bcc_emails']) and row['transport'] != 'gmail' and ('cc' in changes or 'bcc' in changes):
+                raise Refused('cc_requires_gmail')
+            for email in [e for k in ('cc', 'bcc') if k in changes for e in row[k + '_emails']]:
+                policy.recipient(db, email, {}, None, campaign=False)
+            cur.execute('update mail_message set purpose=%s,subject=%s,body_text=%s,body_html=%s,cc_emails=%s,bcc_emails=%s,updated_at=now() where id=%s',
+                        (row['purpose'], row['subject'], row['body_text'], row['body_html'], row['cc_emails'], row['bcc_emails'], args.target))
     with connection(read_only=True) as db:
         _, rows = load(db, args.target)
     return {'message': rows[0], 'sha256': digest(rows)}
@@ -226,6 +246,8 @@ def register(subparsers):
     parser.add_argument('--subject')
     parser.add_argument('--body')
     parser.add_argument('--html')
+    parser.add_argument('--cc', help='Replace the CC list (comma-separated; empty clears it)')
+    parser.add_argument('--bcc', help='Replace the BCC list (comma-separated; empty clears it)')
     parser.set_defaults(handler=edit)
     parser = subparsers.add_parser('preview')
     parser.add_argument('target')
