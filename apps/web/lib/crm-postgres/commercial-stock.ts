@@ -25,7 +25,15 @@ const LIVE_STOCK = `
     case when s.details->'battery_graph'->>'found' = 'yes' then s.details->'battery_graph'->>'pack' end as pack_name,
     case when s.details->'battery_graph'->>'found' = 'yes' then s.details->'battery_graph'->>'fits' end as fits,
     case when s.details->'battery_graph'->>'found' = 'yes' then ${num("s.details->'battery_graph'->'usable_kwh'")}::float8 end as usable_kwh,
-    case when s.details->'battery_graph'->>'found' = 'yes' then ${num("s.details->'battery_graph'->'gross_kwh'")}::float8 end as gross_kwh
+    case when s.details->'battery_graph'->>'found' = 'yes' then ${num("s.details->'battery_graph'->'gross_kwh'")}::float8 end as gross_kwh,
+    case when jsonb_typeof(s.details->'part_numbers') = 'array' and jsonb_array_length(s.details->'part_numbers') > 0
+      then array(select jsonb_array_elements_text(s.details->'part_numbers'))
+      when nullif(trim(s.details->>'part_number'), '') is not null then array[s.details->>'part_number'] end as part_numbers,
+    case when jsonb_typeof(s.details->'tested') = 'boolean' then (s.details->>'tested')::boolean end as tested,
+    ${num("s.details->'soh_percent'")}::float8 as soh_percent,
+    case when s.details->>'damaged' = 'true'
+        or (jsonb_typeof(s.details->'damage') = 'array' and jsonb_array_length(s.details->'damage') > 0) then true
+      when s.details->>'damaged' = 'false' then false end as damaged
   from crm_stock_opportunities s
   left join crm_companies c on c.id = s.company_id
   where s.status in ('opportunity', 'listed')

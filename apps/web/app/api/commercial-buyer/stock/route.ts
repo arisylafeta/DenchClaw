@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { aggregateStock, interpretFilters, searchRows, suggestModels, supplierToken } from "@/lib/commercial-stock";
+import { aggregateStock, interpretFilters, lotKeyFor, searchRows, suggestModels, supplierToken } from "@/lib/commercial-stock";
 import { commercialStockAuthorised, secret, unauthorised } from "@/lib/commercial-stock-access";
 import { liveStock } from "@/lib/crm-postgres/commercial-stock";
 
@@ -15,6 +15,7 @@ const filters = z.strictObject({
   maxPriceEurExVat: z.number().positive().max(1_000_000).optional(),
   seenWithinDays: z.number().int().min(1).max(365).optional(),
   limit: z.number().int().min(1).max(50).optional(),
+  groupKeys: z.array(z.string().regex(/^grp_[0-9a-f]{16}$/)).min(1).max(20).optional(),
   /** Conversation id: supplier tokens are stable within it and unlinkable across conversations. */
   scope: z.string().trim().min(8).max(80).optional(),
 });
@@ -28,7 +29,8 @@ export async function POST(request: Request): Promise<Response> {
   const { rows, matchedOn } = searchRows(all, parsed.data);
   const key = secret() ?? randomUUID();
   const scope = parsed.data.scope ?? randomUUID();
-  const groups = aggregateStock(rows, (supplierId) => supplierToken(supplierId, scope, key));
+  const groups = aggregateStock(rows, (supplierId) => supplierToken(supplierId, scope, key),
+    (supplierId, groupKey, part) => lotKeyFor(supplierId, groupKey, part, scope, key));
   return Response.json({
     groups: groups.slice(0, parsed.data.limit ?? 20),
     totalGroups: groups.length,

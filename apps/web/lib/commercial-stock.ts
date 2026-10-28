@@ -42,6 +42,11 @@ export type StockRow = {
   fits?: string | null;
   usable_kwh?: number | null;
   gross_kwh?: number | null;
+  /** Lot detail (optional so older fixtures still type): stated part numbers, test/SoH/damage facts. */
+  part_numbers?: string[] | null;
+  tested?: boolean | null;
+  soh_percent?: number | null;
+  damaged?: boolean | null;
 };
 
 export type StockFilters = {
@@ -56,6 +61,8 @@ export type StockFilters = {
   maxPriceEurExVat?: number;
   seenWithinDays?: number;
   limit?: number;
+  /** Exact groups only (a tapped stock card or a follow-up on groups already shown). */
+  groupKeys?: string[];
 };
 
 export type StockGroup = {
@@ -86,11 +93,37 @@ export type StockGroup = {
   lastSeen: string | null;
   /** Rows refreshed by a supplier sync or marketplace mirror; null when fewer than MIN_SOURCES. */
   synced: number | null;
+  /** One row per supplier and part number, most units first, at most MAX_LOTS (lotCount has the full number). */
+  lots: StockLot[];
+  lotCount: number;
+};
+
+/**
+ * What one supplier holds of a group under one part number: the row a buyer selects and bids on (Ari, 28 Oct 2026).
+ * Prices are rounded (EUR 50 per unit, EUR 1 per kWh) so an exact advert price cannot be searched back to the supplier;
+ * the ask is the sale price as listed (our fee is already in it). No ids, VINs, cities, photos or source URLs.
+ */
+export type StockLot = {
+  /** Opaque and scoped like supplier tokens; the CRM resolves it back to stock rows when an offer comes in. */
+  lotKey: string;
+  supplier: string;
+  units: number;
+  partNumbers: string[];
+  years: { min: number; max: number } | null;
+  country: string | null;
+  condition: { tested: number; sohMin: number | null; sohMax: number | null; damaged: number; notStated: number };
+  askEurExVat: { min: number; max: number } | null;
+  askEurPerKwh: { min: number; max: number } | null;
+  /** Units priced only with VAT included or unknown VAT (not in the ask). */
+  vatUnknown: number;
+  lastSeen: string | null;
 };
 
 /** Below this many suppliers a group shows only a rounded price band. */
 export const MIN_SOURCES = 3;
 export const PRICE_BAND_EUR = 500;
+export const LOT_PRICE_STEP_EUR = 50;
+export const MAX_LOTS = 12;
 
 const clean = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() || null;
 const deaccent = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -308,6 +341,30 @@ export function supplierToken(supplierId: string, scope: string, secret: string)
   return `S${createHmac("sha256", secret).update(`${scope}\u0000${supplierId}`).digest("hex").slice(0, 6)}`;
 }
 
+/** Opaque lot key: supplier + group + part number under one scope. Unlinkable across scopes, like supplier tokens. */
+export function lotKeyFor(supplierId: string, groupKey: string, part: string, scope: string, secret: string): string {
+  return `lot_${createHmac("sha256", secret).update(`lot\u0000${scope}\u0000${supplierId}\u0000${groupKey}\u0000${part}`).digest("hex").slice(0, 16)}`;
+}
+
+/**
+ * Folded OEM part number used to split lots: letter O and digit 0 are one character (adverts mix "37501AO050" and
+ * "37501A0050"). Empty when none is stated, or for run-on lists and serials longer than any OEM part number.
+ */
+export function partKey(value: string | null | undefined): string {
+  const folded = (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
+  return folded.length >= 5 && folded.length <= 14 ? folded : "";
+}
+
+function firstPerKey(values: string[], key: (value: string) => string): string[] {
+  const seen = new Map<string, string>();
+  for (const value of values) if (!seen.has(key(value))) seen.set(key(value), value);
+  return [...seen.values()];
+}
+
+function rowParts(row: StockRow): string[] {
+  return [...new Set((row.part_numbers ?? []).map((part) => clean(part)).filter((part): part is string => Boolean(part) && partKey(part) !== ""))];
+}
+
 function levenshtein(a: string, b: string, cap = 3): number {
   if (Math.abs(a.length - b.length) > cap) return cap + 1;
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
@@ -395,6 +452,7 @@ export function modelMatches(row: StockRow, wanted: string, graph = false): bool
 /** All filters; the model filter uses the row's model text unless `graph` widens it to the battery graph. */
 export function matchesFilters(row: StockRow, filters: StockFilters, today = new Date(), graph = false): boolean {
   if (!normalMake(row.make)) return false;
+  if (filters.groupKeys?.length && !filters.groupKeys.includes(groupKeyFor(row))) return false;
   const format = effectiveFormat(row);
   if (filters.format ? format !== filters.format : format === "cell") return false;
   if (filters.make && !makeMatches(row, filters.make)) return false;
@@ -478,8 +536,53 @@ function labelFor(group: Pick<StockGroup, "make" | "model" | "capacityKwh" | "fo
     .filter(Boolean).join(" ");
 }
 
+const roundTo = (value: number, step: number) => Math.max(step, Math.round(value / step) * step);
+
+/** Lots of one group: supplier x primary part number. */
+function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: string) => string,
+  lotKey: (supplierId: string, groupKey: string, part: string) => string): StockLot[] {
+  const lots = new Map<string, { supplierId: string; part: string; rows: StockRow[] }>();
+  for (const row of members) {
+    const supplierId = String(row.company_id ?? row.person_id);
+    const part = partKey(rowParts(row)[0]);
+    const key = `${supplierId}\u0000${part}`;
+    const lot = lots.get(key);
+    if (lot) lot.rows.push(row); else lots.set(key, { supplierId, part, rows: [row] });
+  }
+  return [...lots.values()].map(({ supplierId, part, rows }) => {
+    const units = rows.reduce((sum, row) => sum + row.quantity, 0);
+    const priced = rows.filter((row) => typeof row.price_eur_ex_vat === "number" && row.price_eur_ex_vat > 0);
+    const asks = priced.map((row) => row.price_eur_ex_vat!);
+    const perKwh = priced.flatMap((row) => { const kwh = rowKwh(row); return kwh ? [row.price_eur_ex_vat! / kwh] : []; });
+    const years = rows.map((row) => row.year).filter((year): year is number => typeof year === "number" && year > 1990);
+    const soh = rows.map((row) => row.soh_percent).filter((value): value is number => typeof value === "number" && value > 0 && value <= 100);
+    const seen = rows.map((row) => row.seen_on).filter((date): date is string => Boolean(date)).sort();
+    const sum = (test: (row: StockRow) => boolean) => rows.filter(test).reduce((total, row) => total + row.quantity, 0);
+    return {
+      lotKey: lotKey(supplierId, groupKey, part),
+      supplier: tokenFor(supplierId),
+      units,
+      partNumbers: firstPerKey(rows.flatMap(rowParts), partKey).slice(0, 3),
+      years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
+      country: mostCommon(rows.map((row) => normalCountry(row.country))),
+      condition: {
+        tested: sum((row) => row.tested === true || typeof row.soh_percent === "number"),
+        sohMin: soh.length ? Math.round(Math.min(...soh)) : null,
+        sohMax: soh.length ? Math.round(Math.max(...soh)) : null,
+        damaged: sum((row) => row.damaged === true),
+        notStated: sum((row) => row.tested == null && row.soh_percent == null && row.damaged == null),
+      },
+      askEurExVat: asks.length ? { min: roundTo(Math.min(...asks), LOT_PRICE_STEP_EUR), max: roundTo(Math.max(...asks), LOT_PRICE_STEP_EUR) } : null,
+      askEurPerKwh: perKwh.length ? { min: roundTo(Math.min(...perKwh), 1), max: roundTo(Math.max(...perKwh), 1) } : null,
+      vatUnknown: sum((row) => !(typeof row.price_eur_ex_vat === "number" && row.price_eur_ex_vat > 0) && row.price_eur !== null),
+      lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
+    };
+  }).sort((a, b) => b.units - a.units || a.lotKey.localeCompare(b.lotKey));
+}
+
 /** Supplier-free groups, most units first. */
-export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) => string = () => "S"): StockGroup[] {
+export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) => string = () => "S",
+  lotKey: (supplierId: string, groupKey: string, part: string) => string = (supplierId, groupKey, part) => lotKeyFor(supplierId, groupKey, part, "test", "test")): StockGroup[] {
   const groups = new Map<string, StockRow[]>();
   for (const row of rows) {
     if (!normalMake(row.make)) continue;
@@ -524,6 +627,7 @@ export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) 
       priceEurIncVatOnly: members.filter((row) => row.price_eur_ex_vat === null && row.price_eur !== null).length,
       lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
       synced: crowd ? members.filter((row) => row.sync_class === "synced" || row.sync_class === "marketplace").length : null,
+      ...(() => { const lots = lotsFor(groupKey, members, tokenFor, lotKey); return { lots: lots.slice(0, MAX_LOTS), lotCount: lots.length }; })(),
     });
   }
   return result.sort((a, b) => b.units - a.units || a.label.localeCompare(b.label));

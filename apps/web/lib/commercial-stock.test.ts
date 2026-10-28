@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateStock, chemistryFamilies, cleanModel, effectiveFormat, groupKeyFor, matchesFilters, normalCountry, normalModel, normalPowertrain,
-  searchRows, suggestModels, supplierToken, type StockRow,
+  lotKeyFor, partKey, searchRows, suggestModels, supplierToken, type StockRow,
 } from "./commercial-stock";
 
 const row = (over: Partial<StockRow>): StockRow => ({
@@ -17,6 +17,51 @@ const stock = [
   row({ id: "sto_3", make: "VW", model: "ID.3", capacity_kwh: 58, chemistry: "NMC", price_eur_ex_vat: null, price_eur: 6000 }),
   row({ id: "sto_4", make: "Volkswagen", model: "ID.3", capacity_kwh: 58.0, chemistry: "nmc", quantity: 3, price_eur_ex_vat: 5000, company_id: "co_b", person_id: "p_b" }),
 ];
+
+describe("stock lots", () => {
+  const lotRows = [
+    row({ id: "n1", make: "Kia", model: "Niro II", capacity_kwh: 64.8, price_eur_ex_vat: 4171, part_numbers: ["37501-AO050"], tested: true, soh_percent: 94, country: "Newbridge, Edinburgh, United Kingdom" }),
+    row({ id: "n2", make: "Kia", model: "Niro II", capacity_kwh: 64.8, price_eur_ex_vat: 4489, part_numbers: ["37501AO050"], damaged: true, year: 2023, country: "United Kingdom" }),
+    row({ id: "n3", make: "Kia", model: "e-Niro", capacity_kwh: 64.8, price_eur_ex_vat: 5000, part_numbers: ["37501-Q4052"], country: "United Kingdom" }),
+    row({ id: "n4", company_id: "co_b", person_id: "p_b", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8, quantity: 3, price_eur_ex_vat: null, price_eur: 6000, country: "Lithuania" }),
+  ];
+  const scoped = (scope: string) => aggregateStock(lotRows, (id) => supplierToken(id, scope, "k".repeat(32)), (id, group, part) => lotKeyFor(id, group, part, scope, "k".repeat(32)));
+
+  it("splits a group by supplier and part number with rounded asks and condition counts", () => {
+    const [group] = scoped("conv-1234");
+    expect(group).toMatchObject({ units: 6, lotCount: 3 });
+    const [lithuania, ao050, q4052] = group.lots;
+    expect(lithuania).toMatchObject({ units: 3, country: "Lithuania", askEurExVat: null, vatUnknown: 3, partNumbers: [], condition: { notStated: 3 } });
+    expect(ao050).toMatchObject({ units: 2, country: "United Kingdom", partNumbers: ["37501-AO050"],
+      askEurExVat: { min: 4150, max: 4500 }, askEurPerKwh: { min: 64, max: 69 }, years: { min: 2022, max: 2023 },
+      condition: { tested: 1, sohMin: 94, sohMax: 94, damaged: 1, notStated: 0 } });
+    expect(q4052).toMatchObject({ units: 1, partNumbers: ["37501-Q4052"], askEurExVat: { min: 5000, max: 5000 } });
+    expect(ao050.supplier).toBe(q4052.supplier);
+    expect(ao050.lotKey).toMatch(/^lot_[0-9a-f]{16}$/);
+  });
+
+  it("keeps lot keys stable within a scope, unlinkable across scopes, and free of identity", () => {
+    const keys = (scope: string) => scoped(scope)[0].lots.map((lot) => lot.lotKey);
+    expect(keys("conv-1234")).toEqual(keys("conv-1234"));
+    expect(keys("conv-5678").some((key) => keys("conv-1234").includes(key))).toBe(false);
+    const text = JSON.stringify(scoped("conv-1234"));
+    for (const secret of ["Secret Breaker", "co_a", "co_b", "p_b", "n1", "Newbridge", "Edinburgh", "4171", "4489"]) expect(text).not.toContain(secret);
+  });
+
+  it("filters to exact group keys", () => {
+    const key = groupKeyFor(lotRows[0]);
+    expect(matchesFilters(lotRows[0], { groupKeys: [key] })).toBe(true);
+    expect(matchesFilters(lotRows[0], { groupKeys: ["grp_0000000000000000"] })).toBe(false);
+  });
+
+  it("ignores run-on part number lists when splitting", () => {
+    expect(partKey("37501-AO050")).toBe("37501A0050");
+    expect(partKey("37501A0050")).toBe(partKey("37501-AO050"));
+    expect(partKey("722FA0101240220323")).toBe("");
+    expect(partKey("16 755 893 80 16 755 894 80 16 890 952 80")).toBe("");
+    expect(partKey("123")).toBe("");
+  });
+});
 
 describe("aggregateStock", () => {
   it("groups by spec and never exposes supplier identity", () => {
