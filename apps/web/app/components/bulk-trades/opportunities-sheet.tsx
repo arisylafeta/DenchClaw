@@ -149,12 +149,14 @@ const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
 }));
 
 /** Search, starting point and menus; shared by the list and the board. */
-export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, hideSide = false, stages, sort, onSort }: {
+export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, hideSide = false, stages, mainStages, sort, onSort }: {
   rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean;
   /** The sheet is locked to one kind (Requests or Supply): no Buying/Selling toggle. */
   hideSide?: boolean;
   /** The Progress choices; defaults to the stages present in the rows. */
   stages?: readonly string[];
+  /** The stages shown as buttons; the other `stages` go in a "More stages" menu. Defaults to all of them. */
+  mainStages?: readonly string[];
   sort?: SheetSort; onSort?: (next: SheetSort) => void;
 }) {
   const options = sheetOptions(rows);
@@ -170,7 +172,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
     <div className="flex flex-col gap-2.5">
       {!hideProgress && stages && (
         <div role="group" aria-label="Stage" className="flex flex-wrap gap-1.5">
-          {(["all", ...stages] as string[]).map((stage) => {
+          {(["all", ...stages.filter((stage) => !mainStages || mainStages.includes(stage))] as string[]).map((stage) => {
             const on = filters.progress === stage;
             return (
               <button key={stage} type="button" aria-pressed={on} onClick={() => set({ progress: on && stage !== "all" ? "all" : stage })} className={chip} style={chipStyle(on)}>
@@ -179,6 +181,18 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
               </button>
             );
           })}
+          {mainStages && (() => {
+            const more = stages.filter((stage) => !mainStages.includes(stage));
+            if (!more.length) return null;
+            const on = more.includes(filters.progress);
+            return (
+              <select aria-label="More stages" value={on ? filters.progress : ""} onChange={(event) => set({ progress: event.target.value || "all" })}
+                className={`${chip} appearance-auto`} style={chipStyle(on)}>
+                <option value="">More stages</option>
+                {more.map((stage) => <option key={stage} value={stage}>{stage} ({stageCount(stage)})</option>)}
+              </select>
+            );
+          })()}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -226,9 +240,10 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
   );
 }
 
-export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, sort, onSort, onFilters, onOpen, onNext, hideSide = false, stages }: {
+export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, sort, onSort, onFilters, onOpen, onNext, hideSide = false, stages, mainStages }: {
   hideSide?: boolean;
   stages?: readonly string[];
+  mainStages?: readonly string[];
   sort?: SheetSort;
   onSort?: (next: SheetSort) => void;
   rows: SheetRow[];
@@ -246,7 +261,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
   const filtered = isFiltered(filters, hideSide);
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
-      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} sort={sort} onSort={onSort} hideSide={hideSide} stages={stages} />
+      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} sort={sort} onSort={onSort} hideSide={hideSide} stages={stages} mainStages={mainStages} />
 
       <ErrorText error={error} />
       <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">

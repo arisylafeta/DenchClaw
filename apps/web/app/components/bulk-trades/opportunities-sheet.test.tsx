@@ -98,3 +98,22 @@ describe("OpportunitiesSheet stage chips", () => {
     expect(onFilters).toHaveBeenLastCalledWith({ ...NO_FILTERS, progress: "all" });
   });
 });
+
+describe("OpportunitiesSheet more stages", () => {
+  it("keeps the main stages as buttons and the rest in a menu that filters and shows the choice", () => {
+    const rows = [{ key: "a", id: "a", kind: "demand" as const, side: "buyer" as const, title: "Row a", company: "Co", company_id: null, category: null,
+      progress: "Paid" as const, tone: "closing" as const, score: null, latest: null, next_action: null, next_due: null, owner: null, touched: null }];
+    const onFilters = vi.fn();
+    const props = { rows, shown: rows, loading: false, error: null, today: "2026-10-20", stages: ["New", "Offered", "Paid", "Delivered"], mainStages: ["New", "Offered"], onFilters, onOpen: vi.fn(), onNext: vi.fn() };
+    const { rerender } = render(<OpportunitiesSheet {...props} filters={NO_FILTERS} />);
+    expect(Array.from(screen.getByRole("group", { name: "Stage" }).querySelectorAll("button")).map((b) => b.firstChild?.textContent)).toEqual(["All", "New", "Offered"]);
+    const menu = screen.getByLabelText("More stages") as HTMLSelectElement;
+    expect(Array.from(menu.options).map((o) => o.textContent)).toEqual(["More stages", "Paid (1)", "Delivered (0)"]);
+    fireEvent.change(menu, { target: { value: "Paid" } });
+    expect(onFilters).toHaveBeenLastCalledWith({ ...NO_FILTERS, progress: "Paid" });
+    rerender(<OpportunitiesSheet {...props} filters={{ ...NO_FILTERS, progress: "Paid" }} />);
+    expect(screen.getByLabelText("More stages")).toHaveValue("Paid");
+    fireEvent.change(screen.getByLabelText("More stages"), { target: { value: "" } });
+    expect(onFilters).toHaveBeenLastCalledWith({ ...NO_FILTERS, progress: "all" });
+  });
+});

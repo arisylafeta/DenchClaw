@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
 import { filterSheet, filtersFromRoute, NO_FILTERS, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
-import { DEMAND_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
+import { DEMAND_MAIN_STAGES, DEMAND_STAGES, SUPPLY_MAIN_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
 import { boardRows, deskCounts } from "@/lib/bulk-desk";
 import type { DealOwner } from "@/lib/bulk-owner";
 import type { Demand } from "@/lib/bulk-demand";
@@ -201,7 +201,7 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
           </div>
         ) : (
           <OpportunitiesSheet key={tab} rows={tabRows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-            sort={sort} onSort={setSort} onFilters={setFilters} onOpen={open} onNext={saveNext} hideSide stages={tab === "demand" ? DEMAND_STAGES : SUPPLY_STAGES} />
+            sort={sort} onSort={setSort} onFilters={setFilters} onOpen={open} onNext={saveNext} hideSide stages={tab === "demand" ? DEMAND_STAGES : SUPPLY_STAGES} mainStages={tab === "demand" ? DEMAND_MAIN_STAGES : SUPPLY_MAIN_STAGES} />
         )}
       </main>
 

@@ -111,7 +111,9 @@ describe("Trades Preview sheet", () => {
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
     expect(screen.queryByLabelText("Progress")).not.toBeInTheDocument();
-    expect(progress).toEqual(["All", "New", "Qualified", "Sourcing", "Found", "Can't source", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(progress).toEqual(["All", "New", "Qualified", "Sourcing", "Found", "Offered"]);
+    const more = Array.from((screen.getByLabelText("More stages") as HTMLSelectElement).options).map((o) => o.value);
+    expect(more).toEqual(["", "Can't source", "Negotiating", "Agreed", "Paid", "Delivered"]);
   });
 
   it("Supply lists supply with its stage, chance, owner and next action", async () => {
@@ -126,7 +128,8 @@ describe("Trades Preview sheet", () => {
     expect(trade.querySelector("[data-chance]")).toHaveTextContent("60%");
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
-    expect(progress).toEqual(["All", "New", "Qualified", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(progress).toEqual(["All", "New", "Qualified", "Available", "Offered"]);
+    expect(Array.from((screen.getByLabelText("More stages") as HTMLSelectElement).options).map((o) => o.value)).toEqual(["", "Negotiating", "Agreed", "Paid", "Delivered"]);
   });
 
   it("says plainly when a value is not recorded instead of guessing", async () => {

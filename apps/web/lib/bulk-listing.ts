@@ -61,6 +61,10 @@ export const BOARD_STAGES = ["Offered", "Negotiating", "Agreed", "Paid", "Delive
 export const DEMAND_STAGES = ["New", "Qualified", "Sourcing", "Found", "Can't source", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
 /** Supply: a seller's stock is ready to put to buyers, then deal. */
 export const SUPPLY_STAGES = ["New", "Qualified", "Available", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
+/** The stages the Requests and Supply lists show as buttons; the rest (Can't source, and the deal stages after Offered,
+ * which the Deals tab covers) sit in a "More stages" menu. */
+export const DEMAND_MAIN_STAGES = ["New", "Qualified", "Sourcing", "Found", "Offered"] as const satisfies readonly ListingStage[];
+export const SUPPLY_MAIN_STAGES = ["New", "Qualified", "Available", "Offered"] as const satisfies readonly ListingStage[];
 
 /** Labels from bulk_listing_stage() before migration 095, mapped to today's stages so the UI reads right whichever
  * order the UI and the migration go live in. Matched means a counterparty was found: Found for demand, Available for supply. */
