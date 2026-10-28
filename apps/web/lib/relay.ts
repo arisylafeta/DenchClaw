@@ -275,7 +275,7 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
     followRows.push({ title: String(f.title ?? "Follow-on email").slice(0, 120), why: String(f.why ?? "").slice(0, 200), mailId });
   }
   await withPgTransaction(async (tx) => {
-    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state = 'draft'", [itemId]);
+    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [itemId]);
     await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb)`,
       [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources])]);
     for (const [index, f] of followRows.entries()) {
@@ -327,7 +327,7 @@ async function startJob(item: RelayItem, ownerId: string, note: string): Promise
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, "prompt.txt"), `${JOB_SYSTEM(ctx.rules, dir)}\n\n${ctx.prompt}`, { mode: 0o600 });
   await withPgTransaction(async (tx) => {
-    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state = 'draft'", [item.id]);
+    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [item.id]);
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [item.id]);
   });
   const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
