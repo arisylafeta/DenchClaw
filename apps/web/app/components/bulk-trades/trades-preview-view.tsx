@@ -8,7 +8,7 @@ import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bu
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
 import { filterSheet, filtersFromRoute, NO_FILTERS, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
 import { DEMAND_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
-import { boardRows } from "@/lib/bulk-desk";
+import { boardRows, deskCounts } from "@/lib/bulk-desk";
 import type { DealOwner } from "@/lib/bulk-owner";
 import type { Demand } from "@/lib/bulk-demand";
 import { ListingDetail } from "./listing-detail";
@@ -103,8 +103,8 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const shown = useMemo(() => tab === "today" ? filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }) : sortRows(filterSheet(tabRows, filters), sort), [rows, tabRows, filters, sort, tab]);
   /** What each tab holds for the chosen driver, shown beside its name. */
   const tabCounts = useMemo(() => {
-    const mine = filterSheet(rows, { ...NO_FILTERS, owner: filters.owner });
-    return { today: null, demand: mine.filter((row) => row.kind === "demand").length, supply: mine.filter((row) => row.kind === "supply").length, board: boardRows(mine).length } as Record<PreviewTab, number | null>;
+    const counts = deskCounts(filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }));
+    return { today: null, demand: counts.requests, supply: counts.supply, board: counts.deals } as Record<PreviewTab, number | null>;
   }, [rows, filters.owner]);
   const routeFields = (next: SheetFilters, nextTab: PreviewTab) => ({ ...routeFromFilters(next), side: nextTab === "board" && next.side !== "all" ? next.side : null, tab: nextTab === "today" ? null : nextTab });
   const filterFields = routeFields(filters, tab);
@@ -161,7 +161,7 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
           {TABS.map(([value, label]) => (
             <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}
               className={segmentButton} style={tab === value ? segmentOn : segmentOff}>
-              {label}{tabCounts[value] != null && sheetLoaded && <span data-tab-count aria-hidden="true" className="ml-1.5 font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>{tabCounts[value]}</span>}
+              {label}{tabCounts[value] != null && sheetLoaded && <><span className="sr-only">, </span><span data-tab-count className="ml-1.5 font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>{tabCounts[value]}</span></>}
             </button>
           ))}
         </div>

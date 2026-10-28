@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardRows, countedDeals, dealTotals, EUR_PER_GBP, QUARTER_TARGET_GBP, quarterTarget, todayGroups, weightedFee } from "./bulk-desk";
+import { boardRows, countedDeals, dealTotals, deskCounts, EUR_PER_GBP, QUARTER_TARGET_GBP, quarterTarget, todayGroups, weightedFee } from "./bulk-desk";
 import type { SheetRow } from "./bulk-sheet";
 
 const row = (id: string, over: Partial<SheetRow> = {}): SheetRow => ({
@@ -42,6 +42,15 @@ describe("deal totals", () => {
   it("keeps only deal stages for the Board", () => {
     const stages = ["New", "Qualified", "Sourcing", "Found", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;
     expect(boardRows(stages.map((progress) => row(progress, { progress }))).map((r) => r.progress)).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+  });
+});
+
+describe("desk counts", () => {
+  it("counts what each tab lists: every request, every lot, and the deal cards in both", () => {
+    const rows = [row("a", { kind: "demand", progress: "New" }), row("b", { kind: "demand", progress: "Offered" }),
+      row("c", { kind: "supply", progress: "Available" }), row("d", { kind: "supply", progress: "Agreed" })];
+    expect(deskCounts(rows)).toEqual({ requests: 2, supply: 2, deals: 2 });
+    expect(deskCounts([])).toEqual({ requests: 0, supply: 0, deals: 0 });
   });
 });
 

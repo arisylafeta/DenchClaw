@@ -138,7 +138,6 @@ describe("Trades Preview sheet", () => {
     expect(demand.querySelector("[data-ticket]")).toHaveTextContent("Add size");
     expect(demand.querySelector("[data-fee]")).toHaveTextContent("Set fee");
     expect(demand.querySelector("[data-chance]")).toHaveTextContent("Set %");
-    expect(within(demand).getByText("No company")).toBeInTheDocument();
     expect(within(demand).getAllByRole("img", { name: "No driver" }).length).toBeGreaterThan(0);
     expect(within(demand).getByRole("button", { name: "Add next action" })).toBeInTheDocument();
   });
@@ -229,7 +228,7 @@ describe("Trades Preview sheet", () => {
     for (const [search, tab] of [["&q=ioniq", "Requests"], ["&progress=New", "Requests"], ["&side=buyer", "Requests"], ["&side=seller", "Supply"], ["&tab=board", "Deals"], ["&tab=trades", "Deals"], ["&owner=Sean", "Today"]] as const) {
       go(search);
       const view = render(<TradesPreviewView />);
-      expect(await screen.findByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByRole("tab", { name: new RegExp(`^${tab}(,|$)`) })).toHaveAttribute("aria-selected", "true");
       view.unmount();
     }
   });
@@ -261,7 +260,7 @@ describe("Trades Preview sheet", () => {
 
     go("&tab=demand"); // browser Back, not the breadcrumb
     window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(await screen.findByRole("tab", { name: "Requests" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: /^Requests(,|$)/ })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(loads()).toBeGreaterThan(before));
   });
 

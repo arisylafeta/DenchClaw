@@ -3,7 +3,7 @@
 import { CopyIdButton } from "./copy-id-button";
 import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
 import { Search, Flag } from "lucide-react";
-import { NO_FILTERS, FEE_RATE, formatEurCompact, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
+import { filterSheet, NO_FILTERS, FEE_RATE, formatEurCompact, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
@@ -20,7 +20,8 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
 };
 
 // Score | Opportunity | Ticket | Fee | Chance | Driver | Stage | Next action. Ticket, fee and chance join at lg.
-const GRID = "md:grid-cols-[2.25rem_minmax(0,1.7fr)_2rem_8.5rem_minmax(11rem,1.4fr)] lg:grid-cols-[2.25rem_minmax(0,1.7fr)_4.5rem_4.5rem_3.5rem_2rem_8.5rem_minmax(12rem,1.5fr)]";
+// Sized by the sheet's own width (container queries), not the window: in a narrow workspace pane it drops columns instead of scrolling.
+const GRID = "@2xl:grid-cols-[2.25rem_minmax(0,1.7fr)_2.75rem_8.5rem_minmax(11rem,1.4fr)] @4xl:grid-cols-[2.25rem_minmax(0,1.7fr)_4.5rem_4.5rem_3.5rem_2.75rem_8.5rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -101,11 +102,11 @@ function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: 
 
 function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = true }: { loading?: boolean; showSide?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
   const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
-  const num = "hidden min-w-0 text-[13px] tabular-nums lg:block";
+  const num = "hidden min-w-0 text-[13px] tabular-nums @4xl:block";
   return (
     <li aria-hidden={loading || undefined} onClick={() => { if (!loading) onOpen(row); }}
       className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-2.5 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
-      <span className="hidden md:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
+      <span className="hidden @2xl:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       <span className="min-w-0">
         <span className="flex items-start gap-1">
           <button type="button" disabled={loading} title={row.title}
@@ -115,11 +116,11 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = 
           {!loading && <CopyIdButton id={row.id} />}
         </span>
         <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
-          <span className="min-w-0 truncate" title={row.company ?? undefined}><Sh on={loading} chars={14}>{row.company ?? "No company"}</Sh></span>
-          {!loading && row.latest && <span className="hidden shrink-0 md:inline-flex"><IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} /></span>}
-          {!loading && <span className="md:hidden"><DriverAvatar owner={row.owner} size={18} /></span>}
+          {(loading || row.company) && <span className="min-w-0 truncate" title={row.company ?? undefined}><Sh on={loading} chars={14}>{row.company}</Sh></span>}
+          {!loading && row.latest && <span className="hidden shrink-0 @2xl:inline-flex"><IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} /></span>}
+          {!loading && <span className="@2xl:hidden"><DriverAvatar owner={row.owner} size={18} /></span>}
         </span>
-        <span className="mt-1 inline-flex md:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
+        <span className="mt-1 inline-flex @2xl:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       </span>
       <span data-ticket className={num} title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No size recorded: open it to add quantity and price"}>
         <Sh on={loading} chars={5}>{row.value_eur != null ? formatEurCompact(row.value_eur) : <Gap>Add size</Gap>}</Sh></span>
@@ -127,7 +128,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = 
         <Sh on={loading} chars={5}>{row.fee_eur != null ? formatEurCompact(row.fee_eur) : <Gap>Set fee</Gap>}</Sh></span>
       <span data-chance className={num} title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}>
         <Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : <Gap>Set %</Gap>}</Sh></span>
-      <span data-owner className="hidden md:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
+      <span data-owner className="hidden @2xl:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
       <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}</span>
       <span className="min-w-0">
         <NextActionCell loading={loading} value={row.next_action} due={row.next_due} today={today} onSave={(text) => onNext(row, text)} />
@@ -160,19 +161,21 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
   const filtered = isFiltered(filters, hideSide);
   const sides = ["buyer", "seller"] as const;
-  const stageCount = (stage: string) => rows.filter((row) => row.progress === stage).length;
+  // Chip counts follow every filter except the stage itself, so they add up to what the list would show.
+  const countable = filterSheet(rows, { ...filters, progress: "all" });
+  const stageCount = (stage: string) => countable.filter((row) => row.progress === stage).length;
   const chip = `inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]`;
   const chipStyle = (on: boolean) => on ? { background: "var(--bt-text)", borderColor: "var(--bt-text)", color: "var(--bt-surface)" } : { background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" };
   return (
     <div className="flex flex-col gap-2.5">
       {!hideProgress && stages && (
-        <div role="group" aria-label="Stage" className="flex gap-1.5 overflow-x-auto pb-0.5">
+        <div role="group" aria-label="Stage" className="flex flex-wrap gap-1.5">
           {(["all", ...stages] as string[]).map((stage) => {
             const on = filters.progress === stage;
             return (
               <button key={stage} type="button" aria-pressed={on} onClick={() => set({ progress: on && stage !== "all" ? "all" : stage })} className={chip} style={chipStyle(on)}>
                 {stage === "all" ? "All" : stage}
-                <span className="tabular-nums" style={{ color: on ? "inherit" : "var(--bt-muted)", opacity: on ? 0.75 : 1 }}>{stage === "all" ? rows.length : stageCount(stage)}</span>
+                <span className="tabular-nums" style={{ color: on ? "inherit" : "var(--bt-muted)", opacity: on ? 0.75 : 1 }}>{stage === "all" ? countable.length : stageCount(stage)}</span>
               </button>
             );
           })}
@@ -250,10 +253,10 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
         <Sh on={busy} chars={14}>{`${shown.length} of ${rows.length} live`}</Sh>
       </p>
 
-      <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <div className="md:min-w-[48rem] lg:min-w-[62rem]">
-        <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span className="hidden lg:block" title="Approximate value of the deal or the stock">Ticket</span><span className="hidden lg:block" title={`${FEE_RATE * 100}% of the ticket unless set`}>Fee</span><span className="hidden lg:block" title="Chance the deal completes">Chance</span><span>Driver</span><span>Stage</span><span>Next action</span>
+      <div className="@container overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+        <div className="@2xl:min-w-[40rem] @4xl:min-w-[54rem]">
+        <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] @2xl:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
+          <span>Score</span><span>Opportunity</span><span className="hidden @4xl:block" title="Approximate value of the deal or the stock">Ticket</span><span className="hidden @4xl:block" title={`${FEE_RATE * 100}% of the ticket unless set`}>Fee</span><span className="hidden @4xl:block" title="Chance the deal completes">Chance</span><span>Driver</span><span>Stage</span><span>Next action</span>
         </div>
         {displayRows.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">

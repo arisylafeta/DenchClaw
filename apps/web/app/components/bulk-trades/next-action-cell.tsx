@@ -8,8 +8,10 @@ import { shortDate } from "@/lib/bulk-trade-details";
  * The next action of a listing as a cell you edit in place: click, type, Enter or click away to save, Escape to cancel.
  * Clearing the text clears the action. The click never opens the row it sits in.
  */
-export function NextActionCell({ value, due, owner, today, onSave, loading = false }: {
+export function NextActionCell({ value, due, owner, today, onSave, loading = false, large = false }: {
   loading?: boolean;
+  /** The action as the row's headline (Today), at 14px. */
+  large?: boolean;
   value: string | null;
   due: string | null;
   owner?: string | null;
@@ -71,7 +73,7 @@ export function NextActionCell({ value, due, owner, today, onSave, loading = fal
     <button type="button" disabled={loading} onClick={start} aria-label={value ? `Edit next action: ${value}` : "Add next action"}
       className="group flex w-full min-w-0 flex-col items-start gap-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
       {loading ? <span className="text-[13px] leading-snug"><Sh on chars={22} /></span> : value
-        ? <span className="line-clamp-2 text-[13px] leading-snug group-hover:underline">{value}</span>
+        ? <span className={`line-clamp-2 leading-snug group-hover:underline ${large ? "text-[14px] font-medium" : "text-[13px]"}`}>{value}</span>
         : <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Add next step</span>}
       {((value && due) || owner) && (
         <span className="text-[12px]" style={{ color: overdue ? "var(--bt-red)" : dueToday ? "var(--bt-blue)" : "var(--bt-muted)", fontWeight: overdue || dueToday ? 600 : 400 }}>

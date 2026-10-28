@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { boardRows, countedDeals, dealTotals, EUR_PER_GBP, quarterTarget, todayGroups, WIN_RATE, type TodayGroupKey } from "@/lib/bulk-desk";
+import { boardRows, dealTotals, deskCounts, EUR_PER_GBP, quarterTarget, todayGroups, WIN_RATE, type TodayGroupKey } from "@/lib/bulk-desk";
 import { formatEurCompact, type SheetRow } from "@/lib/bulk-sheet";
 import type { DealOwner } from "@/lib/bulk-owner";
 import { isBoardStage } from "@/lib/bulk-listing";
@@ -78,7 +78,7 @@ function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: strin
     <li onClick={() => onOpen(row)}
       className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)]">
       <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="min-w-0 [&_button>span:first-child]:text-[14px] [&_button>span:first-child]:font-medium"><NextActionCell value={row.next_action} due={null} today={today} onSave={(text) => onNext(row, text)} /></span>
+        <span className="min-w-0"><NextActionCell large value={row.next_action} due={null} today={today} onSave={(text) => onNext(row, text)} /></span>
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
           <span>{kindLabel(row)}</span><span aria-hidden="true">·</span>
           <button type="button" title={row.title} className="min-w-0 max-w-full truncate text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
@@ -98,17 +98,16 @@ function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: strin
   );
 }
 
-/** "Alex drives 4 requests, 2 lots and 7 deals. 9 next actions: 1 overdue, 3 due today." */
+/** "Alex has 6 requests and 4 supply lots; 3 are deals. 9 next actions: 1 overdue, 3 due today." Same counts as the tabs. */
 function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: TodayGroupKey; rows: SheetRow[] }[]): string {
-  const deals = countedDeals(boardRows(rows)).length;
-  const requests = rows.filter((row) => row.kind === "demand" && !isBoardStage(row.progress)).length;
-  const lots = rows.filter((row) => row.kind === "supply" && !isBoardStage(row.progress)).length;
+  const counts = deskCounts(rows);
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-  const work = `${plural(requests, "request", "requests")}, ${plural(lots, "lot", "lots")} and ${plural(deals, "deal", "deals")}`;
   const count = (key: TodayGroupKey) => groups.find((group) => group.key === key)?.rows.length ?? 0;
   const actions = rows.filter((row) => row.next_action).length;
   const urgent = [count("overdue") && `${count("overdue")} overdue`, count("today") && `${count("today")} due today`].filter(Boolean).join(", ");
-  return `${owner === "all" ? `The team is on ${work}` : `${owner} drives ${work}`}. ${plural(actions, "next action", "next actions")}${urgent ? `: ${urgent}` : ""}.`;
+  const deals = counts.deals ? `; ${counts.deals === 1 ? "1 is a deal" : `${counts.deals} are deals`}` : "";
+  return `${owner === "all" ? "The team has" : `${owner} has`} ${plural(counts.requests, "request", "requests")} and ${plural(counts.supply, "supply lot", "supply lots")}${deals}. `
+    + `${plural(actions, "next action", "next actions")}${urgent ? `: ${urgent}` : ""}.`;
 }
 
 /** Today: the quarter target, then every open listing's next action by when it is due. Nothing else. */
@@ -122,7 +121,7 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
         <h2 className="text-[20px] font-semibold tracking-[-0.01em]">{new Date(`${today}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}</h2>
-        <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(rows, owner, groups)}</Sh></p>
+        {(busy || (!error && rows.length > 0)) && <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(rows, owner, groups)}</Sh></p>}
       </div>
       <QuarterTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
       <ErrorText error={error} />

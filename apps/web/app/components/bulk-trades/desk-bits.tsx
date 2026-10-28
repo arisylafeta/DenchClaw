@@ -15,8 +15,8 @@ export function DriverAvatar({ owner, size = 24 }: { owner: string | null | unde
   return (
     <span data-driver={owner ?? ""} role="img" aria-label={label} title={label}
       className="inline-flex shrink-0 items-center justify-center rounded-full text-[10px] font-semibold leading-none"
-      style={{ width: size, height: size, background: look?.bg ?? "transparent", color: look?.fg ?? "var(--bt-muted)",
-        border: look ? undefined : "1px dashed var(--bt-border-strong)" }}>
+      style={{ width: size, height: size, background: look?.bg ?? (owner ? "var(--bt-segment)" : "transparent"), color: look?.fg ?? (owner ? "var(--bt-text-2)" : "var(--bt-muted)"),
+        border: owner ? undefined : "1px dashed var(--bt-border-strong)" }}>
       {look?.text ?? (owner ? owner.slice(0, 1) : "–")}
     </span>
   );

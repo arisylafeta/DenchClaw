@@ -61,6 +61,16 @@ export function dealTotals(rows: SheetRow[]): DealTotals {
   }, { count: 0, value_eur: 0, fee_eur: 0, weighted_eur: 0, unsized: 0 });
 }
 
+/** What each desk tab lists: every request, every supply lot, and the deal cards (Offered or later; a request or lot that
+ * is a deal is in both). The tab counts and the Today summary both read this, so they always agree with the lists. */
+export function deskCounts(rows: SheetRow[]): { requests: number; supply: number; deals: number } {
+  return {
+    requests: rows.filter((row) => row.kind === "demand").length,
+    supply: rows.filter((row) => row.kind === "supply").length,
+    deals: boardRows(rows).length,
+  };
+}
+
 /** The deals on the Board: listings at Offered or later. */
 export function boardRows(rows: SheetRow[]): SheetRow[] {
   return rows.filter((row) => isBoardStage(row.progress));
