@@ -11,6 +11,10 @@ const row = (over: Partial<StockRow>): StockRow => ({
   sync_class: "synced", ...over,
 });
 
+const anon = (id: string) => supplierToken(id, "test-scope", "k".repeat(32));
+const lotKeys = (id: string, group: string, part: string) => lotKeyFor(id, group, part, "test-scope", "k".repeat(32));
+const aggregate = (rows: StockRow[]) => aggregateStock(rows, anon, lotKeys);
+
 const stock = [
   row({ id: "sto_1" }),
   row({ id: "sto_2", company_id: "co_b", person_id: "p_b", supplier: "Other Dismantler UAB", country: "Lithuania", price_eur_ex_vat: 3500, sync_class: "syncable", year: 2021 }),
@@ -31,10 +35,11 @@ describe("stock lots", () => {
     const [group] = scoped("conv-1234");
     expect(group).toMatchObject({ units: 6, lotCount: 3 });
     const [lithuania, ao050, q4052] = group.lots;
-    expect(lithuania).toMatchObject({ units: 3, country: "Lithuania", askEurExVat: null, vatUnknown: 3, partNumbers: [], condition: { notStated: 3 } });
-    expect(ao050).toMatchObject({ units: 2, country: "United Kingdom", partNumbers: ["37501-AO050"],
+    expect(lithuania).toMatchObject({ units: 3, countries: ["Lithuania"], askEurExVat: null, priced: 0, vatUnknown: 3, partNumbers: [], condition: { notStated: 3 } });
+    expect(ao050).toMatchObject({ units: 2, countries: ["United Kingdom"], partNumbers: ["37501-AO050"], priced: 2,
       askEurExVat: { min: 4150, max: 4500 }, askEurPerKwh: { min: 64, max: 69 }, years: { min: 2022, max: 2023 },
-      condition: { tested: 1, sohMin: 94, sohMax: 94, damaged: 1, notStated: 0 } });
+      condition: { tested: 1, untested: 0, notStated: 1, sohMin: 94, sohMax: 94, damaged: 1 } });
+    for (const lot of group.lots) expect(lot.condition.tested + lot.condition.untested + lot.condition.notStated).toBe(lot.units);
     expect(q4052).toMatchObject({ units: 1, partNumbers: ["37501-Q4052"], askEurExVat: { min: 5000, max: 5000 } });
     expect(ao050.supplier).toBe(q4052.supplier);
     expect(ao050.lotKey).toMatch(/^lot_[0-9a-f]{16}$/);
@@ -46,6 +51,21 @@ describe("stock lots", () => {
     expect(keys("conv-5678").some((key) => keys("conv-1234").includes(key))).toBe(false);
     const text = JSON.stringify(scoped("conv-1234"));
     for (const secret of ["Secret Breaker", "co_a", "co_b", "p_b", "n1", "Newbridge", "Edinburgh", "4171", "4489"]) expect(text).not.toContain(secret);
+  });
+
+  it("counts supplier-stated untested units, keeps two suppliers of one part apart, and never shows a town", () => {
+    const [group] = aggregateStock([
+      row({ id: "u1", tested: false, damaged: false, quantity: 4, part_numbers: ["0Z1915910FB"], country: "Sariai" }),
+      row({ id: "u2", company_id: "co_c", person_id: "p_c", quantity: 2, part_numbers: ["0Z1915910FB"], country: "Kolin, Czechia" }),
+      row({ id: "u3", company_id: null, person_id: "", quantity: 9 }),
+    ], anon, lotKeys);
+    expect(group.lots).toHaveLength(2);
+    const [untested, other] = group.lots;
+    expect(untested).toMatchObject({ units: 4, countries: [], condition: { tested: 0, untested: 4, notStated: 0, damaged: 0 } });
+    expect(other).toMatchObject({ units: 2, countries: ["Czechia"] });
+    expect(untested.lotKey).not.toBe(other.lotKey);
+    expect(group.countries).toEqual(["Czechia"]);
+    expect(JSON.stringify(group)).not.toMatch(/Sariai|Kolin/);
   });
 
   it("filters to exact group keys", () => {
@@ -65,7 +85,7 @@ describe("stock lots", () => {
 
 describe("aggregateStock", () => {
   it("groups by spec and never exposes supplier identity", () => {
-    const groups = aggregateStock(stock);
+    const groups = aggregate(stock);
     expect(groups).toHaveLength(2);
     const id3 = groups.find((group) => group.make === "Volkswagen")!;
     expect(id3).toMatchObject({ units: 4, priceEurIncVatOnly: 1 });
@@ -76,9 +96,9 @@ describe("aggregateStock", () => {
   });
 
   it("bands prices below three suppliers but always shows supplier count and countries", () => {
-    const [few] = aggregateStock([row({ id: "a", price_eur_ex_vat: 4180 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 4777 })]);
+    const [few] = aggregate([row({ id: "a", price_eur_ex_vat: 4180 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 4777 })]);
     expect(few).toMatchObject({ sources: 2, countries: ["Sweden"], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
-    const [crowd] = aggregateStock([row({ id: "a" }), row({ id: "b", company_id: "co_b", country: "Lithuania", price_eur_ex_vat: 3500 }),
+    const [crowd] = aggregate([row({ id: "a" }), row({ id: "b", company_id: "co_b", country: "Lithuania", price_eur_ex_vat: 3500 }),
       row({ id: "c", company_id: "co_c", country: "Norway", price_eur_ex_vat: 4500, sync_class: "static" })]);
     expect(crowd).toMatchObject({ sources: 3, countries: ["Lithuania", "Norway", "Sweden"], synced: 2, priceEurExVat: { min: 3500, median: 4000, max: 4500, priced: 3 } });
   });
@@ -107,12 +127,12 @@ describe("matchesFilters", () => {
     expect(normalModel("VW", "Volkswagen ID.4")).toBe("ID.4");
     expect(normalModel("Kia", "Kiaxx")).toBe("Kiaxx");
     expect(groupKeyFor(row({ make: "Hyundai", model: "Hyundai Ioniq 5" }))).toBe(groupKeyFor(row({ make: "Hyundai", model: "Ioniq 5" })));
-    expect(aggregateStock([row({ make: "Hyundai", model: "Hyundai Ioniq 5" })])[0]).toMatchObject({ label: "Hyundai Ioniq 5 50 kWh pack", chemistry: "NMC" });
+    expect(aggregate([row({ make: "Hyundai", model: "Hyundai Ioniq 5" })])[0]).toMatchObject({ label: "Hyundai Ioniq 5 50 kWh pack", chemistry: "NMC" });
   });
 
   it("gives per-supplier units under scoped opaque tokens", () => {
     const rows = [row({ id: "a", company_id: "c1", quantity: 2 }), row({ id: "b", company_id: "c1", quantity: 1 }), row({ id: "c", company_id: "c2", person_id: "p_c", quantity: 1 })];
-    const [group] = aggregateStock(rows, (id) => supplierToken(id, "conv-1234", "k".repeat(32)));
+    const [group] = aggregateStock(rows, (id) => supplierToken(id, "conv-1234", "k".repeat(32)), lotKeys);
     expect(group.sources).toBe(2);
     expect(group.suppliers.map((entry) => entry.units)).toEqual([3, 1]);
     expect(group.suppliers[0].supplier).toMatch(/^S[0-9a-f]{6}$/);

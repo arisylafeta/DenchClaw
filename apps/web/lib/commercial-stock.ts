@@ -110,10 +110,17 @@ export type StockLot = {
   units: number;
   partNumbers: string[];
   years: { min: number; max: number } | null;
-  country: string | null;
-  condition: { tested: number; sohMin: number | null; sohMax: number | null; damaged: number; notStated: number };
+  /** Recognised countries only (never a town or site), sorted. */
+  countries: string[];
+  /**
+   * Every unit is in exactly one of tested, untested or notStated (they sum to units); damaged overlaps them.
+   * tested = test result or SoH stated; untested = supplier says not tested; notStated = no test facts at all.
+   */
+  condition: { tested: number; untested: number; notStated: number; damaged: number; sohMin: number | null; sohMax: number | null };
   askEurExVat: { min: number; max: number } | null;
   askEurPerKwh: { min: number; max: number } | null;
+  /** Units with an ex-VAT ask (the ask range covers only these). */
+  priced: number;
   /** Units priced only with VAT included or unknown VAT (not in the ask). */
   vatUnknown: number;
   lastSeen: string | null;
@@ -209,6 +216,14 @@ export function normalCountry(value: string | null | undefined): string | null {
   if (!raw) return null;
   const last = clean(raw.split(",").at(-1)) ?? raw;
   return COUNTRY_BY_ALIAS.get(fold(last)) ?? COUNTRY_BY_ALIAS.get(fold(raw)) ?? last;
+}
+
+/** A recognised country only: free-text locations (towns, sites) never reach a buyer. */
+export function publicCountry(value: string | null | undefined): string | null {
+  const raw = clean(value);
+  if (!raw) return null;
+  const last = clean(raw.split(",").at(-1)) ?? raw;
+  return COUNTRY_BY_ALIAS.get(fold(last)) ?? COUNTRY_BY_ALIAS.get(fold(raw)) ?? null;
 }
 
 const POWERTRAINS: Record<string, string> = {
@@ -537,13 +552,15 @@ function labelFor(group: Pick<StockGroup, "make" | "model" | "capacityKwh" | "fo
 }
 
 const roundTo = (value: number, step: number) => Math.max(step, Math.round(value / step) * step);
+const isTested = (row: StockRow) => row.tested === true || typeof row.soh_percent === "number";
 
 /** Lots of one group: supplier x primary part number. */
 function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: string) => string,
   lotKey: (supplierId: string, groupKey: string, part: string) => string): StockLot[] {
   const lots = new Map<string, { supplierId: string; part: string; rows: StockRow[] }>();
   for (const row of members) {
-    const supplierId = String(row.company_id ?? row.person_id);
+    const supplierId = row.company_id ?? row.person_id;
+    if (!supplierId) continue;
     const part = partKey(rowParts(row)[0]);
     const key = `${supplierId}\u0000${part}`;
     const lot = lots.get(key);
@@ -564,16 +581,18 @@ function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: s
       units,
       partNumbers: firstPerKey(rows.flatMap(rowParts), partKey).slice(0, 3),
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
-      country: mostCommon(rows.map((row) => normalCountry(row.country))),
+      countries: [...new Set(rows.map((row) => publicCountry(row.country)).filter((country): country is string => Boolean(country)))].sort(),
       condition: {
-        tested: sum((row) => row.tested === true || typeof row.soh_percent === "number"),
+        tested: sum(isTested),
+        untested: sum((row) => !isTested(row) && row.tested === false),
+        notStated: sum((row) => !isTested(row) && row.tested !== false),
+        damaged: sum((row) => row.damaged === true),
         sohMin: soh.length ? Math.round(Math.min(...soh)) : null,
         sohMax: soh.length ? Math.round(Math.max(...soh)) : null,
-        damaged: sum((row) => row.damaged === true),
-        notStated: sum((row) => row.tested == null && row.soh_percent == null && row.damaged == null),
       },
       askEurExVat: asks.length ? { min: roundTo(Math.min(...asks), LOT_PRICE_STEP_EUR), max: roundTo(Math.max(...asks), LOT_PRICE_STEP_EUR) } : null,
       askEurPerKwh: perKwh.length ? { min: roundTo(Math.min(...perKwh), 1), max: roundTo(Math.max(...perKwh), 1) } : null,
+      priced: priced.reduce((total, row) => total + row.quantity, 0),
       vatUnknown: sum((row) => !(typeof row.price_eur_ex_vat === "number" && row.price_eur_ex_vat > 0) && row.price_eur !== null),
       lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
     };
@@ -581,11 +600,12 @@ function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: s
 }
 
 /** Supplier-free groups, most units first. */
-export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) => string = () => "S",
-  lotKey: (supplierId: string, groupKey: string, part: string) => string = (supplierId, groupKey, part) => lotKeyFor(supplierId, groupKey, part, "test", "test")): StockGroup[] {
+export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) => string,
+  lotKey: (supplierId: string, groupKey: string, part: string) => string): StockGroup[] {
   const groups = new Map<string, StockRow[]>();
   for (const row of rows) {
-    if (!normalMake(row.make)) continue;
+    // Stock with no supplier cannot be offered or resolved from a lot, so it is not shown at all.
+    if (!normalMake(row.make) || !(row.company_id ?? row.person_id)) continue;
     const key = groupKeyFor(row);
     const members = groups.get(key);
     if (members) members.push(row); else groups.set(key, [row]);
@@ -618,7 +638,7 @@ export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) 
       units: members.reduce((sum, row) => sum + row.quantity, 0),
       sources,
       suppliers: [...perSupplier].map(([id, units]) => ({ supplier: tokenFor(id), units })).sort((a, b) => b.units - a.units || a.supplier.localeCompare(b.supplier)),
-      countries: [...new Set(members.map((row) => normalCountry(row.country)).filter((country): country is string => Boolean(country)))].sort(),
+      countries: [...new Set(members.map((row) => publicCountry(row.country)).filter((country): country is string => Boolean(country)))].sort(),
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
       priceEurExVat: !exVat.length ? null : crowd
         ? { min: round(Math.min(...exVat)), median: round(median(exVat)), max: round(Math.max(...exVat)), priced: exVat.length }

@@ -10,6 +10,7 @@ vi.mock("@/lib/crm-postgres/commercial-stock", () => ({
 vi.mock("@/lib/commercial-stock-access", async (original) => ({
   ...(await original<typeof import("@/lib/commercial-stock-access")>()),
   commercialStockAuthorised: (request: Request) => request.headers.get("authorization") === "Bearer ok",
+  secret: () => "k".repeat(40),
 }));
 
 const { POST: search } = await import("./stock/route");
@@ -30,6 +31,16 @@ describe("commercial-buyer routes", () => {
     const text = await response.text();
     expect(JSON.parse(text)).toMatchObject({ totalGroups: 1, totalUnits: 1, groups: [{ make: "Kia", units: 1 }] });
     for (const secret of ["Hidden Breaker", "co_secret", "p_secret", "sto_secret"]) expect(text).not.toContain(secret);
+  });
+
+  it("return lots without identity and filter by group key", async () => {
+    const all = await (await search(call({ make: "kia", scope: "conv-12345678" }))).json();
+    const groupKey = all.groups[0].groupKey;
+    const response = await search(call({ groupKeys: [groupKey], scope: "conv-12345678" }));
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ groups: [{ groupKey, lotCount: 1, lots: [{ units: 1, countries: ["Norway"] }] }] });
+    for (const secret of ["Hidden Breaker", "co_secret", "p_secret", "sto_secret"]) expect(text).not.toContain(secret);
+    expect((await (await search(call({ groupKeys: ["grp_0000000000000000"] }))).json()).groups).toEqual([]);
   });
 
   it("reject unknown filters", async () => {

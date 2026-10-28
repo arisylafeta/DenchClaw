@@ -27,7 +27,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!parsed.success) return Response.json({ error: "Invalid filters" }, { status: 400 });
   const all = await liveStock();
   const { rows, matchedOn } = searchRows(all, parsed.data);
-  const key = secret() ?? randomUUID();
+  // Supplier tokens and lot keys must be recomputable later (offers resolve lot keys), so no secret means no answer.
+  const key = secret();
+  if (!key) return Response.json({ error: "Not configured" }, { status: 503 });
   const scope = parsed.data.scope ?? randomUUID();
   const groups = aggregateStock(rows, (supplierId) => supplierToken(supplierId, scope, key),
     (supplierId, groupKey, part) => lotKeyFor(supplierId, groupKey, part, scope, key));
