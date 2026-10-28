@@ -3,6 +3,10 @@
 
 All mutations require --apply. Launch additionally requires an approved manifest
 digest and DENCH_CAMPAIGN_LIVE_SEND=1. Never retry an ambiguous send automatically.
+
+A sourcing campaign may use the "gmail" channel instead: the founder sends each frozen email from their own
+Gmail. gmail-drafts puts the approved emails in the sender's Drafts, and record-gmail matches what was sent
+back to the frozen rows. DENCH_CAMPAIGN_GOG is the gog command prefix that takes the account as its first argument.
 """
 
 from __future__ import annotations
@@ -14,11 +18,14 @@ import email.utils
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg2
@@ -31,6 +38,8 @@ PERSONALIZATION_COLUMNS = {"first_name", "last_name", "opening"}
 # An auction campaign promotes one auction to buyers. A sourcing campaign asks suppliers for stock: it has no
 # listing or auction, its links are optional, and each recipient may carry reviewed lines of their own.
 CAMPAIGN_KINDS = {"auction": {"supply_update", "intro"}, "sourcing": {"dismantler_outreach"}}
+# Postmark sends and tracks opens and clicks. Gmail sends are made by hand and only replies are tracked.
+CHANNELS = {"postmark": "email-postmark", "gmail": "email-gmail"}
 VARIABLE = re.compile(r"(?<!\{)\{\{([a-z][a-z0-9_]*)\}\}(?!\})")
 
 def connection(read_only=False):
@@ -47,8 +56,15 @@ def load_manifest(path):
     campaign_type = manifest.get("campaign_type", "supply_update" if kind == "auction" else "dismantler_outreach")
     if campaign_type not in CAMPAIGN_KINDS[kind]:
         raise ValueError(f"A {kind} campaign_type must be one of: {', '.join(sorted(CAMPAIGN_KINDS[kind]))}")
+    channel = manifest.get("channel", "postmark")
+    if channel not in CHANNELS:
+        raise ValueError(f"channel must be one of: {', '.join(sorted(CHANNELS))}")
+    if channel == "gmail" and kind != "sourcing":
+        raise ValueError("Only sourcing campaigns can be sent from Gmail")
     required = ("id", "name", "objective", "success_measure", "stock_snapshot_ref",
-                "message_version", "sender", "reply_to", "reply_owner", "subject", "html", "text", "stream")
+                "message_version", "sender", "reply_to", "reply_owner", "subject", "html", "text")
+    if channel == "postmark":
+        required += ("stream",)
     if kind == "auction":
         required += ("listing_id", "auction_url")
     missing = [key for key in required if not isinstance(manifest.get(key), str) or not manifest[key].strip()]
@@ -56,8 +72,12 @@ def load_manifest(path):
         raise ValueError(f"Missing campaign inputs: {', '.join(missing)}")
     if kind == "sourcing" and (manifest.get("listing_id") or manifest.get("auction_url") or manifest.get("auction_slug")):
         raise ValueError("A sourcing campaign has no listing_id, auction_url or auction_slug")
-    if manifest["stream"] == "outbound":
+    if channel == "postmark" and manifest["stream"] == "outbound":
         raise ValueError("Campaigns require an explicitly configured Broadcast stream")
+    if channel == "gmail":
+        sender = email.utils.parseaddr(manifest["sender"])[1].lower()
+        if manifest.get("stream") or sender != manifest["reply_to"].strip().lower() or not sender.endswith("@rebattery.io"):
+            raise ValueError("A Gmail campaign has no stream and is sent and answered from one rebattery.io mailbox")
     if re.match(r"(?i)supply[\s_-]*update", manifest["name"]) or re.match(r"(?i)supply-update", manifest["id"]):
         # Supply Updates are always sent from, and answered at, the supply mailbox.
         sender = email.utils.parseaddr(manifest["sender"])[1].lower()
@@ -93,7 +113,10 @@ def load_manifest(path):
     text_urls = set(re.findall(r"https://[^\s<>]+", manifest["text"]))
     if html_urls != urls or text_urls != urls:
         raise ValueError("Every HTML and text CTA URL must have exactly one tracking entry")
-    if "{{{ pm:unsubscribe }}}" not in manifest["html"] or "{{{ pm:unsubscribe }}}" not in manifest["text"]:
+    if channel == "gmail":
+        if "pm:unsubscribe" in manifest["html"] or "pm:unsubscribe" in manifest["text"]:
+            raise ValueError("Gmail sends cannot fill Postmark's unsubscribe placeholder")
+    elif "{{{ pm:unsubscribe }}}" not in manifest["html"] or "{{{ pm:unsubscribe }}}" not in manifest["text"]:
         raise ValueError("Broadcast HTML and text must include Postmark's unsubscribe placeholder")
     personalization = manifest.get("personalization", {})
     if not isinstance(personalization, dict) or any(
@@ -120,6 +143,7 @@ def load_manifest(path):
         raise ValueError(f"recipient_variables reuse personalization or campaign variable names: {sorted(shared)}")
     manifest["kind"] = kind
     manifest["campaign_type"] = campaign_type
+    manifest["channel"] = channel
     if not manifest.get("person_ids") and not manifest.get("cohort_sql"):
         raise ValueError("Provide person_ids or cohort_sql (path to a read-only SELECT returning person_id)")
     if manifest.get("person_ids") and manifest.get("cohort_sql"):
@@ -224,6 +248,8 @@ def digest(manifest, rows):
     contents["cohort"] = sorted(rows, key=lambda row: row["email"])
     contents["track_opens"] = True
     contents["track_links"] = "HtmlAndText"
+    if manifest.get("channel", "postmark") == "gmail":
+        contents.update(channel="gmail", track_opens=False, track_links=False)
     return hashlib.sha256(json.dumps(contents, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -317,7 +343,8 @@ def sync_suppressions(stream, suppressions, apply):
 
 
 def preview(manifest):
-    suppressions = stream_suppressions(manifest["stream"])
+    # Gmail has no suppression list: CRM opt-outs (including synced Postmark bounces) still exclude people.
+    suppressions = stream_suppressions(manifest["stream"]) if manifest.get("channel", "postmark") == "postmark" else {}
     with connection(read_only=True) as db:
         rows, exclusions = cohort(db, manifest, suppressions)
         listing_ids = sorted({link["listing_id"] for link in manifest["links"] if link.get("listing_id")})
@@ -343,10 +370,10 @@ def freeze(manifest, rows, sha):
                        source_system, audience, audience_size, objective, success_measure,
                        stock_snapshot_ref, message_version, sender_identity, reply_owner, reply_mailbox, notes,
                        emails_opened, emails_clicked)
-                       values (%s,%s,%s,%s,'email-postmark','frozen','dench-campaign',%s,%s,
+                       values (%s,%s,%s,%s,%s,'frozen','dench-campaign',%s,%s,
                                %s,%s,%s,%s,%s,%s,%s,%s,null,null)""",
                     (manifest["id"], manifest["name"], manifest.get("auction_slug"),
-                     manifest.get("campaign_type", "supply_update"),
+                     manifest.get("campaign_type", "supply_update"), CHANNELS[manifest.get("channel", "postmark")],
                      f"Frozen {len(rows)} recipients; SHA256 {sha}", len(rows), manifest["objective"],
                      manifest["success_measure"], manifest["stock_snapshot_ref"], manifest["message_version"],
                      manifest["sender"], manifest["reply_owner"], manifest["reply_to"],
@@ -379,6 +406,8 @@ def approve(campaign_id, sha, approver):
 
 
 def launch(manifest, sha, max_recipients):
+    if manifest.get("channel", "postmark") == "gmail":
+        raise ValueError("A Gmail campaign is sent by hand: use gmail-drafts, then record-gmail")
     if os.environ.get("DENCH_CAMPAIGN_LIVE_SEND") != "1":
         raise ValueError("DENCH_CAMPAIGN_LIVE_SEND=1 required for a real send")
     if max_recipients < 1:
@@ -463,6 +492,11 @@ def observed_clicks(events, links):
 
 
 def sync(campaign_id, apply, stream):
+    with connection(read_only=True) as db, db.cursor() as cur:
+        cur.execute("select channel from campaigns where id=%s", (campaign_id,))
+        found = cur.fetchone()
+        if found and found[0] == CHANNELS["gmail"]:
+            raise ValueError("A Gmail campaign has no provider receipts: use record-gmail")
     suppressions = stream_suppressions(stream)
     suppression_results = sync_suppressions(stream, suppressions, apply)
     with connection(read_only=True) as db, db.cursor(cursor_factory=RealDictCursor) as cur:
@@ -502,6 +536,8 @@ def sync(campaign_id, apply, stream):
 
 def recover(manifest, apply):
     """Resolve uncertain claims by exact metadata; never mark a missing receipt safe to resend."""
+    if manifest.get("channel", "postmark") == "gmail":
+        raise ValueError("A Gmail campaign has no Postmark receipts: use record-gmail")
     with connection(read_only=True) as db, db.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""select id, person_id, recipient_email from crm_campaign_sends
                        where campaign_id=%s and state in ('sending','unknown')""", (manifest["id"],))
@@ -528,16 +564,124 @@ def recover(manifest, apply):
     return results
 
 
+def gog(account, *args, readonly=True):
+    prefix = os.environ.get("DENCH_CAMPAIGN_GOG")
+    if not prefix:
+        raise ValueError("DENCH_CAMPAIGN_GOG is required for Gmail campaigns")
+    command = [*shlex.split(prefix), account, *(["--readonly"] if readonly else []), *args, "--json", "--no-input"]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise ValueError(f"gog {' '.join(args[:3])} failed: {result.stderr.strip()[:300]}")
+    return json.loads(result.stdout or "{}")
+
+
+def approved_gmail_rows(manifest, sha):
+    """The approved campaign's freeze time and its rows not yet recorded as sent."""
+    if manifest.get("channel") != "gmail":
+        raise ValueError("gmail-drafts and record-gmail are for Gmail campaigns")
+    with connection(read_only=True) as db:
+        all_rows = frozen_rows(db, manifest["id"])
+        if not all_rows or digest(manifest, all_rows) != sha:
+            raise ValueError("Frozen cohort or creative differs from approved manifest")
+        with db.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""select created_at from campaigns where id=%s and approved_manifest_sha256=%s
+                           and approved_at is not null and status in ('frozen','sending')""", (manifest["id"], sha))
+            approved = cur.fetchone()
+            if not approved:
+                raise ValueError("Exact manifest has not been approved")
+            cur.execute("""select id, recipient_email as email, rendered_subject as subject, rendered_html as html,
+                                  rendered_text as text
+                             from crm_campaign_sends where campaign_id=%s and state='frozen'
+                            order by recipient_email""", (manifest["id"],))
+            return approved["created_at"], [dict(row) for row in cur.fetchall()]
+
+
+def gmail_drafts(manifest, sha, apply):
+    """Put each approved email in the sender's Drafts once, exactly as frozen."""
+    _, rows = approved_gmail_rows(manifest, sha)
+    account = email.utils.parseaddr(manifest["sender"])[1].lower()
+    results = []
+    for row in rows:
+        drafts = gog(account, "gmail", "messages", "search", f"in:drafts to:{row['email']}", "--max", "20")
+        if any(found.get("subject") == row["subject"] for found in drafts.get("messages") or []):
+            results.append({"email": row["email"], "draft": "exists"})
+            continue
+        if not apply:
+            results.append({"email": row["email"], "draft": "would create"})
+            continue
+        with tempfile.NamedTemporaryFile("w", suffix=".html") as body:
+            body.write(row["html"])
+            body.flush()
+            created = gog(account, "gmail", "drafts", "create", "--to", row["email"], "--subject", row["subject"],
+                          "--body", row["text"], "--body-html-file", body.name, readonly=False)
+        results.append({"email": row["email"], "draft": "created",
+                        **{key: created[key] for key in ("draftId", "id", "messageId", "threadId") if created.get(key)}})
+    return results
+
+
+def comparable(text, markup=False):
+    text = text or ""
+    if markup:
+        text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    return " ".join(text.replace("\u2019", "'").split()).lower()
+
+
+def record_gmail(manifest, sha, apply):
+    """Mark frozen rows accepted once the exact approved email is found in the sender's Sent mail."""
+    frozen_at, rows = approved_gmail_rows(manifest, sha)
+    account = email.utils.parseaddr(manifest["sender"])[1].lower()
+    results = []
+    for row in rows:
+        found = gog(account, "gmail", "messages", "search",
+                    f"in:sent to:{row['email']} after:{int(frozen_at.timestamp())}", "--max", "20")
+        sent = []
+        for candidate in found.get("messages") or []:
+            if candidate.get("subject") != row["subject"]:
+                continue
+            message = gog(account, "gmail", "get", candidate["id"])
+            to = [address.lower() for _, address in email.utils.getaddresses([message.get("headers", {}).get("to", "")])]
+            if "SENT" in (message.get("message", {}).get("labelIds") or []) and row["email"] in to:
+                sent.append(message)
+        if not sent:
+            results.append({"email": row["email"], "state": "not sent yet"})
+            continue
+        ids = [message["message"]["id"] for message in sent]
+        if len(sent) > 1:
+            results.append({"email": row["email"], "state": "several sends found; not recorded", "gmail_message_ids": ids})
+            continue
+        # Gmail may rewrap the text and signature, but every approved paragraph must arrive unchanged.
+        body = sent[0].get("body") or ""
+        body = comparable(body, markup=bool(re.search(r"<(div|p|br|span|a|html)\b", body, re.I)))
+        changed = [part for part in row["text"].split("\n\nBest,")[0].split("\n\n")
+                   if comparable(part) and comparable(part) not in body]
+        if changed:
+            results.append({"email": row["email"], "state": "edited after approval; not recorded",
+                            "gmail_message_ids": ids, "changed": [part[:80] for part in changed]})
+            continue
+        sent_at = datetime.fromtimestamp(int(sent[0]["message"]["internalDate"]) / 1000, tz=timezone.utc)
+        results.append({"email": row["email"], "state": "sent", "gmail_message_id": ids[0], "sent_at": sent_at.isoformat()})
+        if apply:
+            with connection() as db, db.cursor() as cur:
+                cur.execute("update crm_campaign_sends set state='sending', claimed_at=%s where id=%s and state='frozen'",
+                            (sent_at, row["id"]))
+                cur.execute("""update crm_campaign_sends set state='accepted', provider_message_id=%s, accepted_at=%s
+                               where id=%s and state='sending'""", ("gmail:" + ids[0], sent_at, row["id"]))
+                cur.execute("""update campaigns set status='sending', launched_at=least(coalesce(launched_at, %s), %s)
+                               where id=%s""", (sent_at, sent_at, manifest["id"]))
+    return {"recipients": results, "dry_run": not apply}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("preview", "freeze", "launch", "recover"):
+    for name in ("preview", "freeze", "launch", "recover", "gmail-drafts", "record-gmail"):
         sub = commands.add_parser(name)
         sub.add_argument("--manifest", required=True, help="JSON campaign brief and cohort source")
         if name != "preview":
             sub.add_argument("--apply", action="store_true")
-        if name == "launch":
+        if name in ("launch", "gmail-drafts", "record-gmail"):
             sub.add_argument("--approved-sha256", required=True)
+        if name == "launch":
             sub.add_argument("--max-recipients", required=True, type=int,
                              help="Hard cap for this launch invocation; recipient sends are never implicit")
     sub = commands.add_parser("approve")
@@ -553,9 +697,13 @@ def main():
         sub.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
-        if args.command in ("preview", "freeze", "launch", "recover"):
+        if args.command in ("preview", "freeze", "launch", "recover", "gmail-drafts", "record-gmail"):
             manifest = load_manifest(args.manifest)
-            if args.command == "launch":
+            if args.command == "gmail-drafts":
+                output = {"drafts": gmail_drafts(manifest, args.approved_sha256, args.apply), "dry_run": not args.apply}
+            elif args.command == "record-gmail":
+                output = record_gmail(manifest, args.approved_sha256, args.apply)
+            elif args.command == "launch":
                 if not args.apply:
                     raise ValueError("launch requires --apply and separately approved send")
                 output = launch(manifest, args.approved_sha256, args.max_recipients)

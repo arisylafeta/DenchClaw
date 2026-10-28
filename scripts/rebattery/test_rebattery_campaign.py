@@ -610,3 +610,125 @@ class SourcingCampaignDbTest(unittest.TestCase):
         self.assertEqual(self.query("select 1 from crm_subscriptions where person_id=any(%s::text[])", (self.people,)), [])
         self.assertEqual({row["relationship_stage"] for row in self.query(
             "select relationship_stage from crm_companies where id=any(%s::text[])", (self.companies,))}, {"Contacted"})
+
+
+GMAIL = {**{key: value for key, value in SOURCING.items() if key != "stream"}, "channel": "gmail",
+         "html": "<div>Hi {{first_name}},</div><div>{{ask}}</div><div><br></div><div>Best,</div>"
+                 "<a href='https://www.rebattery.io/'>rebattery.io</a>",
+         "text": "Hi {{first_name}},\n\n{{ask}}\n\nBest,\nAlex\nhttps://www.rebattery.io/"}
+
+
+class GmailManifestTest(unittest.TestCase):
+    def test_gmail_sourcing_needs_no_stream_or_unsubscribe_and_binds_channel(self):
+        manifest = load(GMAIL)
+        self.assertEqual(manifest["channel"], "gmail")
+        self.assertEqual(load(SOURCING)["channel"], "postmark")
+        self.assertNotEqual(campaign.digest(manifest, ROWS), campaign.digest({**manifest, "channel": "postmark"}, ROWS))
+        # Postmark digests are unchanged by the new channel field.
+        self.assertEqual(campaign.digest(MANIFEST, ROWS), campaign.digest(load(MANIFEST), ROWS))
+
+    def test_gmail_rejects_unsubscribe_placeholder_stream_other_mailbox_and_auctions(self):
+        for invalid in (
+            {**GMAIL, "html": GMAIL["html"] + "<a href='{{{ pm:unsubscribe }}}'>x</a>"},
+            {**GMAIL, "stream": "broadcasts"},
+            {**GMAIL, "reply_to": "supply@rebattery.io"},
+            {**GMAIL, "sender": "Alex <alex@example.com>", "reply_to": "alex@example.com"},
+            {**GMAIL, "channel": "fax"},
+            {**MANIFEST, "channel": "gmail"},
+        ):
+            with self.assertRaises(ValueError):
+                load(invalid)
+
+    def test_launch_and_recover_refuse_gmail(self):
+        manifest = load(GMAIL)
+        with self.assertRaises(ValueError):
+            campaign.launch(manifest, "sha", 1)
+        with self.assertRaises(ValueError):
+            campaign.recover(manifest, False)
+
+
+@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+class GmailCampaignDbTest(SourcingCampaignDbTest):
+    def setUp(self):
+        super().setUp()
+        self.manifest = {**GMAIL, "id": self.campaign_id, "person_ids": self.people,
+                         "recipient_variables": self.manifest["recipient_variables"]}
+        self.path = Path(self.directory.name) / "manifest.json"
+        self.path.write_text(json.dumps(self.manifest))
+        self.sent = {}
+        self.drafts = []
+
+    def fake_gog(self, account, *args, readonly=True):
+        self.assertEqual(account, "alex@rebattery.io")
+        if args[:3] == ("gmail", "messages", "search"):
+            query = args[3]
+            box = self.drafts if query.startswith("in:drafts") else self.sent.values()
+            address = query.split("to:")[1].split()[0]
+            return {"messages": [{"id": m["id"], "subject": m["subject"]} for m in box if m["to"] == address]}
+        if args[:3] == ("gmail", "drafts", "create"):
+            self.assertFalse(readonly)
+            options = dict(zip(args[3::2], args[4::2]))
+            self.drafts.append({"id": f"d{len(self.drafts)}", "to": options["--to"], "subject": options["--subject"],
+                                "html": Path(options["--body-html-file"]).read_text()})
+            return {"draftId": self.drafts[-1]["id"]}
+        if args[:2] == ("gmail", "get"):
+            message = self.sent[args[2]]
+            return {"headers": {"to": f"Someone <{message['to']}>"}, "body": message["body"],
+                    "message": {"id": message["id"], "labelIds": ["SENT"], "internalDate": "1792144348000"}}
+        self.fail(f"Unexpected gog call: {args}")
+
+    def run_cli(self, *args):
+        stdout = io.StringIO()
+        with patch("sys.argv", ["rebattery-campaign.py", *args]), patch.object(campaign, "gog", side_effect=self.fake_gog), \
+             patch.object(campaign, "postmark", side_effect=self.fail), redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+            code = campaign.main()
+        return code, json.loads(stdout.getvalue()) if code == 0 else None
+
+    def send(self, row, body=None):
+        self.sent[f"m{len(self.sent)}"] = {"id": f"m{len(self.sent)}", "to": row["recipient_email"],
+                                           "subject": row["rendered_subject"], "body": body or row["rendered_html"]}
+
+    def test_drafts_then_recorded_sends_move_the_dismantler(self):
+        code, frozen = self.run_cli("freeze", "--manifest", str(self.path), "--apply")
+        self.assertEqual(code, 0)
+        sha = frozen["sha256"]
+        [row] = self.query("select channel from campaigns where id=%s", (self.campaign_id,))
+        self.assertEqual(row["channel"], "email-gmail")
+        # Nothing happens before the exact digest is approved.
+        self.assertEqual(self.run_cli("gmail-drafts", "--manifest", str(self.path), "--approved-sha256", sha, "--apply")[0], 1)
+        campaign.approve(self.campaign_id, sha, "Alex")
+        self.assertEqual(self.run_cli("gmail-drafts", "--manifest", str(self.path), "--approved-sha256", "0" * 64,
+                                      "--apply")[0], 1)
+        code, drafted = self.run_cli("gmail-drafts", "--manifest", str(self.path), "--approved-sha256", sha, "--apply")
+        self.assertEqual([d["draft"] for d in drafted["drafts"]], ["created", "created"])
+        self.assertIn("4 Kona &amp; 2 Niro &lt;packs&gt;?", self.drafts[0]["html"] + self.drafts[1]["html"])
+        code, again = self.run_cli("gmail-drafts", "--manifest", str(self.path), "--approved-sha256", sha, "--apply")
+        self.assertEqual([d["draft"] for d in again["drafts"]], ["exists", "exists"])
+
+        rows = {r["person_id"]: r for r in self.query(
+            "select person_id, recipient_email, rendered_subject, rendered_html from crm_campaign_sends where campaign_id=%s",
+            (self.campaign_id,))}
+        self.send(rows[self.people[0]])
+        self.send(rows[self.people[1]], body="<div>Hi Name1,</div><div>Something else entirely</div>")
+        code, dry = self.run_cli("record-gmail", "--manifest", str(self.path), "--approved-sha256", sha)
+        self.assertTrue(dry["dry_run"])
+        self.assertEqual({r["state"] for r in self.query("select state from crm_campaign_sends where campaign_id=%s",
+                                                         (self.campaign_id,))}, {"frozen"})
+        code, recorded = self.run_cli("record-gmail", "--manifest", str(self.path), "--approved-sha256", sha, "--apply")
+        states = {r["email"]: r["state"] for r in recorded["recipients"]}
+        self.assertEqual(states[rows[self.people[0]]["recipient_email"]], "sent")
+        self.assertEqual(states[rows[self.people[1]]["recipient_email"]], "edited after approval; not recorded")
+        sends = {r["person_id"]: r for r in self.query(
+            "select person_id, state, provider_message_id, accepted_at from crm_campaign_sends where campaign_id=%s",
+            (self.campaign_id,))}
+        self.assertEqual((sends[self.people[0]]["state"], sends[self.people[0]]["provider_message_id"]), ("accepted", "gmail:m0"))
+        self.assertEqual(sends[self.people[0]]["accepted_at"].timestamp(), 1792144348)
+        self.assertEqual(sends[self.people[1]]["state"], "frozen")
+        [dismantler] = self.query("select stage, next_step from crm_dismantlers where company_id=%s", (self.companies[0],))
+        self.assertEqual((dismantler["stage"], dismantler["next_step"]), ("Talking", "Follow up if no reply"))
+        # A Gmail campaign never reaches Postmark.
+        with self.assertRaises(ValueError):
+            campaign.sync(self.campaign_id, False, "broadcasts")
+
+    def test_freeze_stores_recipient_lines_and_accepted_send_moves_the_dismantler(self):
+        self.skipTest("Covered for Postmark by SourcingCampaignDbTest")
