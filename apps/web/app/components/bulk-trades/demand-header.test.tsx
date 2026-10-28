@@ -37,4 +37,18 @@ describe("compact preview header", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show less" }));
     expect(brief.textContent!.length).toBe(collapsed);
   });
+
+  it("puts the deal controls on their own row under the title, so the title keeps the full width", () => {
+    render(<DemandHeader demand={demand} supply={null} actions={<button>Status</button>}
+      waiting={{ waiting_on: "us", waiting_since: "2026-10-21" }} ownerPicker={<label>Driver<select aria-label="Deal owner" /></label>} />);
+    const title = screen.getByRole("heading", { name: "4 × example battery packs" });
+    const controls = document.querySelector("[data-deal-controls]") as HTMLElement;
+    expect(controls).toContainElement(screen.getByLabelText("Deal owner"));
+    expect(controls).toContainElement(document.querySelector("[data-waiting-on=us]") as HTMLElement);
+    // The row that holds the title holds only the status control, never the pickers.
+    const titleRow = title.closest("[class*=titleRow]") as HTMLElement;
+    expect(titleRow).toContainElement(screen.getByRole("button", { name: "Status" }));
+    expect(titleRow).not.toContainElement(screen.getByLabelText("Deal owner"));
+    expect(controls.contains(title)).toBe(false);
+  });
 });

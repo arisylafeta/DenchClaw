@@ -27,8 +27,8 @@ export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkLis
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
         </div>
       </div>
-      <div className={`${css.status} flex items-start gap-2`}>{listing.waiting_on && <WaitingBadge row={listing} large />}<FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={onChanged} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /></div>
     </div>
+    <div className={css.controls} data-deal-controls>{listing.waiting_on && <WaitingBadge row={listing} />}<OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /><FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={onChanged} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /></div>
     <dl className={css.facts}>{[
       ["Seller", listing.party], ["Quantity", listing.quantity], ["Location", listing.location],
       ["Started", shortDate((listing.observed_on ?? listing.created_at).slice(0, 10))],

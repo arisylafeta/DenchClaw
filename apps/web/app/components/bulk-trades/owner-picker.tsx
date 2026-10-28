@@ -17,10 +17,10 @@ export function OwnerPicker({ listingId, owner, onChanged }: { listingId: string
     } catch { setValue(previous); setError(true); }
   }
   return <label className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: "var(--bt-muted)" }}>
-    Owner
+    Driver
     <select aria-label="Deal owner" value={value} onChange={(event) => void change(event.target.value)}
       className="h-7 rounded-md border bg-transparent px-1.5 text-[12px]" style={{ borderColor: error ? "var(--bt-red)" : "var(--bt-border)", color: "var(--bt-text)" }}>
-      <option value="">Unassigned</option>
+      <option value="">No driver</option>
       {DEAL_OWNERS.map((name) => <option key={name} value={name}>{name}</option>)}
     </select>
   </label>;

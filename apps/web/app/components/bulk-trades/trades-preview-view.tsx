@@ -21,7 +21,7 @@ import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade
 import { BULK_TRADES_PARAMS, TRADES_PREVIEW_PATH, previewTab, type PreviewTab } from "@/lib/bulk-trades-url";
 
 const SHEET_STATE_KEY = "bt-preview-sheet-state";
-const TABS: [PreviewTab, string][] = [["today", "Today"], ["demand", "Requests"], ["supply", "Supply"], ["board", "Board"]];
+const TABS: [PreviewTab, string][] = [["today", "Today"], ["demand", "Requests"], ["supply", "Supply"], ["board", "Deals"]];
 /** The drivers, in the order the header shows them. */
 const DRIVERS: (DealOwner | "all")[] = ["all", "Alex", "Sean", "Ari"];
 const segmentOn = { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" } as const;
@@ -101,6 +101,11 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const tabRows = useMemo(() => tab === "demand" ? rows.filter((row) => row.kind === "demand")
     : tab === "supply" ? rows.filter((row) => row.kind === "supply") : tab === "board" ? boardRows(rows) : rows, [rows, tab]);
   const shown = useMemo(() => tab === "today" ? filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }) : sortRows(filterSheet(tabRows, filters), sort), [rows, tabRows, filters, sort, tab]);
+  /** What each tab holds for the chosen driver, shown beside its name. */
+  const tabCounts = useMemo(() => {
+    const mine = filterSheet(rows, { ...NO_FILTERS, owner: filters.owner });
+    return { today: null, demand: mine.filter((row) => row.kind === "demand").length, supply: mine.filter((row) => row.kind === "supply").length, board: boardRows(mine).length } as Record<PreviewTab, number | null>;
+  }, [rows, filters.owner]);
   const routeFields = (next: SheetFilters, nextTab: PreviewTab) => ({ ...routeFromFilters(next), side: nextTab === "board" && next.side !== "all" ? next.side : null, tab: nextTab === "today" ? null : nextTab });
   const filterFields = routeFields(filters, tab);
 
@@ -155,7 +160,9 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
         <div role="tablist" aria-label="View" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
           {TABS.map(([value, label]) => (
             <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}
-              className={segmentButton} style={tab === value ? segmentOn : segmentOff}>{label}</button>
+              className={segmentButton} style={tab === value ? segmentOn : segmentOff}>
+              {label}{tabCounts[value] != null && sheetLoaded && <span data-tab-count aria-hidden="true" className="ml-1.5 font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>{tabCounts[value]}</span>}
+            </button>
           ))}
         </div>
         <div role="group" aria-label="Driver" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>

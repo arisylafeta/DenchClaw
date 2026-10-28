@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { boardRows, dealTotals, EUR_PER_GBP, quarterTarget, todayGroups, WIN_RATE, type TodayGroupKey } from "@/lib/bulk-desk";
+import { boardRows, countedDeals, dealTotals, EUR_PER_GBP, quarterTarget, todayGroups, WIN_RATE, type TodayGroupKey } from "@/lib/bulk-desk";
 import { formatEurCompact, type SheetRow } from "@/lib/bulk-sheet";
 import type { DealOwner } from "@/lib/bulk-owner";
-import { shortDate } from "@/lib/bulk-trade-details";
+import { isBoardStage } from "@/lib/bulk-listing";
 import { BusyRegion, Sh } from "./bt-shimmer";
 import { NextActionCell } from "./next-action-cell";
-import { ProgressChip, SideChip } from "./opportunities-sheet";
+import { ProgressChip } from "./opportunities-sheet";
+import { DriverAvatar, DueText } from "./desk-bits";
 import { ErrorText } from "./trade-ui";
 
 /** Whole thousands for the target, e.g. £27k, €31k. */
@@ -66,31 +67,48 @@ export function QuarterTarget({ rows, owner, loading, onOpenBoard }: { rows: She
   );
 }
 
-const ROW_GRID = "md:grid-cols-[minmax(12rem,1.2fr)_minmax(0,1.6fr)_8.5rem_4rem_4.5rem]";
-const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)" };
+const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)", today: "var(--bt-blue)" };
 
+/** What the row is: a request, a supply lot, or a deal once it is offered. */
+const kindLabel = (row: SheetRow) => (isBoardStage(row.progress) ? "Deal" : row.kind === "demand" ? "Request" : "Supply");
+
+/** One task: the next action to do, where it belongs underneath, when it is due and who drives it on the right. */
 function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
-  const due = row.next_action && row.next_due ? row.next_due.slice(0, 10) : null;
-  const overdue = !!due && due < today;
   return (
     <li onClick={() => onOpen(row)}
-      className={`grid cursor-pointer grid-cols-1 items-start gap-x-3 md:items-center gap-y-1.5 px-3 py-2.5 transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${ROW_GRID}`}>
-      <span className="min-w-0"><NextActionCell value={row.next_action} due={null} today={today} onSave={(text) => onNext(row, text)} /></span>
-      <span className="flex min-w-0 items-start gap-1.5">
-        <button type="button" title={row.title} className="line-clamp-2 min-w-0 text-left text-[13px] leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
-          {row.title}{row.company && <span style={{ color: "var(--bt-muted)" }}> · {row.company}</span>}
-        </button>
-        <SideChip side={row.side} />
-      </span>
-      <span className="flex flex-wrap items-center gap-2 md:contents">
-        <span className="min-w-0"><ProgressChip row={row} /></span>
-        <span data-owner title={row.owner ? `Owner ${row.owner}` : "No owner"} className="min-w-0 truncate text-[13px]" style={{ color: row.owner ? undefined : "var(--bt-muted)" }}>{row.owner ?? "—"}</span>
-        <span data-due title={due ? `Due ${shortDate(due)}` : "No due date"} className="text-[13px] tabular-nums" style={{ color: overdue ? "var(--bt-red)" : "var(--bt-muted)", fontWeight: overdue ? 600 : 400 }}>
-          {due ? shortDate(due) : "—"}
+      className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)]">
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="min-w-0 [&_button>span:first-child]:text-[14px] [&_button>span:first-child]:font-medium"><NextActionCell value={row.next_action} due={null} today={today} onSave={(text) => onNext(row, text)} /></span>
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
+          <span>{kindLabel(row)}</span><span aria-hidden="true">·</span>
+          <button type="button" title={row.title} className="min-w-0 max-w-full truncate text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
+            {row.company ? `${row.company}, ` : ""}{row.title}
+          </button>
+          {row.likelihood != null && <><span aria-hidden="true">·</span><span>{row.likelihood}% chance</span></>}
         </span>
+      </span>
+      <span className="flex shrink-0 flex-col items-end gap-1.5">
+        <span className="flex items-center gap-2">
+          <DueText due={row.next_action ? row.next_due : null} today={today} />
+          <DriverAvatar owner={row.owner} size={22} />
+        </span>
+        <ProgressChip row={row} />
       </span>
     </li>
   );
+}
+
+/** "Alex drives 4 requests, 2 lots and 7 deals. 9 next actions: 1 overdue, 3 due today." */
+function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: TodayGroupKey; rows: SheetRow[] }[]): string {
+  const deals = countedDeals(boardRows(rows)).length;
+  const requests = rows.filter((row) => row.kind === "demand" && !isBoardStage(row.progress)).length;
+  const lots = rows.filter((row) => row.kind === "supply" && !isBoardStage(row.progress)).length;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const work = `${plural(requests, "request", "requests")}, ${plural(lots, "lot", "lots")} and ${plural(deals, "deal", "deals")}`;
+  const count = (key: TodayGroupKey) => groups.find((group) => group.key === key)?.rows.length ?? 0;
+  const actions = rows.filter((row) => row.next_action).length;
+  const urgent = [count("overdue") && `${count("overdue")} overdue`, count("today") && `${count("today")} due today`].filter(Boolean).join(", ");
+  return `${owner === "all" ? `The team is on ${work}` : `${owner} drives ${work}`}. ${plural(actions, "next action", "next actions")}${urgent ? `: ${urgent}` : ""}.`;
 }
 
 /** Today: the quarter target, then every open listing's next action by when it is due. Nothing else. */
@@ -102,24 +120,25 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
   const busy = loading && !rows.length;
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-[20px] font-semibold tracking-[-0.01em]">{new Date(`${today}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}</h2>
+        <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(rows, owner, groups)}</Sh></p>
+      </div>
       <QuarterTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
       <ErrorText error={error} />
       <section aria-label="Next actions" className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <header className="flex items-baseline gap-2 border-b px-3 py-2.5" style={{ borderColor: "var(--bt-divider)" }}>
-          <h2 className="text-[14px] font-semibold">Next actions</h2>
+        <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
+          <h2 className="text-[15px] font-semibold">Next actions</h2>
         </header>
-        <div aria-hidden="true" className={`hidden gap-x-3 border-b px-3 py-2 text-[12px] md:grid ${ROW_GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Next action</span><span>Listing</span><span>Stage</span><span>Owner</span><span>Due</span>
-        </div>
         {busy ? (
           <ul className="divide-y divide-[var(--bt-divider)]">
-            {Array.from({ length: 5 }, (_, index) => <li key={index} className="px-3 py-3 text-[13px]"><Sh on chars={30 + (index % 3) * 8} /></li>)}
+            {Array.from({ length: 5 }, (_, index) => <li key={index} className="flex flex-col gap-1.5 px-4 py-3 text-[13px]"><Sh on chars={30 + (index % 3) * 8} /><span className="text-[12px]"><Sh on chars={22} /></span></li>)}
           </ul>
         ) : !rows.length ? (
-          <p className="px-3 py-10 text-center text-[13px]" style={{ color: "var(--bt-muted)" }}>{error ? "The list could not load." : "Nothing open right now."}</p>
+          <p className="px-4 py-10 text-center text-[13px]" style={{ color: "var(--bt-muted)" }}>{error ? "The list could not load." : "Nothing open right now."}</p>
         ) : groups.filter((group) => group.rows.length).map((group) => (
           <section key={group.key} aria-label={group.label} data-group={group.key}>
-            <h3 className="border-b px-3 py-1.5 text-[12px] font-semibold" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)", color: GROUP_TONE[group.key] ?? "var(--bt-text-2)" }}>
+            <h3 className="border-b px-4 py-1.5 text-[12px] font-semibold" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)", color: GROUP_TONE[group.key] ?? "var(--bt-text-2)" }}>
               {group.label} <span className="font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>({group.rows.length})</span>
             </h3>
             <ul className="divide-y divide-[var(--bt-divider)] border-b" style={{ borderColor: "var(--bt-divider)" }}>

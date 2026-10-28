@@ -37,16 +37,16 @@ describe("Bulk Trades board", () => {
       shown={[row({ value_eur: 1_000_000, fee_eur: 100_000, owner: "Sean", likelihood: 70 }), row({ key: "b", id: "b", value_eur: 500_000, fee_eur: 50_000, next_action: null }), row({ key: "c", id: "c", progress: "New" })]} />);
     const offered = within(screen.getByRole("region", { name: "Offered" }));
     expect(offered.getByText("(2)")).toBeTruthy();
-    expect(offered.getByText("€1.5M").closest("[data-stage-total]")).toBeTruthy();
+    expect(offered.getByText("€1.5M ticket").closest("[data-stage-total]")).toBeTruthy();
     const [first, second] = offered.getAllByRole("button");
     expect(first.querySelector("[data-card-value]")).toHaveTextContent("€1M");
     expect(first.querySelector("[data-card-fee]")).toHaveTextContent("€100k");
     expect(first.querySelector("[data-card-chance]")).toHaveTextContent("70%");
-    expect(first.querySelector("[data-card-owner]")).toHaveTextContent("Owner Sean");
+    expect(within(first.querySelector("[data-card-owner]") as HTMLElement).getByRole("img", { name: "Driver Sean" })).toBeTruthy();
     expect(within(first).getByText("Call seller")).toBeTruthy();
-    expect(within(first).getByText("1 Oct")).toBeTruthy();
-    expect(second.querySelector("[data-card-chance]")).toHaveTextContent("—");
-    expect(within(second).getByText("No owner")).toBeTruthy();
+    expect(within(first).getByText("Overdue · 1 Oct")).toBeTruthy();
+    expect(second.querySelector("[data-card-chance]")).toHaveTextContent("Set %");
+    expect(within(second).getByRole("img", { name: "No driver" })).toBeTruthy();
     expect(within(second).getByText("No next action")).toBeTruthy();
   });
 

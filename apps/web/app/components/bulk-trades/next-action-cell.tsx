@@ -64,7 +64,9 @@ export function NextActionCell({ value, due, owner, today, onSave, loading = fal
       </span>
     );
   }
-  const overdue = !!due && due < today;
+  const day = due?.slice(0, 10) ?? null;
+  const overdue = !!day && day < today;
+  const dueToday = !!day && day === today;
   return (
     <button type="button" disabled={loading} onClick={start} aria-label={value ? `Edit next action: ${value}` : "Add next action"}
       className="group flex w-full min-w-0 flex-col items-start gap-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
@@ -72,8 +74,8 @@ export function NextActionCell({ value, due, owner, today, onSave, loading = fal
         ? <span className="line-clamp-2 text-[13px] leading-snug group-hover:underline">{value}</span>
         : <span className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Add next step</span>}
       {((value && due) || owner) && (
-        <span className="text-[12px]" style={{ color: overdue ? "var(--bt-red)" : "var(--bt-muted)" }}>
-          {[owner, value && due ? `${overdue ? "Overdue" : "Due"} ${shortDate(due.slice(0, 10))}` : null].filter(Boolean).join(" · ")}
+        <span className="text-[12px]" style={{ color: overdue ? "var(--bt-red)" : dueToday ? "var(--bt-blue)" : "var(--bt-muted)", fontWeight: overdue || dueToday ? 600 : 400 }}>
+          {[owner, value && day ? (dueToday ? "Due today" : `${overdue ? "Overdue" : "Due"} ${shortDate(day)}`) : null].filter(Boolean).join(" · ")}
         </span>
       )}
     </button>

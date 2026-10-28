@@ -8,6 +8,7 @@ import { shortDate } from "@/lib/bulk-trade-details";
 import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
 import { ErrorText } from "./trade-ui";
+import { DriverAvatar, Gap } from "./desk-bits";
 
 const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   new: { dot: "var(--bt-muted)", bg: "var(--bt-segment)" },
@@ -18,7 +19,8 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   warning: { dot: "var(--bt-red)", bg: "var(--bt-red-bg)" },
 };
 
-const GRID = "md:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(7rem,1fr)_8.5rem_4rem_minmax(11rem,1.5fr)] lg:grid-cols-[2.5rem_minmax(0,1.6fr)_minmax(8rem,1fr)_8.5rem_4.5rem_4.5rem_4.5rem_3.5rem_4rem_minmax(12rem,1.5fr)]";
+// Score | Opportunity | Ticket | Fee | Chance | Driver | Stage | Next action. Ticket, fee and chance join at lg.
+const GRID = "md:grid-cols-[2.25rem_minmax(0,1.7fr)_2rem_8.5rem_minmax(11rem,1.4fr)] lg:grid-cols-[2.25rem_minmax(0,1.7fr)_4.5rem_4.5rem_3.5rem_2rem_8.5rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -99,35 +101,34 @@ function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: 
 
 function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = true }: { loading?: boolean; showSide?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
   const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
+  const num = "hidden min-w-0 text-[13px] tabular-nums lg:block";
   return (
     <li aria-hidden={loading || undefined} onClick={() => { if (!loading) onOpen(row); }}
-      className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-3 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
+      className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-2.5 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
       <span className="hidden md:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       <span className="min-w-0">
         <span className="flex items-start gap-1">
           <button type="button" disabled={loading} title={row.title}
-            className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-medium leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
+            className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-semibold leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
           {!loading && showSide && <SideChip side={row.side} />}
           {!loading && row.is_trade && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
           {!loading && <CopyIdButton id={row.id} />}
         </span>
-        {(loading || row.company || row.owner) && <span className="mt-0.5 block truncate text-[12px] md:hidden" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={14}>{[row.company, row.owner].filter(Boolean).join(" · ")}</Sh></span>}
+        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
+          <span className="min-w-0 truncate" title={row.company ?? undefined}><Sh on={loading} chars={14}>{row.company ?? "No company"}</Sh></span>
+          {!loading && row.latest && <span className="hidden shrink-0 md:inline-flex"><IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} /></span>}
+          {!loading && <span className="md:hidden"><DriverAvatar owner={row.owner} size={18} /></span>}
+        </span>
         <span className="mt-1 inline-flex md:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       </span>
-      <span className="hidden min-w-0 truncate text-[13px] md:block" title={row.company ?? undefined} style={{ color: row.company ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={14}>{row.company ?? "—"}</Sh></span>
+      <span data-ticket className={num} title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No size recorded: open it to add quantity and price"}>
+        <Sh on={loading} chars={5}>{row.value_eur != null ? formatEurCompact(row.value_eur) : <Gap>Add size</Gap>}</Sh></span>
+      <span data-fee className={num} title={row.fee_eur != null ? `${row.fee_is_override ? "Fee set by hand" : `Our fee at ${FEE_RATE * 100}% of value`}, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No fee: set one, or add a size"}>
+        <Sh on={loading} chars={5}>{row.fee_eur != null ? formatEurCompact(row.fee_eur) : <Gap>Set fee</Gap>}</Sh></span>
+      <span data-chance className={num} title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}>
+        <Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : <Gap>Set %</Gap>}</Sh></span>
+      <span data-owner className="hidden md:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
       <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}</span>
-      <span className="hidden min-w-0 lg:block">
-        {loading ? <Sh on chars={7} /> : row.latest ? (
-          <IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} />
-        ) : <span style={{ color: "var(--bt-muted)" }}>—</span>}
-      </span>
-      <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No value recorded"}
-        style={{ color: row.value_eur != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={5}>{formatEurCompact(row.value_eur)}</Sh></span>
-      <span className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.fee_eur != null ? `${row.fee_is_override ? "Fee set by hand" : `Our fee at ${FEE_RATE * 100}% of value`}, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No value, so no fee"}
-        style={{ color: row.fee_eur != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={5}>{formatEurCompact(row.fee_eur)}</Sh></span>
-      <span data-chance className="hidden min-w-0 text-[13px] tabular-nums lg:block" title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}
-        style={{ color: row.likelihood != null ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : "—"}</Sh></span>
-      <span data-owner className="hidden min-w-0 truncate text-[13px] md:block" style={{ color: row.owner ? undefined : "var(--bt-muted)" }}><Sh on={loading} chars={4}>{row.owner ?? "—"}</Sh></span>
       <span className="min-w-0">
         <NextActionCell loading={loading} value={row.next_action} due={row.next_due} today={today} onSave={(text) => onNext(row, text)} />
       </span>
@@ -159,7 +160,24 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
   const set = (patch: Partial<SheetFilters>) => onFilters({ ...filters, ...patch });
   const filtered = isFiltered(filters, hideSide);
   const sides = ["buyer", "seller"] as const;
+  const stageCount = (stage: string) => rows.filter((row) => row.progress === stage).length;
+  const chip = `inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]`;
+  const chipStyle = (on: boolean) => on ? { background: "var(--bt-text)", borderColor: "var(--bt-text)", color: "var(--bt-surface)" } : { background: "var(--bt-surface)", borderColor: "var(--bt-border)", color: "var(--bt-text)" };
   return (
+    <div className="flex flex-col gap-2.5">
+      {!hideProgress && stages && (
+        <div role="group" aria-label="Stage" className="flex gap-1.5 overflow-x-auto pb-0.5">
+          {(["all", ...stages] as string[]).map((stage) => {
+            const on = filters.progress === stage;
+            return (
+              <button key={stage} type="button" aria-pressed={on} onClick={() => set({ progress: on && stage !== "all" ? "all" : stage })} className={chip} style={chipStyle(on)}>
+                {stage === "all" ? "All" : stage}
+                <span className="tabular-nums" style={{ color: on ? "inherit" : "var(--bt-muted)", opacity: on ? 0.75 : 1 }}>{stage === "all" ? rows.length : stageCount(stage)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative min-w-0 flex-1 basis-full sm:basis-64">
           <span className="sr-only">Search opportunities</span>
@@ -179,7 +197,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
             </button>
           ))}
         </div>}
-        {!hideProgress && <Select label="Progress" value={filters.progress} options={stages ? [...stages] : options.progress} onChange={(progress) => set({ progress })} />}
+        {!hideProgress && !stages && <Select label="Progress" value={filters.progress} options={options.progress} onChange={(progress) => set({ progress })} />}
         <Select label="Company" value={filters.company} options={options.company} onChange={(company) => set({ company })} />
         <Select label="Category" value={filters.category} options={options.category} onChange={(category) => set({ category })} />
         <select aria-label="Waiting on" value={filters.waiting} onChange={(event) => set({ waiting: event.target.value as SheetFilters["waiting"] })}
@@ -201,6 +219,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
           </button>
         )}
       </div>
+    </div>
   );
 }
 
@@ -232,9 +251,9 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
       </p>
 
       <div className="overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <div className="md:min-w-[56rem] lg:min-w-[78rem]">
+        <div className="md:min-w-[48rem] lg:min-w-[62rem]">
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] md:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span>Company</span><span>Progress</span><span className="hidden lg:block">Latest</span><span className="hidden lg:block">Value</span><span className="hidden lg:block" title={`${FEE_RATE * 100}% of value unless set`}>Fee</span><span className="hidden lg:block" title="Chance the deal completes">Chance</span><span>Owner</span><span>Next action</span>
+          <span>Score</span><span>Opportunity</span><span className="hidden lg:block" title="Approximate value of the deal or the stock">Ticket</span><span className="hidden lg:block" title={`${FEE_RATE * 100}% of the ticket unless set`}>Fee</span><span className="hidden lg:block" title="Chance the deal completes">Chance</span><span>Driver</span><span>Stage</span><span>Next action</span>
         </div>
         {displayRows.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">

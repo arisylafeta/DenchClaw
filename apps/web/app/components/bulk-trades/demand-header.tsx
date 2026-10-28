@@ -61,8 +61,11 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
             {demand.status !== "open" && <span className={css.chip}>{demand.status}</span>}
           </div>
         </div>
-        <div className={`${css.status} ${css.actions} flex items-start gap-2`}>{waiting?.waiting_on && <WaitingBadge row={waiting} large />}{ownerPicker}{actions}</div>
+        <div className={`${css.status} ${css.actions}`}>{actions}</div>
       </div>
+      {(waiting?.waiting_on || ownerPicker) && (
+        <div className={css.controls} data-deal-controls>{waiting?.waiting_on && <WaitingBadge row={waiting} />}{ownerPicker}</div>
+      )}
       <dl className={css.facts}>
         <div className={css.fact}>
           <dt>Supplier</dt>

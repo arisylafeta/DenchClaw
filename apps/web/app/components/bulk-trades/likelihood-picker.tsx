@@ -18,11 +18,11 @@ export function LikelihoodPicker({ listingId, likelihood, onChanged }: { listing
     } catch { setValue(previous); setError(true); }
   }
   const options = value != null && !(LIKELIHOOD_OPTIONS as readonly number[]).includes(value) ? [...LIKELIHOOD_OPTIONS, value].sort((a, b) => a - b) : LIKELIHOOD_OPTIONS;
-  return <label className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: "var(--bt-muted)" }} title="Chance this deal completes. Scales the score.">
-    Likelihood
+  return <label className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: "var(--bt-muted)" }} title="Chance this deal completes. Fee × chance is the weighted fee.">
+    Chance
     <select aria-label="Likelihood of completion" value={value ?? ""} onChange={(event) => void change(event.target.value)}
       className="h-7 rounded-md border bg-transparent px-1.5 text-[12px]" style={{ borderColor: error ? "var(--bt-red)" : "var(--bt-border)", color: "var(--bt-text)" }}>
-      <option value="">Not set</option>
+      <option value="">Set %</option>
       {options.map((pct) => <option key={pct} value={pct}>{pct}%</option>)}
     </select>
   </label>;
