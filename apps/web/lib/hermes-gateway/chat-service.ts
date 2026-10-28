@@ -403,7 +403,7 @@ export class HermesChatService {
     const parts = /^\/(\S+)([\s\S]*)$/u.exec(command)!;
     const name = parts[1].toLowerCase();
     const arg = parts[2].trim();
-    if (!["invite", "new", "branch", "help", "status", "usage"].includes(name) || /(?:--global|--profile|--session|\n|\r)/i.test(arg)) {throw new ChatServiceError(400,"slash_not_allowed");}
+    if (!["invite", "new", "branch", "help", "status", "usage", "compress", "compact"].includes(name) || /(?:--global|--profile|--session|\n|\r)/i.test(arg)) {throw new ChatServiceError(400,"slash_not_allowed");}
     // Not a Hermes command: it replaces this chat with a group that includes the invited agent.
     if (name === "invite") {
       const [invitee, ...task] = arg.split(/\s+/);
