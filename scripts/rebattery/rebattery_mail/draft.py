@@ -22,8 +22,16 @@ def render_message(row, variables):
 def text_to_html(text):
     """Escaped HTML paragraphs for a plain-text body, so a text-only draft never ships a signature-only HTML part."""
     paragraphs = [chunk for chunk in re.split(r'\n\s*\n', text.strip()) if chunk.strip()]
-    return ''.join('<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">' + html_lib.escape(chunk.strip(), quote=True).replace('\n', '<br>\n') + '</p>\n'
+    return ''.join('<div>' + html_lib.escape(chunk.strip(), quote=True).replace('\n', '<br>') + '</div><div><br></div>'
                    for chunk in paragraphs)
+
+
+def gmail_html(body_html, signature_html=''):
+    """Gmail's own compose markup: one dir=ltr wrapper, a div per line, blank-line divs, and the signature in gmail_signature.
+    Gmail collapses unfamiliar structure (stacked <p> blocks plus a bare signature table) behind a "..." button."""
+    body = re.sub(r'<p\b[^>]*>(.*?)</p>\s*', r'<div>\1</div><div><br></div>', (body_html or '').strip(), flags=re.S)
+    sig = f'<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">{signature_html.strip()}</div>' if (signature_html or '').strip() else ''
+    return f'<div dir="ltr">{body}{sig}</div>'
 
 
 def prepare(db, identity_key, recipients, purpose='personal', template=None, variables=None,
@@ -63,7 +71,7 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
            'cc_emails':sorted(set(e.strip().lower() for e in (cc or []) if e.strip())),'bcc_emails':[author['address'].lower()] if transport == 'postmark-transactional' and author.get('gmail_account') else [],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
            'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and generated is None and author.get('signature_text') else ''),
-           'body_html':rendered['html'] + ((author.get('signature_html') or '') if not template and generated is None else ''),'thread_id':thread,'campaign_id':campaign,
+           'body_html':(gmail_html(rendered['html'], author.get('signature_html') or '') if not template and generated is None else rendered['html']),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
                               'identity_snapshot':{key:author.get(key) for key in ('address','display_name','reply_to','gmail_account','postmark_stream')}},'links':[]}
     if generated is not None:

@@ -383,7 +383,7 @@ type NewDraft = { identity: "alex" | "supply"; to: string[]; ccThread: boolean; 
 /** Creates a mail_message draft through the mail CLI, so threading, the identity signature and content policy apply. */
 async function createMailDraft(d: NewDraft): Promise<string> {
   const args = ["draft", "--identity", d.identity, "--transport", "gmail", "--purpose", "personal", "--to", d.to.join(","),
-    `--subject=${d.subject}`, `--body=${d.body}`, `--html=${textToHtml(d.body)}`];
+    `--subject=${d.subject}`, `--body=${d.body}`, `--html=${textToHtml(d.body)}`];  // the CLI wraps it with the signature in Gmail-native markup
   if (d.thread) args.push("--thread", d.thread);
   if (d.thread && d.ccThread) args.push("--cc-thread");
   args.push("--apply");

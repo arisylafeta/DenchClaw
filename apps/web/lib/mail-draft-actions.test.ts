@@ -13,7 +13,10 @@ describe("draft copy", () => {
   it("renders paragraphs and escapes markup", () => {
     const html = textToHtml("a < b\nsecond line\n\nnext");
     expect(html).toContain("a &lt; b<br>second line");
-    expect(html.match(/<p /g)).toHaveLength(2);
+    expect(html.startsWith('<div dir="ltr">')).toBe(true);
+    expect(html).not.toContain("<p");
+    expect(html).toContain("<div><br></div>");
+    expect(textToHtml("hi", "<table>sig</table>")).toContain('<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><table>sig</table></div>');
   });
 });
 

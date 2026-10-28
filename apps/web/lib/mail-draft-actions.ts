@@ -34,9 +34,11 @@ export async function identitySignatures(): Promise<Map<string, string | null>> 
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** Same paragraph markup `mail-draft-recopy.py` writes. */
-export function textToHtml(body: string): string {
-  return body.split("\n\n").map((part) => `<p style="margin:0 0 12px;font-size:14px;line-height:1.5;color:#0A0A0A;">${escapeHtml(part).replace(/\n/g, "<br>")}</p>`).join("");
+/** Gmail's own compose markup (a div per line, blank-line divs, signature in gmail_signature). Stacked <p> blocks make Gmail fold the tail behind a "..." button. */
+export function textToHtml(body: string, signatureHtml = ""): string {
+  const lines = body.split("\n\n").map((part) => `<div>${escapeHtml(part).replace(/\n/g, "<br>")}</div><div><br></div>`).join("");
+  const sig = signatureHtml.trim() ? `<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">${signatureHtml.trim()}</div>` : "";
+  return `<div dir="ltr">${lines}${sig}</div>`;
 }
 
 /** Splits a draft's text into the copy a person writes and the identity signature frozen at its end. */
@@ -77,7 +79,7 @@ export async function editDraft(draft: MailDraft, changes: { subject?: string; b
     if (body !== main) {
       if (!body) { throw new DraftActionError(400, "The message cannot be empty."); }
       const signatureText = signed ? (identity?.signature_text ?? "") : "";
-      args.push(`--body=${body}${signatureText ? `\n\n${signatureText}` : ""}`, `--html=${textToHtml(body)}${signed ? (identity?.signature_html ?? "") : ""}`);
+      args.push(`--body=${body}${signatureText ? `\n\n${signatureText}` : ""}`, `--html=${textToHtml(body, signed ? (identity?.signature_html ?? "") : "")}`);
     }
   }
   if (args.length === 1) { return; }
