@@ -48,9 +48,24 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     const worked = rows.find((row) => row.id === "btd_sheet_worked")!;
     expect(worked).toMatchObject({ progress: "New", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
     expect(rows.find((row) => row.id === "btd_sheet_qual")).toMatchObject({ progress: "New", side: "buyer" });
-    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "buyer", latest: null });
-    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Signed & Paid", tone: "closing", side: "seller" });
+    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Agreed", tone: "closing", side: "buyer", latest: null });
+    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Agreed", tone: "closing", side: "seller" });
+    // The furthest live offer links the supply and the demand, so each names the other.
+    expect(rows.find((row) => row.id === "bts_sheet_open")?.paired_listing_id).toBe("btd_sheet_new");
+    expect(rows.find((row) => row.id === "btd_sheet_new")?.paired_listing_id).toBe("bts_sheet_open");
+    expect(worked.paired_listing_id).toBeNull();
     expect(rows.filter((row) => row.id === "btl_sheet_live")).toHaveLength(1);
     expect(rows.find((row) => row.id === "btl_sheet_live")).toMatchObject({ kind: "supply", side: "seller" });
+  });
+
+  it("pairs nothing through a declined or lost offer", async () => {
+    await pg.queryPg(`
+      insert into crm_bulk_listings (id, kind, party, summary, status) values ('btl_sheet_dec', 'supply', 'Lot Seller', 'Declined lot', 'open')
+        on conflict (id) do nothing;
+      insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values ('bof_sheet_dec', 'btl_sheet_dec', 'btd_sheet_worked', 'counterparty', 'declined')
+        on conflict (id) do update set stage = excluded.stage;`);
+    const rows = await sheet.listSheet();
+    expect(rows.find((row) => row.id === "btl_sheet_dec")).toMatchObject({ paired_listing_id: null, is_trade: false });
+    expect(rows.find((row) => row.id === "btd_sheet_worked")?.paired_listing_id).toBeNull();
   });
 });

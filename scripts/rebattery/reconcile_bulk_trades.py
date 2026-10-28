@@ -27,7 +27,7 @@ import psycopg2, psycopg2.extras
 
 STAGE = {'To contact': 'candidate', 'Teaser sent': 'offered', 'NDA, specs sent': 'offered', 'Bid in': 'offered',
          'LOI or deposit': 'contract_out', 'Won': 'signed'}
-RANK = {None: -1, 'candidate': 0, 'offered': 1, 'contract_out': 2, 'signed': 3, 'invoiced': 4, 'paid': 5, 'complete': 6, 'declined': 1, 'lost': 1}
+RANK = {None: -1, 'candidate': 0, 'offered': 1, 'negotiating': 2, 'contract_out': 3, 'signed': 4, 'invoiced': 5, 'paid': 6, 'complete': 7, 'declined': 1, 'lost': 1}
 VISIBLE = {'buyer_added': 'outreach', 'buyer_updated': 'outreach', 'file_added': 'document', 'email_drafted': 'mail',
            'proposal_accepted': 'note'}
 HIDDEN = {'trade_created', 'trade_updated', 'field_updated', 'contact_added', 'bid_added'}

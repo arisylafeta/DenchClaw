@@ -59,7 +59,7 @@ const DEMAND_SELECT = `
     ), '[]'::json) as fits,
     coalesce((
       select json_agg(json_build_object('lot_id', listing.id, 'title', coalesce(nullif(listing.spec->>'listing_title', ''), nullif(listing.context->>'listing_title', ''), listing.summary), 'status', case offer.stage
-          when 'candidate' then 'To contact' when 'offered' then 'Offered' when 'contract_out' then 'Contract out'
+          when 'candidate' then 'To contact' when 'offered' then 'Offered' when 'negotiating' then 'Negotiating' when 'contract_out' then 'Contract out'
           when 'signed' then 'Signed' when 'invoiced' then 'Invoice out' when 'paid' then 'Paid' when 'complete' then 'Complete'
           when 'declined' then 'Declined' when 'lost' then 'Lost' else 'To contact' end) order by offer.created_at)
       from crm_bulk_offers offer join crm_bulk_listings listing on listing.id = offer.bulk_listing_id

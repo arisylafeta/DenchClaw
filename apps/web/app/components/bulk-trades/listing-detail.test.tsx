@@ -10,7 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 const listing = (id: string): BulkListingView => ({
   id, kind: "supply", party: "Example seller", title: "24 EV packs", summary: "Available packs", note: null,
   company_id: null, person_id: null, contact: null, email: null, quantity: "24", location: "Berlin", status: "open", closed_reason: null,
-  observed_on: null, next_action: null, next_due: null, waiting_on: "us", waiting_since: "2026-10-20", spec: {}, context: { trade_kind: "packs" }, created_at: "2026-10-20", updated_at: "2026-10-20", is_trade: true, furthest_stage: "contract_out", stage: "Signed & Paid",
+  observed_on: null, next_action: null, next_due: null, waiting_on: "us", waiting_since: "2026-10-20", spec: {}, context: { trade_kind: "packs" }, created_at: "2026-10-20", updated_at: "2026-10-20", is_trade: true, furthest_stage: "contract_out", stage: "Agreed",
 });
 const mount = (id: string) => render(<ListingDetail id={id} today="2026-10-21" onClose={() => {}} onOpenListing={() => {}} />);
 function mockListing(row: BulkListingView | null) {
@@ -76,4 +76,69 @@ it("shows a back link instead of a blank page when a listing cannot render", asy
   expect(alert).toHaveTextContent("could not be displayed");
   fireEvent.click(screen.getByRole("button", { name: /Bulk Trades/ }));
   expect(onClose).toHaveBeenCalled();
+});
+
+it("sets a fee on a supply listing from its header, with the 10% default as the placeholder", async () => {
+  const row = listing("s4"); row.spec = { value_eur: 48000 }; row.context = { trade_kind: "packs", fee_eur: 3000 };
+  const fetch = mockListing(row); mount("s4");
+  const input = await screen.findByLabelText("Fee in euros");
+  expect(input).toHaveValue("3000");
+  expect(input).toHaveAttribute("placeholder", "4,800");
+  fireEvent.change(input, { target: { value: "5,500" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/s4/fee", expect.objectContaining({ method: "PUT", body: JSON.stringify({ fee_eur: 5500 }) })));
+  fireEvent.change(input, { target: { value: "" } });
+  fireEvent.blur(input);
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/s4/fee", expect.objectContaining({ body: JSON.stringify({ fee_eur: null }) })));
+  expect(screen.queryByRole("button", { name: "Can't source" })).toBeNull(); // demand only
+});
+
+it("marks a demand as one we can't source, with a reason, and clears it", async () => {
+  const row = listing("d-cs"); row.kind = "demand";
+  row.demand = { id: row.id, buyer: "Example buyer", wants: "12 Ioniq packs", kind: "standing", spec: {}, context: {}, context_notes: [], status: "open", fits: [], trades: [], missing: [], inventory_matches: [] } as unknown as NonNullable<BulkListingView["demand"]>;
+  const fetch = mockListing(row); const view = mount(row.id);
+  fireEvent.click(await screen.findByRole("button", { name: "Can't source" }));
+  fireEvent.change(screen.getByLabelText("Why we can't source it"), { target: { value: "No Ioniq packs this quarter" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/d-cs/cant-source", expect.objectContaining({ method: "PUT", body: JSON.stringify({ reason: "No Ioniq packs this quarter" }) })));
+  view.unmount();
+
+  row.context = { cant_source: "No Ioniq packs this quarter" };
+  const again = mockListing(row); mount(row.id);
+  expect(await screen.findByText("Can't source: No Ioniq packs this quarter")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Clear can't source" }));
+  await waitFor(() => expect(again).toHaveBeenCalledWith("/api/bulk-listings/d-cs/cant-source", expect.objectContaining({ body: JSON.stringify({ reason: null }) })));
+});
+
+it("reads a dot before three digits as thousands, saves once on Enter then blur, and shows a failed save", async () => {
+  const row = listing("s5"); row.spec = { value_eur: 48000 }; row.context = { trade_kind: "packs" };
+  let fail = false;
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/fee") && init?.method === "PUT") return fail ? new Response(JSON.stringify({ error: "Database unavailable" }), { status: 500 }) : new Response(JSON.stringify({ fee_eur: 1 }));
+    return new Response(JSON.stringify(url.endsWith("/context") ? { person: null, mail: [] } : url.endsWith("/conversation") ? { conversation: [] }
+      : url.endsWith("/fields") ? { fields: [] } : { listing: row }));
+  });
+  vi.stubGlobal("fetch", fetch); mount("s5");
+  const input = await screen.findByLabelText("Fee in euros");
+  const puts = () => fetch.mock.calls.filter(([url, init]) => String(url).endsWith("/fee") && (init as RequestInit | undefined)?.method === "PUT");
+  fireEvent.change(input, { target: { value: "10.000" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.blur(input);
+  await waitFor(() => expect(puts()).toHaveLength(1));
+  expect(puts()[0][1]).toMatchObject({ body: JSON.stringify({ fee_eur: 10000 }) });
+  fireEvent.blur(input);
+  expect(puts()).toHaveLength(1);
+
+  fireEvent.change(input, { target: { value: "ten" } });
+  fireEvent.blur(input);
+  expect(await screen.findByText("Enter a number of euros")).toBeInTheDocument();
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(puts()).toHaveLength(1);
+
+  fail = true;
+  fireEvent.change(input, { target: { value: "1.250" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(await screen.findByText("Could not save the fee")).toBeInTheDocument();
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(puts()[1][1]).toMatchObject({ body: JSON.stringify({ fee_eur: 1250 }) });
 });

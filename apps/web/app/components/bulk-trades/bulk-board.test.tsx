@@ -14,11 +14,12 @@ describe("Bulk Trades board", () => {
   it("puts each card in its stage column and opens it on click", () => {
     const onOpen = vi.fn();
     render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={onOpen}
-      shown={[row({}), row({ key: "b", id: "b", title: "5MWh Cells", side: "buyer", progress: "Signed & Paid" }), row({ key: "c", id: "c", title: "Odd", progress: "Matched" })]} />);
+      shown={[row({}), row({ key: "b", id: "b", title: "5MWh Cells", side: "buyer", progress: "Agreed" }), row({ key: "c", id: "c", title: "Odd", progress: "Negotiating" }), row({ key: "d", id: "d", title: "Early", progress: "Found" })]} />);
     expect(within(screen.getByRole("region", { name: "Offered" })).getByText("40x Toyota Proace 50kWh Packs")).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Matched" })).getByText("Odd")).toBeTruthy();
-    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["New", "Qualified", "Matched", "Offered", "Signed & Paid", "Complete"]);
-    const bid = within(screen.getByRole("region", { name: "Signed & Paid" }));
+    expect(within(screen.getByRole("region", { name: "Negotiating" })).getByText("Odd")).toBeTruthy();
+    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(screen.queryByText("Early")).toBeNull();
+    const bid = within(screen.getByRole("region", { name: "Agreed" }));
     fireEvent.click(bid.getByText("5MWh Cells"));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
   });
@@ -31,15 +32,33 @@ describe("Bulk Trades board", () => {
     expect(screen.getByText("On us")).toBeTruthy();
   });
 
-  it("shows each card's value and owner and the stage total beside the stage name", () => {
+  it("shows each card's value, fee, chance, owner and next action, and the stage total beside the stage name", () => {
     render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={vi.fn()}
-      shown={[row({ value_eur: 1_000_000, owner: "Sean", likelihood: 70 }), row({ key: "b", id: "b", value_eur: 500_000 }), row({ key: "c", id: "c", progress: "New" })]} />);
+      shown={[row({ value_eur: 1_000_000, fee_eur: 100_000, owner: "Sean", likelihood: 70 }), row({ key: "b", id: "b", value_eur: 500_000, fee_eur: 50_000, next_action: null }), row({ key: "c", id: "c", progress: "New" })]} />);
     const offered = within(screen.getByRole("region", { name: "Offered" }));
     expect(offered.getByText("(2)")).toBeTruthy();
     expect(offered.getByText("€1.5M").closest("[data-stage-total]")).toBeTruthy();
-    expect(offered.getByText("70% · Owner Sean")).toBeTruthy();
-    expect(offered.getByText("No owner")).toBeTruthy();
-    expect(offered.getByText("€1M")).toBeTruthy();
+    const [first, second] = offered.getAllByRole("button");
+    expect(first.querySelector("[data-card-value]")).toHaveTextContent("€1M");
+    expect(first.querySelector("[data-card-fee]")).toHaveTextContent("€100k");
+    expect(first.querySelector("[data-card-chance]")).toHaveTextContent("70%");
+    expect(first.querySelector("[data-card-owner]")).toHaveTextContent("Owner Sean");
+    expect(within(first).getByText("Call seller")).toBeTruthy();
+    expect(within(first).getByText("1 Oct")).toBeTruthy();
+    expect(second.querySelector("[data-card-chance]")).toHaveTextContent("—");
+    expect(within(second).getByText("No owner")).toBeTruthy();
+    expect(within(second).getByText("No next action")).toBeTruthy();
+  });
+
+  it("sums fee × chance per stage and counts the deals missing either", () => {
+    render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={vi.fn()}
+      shown={[row({ fee_eur: 4000, likelihood: 50 }), row({ key: "b", id: "b", fee_eur: 2200, likelihood: 100 }), row({ key: "c", id: "c", fee_eur: 9000 }), row({ key: "d", id: "d", likelihood: 40 }),
+        row({ key: "e", id: "e", progress: "Paid", fee_eur: 1000, likelihood: 100 })]} />);
+    const offered = screen.getByRole("region", { name: "Offered" });
+    expect(offered.querySelector("[data-stage-weighted]")).toHaveTextContent("€4.2k weighted");
+    expect(offered.querySelector("[data-stage-unsized]")).toHaveTextContent("2 unsized");
+    const paid = screen.getByRole("region", { name: "Paid" });
+    expect(paid.querySelector("[data-stage-weighted]")).toHaveTextContent("€1k weighted");
+    expect(paid.querySelector("[data-stage-unsized]")).toBeNull();
   });
 });
-

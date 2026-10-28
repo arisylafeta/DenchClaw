@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeBulkTradesTab, buildBulkTradesUrl, carryBulkTradesParams, isBulkTradesHref, isTradesPreviewHref, parseBulkTradesRoute,
-  parseTradeListingPath, tradeListingPath,
+  parseTradeListingPath, previewTab, tradeListingPath, BULK_TRADES_PARAMS, TRADES_PREVIEW_PATH,
 } from "./bulk-trades-url";
 
 describe("bulk trades URLs", () => {
@@ -78,3 +78,28 @@ describe("listing tab paths", () => {
   });
 });
 
+
+describe("Trades Preview tabs", () => {
+  const route = (search: string) => parseBulkTradesRoute(`path=%7Etrades-preview&${search}`);
+  it("opens Today by default, and each tab by name", () => {
+    expect(previewTab(route(""))).toBe("today");
+    for (const tab of ["today", "demand", "supply", "board"] as const) expect(previewTab(route(`tab=${tab}`))).toBe(tab);
+  });
+  it("keeps older links working: board and trades go to the Board, a side with no tab to Requests or Supply", () => {
+    expect(previewTab(route("tab=trades"))).toBe("board");
+    expect(previewTab(route("side=buyer"))).toBe("demand");
+    expect(previewTab(route("side=seller"))).toBe("supply");
+    expect(previewTab(route("side=bogus"))).toBe("today");
+    expect(previewTab(route("tab=board&side=buyer"))).toBe("board");
+    expect(previewTab(route("tab=nonsense&side=seller"))).toBe("supply");
+    for (const filter of ["q=leaf", "company=Acme", "category=packs", "waiting=us", "progress=Matched"]) expect(previewTab(route(filter))).toBe("demand");
+    expect(previewTab(route("owner=Sean"))).toBe("today");
+  });
+  it("round-trips the driver as owner and carries it through shell re-projection", () => {
+    const parsed = route("tab=supply&owner=Sean");
+    expect(parsed.owner).toBe("Sean");
+    expect(buildBulkTradesUrl({ tab: "supply", owner: "Sean" }, undefined, TRADES_PREVIEW_PATH)).toBe("/?path=%7Etrades-preview&tab=supply&owner=Sean");
+    expect(BULK_TRADES_PARAMS).toContain("owner");
+    expect(new URLSearchParams(carryBulkTradesParams("path=%7Etrades-preview", "path=%7Etrades-preview&owner=Ari")).get("owner")).toBe("Ari");
+  });
+});

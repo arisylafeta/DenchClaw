@@ -6,6 +6,8 @@ import type { BulkListingView } from "@/lib/bulk-listing";
 import { shortDate } from "@/lib/bulk-trade-details";
 import { LikelihoodPicker } from "./likelihood-picker";
 import { OwnerPicker } from "./owner-picker";
+import { FeeInput } from "./fee-input";
+import { valueAndFee } from "@/lib/bulk-sheet";
 import { CopyIdButton } from "./copy-id-button";
 import { WaitingBadge } from "./opportunities-sheet";
 import css from "./demand-header.module.css";
@@ -25,7 +27,7 @@ export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkLis
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
         </div>
       </div>
-      <div className={`${css.status} flex items-start gap-2`}>{listing.waiting_on && <WaitingBadge row={listing} large />}<LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /></div>
+      <div className={`${css.status} flex items-start gap-2`}>{listing.waiting_on && <WaitingBadge row={listing} large />}<FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={onChanged} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /></div>
     </div>
     <dl className={css.facts}>{[
       ["Seller", listing.party], ["Quantity", listing.quantity], ["Location", listing.location],

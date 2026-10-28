@@ -6,17 +6,27 @@ import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
-import { filterSheet, filtersFromRoute, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
+import { filterSheet, filtersFromRoute, NO_FILTERS, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
+import { DEMAND_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
+import { boardRows } from "@/lib/bulk-desk";
+import type { DealOwner } from "@/lib/bulk-owner";
 import type { Demand } from "@/lib/bulk-demand";
 import { ListingDetail } from "./listing-detail";
 import { DemandDialog } from "./demand-editor";
 import { OpportunitiesSheet, SheetFilterBar } from "./opportunities-sheet";
 import { BulkBoard } from "./bulk-board";
+import { TodayView } from "./today-view";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade-ui";
-import { BULK_TRADES_PARAMS, TRADES_PREVIEW_PATH } from "@/lib/bulk-trades-url";
+import { BULK_TRADES_PARAMS, TRADES_PREVIEW_PATH, previewTab, type PreviewTab } from "@/lib/bulk-trades-url";
 
 const SHEET_STATE_KEY = "bt-preview-sheet-state";
+const TABS: [PreviewTab, string][] = [["today", "Today"], ["demand", "Requests"], ["supply", "Supply"], ["board", "Board"]];
+/** The drivers, in the order the header shows them. */
+const DRIVERS: (DealOwner | "all")[] = ["all", "Alex", "Sean", "Ari"];
+const segmentOn = { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" } as const;
+const segmentOff = { color: "var(--bt-text-2)" } as const;
+const segmentButton = "h-8 shrink-0 rounded-md px-3 text-[13px] whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 import { useBulkTradesRoute } from "./use-bulk-trades-route";
 
 type Props = {
@@ -78,15 +88,27 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
     wasDetailOpen.current = detailOpen;
   }, [detailOpen, load]);
 
-  const filters = useMemo(() => filtersFromRoute(route), [route]);
-  const shown = useMemo(() => sortRows(filterSheet(rows, filters), sort), [rows, filters, sort]);
-  // Normalised from what the sheet shows, so an older ?tab=demand link keeps its filter through open and back.
-  const board = route.tab === "board";
-  const filterFields = { ...routeFromFilters(filters), tab: board ? ("board" as const) : null };
+  // Today, Requests (demand), Supply or Board. Requests and Supply lock the sheet to their side; older links with only
+  // side=buyer|seller land on them. The side is written to the URL only on the Board, where it is still a filter.
+  const tab = previewTab(route);
+  const filters = useMemo<SheetFilters>(() => {
+    const base = filtersFromRoute(route);
+    // A Progress value from an older link or another tab is mapped to this tab's stages, or dropped. The Board has no Progress filter.
+    const kind = tab === "demand" ? "demand" : tab === "supply" ? "supply" : null;
+    const progress = kind && base.progress !== "all" ? progressFor(base.progress, kind) ?? "all" : kind ? base.progress : "all";
+    return { ...base, progress, side: tab === "demand" ? "buyer" : tab === "supply" ? "seller" : tab === "board" ? base.side : "all" };
+  }, [route, tab]);
+  const tabRows = useMemo(() => tab === "demand" ? rows.filter((row) => row.kind === "demand")
+    : tab === "supply" ? rows.filter((row) => row.kind === "supply") : tab === "board" ? boardRows(rows) : rows, [rows, tab]);
+  const shown = useMemo(() => tab === "today" ? filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }) : sortRows(filterSheet(tabRows, filters), sort), [rows, tabRows, filters, sort, tab]);
+  const routeFields = (next: SheetFilters, nextTab: PreviewTab) => ({ ...routeFromFilters(next), side: nextTab === "board" && next.side !== "all" ? next.side : null, tab: nextTab === "today" ? null : nextTab });
+  const filterFields = routeFields(filters, tab);
 
   /** Filters refine the current page (replace); opening a record is a new page (push). */
-  const setFilters = (next: SheetFilters) => navigate({ ...routeFromFilters(next), tab: filterFields.tab }, "replace");
-  const setView = (tab: "board" | null) => navigate({ ...routeFromFilters(filters), tab }, "replace");
+  const setFilters = (next: SheetFilters) => navigate(routeFields(next, tab), "replace");
+  /** A tab starts with its own filters; only the driver carries over. */
+  const setTab = (next: PreviewTab) => navigate(routeFields({ ...NO_FILTERS, owner: filters.owner }, next), "replace");
+  const setOwner = (owner: DealOwner | "all") => navigate(routeFields({ ...filters, owner }, tab), "replace");
   /** In the workspace a record opens in its own tab, so the sheet keeps its filters and place. */
   const openId = (id: string, title?: string) => (onOpenListing ? onOpenListing(id, title) : navigate({ ...filterFields, listing: id }));
   const open = (row: SheetRow) => openId(row.id, row.title);
@@ -128,13 +150,18 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
 
   return (
     <div className="bulk-trades bt-preview flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-3 px-2 pb-3 pt-5 sm:px-3">
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
-        <div role="tablist" aria-label="View" className="flex rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
-          {([["List", null], ["Board", "board"]] as const).map(([label, tab]) => (
-            <button key={label} type="button" role="tab" aria-selected={(tab === "board") === board} onClick={() => setView(tab)}
-              className="h-8 rounded-md px-3 text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"
-              style={(tab === "board") === board ? { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" } : { color: "var(--bt-text-2)" }}>{label}</button>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2 pb-2 pt-3 sm:px-3">
+        <h1 className="text-[18px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
+        <div role="tablist" aria-label="View" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
+          {TABS.map(([value, label]) => (
+            <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}
+              className={segmentButton} style={tab === value ? segmentOn : segmentOff}>{label}</button>
+          ))}
+        </div>
+        <div role="group" aria-label="Driver" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
+          {DRIVERS.map((value) => (
+            <button key={value} type="button" aria-pressed={filters.owner === value} onClick={() => setOwner(value)}
+              className={segmentButton} style={filters.owner === value ? segmentOn : segmentOff}>{value === "all" ? "All" : value}</button>
           ))}
         </div>
         <div className="flex-1" />
@@ -155,16 +182,19 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto px-2 pb-8 pt-2 sm:px-3">
+      <main className="flex-1 overflow-auto px-2 pb-8 pt-1 sm:px-3">
         <ErrorText error={actionError} />
-        {board ? (
+        {tab === "today" ? (
+          <TodayView rows={shown} owner={filters.owner} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
+            onOpen={open} onNext={saveNext} onOpenBoard={() => setTab("board")} />
+        ) : tab === "board" ? (
           <div className="flex flex-col gap-4">
-            <SheetFilterBar rows={rows} filters={filters} onFilters={setFilters} hideProgress />
+            <SheetFilterBar rows={tabRows} filters={filters} onFilters={setFilters} hideProgress />
             <BulkBoard shown={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
           </div>
         ) : (
-          <OpportunitiesSheet rows={rows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-            sort={sort} onSort={setSort} onFilters={setFilters} onOpen={open} onNext={saveNext} />
+          <OpportunitiesSheet key={tab} rows={tabRows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
+            sort={sort} onSort={setSort} onFilters={setFilters} onOpen={open} onNext={saveNext} hideSide stages={tab === "demand" ? DEMAND_STAGES : SUPPLY_STAGES} />
         )}
       </main>
 

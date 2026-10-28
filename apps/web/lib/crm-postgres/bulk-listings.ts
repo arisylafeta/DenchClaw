@@ -1,5 +1,5 @@
 import { queryPg } from "../postgres";
-import type { BulkListingView, ListingStage } from "../bulk-listing";
+import { listingStageOf, type BulkListingView } from "../bulk-listing";
 import type { OfferStage } from "./bulk-offers";
 import { listingStage, LISTING_STAGE_ORDER } from "../listing-stage";
 import { demandTitle } from "../bulk-demand-header";
@@ -27,10 +27,10 @@ export async function listingView(id: string): Promise<BulkListingView | null> {
   if (!listing) return null;
   const [stage, demand, [{ listing_stage }]] = await Promise.all([
     listingFurthestStage(id), listing.kind === "demand" ? getDemand(id) : null,
-    queryPg<{ listing_stage: ListingStage }>("select bulk_listing_stage($1) as listing_stage", [id]),
+    queryPg<{ listing_stage: string }>("select bulk_listing_stage($1) as listing_stage", [id]),
   ]);
   const title = [listing.spec.listing_title, listing.context.listing_title]
     .find((value): value is string => typeof value === "string" && !!value.trim());
-  return { ...listing, ...listingStage([stage]), stage: listing_stage, title: demand ? demandTitle(demand) : title?.trim() || listing.summary,
+  return { ...listing, ...listingStage([stage]), stage: listingStageOf(listing_stage, listing.kind), title: demand ? demandTitle(demand) : title?.trim() || listing.summary,
     ...(demand ? { demand } : {}) };
 }

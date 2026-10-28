@@ -26,7 +26,7 @@ import psycopg2
 import psycopg2.extras
 
 DSN = os.environ.get("DENCH_CRM_DSN", "host=/var/run/postgresql dbname=denchclaw")
-ACTIVE = ("candidate", "offered", "contract_out", "signed", "invoiced", "paid")
+ACTIVE = ("candidate", "offered", "negotiating", "contract_out", "signed", "invoiced", "paid")
 OUR_DOMAIN = "@rebattery.io"
 CRM = "https://crm.rebattery.io/?path=~trades-preview&listing="
 
