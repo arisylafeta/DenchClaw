@@ -15,6 +15,16 @@ describe('history/live reconciliation', () => {
     expect(state.messages.map(message => message.id)).toEqual(['1', '2'])
     expect(state.clientToMessage).toEqual({ a: '1', b: '2' })
   })
+  it('claims the durable row of an image prompt that Hermes extended with staging lines', () => {
+    const sent = '[Attached files: assets/1-image.png]\n\nthere is a gap under the header'
+    let state = submitOptimistic(initial(), { clientId: 'a', text: sent })
+    state = applySnapshot(state, snapshot({ messages: [
+      { id: '1', role: 'user', text: `${sent}\n@image:/root/.hermes/profiles/devon/images/upload_1.png\n[screenshot]` },
+      { id: '2', role: 'assistant', text: 'fixed' },
+    ] }), 0, ctx)
+    expect(state.messages.map(message => message.id)).toEqual(['1', '2'])
+    expect(state.clientToMessage).toEqual({ a: '1' })
+  })
   it('does not claim an identical user row that existed before submission', () => {
     let state = applySnapshot(initial(), snapshot({ messages: [{ id: 'old', role: 'user', text: 'same' }] }), 0, ctx)
     state = submitOptimistic(state, { clientId: 'a', text: 'same' })

@@ -141,6 +141,14 @@ export function placeSteer(state: ReconcileState, clientId: string): ReconcileSt
   live.splice(boundary < 0 ? (waiting < 0 ? live.length : waiting) : boundary + 1, 0, steer)
   return { ...state, messages: live, streamId: null, awaitingResponse: true, sawAssistantPayload: false }
 }
+/**
+ * Hermes appends image staging lines (`@image:<path>`, `[screenshot]`, `[User attached image: …]`) to the
+ * persisted prompt. The CRM never sent them, so they must not stop the durable row from claiming its send.
+ */
+const withoutStagedImages = (text: string): string => text
+  .replace(/^[ \t]*@image:\S+[ \t]*$/gm, '')
+  .replace(/^[ \t]*\[User attached image:[^\]]*\][ \t]*$/gm, '')
+  .replace(/^[ \t]*\[(?:screenshot|image|photo)\][ \t]*$/gm, '')
 /** Consume consecutive submissions in order, including the gateway's aggregate queue MERGE. */
 function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pick<ReconcileState, 'messages' | 'clientToMessage'> {
   const messages = base.messages.slice()
@@ -160,7 +168,7 @@ function reconcileOptimistic(state: ReconcileState, base: SnapshotChatState): Pi
       const message = messages[row]
       if (message.role !== 'user' || first.knownUserIds.includes(message.id)) continue
       if (message.clientIds?.includes(first.clientId)) { match = row; consumed = 1; break }
-      const target = normalizeMessageText(steerOwnText(messageText(message)))
+      const target = normalizeMessageText(withoutStagedImages(steerOwnText(messageText(message))))
       let combined = ''
       for (let end = i; end < state.optimistic.length; end++) {
         if (state.optimistic[end].knownUserIds.includes(message.id)) break
