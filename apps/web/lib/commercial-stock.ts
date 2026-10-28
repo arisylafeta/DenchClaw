@@ -54,7 +54,7 @@ export type StockGroup = {
   units: number;
   /** Distinct suppliers; null when fewer than MIN_SOURCES, so a single seller cannot be singled out. */
   sources: number | null;
-  /** Empty when fewer than MIN_SOURCES. */
+  /** Countries the stock is held in (supplier country), always shown: buyers plan logistics from it (Ari, 28 Oct 2026). */
   countries: string[];
   years: { min: number; max: number } | null;
   /** With fewer than MIN_SOURCES only a band rounded to PRICE_BAND_EUR is shown and median is null. */
@@ -177,7 +177,7 @@ export function aggregateStock(rows: StockRow[]): StockGroup[] {
       powertrain: clean(first.powertrain),
       units: members.reduce((sum, row) => sum + row.quantity, 0),
       sources: crowd ? sources : null,
-      countries: crowd ? [...new Set(members.map((row) => clean(row.country)).filter((country): country is string => Boolean(country)))].sort() : [],
+      countries: [...new Set(members.map((row) => clean(row.country)).filter((country): country is string => Boolean(country)))].sort(),
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
       priceEurExVat: !exVat.length ? null : crowd
         ? { min: round(Math.min(...exVat)), median: round(median(exVat)), max: round(Math.max(...exVat)), priced: exVat.length }

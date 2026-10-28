@@ -27,9 +27,9 @@ describe("aggregateStock", () => {
     for (const secret of ["Secret Breaker", "Other Dismantler", "co_a", "co_b", "p_a", "sto_1", "sto_4"]) expect(text).not.toContain(secret);
   });
 
-  it("hides source count, countries and exact prices below three suppliers", () => {
+  it("hides source count and exact prices below three suppliers, never countries", () => {
     const [few] = aggregateStock([row({ id: "a", price_eur_ex_vat: 4180 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 4777 })]);
-    expect(few).toMatchObject({ sources: null, countries: [], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
+    expect(few).toMatchObject({ sources: null, countries: ["Sweden"], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
     const [crowd] = aggregateStock([row({ id: "a" }), row({ id: "b", company_id: "co_b", country: "Lithuania", price_eur_ex_vat: 3500 }),
       row({ id: "c", company_id: "co_c", country: "Norway", price_eur_ex_vat: 4500, sync_class: "static" })]);
     expect(crowd).toMatchObject({ sources: 3, countries: ["Lithuania", "Norway", "Sweden"], synced: 2, priceEurExVat: { min: 3500, median: 4000, max: 4500, priced: 3 } });
