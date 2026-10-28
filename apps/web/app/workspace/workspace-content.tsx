@@ -2682,7 +2682,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
       onOpenMailDraft={(id, title) => { void handleFilePathClickFromChat(mailDraftPath(id), { title }); }}
       onOpenListing={openTradeListing}
       onOpenMailMessage={(id, title) => { void handleFilePathClickFromChat(mailMessagePath(id), { title }); }}
-      onCloseTab={() => { if (tab) dispatch({ type: "closeContent", id: tab.id }); }}
+      onCloseTab={() => { if (!tab) return; dispatch({ type: "closeContent", id: tab.id }); /* A listing tab's back link returns to the Bulk Trades sheet, as it was left. */ if (tab.kind === "trade-listing") openTradesPreview(); }}
       onRenameTab={(title) => { if (tab) dispatch({ type: "renameContent", id: tab.id, title }); }}
       activeEntryId={undefined}
       searchFn={searchIndex}
