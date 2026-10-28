@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStock, groupKeyFor, matchesFilters, type StockRow } from "./commercial-stock";
+import { aggregateStock, groupKeyFor, matchesFilters, normalModel, supplierToken, type StockRow } from "./commercial-stock";
 
 const row = (over: Partial<StockRow>): StockRow => ({
   id: "sto_1", company_id: "co_a", person_id: "p_a", supplier: "Secret Breaker AB", status: "opportunity",
@@ -27,9 +27,9 @@ describe("aggregateStock", () => {
     for (const secret of ["Secret Breaker", "Other Dismantler", "co_a", "co_b", "p_a", "sto_1", "sto_4"]) expect(text).not.toContain(secret);
   });
 
-  it("hides source count and exact prices below three suppliers, never countries", () => {
+  it("bands prices below three suppliers but always shows supplier count and countries", () => {
     const [few] = aggregateStock([row({ id: "a", price_eur_ex_vat: 4180 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 4777 })]);
-    expect(few).toMatchObject({ sources: null, countries: ["Sweden"], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
+    expect(few).toMatchObject({ sources: 2, countries: ["Sweden"], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
     const [crowd] = aggregateStock([row({ id: "a" }), row({ id: "b", company_id: "co_b", country: "Lithuania", price_eur_ex_vat: 3500 }),
       row({ id: "c", company_id: "co_c", country: "Norway", price_eur_ex_vat: 4500, sync_class: "static" })]);
     expect(crowd).toMatchObject({ sources: 3, countries: ["Lithuania", "Norway", "Sweden"], synced: 2, priceEurExVat: { min: 3500, median: 4000, max: 4500, priced: 3 } });
@@ -52,5 +52,24 @@ describe("matchesFilters", () => {
     expect(matchesFilters(row({ powertrain: "HEV" }), { powertrain: "hev" }, today)).toBe(true);
     expect(matchesFilters(row({ seen_on: "2026-08-01" }), { seenWithinDays: 30 }, today)).toBe(false);
     expect(matchesFilters(row({ make: null }), {}, today)).toBe(false);
+  });
+
+  it("strips a repeated make from the model so both spellings group together", () => {
+    expect(normalModel("Hyundai", "Hyundai Ioniq 5")).toBe("Ioniq 5");
+    expect(normalModel("VW", "Volkswagen ID.4")).toBe("ID.4");
+    expect(normalModel("Kia", "Kiaxx")).toBe("Kiaxx");
+    expect(groupKeyFor(row({ make: "Hyundai", model: "Hyundai Ioniq 5" }))).toBe(groupKeyFor(row({ make: "Hyundai", model: "Ioniq 5" })));
+    expect(aggregateStock([row({ make: "Hyundai", model: "Hyundai Ioniq 5" })])[0].label).toBe("Hyundai Ioniq 5 50 kWh NMC622 pack");
+  });
+
+  it("gives per-supplier units under scoped opaque tokens", () => {
+    const rows = [row({ id: "a", company_id: "c1", quantity: 2 }), row({ id: "b", company_id: "c1", quantity: 1 }), row({ id: "c", company_id: "c2", person_id: "p_c", quantity: 1 })];
+    const [group] = aggregateStock(rows, (id) => supplierToken(id, "conv-1234", "k".repeat(32)));
+    expect(group.sources).toBe(2);
+    expect(group.suppliers.map((entry) => entry.units)).toEqual([3, 1]);
+    expect(group.suppliers[0].supplier).toMatch(/^S[0-9a-f]{6}$/);
+    expect(JSON.stringify(group)).not.toMatch(/"c1"|"c2"|Secret Breaker/);
+    expect(supplierToken("c1", "conv-1234", "k".repeat(32))).toBe(group.suppliers[0].supplier);
+    expect(supplierToken("c1", "conv-9999", "k".repeat(32))).not.toBe(group.suppliers[0].supplier);
   });
 });

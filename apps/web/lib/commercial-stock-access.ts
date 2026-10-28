@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
  */
 const SECRET_FILE = "/root/.hermes/workspace/secrets/commercial-stock-api.secret";
 
-function secret(): string | null {
+export function secret(): string | null {
   try {
     const value = readFileSync(process.env.COMMERCIAL_STOCK_SECRET_FILE || SECRET_FILE, "utf8").trim();
     return value.length >= 32 ? value : null;

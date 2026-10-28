@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 /**
  * Commercial-buyer stock (REB-577): dismantler stock from `crm_stock_opportunities`, aggregated into
@@ -52,8 +52,13 @@ export type StockGroup = {
   chemistry: string | null;
   powertrain: string | null;
   units: number;
-  /** Distinct suppliers; null when fewer than MIN_SOURCES, so a single seller cannot be singled out. */
-  sources: number | null;
+  /** Distinct suppliers holding the group (a count only; Ari, 28 Oct 2026: buyers plan collection from it). */
+  sources: number;
+  /**
+   * Units per supplier under an opaque token, largest first. Tokens are scoped to one conversation (see supplierToken),
+   * so Jules can tell how many suppliers cover a selection across searches, but they never identify or link a supplier.
+   */
+  suppliers: { supplier: string; units: number }[];
   /** Countries the stock is held in (supplier country), always shown: buyers plan logistics from it (Ari, 28 Oct 2026). */
   countries: string[];
   years: { min: number; max: number } | null;
@@ -66,7 +71,7 @@ export type StockGroup = {
   synced: number | null;
 };
 
-/** Below this many suppliers a group shows no supplier count, countries or exact prices. */
+/** Below this many suppliers a group shows only a rounded price band. */
 export const MIN_SOURCES = 3;
 export const PRICE_BAND_EUR = 500;
 
@@ -96,8 +101,24 @@ export function normalKwh(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value < 2000 ? Math.round(value * 10) / 10 : null;
 }
 
+/** Model without a repeated make ("Hyundai Ioniq 5" under make Hyundai becomes "Ioniq 5"). */
+export function normalModel(make: string | null | undefined, model: string | null | undefined): string | null {
+  const value = clean(model);
+  if (!value) return null;
+  const lower = value.toLowerCase();
+  for (const prefix of new Set([clean(make)?.toLowerCase(), normalMake(make)?.toLowerCase()])) {
+    if (prefix && lower.startsWith(`${prefix} `)) return value.slice(prefix.length + 1).trim() || null;
+  }
+  return value;
+}
+
+/** Opaque supplier token, stable within one scope (a conversation) and unlinkable across scopes. */
+export function supplierToken(supplierId: string, scope: string, secret: string): string {
+  return `S${createHmac("sha256", secret).update(`${scope}\u0000${supplierId}`).digest("hex").slice(0, 6)}`;
+}
+
 function specKey(row: StockRow) {
-  return [normalMake(row.make), clean(row.model)?.toLowerCase(), normalFormat(row.format), normalKwh(row.capacity_kwh),
+  return [normalMake(row.make), normalModel(row.make, row.model)?.toLowerCase(), normalFormat(row.format), normalKwh(row.capacity_kwh),
     clean(row.chemistry)?.toUpperCase()].map((part) => part ?? "").join("|");
 }
 
@@ -144,7 +165,7 @@ function labelFor(group: Pick<StockGroup, "make" | "model" | "capacityKwh" | "fo
 }
 
 /** Supplier-free groups, most units first. */
-export function aggregateStock(rows: StockRow[]): StockGroup[] {
+export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) => string = () => "S"): StockGroup[] {
   const groups = new Map<string, { rows: StockRow[] }>();
   for (const row of rows) {
     if (!normalMake(row.make)) continue;
@@ -160,7 +181,7 @@ export function aggregateStock(rows: StockRow[]): StockGroup[] {
     const years = members.map((row) => row.year).filter((year): year is number => typeof year === "number" && year > 1990);
     const seen = members.map((row) => row.seen_on).filter((date): date is string => Boolean(date)).sort();
     const models = new Map<string, number>();
-    for (const row of members) { const model = clean(row.model); if (model) models.set(model, (models.get(model) ?? 0) + 1); }
+    for (const row of members) { const model = normalModel(row.make, row.model); if (model) models.set(model, (models.get(model) ?? 0) + 1); }
     const group = {
       make: normalMake(first.make)!,
       model: [...models].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
@@ -168,7 +189,12 @@ export function aggregateStock(rows: StockRow[]): StockGroup[] {
       capacityKwh: normalKwh(first.capacity_kwh),
       chemistry: clean(first.chemistry)?.toUpperCase() ?? null,
     };
-    const sources = new Set(members.map((row) => row.company_id ?? row.person_id)).size;
+    const perSupplier = new Map<string, number>();
+    for (const row of members) {
+      const id = String(row.company_id ?? row.person_id);
+      perSupplier.set(id, (perSupplier.get(id) ?? 0) + row.quantity);
+    }
+    const sources = perSupplier.size;
     const crowd = sources >= MIN_SOURCES;
     result.push({
       groupKey,
@@ -176,7 +202,8 @@ export function aggregateStock(rows: StockRow[]): StockGroup[] {
       ...group,
       powertrain: clean(first.powertrain),
       units: members.reduce((sum, row) => sum + row.quantity, 0),
-      sources: crowd ? sources : null,
+      sources,
+      suppliers: [...perSupplier].map(([id, units]) => ({ supplier: tokenFor(id), units })).sort((a, b) => b.units - a.units || a.supplier.localeCompare(b.supplier)),
       countries: [...new Set(members.map((row) => clean(row.country)).filter((country): country is string => Boolean(country)))].sort(),
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
       priceEurExVat: !exVat.length ? null : crowd

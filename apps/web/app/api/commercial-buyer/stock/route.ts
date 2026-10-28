@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { aggregateStock, matchesFilters } from "@/lib/commercial-stock";
-import { commercialStockAuthorised, unauthorised } from "@/lib/commercial-stock-access";
+import { randomUUID } from "node:crypto";
+import { aggregateStock, matchesFilters, supplierToken } from "@/lib/commercial-stock";
+import { commercialStockAuthorised, secret, unauthorised } from "@/lib/commercial-stock-access";
 import { liveStock } from "@/lib/crm-postgres/commercial-stock";
 
 export const runtime = "nodejs";
@@ -14,6 +15,8 @@ const filters = z.strictObject({
   maxPriceEurExVat: z.number().positive().max(1_000_000).optional(),
   seenWithinDays: z.number().int().min(1).max(365).optional(),
   limit: z.number().int().min(1).max(50).optional(),
+  /** Conversation id: supplier tokens are stable within it and unlinkable across conversations. */
+  scope: z.string().trim().min(8).max(80).optional(),
 });
 
 /** Supplier-free stock groups for Jules' commercial-buyer path. */
@@ -22,7 +25,9 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = filters.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid filters" }, { status: 400 });
   const rows = (await liveStock()).filter((row) => matchesFilters(row, parsed.data));
-  const groups = aggregateStock(rows);
+  const key = secret() ?? randomUUID();
+  const scope = parsed.data.scope ?? randomUUID();
+  const groups = aggregateStock(rows, (supplierId) => supplierToken(supplierId, scope, key));
   return Response.json({
     groups: groups.slice(0, parsed.data.limit ?? 20),
     totalGroups: groups.length,
