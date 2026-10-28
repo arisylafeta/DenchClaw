@@ -52,30 +52,34 @@ export const TRADE_STAGES: readonly OfferStage[] = ["contract_out", "signed", "i
 
 /** Every listing stage, in order. Computed by bulk_listing_stage() in Postgres; never stored. Demand and supply
  * have their own early stages (DEMAND_STAGES, SUPPLY_STAGES) and share the deal stages on the Board (BOARD_STAGES). */
-export const LISTING_STAGES = ["New", "Qualified", "Sourcing", "Found", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;
+export const LISTING_STAGES = ["New", "Qualified", "Sourcing", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;
 export type ListingStage = (typeof LISTING_STAGES)[number];
 
 /** Deal stages: an offer is out to a counterparty. Only these are on the Board. */
 export const BOARD_STAGES = ["Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const satisfies readonly ListingStage[];
 /** Requests: we look for supply for a buyer, then deal. */
-export const DEMAND_STAGES = ["New", "Qualified", "Sourcing", "Found", "Can't source", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
+export const DEMAND_STAGES = ["New", "Qualified", "Sourcing", "Can't source", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
 /** Supply: a seller's stock is ready to put to buyers, then deal. */
-export const SUPPLY_STAGES = ["New", "Qualified", "Available", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
+export const SUPPLY_STAGES = ["New", "Available", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
 /** The stages the Requests and Supply lists show as buttons; the rest (Can't source, and the deal stages after Offered,
  * which the Deals tab covers) sit in a "More stages" menu. */
-export const DEMAND_MAIN_STAGES = ["New", "Qualified", "Sourcing", "Found", "Offered"] as const satisfies readonly ListingStage[];
-export const SUPPLY_MAIN_STAGES = ["New", "Qualified", "Available", "Offered"] as const satisfies readonly ListingStage[];
+export const DEMAND_MAIN_STAGES = ["New", "Qualified", "Sourcing", "Offered"] as const satisfies readonly ListingStage[];
+export const SUPPLY_MAIN_STAGES = ["New", "Available", "Offered"] as const satisfies readonly ListingStage[];
 
-/** Labels from bulk_listing_stage() before migration 095, mapped to today's stages so the UI reads right whichever
- * order the UI and the migration go live in. Matched means a counterparty was found: Found for demand, Available for supply. */
+/** Labels from bulk_listing_stage() before migrations 095 and 096, mapped to today's stages so the UI reads right whichever
+ * order the UI and the migration go live in. Matched and Found mean a counterparty was found but not offered: Sourcing
+ * for demand, Available for supply. */
 const LEGACY_STAGE: Record<string, (kind: ListingKind) => ListingStage> = {
-  Matched: (kind) => (kind === "demand" ? "Found" : "Available"),
+  Matched: (kind) => (kind === "demand" ? "Sourcing" : "Available"),
+  Found: (kind) => (kind === "demand" ? "Sourcing" : "Available"),
   "Signed & Paid": () => "Agreed",
   Complete: () => "Delivered",
 };
 
 /** A stage label as the UI should show it: today's labels as they are, older ones mapped, anything else unchanged. */
 export function listingStageOf(label: string, kind: ListingKind): ListingStage {
+  // Supply has no Qualified stage since 096: a qualified lot is Available.
+  if (kind === "supply" && label === "Qualified") return "Available";
   return (LISTING_STAGES as readonly string[]).includes(label) ? (label as ListingStage) : LEGACY_STAGE[label]?.(kind) ?? (label as ListingStage);
 }
 

@@ -132,7 +132,7 @@ export function formatEurCompact(value: number | null | undefined): string {
 }
 
 export const STAGE_TONE: Record<ListingStage, SheetTone> = {
-  New: "new", Qualified: "new", Sourcing: "active", Found: "active", Available: "active", "Can't source": "warning",
+  New: "new", Qualified: "new", Sourcing: "active", Available: "active", "Can't source": "warning",
   Offered: "waiting", Negotiating: "waiting", Agreed: "closing", Paid: "closing", Delivered: "closing",
 };
 

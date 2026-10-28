@@ -40,7 +40,7 @@ describe("deal totals", () => {
     expect(dealTotals([demand, row("s1", { paired_listing_id: "d1" })]).unsized).toBe(0);
   });
   it("keeps only deal stages for the Board", () => {
-    const stages = ["New", "Qualified", "Sourcing", "Found", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;
+    const stages = ["New", "Qualified", "Sourcing", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;
     expect(boardRows(stages.map((progress) => row(progress, { progress }))).map((r) => r.progress)).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
   });
 });

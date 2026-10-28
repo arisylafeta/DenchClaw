@@ -28,7 +28,7 @@ describe("listing view", () => {
   });
   it("attaches the existing demand and uses its headline rules", async () => {
     const demand = { wants: "4 Renault packs", buyer: "Buyer", product_family: null, context: {} };
-    mocks.query.mockResolvedValueOnce([{ id: "demand", kind: "demand", summary: "Summary", spec: {}, context: {} }]).mockResolvedValueOnce([{ stage: "candidate" }]).mockResolvedValueOnce([{ listing_stage: "Found" }]);
+    mocks.query.mockResolvedValueOnce([{ id: "demand", kind: "demand", summary: "Summary", spec: {}, context: {} }]).mockResolvedValueOnce([{ stage: "candidate" }]).mockResolvedValueOnce([{ listing_stage: "Sourcing" }]);
     mocks.demand.mockResolvedValue(demand);
     expect(await listingView("demand")).toMatchObject({ demand, title: "4 × Renault packs", is_trade: false });
   });

@@ -29,10 +29,10 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     await pg.pgPool.end();
   });
 
-  it("is New until the basics are in, then Qualified", async () => {
+  it("is New until the basics are in, then Qualified (demand) or Available (supply)", async () => {
     expect(await stage("stg_new")).toBe("New");
     expect(await stage("stg_partial")).toBe("New");
-    expect(await stage("stg_ready")).toBe("Qualified");
+    expect(await stage("stg_ready")).toBe("Available");
     expect(await stage("stg_demand")).toBe("Qualified");
   });
 
@@ -40,12 +40,12 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     expect(await stage("stg_asked")).toBe("New");
   });
 
-  it("is Available (supply) or Found (demand) by a visible saved match, and a hidden one does not count", async () => {
+  it("is Available (supply) or Sourcing (demand) by a visible saved match, and a hidden one does not count", async () => {
     await pg.queryPg("insert into crm_bulk_trade_supply_matches (supply_id, demand_id, strength, reason, hidden) values ('stg_new', 'stg_demand', 'partial', 'x', true)");
     expect(await stage("stg_new")).toBe("New");
     await pg.queryPg("update crm_bulk_trade_supply_matches set hidden = false where supply_id = 'stg_new'");
     expect(await stage("stg_new")).toBe("Available");
-    expect(await stage("stg_demand")).toBe("Found");
+    expect(await stage("stg_demand")).toBe("Sourcing");
     await pg.queryPg("delete from crm_bulk_trade_supply_matches where supply_id = 'stg_new'");
   });
 
@@ -58,7 +58,7 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     expect(await stage("stg_demand")).toBe("Qualified");
   });
 
-  it("marks a demand Can't source while a reason is set, over Found, but never over a live deal", async () => {
+  it("marks a demand Can't source while a reason is set, over Sourcing, but never over a live deal", async () => {
     const { setListingCantSource } = await import("./bulk-listing-cant-source");
     const reason = (text: string | null) => setListingCantSource("stg_demand", text);
     expect(await setListingCantSource("stg_ready", "Supply cannot be unsourceable")).toBe(false);
@@ -75,7 +75,7 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     expect(await stage("stg_demand")).toBe("Offered");
     await reason(null);
     await pg.queryPg("update crm_bulk_offers set stage = 'candidate' where id = 'stg_dc'");
-    expect(await stage("stg_demand")).toBe("Found");
+    expect(await stage("stg_demand")).toBe("Sourcing"); // a candidate supplier, not offered yet
     await pg.queryPg("delete from crm_bulk_offers where id = 'stg_dc'");
   });
 

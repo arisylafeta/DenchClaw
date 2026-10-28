@@ -14,7 +14,7 @@ describe("Bulk Trades board", () => {
   it("puts each card in its stage column and opens it on click", () => {
     const onOpen = vi.fn();
     render(<BulkBoard loading={false} error={null} today="2026-10-23" onOpen={onOpen}
-      shown={[row({}), row({ key: "b", id: "b", title: "5MWh Cells", side: "buyer", progress: "Agreed" }), row({ key: "c", id: "c", title: "Odd", progress: "Negotiating" }), row({ key: "d", id: "d", title: "Early", progress: "Found" })]} />);
+      shown={[row({}), row({ key: "b", id: "b", title: "5MWh Cells", side: "buyer", progress: "Agreed" }), row({ key: "c", id: "c", title: "Odd", progress: "Negotiating" }), row({ key: "d", id: "d", title: "Early", progress: "Sourcing" })]} />);
     expect(within(screen.getByRole("region", { name: "Offered" })).getByText("40x Toyota Proace 50kWh Packs")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Negotiating" })).getByText("Odd")).toBeTruthy();
     expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);

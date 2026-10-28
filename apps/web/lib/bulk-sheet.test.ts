@@ -31,8 +31,9 @@ describe("sheet rows", () => {
   });
 
   it("shows offer progress and preserves an explicit hold", () => {
-    for (const stage of LISTING_STAGES)
+    for (const stage of SUPPLY_STAGES)
       expect(listing({ stage }).progress).toBe(stage);
+    expect(listing({ stage: "Qualified" }).progress).toBe("Available"); // supply has no Qualified since 096
     expect(listing({ stage: "Offered", spec: { trade_stage: "On hold", hold_until: "2026-11-01" } }))
       .toMatchObject({ progress: "Offered", held: true, tone: "hold" });
     expect(listing({ stage: "Offered" })).toMatchObject({ held: false });
@@ -114,7 +115,7 @@ describe("ranking", () => {
 describe("sortRows", () => {
   const row = (id: string, over = {}) => ({ ...demand({ id }), ...over });
   const rows = [
-    row("a", { score: 40, next_due: "2026-10-30", progress: "Found", title: "A" }),
+    row("a", { score: 40, next_due: "2026-10-30", progress: "Sourcing", title: "A" }),
     row("b", { score: null, next_due: null, progress: "New", title: "B" }),
     row("c", { score: 90, next_due: "2026-10-25", progress: "Offered", title: "C" }),
     row("d", { score: 12, next_due: null, progress: "Qualified", title: "D" }),
@@ -191,9 +192,9 @@ describe("value and fee", () => {
 
 describe("stages", () => {
   it("orders every stage once, and splits them by kind with the deal stages shared", () => {
-    expect(LISTING_STAGES).toEqual(["New", "Qualified", "Sourcing", "Found", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
-    expect(DEMAND_STAGES).toEqual(["New", "Qualified", "Sourcing", "Found", "Can't source", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
-    expect(SUPPLY_STAGES).toEqual(["New", "Qualified", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(LISTING_STAGES).toEqual(["New", "Qualified", "Sourcing", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(DEMAND_STAGES).toEqual(["New", "Qualified", "Sourcing", "Can't source", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(SUPPLY_STAGES).toEqual(["New", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
     expect(BOARD_STAGES).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
     expect(stagesFor("demand")).toBe(DEMAND_STAGES);
     expect(stagesFor("supply")).toBe(SUPPLY_STAGES);
@@ -201,21 +202,24 @@ describe("stages", () => {
   });
   it("colours early stages quiet, working stages blue, deals amber then green, and Can't source as a warning", () => {
     expect(LISTING_STAGES.map((stage) => STAGE_TONE[stage])).toEqual(
-      ["new", "new", "active", "active", "warning", "active", "waiting", "waiting", "closing", "closing", "closing"]);
+      ["new", "new", "active", "warning", "active", "waiting", "waiting", "closing", "closing", "closing"]);
     expect(demand({ stage: "Can't source" })).toMatchObject({ progress: "Can't source", tone: "warning" });
     expect(demand({ stage: "Mystery" as never })).toMatchObject({ progress: "Mystery", tone: "new" });
   });
   it("reads the labels of a database without migration 095 as today's stages", () => {
-    expect(demand({ stage: "Matched" as never })).toMatchObject({ progress: "Found", tone: "active" });
+    expect(demand({ stage: "Matched" as never })).toMatchObject({ progress: "Sourcing", tone: "active" });
+    expect(demand({ stage: "Found" as never })).toMatchObject({ progress: "Sourcing", tone: "active" });
     expect(supply({ stage: "Matched" as never })).toMatchObject({ progress: "Available", tone: "active" });
     expect(supply({ stage: "Signed & Paid" as never })).toMatchObject({ progress: "Agreed", tone: "closing" });
     expect(demand({ stage: "Complete" as never })).toMatchObject({ progress: "Delivered", tone: "closing" });
     expect(listingStageOf("Offered", "supply")).toBe("Offered");
   });
   it("keeps, maps or drops a Progress filter for a list of one kind", () => {
-    expect(progressFor("Found", "demand")).toBe("Found");
-    expect(progressFor("Found", "supply")).toBeNull();
-    expect(progressFor("Matched", "demand")).toBe("Found");
+    expect(progressFor("Found", "demand")).toBe("Sourcing");
+    expect(progressFor("Found", "supply")).toBe("Available");
+    expect(progressFor("Matched", "demand")).toBe("Sourcing");
+    expect(progressFor("Qualified", "supply")).toBe("Available");
+    expect(progressFor("Qualified", "demand")).toBe("Qualified");
     expect(progressFor("Matched", "supply")).toBe("Available");
     expect(progressFor("Signed & Paid", "supply")).toBe("Agreed");
     expect(progressFor("Complete", "demand")).toBe("Delivered");

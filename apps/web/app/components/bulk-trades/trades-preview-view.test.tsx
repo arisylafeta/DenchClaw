@@ -111,7 +111,7 @@ describe("Trades Preview sheet", () => {
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
     expect(screen.queryByLabelText("Progress")).not.toBeInTheDocument();
-    expect(progress).toEqual(["All", "New", "Qualified", "Sourcing", "Found", "Offered"]);
+    expect(progress).toEqual(["All", "New", "Qualified", "Sourcing", "Offered"]);
     const more = Array.from((screen.getByLabelText("More stages") as HTMLSelectElement).options).map((o) => o.value);
     expect(more).toEqual(["", "Can't source", "Negotiating", "Agreed", "Paid", "Delivered"]);
   });
@@ -128,7 +128,7 @@ describe("Trades Preview sheet", () => {
     expect(trade.querySelector("[data-chance]")).toHaveTextContent("60%");
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
-    expect(progress).toEqual(["All", "New", "Qualified", "Available", "Offered"]);
+    expect(progress).toEqual(["All", "New", "Available", "Offered"]);
     expect(Array.from((screen.getByLabelText("More stages") as HTMLSelectElement).options).map((o) => o.value)).toEqual(["", "Negotiating", "Agreed", "Paid", "Delivered"]);
   });
 
