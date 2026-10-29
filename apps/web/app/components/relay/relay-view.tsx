@@ -537,6 +537,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
           ))}
         </div>
       )}
+      {!sent && mail.warnings.map((w) => <div key={w} role="alert" className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)", marginBottom: 0 }}><b>Check the conversation:</b> {w}</div>)}
       {mail.state === "draft" && mail.failure && !sendingTo && <div className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)", marginBottom: 0 }}><b>Last try didn&apos;t send:</b> {failureText(mail.failure, mail.state)}</div>}
       {!sent && (
         <div className={cx(s.bys, verdict.state === "check" && s.check, verdict.state === "stop" && s.stop)} aria-live="polite">

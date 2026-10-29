@@ -59,6 +59,7 @@ export type RelayDraftView = {
     subject: string | null; main: string; updated_at: string; attachments: DraftAttachment[]; transport: string | null;
     /** Why the last send attempt did not go out, if it didn't. */
     failure: { reason: string; detail?: unknown } | null;
+    warnings: string[];
   } | null;
 };
 
@@ -442,7 +443,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
         mail_message_id: d.mail_message_id, gmail_draft_id: d.gmail_draft_id,
         mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, bcc_emails: m.bcc_emails, subject: m.subject,
           main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport,
-          failure: m.personalization?.send_failure ?? null } : null,
+          failure: m.personalization?.send_failure ?? null, warnings: ((m.personalization as { oneoff?: { warnings?: unknown[] } } | null)?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === "string") } : null,
       };
     }),
     todos: todos.filter((t) => t.item_id === item.id),

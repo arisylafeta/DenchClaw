@@ -89,6 +89,14 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
             row['in_reply_to'] = previous['rfc_message_id']
             row['rfc_references'] = ' '.join(filter(None,[previous['rfc_references'],previous['rfc_message_id']]))
             row['personalization']['reply_gmail_message_id'] = previous['gmail_message_id']
+            # Guard: the person we reply to may have started a newer conversation elsewhere; say so instead of threading silently.
+            cur.execute("""select thread_id, subject from mail_message where direction='inbound' and thread_id<>%s and lower(from_email)=any(%s)
+                and coalesce(sent_at,created_at) > coalesce(%s,'-infinity') and coalesce(sent_at,created_at) > now() - interval '14 days'
+                order by coalesce(sent_at,created_at) desc limit 1""",(thread,row['to_emails'],previous['sent_at'] or previous['created_at']))
+            newer = cur.fetchone()
+            if newer:
+                oneoff = row['personalization'].setdefault('oneoff', {'warnings': [], 'variables_used': []})
+                oneoff['warnings'] = [*oneoff.get('warnings', []), f"Newer email from this recipient in a different conversation: \"{newer['subject']}\" ({newer['thread_id']}). This reply is threaded under the older one; check it is the right conversation."]
     if cc_thread:
         if not thread:
             raise Refused('cc_thread_requires_thread')
