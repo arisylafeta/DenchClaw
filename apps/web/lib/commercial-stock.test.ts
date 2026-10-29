@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateStock, chemistryFamilies, cleanModel, effectiveFormat, groupKeyFor, matchesFilters, normalCountry, normalModel, normalPowertrain,
-  lotKeyFor, packLabel, partKey, searchRows, suggestModels, supplierToken, withPackIdentity, type StockRow,
+  interpretFilters, lotKeyFor, packLabel, partKey, searchRows, suggestModels, bandOffsetFor, lotBand, withPackIdentity, type StockRow,
 } from "./commercial-stock";
 
 const row = (over: Partial<StockRow>): StockRow => ({
@@ -11,9 +11,10 @@ const row = (over: Partial<StockRow>): StockRow => ({
   sync_class: "synced", ...over,
 });
 
-const anon = (id: string) => supplierToken(id, "test-scope", "k".repeat(32));
 const lotKeys = (id: string, group: string, part: string) => lotKeyFor(id, group, part, "test-scope", "k".repeat(32));
-const aggregate = (rows: StockRow[]) => aggregateStock(rows, anon, lotKeys);
+/** Fixed EUR 50 offset in tests so bands are predictable: real ask a shows as [a-50, a+50] rounded to EUR 10. */
+const keys = { lotKey: lotKeys, bandOffset: () => 50 };
+const aggregate = (rows: StockRow[]) => aggregateStock(rows, keys);
 
 const stock = [
   row({ id: "sto_1" }),
@@ -30,7 +31,7 @@ describe("stock lots", () => {
     row({ id: "n3", make: "Kia", model: "e-Niro", capacity_kwh: 64.8, price_eur_ex_vat: 5000, part_numbers: ["37501-Q4052"], country: "United Kingdom" }),
     row({ id: "n4", company_id: "co_b", person_id: "p_b", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8, quantity: 3, price_eur_ex_vat: null, price_eur: 6000, country: "Lithuania" }),
   ];
-  const scoped = (scope: string) => aggregateStock(lotRows, (id) => supplierToken(id, scope, "k".repeat(32)), (id, group, part) => lotKeyFor(id, group, part, scope, "k".repeat(32)));
+  const scoped = (scope: string) => aggregateStock(lotRows, { lotKey: (id, group, part) => lotKeyFor(id, group, part, scope, "k".repeat(32)), bandOffset: () => 50 });
 
   it("splits a group by supplier and part number with rounded asks and condition counts", () => {
     const [group] = scoped("conv-1234");
@@ -38,11 +39,12 @@ describe("stock lots", () => {
     const [lithuania, ao050, q4052] = group.lots;
     expect(lithuania).toMatchObject({ units: 3, countries: ["Lithuania"], askEurExVat: null, priced: 0, vatUnknown: 3, partNumbers: [], condition: { notStated: 3 } });
     expect(ao050).toMatchObject({ units: 2, countries: ["United Kingdom"], partNumbers: ["37501-AO050"], priced: 2,
-      askEurExVat: { min: 4150, max: 4500 }, askEurPerKwh: { min: 64, max: 70 }, years: { min: 2022, max: 2023 },
+      askEurExVat: { min: 4120, max: 4540 }, askEurPerKwh: { min: 63, max: 71 }, years: { min: 2022, max: 2023 },
       condition: { tested: 1, untested: 0, notStated: 1, sohMin: 94, sohMax: 94, damaged: 0 } });
     for (const lot of group.lots) expect(lot.condition.tested + lot.condition.untested + lot.condition.notStated).toBe(lot.units);
-    expect(q4052).toMatchObject({ units: 1, partNumbers: ["37501-Q4052"], askEurExVat: { min: 5000, max: 5000 } });
-    expect(ao050.supplier).toBe(q4052.supplier);
+    expect(q4052).toMatchObject({ units: 1, partNumbers: ["37501-Q4052"], askEurExVat: { min: 4950, max: 5050 }, lastSeen: "2026-10" });
+    expect(ao050).not.toHaveProperty("supplier");
+    expect(ao050).not.toHaveProperty("askExactEurExVat");
     expect(ao050.lotKey).toMatch(/^lot_[0-9a-f]{16}$/);
   });
 
@@ -59,7 +61,7 @@ describe("stock lots", () => {
       row({ id: "u1", tested: false, damaged: false, quantity: 4, part_numbers: ["0Z1915910FB"], country: "Sariai" }),
       row({ id: "u2", company_id: "co_c", person_id: "p_c", quantity: 2, part_numbers: ["0Z1915910FB"], country: "Kolin, Czechia" }),
       row({ id: "u3", company_id: null, person_id: "", quantity: 9 }),
-    ], anon, lotKeys);
+    ], keys);
     expect(group.lots).toHaveLength(2);
     const [untested, other] = group.lots;
     expect(untested).toMatchObject({ units: 4, countries: [], condition: { tested: 0, untested: 4, notStated: 0, damaged: 0 } });
@@ -192,15 +194,23 @@ describe("matchesFilters", () => {
     expect(aggregate([row({ make: "Hyundai", model: "Hyundai Ioniq 5" })])[0]).toMatchObject({ label: "Hyundai Ioniq 5 50 kWh pack", chemistry: "NMC" });
   });
 
-  it("gives per-supplier units under scoped opaque tokens", () => {
+  it("gives a seller count only: no per-seller units or tokens", () => {
     const rows = [row({ id: "a", company_id: "c1", quantity: 2 }), row({ id: "b", company_id: "c1", quantity: 1 }), row({ id: "c", company_id: "c2", person_id: "p_c", quantity: 1 })];
-    const [group] = aggregateStock(rows, (id) => supplierToken(id, "conv-1234", "k".repeat(32)), lotKeys);
+    const [group] = aggregateStock(rows, keys);
     expect(group.sources).toBe(2);
-    expect(group.suppliers.map((entry) => entry.units)).toEqual([3, 1]);
-    expect(group.suppliers[0].supplier).toMatch(/^S[0-9a-f]{6}$/);
-    expect(JSON.stringify(group)).not.toMatch(/"c1"|"c2"|Secret Breaker/);
-    expect(supplierToken("c1", "conv-1234", "k".repeat(32))).toBe(group.suppliers[0].supplier);
-    expect(supplierToken("c1", "conv-9999", "k".repeat(32))).not.toBe(group.suppliers[0].supplier);
+    expect(group).not.toHaveProperty("suppliers");
+    expect(JSON.stringify(group)).not.toMatch(/"c1"|"c2"|Secret Breaker|"S[0-9a-f]{6}"/);
+  });
+
+  it("shows only known makes, without bracketed notes, and recognised countries only", () => {
+    expect(matchesFilters(row({ make: "(Hybride)" }), {}, today)).toBe(false);
+    expect(matchesFilters(row({ make: "Smart/Mercedes (Daimler, from A789 part prefix)" }), {}, today)).toBe(false);
+    expect(matchesFilters(row({ make: "WS Technicals" }), {}, today)).toBe(false);
+    expect(aggregate([row({ make: "MINI (BMW)" })])[0].make).toBe("Mini");
+    expect(aggregate([row({ make: "LG Chem (Renault)", format: "module" })])[0].make).toBe("LG Chem");
+    expect(matchesFilters(row({ country: "Sariai, Lithuania" }), { country: "Sariai" }, today)).toBe(false);
+    expect(matchesFilters(row({ country: "Sariai, Lithuania" }), { country: "LT" }, today)).toBe(true);
+    expect(interpretFilters({ make: "Acme Breakers", country: "Vilnius" })).toEqual({ makes: [], format: "pack or module" });
   });
 });
 
@@ -286,5 +296,37 @@ describe("grouping", () => {
     expect(cleanModel("VW", "VW ID.3 (E11, E12) Pro  107 kW  145 PS (11.2020-> )")).toBe("ID.3 Pro");
     expect(cleanModel("Hyundai", "IONIQ 5 (listed as Ioniq) 77.4 kWh battery")).toBe("IONIQ 5");
     expect(cleanModel("Mercedes", "MB C 205 2014-21")).toBe("C 205");
+  });
+});
+
+describe("ask bands", () => {
+  it("never shows the real ask on a band edge, whatever the offset, and stays about EUR 100 wide", () => {
+    for (const ask of [4500, 4180.2, 399, 12000]) {
+      for (let offset = 10; offset <= 90; offset += 10) {
+        const band = lotBand([ask], offset);
+        expect(band.min).toBeLessThan(ask);
+        expect(band.max).toBeGreaterThan(ask);
+        expect(band.max - band.min).toBeGreaterThanOrEqual(100);
+        expect(band.max - band.min).toBeLessThanOrEqual(110);
+      }
+    }
+  });
+
+  it("fixes the offset per lot, the same in every conversation, between EUR 10 and 90", () => {
+    const offsets = new Set(Array.from({ length: 50 }, (_, index) => bandOffsetFor(`co_${index}`, "grp_0123456789abcdef", "37501A0050", "k".repeat(32))));
+    for (const offset of offsets) expect(offset >= 10 && offset <= 90 && offset % 10 === 0).toBe(true);
+    expect(offsets.size).toBeGreaterThan(3);
+    expect(bandOffsetFor("co_a", "grp_x", "P1", "k".repeat(32))).toBe(bandOffsetFor("co_a", "grp_x", "P1", "k".repeat(32)));
+  });
+
+  it("adds the real asks only for the server re-check", () => {
+    const rows = [row({ id: "a", price_eur_ex_vat: 4180.2 })];
+    expect(aggregateStock(rows, keys)[0].lots[0]).not.toHaveProperty("askExactEurExVat");
+    expect(aggregateStock(rows, { ...keys, exact: true })[0].lots[0].askExactEurExVat).toEqual({ min: 4180, max: 4180 });
+  });
+
+  it("rounds every group price, never an exact seller figure", () => {
+    const [crowd] = aggregate([row({ id: "a", price_eur_ex_vat: 124 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 335 }), row({ id: "c", company_id: "co_c", price_eur_ex_vat: 661 })]);
+    expect(crowd.priceEurExVat).toEqual({ min: 100, median: 300, max: 700, priced: 3 });
   });
 });

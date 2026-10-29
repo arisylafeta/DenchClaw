@@ -78,20 +78,16 @@ export type StockGroup = {
   chemistry: string | null;
   powertrain: string | null;
   units: number;
-  /** Distinct suppliers holding the group (a count only; Ari, 28 Oct 2026: buyers plan collection from it). */
+  /** Distinct suppliers holding the group (a count only; Ari, 28 Oct 2026: buyers plan collection from it). No per-seller detail. */
   sources: number;
-  /**
-   * Units per supplier under an opaque token, largest first. Tokens are scoped to one conversation (see supplierToken),
-   * so Jules can tell how many suppliers cover a selection across searches, but they never identify or link a supplier.
-   */
-  suppliers: { supplier: string; units: number }[];
   /** Countries the stock is held in (supplier country), always shown: buyers plan logistics from it (Ari, 28 Oct 2026). */
   countries: string[];
   years: { min: number; max: number } | null;
-  /** With fewer than MIN_SOURCES only a band rounded to PRICE_BAND_EUR is shown and median is null. */
+  /** Always a band: EUR 100 steps from MIN_SOURCES suppliers, else PRICE_BAND_EUR and median null. */
   priceEurExVat: { min: number; median: number | null; max: number; priced: number } | null;
   /** Rows priced only with VAT included or with unknown VAT. */
   priceEurIncVatOnly: number;
+  /** Month only ("2026-10"). */
   lastSeen: string | null;
   /** Rows refreshed by a supplier sync or marketplace mirror; null when fewer than MIN_SOURCES. */
   synced: number | null;
@@ -102,13 +98,13 @@ export type StockGroup = {
 
 /**
  * What one supplier holds of a group under one part number: the row a buyer selects and bids on (Ari, 28 Oct 2026).
- * Prices are rounded (EUR 50 per unit, EUR 1 per kWh) so an exact advert price cannot be searched back to the supplier;
- * the ask is the sale price as listed (our fee is already in it). No ids, VINs, cities, photos or source URLs.
+ * The ask is the seller's own public ask on purpose (buyers pay no hidden mark-up, Ari 29 Oct 2026), shown only as a
+ * band about EUR 100 wide whose position is shifted per lot (lotBand), so the exact advert price is never on screen.
+ * No supplier token, ids, VINs, cities, photos or source URLs.
  */
 export type StockLot = {
-  /** Opaque and scoped like supplier tokens; the CRM resolves it back to stock rows when an offer comes in. */
+  /** Opaque, keyed per scope (a signed conversation scope); the CRM resolves it back to stock rows with that scope. */
   lotKey: string;
-  supplier: string;
   units: number;
   partNumbers: string[];
   years: { min: number; max: number } | null;
@@ -121,6 +117,8 @@ export type StockLot = {
   condition: { tested: number; untested: number; notStated: number; damaged: number; sohMin: number | null; sohMax: number | null };
   askEurExVat: { min: number; max: number } | null;
   askEurPerKwh: { min: number; max: number } | null;
+  /** The real asks (EUR, whole), only on the platform's server-side re-check (`exact`), never in a buyer search. */
+  askExactEurExVat?: { min: number; max: number } | null;
   /** Units with an ex-VAT ask (the ask range covers only these). */
   priced: number;
   /** Units priced only with VAT included or unknown VAT (not in the ask). */
@@ -132,7 +130,14 @@ export type StockLot = {
 export const MIN_SOURCES = 3;
 export const PRICE_BAND_EUR = 500;
 export const LOT_PRICE_STEP_EUR = 50;
-export const MAX_LOTS = 12;
+export const MAX_LOTS = 10;
+/** Width of a lot's shown ask band (Ari, 29 Oct 2026: wider bands, roughly EUR 50-100). */
+export const LOT_BAND_EUR = 100;
+/** A buyer search returns at most this many groups (a re-check by group keys returns every group asked for). */
+export const MAX_SEARCH_GROUPS = 8;
+/** Totals above these show as capped, so the size of the whole book is not read off a search. */
+export const TOTAL_GROUPS_CAP = 50;
+export const TOTAL_UNITS_CAP = 500;
 
 const clean = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim() || null;
 const deaccent = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -145,7 +150,25 @@ const MAKE_ALIASES: Record<string, string> = {
   citroen: "Citroën", skoda: "Škoda", bmw: "BMW", mg: "MG", byd: "BYD", ds: "DS", kia: "Kia", seat: "SEAT", cupra: "Cupra",
   alfa: "Alfa Romeo", alfaromeo: "Alfa Romeo", landrover: "Land Rover", rangerover: "Land Rover",
   opel: "Opel", vauxhall: "Vauxhall", nio: "NIO", gwm: "GWM", jac: "JAC", leapmotor: "Leapmotor", lynkco: "Lynk & Co",
+  lynk: "Lynk & Co", mg4: "MG", mg5: "MG", vwag: "Volkswagen", volkwagen: "Volkswagen", lgchem: "LG Chem", skon: "SK On", catl: "CATL",
+  samsungsdi: "Samsung SDI", kgmobility: "KG Mobility", xpeng: "XPeng", stellantisev: "Stellantis",
 };
+
+/**
+ * Makes we show (folded). Anything else (junk such as "(Hybride)", internal notes, unknown brands) is left out, so free
+ * text never reaches a buyer through the make. Add a brand here when real stock under it appears.
+ */
+const KNOWN_MAKES = new Set([
+  "toyota", "kia", "nissan", "hyundai", "tesla", "peugeot", "volkswagen", "mercedesbenz", "bmw", "opel", "audi", "renault", "mg", "volvo",
+  "ford", "mazda", "honda", "suzuki", "mitsubishi", "porsche", "polestar", "lexus", "byd", "vauxhall", "skoda", "maxus", "citroen", "jaguar",
+  "lynkco", "fiat", "cupra", "xpeng", "subaru", "jeep", "landrover", "seat", "ds", "mini", "dacia", "smart", "hongqi", "chevrolet", "jac",
+  "nio", "voyah", "seres", "leapmotor", "ssangyong", "kgmobility", "zeekr", "genesis", "fisker", "bentley", "dongfeng", "dodge", "jaecoo",
+  "lamborghini", "lancia", "huawei", "ora", "gwm", "omoda", "alfaromeo", "ferrari", "maserati", "abarth", "chrysler", "alpine", "geely",
+  "aiways", "rivian", "lucid", "stellantis", "cadillac", "lotus", "rollsroyce", "astonmartin", "mclaren", "chery", "saic", "wuling",
+  "samsung", "samsungsdi", "lgchem", "lg", "lgenergysolution", "skon", "sk", "catl", "eve", "farasis", "gotion", "lishen", "panasonic", "terrae",
+  "calb", "svolt", "sunwoda", "envision", "aesc", "northvolt", "microvast", "forsee", "dalian", "daliancbak", "cbak", "kokam", "toshiba", "saft",
+  "pylontech", "polarium", "eleo", "bosch", "sony", "talaria", "myria", "vestwoods",
+]);
 
 /** Group and alliance names a buyer may use as a make. */
 const MAKE_GROUPS: Record<string, string[]> = {
@@ -254,10 +277,12 @@ export function chemistryFamilies(value: string | null | undefined): string[] {
 }
 
 export function normalMake(value: string | null | undefined): string | null {
-  const make = clean(value);
+  // Bracketed notes never belong to a make ("MINI (BMW)", "(Hybride)", "Smart/Mercedes (Daimler, from ...)").
+  const make = clean(value?.replace(/\([^)]*\)?/g, " "));
   if (!make) return null;
   const alias = MAKE_ALIASES[fold(make)];
   if (alias) return alias;
+  if (!KNOWN_MAKES.has(fold(make))) return null;
   return make.split(" ").map((part) => (part.length <= 3 && part === part.toUpperCase()) ? part : part[0].toUpperCase() + part.slice(1).toLowerCase()).join(" ");
 }
 
@@ -401,9 +426,20 @@ export function groupKeyFor(row: StockRow): string {
   return `grp_${createHash("sha256").update(specKey(row)).digest("hex").slice(0, 16)}`;
 }
 
-/** Opaque supplier token, stable within one scope (a conversation) and unlinkable across scopes. */
-export function supplierToken(supplierId: string, scope: string, secret: string): string {
-  return `S${createHmac("sha256", secret).update(`${scope}\u0000${supplierId}`).digest("hex").slice(0, 6)}`;
+/**
+ * Where a lot's real ask sits inside its shown band: EUR 10-90 below the band top, fixed per lot and the same in every
+ * conversation, so comparing bands across chats never narrows them down, and the real ask is never on a band edge.
+ */
+export function bandOffsetFor(supplierId: string, groupKey: string, part: string, secret: string): number {
+  const value = createHmac("sha256", secret).update(`band\u0000${supplierId}\u0000${groupKey}\u0000${part}`).digest().readUInt16BE(0);
+  return 10 + (value % 9) * 10;
+}
+
+/** The shown band for real asks: about LOT_BAND_EUR wide, in whole EUR 10, containing every real ask strictly inside. */
+export function lotBand(asks: number[], offset: number): { min: number; max: number } {
+  const low = Math.min(...asks), high = Math.max(...asks);
+  const min = Math.max(10, Math.floor((low - offset) / 10) * 10);
+  return { min, max: Math.max(min + LOT_BAND_EUR, Math.ceil((high - offset + LOT_BAND_EUR) / 10) * 10) };
 }
 
 /** Opaque lot key: supplier + group + part number under one scope. Unlinkable across scopes, like supplier tokens. */
@@ -532,7 +568,11 @@ export function matchesFilters(row: StockRow, filters: StockFilters, today = new
     const wanted = normalPowertrain(filters.powertrain) ?? clean(filters.powertrain)?.toUpperCase();
     if (normalPowertrain(row.powertrain) !== wanted) return false;
   }
-  if (filters.country && normalCountry(row.country) !== normalCountry(filters.country)) return false;
+  // Recognised countries only, on both sides: free text (a town, a site) never matches, so it cannot probe locations.
+  if (filters.country) {
+    const wanted = publicCountry(filters.country);
+    if (!wanted || publicCountry(row.country) !== wanted) return false;
+  }
   if (!kwhMatches(row, filters)) return false;
   if (filters.maxPriceEurExVat !== undefined && (row.price_eur_ex_vat === null || row.price_eur_ex_vat > filters.maxPriceEurExVat)) return false;
   if (filters.seenWithinDays !== undefined && daysOld(row.seen_on, today) > filters.seenWithinDays) return false;
@@ -552,11 +592,12 @@ export function interpretFilters(filters: StockFilters) {
   const platform = filters.model ? PLATFORMS[fold(filters.model)] : undefined;
   const group = filters.make ? MAKE_GROUPS[fold(filters.make)] : undefined;
   return {
-    ...(filters.make ? { makes: group ?? [normalMake(filters.make) ?? filters.make] } : {}),
+    ...(filters.make ? { makes: group ?? (normalMake(filters.make) ? [normalMake(filters.make)!] : []) } : {}),
     ...(platform ? { platformModels: [...new Set(platform.map(([make, model]) => `${make} ${model}`))] } : {}),
-    ...(filters.country ? { country: normalCountry(filters.country) ?? filters.country } : {}),
-    ...(filters.powertrain ? { powertrain: normalPowertrain(filters.powertrain) ?? filters.powertrain } : {}),
-    ...(filters.chemistry ? { chemistry: chemistryFamilies(filters.chemistry).join(" / ") || filters.chemistry } : {}),
+    // Only values the search recognised are echoed back, never the buyer's raw text.
+    ...(filters.country && publicCountry(filters.country) ? { country: publicCountry(filters.country)! } : {}),
+    ...(filters.powertrain && normalPowertrain(filters.powertrain) ? { powertrain: normalPowertrain(filters.powertrain)! } : {}),
+    ...(filters.chemistry && chemistryFamilies(filters.chemistry).length ? { chemistry: chemistryFamilies(filters.chemistry).join(" / ") } : {}),
     format: filters.format ?? "pack or module",
   };
 }
@@ -582,7 +623,6 @@ export function suggestModels(rows: StockRow[], filters: StockFilters, limit = 5
   return [...scored].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([name]) => name);
 }
 
-const round = (value: number) => Math.round(value);
 
 function median(values: number[]) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -606,9 +646,16 @@ const roundDown = (value: number, step: number) => Math.max(step, Math.floor(val
 const roundUp = (value: number, step: number) => Math.max(step, Math.ceil(value / step) * step);
 const isTested = (row: StockRow) => row.tested === true || typeof row.soh_percent === "number";
 
+export type LotKeys = {
+  lotKey: (supplierId: string, groupKey: string, part: string) => string;
+  /** EUR 10-90; see bandOffsetFor. */
+  bandOffset: (supplierId: string, groupKey: string, part: string) => number;
+  /** Add the real asks (server-side re-check only). */
+  exact?: boolean;
+};
+
 /** Lots of one group: supplier x primary part number. */
-function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: string) => string,
-  lotKey: (supplierId: string, groupKey: string, part: string) => string): StockLot[] {
+function lotsFor(groupKey: string, members: StockRow[], keys: LotKeys): StockLot[] {
   const lots = new Map<string, { supplierId: string; part: string; rows: StockRow[] }>();
   for (const row of members) {
     const supplierId = row.company_id ?? row.person_id;
@@ -622,14 +669,14 @@ function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: s
     const units = rows.reduce((sum, row) => sum + row.quantity, 0);
     const priced = rows.filter((row) => typeof row.price_eur_ex_vat === "number" && row.price_eur_ex_vat > 0);
     const asks = priced.map((row) => row.price_eur_ex_vat!);
-    const perKwh = priced.flatMap((row) => { const kwh = rowKwh(row); return kwh ? [row.price_eur_ex_vat! / kwh] : []; });
+    const kwhs = priced.map(rowKwh).filter((kwh): kwh is number => kwh !== null);
+    const band = asks.length ? lotBand(asks, keys.bandOffset(supplierId, groupKey, part)) : null;
     const years = rows.map((row) => row.year).filter((year): year is number => typeof year === "number" && year > 1990);
     const soh = rows.map((row) => row.soh_percent).filter((value): value is number => typeof value === "number" && value > 0 && value <= 100);
     const seen = rows.map((row) => row.seen_on).filter((date): date is string => Boolean(date)).sort();
     const sum = (test: (row: StockRow) => boolean) => rows.filter(test).reduce((total, row) => total + row.quantity, 0);
     return {
-      lotKey: lotKey(supplierId, groupKey, part),
-      supplier: tokenFor(supplierId),
+      lotKey: keys.lotKey(supplierId, groupKey, part),
       units,
       partNumbers: firstPerKey(rows.flatMap(rowParts), partKey).slice(0, 3),
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
@@ -642,18 +689,22 @@ function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: s
         sohMin: soh.length ? Math.round(Math.min(...soh)) : null,
         sohMax: soh.length ? Math.round(Math.max(...soh)) : null,
       },
-      askEurExVat: asks.length ? { min: roundDown(Math.min(...asks), LOT_PRICE_STEP_EUR), max: roundUp(Math.max(...asks), LOT_PRICE_STEP_EUR) } : null,
-      askEurPerKwh: perKwh.length ? { min: roundDown(Math.min(...perKwh), 1), max: roundUp(Math.max(...perKwh), 1) } : null,
+      askEurExVat: band,
+      // Per kWh follows the shown band, never the real ask.
+      askEurPerKwh: band && kwhs.length ? (() => {
+        const min = Math.max(1, Math.floor(band.min / Math.max(...kwhs)));
+        return { min, max: Math.max(min + 1, Math.ceil(band.max / Math.min(...kwhs))) };
+      })() : null,
+      ...(keys.exact ? { askExactEurExVat: asks.length ? { min: Math.round(Math.min(...asks)), max: Math.round(Math.max(...asks)) } : null } : {}),
       priced: priced.reduce((total, row) => total + row.quantity, 0),
       vatUnknown: sum((row) => !(typeof row.price_eur_ex_vat === "number" && row.price_eur_ex_vat > 0) && row.price_eur !== null),
-      lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
+      lastSeen: seen.at(-1)?.slice(0, 7) ?? null,
     };
   }).sort((a, b) => b.units - a.units || a.lotKey.localeCompare(b.lotKey));
 }
 
-/** Supplier-free groups, most units first. */
-export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) => string,
-  lotKey: (supplierId: string, groupKey: string, part: string) => string): StockGroup[] {
+/** Supplier-free groups, most units first. `maxLots` caps lots per group (a re-check asks for all of them). */
+export function aggregateStock(rows: StockRow[], keys: LotKeys, maxLots = MAX_LOTS): StockGroup[] {
   const groups = new Map<string, StockRow[]>();
   for (const row of rows) {
     // Stock with no supplier cannot be offered or resolved from a lot, so it is not shown at all. Damaged packs are not
@@ -694,17 +745,18 @@ export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) 
       powertrain: mostCommon(members.map((row) => normalPowertrain(row.powertrain))),
       units: members.reduce((sum, row) => sum + row.quantity, 0),
       sources,
-      suppliers: [...perSupplier].map(([id, units]) => ({ supplier: tokenFor(id), units })).sort((a, b) => b.units - a.units || a.supplier.localeCompare(b.supplier)),
       countries: [...new Set(members.map((row) => publicCountry(row.country)).filter((country): country is string => Boolean(country)))].sort(),
       years: years.length ? { min: Math.min(...years), max: Math.max(...years) } : null,
-      priceEurExVat: !exVat.length ? null : crowd
-        ? { min: round(Math.min(...exVat)), median: round(median(exVat)), max: round(Math.max(...exVat)), priced: exVat.length }
-        : { min: Math.max(PRICE_BAND_EUR, Math.floor(Math.min(...exVat) / PRICE_BAND_EUR) * PRICE_BAND_EUR),
-          median: null, max: Math.ceil(Math.max(...exVat) / PRICE_BAND_EUR) * PRICE_BAND_EUR, priced: exVat.length },
+      priceEurExVat: !exVat.length ? null : (() => {
+        // Never an exact seller price: EUR 100 steps with several suppliers, a wide band otherwise; always two figures.
+        const step = crowd ? LOT_BAND_EUR : PRICE_BAND_EUR;
+        const min = roundDown(Math.min(...exVat), step);
+        return { min, median: crowd ? Math.round(median(exVat) / step) * step : null, max: Math.max(min + step, roundUp(Math.max(...exVat), step)), priced: exVat.length };
+      })(),
       priceEurIncVatOnly: members.filter((row) => row.price_eur_ex_vat === null && row.price_eur !== null).length,
-      lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
+      lastSeen: seen.at(-1)?.slice(0, 7) ?? null,
       synced: crowd ? members.filter((row) => row.sync_class === "synced" || row.sync_class === "marketplace").length : null,
-      ...(() => { const lots = lotsFor(groupKey, members, tokenFor, lotKey); return { lots: lots.slice(0, MAX_LOTS), lotCount: lots.length }; })(),
+      ...(() => { const lots = lotsFor(groupKey, members, keys); return { lots: lots.slice(0, maxLots), lotCount: lots.length }; })(),
     });
   }
   return result.sort((a, b) => b.units - a.units || a.label.localeCompare(b.label));
