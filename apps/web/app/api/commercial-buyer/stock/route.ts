@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { aggregateStock, interpretFilters, lotKeyFor, searchRows, suggestModels, supplierToken } from "@/lib/commercial-stock";
+import { aggregateStock, interpretFilters, lotKeyFor, searchRows, suggestModels, supplierToken, withPackIdentity } from "@/lib/commercial-stock";
 import { commercialStockAuthorised, secret, unauthorised } from "@/lib/commercial-stock-access";
 import { liveStock } from "@/lib/crm-postgres/commercial-stock";
 
@@ -25,7 +25,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!commercialStockAuthorised(request)) return unauthorised();
   const parsed = filters.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid filters" }, { status: 400 });
-  const all = await liveStock();
+  const all = withPackIdentity(await liveStock());
   const { rows, matchedOn } = searchRows(all, parsed.data);
   // Supplier tokens and lot keys must be recomputable later (offers resolve lot keys), so no secret means no answer.
   const key = secret();

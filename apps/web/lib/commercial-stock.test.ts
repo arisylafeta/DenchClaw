@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateStock, chemistryFamilies, cleanModel, effectiveFormat, groupKeyFor, matchesFilters, normalCountry, normalModel, normalPowertrain,
-  lotKeyFor, partKey, searchRows, suggestModels, supplierToken, type StockRow,
+  lotKeyFor, packLabel, partKey, searchRows, suggestModels, supplierToken, withPackIdentity, type StockRow,
 } from "./commercial-stock";
 
 const row = (over: Partial<StockRow>): StockRow => ({
@@ -25,7 +25,8 @@ const stock = [
 describe("stock lots", () => {
   const lotRows = [
     row({ id: "n1", make: "Kia", model: "Niro II", capacity_kwh: 64.8, price_eur_ex_vat: 4171, part_numbers: ["37501-AO050"], tested: true, soh_percent: 94, country: "Newbridge, Edinburgh, United Kingdom" }),
-    row({ id: "n2", make: "Kia", model: "Niro II", capacity_kwh: 64.8, price_eur_ex_vat: 4489, part_numbers: ["37501AO050"], damaged: true, year: 2023, country: "United Kingdom" }),
+    row({ id: "n2", make: "Kia", model: "Niro II", capacity_kwh: 64.8, price_eur_ex_vat: 4489, part_numbers: ["37501AO050"], year: 2023, country: "United Kingdom" }),
+    row({ id: "n5", make: "Kia", model: "Niro II", capacity_kwh: 64.8, price_eur_ex_vat: 2000, part_numbers: ["37501AO050"], damaged: true, country: "United Kingdom" }),
     row({ id: "n3", make: "Kia", model: "e-Niro", capacity_kwh: 64.8, price_eur_ex_vat: 5000, part_numbers: ["37501-Q4052"], country: "United Kingdom" }),
     row({ id: "n4", company_id: "co_b", person_id: "p_b", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8, quantity: 3, price_eur_ex_vat: null, price_eur: 6000, country: "Lithuania" }),
   ];
@@ -38,7 +39,7 @@ describe("stock lots", () => {
     expect(lithuania).toMatchObject({ units: 3, countries: ["Lithuania"], askEurExVat: null, priced: 0, vatUnknown: 3, partNumbers: [], condition: { notStated: 3 } });
     expect(ao050).toMatchObject({ units: 2, countries: ["United Kingdom"], partNumbers: ["37501-AO050"], priced: 2,
       askEurExVat: { min: 4150, max: 4500 }, askEurPerKwh: { min: 64, max: 69 }, years: { min: 2022, max: 2023 },
-      condition: { tested: 1, untested: 0, notStated: 1, sohMin: 94, sohMax: 94, damaged: 1 } });
+      condition: { tested: 1, untested: 0, notStated: 1, sohMin: 94, sohMax: 94, damaged: 0 } });
     for (const lot of group.lots) expect(lot.condition.tested + lot.condition.untested + lot.condition.notStated).toBe(lot.units);
     expect(q4052).toMatchObject({ units: 1, partNumbers: ["37501-Q4052"], askEurExVat: { min: 5000, max: 5000 } });
     expect(ao050.supplier).toBe(q4052.supplier);
@@ -80,6 +81,58 @@ describe("stock lots", () => {
     expect(partKey("722FA0101240220323")).toBe("");
     expect(partKey("16 755 893 80 16 755 894 80 16 890 952 80")).toBe("");
     expect(partKey("123")).toBe("");
+  });
+});
+
+describe("pack identity", () => {
+  const eNiro = { pack_key: "fam:kia-niro-67-5", pack_name: "Kia e-Niro 67.5 kWh", usable_kwh: 64, gross_kwh: 67.5 };
+  const niro2 = { pack_key: "evdb:kia|niro|68.0", pack_name: "Kia Niro EV 68.0 kWh", usable_kwh: 64.8, gross_kwh: 68 };
+
+  it("puts every listing of one physical pack in one group under the usable kWh, whatever the advert calls it", () => {
+    const groups = aggregate(withPackIdentity([
+      row({ id: "a", make: "Kia", model: "Niro", capacity_kwh: 64, part_numbers: ["37501-Q4052"], ...eNiro }),
+      row({ id: "b", make: "Kia", model: "Niro", capacity_kwh: 67.5, part_numbers: ["37501-Q4151"], ...eNiro }),
+      row({ id: "c", make: "Kia", model: "Niro VAN DE", capacity_kwh: 64, part_numbers: ["37501Q4052"] }),
+      row({ id: "d", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8, part_numbers: ["37501-AO050"], ...niro2 }),
+      row({ id: "e", make: "Kia", model: "Niro II", capacity_kwh: 64.8, part_numbers: ["37501A0050"] }),
+    ]));
+    expect(groups.map((group) => [group.label, group.units, group.capacityKwh, group.grossKwh])).toEqual([
+      ["Kia e-Niro 64 kWh pack", 3, 64, 67.5],
+      ["Kia Niro EV 64.8 kWh pack", 2, 64.8, 68],
+    ]);
+  });
+
+  it("never merges on a part number or spec that points to two packs, and leaves unknown listings in text groups", () => {
+    const rows = withPackIdentity([
+      row({ id: "a", make: "Kia", model: "Niro", capacity_kwh: 64, part_numbers: ["SHARED1"], ...eNiro }),
+      row({ id: "b", make: "Kia", model: "Niro", capacity_kwh: 64, part_numbers: ["SHARED1"], ...niro2 }),
+      row({ id: "c", make: "Kia", model: "Niro", capacity_kwh: 64, part_numbers: ["SHARED1"] }),
+      row({ id: "d", make: "Kia", model: "Niro", capacity_kwh: 64 }),
+      row({ id: "e", make: "Kia", model: "Soul", capacity_kwh: 27 }),
+    ]);
+    expect(rows.slice(2).map((r) => r.pack_key ?? null)).toEqual([null, null, null]);
+  });
+
+  it("learns a pack from a listing that states the same spec, only when the listing has no part number", () => {
+    const [, learned, other] = withPackIdentity([
+      row({ id: "a", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8, ...niro2 }),
+      row({ id: "b", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8 }),
+      row({ id: "c", make: "Kia", model: "Niro Mk2", capacity_kwh: 64.8, part_numbers: ["99999X9999"] }),
+    ]);
+    expect(learned.pack_key).toBe(niro2.pack_key);
+    expect(other.pack_key ?? null).toBeNull();
+  });
+
+  it("keeps damaged packs out of every group", () => {
+    expect(aggregate([row({ id: "x", damaged: true }), row({ id: "y" })])[0].units).toBe(1);
+  });
+
+  it("labels named packs without brackets or spec tails and falls back when a name is unusable", () => {
+    expect(packLabel("Hyundai Kona Electric 64 kWh (OS, 2017-2021)", 64)).toBe("Hyundai Kona Electric 64 kWh pack");
+    expect(packLabel("BMW iX3 (G08) 80 kWh pack (73.83 kWh usable), 345 V 232 Ah, 2020-2024", 73.8)).toBe("BMW iX3 73.8 kWh pack");
+    expect(packLabel("Audi Q5 hybrid quattro traction battery, VW-group number 8R0 915 591 (kWh not stated)", null)).toBeNull();
+    const [group] = aggregate([row({ pack_key: "res:notes-1", pack_name: "Audi q5 fy phev 17 9kwh oem family candidate", make: "Audi", model: "Q5", capacity_kwh: 17.9 })]);
+    expect(group.label).toBe("Audi Q5 17.9 kWh pack");
   });
 });
 

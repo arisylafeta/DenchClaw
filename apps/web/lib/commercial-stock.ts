@@ -68,6 +68,8 @@ export type StockFilters = {
 export type StockGroup = {
   groupKey: string;
   label: string;
+  /** Gross kWh of the identified pack when the battery graph knows it (capacityKwh is the usable figure then). */
+  grossKwh?: number | null;
   make: string;
   model: string | null;
   format: string | null;
@@ -341,9 +343,56 @@ function rowKwh(row: StockRow): number | null {
 }
 
 function specKey(row: StockRow) {
+  // One physical pack is one group, whatever the advert calls it (Ari, 28 Oct 2026: e-Niro "64", "67.5" and "VAN DE 64"
+  // are the same pack). The battery graph's pack identity wins; listing text is only the fallback.
+  return row.pack_key ? `pack|${row.pack_key}` : textSpecKey(row);
+}
+
+/** Grouping key from the listing text alone (make, model family, format, rounded kWh). */
+function textSpecKey(row: StockRow) {
   const kwh = rowKwh(row);
   return ["v2", normalMake(row.make), modelFamily(row, kwh), effectiveFormat(row), kwh === null ? null : Math.round(kwh)]
     .map((part) => part ?? "").join("|");
+}
+
+/**
+ * Rows without a battery-graph match inherit the pack identity of graph-matched rows that state the same OEM part number,
+ * when that part number points to exactly one pack. Run once over all live stock so group keys do not depend on a search.
+ */
+export function withPackIdentity(rows: StockRow[]): StockRow[] {
+  // A key that leads to two different packs is dropped (null), so an ambiguous part number or spec never merges packs.
+  const learn = (map: Map<string, StockRow | null>, key: string, row: StockRow) => {
+    const known = map.get(key);
+    if (known === undefined) map.set(key, row);
+    else if (known && known.pack_key !== row.pack_key) map.set(key, null);
+  };
+  const byPart = new Map<string, StockRow | null>();
+  const bySpec = new Map<string, StockRow | null>();
+  for (const row of rows) {
+    if (!row.pack_key) continue;
+    for (const part of rowParts(row).map(partKey)) learn(byPart, part, row);
+    // Listing text only names a pack when it states a kWh figure.
+    if (normalKwh(row.capacity_kwh) !== null) learn(bySpec, textSpecKey(row), row);
+  }
+  return rows.map((row) => {
+    if (row.pack_key) return row;
+    const source = rowParts(row).map((part) => byPart.get(partKey(part))).find((match): match is StockRow => Boolean(match))
+      ?? (rowParts(row).length === 0 && normalKwh(row.capacity_kwh) !== null ? bySpec.get(textSpecKey(row)) ?? undefined : undefined);
+    return source ? { ...row, pack_key: source.pack_key, pack_name: source.pack_name, fits: row.fits ?? source.fits,
+      usable_kwh: source.usable_kwh, gross_kwh: source.gross_kwh } : row;
+  });
+}
+
+/** Curated graph families and EV-database packs have usable names; other graph keys are research notes. */
+const NAMED_PACK = /^(fam|evdb):/;
+
+/** "Kia e-Niro 67.5 kWh" with 64 usable -> "Kia e-Niro 64 kWh pack": no brackets or spec tail, the usable kWh, "pack" once. */
+export function packLabel(name: string | null | undefined, usableKwh: number | null): string | null {
+  let label = clean((name ?? "").replace(/\([^)]*\)/g, " ").split(",")[0]);
+  if (!label || !/\d\s*kwh/i.test(label) || label.length > 70) return null;
+  if (usableKwh !== null) label = label.replace(/\d+(?:\.\d+)?\s*kwh/i, `${usableKwh} kWh`);
+  label = label.replace(/\s+(traction\s+)?(battery|pack)\b.*$/i, "").replace(/\s+(gross|net|usable)\b.*$/i, "");
+  return clean(`${label} pack`);
 }
 
 /** Opaque, stable key for a spec. It is a hash of the spec only, so it never encodes a supplier or a row id. */
@@ -604,8 +653,9 @@ export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) 
   lotKey: (supplierId: string, groupKey: string, part: string) => string): StockGroup[] {
   const groups = new Map<string, StockRow[]>();
   for (const row of rows) {
-    // Stock with no supplier cannot be offered or resolved from a lot, so it is not shown at all.
-    if (!normalMake(row.make) || !(row.company_id ?? row.person_id)) continue;
+    // Stock with no supplier cannot be offered or resolved from a lot, so it is not shown at all. Damaged packs are not
+    // sold to buyers (Ari, 28 Oct 2026), so they never reach a group either.
+    if (!normalMake(row.make) || !(row.company_id ?? row.person_id) || row.damaged === true) continue;
     const key = groupKeyFor(row);
     const members = groups.get(key);
     if (members) members.push(row); else groups.set(key, [row]);
@@ -615,12 +665,15 @@ export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) 
     const exVat = members.map((row) => row.price_eur_ex_vat).filter((price): price is number => typeof price === "number" && price > 0);
     const years = members.map((row) => row.year).filter((year): year is number => typeof year === "number" && year > 1990);
     const seen = members.map((row) => row.seen_on).filter((date): date is string => Boolean(date)).sort();
+    const packKey = members[0].pack_key ?? null;
+    const usable = packKey ? mostCommon(members.map((row) => normalKwh(row.usable_kwh ?? null))) : null;
     const group = {
       make: normalMake(members[0].make)!,
       model: mostCommon(members.map((row) => cleanModel(row.make, row.model))),
       format: effectiveFormat(members[0]),
-      capacityKwh: mostCommon(members.map(rowKwh)),
+      capacityKwh: usable ?? mostCommon(members.map(rowKwh)),
     };
+    const named = packKey && NAMED_PACK.test(packKey) ? packLabel(mostCommon(members.map((row) => row.pack_name)), group.capacityKwh) : null;
     const families = [...new Set(members.flatMap((row) => chemistryFamilies(row.chemistry)))].sort();
     const perSupplier = new Map<string, number>();
     for (const row of members) {
@@ -631,7 +684,8 @@ export function aggregateStock(rows: StockRow[], tokenFor: (supplierId: string) 
     const crowd = sources >= MIN_SOURCES;
     result.push({
       groupKey,
-      label: labelFor(group),
+      label: named ?? labelFor(group),
+      grossKwh: packKey ? mostCommon(members.map((row) => normalKwh(row.gross_kwh ?? null))) : null,
       ...group,
       chemistry: families.length ? families.join(" / ") : null,
       powertrain: mostCommon(members.map((row) => normalPowertrain(row.powertrain))),

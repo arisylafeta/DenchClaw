@@ -4,12 +4,12 @@
  *   echo '{"model":"ID3"}' | pnpm exec tsx scripts/commercial-stock-local-search.ts
  */
 import { createInterface } from "node:readline";
-import { aggregateStock, interpretFilters, lotKeyFor, searchRows, suggestModels, supplierToken, type StockFilters } from "../lib/commercial-stock";
+import { aggregateStock, interpretFilters, lotKeyFor, searchRows, suggestModels, supplierToken, withPackIdentity, type StockFilters } from "../lib/commercial-stock";
 import { liveStock } from "../lib/crm-postgres/commercial-stock";
 import { pgPool } from "../lib/postgres";
 
 async function main() {
-  const all = await liveStock();
+  const all = withPackIdentity(await liveStock());
   for await (const line of createInterface({ input: process.stdin })) {
     if (!line.trim()) continue;
     const filters = JSON.parse(line) as StockFilters & { scope?: string };
