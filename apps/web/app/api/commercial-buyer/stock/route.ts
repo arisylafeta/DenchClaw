@@ -9,11 +9,8 @@ import { liveStock } from "@/lib/crm-postgres/commercial-stock";
 
 export const runtime = "nodejs";
 
-/**
- * Until the platform signs every scope, an unsigned scope is still honoured (only staging consumes this API). Set to
- * false once the platform release that sends `scopeSig` is live.
- */
-const ALLOW_UNSIGNED_SCOPE = true;
+/** Every scope must be signed by the platform (live on staging since 9a9cebd24); an unsigned scope is refused. */
+const ALLOW_UNSIGNED_SCOPE = false;
 
 const text = z.string().trim().min(1).max(80).optional();
 const filters = z.strictObject({
