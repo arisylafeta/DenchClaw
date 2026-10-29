@@ -574,8 +574,11 @@ export function matchesFilters(row: StockRow, filters: StockFilters, today = new
     if (!wanted || publicCountry(row.country) !== wanted) return false;
   }
   if (!kwhMatches(row, filters)) return false;
-  if (filters.maxPriceEurExVat !== undefined && (row.price_eur_ex_vat === null || row.price_eur_ex_vat > filters.maxPriceEurExVat)) return false;
-  if (filters.seenWithinDays !== undefined && daysOld(row.seen_on, today) > filters.seenWithinDays) return false;
+  // Price and freshness filters compare in coarse steps (EUR 100, whole months), so they cannot be used to binary-search
+  // a seller's exact ask inside its shown band or the exact day it was listed.
+  if (filters.maxPriceEurExVat !== undefined && (row.price_eur_ex_vat === null ||
+    Math.floor(row.price_eur_ex_vat / LOT_BAND_EUR) > Math.floor(filters.maxPriceEurExVat / LOT_BAND_EUR))) return false;
+  if (filters.seenWithinDays !== undefined && Math.ceil(daysOld(row.seen_on, today) / 30) > Math.ceil(filters.seenWithinDays / 30)) return false;
   return true;
 }
 
@@ -642,8 +645,6 @@ function labelFor(group: Pick<StockGroup, "make" | "model" | "capacityKwh" | "fo
 }
 
 // Ask ranges round outward, so the top of a shown ask is never below what a seller actually asks.
-const roundDown = (value: number, step: number) => Math.max(step, Math.floor(value / step) * step);
-const roundUp = (value: number, step: number) => Math.max(step, Math.ceil(value / step) * step);
 const isTested = (row: StockRow) => row.tested === true || typeof row.soh_percent === "number";
 
 export type LotKeys = {
@@ -750,8 +751,10 @@ export function aggregateStock(rows: StockRow[], keys: LotKeys, maxLots = MAX_LO
       priceEurExVat: !exVat.length ? null : (() => {
         // Never an exact seller price: EUR 100 steps with several suppliers, a wide band otherwise; always two figures.
         const step = crowd ? LOT_BAND_EUR : PRICE_BAND_EUR;
-        const min = roundDown(Math.min(...exVat), step);
-        return { min, median: crowd ? Math.round(median(exVat) / step) * step : null, max: Math.max(min + step, roundUp(Math.max(...exVat), step)), priced: exVat.length };
+        // Strictly outside the real cheapest and dearest asks, so an ask on a step line never shows as a bound.
+        const min = Math.max(0, Math.floor((Math.min(...exVat) - 1) / step) * step);
+        const max = Math.max(min + step, (Math.floor(Math.max(...exVat) / step) + 1) * step);
+        return { min, median: crowd ? Math.floor(median(exVat) / step) * step : null, max, priced: exVat.length };
       })(),
       priceEurIncVatOnly: members.filter((row) => row.price_eur_ex_vat === null && row.price_eur !== null).length,
       lastSeen: seen.at(-1)?.slice(0, 7) ?? null,

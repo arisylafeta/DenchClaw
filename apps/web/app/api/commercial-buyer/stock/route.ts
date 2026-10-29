@@ -53,7 +53,8 @@ export async function POST(request: Request): Promise<Response> {
   // A real filter is required, so the whole book cannot be read with an empty or country-only query.
   const filtered = Boolean(input.make || input.model || input.groupKeys?.length || input.kwhMin !== undefined || input.kwhMax !== undefined);
   if (!filtered) return fail("filter_required", 400);
-  if (input.exact && !input.groupKeys?.length) return fail("Invalid filters", 400);
+  // Real asks only for the platform's signed re-check by group keys.
+  if (input.exact && !(input.groupKeys?.length && input.scope && input.scopeSig)) return fail("Invalid filters", 400);
   if (input.scopeSig && !input.scope) return fail("Invalid scope", 400);
   if (input.scope && !(input.scopeSig ? scopeSignatureValid(input.scope, input.scopeSig, key) : ALLOW_UNSIGNED_SCOPE)) return fail("Invalid scope", 400);
 

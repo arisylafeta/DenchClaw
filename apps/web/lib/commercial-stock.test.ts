@@ -164,7 +164,7 @@ describe("aggregateStock", () => {
     expect(few).toMatchObject({ sources: 2, countries: ["Sweden"], synced: null, priceEurExVat: { min: 4000, median: null, max: 5000, priced: 2 } });
     const [crowd] = aggregate([row({ id: "a" }), row({ id: "b", company_id: "co_b", country: "Lithuania", price_eur_ex_vat: 3500 }),
       row({ id: "c", company_id: "co_c", country: "Norway", price_eur_ex_vat: 4500, sync_class: "static" })]);
-    expect(crowd).toMatchObject({ sources: 3, countries: ["Lithuania", "Norway", "Sweden"], synced: 2, priceEurExVat: { min: 3500, median: 4000, max: 4500, priced: 3 } });
+    expect(crowd).toMatchObject({ sources: 3, countries: ["Lithuania", "Norway", "Sweden"], synced: 2, priceEurExVat: { min: 3400, median: 4000, max: 4600, priced: 3 } });
   });
 
   it("uses an opaque key that depends only on the spec", () => {
@@ -328,5 +328,15 @@ describe("ask bands", () => {
   it("rounds every group price, never an exact seller figure", () => {
     const [crowd] = aggregate([row({ id: "a", price_eur_ex_vat: 124 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 335 }), row({ id: "c", company_id: "co_c", price_eur_ex_vat: 661 })]);
     expect(crowd.priceEurExVat).toEqual({ min: 100, median: 300, max: 700, priced: 3 });
+  });
+
+  it("never shows a real ask as a group bound, even on a step line, and price or freshness filters stay coarse", () => {
+    const [crowd] = aggregate([row({ id: "a", price_eur_ex_vat: 4000 }), row({ id: "b", company_id: "co_b", price_eur_ex_vat: 4500 }), row({ id: "c", company_id: "co_c", price_eur_ex_vat: 5000 })]);
+    expect(crowd.priceEurExVat).toEqual({ min: 3900, median: 4500, max: 5100, priced: 3 });
+    const today = new Date("2026-10-27T12:00:00Z");
+    expect(matchesFilters(row({ price_eur_ex_vat: 4180 }), { maxPriceEurExVat: 4101 }, today)).toBe(true);
+    expect(matchesFilters(row({ price_eur_ex_vat: 4180 }), { maxPriceEurExVat: 4179 }, today)).toBe(true);
+    expect(matchesFilters(row({ price_eur_ex_vat: 4180 }), { maxPriceEurExVat: 4099 }, today)).toBe(false);
+    expect(matchesFilters(row({ seen_on: "2026-10-20" }), { seenWithinDays: 1 }, today)).toBe(true);
   });
 });
