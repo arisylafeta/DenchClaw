@@ -18,6 +18,18 @@ class Plan(unittest.TestCase):
             ("d", "opportunity", "missing", "listed", "published"),
         ])
 
+    def test_stale_and_rejected_rows_keep_their_status_unless_live_again(self):
+        rows = [
+            {"id": "s", "status": "stale", "marketplace_status": "withdrawn", "marketplace_listing_id": "m1"},
+            {"id": "r", "status": "rejected", "marketplace_status": None, "marketplace_listing_id": None},
+            {"id": "p", "status": "rejected", "marketplace_status": "draft", "marketplace_listing_id": "m3"},
+        ]
+        statuses = {"m1": "withdrawn", "m3": "published"}
+        self.assertEqual(plan(rows, statuses), [
+            ("r", "rejected", "missing", "rejected", None),
+            ("p", "listed", "published", "rejected", "draft"),
+        ])
+
 
     def test_new_listings_skip_linked_bundles_drafts_and_our_own_accounts(self):
         mk = lambda i, **kw: {"id": i, "listing_status": "published", "listing_kind": "individual", "reference": "1",

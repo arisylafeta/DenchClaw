@@ -88,9 +88,10 @@ def plan(rows, statuses):
     for row in rows:
         market = statuses.get(row["marketplace_listing_id"], "missing")
         status = "listed" if market == "published" else "opportunity"
-        # A row marked stale by stock reconciliation stays stale unless its listing is live again.
-        if row["status"] == "stale" and market != "published":
-            status = "stale"
+        # A row marked stale (gone at source) or rejected (dropped in the enrichment pipeline)
+        # keeps that status unless its listing is live again.
+        if row["status"] in ("stale", "rejected") and market != "published":
+            status = row["status"]
         if (status, market) != (row["status"], row["marketplace_status"]):
             changes.append((row["id"], status, market, row["status"], row["marketplace_status"]))
     return changes
