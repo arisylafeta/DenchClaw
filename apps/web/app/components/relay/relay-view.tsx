@@ -330,6 +330,12 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
   const viewId = views[item.id] && ordered.some((d) => d.id === views[item.id]) ? views[item.id] : ordered[0]?.id;
   const draft = ordered.find((d) => d.id === viewId) ?? ordered[0];
   const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending;
+  const [finishing, setFinishing] = useState(false);
+  const finish = async () => {
+    setFinishing(true);
+    try { await api(`/api/relay/items/${item.id}/done`, { method: "POST" }); say("Done · no reply. Marked read and labelled Sorted in Gmail"); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't update Gmail."); } finally { setFinishing(false); }
+  };
   return (
     <section aria-label="Review">
       <div className={s.phead}><span className={s.tag}>In review</span></div>
@@ -342,6 +348,8 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
         })}
         <button className={s.navb} type="button" aria-label="Next" onClick={() => setCur((index + 1) % items.length)}>›</button>
         <span className={s.count}>{index + 1} of {items.length}</span>
+        <span className={s.sp} />
+        <button type="button" className={cx(s.btn, s.ghost)} disabled={finishing} title="No reply needed: marks this email read, labels it Sorted in Gmail and removes it from Review" onClick={() => void finish()}>{finishing ? "Marking…" : "Done, no reply"}</button>
       </div>
       <div className={s.rgrid}>
         <div className={s.col}>
