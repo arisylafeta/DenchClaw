@@ -38,7 +38,7 @@ describe("stock lots", () => {
     const [lithuania, ao050, q4052] = group.lots;
     expect(lithuania).toMatchObject({ units: 3, countries: ["Lithuania"], askEurExVat: null, priced: 0, vatUnknown: 3, partNumbers: [], condition: { notStated: 3 } });
     expect(ao050).toMatchObject({ units: 2, countries: ["United Kingdom"], partNumbers: ["37501-AO050"], priced: 2,
-      askEurExVat: { min: 4150, max: 4500 }, askEurPerKwh: { min: 64, max: 69 }, years: { min: 2022, max: 2023 },
+      askEurExVat: { min: 4150, max: 4500 }, askEurPerKwh: { min: 64, max: 70 }, years: { min: 2022, max: 2023 },
       condition: { tested: 1, untested: 0, notStated: 1, sohMin: 94, sohMax: 94, damaged: 0 } });
     for (const lot of group.lots) expect(lot.condition.tested + lot.condition.untested + lot.condition.notStated).toBe(lot.units);
     expect(q4052).toMatchObject({ units: 1, partNumbers: ["37501-Q4052"], askEurExVat: { min: 5000, max: 5000 } });
@@ -121,6 +121,15 @@ describe("pack identity", () => {
     ]);
     expect(learned.pack_key).toBe(niro2.pack_key);
     expect(other.pack_key ?? null).toBeNull();
+  });
+
+  it("groups only on curated pack identities, never on graph research keys", () => {
+    const research = { pack_key: "res:notes-1", pack_name: "Audi q5 oem family candidate" };
+    const groups = aggregate(withPackIdentity([
+      row({ id: "a", make: "Audi", model: "Q5", capacity_kwh: 17.9, part_numbers: ["80A915591A"], ...research }),
+      row({ id: "b", make: "Audi", model: "Q5", capacity_kwh: 14.1, part_numbers: ["80A915591A"], ...research }),
+    ]));
+    expect(groups.map((group) => group.units)).toEqual([1, 1]);
   });
 
   it("keeps damaged packs out of every group", () => {

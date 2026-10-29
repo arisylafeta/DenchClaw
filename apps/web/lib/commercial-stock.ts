@@ -345,7 +345,8 @@ function rowKwh(row: StockRow): number | null {
 function specKey(row: StockRow) {
   // One physical pack is one group, whatever the advert calls it (Ari, 28 Oct 2026: e-Niro "64", "67.5" and "VAN DE 64"
   // are the same pack). The battery graph's pack identity wins; listing text is only the fallback.
-  return row.pack_key ? `pack|${row.pack_key}` : textSpecKey(row);
+  // Only curated pack identities group; graph research keys can cover a whole OEM family of different packs.
+  return row.pack_key && NAMED_PACK.test(row.pack_key) ? `pack|${row.pack_key}` : textSpecKey(row);
 }
 
 /** Grouping key from the listing text alone (make, model family, format, rounded kWh). */
@@ -369,7 +370,7 @@ export function withPackIdentity(rows: StockRow[]): StockRow[] {
   const byPart = new Map<string, StockRow | null>();
   const bySpec = new Map<string, StockRow | null>();
   for (const row of rows) {
-    if (!row.pack_key) continue;
+    if (!row.pack_key || !NAMED_PACK.test(row.pack_key)) continue;
     for (const part of rowParts(row).map(partKey)) learn(byPart, part, row);
     // Listing text only names a pack when it states a kWh figure.
     if (normalKwh(row.capacity_kwh) !== null) learn(bySpec, textSpecKey(row), row);
@@ -600,7 +601,9 @@ function labelFor(group: Pick<StockGroup, "make" | "model" | "capacityKwh" | "fo
     .filter(Boolean).join(" ");
 }
 
-const roundTo = (value: number, step: number) => Math.max(step, Math.round(value / step) * step);
+// Ask ranges round outward, so the top of a shown ask is never below what a seller actually asks.
+const roundDown = (value: number, step: number) => Math.max(step, Math.floor(value / step) * step);
+const roundUp = (value: number, step: number) => Math.max(step, Math.ceil(value / step) * step);
 const isTested = (row: StockRow) => row.tested === true || typeof row.soh_percent === "number";
 
 /** Lots of one group: supplier x primary part number. */
@@ -639,8 +642,8 @@ function lotsFor(groupKey: string, members: StockRow[], tokenFor: (supplierId: s
         sohMin: soh.length ? Math.round(Math.min(...soh)) : null,
         sohMax: soh.length ? Math.round(Math.max(...soh)) : null,
       },
-      askEurExVat: asks.length ? { min: roundTo(Math.min(...asks), LOT_PRICE_STEP_EUR), max: roundTo(Math.max(...asks), LOT_PRICE_STEP_EUR) } : null,
-      askEurPerKwh: perKwh.length ? { min: roundTo(Math.min(...perKwh), 1), max: roundTo(Math.max(...perKwh), 1) } : null,
+      askEurExVat: asks.length ? { min: roundDown(Math.min(...asks), LOT_PRICE_STEP_EUR), max: roundUp(Math.max(...asks), LOT_PRICE_STEP_EUR) } : null,
+      askEurPerKwh: perKwh.length ? { min: roundDown(Math.min(...perKwh), 1), max: roundUp(Math.max(...perKwh), 1) } : null,
       priced: priced.reduce((total, row) => total + row.quantity, 0),
       vatUnknown: sum((row) => !(typeof row.price_eur_ex_vat === "number" && row.price_eur_ex_vat > 0) && row.price_eur !== null),
       lastSeen: seen.at(-1)?.slice(0, 10) ?? null,
