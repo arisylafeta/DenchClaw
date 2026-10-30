@@ -5,86 +5,352 @@
   "description": "One schema for every writer (dismantler-sync, crm-update, marketplace sync) and reader (stock search, commercial_stock_lines, CRM UI). Facts live at the top level, one key per fact; field_source says who wrote each fact. Write rules: a writer fills an empty fact or refreshes a fact that already carries its own source; owner values are never overwritten; precedence owner > pipeline > supplier > marketplace; disagreements beyond a margin go to a conflict list instead of being written.",
   "type": "object",
   "additionalProperties": false,
-  "x-facts": ["make", "model", "variant", "year", "part_numbers", "format", "powertrain", "chemistry", "capacity_kwh", "capacity_basis", "capacity_kwh_gross", "capacity_kwh_usable", "voltage_nominal", "capacity_ah", "pack_weight_kg", "soh_percent", "condition", "damaged", "tested", "vin"],
-  "x-sources": ["owner", "pipeline", "supplier", "marketplace"],
+  "x-facts": [
+    "make",
+    "model",
+    "variant",
+    "year",
+    "part_numbers",
+    "format",
+    "powertrain",
+    "chemistry",
+    "capacity_kwh",
+    "capacity_basis",
+    "capacity_kwh_gross",
+    "capacity_kwh_usable",
+    "voltage_nominal",
+    "capacity_ah",
+    "pack_weight_kg",
+    "soh_percent",
+    "condition",
+    "damaged",
+    "tested",
+    "vin"
+  ],
+  "x-sources": [
+    "owner",
+    "pipeline",
+    "supplier",
+    "marketplace"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
-
-    "make": { "type": "string", "minLength": 1 },
-    "model": { "type": "string", "minLength": 1 },
-    "variant": { "type": "string", "minLength": 1 },
-    "year": { "type": "integer", "minimum": 1990, "maximum": 2100 },
-    "part_numbers": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "minItems": 1 },
-    "format": { "enum": ["pack", "module", "cell"] },
-    "powertrain": { "enum": ["BEV", "PHEV", "HEV", "MHEV"] },
-    "chemistry": { "type": "string", "minLength": 1, "not": { "enum": ["UNKNOWN", "unknown", "Unknown"] } },
-    "capacity_kwh": { "type": "number", "exclusiveMinimum": 0, "description": "Marketed kWh: what the OEM or seller markets (pipeline packKwh). The figure search groups on." },
-    "capacity_basis": { "enum": ["marketed", "label", "listing_text", "estimate"] },
-    "capacity_kwh_gross": { "type": "number", "exclusiveMinimum": 0 },
-    "capacity_kwh_usable": { "type": "number", "exclusiveMinimum": 0 },
-    "voltage_nominal": { "type": "number", "exclusiveMinimum": 0 },
-    "capacity_ah": { "type": "number", "exclusiveMinimum": 0 },
-    "pack_weight_kg": { "type": "number", "exclusiveMinimum": 0 },
-    "soh_percent": { "type": "number", "minimum": 0, "maximum": 150 },
-    "condition": { "type": "string", "minLength": 1 },
-    "damaged": { "type": "boolean" },
-    "tested": { "type": "boolean" },
-    "vin": { "type": "string", "minLength": 1, "description": "Private. Never leaves the CRM." },
-
+    "schema_version": {
+      "const": 1
+    },
+    "make": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "variant": {
+      "type": "string",
+      "minLength": 1
+    },
+    "year": {
+      "type": "integer",
+      "minimum": 1990,
+      "maximum": 2100
+    },
+    "part_numbers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "format": {
+      "enum": [
+        "pack",
+        "module",
+        "cell"
+      ]
+    },
+    "powertrain": {
+      "enum": [
+        "BEV",
+        "PHEV",
+        "HEV",
+        "MHEV"
+      ]
+    },
+    "chemistry": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "enum": [
+          "UNKNOWN",
+          "unknown",
+          "Unknown"
+        ]
+      }
+    },
+    "capacity_kwh": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Marketed kWh: what the OEM or seller markets (pipeline packKwh). The figure search groups on."
+    },
+    "capacity_basis": {
+      "enum": [
+        "marketed",
+        "label",
+        "listing_text",
+        "estimate"
+      ]
+    },
+    "capacity_kwh_gross": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "capacity_kwh_usable": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "voltage_nominal": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "capacity_ah": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "pack_weight_kg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "soh_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 150
+    },
+    "condition": {
+      "type": "string",
+      "minLength": 1
+    },
+    "damaged": {
+      "type": "boolean"
+    },
+    "tested": {
+      "type": "boolean"
+    },
+    "vin": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Private. Never leaves the CRM."
+    },
     "field_source": {
       "type": "object",
-      "propertyNames": { "enum": ["make", "model", "variant", "year", "part_numbers", "format", "powertrain", "chemistry", "capacity_kwh", "capacity_basis", "capacity_kwh_gross", "capacity_kwh_usable", "voltage_nominal", "capacity_ah", "pack_weight_kg", "soh_percent", "condition", "damaged", "tested", "vin"] },
-      "additionalProperties": { "enum": ["owner", "pipeline", "supplier", "marketplace"] }
+      "propertyNames": {
+        "enum": [
+          "make",
+          "model",
+          "variant",
+          "year",
+          "part_numbers",
+          "format",
+          "powertrain",
+          "chemistry",
+          "capacity_kwh",
+          "capacity_basis",
+          "capacity_kwh_gross",
+          "capacity_kwh_usable",
+          "voltage_nominal",
+          "capacity_ah",
+          "pack_weight_kg",
+          "soh_percent",
+          "condition",
+          "damaged",
+          "tested",
+          "vin"
+        ]
+      },
+      "additionalProperties": {
+        "enum": [
+          "owner",
+          "pipeline",
+          "supplier",
+          "marketplace"
+        ]
+      }
     },
-
-    "quantity_available": { "type": ["number", "string"] },
-    "availability": { "type": "object" },
-    "price_eur": { "type": "number" },
-    "price_eur_ex_vat": { "type": "number" },
-    "price_eur_basis": { "type": "string" },
-    "price_ex_vat": { "type": ["number", "null"] },
-    "price_basis": { "type": "string" },
-    "vat": { "type": "string" },
-    "vat_basis": { "type": "string" },
-    "fx": { "type": "object" },
-    "eur_per_kwh": { "type": "number" },
-    "deliver": { "type": "boolean" },
-    "sync_class": { "enum": ["synced", "syncable", "static", "marketplace", "pipeline"] },
-    "source_url": { "type": "string" },
-    "photos": { "type": "array" },
-    "damage": { "type": "array" },
-    "battery_graph": { "type": "object", "description": "Research lead only (never a fact). Read by stock search." },
-
-    "sync": { "type": "object", "description": "Source sync state: adapter, sourceKey, firstSeen, lastSeen, available, missingSince, snapshotSha256, supplied (raw site values)." },
+    "quantity_available": {
+      "type": [
+        "number",
+        "string"
+      ]
+    },
+    "availability": {
+      "type": "object"
+    },
+    "price_eur": {
+      "type": "number"
+    },
+    "price_eur_ex_vat": {
+      "type": "number"
+    },
+    "price_eur_basis": {
+      "type": "string"
+    },
+    "price_ex_vat": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "price_basis": {
+      "type": "string"
+    },
+    "vat": {
+      "type": "string"
+    },
+    "vat_basis": {
+      "type": "string"
+    },
+    "fx": {
+      "type": "object"
+    },
+    "eur_per_kwh": {
+      "type": "number"
+    },
+    "deliver": {
+      "type": "boolean"
+    },
+    "sync_class": {
+      "enum": [
+        "synced",
+        "syncable",
+        "static",
+        "marketplace",
+        "pipeline"
+      ]
+    },
+    "source_url": {
+      "type": "string"
+    },
+    "photos": {
+      "type": "array"
+    },
+    "damage": {
+      "type": "array"
+    },
+    "battery_graph": {
+      "type": "object",
+      "description": "Research lead only (never a fact). Read by stock search."
+    },
+    "sync": {
+      "type": "object",
+      "description": "Source sync state: adapter, sourceKey, firstSeen, lastSeen, available, missingSince, snapshotSha256, supplied (raw site values)."
+    },
     "enrichment": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "state": { "enum": ["imported", "enriched", "ready", "rejected"] },
-        "ready": { "type": "boolean" },
-        "missing": { "type": "array", "items": { "type": "string" } },
-        "supported": { "type": "array", "items": { "type": "string" } },
-        "item_id": { "type": "string" },
-        "namespace": { "type": "string" },
-        "enriched_at": { "type": ["string", "null"] },
-        "checked_on": { "type": "string" },
-        "link": { "type": "string" },
+        "state": {
+          "enum": [
+            "imported",
+            "enriched",
+            "ready",
+            "rejected"
+          ]
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "enriched_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checked_on": {
+          "type": "string"
+        },
+        "link": {
+          "type": "string"
+        },
         "moved_from": {},
-        "decisions": { "type": "array", "items": { "type": "object" } },
-        "conflicts": { "type": "array", "items": { "type": "object" } },
-        "legacy": { "type": "object", "description": "enriched_by / enriched_on from earlier one-off runs." }
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "legacy": {
+          "type": "object",
+          "description": "enriched_by / enriched_on from earlier one-off runs."
+        }
       }
     },
-    "marketplace": { "type": "object", "description": "Listing link state only (slug, status); no fact copies." },
-    "stale": { "type": "object" },
-    "stale_history": { "type": "array" },
-    "rejected": { "type": "object" },
-    "status_history": { "type": "array" },
-    "previous_listings": { "type": "array" },
-    "history": { "type": ["array", "string"] },
-    "evidence": { "type": "object" },
-    "sources": { "type": "array" },
-    "attributes": { "type": "object", "description": "Raw supplier attribute table as read from the source." },
-    "extra": { "type": "object", "description": "Supplier-specific values that are not schema facts." }
+    "marketplace": {
+      "type": "object",
+      "description": "Listing link state only (slug, status); no fact copies."
+    },
+    "delivery": {
+      "type": "object",
+      "description": "Last push sync that delivered this row: plan hash, by, on, environment."
+    },
+    "stale": {
+      "type": "object"
+    },
+    "stale_history": {
+      "type": "array"
+    },
+    "rejected": {
+      "type": "object"
+    },
+    "status_history": {
+      "type": "array"
+    },
+    "previous_listings": {
+      "type": "array"
+    },
+    "history": {
+      "type": [
+        "array",
+        "string"
+      ]
+    },
+    "evidence": {
+      "type": "object"
+    },
+    "sources": {
+      "type": "array"
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Raw supplier attribute table as read from the source."
+    },
+    "extra": {
+      "type": "object",
+      "description": "Supplier-specific values that are not schema facts."
+    }
   }
 }

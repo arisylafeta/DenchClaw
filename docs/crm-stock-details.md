@@ -24,6 +24,7 @@ One schema for every writer and reader of stock rows. Source of truth: `apps/web
 - `sync`: source sync state (`adapter`, `sourceKey`, `firstSeen`, `lastSeen`, `available`, `supplied`).
 - `enrichment`: pipeline state only (`state` imported / enriched / ready / rejected, `ready`, `missing`, `supported`, `item_id`, `namespace`, `enriched_at`, `checked_on`, `link`, filtered `decisions`, `conflicts`).
 - `marketplace`: listing link state only (`slug`, ...).
+- `delivery`: the last push sync that delivered the row (`plan`, `by`, `on`, `environment`).
 - `stale`, `stale_history`, `rejected`, `status_history`, `previous_listings`, `history`, `evidence`, `sources`, `attributes`.
 - Operational: `quantity_available`, `availability`, `price_eur`, `price_eur_ex_vat`, `vat_basis`, `fx`, `deliver`, `sync_class`, `photos`, `damage`, `battery_graph` (research lead only).
 - `extra`: supplier-specific keys that are not facts (`grade_raw`, `donor_mileage_km`, `bildelsbasen_listing_id`, ...).

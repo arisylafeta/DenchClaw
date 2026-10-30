@@ -48,6 +48,7 @@ export interface StockDetailsV1 {
   sync?: Record<string, unknown>;
   enrichment?: Record<string, unknown>;
   marketplace?: Record<string, unknown>;
+  delivery?: Record<string, unknown>;
   stale?: Record<string, unknown>;
   stale_history?: unknown[];
   rejected?: Record<string, unknown>;
