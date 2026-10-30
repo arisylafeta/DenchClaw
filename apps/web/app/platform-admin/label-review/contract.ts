@@ -137,3 +137,64 @@ export function correctionInstruction(entry: Pick<LabelReviewEntry, "observation
     source: `${by}, label review`,
   };
 }
+
+/** Entries that share a part code are one pack type, so they are checked together. */
+export type LabelGroup = {
+  key: string;
+  title: string;
+  subtitle: string;
+  entries: LabelReviewEntry[];
+  rows: number;
+  pending: number;
+  mismatches: number;
+};
+
+export type LabelGroupDecisionInput = {
+  observationIds: string[];
+  decision: LabelDecision;
+  note: string;
+  correctedKwh?: number | null;
+};
+
+const normCode = (code: string) => code.toUpperCase().replace(/[\s.\-_/]/g, "");
+
+export function groupKeyOf(entry: Pick<LabelReviewEntry, "partNumbers" | "make" | "model">): string {
+  const code = entry.partNumbers.map(normCode).find(Boolean);
+  return code ? `pn:${code}` : `nocode:${(entry.make ?? "").toLowerCase()}|${(entry.model ?? "").toLowerCase()}`;
+}
+
+/** Groups the queue by part code (rows with no code group by make and model). Groups that still differ come first. */
+export function groupEntries(entries: LabelReviewEntry[]): LabelGroup[] {
+  const map = new Map<string, LabelReviewEntry[]>();
+  for (const e of entries) {
+    const key = groupKeyOf(e);
+    (map.get(key) ?? map.set(key, []).get(key)!).push(e);
+  }
+  const groups: LabelGroup[] = [...map].map(([key, list]) => {
+    const models = [...new Set(list.map((e) => `${e.make ?? ""} ${e.model ?? ""}`.trim()))];
+    const code = list[0].partNumbers[0];
+    const rows = new Set(list.map((e) => e.itemId)).size;
+    return {
+      key,
+      title: code ?? `${models[0] || "Unknown"} (no part code)`,
+      subtitle: `${models.join(", ")} · ${rows} ${rows === 1 ? "row" : "rows"} · ${list.length} ${list.length === 1 ? "reading" : "readings"}`,
+      entries: list,
+      rows,
+      pending: list.filter((e) => !e.decision).length,
+      mismatches: list.filter((e) => !e.decision && e.match === "mismatch").length,
+    };
+  });
+  const rank = (g: LabelGroup) => (g.mismatches ? 0 : g.pending ? 1 : 2);
+  return groups.sort((a, b) => rank(a) - rank(b) || b.mismatches - a.mismatches || a.title.localeCompare(b.title));
+}
+
+/** Checks a decision made on a whole group. */
+export function validateGroupDecision(input: unknown): { ok: true; value: LabelGroupDecisionInput } | { ok: false; error: string } {
+  if (!input || typeof input !== "object") return { ok: false, error: "Decision must be an object." };
+  const raw = input as Record<string, unknown>;
+  const ids = Array.isArray(raw.observationIds) ? raw.observationIds : [];
+  if (ids.length === 0 || ids.length > 100 || !ids.every(isUuid)) return { ok: false, error: "Choose 1 to 100 readings." };
+  const one = validateDecision({ observationId: ids[0], decision: raw.decision, note: raw.note, correctedKwh: raw.correctedKwh });
+  if (!one.ok) return one;
+  return { ok: true, value: { observationIds: [...new Set(ids as string[])], decision: one.value.decision, note: one.value.note, correctedKwh: one.value.correctedKwh } };
+}

@@ -7,8 +7,8 @@ import { Badge } from "@/app/components/platform-admin/ui/badge";
 import { Button } from "@/app/components/platform-admin/ui/button";
 import { Input } from "@/app/components/platform-admin/ui/input";
 import { Textarea } from "@/app/components/platform-admin/ui/textarea";
-import { getLabelReviewPage, recordLabelDecision } from "./actions";
-import type { LabelDecision, LabelReviewEntry, LabelReviewPage } from "./contract";
+import { getLabelReviewPage, recordLabelGroupDecision } from "./actions";
+import { groupEntries, type LabelDecision, type LabelGroup, type LabelReviewEntry, type LabelReviewPage } from "./contract";
 
 type Filter = "todo" | "mismatch" | "done" | "all";
 
@@ -20,11 +20,20 @@ const MATCH_TEXT: Record<LabelReviewEntry["match"], string> = {
 };
 
 const fmt = (n: number | null, unit: string) => (n === null ? "none" : `${n} ${unit}`);
+const rowName = (e: LabelReviewEntry) => `${e.make ?? ""} ${e.model ?? ""}${e.donorYear ? ` (${e.donorYear})` : ""}`.trim();
+
+/** The label energy most readings of the group agree on, used to prefill a correction. */
+function commonLabelKwh(group: LabelGroup): number | null {
+  const counts = new Map<number, number>();
+  for (const e of group.entries) if (!e.decision && e.parsed.kwh !== null) counts.set(e.parsed.kwh, (counts.get(e.parsed.kwh) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
 
 export function LabelReviewClient({ initialPage }: { initialPage: LabelReviewPage }) {
   const [page, setPage] = useState(initialPage);
   const [filter, setFilter] = useState<Filter>(initialPage.mismatches > 0 ? "mismatch" : "todo");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedReading, setSelectedReading] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [correcting, setCorrecting] = useState(false);
   const [kwh, setKwh] = useState("");
@@ -33,11 +42,19 @@ export function LabelReviewClient({ initialPage }: { initialPage: LabelReviewPag
   const [zoomed, setZoomed] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  const groups = useMemo(() => groupEntries(page.entries), [page.entries]);
   const visible = useMemo(
-    () => page.entries.filter((e) => (filter === "all" ? true : filter === "done" ? e.decision : filter === "mismatch" ? !e.decision && e.match === "mismatch" : !e.decision)),
-    [page.entries, filter],
+    () => groups.filter((g) => (filter === "all" ? true : filter === "done" ? g.pending === 0 : filter === "mismatch" ? g.mismatches > 0 : g.pending > 0)),
+    [groups, filter],
   );
-  const current = visible.find((e) => e.observationId === selected) ?? visible[0] ?? null;
+  const group = visible.find((g) => g.key === selectedKey) ?? visible[0] ?? null;
+  const current = group
+    ? (group.entries.find((e) => e.observationId === selectedReading)
+      ?? group.entries.find((e) => !e.decision && e.match === "mismatch")
+      ?? group.entries.find((e) => !e.decision)
+      ?? group.entries[0])
+    : null;
+  const pendingIds = useMemo(() => group?.entries.filter((e) => !e.decision).map((e) => e.observationId) ?? [], [group]);
   const photos = useMemo(() => (current ? [current.photoUrl, ...current.otherPhotos] : []), [current]);
   const photo = shown ?? current?.photoUrl ?? null;
   const photoIndex = Math.max(0, photos.indexOf(photo ?? ""));
@@ -47,26 +64,27 @@ export function LabelReviewClient({ initialPage }: { initialPage: LabelReviewPag
     setZoomed(false);
   }, [photos, photoIndex]);
 
-  useEffect(() => { setNote(""); setCorrecting(false); setKwh(""); setShown(null); setLightbox(false); setZoomed(false); }, [current?.observationId]);
+  useEffect(() => { setNote(""); setCorrecting(false); setKwh(""); setSelectedReading(null); setShown(null); setLightbox(false); setZoomed(false); }, [group?.key]);
+  useEffect(() => { setShown(null); setZoomed(false); }, [current?.observationId]);
 
-  const move = useCallback((step: number) => {
+  const move = useCallback((by: number) => {
     if (!visible.length) return;
-    const at = Math.max(0, visible.findIndex((e) => e.observationId === current?.observationId));
-    setSelected(visible[Math.min(visible.length - 1, Math.max(0, at + step))].observationId);
-  }, [visible, current?.observationId]);
+    const at = Math.max(0, visible.findIndex((g) => g.key === group?.key));
+    setSelectedKey(visible[Math.min(visible.length - 1, Math.max(0, at + by))].key);
+  }, [visible, group?.key]);
 
   const decide = useCallback((decision: LabelDecision) => {
-    if (!current || pending) return;
-    if (decision === "correct" && !correcting) { setCorrecting(true); setKwh(String(current.parsed.kwh ?? "")); return; }
+    if (!group || pending || pendingIds.length === 0) return;
+    if (decision === "correct" && !correcting) { setCorrecting(true); setKwh(String(commonLabelKwh(group) ?? "")); return; }
     startTransition(async () => {
-      const result = await recordLabelDecision({ observationId: current.observationId, decision, note, correctedKwh: decision === "correct" ? Number(kwh.replace(",", ".")) : null });
-      if (!result.ok) { toast.error(result.error); return; }
-      toast.success(`${decision === "approve" ? "Approved" : decision === "reject" ? "Rejected" : "Corrected"}`);
-      const next = visible[visible.findIndex((e) => e.observationId === current.observationId) + 1];
+      const result = await recordLabelGroupDecision({ observationIds: pendingIds, decision, note, correctedKwh: decision === "correct" ? Number(kwh.replace(",", ".")) : null });
+      if (!result.ok) { toast.error(result.error); if (result.done > 0) setPage(await getLabelReviewPage()); return; }
+      toast.success(`${decision === "approve" ? "Approved" : decision === "reject" ? "Rejected" : "Corrected"} ${result.done} ${result.done === 1 ? "reading" : "readings"}`);
+      const next = visible[visible.findIndex((g) => g.key === group.key) + 1];
       setPage(await getLabelReviewPage());
-      if (next) setSelected(next.observationId);
+      if (next) setSelectedKey(next.key);
     });
-  }, [current, pending, correcting, note, kwh, visible]);
+  }, [group, pending, pendingIds, correcting, note, kwh, visible]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -93,12 +111,13 @@ export function LabelReviewClient({ initialPage }: { initialPage: LabelReviewPag
   }, [move, decide, step, lightbox]);
 
   const donePct = page.total ? Math.round((page.decided / page.total) * 100) : 0;
+  const decidedHere = group ? group.entries.length - group.pending : 0;
 
   return (
     <div className="flex h-screen flex-col bg-[var(--color-main-bg)] text-[var(--color-text)]">
       <header className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border)] px-4 py-3">
         <h1 className="text-sm font-semibold">Label review</h1>
-        <span className="text-xs text-[var(--color-text-muted)]">{page.decided} of {page.total} checked · {page.mismatches} differ from the stored value</span>
+        <span className="text-xs text-[var(--color-text-muted)]">{groups.length} part codes · {page.decided} of {page.total} readings checked · {page.mismatches} differ from the stored value</span>
         <div className="h-1 w-32 overflow-hidden rounded bg-[var(--color-border)]" aria-hidden><div className="h-full bg-[var(--color-accent)]" style={{ width: `${donePct}%` }} /></div>
         <div className="ml-auto flex gap-1" role="tablist" aria-label="Filter">
           {([["mismatch", "Differs"], ["todo", "To check"], ["done", "Checked"], ["all", "All"]] as const).map(([key, label]) => (
@@ -108,54 +127,62 @@ export function LabelReviewClient({ initialPage }: { initialPage: LabelReviewPag
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,12rem)_minmax(0,1fr)] md:grid-cols-[17rem_minmax(0,1fr)] md:grid-rows-1">
-        <nav className="min-h-0 overflow-auto border-b border-[var(--color-border)] md:border-b-0 md:border-r" aria-label="Queue">
+        <nav className="min-h-0 overflow-auto border-b border-[var(--color-border)] md:border-b-0 md:border-r" aria-label="Part codes">
           {visible.length === 0 && <p className="p-4 text-xs text-[var(--color-text-muted)]">Nothing here.</p>}
-          {visible.map((e) => (
-            <button key={e.observationId} type="button" onClick={() => setSelected(e.observationId)}
-              className={`block w-full border-b border-[var(--color-border)] px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2 ${e.observationId === current?.observationId ? "bg-[var(--color-surface-hover)]" : ""}`}>
-              <span className="block truncate font-medium">{e.make} {e.model}</span>
-              <span className="flex items-center gap-2 text-[var(--color-text-muted)]">
-                <span>stored {fmt(e.stored.packKwh, "kWh")}</span>
-                <span>label {fmt(e.parsed.kwh, "kWh")}</span>
-                {e.decision ? <Badge variant="secondary">{e.decision.decision}</Badge> : e.match === "mismatch" ? <Badge variant="destructive">differs</Badge> : null}
+          {visible.map((g) => (
+            <button key={g.key} type="button" onClick={() => setSelectedKey(g.key)} aria-current={g.key === group?.key}
+              className={`block w-full border-b border-[var(--color-border)] px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2 ${g.key === group?.key ? "bg-[var(--color-surface-hover)]" : ""}`}>
+              <span className="block truncate font-medium">{g.title}</span>
+              <span className="block truncate text-[var(--color-text-muted)]">{g.subtitle}</span>
+              <span className="mt-0.5 flex items-center gap-2">
+                {g.mismatches > 0 ? <Badge variant="destructive">{g.mismatches} differ</Badge> : g.pending === 0 ? <Badge variant="secondary">checked</Badge> : <span className="text-[var(--color-text-muted)]">{g.pending} to check</span>}
               </span>
             </button>
           ))}
         </nav>
 
-        {current ? (
+        {group && current ? (
           <div className="flex min-h-0 min-w-0 flex-col">
-            <section className="max-h-[46%] min-w-0 shrink-0 overflow-auto border-b border-[var(--color-border)] p-4" aria-label="Output">
-              <h2 className="text-sm font-semibold">{current.make} {current.model}{current.donorYear ? ` (${current.donorYear})` : ""}</h2>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">{current.partNumbers.length ? current.partNumbers.join(", ") : "No part code on the row"} · read by {current.actor ?? "unknown"}</p>
-              <p className={`mt-3 rounded-md px-2 py-1 text-xs ${current.match === "mismatch" ? "bg-[var(--color-error)]/10 text-[var(--color-error)]" : "bg-[var(--color-surface-hover)]"}`}>{MATCH_TEXT[current.match]}</p>
-              <table className="mt-3 w-full text-xs">
-                <thead><tr className="text-left text-[var(--color-text-muted)]"><th className="py-1 font-normal">Field</th><th className="font-normal">Engine read</th><th className="font-normal">Stored</th></tr></thead>
+            <section className="max-h-[50%] min-w-0 shrink-0 overflow-auto border-b border-[var(--color-border)] p-4" aria-label="Output">
+              <h2 className="text-sm font-semibold">{group.title}</h2>
+              <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{group.subtitle}{decidedHere ? ` · ${decidedHere} already checked` : ""}</p>
+
+              <table className="mt-3 w-full text-xs" aria-label="Readings in this group">
+                <thead><tr className="text-left text-[var(--color-text-muted)]"><th className="py-1 font-normal">Row</th><th className="font-normal">Photo</th><th className="font-normal">Label</th><th className="font-normal">Stored</th><th className="font-normal"> </th></tr></thead>
                 <tbody>
-                  <tr><td className="py-1">Pack energy</td><td>{fmt(current.parsed.kwh, "kWh")}</td><td>{fmt(current.stored.packKwh, "kWh")}{current.stored.packKwhAuthority ? ` · ${current.stored.packKwhAuthority}` : ""}</td></tr>
-                  <tr><td className="py-1">Nominal voltage</td><td>{fmt(current.parsed.voltage, "V")}</td><td>{fmt(current.stored.voltageNominal, "V")}</td></tr>
-                  <tr><td className="py-1">Capacity</td><td>{fmt(current.parsed.ah, "Ah")}</td><td>{fmt(current.stored.capacityAh, "Ah")}</td></tr>
+                  {group.entries.map((e) => (
+                    <tr key={e.observationId} onClick={() => setSelectedReading(e.observationId)} aria-selected={e.observationId === current.observationId}
+                      className={`cursor-pointer border-t border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] ${e.observationId === current.observationId ? "bg-[var(--color-surface-hover)]" : ""}`}>
+                      <td className="py-1">{rowName(e)}</td>
+                      <td>{e.photoNumber ?? "?"}</td>
+                      <td className={e.match === "mismatch" ? "text-[var(--color-error)]" : ""}>{fmt(e.parsed.kwh, "kWh")}{e.parsed.voltage !== null ? ` · ${e.parsed.voltage} V` : ""}</td>
+                      <td>{fmt(e.stored.packKwh, "kWh")}{e.stored.packKwhAuthority ? ` · ${e.stored.packKwhAuthority}` : ""}</td>
+                      <td>{e.decision ? <Badge variant="secondary">{e.decision.decision}</Badge> : e.match === "mismatch" ? <Badge variant="destructive">differs</Badge> : null}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-              <h3 className="mt-4 text-xs font-medium">Transcription</h3>
+
+              <p className={`mt-3 rounded-md px-2 py-1 text-xs ${current.match === "mismatch" ? "bg-[var(--color-error)]/10 text-[var(--color-error)]" : "bg-[var(--color-surface-hover)]"}`}>{MATCH_TEXT[current.match]} · read by {current.actor ?? "unknown"}</p>
+              <h3 className="mt-3 text-xs font-medium">Transcription of the selected reading</h3>
               <pre className="mt-1 whitespace-pre-wrap break-words rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">{current.text}</pre>
 
-              {current.decision ? (
-                <p className="mt-4 text-xs">Checked: <b>{current.decision.decision}</b> by {current.decision.by}{current.decision.note ? ` — ${current.decision.note}` : ""}</p>
+              {pendingIds.length === 0 ? (
+                <p className="mt-4 text-xs">Everything in this group is checked.{current.decision ? ` Last: ${current.decision.decision} by ${current.decision.by}${current.decision.note ? ` — ${current.decision.note}` : ""}` : ""}</p>
               ) : (
                 <div className="mt-4 space-y-2">
                   {correcting && (
-                    <label className="block text-xs">Pack energy on the label (kWh)
+                    <label className="block text-xs">Pack energy on the label (kWh), set on every row in this group
                       <Input inputMode="decimal" value={kwh} onChange={(ev) => setKwh(ev.target.value)} className="mt-1 w-32" aria-label="Corrected pack energy in kWh" />
                     </label>
                   )}
-                  <Textarea value={note} onChange={(ev) => setNote(ev.target.value)} placeholder="Notes (required to reject)" rows={3} aria-label="Notes" />
+                  <Textarea value={note} onChange={(ev) => setNote(ev.target.value)} placeholder="Notes (required to reject)" rows={2} aria-label="Notes" />
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => decide("approve")} disabled={pending}><CheckIcon /> Approve <kbd className="text-[10px] opacity-70">A</kbd></Button>
-                    <Button variant="destructive" onClick={() => decide("reject")} disabled={pending}><XIcon /> Reject <kbd className="text-[10px] opacity-70">R</kbd></Button>
+                    <Button onClick={() => decide("approve")} disabled={pending}><CheckIcon /> Approve {pendingIds.length} <kbd className="text-[10px] opacity-70">A</kbd></Button>
+                    <Button variant="destructive" onClick={() => decide("reject")} disabled={pending}><XIcon /> Reject {pendingIds.length} <kbd className="text-[10px] opacity-70">R</kbd></Button>
                     <Button variant="outline" onClick={() => decide("correct")} disabled={pending}><PencilIcon /> {correcting ? "Save correction" : "Correct"} <kbd className="text-[10px] opacity-70">C</kbd></Button>
                   </div>
-                  <p className="text-[11px] text-[var(--color-text-muted)]">J and K move through the queue. A correction sets the stored value with your note; nothing is published from here.</p>
+                  <p className="text-[11px] text-[var(--color-text-muted)]">A decision applies to every unchecked reading with this part code. J and K change part code. The label figure always wins: a correction sets the stored value with your note. Nothing is published from here.</p>
                 </div>
               )}
             </section>

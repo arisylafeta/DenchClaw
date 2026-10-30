@@ -61,3 +61,50 @@ describe("recordLabelDecision", () => {
     expect(stockCli).not.toHaveBeenCalled();
   });
 });
+
+describe("recordLabelGroupDecision", () => {
+  const OBS2 = "33333333-3333-4333-8333-333333333333";
+  const ITEM2 = "44444444-4444-4444-8444-444444444444";
+  const e1 = { ...entry, itemId: ITEM };
+  const e2 = { ...entry, observationId: OBS2, itemId: ITEM };
+  const e3 = { ...entry, observationId: "55555555-5555-4555-8555-555555555555", itemId: ITEM2 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentUser.mockResolvedValue({ id: "u1", email: "ari@example.com" });
+    readLabelQueue.mockResolvedValue({ entries: [e1, e2, e3] });
+    stockCli.mockResolvedValue("{}");
+    currentItemVersion.mockResolvedValue(7);
+  });
+
+  it("approves every pending reading, one observation each", async () => {
+    const { recordLabelGroupDecision } = await import("./actions");
+    const r = await recordLabelGroupDecision({ observationIds: [e1.observationId, e2.observationId, e3.observationId], decision: "approve", note: "" });
+    expect(r).toEqual({ ok: true, done: 3, skipped: 0 });
+    expect(stockCli.mock.calls.map((c) => c[0][0])).toEqual(["observe", "observe", "observe"]);
+  });
+
+  it("corrects once per row, not once per reading, then records every reading", async () => {
+    const { recordLabelGroupDecision } = await import("./actions");
+    await recordLabelGroupDecision({ observationIds: [e1.observationId, e2.observationId, e3.observationId], decision: "correct", note: "label", correctedKwh: 26 });
+    const verbs = stockCli.mock.calls.map((c) => `${c[0][0]}:${c[0][1]}`);
+    expect(verbs.filter((v) => v.startsWith("user-update"))).toEqual([`user-update:${ITEM}`, `user-update:${ITEM2}`]);
+    expect(verbs.filter((v) => v.startsWith("observe")).length).toBe(3);
+  });
+
+  it("skips readings that were already checked and stops with a count when a write fails", async () => {
+    readLabelQueue.mockResolvedValue({ entries: [e1, { ...e2, decision: { decision: "approve", by: "x", note: "", at: "y" } }, e3] });
+    stockCli.mockResolvedValueOnce("{}").mockRejectedValueOnce(new Error("CONFLICT: stale\nstack"));
+    const { recordLabelGroupDecision } = await import("./actions");
+    const r = await recordLabelGroupDecision({ observationIds: [e1.observationId, e2.observationId, e3.observationId], decision: "approve", note: "" });
+    expect(r).toEqual({ ok: false, error: "CONFLICT: stale (1 of 2 saved)", done: 1 });
+  });
+
+  it("writes nothing when signed out", async () => {
+    currentUser.mockResolvedValue(null);
+    const { recordLabelGroupDecision } = await import("./actions");
+    expect(await recordLabelGroupDecision({ observationIds: [e1.observationId], decision: "approve", note: "" })).toMatchObject({ ok: false, done: 0 });
+    expect(stockCli).not.toHaveBeenCalled();
+  });
+});
+
