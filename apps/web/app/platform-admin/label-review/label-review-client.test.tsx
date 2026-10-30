@@ -29,6 +29,7 @@ describe("LabelReviewClient", () => {
     expect(screen.getAllByText(/77 kWh/).length).toBeGreaterThan(0);
     expect(screen.getByText(/independent_review/)).toBeTruthy();
     expect(screen.getByAltText(/Supplier photo of Audi Q4/)).toHaveProperty("src", "https://cdn.example/label.jpg");
+    expect(screen.getByRole("group", { name: "Photos" }).querySelectorAll("button").length).toBe(2);
     expect(screen.getByRole("link", { name: /Original listing/ })).toHaveProperty("href", "https://supplier.example/listing/1");
   });
 
@@ -58,5 +59,22 @@ describe("LabelReviewClient", () => {
     expect(screen.queryByText(/Audi Q3/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "To check" }));
     expect(screen.getAllByText(/Audi Q3/).length).toBeGreaterThan(0);
+  });
+
+  it("opens the photo full screen, steps with the arrow keys and closes with Escape", async () => {
+    render(<LabelReviewClient initialPage={page([base])} />);
+    await userEvent.click(screen.getByRole("button", { name: "Open photo in full view" }));
+    const dialog = screen.getByRole("dialog", { name: "Photo full view" });
+    expect(dialog.querySelector("img")).toHaveProperty("src", "https://cdn.example/label.jpg");
+    await userEvent.keyboard("{ArrowRight}");
+    expect(screen.getByRole("dialog", { name: "Photo full view" }).querySelector("img")).toHaveProperty("src", "https://cdn.example/other.jpg");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("picks a photo from the carousel strip", async () => {
+    render(<LabelReviewClient initialPage={page([base])} />);
+    await userEvent.click(screen.getByRole("button", { name: "Photo 2" }));
+    expect(screen.getByAltText(/Supplier photo of Audi Q4/)).toHaveProperty("src", "https://cdn.example/other.jpg");
   });
 });
