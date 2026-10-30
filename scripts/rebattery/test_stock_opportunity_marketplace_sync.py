@@ -1,6 +1,6 @@
 import unittest
 
-from stock_opportunity_marketplace_sync import bundle_links, new_listings, plan, stock_row
+from stock_opportunity_marketplace_sync import bundle_links, details_v1, new_listings, plan, stock_row
 
 
 class Plan(unittest.TestCase):
@@ -54,3 +54,17 @@ class Plan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DetailsV1(unittest.TestCase):
+    def test_marketplace_facts_land_on_schema_keys_with_their_source(self):
+        spec = {"manufacturer": "Nissan", "model": "Leaf", "format": "Pack", "chemistry": "NMC", "pack_kwh": 40,
+                "year_manufacture": 2019, "soh": None, "metadata_json": {"partNumber": "295B0-5SA0A"}}
+        details = details_v1(spec, {"seo_slug": "nissan-leaf-40"})
+        self.assertEqual(details["format"], "pack")
+        self.assertEqual(details["part_numbers"], ["295B0-5SA0A"])
+        self.assertEqual(details["capacity_basis"], "marketed")
+        self.assertEqual(details["marketplace"], {"slug": "nissan-leaf-40"})
+        self.assertNotIn("part_number", details)
+        self.assertNotIn("soh_percent", details)
+        self.assertEqual(set(details["field_source"]), {"make", "model", "format", "chemistry", "capacity_kwh", "capacity_basis", "year", "part_numbers"})

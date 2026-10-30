@@ -111,6 +111,40 @@ def new_listings(listings, linked_ids):
     return out
 
 
+def _num(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def details_v1(spec, listing):
+    """Stock details in schema v1 (apps/web/lib/crm-postgres/stock-details.schema.json): marketplace facts at the
+    top level, each marked field_source "marketplace", so the pipeline and supplier syncs can refine them."""
+    meta = spec.get("metadata_json") or {}
+    fmt = str(spec.get("format") or "").strip().lower()
+    year = spec.get("year_manufacture")
+    facts = {
+        "make": spec.get("manufacturer") or None, "model": spec.get("model") or None,
+        "format": fmt if fmt in ("pack", "module", "cell") else None,
+        "chemistry": spec.get("chemistry") if spec.get("chemistry") and "unknown" not in str(spec.get("chemistry")).lower() else None,
+        "capacity_kwh": _num(spec.get("pack_kwh")),
+        "year": int(year) if str(year or "").isdigit() and 1990 <= int(year) <= 2100 else None,
+        "soh_percent": _num(spec.get("soh")),
+        "part_numbers": [meta["partNumber"]] if meta.get("partNumber") else None,
+        "vin": meta.get("vin") or None,
+    }
+    details = {key: value for key, value in facts.items() if value is not None}
+    if "capacity_kwh" in details:
+        details["capacity_basis"] = "marketed"
+    details["field_source"] = {key: "marketplace" for key in details}
+    if listing.get("seo_slug"):
+        details["marketplace"] = {"slug": listing["seo_slug"]}
+    details["schema_version"] = 1
+    return details
+
+
 def stock_row(listing):
     spec = specs(listing)
     location = (spec.get("location_address") or {}) if isinstance(spec.get("location_address"), dict) else {}
@@ -123,10 +157,7 @@ def stock_row(listing):
         "price_unit": UNIT.get(fmt) if listing.get("buy_now_price") is not None else None, "location": place,
         "supplier_ref": f"marketplace:{listing.get('reference') or listing['id']}",
         "observed_on": (listing.get("published_at") or "")[:10] or None,
-        "details": {"marketplace": {k: spec.get(k) for k in ("manufacturer", "model", "format", "chemistry", "pack_kwh",
-                                                            "year_manufacture", "soh")},
-                    "seo_slug": listing.get("seo_slug"), "vin": (spec.get("metadata_json") or {}).get("vin"),
-                    "part_number": (spec.get("metadata_json") or {}).get("partNumber")},
+        "details": details_v1(spec, listing),
     }
 
 
