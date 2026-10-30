@@ -406,7 +406,8 @@ function resolveDerivedContent(
         section === "battery-review" ||
         section === "battery-requests" ||
         section === "messages" ||
-        section === "payout-reviews"
+        section === "payout-reviews" ||
+        section === "label-review"
       ) {
         return { kind: "platform-admin", section };
       }

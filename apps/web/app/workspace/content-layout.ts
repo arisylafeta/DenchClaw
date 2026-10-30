@@ -4,6 +4,7 @@ export function contentUsesFullView(path: string | null | undefined): boolean {
     || path === "campaign"
     || path === "~platform-admin/listings"
     || path === "~platform-admin/payout-reviews"
+    || path === "~platform-admin/label-review"
     || path === "~platform-admin/battery-requests"
     || path === "~platform-admin/messages";
 }

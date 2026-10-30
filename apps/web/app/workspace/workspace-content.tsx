@@ -1503,7 +1503,8 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         | "platform-battery-review"
         | "platform-battery-requests"
         | "platform-messages"
-        | "platform-payout-reviews",
+        | "platform-payout-reviews"
+        | "platform-label-review",
     ) => {
       // Make sure the right panel is open and wide enough to actually use
       // when the user clicks one of the data tabs (People, Companies, etc.).
@@ -1542,6 +1543,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         "platform-battery-requests": { path: "~platform-admin/battery-requests", name: "Battery requests" },
         "platform-messages": { path: "~platform-admin/messages", name: "Message monitoring" },
         "platform-payout-reviews": { path: "~platform-admin/payout-reviews", name: "Payout reviews" },
+        "platform-label-review": { path: "~platform-admin/label-review", name: "Label review" },
       }[target];
       openTabForNode({ path: config.path, name: config.name, type: "folder" }, { preview: false });
       closeEntryModalIfOpen();
@@ -2570,7 +2572,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
                 : null
     ),
     activePlatformTarget: activeContentTab?.kind === "platform-admin"
-      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews"
+      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | "label-review"
       : null,
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,

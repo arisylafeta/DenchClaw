@@ -386,6 +386,7 @@ export function inferContentTabTitle(path: string, fallback?: string): string {
   }
   if (path === "~platform-admin/messages") return "Message monitoring";
   if (path === "~platform-admin/payout-reviews") return "Payout reviews";
+  if (path === "~platform-admin/label-review") return "Label review";
   if (path === "~crm/inbox") return "Mail";
   if (path === "~crm/home") return "Home";
   if (path === "~crm/leaderboard") return "Leaderboard";

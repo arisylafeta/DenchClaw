@@ -90,7 +90,8 @@ export type PlatformAdminSection =
   | "battery-review"
   | "battery-requests"
   | "messages"
-  | "payout-reviews";
+  | "payout-reviews"
+  | "label-review";
 
 export type ContentState =
   | { kind: "none" }
