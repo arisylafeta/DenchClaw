@@ -307,5 +307,9 @@ describe("duplicateStockFor (REB-566)", () => {
     expect(query).not.toHaveBeenCalled();
     expect(await duplicateStockFor({ query } as never, "c1", null, "SP05 system")).toEqual([{ id: "sto_1", title: "SP05" }]);
     expect(query).toHaveBeenCalledWith(expect.stringContaining("crm_stock_opportunities"), ["c1", null, "SP05 system"]);
+    const sql = (query.mock.calls.at(-1) as unknown as [string])[0];
+    expect(sql).toContain("details->'field_source'->>'model' = 'marketplace'");
+    expect(sql).toContain("details->'part_numbers'->>0");
+    expect(sql).not.toMatch(/part_number'|'marketplace'->>/);
   });
 });

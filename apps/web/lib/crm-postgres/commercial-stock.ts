@@ -13,6 +13,7 @@ const LIVE_STOCK = `
     s.details->>'make' as make, s.details->>'model' as model, s.details->>'format' as format,
     coalesce(${num("s.details->'capacity_kwh'")}, ${num("s.details->'capacity_kwh_gross'")},
       ${num("s.details->'battery_graph'->'gross_kwh'")})::float8 as capacity_kwh,
+    s.details->>'capacity_basis' as capacity_basis,
     s.details->>'chemistry' as chemistry, s.details->>'powertrain' as powertrain,
     ${num("s.details->'year'")}::int as year,
     coalesce(nullif(c.country, ''), nullif(s.location, '')) as country,

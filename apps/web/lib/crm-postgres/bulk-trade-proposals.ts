@@ -434,9 +434,9 @@ export async function duplicateStockFor(
   const { rows } = await client.query(
     `select s.id, s.title from crm_stock_opportunities s
      where (($1::text is not null and s.company_id = $1) or ($2::text is not null and s.person_id = $2))
-       and length(regexp_replace(lower(coalesce(nullif(s.details->'marketplace'->>'model', ''), nullif(s.details->>'part_number', ''), '')), '[^a-z0-9]', '', 'g')) >= 5
+       and length(regexp_replace(lower(coalesce(nullif(case when s.details->'field_source'->>'model' = 'marketplace' then s.details->>'model' end, ''), nullif(s.details->'part_numbers'->>0, ''), '')), '[^a-z0-9]', '', 'g')) >= 5
        and regexp_replace(lower($3), '[^a-z0-9]', '', 'g')
-           like '%' || regexp_replace(lower(coalesce(nullif(s.details->'marketplace'->>'model', ''), s.details->>'part_number')), '[^a-z0-9]', '', 'g') || '%'
+           like '%' || regexp_replace(lower(coalesce(nullif(case when s.details->'field_source'->>'model' = 'marketplace' then s.details->>'model' end, ''), s.details->'part_numbers'->>0)), '[^a-z0-9]', '', 'g') || '%'
      limit 5`,
     [companyId, personId, title],
   );

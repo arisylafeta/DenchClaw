@@ -27,6 +27,8 @@ export type StockRow = {
   model: string | null;
   format: string | null;
   capacity_kwh: number | null;
+  /** How capacity_kwh was established: marketed | label | listing_text | estimate. */
+  capacity_basis?: string | null;
   chemistry: string | null;
   powertrain: string | null;
   year: number | null;
