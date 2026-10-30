@@ -24,7 +24,7 @@ let pool: pg.Pool | null = null;
 /** Read-only connection to the stock ledger. Every write goes through the stock CLI, never through this pool. */
 function stockPool(): pg.Pool {
   pool ??= new pg.Pool({
-    connectionString: process.env.STOCK_DATABASE_URL ?? "postgresql:///rebattery_enrichments?host=/var/run/postgresql",
+    connectionString: process.env.STOCK_DATABASE_URL ?? "postgresql://root@/rebattery_enrichments?host=/var/run/postgresql",
     options: "-c default_transaction_read_only=on",
     max: 3,
   });
@@ -135,6 +135,8 @@ export async function stockCli(args: string[], body: unknown, actor: string): Pr
     await writeFile(file, JSON.stringify(body), { mode: 0o600 });
     const { stdout } = await run("node", [CLI, ...args, "--actor", actor, "--input", file], {
       cwd: join(CLI, "..", "..", ".."),
+      // The web service runs without USER set, and the CLI connects to PostgreSQL over the local socket as that user.
+      env: { ...process.env, USER: process.env.USER ?? "root", PGUSER: process.env.PGUSER ?? "root" },
       timeout: 120_000,
       maxBuffer: 8 * 1024 * 1024,
     });
