@@ -182,7 +182,25 @@ def handle(args):
             with db.cursor() as cur:
                 cur.execute('select distinct gmail_account from mail_identity where active and gmail_account is not null order by gmail_account')
                 accounts = [r[0] for r in cur.fetchall()]
-        return {'dry_run':not args.apply,'accounts':[sync_gmail(db,account,args.since,args.apply) for account in accounts]}
+        results = []
+        for account in accounts:
+            if args.apply and not lock_gmail_sync(db,account,wait=not getattr(args,'if_free',False)):
+                results.append({'account':account,'skipped':'another Gmail sync for this account is running'})
+                continue
+            results.append(sync_gmail(db,account,args.since,args.apply,skip_known=getattr(args,'skip_known',False)))
+        return {'dry_run':not args.apply,'accounts':results}
+
+
+def lock_gmail_sync(db, account, wait=True):
+    """One applied Gmail sync per account at a time: each runs in one transaction, and two importing the same new
+    message would abort on the unique Gmail id. The lock is released when the transaction ends."""
+    with db.cursor() as cur:
+        key = 'rebattery-mail:gmail-sync:'+account.lower()
+        if wait:
+            cur.execute('select pg_advisory_xact_lock(hashtext(%s))',(key,))
+            return True
+        cur.execute('select pg_try_advisory_xact_lock(hashtext(%s))',(key,))
+        return bool(cur.fetchone()[0])
 
 
 def register(subparsers):
@@ -200,5 +218,8 @@ def register(subparsers):
         parser.add_argument('--since')
         if name == 'postmark':
             parser.add_argument('--recent-days',type=int,help='Only re-read sends from the last N days, plus sends Postmark has not yet reported on')
+        if name == 'gmail':
+            parser.add_argument('--skip-known',action='store_true',help='Only fetch messages the mail log does not have yet (labels on known mail are not refreshed)')
+            parser.add_argument('--if-free',action='store_true',help='Skip an account whose Gmail sync is already running instead of waiting for it')
         parser.add_argument('--apply',action='store_true')
         parser.set_defaults(handler=handle)

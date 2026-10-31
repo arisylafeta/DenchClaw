@@ -232,9 +232,9 @@ def test_fallback_summary():
 
 # ---------- plan_writes (user state) ----------
 
-def row(gid="t1", tab="action", newest="m2", newest_at=NOW, summarised=True, **kw):
-    r = {"gmail_thread_id": gid, "tab": tab, "priority": "medium", "newest_message_id": newest, "newest_at": newest_at,
-         "last_seen_message_id": newest, "summarised": summarised, "headline": "H", "context": "C", "earlier": [],
+def row(gid="t1", tab="action", newest="m2", summarised=True, **kw):
+    r = {"gmail_thread_id": gid, "tab": tab, "priority": "medium", "newest_message_id": newest, "new_message": True, "seen_known": True,
+         "last_seen_message_id": newest, "summary_message_id": newest if summarised else None, "summarised": summarised, "headline": "H", "context": "C", "earlier": [],
          "last_message": {"text": "x"}, "contact_type": "buyer", "mail_thread_id": "gmail_thread_" + gid}
     r.update(kw)
     return r
@@ -254,12 +254,75 @@ def test_plan_insert_new():
 
 
 def test_plan_done_item_reopens_only_on_new_message():
-    same = rs.plan_writes([row(newest="m1")], {"t1": item(status="done", last_seen="m1")}, NOW, {"t1"})
+    same = rs.plan_writes([row(newest="m1", new_message=False, seen_known=True)], {"t1": item(status="done", last_seen="m1")}, NOW, {"t1"})
     assert same == []
-    newer = rs.plan_writes([row(newest="m2")], {"t1": item(status="done")}, NOW, {"t1"})
-    assert newer[0]["kind"] == "reopen" and newer[0]["values"]["status"] == "open"
-    review_old = rs.plan_writes([row(newest="m2", newest_at=NOW - dt.timedelta(days=2))], {"t1": item(status="review")}, NOW, {"t1"})
-    assert review_old == []  # message predates the close
+    newer = rs.plan_writes([row(newest="m2", new_message=True, seen_known=True)], {"t1": item(status="done", user_tab="action")}, NOW, {"t1"})
+    assert newer[0]["kind"] == "reopen" and newer[0]["values"]["status"] == "open" and newer[0]["values"]["user_tab"] is None
+    review_seen = rs.plan_writes([row(newest="m2", new_message=False, seen_known=True)], {"t1": item(status="review")}, NOW, {"t1"})
+    assert review_seen == []
+
+
+def test_plan_closed_item_with_unknown_last_seen_adopts_without_reopening():
+    ops = rs.plan_writes([row(newest="m2", new_message=False, seen_known=False)], {"t1": item(status="review", last_seen=None)}, NOW, {"t1"})
+    assert ops == [{"op": "update", "gmail_thread_id": "t1", "id": "i1", "kind": "adopt", "values": {"last_seen_message_id": "m2"}}]
+
+
+def test_reply_synced_after_done_still_counts_as_new():
+    # Tom replied at 11:55; Alex clicked Done at 12:00 without seeing it; the sync brought it in at 12:30.
+    seen = msg("outbound", NOW - dt.timedelta(hours=3), mid="m1")
+    reply = msg("inbound", NOW - dt.timedelta(minutes=5), "Any update?", mid="m2")
+    assert rs.newer_than([seen, reply], reply, "m1") == (True, True)
+    assert rs.newer_than([seen, reply], seen, "m1") == (False, True)
+    assert rs.newer_than([seen, reply], reply, None) == (False, False)
+    assert rs.newer_than([reply], reply, "gone") == (False, False)
+    ops = rs.plan_writes([row(newest="m2", new_message=True, seen_known=True)],
+                         {"t1": item(status="done", done_reason="user_done", updated=NOW + dt.timedelta(minutes=30))}, NOW, {"t1"})
+    assert ops[0]["kind"] == "reopen"
+
+
+def test_older_internal_last_seen_does_not_reopen():
+    # Old rows recorded any newest message; an internal note newer than the last real message is not "new".
+    real = msg("inbound", NOW - dt.timedelta(hours=5), "Price?", mid="m1")
+    internal = msg("inbound", NOW - dt.timedelta(hours=1), "fyi", frm="ari@rebattery.io", mid="m9")
+    assert rs.newer_than([real, internal], real, "m9") == (False, True)
+
+
+# ---------- the owner's choices: moved tabs and sender rules ----------
+
+def test_moved_tab_holds_until_a_newer_message():
+    first = msg("inbound", 2, "FYI our new price list", mid="m1")
+    other = {"tab": "other", "reason": "unsolicited or FYI", "counterpart_email": "tom@dealer.no", "waiting_since": first["at"]}
+    moved = {"status": "open", "user_tab": "action", "user_tab_seen_id": "m1", "last_seen_message_id": "m1"}
+    held, clear = rs.apply_user_choices(other, first, moved, [first], {})
+    assert held["tab"] == "action" and held["reason"] == "moved by you" and not clear
+    expired = {"tab": None, "reason": "older than window", "done_reason": "expired", "counterpart_email": "tom@dealer.no"}
+    assert rs.apply_user_choices(expired, first, moved, [first], {})[0]["tab"] == "action"
+    replied = {"tab": None, "reason": "owner wrote to them since", "done_reason": "replied"}
+    assert rs.apply_user_choices(replied, first, moved, [first], {}) == (replied, False)
+    later = msg("inbound", 1, "Also, are you at the show?", mid="m2")
+    again, clear = rs.apply_user_choices(other, later, moved, [first, later], {})
+    assert again["tab"] == "other" and clear
+
+
+def test_moved_tab_ignored_once_closed():
+    first = msg("inbound", 2, "hi", mid="m1")
+    other = {"tab": "other", "reason": "x", "counterpart_email": "tom@dealer.no"}
+    assert rs.apply_user_choices(other, first, {"status": "done", "user_tab": "action"}, [first], {}) == (other, False)
+
+
+def test_sender_rules_by_email_then_domain_inbound_only():
+    rules = {"tom@dealer.no": "action", "@spam.example": "other"}
+    inbound = msg("inbound", 1, "FYI", mid="m1")
+    other = {"tab": "other", "reason": "unsolicited or FYI", "counterpart_email": "tom@dealer.no"}
+    assert rs.apply_user_choices(other, inbound, None, [inbound], rules)[0] == {**other, "tab": "action", "reason": "sender rule: action"}
+    pitch = msg("inbound", 1, "Can you quote?", frm="bob@spam.example", mid="m2")
+    action = {"tab": "action", "reason": "inbound question or request", "counterpart_email": "bob@spam.example"}
+    assert rs.apply_user_choices(action, pitch, None, [pitch], rules)[0]["tab"] == "other"
+    chase = msg("outbound", 5, "Any news?", to=["bob@spam.example"], mid="m3")
+    follow = {"tab": "follow", "reason": "no reply", "counterpart_email": "bob@spam.example"}
+    assert rs.apply_user_choices(follow, chase, None, [chase], rules)[0]["tab"] == "follow"
+    none = {"tab": None, "reason": "owner wrote to them since", "done_reason": "replied", "counterpart_email": "tom@dealer.no"}
+    assert rs.apply_user_choices(none, inbound, None, [inbound], rules)[0]["tab"] is None
 
 
 def test_plan_snoozed_only_content():
@@ -273,16 +336,23 @@ def test_plan_marks_replied_done():
 
 
 def test_plan_unsummarised_keeps_old_content():
-    ops = rs.plan_writes([row(summarised=False, priority="high")], {"t1": item()}, NOW, {"t1"})
+    ops = rs.plan_writes([row(summarised=False, priority="high", summary_message_id=None)], {"t1": item(summary_message_id="m1")}, NOW, {"t1"})
     v = ops[0]["values"]
-    assert "headline" not in v and v.get("priority") == "high" and "last_seen_message_id" not in v
+    assert "headline" not in v and v.get("priority") == "high"
+    # last_seen moves on (so a later close knows what was seen); the summary is retried next run.
+    assert v["last_seen_message_id"] == "m2" and "summary_message_id" not in v
+
+
+def test_plan_clears_user_tab_on_new_message():
+    ops = rs.plan_writes([row(tab="other", clear_user_tab=True)], {"t1": item(tab="action", user_tab="action")}, NOW, {"t1"})
+    assert ops[0]["values"]["user_tab"] is None and ops[0]["values"]["tab"] == "other"
 
 
 # ---------- DB write path against a scratch schema ----------
 
 TEST_DB = os.environ.get("RELAY_TEST_DB", "stock_test_9e426f3f65c340ea8fbd892fd0fabf84")
 SCHEMA = "relay_scan_t"
-MIGRATION = Path(__file__).resolve().parents[2] / "apps/web/lib/crm-postgres/migrations/089_relay.sql"
+MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "097_relay_sticky_fresh.sql")]
 TABLES = ["crm_users", "mail_thread", "mail_message", "work_tasks", "crm_bulk_listings", "crm_bulk_thread_links", "crm_people", "crm_companies"]
 
 
@@ -309,9 +379,10 @@ def scratch():
     setup = f"create schema {SCHEMA};\nset search_path = {SCHEMA}, public;\n{ddl}\n"
     res = psql(TEST_DB, setup)
     assert res.returncode == 0, res.stderr[-2000:]
-    migration = MIGRATION.read_text().replace("grant select", "-- grant select")
-    res = psql(TEST_DB, f"set search_path = {SCHEMA}, public;\n{migration}")
-    assert res.returncode == 0, res.stderr[-2000:]
+    for path in MIGRATIONS:
+        migration = path.read_text().replace("grant select", "-- grant select")
+        res = psql(TEST_DB, f"set search_path = {SCHEMA}, public;\n{migration}")
+        assert res.returncode == 0, res.stderr[-2000:]
     yield
     psql(TEST_DB, f"drop schema if exists {SCHEMA} cascade")
 
@@ -374,6 +445,32 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
                         f"select status, done_reason, note from {SCHEMA}.relay_item where gmail_thread_id = 'a'"],
                        text=True, capture_output=True, check=True).stdout.strip()
     assert a == "done|replied|call him"
+
+    # Alex marks the Kokam chase done; a reply sent before that click reaches the CRM only afterwards. It reopens.
+    q = lambda sql: subprocess.run(["psql", "-X", "-At", "-d", TEST_DB, "-c", sql], env={**os.environ, "PGOPTIONS": f"-c search_path={SCHEMA},public"},
+                                   text=True, capture_output=True, check=True).stdout.strip()
+    q("update relay_item set status = 'done', done_reason = 'user_done', updated_at = now() + interval '1 hour' where gmail_thread_id = 'f'")
+    psql(TEST_DB, f"""set search_path = {SCHEMA}, public;
+      insert into mail_message (id, direction, transport, purpose, mailbox_owner_id, thread_id, subject, body_text, from_email, to_emails, state, sent_at, gmail_message_id)
+      values ('mf3', 'inbound', 'gmail', null, '{owner}', 'gmail_thread_f', 'Re: Kokam cells', 'Can you do 33 per cell instead?', 'buyer@cells.example', '{{alex@rebattery.io}}', 'received', now() - interval '5 minutes', 'gf3');""")
+    assert rs.main(args) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["reopened"] == 1
+    assert q("select status, tab, last_seen_message_id, summary_message_id from relay_item where gmail_thread_id = 'f'") == "open|action|mf3|mf3"
+
+    # Alex moves a newsletter-like FYI to Action: the next scan keeps it there.
+    psql(TEST_DB, f"""set search_path = {SCHEMA}, public;
+      insert into mail_thread (id, gmail_thread_id, mailbox_owner_id, subject, last_message_at) values ('gmail_thread_p', 'p', '{owner}', 'Price list', now());
+      insert into mail_message (id, direction, transport, purpose, mailbox_owner_id, thread_id, subject, body_text, from_email, to_emails, state, sent_at, gmail_message_id)
+      values ('mp1', 'inbound', 'gmail', null, '{owner}', 'gmail_thread_p', 'Price list', 'Our autumn price list for modules.', 'sales@newco.example', '{{alex@rebattery.io}}', 'received', now() - interval '1 hour', 'gp1');""")
+    assert rs.main(args) == 0
+    capsys.readouterr()
+    assert q("select tab from relay_item where gmail_thread_id = 'p'") == "other"
+    q("update relay_item set tab = 'action', user_tab = 'action', user_tab_seen_id = last_seen_message_id where gmail_thread_id = 'p'")
+    assert rs.main(args) == 0
+    capsys.readouterr()
+    assert q("select tab, user_tab from relay_item where gmail_thread_id = 'p'") == "action|action"
+    assert q("select errors::text from relay_scan_run") == "[]"
 
 
 def _listing(id, kind, status, summary, email):
