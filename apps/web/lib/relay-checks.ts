@@ -56,3 +56,15 @@ export function promisesIn(body: string): string[] {
 
 /** Notes that ask for work rather than words go to a background agent job (research, lists, files). */
 export const NEEDS_AGENT = /\b(research|find|look (?:up|for|into)|search|check (?:our|the|what|which|if)|pull|csv|excel|spreadsheet|stock ?list|inventory list|attach|invoice|quote sheet|compare|analy[sz]e|work out|calculate|enrich)/i;
+
+const FREEMAIL = new Set(["gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.com", "yahoo.com", "icloud.com", "me.com", "aol.com",
+  "gmx.de", "gmx.net", "web.de", "proton.me", "protonmail.com", "seznam.cz", "wp.pl", "mail.ru", "yandex.ru", "msn.com", "hotmail.co.uk",
+  "yahoo.co.uk", "btinternet.com", "orange.fr", "free.fr"]);  // the same list as relay_scan.py FREEMAIL
+
+/** What a sorting rule for this sender matches: their company domain ("@acme.com"), or the address itself for free mail. */
+export function senderRuleMatch(email: string | null | undefined): string | null {
+  const address = (email ?? "").trim().toLowerCase();
+  const domain = address.split("@")[1];
+  if (!domain || domain === "rebattery.io") return null;
+  return FREEMAIL.has(domain) ? address : `@${domain}`;
+}
