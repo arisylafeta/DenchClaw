@@ -8,7 +8,7 @@ import { queryPg, withPgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
-import { amountsIn, NEEDS_AGENT } from "./relay-checks";
+import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -113,7 +113,8 @@ export async function updateRelayItem(id: string, ownerId: string, patch: RelayI
   const add = (column: string, value: unknown) => { values.push(value); sets.push(`${column} = $${values.length}`); };
   if (typeof patch.note === "string") add("note", patch.note.slice(0, 4000));
   if (patch.status) add("status", patch.status);
-  if (patch.tab) add("tab", patch.tab);
+  // A move sticks: the scan keeps this tab until a message newer than the one Relay had seen arrives.
+  if (patch.tab) { add("tab", patch.tab); add("user_tab", patch.tab); sets.push("user_tab_seen_id = last_seen_message_id"); }
   if (patch.snooze_until !== undefined) add("snooze_until", patch.snooze_until);
   if (typeof patch.done_reason === "string") add("done_reason", patch.done_reason.slice(0, 200));
   if (!sets.length) return readRelayItem(id, ownerId);
@@ -147,6 +148,26 @@ export async function addRule(ownerId: string, text: string): Promise<void> {
 
 export async function deleteRule(ownerId: string, id: string): Promise<void> {
   await queryPg("delete from relay_rule where id = $1 and owner_id = $2::uuid", [id, ownerId]);
+}
+
+// ---------- sender rules ----------
+
+export type SenderRule = { id: string; match: string; tab: "action" | "other" };
+export async function listSenderRules(ownerId: string): Promise<SenderRule[]> {
+  return queryPg<SenderRule>("select id, match, tab from relay_sender_rule where owner_id = $1::uuid order by created_at desc", [ownerId]);
+}
+
+/** "Always treat this sender as needs reply / no reply". Applies from the next scan, to new and open emails. */
+export async function addSenderRule(ownerId: string, email: string, tab: "action" | "other"): Promise<SenderRule> {
+  const match = senderRuleMatch(email);
+  if (!match) throw new RelayError(400, "Relay can't make a rule for this sender.");
+  const [row] = await queryPg<SenderRule>(`insert into relay_sender_rule (owner_id, match, tab) values ($1::uuid, $2, $3)
+    on conflict (owner_id, match) do update set tab = excluded.tab returning id, match, tab`, [ownerId, match, tab]);
+  return row;
+}
+
+export async function deleteSenderRule(ownerId: string, id: string): Promise<void> {
+  await queryPg("delete from relay_sender_rule where id = $1 and owner_id = $2::uuid", [id, ownerId]);
 }
 
 // ---------- context for drafting ----------

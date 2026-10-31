@@ -4,13 +4,17 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
-import { beforeYouSend, NEEDS_AGENT, promisesIn, type Issue } from "@/lib/relay-checks";
+import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
 
 type Counts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number };
-type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; rules: { id: string; text: string }[]; scannedAt: string | null; avgReplyMinutes: number | null };
+type SenderRule = { id: string; match: string; tab: "action" | "other" };
+type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; rules: { id: string; text: string }[]; senderRules: SenderRule[]; scannedAt: string | null; mailSyncedAt: string | null; avgReplyMinutes: number | null };
+/** A second button on the toast, next to Undo. */
+type ToastAction = { label: string; run: () => void | Promise<void> };
+type Say = (text: string, undo?: () => void, action?: ToastAction) => void;
 type Page = "inbox" | "review" | "todos";
 
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
@@ -51,14 +55,14 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
   const [tab, setTab] = useState<RelayTab>("action");
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
+  const [toast, setToast] = useState<{ text: string; undo?: () => void; action?: ToastAction } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, tick] = useState(0);
 
-  const say = useCallback((text: string, undo?: () => void) => {
+  const say = useCallback<Say>((text, undo, action) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ text, undo });
-    toastTimer.current = setTimeout(() => setToast(null), undo ? 6000 : 2800);
+    setToast({ text, undo, action });
+    toastTimer.current = setTimeout(() => setToast(null), action ? 9000 : undo ? 6000 : 2800);
   }, []);
 
   const load = useCallback(async (which: RelayTab) => {
@@ -103,7 +107,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
     }
     if (done.length) setSending((m) => Object.fromEntries(Object.entries(m).filter(([id]) => !done.includes(id))));
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The scan runs every 10 minutes; refresh the page each minute so new mail and the scan time show up.
+  // The scan reads Gmail and sorts it about every 10 minutes; refresh the page each minute so new mail and the times show up.
   useEffect(() => {
     const id = setInterval(() => { tick((n) => n + 1); if (document.visibilityState === "visible") void load(tab); }, 60_000);
     return () => clearInterval(id);
@@ -114,7 +118,15 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
   const handled = counts ? counts.sent_today + counts.done_today : 0;
   const pct = total ? Math.round(((handled + (counts?.review ?? 0) * 0.5) / total) * 100) : 100;
   const score = counts ? Math.min(99, Math.round(pct * 0.6 + Math.min(40, counts.sent_today * 4 + counts.done_today))) : 0;
-  const scanned = data?.scannedAt ? Math.max(0, Math.round((Date.now() - new Date(data.scannedAt).getTime()) / 60_000)) : null;
+  const minutesSince = (iso: string | null | undefined) => (iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000)) : null);
+  const scanned = minutesSince(data?.scannedAt);
+  const mailAge = minutesSince(data?.mailSyncedAt);
+  // Fresh means Gmail was read recently, not just that the scan ran on old mail.
+  const freshness = scanned == null ? "Waiting for the first scan"
+    : scanned > 25 ? `Last scan ${ago(data?.scannedAt)} ago`
+    : mailAge != null && mailAge > 25 ? `Sorted ${scanned} min ago · Gmail last read ${ago(data?.mailSyncedAt)} ago`
+    : mailAge != null ? `Checked Gmail ${mailAge} min ago` : `Sorted ${scanned} min ago`;
+  const stale = scanned != null && (scanned > 25 || (mailAge != null && mailAge > 25));
   const ring = 2 * Math.PI * 25;
 
   return (
@@ -127,9 +139,9 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
               <button key={key} role="tab" type="button" aria-selected={page === key} onClick={() => setPage(key)}>{label} <span className={s.n}>{n}</span></button>
             ))}
           </div>
-          <div className={s.scan} title="Relay scans Gmail every 10 minutes">
-            <span className={cx(s.pulse, scanned != null && scanned > 20 && s.stale)} />
-            <span>{scanned == null ? "Waiting for the first scan" : scanned > 20 ? `Last scan ${ago(data?.scannedAt)} ago` : `Scanned ${scanned} min ago · next scan in ${Math.max(1, 10 - (scanned % 10))} min`}</span>
+          <div className={s.scan} title="Relay reads new Gmail and sorts it about every 10 minutes">
+            <span className={cx(s.pulse, stale && s.stale)} />
+            <span>{freshness}</span>
           </div>
         </div>
 
@@ -152,6 +164,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
       </div>
       <div className={cx(s.toast, toast && s.on)} role="status" aria-live="polite">
         <span>{toast?.text}</span>
+        {toast?.action && <button type="button" onClick={() => { void toast.action?.run(); setToast(null); }}>{toast.action.label}</button>}
         {toast?.undo && <button type="button" onClick={() => { toast.undo?.(); setToast(null); }}>Undo</button>}
       </div>
     </div>
@@ -161,7 +174,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
 // ---------------------------------------------------------------- Inbox
 
 function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
-  data: Summary; tab: RelayTab; setTab: (t: RelayTab) => void; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void;
+  data: Summary; tab: RelayTab; setTab: (t: RelayTab) => void; reload: () => Promise<void>; say: Say;
   onOpenListing?: (id: string, title?: string) => void; onDrafted: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -198,15 +211,30 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
       setBusy((b) => ({ ...b, [i.id]: false }));
     }
   };
+  /** "Always do this for this sender" offered on the toast after a move or a Done. */
+  const ruleAction = (i: RelayItem, tab: "action" | "other"): ToastAction | undefined => {
+    const match = senderRuleMatch(i.counterpart_email);
+    if (!match || data.senderRules.some((r) => r.match === match && r.tab === tab)) return undefined;
+    return {
+      label: tab === "action" ? `Always for ${match}` : `Never for ${match}`,
+      run: async () => {
+        try {
+          await api(`/api/relay/sender-rules`, { method: "POST", body: { email: i.counterpart_email, tab } });
+          say(tab === "action" ? `New email from ${match} will show under Action` : `New email from ${match} will go to Other`);
+          await reload();
+        } catch (err) { say(err instanceof Error ? err.message : "Couldn't save the rule."); }
+      },
+    };
+  };
   const moveToAction = async (i: RelayItem) => {
     setGone((g) => ({ ...g, [i.id]: true }));
     try {
       await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { tab: "action" } });
-      say("Moved to Action · Relay will learn from this", async () => {
+      say("Moved to Action. It stays there until they write again.", async () => {
         await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { tab: "other" } }).catch(() => undefined);
         setGone((g) => ({ ...g, [i.id]: false }));
         await reload();
-      });
+      }, ruleAction(i, "action"));
       await reload();
     } catch (err) { setGone((g) => ({ ...g, [i.id]: false })); say(err instanceof Error ? err.message : "Couldn't move it."); }
   };
@@ -214,9 +242,13 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
     setGone((g) => ({ ...g, [i.id]: true }));
     try {
       await api(`/api/relay/items/${i.id}/done`, { method: "POST" });
-      say("Done · marked read and labelled Sorted in Gmail");
+      say("Done · marked read and labelled Sorted in Gmail", undefined, tab === "action" ? ruleAction(i, "other") : undefined);
       await reload();
     } catch (err) { setGone((g) => ({ ...g, [i.id]: false })); say(err instanceof Error ? err.message : "Couldn't update Gmail."); }
+  };
+  const dropRule = async (r: SenderRule) => {
+    try { await api(`/api/relay/sender-rules`, { method: "POST", body: { delete: r.id } }); say(`Removed the rule for ${r.match}`); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
   };
 
   const heads = tab === "follow" ? ["Waiting on", "Your last email", "Deal", "No reply", "Priority"]
@@ -301,6 +333,16 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
             );
           })}
       </div>
+      {data.senderRules.length > 0 && (
+        <div className={s.srules} aria-label="Sorting rules">
+          <span className={s.muted}>Sorting rules:</span>
+          {data.senderRules.map((r) => (
+            <span key={r.id} className={s.srule}>{r.match} → {r.tab === "action" ? "needs reply" : "no reply"}
+              <button type="button" aria-label={`Remove the rule for ${r.match}`} onClick={() => void dropRule(r)}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

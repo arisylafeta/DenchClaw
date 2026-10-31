@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { amountsIn, beforeYouSend, normaliseAmount, promisesIn } from "./relay-checks";
+import { amountsIn, beforeYouSend, normaliseAmount, promisesIn, senderRuleMatch } from "./relay-checks";
 
 const facts = { amounts: ["£480", "€30"], participants: ["lubomir@vojta.cz"], unit: "kwh" as const };
 
@@ -43,5 +43,17 @@ describe("NEEDS_AGENT", () => {
     expect(NEEDS_AGENT.test("attach the Ioniq 5 stock list")).toBe(true);
     expect(NEEDS_AGENT.test("thank him, offer €38, ask for volumes")).toBe(false);
     expect(NEEDS_AGENT.test("say the price has gone up, still keen?")).toBe(false);
+  });
+});
+
+describe("senderRuleMatch", () => {
+  it("matches a company by domain and free mail by address", () => {
+    expect(senderRuleMatch("Tom@Dealer.no")).toBe("@dealer.no");
+    expect(senderRuleMatch("jan.novak@seznam.cz")).toBe("jan.novak@seznam.cz");
+  });
+  it("makes no rule for our own people or a missing address", () => {
+    expect(senderRuleMatch("ari@rebattery.io")).toBeNull();
+    expect(senderRuleMatch(null)).toBeNull();
+    expect(senderRuleMatch("nobody")).toBeNull();
   });
 });
