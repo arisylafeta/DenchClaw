@@ -280,6 +280,22 @@ def test_reply_synced_after_done_still_counts_as_new():
     assert ops[0]["kind"] == "reopen"
 
 
+def test_alex_own_send_does_not_reopen_but_a_due_chase_does():
+    # A third chase sent from Relay closes the item as sent; it must not bounce back into Other.
+    third = rs.plan_writes([row(tab="other", newest="m4", new_message=False, seen_known=True)],
+                           {"t1": item(status="done", done_reason="sent", last_seen="m3")}, NOW, {"t1"})
+    assert third == []
+    due = rs.plan_writes([row(tab="follow", newest="m4", new_message=False, seen_known=True)],
+                         {"t1": item(status="done", done_reason="sent", last_seen="m3")}, NOW, {"t1"})
+    assert due[0]["kind"] == "reopen" and due[0]["values"]["tab"] == "follow"
+
+
+def test_sender_rule_covers_subdomains():
+    assert rs.sender_rule({"@acme.com": "other"}, "Bob <bob@uk.acme.com>") == "other"
+    assert rs.sender_rule({"@acme.com": "other", "bob@uk.acme.com": "action"}, "bob@uk.acme.com") == "action"
+    assert rs.sender_rule({"@acme.com": "other"}, "bob@notacme.com") is None
+
+
 def test_older_internal_last_seen_does_not_reopen():
     # Old rows recorded any newest message; an internal note newer than the last real message is not "new".
     real = msg("inbound", NOW - dt.timedelta(hours=5), "Price?", mid="m1")
@@ -470,6 +486,15 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     assert rs.main(args) == 0
     capsys.readouterr()
     assert q("select tab, user_tab from relay_item where gmail_thread_id = 'p'") == "action|action"
+
+    # A move made while a scan was running survives that scan's write; clearing the move sets the tab outright.
+    conn = rs.psycopg2.connect(dsn, options=f"-c search_path={SCHEMA},public")
+    pid = q("select id from relay_item where gmail_thread_id = 'p'")
+    rs.apply_ops(conn, owner, [{"op": "update", "id": pid, "kind": "update", "gmail_thread_id": "p", "values": {"tab": "other"}}])
+    assert q("select tab from relay_item where gmail_thread_id = 'p'") == "action"
+    rs.apply_ops(conn, owner, [{"op": "update", "id": pid, "kind": "update", "gmail_thread_id": "p", "values": {"tab": "other", **rs.CLEAR_USER_TAB}}])
+    assert q("select tab, coalesce(user_tab, '-') from relay_item where gmail_thread_id = 'p'") == "other|-"
+    conn.close()
     assert q("select errors::text from relay_scan_run") == "[]"
 
 

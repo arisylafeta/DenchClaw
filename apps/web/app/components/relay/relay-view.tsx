@@ -232,7 +232,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
     try {
       await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { tab: "action" } });
       say("Moved to Action. It stays there until they write again.", async () => {
-        await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { tab: "other" } }).catch(() => undefined);
+        await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { tab: "other", sticky: false } }).catch(() => undefined);
         setGone((g) => ({ ...g, [i.id]: false }));
         await reload();
       }, ruleAction(i, "action"));

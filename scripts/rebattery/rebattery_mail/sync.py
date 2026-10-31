@@ -1,4 +1,5 @@
 """Pull provider truth into one mail log; dry-run is the default."""
+import psycopg2.errors
 from urllib.parse import quote
 from urllib.error import URLError
 from datetime import datetime, timedelta, timezone
@@ -160,6 +161,9 @@ def recheck_thread(thread_id, account, driver=None):
             since = first.strftime('%Y/%m/%d') if first else None
         if since is None:
             since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y/%m/%d')
+        # Wait briefly for a short sync (Relay's pre-scan one) to finish rather than collide with it on a new message.
+        # Behind a long full sync the send goes ahead unlocked, as it always has, instead of hanging.
+        lock_gmail_sync(db,account,timeout_seconds=30)
         result = sync_gmail(db,account,since=since,apply=True,driver=driver,skip_known=True)
         if thread_id is None:
             return bool(result['counts']['replies'])
@@ -188,19 +192,35 @@ def handle(args):
                 results.append({'account':account,'skipped':'another Gmail sync for this account is running'})
                 continue
             results.append(sync_gmail(db,account,args.since,args.apply,skip_known=getattr(args,'skip_known',False)))
+            if args.apply:
+                db.commit()  # each account's import stands alone and releases its lock before the next account
         return {'dry_run':not args.apply,'accounts':results}
 
 
-def lock_gmail_sync(db, account, wait=True):
+def lock_gmail_sync(db, account, wait=True, timeout_seconds=None):
     """One applied Gmail sync per account at a time: each runs in one transaction, and two importing the same new
-    message would abort on the unique Gmail id. The lock is released when the transaction ends."""
+    message would abort on the unique Gmail id. The lock is released when the transaction ends.
+
+    wait=False only tries. With timeout_seconds, waits that long and returns False if the lock is still held."""
     with db.cursor() as cur:
         key = 'rebattery-mail:gmail-sync:'+account.lower()
-        if wait:
+        if not wait:
+            cur.execute('select pg_try_advisory_xact_lock(hashtext(%s))',(key,))
+            return bool(cur.fetchone()[0])
+        if timeout_seconds is None:
             cur.execute('select pg_advisory_xact_lock(hashtext(%s))',(key,))
             return True
-        cur.execute('select pg_try_advisory_xact_lock(hashtext(%s))',(key,))
-        return bool(cur.fetchone()[0])
+        cur.execute('savepoint gmail_sync_lock')
+        cur.execute("select set_config('lock_timeout', %s, true)",('%ds' % timeout_seconds,))
+        try:
+            cur.execute('select pg_advisory_xact_lock(hashtext(%s))',(key,))
+            locked = True
+        except psycopg2.errors.LockNotAvailable:
+            cur.execute('rollback to savepoint gmail_sync_lock')
+            locked = False
+        cur.execute("select set_config('lock_timeout', '0', true)")
+        cur.execute('release savepoint gmail_sync_lock')
+        return locked
 
 
 def register(subparsers):
