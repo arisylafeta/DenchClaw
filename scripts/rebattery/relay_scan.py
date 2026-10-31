@@ -703,15 +703,18 @@ def summarise(batches: list[list[dict]], model=run_hermes) -> tuple[dict[str, di
 
 # ---------- planning and writing ----------
 
-CONTENT_FIELDS = ("headline", "context", "earlier", "contact_type", "last_message", "last_seen_message_id")
+CONTENT_FIELDS = ("headline", "context", "earlier", "contact_type", "last_message", "last_seen_message_id", "summary_message_id")
 STATE_FIELDS = ("tab", "priority", "counterpart_name", "counterpart_email", "company", "mail_thread_id",
                 "bulk_listing_id", "deal_label", "waiting_since")
+CLEAR_USER_TAB = {"user_tab": None, "user_tab_seen_id": None}
 
 
 def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, seen_threads: set[str]) -> list[dict]:
     """Turn classified rows into insert/update/done operations, respecting user state.
 
-    rows: {gmail_thread_id, tab (or None), done_reason, newest_message_id, newest_at, summarised, fields...}
+    rows: {gmail_thread_id, tab (or None), done_reason, newest_message_id, summarised, new_message, seen_known, fields...}
+      newest_message_id is the newest real message (last_seen_message_id records it); new_message says it was sent
+      after the message the item last saw, and seen_known that Relay could find that message at all.
     seen_threads: gmail thread ids that were loaded this run (open items outside it are left alone).
     """
     ops = []
@@ -724,19 +727,25 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
             for k in ("headline", "context", "earlier"):
                 content.pop(k, None)
             content["contact_type"] = row.get("contact_type") or item.get("contact_type")
-            content["last_seen_message_id"] = item.get("last_seen_message_id")
+            content["summary_message_id"] = item.get("summary_message_id")
+        if row.get("clear_user_tab"):
+            content.update(CLEAR_USER_TAB)
         if not item:
             if row.get("tab"):
                 ops.append({"op": "insert", "gmail_thread_id": gid, "values": {**fields, **content, "status": "open"}})
             continue
-        new_message = row.get("newest_message_id") and row["newest_message_id"] != item.get("last_seen_message_id") \
-            and (row.get("newest_at") is None or item.get("updated_at") is None or row["newest_at"] > item["updated_at"])
+        new_message = bool(row.get("new_message"))
         snoozed = item.get("snooze_until") and item["snooze_until"] > now
         if item["status"] in ("review", "done"):
             reopen_follow = item["status"] == "done" and item.get("done_reason") == "replied" and row.get("tab") == "follow"
             if (new_message and row.get("tab")) or reopen_follow:
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "reopen",
-                            "values": {**fields, **content, "status": "open", "done_reason": None}})
+                            "values": {**fields, **content, **CLEAR_USER_TAB, "status": "open", "done_reason": None}})
+            elif not row.get("seen_known") and row.get("newest_message_id"):
+                # Relay can't place the message this item last saw (none recorded, e.g. "Draft in Relay" items):
+                # adopt the newest one so the next real message counts as new, without reopening it now.
+                ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "adopt",
+                            "values": {"last_seen_message_id": row["newest_message_id"]}})
             continue
         if snoozed:
             if row.get("summarised") or new_message:
@@ -830,6 +839,8 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
                "existing_open": bool(item and item["status"] == "open")}
         result = classify_thread(msgs, ctx, now, args.days, args.follow_days)
+        new_message, seen_known = newer_than(th["messages"], last, (item or {}).get("last_seen_message_id"))
+        result, clear_user_tab = apply_user_choices(result, last, item, th["messages"], ctx_global.get("sender_rules", {}))
         priority, why = compute_priority(result, msgs, ctx, now)
         sender_name = None
         if counterpart:
@@ -838,7 +849,6 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
                     sender_name = m["from_name"]
                     break
         name = sender_name or person.get("full_name") or name_from_email(counterpart)
-        newest = max(th["messages"], key=lambda m: m["at"])
         row = {
             "gmail_thread_id": gid, "mail_thread_id": tid, "tab": result["tab"], "reason": result["reason"],
             "done_reason": result.get("done_reason"), "priority": priority, "priority_reason": why,
@@ -851,16 +861,55 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
             "last_message": {"from_name": "Alex" if last["direction"] == "outbound" else name,
                              "from_email": email_of(last.get("from_email")), "at": last["at"].isoformat(),
                              "direction": last["direction"], "text": last.get("text") or ""},
-            "newest_message_id": newest["id"], "newest_at": newest["at"], "last_seen_message_id": newest["id"],
+            "newest_message_id": last["id"], "last_seen_message_id": last["id"], "summary_message_id": None,
+            "new_message": new_message, "seen_known": seen_known, "clear_user_tab": clear_user_tab,
             "subject": th.get("subject") or last.get("subject") or "", "summarised": False,
         }
         fb = fallback_summary(row["subject"], msgs)
         row.update({k: fb[k] for k in ("headline", "context", "earlier")})
         rows.append(row)
-        if result["tab"] and (not item or item.get("last_seen_message_id") != newest["id"]):
-            if not item or item["status"] == "open" or (item.get("updated_at") and newest["at"] > item["updated_at"]):
+        if result["tab"] and (not item or item.get("summary_message_id") != last["id"]):
+            if not item or item["status"] == "open" or new_message:
                 jobs.append({"row": row, "record": summary_record(gid, row["subject"], result["tab"], msgs, brief), "ctx": ctx, "msgs": msgs, "result": result})
     return rows, jobs, seen
+
+
+def newer_than(messages: list[dict], last: dict, seen_id: str | None) -> tuple[bool, bool]:
+    """(last is newer than the message seen_id names, that message was found on the thread).
+
+    Compares the messages' own send times, never when Relay or the owner touched the item, so a reply that
+    reaches the CRM late still counts as new.
+    """
+    seen = next((m for m in messages if m["id"] == seen_id), None) if seen_id else None
+    if seen is None:
+        return False, False
+    return last["id"] != seen_id and last["at"] > seen["at"], True
+
+
+def sender_rule(rules: dict[str, str], email: str | None) -> str | None:
+    email = email_of(email)
+    return rules.get(email) or rules.get("@" + domain_of(email)) if email else None
+
+
+def apply_user_choices(result: dict, last: dict, item: dict | None, messages: list[dict], rules: dict[str, str]) -> tuple[dict, bool]:
+    """The owner's choices over the classifier. Returns (result, clear_user_tab).
+
+    A tab the owner moved an open item to holds until a message newer than the one he saw when he moved it.
+    It is only dropped earlier when the thread was answered (done_reason 'replied'). A sender rule sets the tab
+    of an inbound thread that would show as action or other.
+    """
+    user_tab = item.get("user_tab") if item and item.get("status") == "open" else None
+    if user_tab:
+        moved_after, _ = newer_than(messages, last, item.get("user_tab_seen_id") or item.get("last_seen_message_id"))
+        if moved_after:
+            return result, True
+        if result.get("tab") is None and result.get("done_reason") == "replied":
+            return result, False
+        return {**result, "tab": user_tab, "reason": "moved by you", "done_reason": None}, False
+    rule = sender_rule(rules, result.get("counterpart_email")) if last["direction"] == "inbound" else None
+    if rule and result.get("tab") in ("action", "other") and rule != result["tab"]:
+        return {**result, "tab": rule, "reason": f"sender rule: {rule}"}, False
+    return result, False
 
 
 def merge_summary(job: dict, summary: dict, now: dt.datetime) -> None:
@@ -875,18 +924,46 @@ def merge_summary(job: dict, summary: dict, now: dt.datetime) -> None:
     if row["priority"] == "medium" and summary.get("priority") in ("urgent", "high"):
         row["priority"], row["priority_reason"] = "high", "model suggestion"
     row["summarised"] = True
+    row["summary_message_id"] = row["newest_message_id"]
 
 
-def run_sync(owner_email: str) -> str | None:
+def run_sync(owner_email: str) -> tuple[bool, str | None]:
+    """Pull the owner's new Gmail since yesterday into the mail log. Returns (synced, error).
+
+    Only fetches messages the log does not have yet, and skips the round when another Gmail sync for the account
+    is running (that one brings the mail in), so it is cheap enough to run before every scan.
+    """
     env = dict(os.environ)
     if not env.get("GOG_KEYRING_PASSWORD") and KEYRING_FILE.exists():
         env["GOG_KEYRING_PASSWORD"] = KEYRING_FILE.read_text().strip()
     since = (dt.date.today() - dt.timedelta(days=1)).strftime("%Y/%m/%d")
-    result = subprocess.run(["/usr/bin/python3", str(SYNC_SCRIPT), "sync", "gmail", "--account", owner_email, "--since", since, "--apply"],
-                            env=env, text=True, capture_output=True, timeout=900, check=False)
+    try:
+        result = subprocess.run(["/usr/bin/python3", str(SYNC_SCRIPT), "sync", "gmail", "--account", owner_email, "--since", since,
+                                 "--skip-known", "--if-free", "--apply"], env=env, text=True, capture_output=True, timeout=240, check=False)
+    except subprocess.TimeoutExpired:
+        return False, "sync timed out after 240s"
     if result.returncode:
-        return f"sync failed (exit {result.returncode}): {(result.stderr or result.stdout).strip()[-200:]}"
-    return None
+        return False, f"sync failed (exit {result.returncode}): {(result.stderr or result.stdout).strip()[-200:]}"
+    return '"skipped"' not in result.stdout, None
+
+
+def record_scan(cur, owner_id: str, synced: bool, errors: list[str]) -> None:
+    """When this scan finished and, if it pulled mail, when Gmail was last read. The page shows both."""
+    if not table_exists(cur, "relay_scan_run"):
+        return
+    cur.execute(
+        """insert into relay_scan_run (owner_id, finished_at, mail_synced_at, errors) values (%s, now(), case when %s then now() end, %s)
+           on conflict (owner_id) do update set finished_at = excluded.finished_at,
+             mail_synced_at = coalesce(excluded.mail_synced_at, relay_scan_run.mail_synced_at), errors = excluded.errors""",
+        (owner_id, synced, psycopg2.extras.Json(errors)))
+
+
+def load_sender_rules(cur, owner_id: str) -> dict[str, str]:
+    """The owner's "always treat this sender as ..." rules, keyed by email or "@domain"."""
+    if not table_exists(cur, "relay_sender_rule"):
+        return {}
+    cur.execute("select match, tab from relay_sender_rule where owner_id = %s", (owner_id,))
+    return {r["match"]: r["tab"] for r in cur.fetchall()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -912,8 +989,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     errors: list[str] = []
+    synced = False
     if args.sync:
-        err = run_sync(args.owner_email)
+        synced, err = run_sync(args.owner_email)
         if err:
             errors.append(err)
 
@@ -944,6 +1022,7 @@ def main(argv: list[str] | None = None) -> int:
             "deals": load_deals(cur, list(threads)),
             "open_deal_emails": load_open_deal_emails(cur),
             "owned": load_owned_listings(cur),
+            "sender_rules": load_sender_rules(cur, owner_id),
             "last_to": last_to, "last_from": last_from,
         }
         rows, jobs, seen = build_rows(threads, existing, ctx_global, now, args)
@@ -958,18 +1037,17 @@ def main(argv: list[str] | None = None) -> int:
                 key = job["row"]["gmail_thread_id"]
                 if key in found:
                     merge_summary(job, found[key], now)
-            for job in jobs:
-                if not job["row"]["summarised"]:
-                    # Keep the old last_seen so the thread is summarised next run.
-                    old = existing.get(job["row"]["gmail_thread_id"])
-                    job["row"]["last_seen_message_id"] = old.get("last_seen_message_id") if old else None
         elif args.no_llm:
             for job in jobs:
                 job["row"]["summarised"] = True  # fallback content stands in for a summary
+                job["row"]["summary_message_id"] = job["row"]["newest_message_id"]
 
         ops = plan_writes(rows, existing, now, seen)
-        if args.apply and ops:
-            apply_ops(conn, owner_id, ops)
+        if args.apply:
+            if ops:
+                apply_ops(conn, owner_id, ops)
+            record_scan(cur, owner_id, synced, errors)
+            conn.commit()
 
         tabs: dict[str, int] = {"action": 0, "follow": 0, "other": 0}
         priorities: dict[str, int] = {}
@@ -989,6 +1067,7 @@ def main(argv: list[str] | None = None) -> int:
             "updated": sum(1 for o in ops if o["op"] == "update" and o["kind"] in ("update", "content", "reopen")),
             "reopened": sum(1 for o in ops if o.get("kind") == "reopen"),
             "done": sum(1 for o in ops if o.get("kind") == "done"),
+            "adopted": sum(1 for o in ops if o.get("kind") == "adopt"),
             "llm_calls": llm_calls, "summaries_pending": sum(1 for j in jobs if not j["row"]["summarised"]),
             "reasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1])),
             "relay_table": bool(existing) or table_exists(cur, "relay_item"),
