@@ -737,7 +737,8 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
         new_message = bool(row.get("new_message"))
         snoozed = item.get("snooze_until") and item["snooze_until"] > now
         if item["status"] in ("review", "done"):
-            reopen_follow = item["status"] == "done" and item.get("done_reason") == "replied" and row.get("tab") == "follow"
+            # A reply Alex sent (by hand or from Relay) that asked something comes back as Follow once the chase is due.
+            reopen_follow = item["status"] == "done" and item.get("done_reason") in ("replied", "sent") and row.get("tab") == "follow"
             if (new_message and row.get("tab")) or reopen_follow:
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "reopen",
                             "values": {**fields, **content, **CLEAR_USER_TAB, "status": "open", "done_reason": None}})
@@ -798,7 +799,11 @@ def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
                     values.pop("headline", None)
                 if values.get("context") is None:
                     values.pop("context", None)
-                sets = ", ".join(f"{k} = %s" for k in values) + ", updated_at = now()"
+                # A move Alex made while this scan was running wins over the classifier's tab (reopen clears moves).
+                keep_move = op["kind"] != "reopen" and "user_tab" not in values  # this op clearing the move sets the tab outright
+                sets = ", ".join("tab = coalesce(user_tab, %s)" if k == "tab" and keep_move else f"{k} = %s" for k in values)
+                if op["kind"] != "adopt":  # adopting a seen message is bookkeeping, not a change Alex should see
+                    sets += ", updated_at = now()"
                 cur.execute(f"update relay_item set {sets} where id = %s and owner_id = %s",
                             [*[_db_value(k, v) for k, v in values.items()], op["id"], owner_id])
     conn.commit()
@@ -839,7 +844,8 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
                "existing_open": bool(item and item["status"] == "open")}
         result = classify_thread(msgs, ctx, now, args.days, args.follow_days)
-        new_message, seen_known = newer_than(th["messages"], last, (item or {}).get("last_seen_message_id"))
+        newer, seen_known = newer_than(th["messages"], last, (item or {}).get("last_seen_message_id"))
+        new_message = newer and last["direction"] == "inbound"  # Alex's own sends never reopen anything by themselves
         result, clear_user_tab = apply_user_choices(result, last, item, th["messages"], ctx_global.get("sender_rules", {}))
         priority, why = compute_priority(result, msgs, ctx, now)
         sender_name = None
@@ -883,12 +889,16 @@ def newer_than(messages: list[dict], last: dict, seen_id: str | None) -> tuple[b
     seen = next((m for m in messages if m["id"] == seen_id), None) if seen_id else None
     if seen is None:
         return False, False
-    return last["id"] != seen_id and last["at"] > seen["at"], True
+    return last["id"] != seen_id and last["at"] >= seen["at"], True
 
 
 def sender_rule(rules: dict[str, str], email: str | None) -> str | None:
+    """The rule for this address, else for its domain or a parent domain ("@acme.com" covers uk.acme.com)."""
     email = email_of(email)
-    return rules.get(email) or rules.get("@" + domain_of(email)) if email else None
+    if not email or email in rules:
+        return rules.get(email)
+    parts = domain_of(email).split(".")
+    return next((rules["@" + ".".join(parts[i:])] for i in range(len(parts) - 1) if "@" + ".".join(parts[i:]) in rules), None)
 
 
 def apply_user_choices(result: dict, last: dict, item: dict | None, messages: list[dict], rules: dict[str, str]) -> tuple[dict, bool]:
@@ -905,7 +915,8 @@ def apply_user_choices(result: dict, last: dict, item: dict | None, messages: li
             return result, True
         if result.get("tab") is None and result.get("done_reason") == "replied":
             return result, False
-        return {**result, "tab": user_tab, "reason": "moved by you", "done_reason": None}, False
+        return {**result, "tab": user_tab, "reason": "moved by you", "done_reason": None,
+                "waiting_since": result.get("waiting_since") or item.get("waiting_since")}, False
     rule = sender_rule(rules, result.get("counterpart_email")) if last["direction"] == "inbound" else None
     if rule and result.get("tab") in ("action", "other") and rule != result["tab"]:
         return {**result, "tab": rule, "reason": f"sender rule: {rule}"}, False
@@ -948,14 +959,17 @@ def run_sync(owner_email: str) -> tuple[bool, str | None]:
 
 
 def record_scan(cur, owner_id: str, synced: bool, errors: list[str]) -> None:
-    """When this scan finished and, if it pulled mail, when Gmail was last read. The page shows both."""
+    """When this scan finished and when Gmail was last read: by this scan's sync, or by the hourly CRM sync (it stamps
+    every message it reads), whichever was later. The page shows both."""
     if not table_exists(cur, "relay_scan_run"):
         return
     cur.execute(
-        """insert into relay_scan_run (owner_id, finished_at, mail_synced_at, errors) values (%s, now(), case when %s then now() end, %s)
+        """insert into relay_scan_run (owner_id, finished_at, mail_synced_at, errors)
+           values (%s, now(), greatest(case when %s then now() end,
+                   (select max(last_synced_at) from mail_message where mailbox_owner_id = %s and transport = 'gmail')), %s)
            on conflict (owner_id) do update set finished_at = excluded.finished_at,
-             mail_synced_at = coalesce(excluded.mail_synced_at, relay_scan_run.mail_synced_at), errors = excluded.errors""",
-        (owner_id, synced, psycopg2.extras.Json(errors)))
+             mail_synced_at = greatest(excluded.mail_synced_at, relay_scan_run.mail_synced_at), errors = excluded.errors""",
+        (owner_id, synced, owner_id, psycopg2.extras.Json(errors)))
 
 
 def load_sender_rules(cur, owner_id: str) -> dict[str, str]:

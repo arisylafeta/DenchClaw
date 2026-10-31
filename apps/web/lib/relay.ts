@@ -105,7 +105,7 @@ export async function readRelayItem(id: string, ownerId: string): Promise<RelayI
   return row ?? null;
 }
 
-export type RelayItemPatch = { note?: string; status?: "open" | "done"; tab?: RelayTab; snooze_until?: string | null; done_reason?: string };
+export type RelayItemPatch = { note?: string; status?: "open" | "done"; tab?: RelayTab; sticky?: boolean; snooze_until?: string | null; done_reason?: string };
 
 /** Saves the note, marks done (no reply needed), moves between tabs or snoozes. Only the owner's own items. */
 export async function updateRelayItem(id: string, ownerId: string, patch: RelayItemPatch): Promise<RelayItem | null> {
@@ -114,7 +114,12 @@ export async function updateRelayItem(id: string, ownerId: string, patch: RelayI
   if (typeof patch.note === "string") add("note", patch.note.slice(0, 4000));
   if (patch.status) add("status", patch.status);
   // A move sticks: the scan keeps this tab until a message newer than the one Relay had seen arrives.
-  if (patch.tab) { add("tab", patch.tab); add("user_tab", patch.tab); sets.push("user_tab_seen_id = last_seen_message_id"); }
+  // sticky: false (Undo) puts the tab back and hands it to the scan again.
+  if (patch.tab) {
+    add("tab", patch.tab);
+    if (patch.sticky === false) sets.push("user_tab = null", "user_tab_seen_id = null");
+    else { add("user_tab", patch.tab); sets.push(`user_tab_seen_id = coalesce(last_seen_message_id, (select mm.id from mail_message mm where mm.thread_id = relay_item.mail_thread_id order by coalesce(mm.sent_at, mm.accepted_at, mm.created_at) desc limit 1))`); }
+  }
   if (patch.snooze_until !== undefined) add("snooze_until", patch.snooze_until);
   if (typeof patch.done_reason === "string") add("done_reason", patch.done_reason.slice(0, 200));
   if (!sets.length) return readRelayItem(id, ownerId);
@@ -799,11 +804,13 @@ export async function draftForTask(taskId: string, owner: { id: string; email: s
   if (!itemId && meta.mail_thread_id) {
     // The thread isn't in Relay yet: add it, using its latest inbound sender as the person.
     const [made] = await queryPg<{ id: string }>(
-      `insert into relay_item (owner_id, gmail_thread_id, mail_thread_id, tab, status, headline, counterpart_email, counterpart_name)
+      `insert into relay_item (owner_id, gmail_thread_id, mail_thread_id, tab, status, headline, counterpart_email, counterpart_name, last_seen_message_id)
        select $1::uuid, t.gmail_thread_id, t.id, 'action', 'open', $3,
          (select from_email from mail_message where thread_id = t.id and direction = 'inbound' order by coalesce(sent_at, created_at) desc limit 1),
          (select p.full_name from mail_message mm join crm_people p on lower(p.email) = lower(mm.from_email)
-            where mm.thread_id = t.id and mm.direction = 'inbound' order by coalesce(mm.sent_at, mm.created_at) desc limit 1)
+            where mm.thread_id = t.id and mm.direction = 'inbound' order by coalesce(mm.sent_at, mm.created_at) desc limit 1),
+         -- What Relay has seen, so a reply that arrives after this draft reopens it.
+         (select mm.id from mail_message mm where mm.thread_id = t.id order by coalesce(mm.sent_at, mm.accepted_at, mm.created_at) desc limit 1)
        from mail_thread t where t.id = $2
        on conflict (owner_id, gmail_thread_id) do update set updated_at = now()
        returning id`, [owner.id, meta.mail_thread_id, meta.title.slice(0, 200)]);

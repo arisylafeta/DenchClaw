@@ -15,6 +15,7 @@ export async function PATCH(req: Request, { params }: Context) {
   if (typeof body?.tab === "string") {
     if (!RELAY_TABS.includes(body.tab as RelayTab)) return Response.json({ error: "Unknown tab" }, { status: 400 });
     patch.tab = body.tab as RelayTab;
+    if (body.sticky === false) patch.sticky = false;
   }
   if (typeof body?.snooze_until === "string" || body?.snooze_until === null) patch.snooze_until = body.snooze_until as string | null;
   try {

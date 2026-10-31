@@ -21,8 +21,13 @@ def test_second_sync_of_the_same_account_skips_while_the_first_runs():
         assert not sync.lock_gmail_sync(second, 'alex@rebattery.io', wait=False)
         assert sync.lock_gmail_sync(second, 'ari@rebattery.io', wait=False)
         second.rollback()
+        # A send recheck waits a bounded time, then carries on without the lock in a usable transaction.
+        assert not sync.lock_gmail_sync(second, 'alex@rebattery.io', timeout_seconds=1)
+        with second.cursor() as cur:
+            cur.execute('select 1')
+        second.rollback()
         first.commit()
-        assert sync.lock_gmail_sync(second, 'alex@rebattery.io', wait=False)
+        assert sync.lock_gmail_sync(second, 'alex@rebattery.io', timeout_seconds=1)
     finally:
         first.close()
         second.close()
@@ -37,9 +42,13 @@ def parse(argv):
 def test_flags_reach_the_sync_and_a_busy_account_is_skipped(monkeypatch):
     calls = []
 
+    class FakeDb:
+        def commit(self):
+            pass
+
     @contextmanager
     def fake_connection(read_only=False):
-        yield object()
+        yield FakeDb()
 
     monkeypatch.setattr(sync, 'connection', fake_connection)
     monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since, apply, skip_known=False: calls.append((account, since, skip_known)) or {'account': account})
