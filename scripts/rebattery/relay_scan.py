@@ -111,6 +111,25 @@ TRIAGE_OTHER = {"2 Waiting", "4 Sorted", "5 Read"}
 STREAM_TYPE = {"Admin": "admin", "Investor": "partner"}
 CONTACT_TYPES = {"buyer", "supplier", "logistics", "partner", "admin", "other"}
 PRIORITIES = ["overdue", "urgent", "high", "medium", "low"]
+# The kinds of email Alex handles. The summary tags each thread so its draft gets the matching card and examples from the
+# voice that relay_voice_study.py builds with the same keys.
+SITUATIONS = {
+    "buyer_needs": "a buyer asks for stock, specs, availability or what we have",
+    "buyer_price": "a buyer asks for a price, makes an offer or negotiates",
+    "supplier_offer": "a seller, dealer, dismantler or fleet offers batteries or sends stock details",
+    "supplier_price": "price or terms with a seller: their price, our offer, a counter",
+    "listing": "getting a seller listed or onboarded on ReBattery, accounts, how the platform works",
+    "logistics": "collection, shipping, ADR, packaging, warehouses, paperwork for moving goods",
+    "documents": "sending or asking for files: photos, test reports, invoices, spec sheets, stock lists",
+    "scheduling": "arranging, moving or confirming a call or meeting",
+    "intro": "introductions: being introduced, introducing others, first contact after an intro",
+    "chase": "following up when the other side has not answered",
+    "decline": "saying no, not a fit, not now, or closing something off",
+    "ack": "thanks, confirmation, a quick yes, or a short holding reply",
+    "partner": "partners, recyclers, testing and diagnostics firms, platforms, investors, collaborations",
+    "admin": "accounts, legal, finance, suppliers of services to ReBattery, recruiting, events",
+    "other": "anything else",
+}
 
 
 # ---------- small helpers ----------
@@ -616,10 +635,12 @@ For each thread return one JSON object. Reply with ONLY a JSON array, no prose, 
  "context": "<2-3 plain sentences: what they are asking, the key facts (prices, quantities, models, dates) and what is still open>",
  "earlier": [{"who": "<first name or company>", "when": "<e.g. 21 Oct>", "summary": "<one line>"}],
  "contact_type": "buyer|supplier|logistics|partner|admin|other",
- "priority": "urgent|high|medium|low"}
+ "priority": "urgent|high|medium|low",
+ "situation": "<one situation key>"}
 Rules: British English. No em dashes. No greetings or filler. Never invent facts that are not in the thread.
 "earlier" covers the messages before the last one, newest first, at most 5 (empty list when there are none).
-tab "action" means Alex owes a reply; "follow" means Alex is waiting on them; "other" means no reply is needed."""
+tab "action" means Alex owes a reply; "follow" means Alex is waiting on them; "other" means no reply is needed.
+situation is what Alex's next email on the thread will be about. Keys: """ + "; ".join(f"{k}: {v}" for k, v in SITUATIONS.items())
 
 
 def build_summary_prompt(records: list[dict]) -> str:
@@ -674,6 +695,7 @@ def parse_summaries(text: str) -> dict[str, dict]:
             "earlier": [{"who": str(e.get("who") or ""), "when": str(e.get("when") or ""), "summary": str(e.get("summary") or "")[:300]} for e in earlier],
             "contact_type": item.get("contact_type") if item.get("contact_type") in CONTACT_TYPES else None,
             "priority": item.get("priority") if item.get("priority") in PRIORITIES else None,
+            "situation": item.get("situation") if item.get("situation") in SITUATIONS else None,
         }
     return out
 
@@ -686,7 +708,7 @@ def fallback_summary(subject: str, msgs: list[dict]) -> dict:
         earlier.append({"who": who, "when": m["at"].strftime("%d %b"), "summary": re.sub(r"\s+", " ", m.get("text") or "")[:140]})
     return {"headline": re.sub(r"^\s*((re|fwd?|aw|sv|wg|tr)\s*:\s*)+", "", subject or "", flags=re.I)[:60] or "(no subject)",
             "context": re.sub(r"\s+", " ", last.get("text") or last.get("body_preview") or "")[:300],
-            "earlier": earlier, "contact_type": None, "priority": None}
+            "earlier": earlier, "contact_type": None, "priority": None, "situation": None}
 
 
 def summarise(batches: list[list[dict]], model=run_hermes) -> tuple[dict[str, dict], int, list[str]]:
@@ -703,7 +725,7 @@ def summarise(batches: list[list[dict]], model=run_hermes) -> tuple[dict[str, di
 
 # ---------- planning and writing ----------
 
-CONTENT_FIELDS = ("headline", "context", "earlier", "contact_type", "last_message", "last_seen_message_id", "summary_message_id")
+CONTENT_FIELDS = ("headline", "context", "earlier", "contact_type", "situation", "last_message", "last_seen_message_id", "summary_message_id")
 STATE_FIELDS = ("tab", "priority", "counterpart_name", "counterpart_email", "company", "mail_thread_id",
                 "bulk_listing_id", "deal_label", "waiting_since")
 CLEAR_USER_TAB = {"user_tab": None, "user_tab_seen_id": None}
@@ -727,6 +749,7 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
             for k in ("headline", "context", "earlier"):
                 content.pop(k, None)
             content["contact_type"] = row.get("contact_type") or item.get("contact_type")
+            content["situation"] = item.get("situation")
             content["summary_message_id"] = item.get("summary_message_id")
         if row.get("clear_user_tab"):
             content.update(CLEAR_USER_TAB)
@@ -928,6 +951,7 @@ def merge_summary(job: dict, summary: dict, now: dt.datetime) -> None:
     for k in ("headline", "context", "earlier"):
         if summary.get(k) or k == "earlier":
             row[k] = summary.get(k) or []
+    row["situation"] = summary.get("situation")
     if not row.get("contact_type") and summary.get("contact_type"):
         row["contact_type"] = summary["contact_type"]
         ctx = {**job["ctx"], "contact_type": summary["contact_type"]}

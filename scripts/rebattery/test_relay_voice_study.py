@@ -1,0 +1,61 @@
+"""Tests for relay_voice_study.py: the pure text handling (no database, no model).
+
+Run: /usr/bin/python3 -m pytest scripts/rebattery/test_relay_voice_study.py -q
+"""
+import importlib.util
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+spec = importlib.util.spec_from_file_location("relay_voice_study", Path(__file__).with_name("relay_voice_study.py"))
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+
+
+def test_mask_removes_old_facts_but_keeps_the_words():
+    text = "Hi Tom, we can do £1,250 per pack or €38/kWh, 20k EUR total. Call +44 7700 900123 or tom@dealer.no, see https://x.io/a"
+    got = vs.mask(text)
+    assert "1,250" not in got and "38" not in got and "7700" not in got and "dealer.no" not in got and "x.io" not in got
+    assert got.startswith("Hi Tom, we can do [amount] per pack") and "[phone]" in got and "[email]" in got and "[link]" in got
+    assert vs.mask("We have 76 LFP packs at 52 kWh") == "We have 76 LFP packs at 52 kWh"  # quantities are style, not prices
+
+
+def test_unwrap_rejoins_hard_wrapped_lines_only():
+    wrapped = "Hi Elie,\n\nThe batteries should be shippable as product rather than waste, and we\nhave UN38.3 documentation.\n\nBest,\nAlex"
+    assert vs.unwrap(wrapped) == "Hi Elie,\n\nThe batteries should be shippable as product rather than waste, and we have UN38.3 documentation.\n\nBest,\nAlex"
+    listed = "Details below, all of them confirmed by the seller on the call this morning:\n- Type: NMC\n- Qty: 200"
+    assert vs.unwrap(listed) == listed
+
+
+def test_greeting_signoff_and_body():
+    text = "Hi James,\n\nPerfect - I've just sent over a calendar invite for 2pm.\n\nSpeak soon,\nAlex"
+    assert vs.greeting_of(text) == "hi" and vs.signoff_of(text) == "speak soon"
+    assert vs.body_of(text) == "Perfect - I've just sent over a calendar invite for 2pm."
+    assert vs.signoff_of("Hi,\n\nDone.\n\nAlex") == "alex only"
+    assert vs.signoff_of("Thanks!") == "none" and vs.greeting_of("Thanks!") == "none"
+
+
+def test_stats_numbers():
+    rows = [{"text": "Hi A,\n\nCan you send photos?\n\nBest,\nAlex", "words": 4, "kind": "reply", "identity": "alex", "contact_type": "buyer",
+             "inbound": {"latency_minutes": 30}},
+            {"text": "Hi B,\n\nDone - sent.\n\nThanks,\nAlex", "words": 2, "kind": "chase", "identity": "alex", "contact_type": None, "inbound": None}]
+    s = vs.compute_stats(rows)
+    assert s["all"]["n"] == 2 and s["all"]["asks_question_pct"] == 50 and s["all"]["spaced_hyphen_pct"] == 50
+    assert s["all"]["signoff"] == {"best": 1, "thanks": 1} and s["all"]["reply_minutes_median"] == 30
+    assert s["by_contact_type"]["unknown"]["n"] == 1
+
+
+def test_pick_examples_matches_the_web_order():
+    bank = [{"situation": "buyer_price", "contact_type": "buyer", "inbound": "What price for Leaf modules?", "sent_at": "2025-01-01"},
+            {"situation": "buyer_price", "contact_type": "buyer", "inbound": "Leaf modules price per kWh please", "sent_at": "2024-01-01"},
+            {"situation": "buyer_price", "contact_type": "supplier", "inbound": "Leaf modules price per kWh please", "sent_at": "2026-01-01"},
+            {"situation": "chase", "contact_type": "buyer", "inbound": "Leaf", "sent_at": "2026-01-01"}]
+    got = vs.pick_examples(bank, "buyer_price", "buyer", "Price for your Leaf modules per kWh?", k=3)
+    assert [g["sent_at"] for g in got] == ["2025-01-01", "2024-01-01", "2026-01-01"]
+    assert vs.pick_examples(bank, None, "supplier", "x")[0]["contact_type"] == "supplier"
+
+
+def test_draft_system_with_and_without_voice():
+    plain, voiced = vs.draft_system(vs.DEFAULT_RULES, None), vs.draft_system(vs.DEFAULT_RULES, "## Defaults\nOpen with Hi.")
+    assert 'sign off "Best' in plain and "How Alex writes" not in plain
+    assert "## Defaults" in voiced and "How Alex writes" in voiced and 'sign off "Best' not in voiced

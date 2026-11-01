@@ -9,6 +9,7 @@ import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
+import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -41,6 +42,8 @@ export type RelayItem = {
   mail_thread_id: string | null;
   gmail_thread_id: string;
   updated_at: string;
+  /** The kind of email (buyer_price, chase, ...), from the scan; picks the voice card and examples. */
+  situation: string | null;
 };
 
 export type RelayDraftView = {
@@ -70,7 +73,7 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
-  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at`;
+  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation`;
 
 const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then 1 when 'high' then 2 when 'medium' then 3 else 4 end`;
 
@@ -235,12 +238,12 @@ export class RelayError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 
-const DRAFT_SYSTEM = (rules: string[]) => `You are Relay, drafting emails for Alex Polglase, founder of ReBattery (a UK marketplace and broker for used EV and storage batteries).
-Write exactly what Alex asked for in his note, in his voice. Follow these writing rules strictly:
+const DRAFT_SYSTEM = (rules: string[], guide?: string | null) => `You are Relay, drafting emails for Alex Polglase, founder of ReBattery (a UK marketplace and broker for used EV and storage batteries).
+Write exactly what Alex asked for in his note, in his voice.${voiceGuideBlock(guide)} Follow these writing rules strictly:
 ${rules.map((r) => `- ${r}`).join("\n")}
 - Never invent facts: prices, quantities, dates, tests, partners, logistics or availability must come from the thread, the deal or Alex's note. Use a [BLANK] if something is missing.
 - Nothing is attached to this draft. Never write that something is attached, enclosed or included as a file. If a file is needed, say you will send it, and add a to-do.
-- Greet by first name ("Hi Mark,"), sign off "Best,\\nAlex". Do not add a signature block; it is added automatically.
+${greetingRule(!!guide)}
 - No em dashes. British English.
 Return ONLY JSON:
 {"subject": "Re: …" (keep the thread's subject), "body": "the reply text",
@@ -250,17 +253,47 @@ Return ONLY JSON:
 
 export type DraftResult = { item: RelayItem };
 
-/** Everything a draft is written from: the thread, the deal, the writing rules and who the reply goes to. */
+// ---------- voice ----------
+
+type Voice = { guide: string; card: string | null; examples: VoiceExample[] };
+
+/** The owner's active voice (relay_voice_study.py): the guide, this kind of email's card and his three closest real replies.
+ * Null until a voice is published; drafting then works as before. */
+async function voiceFor(ownerId: string, item: Pick<RelayItem, "situation" | "contact_type">, theirText: string): Promise<Voice | null> {
+  try {
+    const [voice] = await queryPg<{ id: string; guide: string }>("select id, guide from relay_voice where owner_id = $1::uuid and active", [ownerId]);
+    if (!voice) return null;
+    const [card] = item.situation ? await queryPg<{ card: string }>("select card from relay_voice_situation where voice_id = $1 and situation = $2", [voice.id, item.situation]) : [];
+    // Same situation; for an email the scan hasn't tagged yet, the same kind of contact.
+    const pool = await queryPg<VoiceExample>(
+      `select inbound, reply, contact_type, sent_at::text as sent_at from relay_voice_example
+       where voice_id = $1 and (situation = $2 or ($2::text is null and contact_type = $3)) order by sent_at desc limit 80`,
+      [voice.id, item.situation, item.contact_type]);
+    return { guide: voice.guide, card: card?.card ?? null, examples: pickExamples(pool, item.contact_type, theirText) };
+  } catch {
+    return null;  // before the voice tables exist
+  }
+}
+
+async function activeGuide(ownerId: string): Promise<string | null> {
+  try {
+    const [row] = await queryPg<{ guide: string }>("select guide from relay_voice where owner_id = $1::uuid and active", [ownerId]);
+    return row?.guide ?? null;
+  } catch { return null; }
+}
+
+/** Everything a draft is written from: the thread, the deal, the writing rules, the owner's voice and who the reply goes to. */
 async function draftContext(item: RelayItem, ownerId: string, note: string) {
   const messages = await threadMessages(item.mail_thread_id);
   const rules = (await listRules(ownerId)).map((r) => r.text);
   const deal = await dealSummary(item.bulk_listing_id);
   const lastInbound = messages.find((m) => m.direction === "inbound");
+  const voice = await voiceFor(ownerId, item, stripQuoted(lastInbound?.body_text ?? item.last_message?.text ?? ""));
   const transcript = [...messages].reverse().map((m) => `--- ${m.direction === "inbound" ? `From ${m.from_email}` : `From Alex (${m.from_email})`} · ${m.at}\nTo: ${m.to_emails.join(", ")}${m.cc_emails.length ? `\nCc: ${m.cc_emails.join(", ")}` : ""}\nSubject: ${m.subject ?? ""}\n${stripQuoted(m.body_text ?? "").slice(0, 3000)}`).join("\n\n");
-  const prompt = `Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
+  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   const to = (lastInbound?.from_email ?? item.counterpart_email ?? "").trim();
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
-  return { messages, rules, prompt, to, identity: replyIdentity(messages) };
+  return { messages, rules, prompt, to, identity: replyIdentity(messages), guide: voice?.guide ?? null };
 }
 
 /** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. Notes that need work start an agent job instead. */
@@ -274,7 +307,7 @@ export async function draftFromNote(itemId: string, ownerId: string, note: strin
     return (await readRelayItem(itemId, ownerId))!;
   }
   const ctx = await draftContext(item, ownerId, note);
-  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules), ctx.prompt));
+  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
   await saveDraftOutputs(item, ownerId, note, ctx, parsed, []);
   return (await readRelayItem(itemId, ownerId))!;
 }
@@ -330,7 +363,7 @@ const JOB_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_job.py"
 const JOB_STALE_MINUTES = 25;
 export type RelayJob = { id: string; item_id: string; status: "queued" | "running" | "ready" | "finalising" | "done" | "failed"; steps: string[]; error: string | null; created_at: string; started_at: string | null; finished_at: string | null; note: string };
 
-const JOB_SYSTEM = (rules: string[], dir: string) => `You are Relay, Alex Polglase's email agent at ReBattery (a UK marketplace and broker for used EV and storage batteries).
+const JOB_SYSTEM = (rules: string[], dir: string, guide?: string | null) => `You are Relay, Alex Polglase's email agent at ReBattery (a UK marketplace and broker for used EV and storage batteries).
 Alex's note asks for work before a reply can be written. Do the work with your tools, then write the reply.
 
 What you may do:
@@ -340,10 +373,10 @@ What you may do:
 
 What you must never do: send, draft, edit or label any email (no rebattery-mail draft/edit/send, no gog gmail), write to any database, contact anyone, or name a supplier, town or stock ref in the email.
 
-Writing rules for the reply:
+Writing rules for the reply:${voiceGuideBlock(guide)}
 ${rules.map((r) => `- ${r}`).join("\n")}
 - Every number in the email must come from the thread, the deal, Alex's note or your research (list where in "sources").
-- Only say a file is attached if it is in "files". Greet by first name, sign off "Best,\\nAlex", no signature block, no em dashes, British English.
+- Only say a file is attached if it is in "files". ${guide ? "Greet by first name and sign off as \"How Alex writes\" describes" : "Greet by first name, sign off \"Best,\\nAlex\""}, no signature block, no em dashes, British English.
 
 Finish with ONLY this JSON as your final message:
 {"subject": "Re: …", "body": "the reply", "files": ["absolute paths of files you made in ${dir} to attach"], "sources": ["one line per fact you used, e.g. CRM stock: 76 LFP lots, 19,454 kWh"], "todos": [{"title": "…", "detail": "…", "kind": "suggested" | "promise"}], "follow_ons": [], "log": ["3-6 short past-tense lines of what you did"]}`;
@@ -355,7 +388,7 @@ async function startJob(item: RelayItem, ownerId: string, note: string): Promise
     [item.id, ownerId, note, JSON.stringify(["Queued"])]);
   const dir = join(JOB_ROOT, job.id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(join(dir, "prompt.txt"), `${JOB_SYSTEM(ctx.rules, dir)}\n\n${ctx.prompt}`, { mode: 0o600 });
+  writeFileSync(join(dir, "prompt.txt"), `${JOB_SYSTEM(ctx.rules, dir, ctx.guide)}\n\n${ctx.prompt}`, { mode: 0o600 });
   await withPgTransaction(async (tx) => {
     await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [item.id]);
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [item.id]);
@@ -545,10 +578,11 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
   if (!mail || mail.state !== "draft") throw new RelayError(409, "This email was already sent.");
   const rules = (await listRules(ownerId)).map((r) => r.text);
+  const guide = await activeGuide(ownerId);
   const current = (await editableCopy(mail)).main;
   const files = (mail.attachments ?? []).map((a) => a.filename);
   const attachedLine = files.length ? `Files actually attached: ${files.join(", ")}. Only these may be called attached.` : "No files are attached. Never write that anything is attached, enclosed or included; if asked to attach something, say in the note that it needs the Attach stock list button or Gmail.";
-  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can change the text and the Cc and Bcc lists (Cc now: ${mail.cc_emails.join(", ") || "none"}; Bcc now: ${mail.bcc_emails.join(", ") || "none"}), never the To line: you cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\nNo signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}.`;
+  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can change the text and the Cc and Bcc lists (Cc now: ${mail.cc_emails.join(", ") || "none"}; Bcc now: ${mail.bcc_emails.join(", ") || "none"}), never the To line: you cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\n${voiceGuideBlock(guide)}No signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}.`;
   const parsed = parseJson(await askAgent(system, `Instruction: ${instruction}\n\nCurrent draft:\n${current}`, 120_000));
   const body = String(parsed.body ?? "").trim();
   if (!body) throw new RelayError(502, "The assistant returned an empty draft. Try again.");

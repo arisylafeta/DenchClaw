@@ -368,7 +368,7 @@ def test_plan_clears_user_tab_on_new_message():
 
 TEST_DB = os.environ.get("RELAY_TEST_DB", "stock_test_9e426f3f65c340ea8fbd892fd0fabf84")
 SCHEMA = "relay_scan_t"
-MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql")]
+MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql")]
 TABLES = ["crm_users", "mail_thread", "mail_message", "work_tasks", "crm_bulk_listings", "crm_bulk_thread_links", "crm_people", "crm_companies"]
 
 
@@ -433,7 +433,7 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     (triage / "state.json").write_text(json.dumps({"threads": {"a": {"automated_state": "1 Action", "automated_stream": "Deal"}}}))
     (triage / "briefs.json").write_text(json.dumps({"a": {"contact_type": "supplier", "who": "Tom"}}))
     monkeypatch.setattr(rs, "run_hermes", lambda prompt: json.dumps([
-        {"key": "a", "headline": "Wants a price for 20 packs", "context": "Tom asks for a price.", "earlier": [], "contact_type": "supplier", "priority": "medium"},
+        {"key": "a", "headline": "Wants a price for 20 packs", "context": "Tom asks for a price.", "earlier": [], "contact_type": "supplier", "priority": "medium", "situation": "supplier_price"},
         {"key": "f", "headline": "Waiting on Kokam answer", "context": "Alex offered EUR 35.", "earlier": [], "contact_type": "buyer", "priority": "high"},
     ]))
     dsn = f"host=/var/run/postgresql dbname={TEST_DB}"
@@ -447,6 +447,8 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
                           text=True, capture_output=True, check=True).stdout.strip().splitlines()
     assert rows[0].split("|")[:6] == ["a", "action", "medium", "open", "Wants a price for 20 packs", ""]
     assert rows[0].split("|")[6] == "What price can you do for 20 packs?"
+    assert subprocess.run(["psql", "-X", "-At", "-d", TEST_DB, "-c", f"select situation from {SCHEMA}.relay_item where gmail_thread_id = 'a'"],
+                          text=True, capture_output=True, check=True).stdout.strip() == "supplier_price"
     assert rows[1].split("|")[:6] == ["f", "follow", "high", "open", "Waiting on Kokam answer", "Kokam cells · 13,104 units"]
 
     # User sets a note; Alex replies to Tom. Next run marks it done and keeps the note.
