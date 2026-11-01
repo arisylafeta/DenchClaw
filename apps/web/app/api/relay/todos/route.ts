@@ -11,7 +11,9 @@ export async function POST(req: Request) {
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   if (!title) return Response.json({ error: "Add what needs doing." }, { status: 400 });
   try {
-    return Response.json(await addTask(guard.user, title, typeof body?.due === "string" && body.due.trim() ? body.due.trim().slice(0, 40) : null));
+    const on = typeof body?.on === "string" && body.on ? body.on : null;
+    const at = typeof body?.at === "string" && body.at ? body.at : null;
+    return Response.json(await addTask(guard.user, title, typeof body?.due === "string" && body.due.trim() ? body.due.trim().slice(0, 40) : null, on ? { date: on, time: at } : null));
   } catch (error) {
     return relayError(error);
   }

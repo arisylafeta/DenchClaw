@@ -3,14 +3,15 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
+import { describeWhen, parseWhen } from "@/lib/relay-when";
 import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
 
-type Counts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number };
-type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; rules: { id: string; text: string }[]; scannedAt: string | null; avgReplyMinutes: number | null };
+type Counts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number; scheduled: number };
+type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; scheduled: RelayTask[]; rules: { id: string; text: string }[]; scannedAt: string | null; avgReplyMinutes: number | null };
 type Page = "inbox" | "review" | "todos";
 
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
@@ -148,7 +149,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
         {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onDrafted={() => setPage("review")} />}
         {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} />}
-        {data && page === "todos" && <Tasks tasks={data.todos} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
+        {data && page === "todos" && <Tasks tasks={data.todos} scheduled={data.scheduled ?? []} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
       </div>
       <div className={cx(s.toast, toast && s.on)} role="status" aria-live="polite">
         <span>{toast?.text}</span>
@@ -782,11 +783,9 @@ function SnoozeMenu({ onPick }: { onPick: (at: Date, label: string) => void }) {
   );
 }
 
-const DUE_WORDS: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", tomorrow: "Tomorrow", today: "Today" };
-const DUE_RE = /\b(mon|tue|wed|thu|fri|tomorrow|today)\b/i;
 
-function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted }: {
-  tasks: RelayTask[]; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void;
+function Tasks({ tasks, scheduled, reload, say, onOpenListing, onOpenMailMessage, onDrafted }: {
+  tasks: RelayTask[]; scheduled: RelayTask[]; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void;
   onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void; onDrafted: () => void;
 }) {
   const [filter, setFilter] = useState<string>("all");
@@ -839,15 +838,27 @@ function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted
     if (yes) void close(t, /retire/i.test(t.yes_label ?? "") ? "retire" : "done");
     else { const at = new Date(); at.setDate(at.getDate() + 3); at.setHours(8, 0, 0, 0); void snooze(t, at, "in 3 days"); }
   };
+  const [view, setView] = useState<"open" | "scheduled">("open");
+  const when = useMemo(() => parseWhen(title), [title]);
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = title.trim();
     if (!text) return;
-    const due = text.match(DUE_RE)?.[1]?.toLowerCase();
+    const parsed = parseWhen(text);
+    if (parsed && !parsed.title) { say("Add what the to-do is, as well as the day."); return; }
     try {
-      const r = await api<{ reb_key: string }>("/api/relay/todos", { method: "POST", body: { title: text.replace(DUE_RE, "").replace(/\s{2,}/g, " ").trim(), due: due ? DUE_WORDS[due] : null } });
-      setTitle(""); say(`Added ${r.reb_key} to Work Tasks`); await reload();
+      const r = await api<{ reb_key: string; shows_at: string | null }>("/api/relay/todos", { method: "POST", body: parsed ? { title: parsed.title, on: parsed.date, at: parsed.time } : { title: text } });
+      setTitle("");
+      say(parsed ? (r.shows_at ? `${r.reb_key} scheduled for ${describeWhen(parsed.date, parsed.time)}. I'll WhatsApp you then.` : `Added ${r.reb_key} to Work Tasks`) : `Added ${r.reb_key} to Work Tasks`);
+      await reload();
     } catch (err) { say(err instanceof Error ? err.message : "Couldn't add it."); }
+  };
+  const showNow = async (t: RelayTask) => { try { await post(t.id, { action: "reopen" }); say(`${t.reb_key} is back in your list`); await reload(); } catch (err) { say(err instanceof Error ? err.message : "Couldn't move it."); } };
+  const moveTo = async (t: RelayTask, day: string) => {
+    if (!day) return;
+    const at = new Date(`${day}T08:00:00`);
+    if (Number.isNaN(at.getTime()) || at.getTime() < Date.now()) { say("Pick a day in the future."); return; }
+    try { await post(t.id, { action: "snooze", until: at.toISOString() }); say(`${t.reb_key} moved to ${describeWhen(day, null)}`); await reload(); } catch (err) { say(err instanceof Error ? err.message : "Couldn't change the date."); }
   };
   // J/K move, E done, Enter acts, S snoozes (opens the menu on the selected row).
   useEffect(() => {
@@ -879,10 +890,34 @@ function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted
     <section aria-label="To-dos" className={s.tasks}>
       <form className={s.tadd} onSubmit={(e) => void add(e)}>
         <Svg d='<path d="M12 5v14M5 12h14"/>' />
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a to-do… try “call Lubomír Fri”" aria-label="New to-do" />
-        {DUE_RE.test(title) && <span className={s.parsed}>Due {DUE_WORDS[title.match(DUE_RE)![1].toLowerCase()]}</span>}
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a to-do… try “call Lubomír next Wed” or “send NDA 12 Nov at 3pm”" aria-label="New to-do" />
+        {when && <span className={s.parsed}>Appears {describeWhen(when.date, when.time)}</span>}
       </form>
 
+      <div className={s.tfilters} role="group" aria-label="To-do view">
+        <button type="button" className={s.tf} aria-pressed={view === "open"} onClick={() => setView("open")}>Open <span className={s.n}>{tasks.length}</span></button>
+        <button type="button" className={s.tf} aria-pressed={view === "scheduled"} onClick={() => setView("scheduled")}>Scheduled <span className={s.n}>{scheduled.length}</span></button>
+      </div>
+      {view === "scheduled" && (
+        <section aria-label="Scheduled to-dos" className={s.tgroup}>
+          {scheduled.length === 0 && <div className={cx(s.card, s.empty)}><b>Nothing scheduled</b><span className={s.muted}>Add one with a day, like “call Lubomír next Wed”. It shows up here until then.</span></div>}
+          {scheduled.map((t) => {
+            const day = (t.snooze_until ?? "").slice(0, 10);
+            return (
+              <div key={t.id} className={s.trow} id={`task-${t.id}`}>
+                <div className={s.tmain}><div className={s.tt}><b>{t.title}</b><span className={s.tkey}>{t.reb_key}</span></div></div>
+                <div className={s.tside}><span className={s.parsed}>{day ? describeWhen(day, new Date(t.snooze_until!).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" })) : ""}</span></div>
+                <div className={s.thov} style={{ opacity: 1 }}>
+                  <input type="date" aria-label={`New day for ${t.reb_key}`} min={new Date().toISOString().slice(0, 10)} defaultValue={day} onChange={(e) => void moveTo(t, e.target.value)} className={s.tbtn} />
+                  <button type="button" className={s.tbtn} onClick={() => void showNow(t)}>Show now</button>
+                  <button type="button" className={s.tbtn} onClick={() => void close(t, "done")}>Done</button>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
+      {view === "open" && <>
       <div className={s.uhead}><h2>Most urgent</h2></div>
       <div className={s.urgent}>
         {urgent.length ? urgent.map((t) => (
@@ -937,6 +972,7 @@ function Tasks({ tasks, reload, say, onOpenListing, onOpenMailMessage, onDrafted
           </section>
         );
       })}
+      </>}
     </section>
   );
 }

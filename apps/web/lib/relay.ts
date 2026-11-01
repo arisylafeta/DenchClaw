@@ -82,7 +82,7 @@ export async function listRelayItems(ownerId: string, tab: RelayTab): Promise<Re
      order by ${PRIORITY_ORDER}, coalesce(i.waiting_since, i.updated_at) asc limit 200`, [ownerId, tab]);
 }
 
-export type RelayCounts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number };
+export type RelayCounts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number; scheduled: number };
 
 export async function relayCounts(ownerId: string): Promise<RelayCounts> {
   const [row] = await queryPg<RelayCounts>(
@@ -94,10 +94,13 @@ export async function relayCounts(ownerId: string): Promise<RelayCounts> {
        (select count(*) from work_tasks w left join relay_task_meta m on m.work_task_id = w.id
           where lower(w.assignee_email) = (select lower(email) from crm_users where id = $1::uuid) and w.status in ('Planned','In Progress')
           and (m.snooze_until is null or m.snooze_until <= now()))::int as todos,
+       (select count(*) from work_tasks w join relay_task_meta m on m.work_task_id = w.id
+          where lower(w.assignee_email) = (select lower(email) from crm_users where id = $1::uuid) and w.status in ('Planned','In Progress')
+          and m.snooze_until > now())::int as scheduled,
        (select count(*) from relay_draft d join relay_item x on x.id = d.item_id where x.owner_id = $1::uuid and d.state = 'sent' and d.updated_at >= date_trunc('day', now()))::int as sent_today,
        count(*) filter (where status = 'done' and updated_at >= date_trunc('day', now()))::int as done_today
      from relay_item where owner_id = $1::uuid`, [ownerId]);
-  return row ?? { action: 0, follow: 0, other: 0, review: 0, todos: 0, sent_today: 0, done_today: 0 };
+  return row ?? { action: 0, follow: 0, other: 0, review: 0, todos: 0, sent_today: 0, done_today: 0, scheduled: 0 };
 }
 
 export async function readRelayItem(id: string, ownerId: string): Promise<RelayItem | null> {
@@ -759,13 +762,13 @@ export async function updateTask(taskId: string, owner: { id: string; email: str
     const when = until ? new Date(until) : null;
     if (!when || Number.isNaN(when.getTime()) || when.getTime() < Date.now()) throw new RelayError(400, "Pick a time in the future.");
     await queryPg(`insert into relay_task_meta (work_task_id, snooze_until) values ($1, $2)
-      on conflict (work_task_id) do update set snooze_until = excluded.snooze_until, updated_at = now()`, [taskId, when.toISOString()]);
+      on conflict (work_task_id) do update set snooze_until = excluded.snooze_until, reminded_at = null, updated_at = now()`, [taskId, when.toISOString()]);
     return;
   }
   const status = action === "done" ? "Done" : action === "retire" ? "Retired" : "Planned";
   await queryPg("update work_tasks set status = $2, updated_at = now() where id = $1", [taskId, status]);
   await queryPg("update relay_todo set state = $2, updated_at = now() where work_task_id = $1", [taskId, action === "reopen" ? "accepted" : "done"]);
-  if (action === "reopen") await queryPg("update relay_task_meta set snooze_until = null, updated_at = now() where work_task_id = $1", [taskId]);
+  if (action === "reopen") await queryPg("update relay_task_meta set snooze_until = null, reminded_at = coalesce(reminded_at, now()), updated_at = now() where work_task_id = $1", [taskId]);
 }
 
 /** "Draft in Relay": drafts the reply on the task's thread from its note, so it lands in Review (an agent job if it needs research or a list). */
@@ -795,14 +798,40 @@ export async function draftForTask(taskId: string, owner: { id: string; email: s
 }
 
 /** A to-do added on the To-dos tab: a Work Task in the Backlog, shown under "Added by you". */
-export async function addTask(owner: { id: string; email: string }, title: string, dueLabel: string | null): Promise<{ reb_key: string }> {
-  const created = await addTodo(owner, title, dueLabel ? `Due ${dueLabel}` : "");
+export type TaskWhen = { date: string; time?: string | null };
+
+/** A to-do for the owner. With `when` in the future it stays out of the list until that morning (08:00 London unless a time is given) and then reminds on WhatsApp. */
+export async function addTask(owner: { id: string; email: string }, title: string, dueLabel: string | null, when?: TaskWhen | null): Promise<{ reb_key: string; shows_at: string | null }> {
+  if (when && !/^\d{4}-\d{2}-\d{2}$/.test(when.date)) throw new RelayError(400, "That date isn't valid.");
+  if (when?.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(when.time)) throw new RelayError(400, "That time isn't valid.");
+  const label = when ? `Due ${when.date}` : dueLabel ? `Due ${dueLabel}` : "";
+  const created = await addTodo(owner, title, label);
   const [task] = await queryPg<{ id: string }>("select id from work_tasks where reb_key = $1", [created.reb_key]);
+  let showsAt: string | null = null;
   if (task) {
     await queryPg(`insert into relay_task_meta (work_task_id, category, title, next_step, action_kind, classified_at) values ($1, 'mine', $2, $3, 'none', now())
-      on conflict (work_task_id) do nothing`, [task.id, title.slice(0, 160), dueLabel ? `Due ${dueLabel}` : ""]);
+      on conflict (work_task_id) do nothing`, [task.id, title.slice(0, 160), label]);
+    if (when) {
+      const [row] = await queryPg<{ at: string | null }>(
+        `update relay_task_meta set due_at = $2::date,
+           snooze_until = case when (($2::date + $3::time) at time zone 'Europe/London') > now() then ($2::date + $3::time) at time zone 'Europe/London' end,
+           reminded_at = null, updated_at = now() where work_task_id = $1 returning snooze_until::text as at`, [task.id, when.date, when.time || "08:00"]);
+      showsAt = row?.at ?? null;
+    }
   }
-  return created;
+  return { ...created, shows_at: showsAt };
+}
+
+/** To-dos waiting for their day, soonest first: the queue behind the To-dos tab. */
+export async function listScheduled(owner: { id: string; email: string }): Promise<RelayTask[]> {
+  return queryPg<RelayTask>(
+    `select w.id, w.reb_key, w.status, w.created_at, coalesce(nullif(m.title,''), w.title) as title, 'mine' as category,
+       coalesce(m.next_step, '') as next_step, null as urgent_reason, m.due_at::text as due_at, null as question, null as yes_label, null as no_label,
+       null as action_label, 'none' as action_kind, null as link_kind, null as link_label, m.relay_item_id, m.bulk_listing_id, m.link_url,
+       m.snooze_until::text as snooze_until, null as open_message_id
+     from work_tasks w join relay_task_meta m on m.work_task_id = w.id
+     where lower(w.assignee_email) = lower($1) and w.status in ('Planned', 'In Progress') and m.snooze_until > now()
+     order by m.snooze_until, w.created_at limit 300`, [owner.email]);
 }
 
 // ---------- chat ----------
