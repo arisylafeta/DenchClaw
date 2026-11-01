@@ -167,7 +167,16 @@ def recheck_thread(thread_id, account, driver=None):
                 sync_gmail(db,account,apply=True,driver=driver,thread_id=gmail_thread,skip_known=True)
                 with db.cursor() as cur:
                     cur.execute("select exists(select 1 from mail_message where thread_id=%s and direction='inbound')",(thread_id,))
-                    return cur.fetchone()[0]
+                    if cur.fetchone()[0]:
+                        return True
+                # No reply in the thread: a reply can still sit in another Gmail thread (a changed subject, an answer
+                # to a Postmark send). Mail older than a day is already logged by the hourly sync, so a search from
+                # yesterday finds anything new, and syncing it links the reply to this conversation.
+                since = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y/%m/%d')
+                result = sync_gmail(db,account,since=since,apply=True,driver=driver,skip_known=True)
+                with db.cursor() as cur:
+                    cur.execute("select exists(select 1 from mail_message where thread_id=%s and direction='inbound')",(thread_id,))
+                    return cur.fetchone()[0] or bool(result['counts']['replies'])
             with db.cursor() as cur:
                 cur.execute("select min(coalesce(sent_at,created_at)) - interval '1 day' from mail_message where thread_id=%s",(thread_id,))
                 first = cur.fetchone()[0]

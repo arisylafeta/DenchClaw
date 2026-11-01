@@ -222,6 +222,20 @@ def test_pre_send_refresh_reads_only_the_gmail_thread_when_known(monkeypatch):
     assert seen == [(None, '19e82db74675fa10', True)]
 
 
+def test_pre_send_refresh_also_finds_replies_in_another_thread(monkeypatch):
+    """No reply in the thread itself: a short mailbox search from yesterday picks up a reply that landed in another
+    Gmail thread (changed subject, answer to a Postmark send), so a chase never goes to someone who already answered."""
+    from datetime import datetime, timedelta, timezone
+    from rebattery_mail import sync
+
+    seen = []
+    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None, skip_known=False, thread_id=None: seen.append((since, thread_id, skip_known)) or {'counts': {'replies': 1 if since else 0}})
+    monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(False, gmail_thread='19e82db74675fa10'))
+    assert sync.recheck_thread('gmail_thread_x', 'alex@rebattery.io') is True
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y/%m/%d')
+    assert seen == [(None, '19e82db74675fa10', True), (yesterday, None, True)]
+
+
 def test_first_message_skips_reply_refresh(monkeypatch):
     """A first-contact draft has no thread and no earlier outbound mail, so there is nothing to refresh."""
     from rebattery_mail import send, sync
